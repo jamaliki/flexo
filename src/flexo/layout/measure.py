@@ -8,6 +8,7 @@ from flexo.components import intrinsic_node_size
 from flexo.geometry import Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import FigureSpec, LayoutKind, LayoutSpec, NodeSpec
+from flexo.layout.gaps import routing_gaps_for_group
 from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer
 from flexo.validate import normalize_and_validate
@@ -41,7 +42,12 @@ def measure_figure(
                 child = measure_group(child_id)
                 child_sizes.append(_declared_size(child.spec.layout, child.intrinsic_size))
         label = text_measurer.measure(group.label)
-        body = arrangement_size(tuple(child_sizes), group.layout, layout_style)
+        body = arrangement_size(
+            tuple(child_sizes),
+            group.layout,
+            layout_style,
+            gaps=routing_gaps_for_group(semantic, group_id, layout_style),
+        )
         padding = (group.layout.padding or layout_style.group_padding).points
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
         measured = MeasuredGroup(
@@ -75,21 +81,23 @@ def arrangement_size(
     style: LayoutStyle,
     *,
     kind: LayoutKind | None = None,
+    gaps: tuple[float, ...] | None = None,
 ) -> Size:
     if not child_sizes:
         return Size(0.0, 0.0)
     actual_kind = kind or layout.kind
     gap = (layout.gap or style.gap).points
+    axis_gaps = gaps if gaps is not None else (gap,) * (len(child_sizes) - 1)
     values = _equalized(child_sizes) if layout.equal_size else child_sizes
     if actual_kind == "row":
         return Size(
-            sum(size.width for size in values) + gap * (len(values) - 1),
+            sum(size.width for size in values) + sum(axis_gaps),
             max(size.height for size in values),
         )
     if actual_kind in {"column", "stack"}:
         return Size(
             max(size.width for size in values),
-            sum(size.height for size in values) + gap * (len(values) - 1),
+            sum(size.height for size in values) + sum(axis_gaps),
         )
     if actual_kind == "overlay":
         return Size(
