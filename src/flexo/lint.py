@@ -9,7 +9,7 @@ from itertools import combinations
 
 from flexo.compiler import Compilation
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
-from flexo.geometry import Rect, segments
+from flexo.geometry import Rect, Segment, segments
 from flexo.style import STYLES, LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS
 
@@ -170,6 +170,40 @@ def _routing_diagnostics(
                     entity_id=edge.spec.id,
                 )
             )
+        center_segments = segments(edge.centerline)
+        shaft_segments = segments(edge.shaft)
+        if center_segments and shaft_segments:
+            center_final = center_segments[-1]
+            shaft_final = shaft_segments[-1]
+            if center_final.horizontal != shaft_final.horizontal:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.marker.orientation",
+                        "Arrow marker orientation does not match the final approach segment.",
+                        entity_id=edge.spec.id,
+                    )
+                )
+        if center_segments:
+            first = center_segments[0]
+            final = center_segments[-1]
+            source_vector = source.side.vector
+            target_vector = target.side.vector
+            if not _same_direction(first, source_vector.x, source_vector.y):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.source.direction",
+                        "Route does not depart in the source port direction.",
+                        entity_id=edge.spec.id,
+                    )
+                )
+            if not _same_direction(final, -target_vector.x, -target_vector.y):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.target.direction",
+                        "Route does not arrive opposite the target port direction.",
+                        entity_id=edge.spec.id,
+                    )
+                )
         if any(not canvas.contains_point(point) for point in edge.centerline):
             diagnostics.append(
                 Diagnostic(
@@ -291,3 +325,11 @@ def _local_name(tag: str) -> str:
 def _tree_depth(root: ET.Element) -> int:
     children = list(root)
     return 1 if not children else 1 + max(_tree_depth(child) for child in children)
+
+
+def _same_direction(segment: Segment, expected_x: float, expected_y: float) -> bool:
+    delta_x = segment.end.x - segment.start.x
+    delta_y = segment.end.y - segment.start.y
+    if expected_x:
+        return delta_x * expected_x > 0.0 and abs(delta_y) < 1e-7
+    return delta_y * expected_y > 0.0 and abs(delta_x) < 1e-7
