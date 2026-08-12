@@ -35,7 +35,7 @@ internals remain independently editable in Inkscape.
   embedded variable-font CSS produces an Inkscape support warning; the gallery
   does not yet stress multiple modules or encoder-decoder layouts.
 - Live beam note: `docs/improvement-beam.md`.
-- Current beam checkpoint: checkpoint 1.
+- Current beam checkpoint: checkpoint 2.
 
 ## Experimental Log
 
@@ -79,6 +79,29 @@ internals remain independently editable in Inkscape.
   west-facing targets receive right-pointing arrows; zero lint diagnostics.
 - Decision: accepted.
 
+### Cycle 3: Coupled layout and routing
+
+- Branch owner: primary agent.
+- Observation: widening dense gutters fixed arrowhead crowding but the
+  edge-at-a-time router still produced 17 elbows and one feed-forward crossing.
+- Hypothesis: routing quality depends on target-port placement and layer order,
+  not just shortest-path search after geometry is frozen.
+- Mechanism: enlarge edge-dense sibling gutters, align adaptive receiving ports
+  with their producers, reorder small adjacent columns only when crossings
+  strictly decrease, then rank visibility paths lexicographically.
+- Guardrails: explicit port offsets and semantic lanes remain fixed; rounded
+  corners retain clearance; author order wins every tie.
+- Success criteria: zero feed-forward crossings, no insufficient port stubs,
+  and at most one non-straight feed-forward connection in the vertical slice.
+- Result: total elbows fell from 17 to 7; feed-forward elbows fell from 14 to 2;
+  seven of eight feed-forward connections are straight; crossings fell from one
+  to zero; zero lint diagnostics; 43 tests pass.
+- Plots: `examples/build/vertical-slice.optimized-routing.png`.
+- Interpretation: orthogonal routing must be coupled to limited coordinate and
+  ordering freedom; a more elaborate path search alone cannot beat geometric
+  lower bounds imposed by fixed ports.
+- Decision: accepted.
+
 ## Accepted Changes
 
 - Public repository, compiler contract, and validation objectives established.
@@ -88,6 +111,8 @@ internals remain independently editable in Inkscape.
   palette re-theming, and Inkscape-derived outputs.
 - West-side source residual port for deliberate bottom-rail composition.
 - Marker geometry bounded below route clearance, with direction linting.
+- Edge-aware routing gutters, adaptive generated ports, bounded crossing
+  minimization, and lexicographic clean-path/bend/length routing.
 
 ## Rejected Changes
 

@@ -17,13 +17,13 @@ class ComponentDefinition:
     ports: tuple[PortSpec, ...]
 
 
-_INPUT = PortSpec("input", Side.WEST)
+_INPUT = PortSpec("input", Side.WEST, adaptive=True)
 _OUTPUT = PortSpec("output", Side.EAST)
 _STANDARD = (_INPUT, _OUTPUT)
 _QKV = (
-    PortSpec("q", Side.WEST, 0.24),
-    PortSpec("k", Side.WEST, 0.5),
-    PortSpec("v", Side.WEST, 0.76),
+    PortSpec("q", Side.WEST, 0.24, adaptive=True),
+    PortSpec("k", Side.WEST, 0.5, adaptive=True),
+    PortSpec("v", Side.WEST, 0.76, adaptive=True),
     _OUTPUT,
 )
 _MULTI_OUTPUT = (

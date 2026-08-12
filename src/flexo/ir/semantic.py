@@ -37,6 +37,7 @@ class PortSpec:
     name: str
     side: Side
     offset: float = 0.5
+    adaptive: bool = False
 
     def __post_init__(self) -> None:
         _validate_id(self.name, "Port name")

@@ -347,7 +347,10 @@ class GroupBuilder:
         **options: object,
     ) -> NodeHandle | PortRef:
         ports = (
-            (PortSpec("input", Side.WEST), PortSpec(_port_name(output), Side.EAST))
+            (
+                PortSpec("input", Side.WEST, adaptive=True),
+                PortSpec(_port_name(output), Side.EAST),
+            )
             if output
             else ()
         )
@@ -460,6 +463,7 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
             "input" if input_count == 1 else f"input{index + 1}",
             Side.WEST,
             (index + 1) / (input_count + 1),
+            adaptive=True,
         )
         for index in range(input_count)
     )

@@ -122,3 +122,51 @@ def test_dense_sibling_routes_reserve_a_lane_gutter() -> None:
         route_segments = segments(edge.centerline)
         assert route_segments[0].length >= style.route_clearance.points
         assert route_segments[-1].length >= style.route_clearance.points
+
+
+def test_adaptive_target_port_aligns_but_explicit_offset_stays_fixed() -> None:
+    figure = FigureSpec(
+        "adaptive-ports",
+        width=pt(180),
+        nodes=(
+            NodeSpec("source", "block"),
+            NodeSpec(
+                "adaptive",
+                "block",
+                ports=(PortSpec("input", Side.WEST, adaptive=True),),
+            ),
+            NodeSpec(
+                "fixed",
+                "block",
+                ports=(PortSpec("input", Side.WEST, 0.2),),
+            ),
+        ),
+        edges=(
+            EdgeSpec("to-adaptive", PortRef("source", "output"), PortRef("adaptive", "input")),
+            EdgeSpec("to-fixed", PortRef("source", "output"), PortRef("fixed", "input")),
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("source", "targets"),
+                LayoutSpec("row", gap=pt(18)),
+            ),
+            GroupSpec(
+                "targets",
+                ("adaptive", "fixed"),
+                LayoutSpec("column", gap=pt(10), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+
+    fitted = fit_figure(measure_figure(figure))
+    source_y = fitted.node("source").port("output").position.y
+    adaptive = fitted.node("adaptive")
+    expected_y = min(
+        adaptive.bounds.bottom - LayoutStyle().corner_radius.points,
+        max(adaptive.bounds.top + LayoutStyle().corner_radius.points, source_y),
+    )
+    assert adaptive.port("input").position.y == expected_y
+    fixed = fitted.node("fixed")
+    assert fixed.port("input").position.y == fixed.bounds.top + fixed.bounds.height * 0.2

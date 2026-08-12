@@ -12,6 +12,8 @@ from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import LayoutKind, LayoutSpec
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.measure import arrangement_size
+from flexo.layout.order import optimized_child_orders
+from flexo.layout.ports import adapt_target_ports
 from flexo.style import STYLES, LayoutStyle
 
 _EPSILON = 1e-7
@@ -40,15 +42,18 @@ class _Fitter:
         self.style = style
         self.nodes = {node.spec.id: node for node in measured.nodes}
         self.groups = {group.spec.id: group for group in measured.groups}
+        self.child_orders = optimized_child_orders(measured.semantic)
         self.fitted_nodes: dict[str, FittedNode] = {}
         self.fitted_groups: dict[str, FittedGroup] = {}
 
     def fit(self) -> FittedFigure:
         canvas = self.measured.canvas_size
         self._fit_group(self.measured.semantic.root, Rect(0.0, 0.0, canvas.width, canvas.height))
+        nodes = tuple(self.fitted_nodes[node.spec.id] for node in self.measured.nodes)
+        nodes = adapt_target_ports(self.measured.semantic, nodes, self.style)
         return FittedFigure(
             self.measured,
-            tuple(self.fitted_nodes[node.spec.id] for node in self.measured.nodes),
+            nodes,
             tuple(self.fitted_groups[group.spec.id] for group in self.measured.groups),
             canvas,
         )
@@ -68,7 +73,8 @@ class _Fitter:
             max(0.0, bounds.width - 2.0 * padding),
             max(0.0, bounds.height - 2.0 * padding - title_height),
         )
-        children = tuple(self._child(child_id) for child_id in measured_group.spec.children)
+        child_ids = self.child_orders.get(group_id, measured_group.spec.children)
+        children = tuple(self._child(child_id) for child_id in child_ids)
         kind = self._resolve_kind(measured_group, children, content.size)
         child_bounds = self._arrange(children, layout, kind, content, group_id)
         self.fitted_groups[group_id] = FittedGroup(measured_group, bounds, content)
