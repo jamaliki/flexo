@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from itertools import combinations, pairwise, permutations
 
-from flexo.ir.semantic import EdgeSpec, FigureSpec, GroupSpec
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutConnection, layout_connections
 
 _MAXIMUM_EXHAUSTIVE_CHILDREN = 5
 
@@ -24,7 +24,7 @@ def optimized_child_orders(figure: FigureSpec) -> dict[str, tuple[str, ...]]:
             if not _optimizable_pair(left, right, result):
                 continue
             assert left is not None and right is not None
-            connecting = _connecting_edges(figure.edges, left, right, descendants)
+            connecting = _connecting_edges(layout_connections(figure), left, right, descendants)
             best_left, best_right = _best_pair_order(left, right, connecting, descendants)
             original_crossings = _crossing_count(
                 left.children,
@@ -65,7 +65,7 @@ def _optimizable_pair(
 def _best_pair_order(
     left: GroupSpec,
     right: GroupSpec,
-    edges: tuple[EdgeSpec, ...],
+    edges: tuple[LayoutConnection, ...],
     descendants: dict[str, frozenset[str]],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     best = (left.children, right.children)
@@ -83,17 +83,17 @@ def _best_pair_order(
 
 
 def _connecting_edges(
-    edges: tuple[EdgeSpec, ...],
+    edges: tuple[LayoutConnection, ...],
     left: GroupSpec,
     right: GroupSpec,
     descendants: dict[str, frozenset[str]],
-) -> tuple[EdgeSpec, ...]:
+) -> tuple[LayoutConnection, ...]:
     left_nodes = frozenset().union(*(descendants[child] for child in left.children))
     right_nodes = frozenset().union(*(descendants[child] for child in right.children))
     return tuple(
         edge
         for edge in edges
-        if not edge.lane_hint
+        if not edge.externally_routed
         and (
             (edge.source.node_id in left_nodes and edge.target.node_id in right_nodes)
             or (edge.target.node_id in left_nodes and edge.source.node_id in right_nodes)
@@ -104,7 +104,7 @@ def _connecting_edges(
 def _crossing_count(
     left_order: tuple[str, ...],
     right_order: tuple[str, ...],
-    edges: tuple[EdgeSpec, ...],
+    edges: tuple[LayoutConnection, ...],
     descendants: dict[str, frozenset[str]],
 ) -> int:
     left_positions = _node_positions(left_order, descendants)

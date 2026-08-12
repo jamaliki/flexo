@@ -8,7 +8,7 @@ from statistics import fmean
 
 from flexo.geometry import Point, Side
 from flexo.ir.fitted import FittedNode, ResolvedPort
-from flexo.ir.semantic import FigureSpec, PortSpec
+from flexo.ir.semantic import FigureSpec, PortSpec, layout_connections
 from flexo.style import LayoutStyle
 
 
@@ -34,9 +34,9 @@ def _adapt_endpoint_ports(
 ) -> tuple[FittedNode, ...]:
     by_id = {node.measured.spec.id: node for node in nodes}
     desired: defaultdict[tuple[str, str], list[float]] = defaultdict(list)
-    for edge in figure.edges:
-        moving_ref = edge.target if move_targets else edge.source
-        opposite_ref = edge.source if move_targets else edge.target
+    for connection in layout_connections(figure):
+        moving_ref = connection.target if move_targets else connection.source
+        opposite_ref = connection.source if move_targets else connection.target
         moving_node = by_id[moving_ref.node_id]
         moving_spec = next(
             port for port in moving_node.measured.spec.ports if port.name == moving_ref.port_name

@@ -11,28 +11,57 @@ def vertical_slice() -> FigureSpec:
         with figure.module(
             "cryo",
             label="Cryo-EM information flow",
-            gap="10pt",
+            gap="12pt",
             justify="center",
         ) as module:
-            with module.column("inputs", gap="8pt", padding=0, role="layout") as inputs:
-                nodes = inputs.feature_strip("nodes", label="Node features", cells=7)
-                distances = inputs.feature_strip("distances", label="Distances", cells=5)
-            with module.column("encoders", gap="5pt", padding=0, role="layout") as encoders:
-                q, v = encoders.mlp(
-                    "projection",
-                    label="Feature MLP",
-                    inputs=[nodes, distances],
-                    outputs=["Q", "V"],
-                )
-                k = encoders.cnn(
-                    "keys",
-                    label="Edge CNN",
-                    input=nodes.branch,
-                    output="K",
-                )
+            with module.column(
+                "branches",
+                gap="12pt",
+                padding=0,
+                align="end",
+                role="layout",
+            ) as branches:
+                with branches.row(
+                    "feature-path",
+                    gap="12pt",
+                    padding=0,
+                    role="layout",
+                ) as feature_path:
+                    with feature_path.column(
+                        "inputs",
+                        gap="8pt",
+                        padding=0,
+                        role="layout",
+                    ) as inputs:
+                        nodes = inputs.feature_strip("nodes", label="Node features", cells=7)
+                        distances = inputs.feature_strip("distances", label="Distances", cells=5)
+                    combined = feature_path.concat("concat", inputs=[nodes, distances])
+                    projection = feature_path.mlp(
+                        "projection",
+                        label="Feature MLP",
+                        input=combined,
+                    )
+                    q, v = feature_path.channels(
+                        "query-value",
+                        labels=["Q", "V"],
+                        input=projection,
+                    )
+                with branches.row(
+                    "edge-path",
+                    gap="12pt",
+                    padding=0,
+                    role="layout",
+                ) as edge_path:
+                    neighbourhoods = edge_path.inset(
+                        "neighbourhoods",
+                        label="Edge neighbourhoods",
+                        width="82pt",
+                        height="48pt",
+                    )
+                    keys = edge_path.cnn("keys", label="Edge CNN", input=neighbourhoods)
+                    (k,) = edge_path.channels("key", labels=["K"], input=keys)
             attended = module.attention("attention", q=q, k=k, v=v)
             prediction = module.prediction("prediction", input=attended)
-            module.inset("density", label="Scientific inset")
             module.residual(
                 nodes,
                 prediction,

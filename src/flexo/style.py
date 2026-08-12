@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
+from typing import Literal
 
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.units import Length, mm, pt
@@ -52,6 +53,7 @@ class LayoutStyle:
     stroke_width: Length = _PT_0_8
     connector_width: Length = _PT_0_9
     corner_radius: Length = _PT_3
+    elbow_radius: Length = _PT_3
     arrow_length: Length = _PT_4
     arrow_width: Length = _PT_3_5
     route_clearance: Length = _PT_5
@@ -59,6 +61,7 @@ class LayoutStyle:
     route_lane_spacing: Length = _PT_4
     port_spacing: Length = _PT_6
     bend_penalty: float = 14.0
+    junction_dots: Literal["auto", "always", "never"] = "auto"
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
 
     def resolve_width(self, value: str | Length | float) -> Length:

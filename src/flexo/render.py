@@ -47,6 +47,10 @@ def _render_kind(
         _tensor(parent, node, style, palette)
     elif kind == "junction":
         _junction(parent, node, style, palette)
+    elif kind == "concat":
+        _concat(parent, node, style, palette)
+    elif kind == "channels":
+        _channels(parent, node, style, palette)
     elif kind in {"matrix", "attention", "graph", "inset"}:
         render_scientific(parent, node, style, palette)
     else:
@@ -194,6 +198,90 @@ def _junction(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
     )
 
 
+def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    base_rect(
+        parent,
+        node,
+        style,
+        palette,
+        fill_role="container-fill",
+        stroke_role="block-stroke",
+    )
+    bounds = node.bounds
+    motif = element(parent, "g", id=f"{node.measured.spec.id}.motif")
+    for index, width in enumerate((14.0, 10.0, 6.0)):
+        element(
+            motif,
+            "rect",
+            x=bounds.center.x - width / 2.0,
+            y=bounds.bottom - 11.0 + index * 3.0,
+            width=width,
+            height=1.5,
+            rx=0.75,
+            opacity=0.45 + index * 0.2,
+            **paint_attributes(palette=palette, fill_role="block-stroke"),
+        )
+
+
+def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    bounds = node.bounds
+    labels = str(node.measured.spec.property("labels", "K")).split(",")
+    outputs = node.ports[1:]
+    input_port = node.port("input")
+    split_x = bounds.left + 4.0
+    label_x = bounds.left + 10.0
+    bar_left = bounds.right - 5.0
+    motif = element(parent, "g", id=f"{node.measured.spec.id}.channels")
+    path_commands = [
+        f"M {number(bounds.left)} {number(input_port.position.y)} H {number(split_x)}"
+    ]
+    port_ys = (input_port.position.y, *(output.position.y for output in outputs))
+    if min(port_ys) != max(port_ys):
+        path_commands.append(
+            f"M {number(split_x)} {number(min(port_ys))} V {number(max(port_ys))}"
+        )
+    for output in outputs:
+        path_commands.append(
+            f"M {number(split_x)} {number(output.position.y)} H {number(label_x - 2.0)}"
+        )
+    element(
+        motif,
+        "path",
+        d=" ".join(path_commands),
+        stroke__linecap="square",
+        stroke__linejoin="miter",
+        **paint_attributes(
+            palette=palette,
+            stroke_role="connector",
+            stroke_width=style.connector_width.points,
+        ),
+    )
+    for index, (label, output) in enumerate(zip(labels, outputs, strict=True)):
+        text = element(
+            motif,
+            "text",
+            id=f"{node.measured.spec.id}.channel.{index + 1}.label",
+            x=label_x,
+            y=output.position.y + style.typography.size.points * 0.32,
+            font__family=style.typography.family,
+            font__size=style.typography.minimum_size.points,
+            font__weight=style.typography.label_weight,
+            fill=palette.get("ink"),
+            data__flexo__fill="ink",
+        )
+        text.text = label
+        element(
+            motif,
+            "rect",
+            id=f"{node.measured.spec.id}.channel.{index + 1}.bar",
+            x=bar_left,
+            y=output.position.y - 3.0,
+            width=5.0,
+            height=6.0,
+            **paint_attributes(palette=palette, fill_role="accent-stroke"),
+        )
+
+
 def _render_label(
     parent: ET.Element,
     node: FittedNode,
@@ -204,7 +292,16 @@ def _render_label(
     if not metrics.lines:
         return
     bounds = node.bounds
-    motif_kinds = {"feature-strip", "matrix", "attention", "sequence", "graph", "inset"}
+    motif_kinds = {
+        "attention",
+        "channels",
+        "concat",
+        "feature-strip",
+        "graph",
+        "inset",
+        "matrix",
+        "sequence",
+    }
     label_height = (
         bounds.height * 0.24
         if node.measured.spec.kind in motif_kinds

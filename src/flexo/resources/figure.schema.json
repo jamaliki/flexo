@@ -17,6 +17,11 @@
       "type": "array",
       "items": {"$ref": "#/$defs/edge"}
     },
+    "nets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/net"},
+      "default": []
+    },
     "groups": {
       "type": "array",
       "minItems": 1,
@@ -137,6 +142,50 @@
         "depart": {"$ref": "#/$defs/side"},
         "arrive": {"$ref": "#/$defs/side"}
       }
+    },
+    "net": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "sources", "targets"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["fan-out", "merge"]},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+        },
+        "role": {"$ref": "#/$defs/identifier", "default": "flow"},
+        "label": {"$ref": "#/$defs/label", "default": ""},
+        "rail": {"$ref": "#/$defs/side"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "fan-out"}}},
+          "then": {
+            "properties": {
+              "sources": {"maxItems": 1},
+              "targets": {"minItems": 2}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "merge"}}},
+          "then": {
+            "properties": {
+              "sources": {"minItems": 2},
+              "targets": {"maxItems": 1}
+            }
+          }
+        }
+      ]
     },
     "layout": {
       "type": "object",

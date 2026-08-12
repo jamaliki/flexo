@@ -20,6 +20,7 @@ def normalize_and_validate(figure: FigureSpec) -> FigureSpec:
         palette=figure.palette,
         nodes=tuple(normalize_node(node) for node in figure.nodes),
         edges=figure.edges,
+        nets=figure.nets,
         groups=figure.groups,
         schema_version=figure.schema_version,
     )
@@ -39,11 +40,15 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                     entity_id=entity_id,
                 )
             )
-    edge_ids = [edge.id for edge in figure.edges]
-    for edge_id, count in Counter(edge_ids).items():
-        if count > 1 or edge_id in entity_ids:
+    connection_ids = [edge.id for edge in figure.edges] + [net.id for net in figure.nets]
+    for connection_id, count in Counter(connection_ids).items():
+        if count > 1 or connection_id in entity_ids:
             diagnostics.append(
-                Diagnostic("semantic.id.duplicate", "Semantic ID is not unique.", entity_id=edge_id)
+                Diagnostic(
+                    "semantic.id.duplicate",
+                    "Semantic ID is not unique.",
+                    entity_id=connection_id,
+                )
             )
 
     nodes = {node.id: node for node in figure.nodes}
@@ -156,6 +161,33 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                         entity_id=edge.id,
                     )
                 )
+    for net in figure.nets:
+        for label, references in (("source", net.sources), ("target", net.targets)):
+            for reference in references:
+                node = nodes.get(reference.node_id)
+                if node is None:
+                    diagnostics.append(
+                        Diagnostic(
+                            f"net.{label}.unknown-node",
+                            f'{label.title()} node "{reference.node_id}" does not exist.',
+                            entity_id=net.id,
+                        )
+                    )
+                    continue
+                names = tuple(port.name for port in node.ports)
+                if reference.port_name not in names:
+                    diagnostics.append(
+                        Diagnostic(
+                            f"net.{label}.unknown-port",
+                            f'{label.title()} port "{reference}" does not exist.',
+                            entity_id=net.id,
+                            hint=(
+                                "Valid ports: "
+                                + ", ".join(f"{node.id}.{name}" for name in names)
+                                + "."
+                            ),
+                        )
+                    )
     return tuple(diagnostics)
 
 

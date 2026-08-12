@@ -32,6 +32,11 @@ _MULTI_OUTPUT = (
     PortSpec("branch", Side.EAST, 0.7, adaptive=True),
     PortSpec("residual", Side.WEST, 0.8),
 )
+_CONCAT = (
+    PortSpec("input1", Side.WEST, 0.3, adaptive=True),
+    PortSpec("input2", Side.WEST, 0.7, adaptive=True),
+    _OUTPUT,
+)
 
 COMPONENTS: dict[str, ComponentDefinition] = {
     definition.kind: definition
@@ -45,6 +50,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
             (_INPUT, PortSpec("residual", Side.SOUTH), _OUTPUT),
         ),
         ComponentDefinition("attention", Size(60.0, 58.0), _QKV),
+        ComponentDefinition("concat", Size(32.0, 42.0), _CONCAT),
+        ComponentDefinition("channels", Size(22.0, 34.0), _STANDARD),
         ComponentDefinition("feature-strip", Size(58.0, 25.0), _MULTI_OUTPUT),
         ComponentDefinition("tensor", Size(54.0, 26.0), _STANDARD),
         ComponentDefinition("matrix", Size(50.0, 48.0), _STANDARD),

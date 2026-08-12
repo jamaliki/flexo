@@ -9,6 +9,7 @@ from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.routed import RoutedEdge, RoutedFigure
 from flexo.ir.semantic import EdgeSpec, Waypoint
+from flexo.routing.nets import net_segments, route_net
 from flexo.routing.nudge import shorten_end
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import STYLES, LayoutStyle
@@ -24,12 +25,17 @@ def route_figure(
     layout_style = style or STYLES[fitted.measured.semantic.style]
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     occupied: tuple[Segment, ...] = ()
+    routed_nets = []
+    for net in fitted.measured.semantic.nets:
+        result = route_net(fitted, net, layout_style, text_measurer, occupied)
+        routed_nets.append(result)
+        occupied += net_segments(result)
     routed: list[RoutedEdge] = []
     for edge in fitted.measured.semantic.edges:
         result = _route_edge(fitted, edge, layout_style, text_measurer, occupied)
         routed.append(result)
         occupied += segments(result.centerline)
-    return RoutedFigure(fitted, tuple(routed))
+    return RoutedFigure(fitted, tuple(routed), tuple(routed_nets))
 
 
 def _route_edge(
@@ -67,7 +73,7 @@ def _route_edge(
     source_escape = _escape(source_port.position, source_side, clearance)
     target_clearance = max(
         clearance,
-        2.0 * style.arrow_length.points,
+        2.0 * style.arrow_length.points + style.elbow_radius.points,
     )
     target_escape = _escape(target_port.position, target_side, target_clearance)
     obstacles = tuple(
