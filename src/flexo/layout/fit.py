@@ -10,6 +10,7 @@ from flexo.geometry import Rect, Size
 from flexo.ir.fitted import FittedFigure, FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import LayoutKind, LayoutSpec
+from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.measure import arrangement_size
 from flexo.style import STYLES, LayoutStyle
 
@@ -111,7 +112,17 @@ class _Fitter:
         available: Size,
     ) -> LayoutKind:
         layout = group.spec.layout
-        requested = arrangement_size(tuple(child.size for child in children), layout, self.style)
+        requested = arrangement_size(
+            tuple(child.size for child in children),
+            layout,
+            self.style,
+            gaps=routing_gaps_for_group(
+                self.measured.semantic,
+                group.spec.id,
+                self.style,
+                kind=layout.kind,
+            ),
+        )
         fits = (
             requested.width <= available.width + _EPSILON
             and requested.height <= available.height + _EPSILON
@@ -124,6 +135,12 @@ class _Fitter:
                 layout,
                 self.style,
                 kind=layout.reflow,
+                gaps=routing_gaps_for_group(
+                    self.measured.semantic,
+                    group.spec.id,
+                    self.style,
+                    kind=layout.reflow,
+                ),
             )
             if (
                 reflowed.width <= available.width + _EPSILON
@@ -163,31 +180,39 @@ class _Fitter:
             child.size for child in children
         )
         gap = (layout.gap or self.style.gap).points
+        axis_gaps = routing_gaps_for_group(
+            self.measured.semantic,
+            group_id,
+            self.style,
+            kind=kind,
+        )
         if kind == "row":
-            total = sum(size.width for size in sizes) + gap * (len(sizes) - 1)
-            start, actual_gap = _justification(
-                layout.justify, content.width, total, gap, len(sizes)
+            total = sum(size.width for size in sizes) + sum(axis_gaps)
+            start, actual_gaps = _linear_justification(
+                layout.justify, content.width, total, axis_gaps
             )
             x = content.x + start
             result = []
-            for size in sizes:
+            for index, size in enumerate(sizes):
                 height = content.height if layout.align == "stretch" else size.height
                 y = _cross_position(layout.align, content.y, content.height, height)
                 result.append(Rect(x, y, size.width, height))
-                x += size.width + actual_gap
+                if index < len(actual_gaps):
+                    x += size.width + actual_gaps[index]
             return tuple(result)
         if kind in {"column", "stack"}:
-            total = sum(size.height for size in sizes) + gap * (len(sizes) - 1)
-            start, actual_gap = _justification(
-                layout.justify, content.height, total, gap, len(sizes)
+            total = sum(size.height for size in sizes) + sum(axis_gaps)
+            start, actual_gaps = _linear_justification(
+                layout.justify, content.height, total, axis_gaps
             )
             y = content.y + start
             result = []
-            for size in sizes:
+            for index, size in enumerate(sizes):
                 width = content.width if layout.align == "stretch" else size.width
                 x = _cross_position(layout.align, content.x, content.width, width)
                 result.append(Rect(x, y, width, size.height))
-                y += size.height + actual_gap
+                if index < len(actual_gaps):
+                    y += size.height + actual_gaps[index]
             return tuple(result)
         if kind == "overlay":
             return tuple(
@@ -280,6 +305,23 @@ def _justification(
     if justify == "space-between" and count > 1:
         return 0.0, gap + extra / (count - 1)
     return 0.0, gap
+
+
+def _linear_justification(
+    justify: str,
+    available: float,
+    natural: float,
+    gaps: tuple[float, ...],
+) -> tuple[float, tuple[float, ...]]:
+    extra = max(0.0, available - natural)
+    if justify == "center":
+        return extra / 2.0, gaps
+    if justify == "end":
+        return extra, gaps
+    if justify == "space-between" and gaps:
+        addition = extra / len(gaps)
+        return 0.0, tuple(gap + addition for gap in gaps)
+    return 0.0, gaps
 
 
 def _cross_position(align: str, start: float, available: float, size: float) -> float:

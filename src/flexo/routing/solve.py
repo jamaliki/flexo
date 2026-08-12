@@ -71,10 +71,13 @@ def _route_edge(
     )
     target_escape = _escape(target_port.position, target_side, target_clearance)
     obstacles = tuple(
-        node.bounds.inflated(clearance)
+        node.bounds.inflated(
+            target_clearance
+            if node.measured.spec.id == target_node.measured.spec.id
+            else clearance
+        )
         for node in fitted.nodes
-        if node.measured.spec.id not in {source_node.measured.spec.id, target_node.measured.spec.id}
-        and node.measured.spec.kind not in {"label", "spacer", "junction"}
+        if node.measured.spec.kind not in {"label", "spacer", "junction"}
     )
     forced = _forced_points(fitted, edge, source_escape, target_escape, clearance)
     anchors = (source_escape, *forced, target_escape)

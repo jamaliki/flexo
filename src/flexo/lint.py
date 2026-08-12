@@ -204,6 +204,26 @@ def _routing_diagnostics(
                         entity_id=edge.spec.id,
                     )
                 )
+            if first.length + 1e-5 < style.route_clearance.points:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.source.clearance",
+                        "Route turns before clearing the source component.",
+                        entity_id=edge.spec.id,
+                    )
+                )
+            target_clearance = max(
+                style.route_clearance.points,
+                style.arrow_length.points + max(1.0, style.connector_width.points),
+            )
+            if final.length + 1e-5 < target_clearance:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.target.clearance",
+                        "Route turns before the arrow clears the target component.",
+                        entity_id=edge.spec.id,
+                    )
+                )
         if any(not canvas.contains_point(point) for point in edge.centerline):
             diagnostics.append(
                 Diagnostic(

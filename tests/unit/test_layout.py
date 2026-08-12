@@ -3,8 +3,20 @@ from __future__ import annotations
 import pytest
 
 from flexo.diagnostics import FlexoError
-from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, TextRun
+from flexo.geometry import Side, segments
+from flexo.ir.semantic import (
+    EdgeSpec,
+    FigureSpec,
+    GroupSpec,
+    LayoutSpec,
+    NodeSpec,
+    PortRef,
+    PortSpec,
+    TextRun,
+)
 from flexo.layout import fit_figure, measure_figure
+from flexo.routing import route_figure
+from flexo.style import LayoutStyle
 from flexo.units import pt
 
 
@@ -65,3 +77,48 @@ def test_fixed_boundary_reports_local_overflow() -> None:
     )
     with pytest.raises(FlexoError, match=r"layout\.overflow"):
         fit_figure(measure_figure(figure))
+
+
+def test_dense_sibling_routes_reserve_a_lane_gutter() -> None:
+    source_ports = tuple(
+        PortSpec(f"out{index}", Side.EAST, offset)
+        for index, offset in enumerate((0.25, 0.5, 0.75), start=1)
+    )
+    target_ports = tuple(
+        PortSpec(f"in{index}", Side.WEST, offset)
+        for index, offset in enumerate((0.25, 0.5, 0.75), start=1)
+    )
+    figure = FigureSpec(
+        "dense-routes",
+        width=pt(180),
+        nodes=(
+            NodeSpec("source", "block", ports=source_ports),
+            NodeSpec("target", "block", ports=target_ports),
+        ),
+        edges=tuple(
+            EdgeSpec(
+                f"flow{index}",
+                PortRef("source", f"out{index}"),
+                PortRef("target", f"in{index}"),
+            )
+            for index in range(1, 4)
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("source", "target"),
+                LayoutSpec("row", gap=pt(10), justify="start"),
+            ),
+        ),
+    )
+
+    routed = route_figure(fit_figure(measure_figure(figure)))
+    source = routed.fitted.node("source").bounds
+    target = routed.fitted.node("target").bounds
+    style = LayoutStyle()
+    expected = 2 * style.route_clearance.points + 2 * style.route_lane_spacing.points
+    assert target.left - source.right == expected
+    for edge in routed.edges:
+        route_segments = segments(edge.centerline)
+        assert route_segments[0].length >= style.route_clearance.points
+        assert route_segments[-1].length >= style.route_clearance.points

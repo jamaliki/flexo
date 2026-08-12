@@ -54,6 +54,7 @@ class LayoutStyle:
     arrow_length: Length = _PT_4
     arrow_width: Length = _PT_3_5
     route_clearance: Length = _PT_5
+    route_lane_spacing: Length = _PT_4
     bend_penalty: float = 14.0
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
 
