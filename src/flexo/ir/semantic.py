@@ -162,6 +162,10 @@ class GroupSpec:
         if len(self.children) != len(set(self.children)):
             raise ValueError(f'group "{self.id}" contains duplicate children')
 
+    @property
+    def text(self) -> str:
+        return "".join(run.text for run in self.label)
+
 
 @dataclass(frozen=True, slots=True)
 class FigureSpec:
