@@ -8,10 +8,13 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from flexo.compiler import Compilation
+from flexo.components import TRANSPARENT_KINDS
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, segments
 from flexo.style import STYLES, LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS
+
+_CONTAINMENT_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +73,9 @@ def _fitted_diagnostics(
             nodes[child_id] if child_id in nodes else groups[child_id].bounds
             for child_id in spec.children
         ]
+        content = group.content_bounds.inflated(_CONTAINMENT_TOLERANCE)
         for child_id, bounds in zip(spec.children, child_bounds, strict=True):
-            if not group.content_bounds.contains_rect(bounds):
+            if not content.contains_rect(bounds):
                 diagnostics.append(
                     Diagnostic(
                         "layout.child.outside",
@@ -159,6 +163,8 @@ def _routing_diagnostics(
                 )
             for node in routed.fitted.nodes:
                 if node.measured.spec.id in {edge.spec.source.node_id, edge.spec.target.node_id}:
+                    continue
+                if node.measured.spec.kind in TRANSPARENT_KINDS:
                     continue
                 if segment.intersects_rect_interior(node.bounds):
                     diagnostics.append(
@@ -354,6 +360,8 @@ def _net_obstacle_diagnostics(
         for node in compilation.routed.fitted.nodes:
             if node.measured.spec.id == endpoint_id:
                 continue
+            if node.measured.spec.kind in TRANSPARENT_KINDS:
+                continue
             if any(
                 segment.intersects_rect_interior(node.bounds)
                 for segment in segments(route)
@@ -392,6 +400,7 @@ def _track_separation_diagnostics(
                 Diagnostic(
                     "routing.connector.crossing",
                     f'Route crosses "{second_id}".',
+                    Severity.WARNING,
                     entity_id=first_id,
                 )
             )

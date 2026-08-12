@@ -45,9 +45,24 @@ class MeasuredFigure:
     nodes: tuple[MeasuredNode, ...]
     groups: tuple[MeasuredGroup, ...]
     canvas_size: Size
+    edge_labels: tuple[TextMetrics, ...] = ()
+    """Label metrics, positionally aligned with ``semantic.edges``."""
 
     def node(self, node_id: str) -> MeasuredNode:
         return next(node for node in self.nodes if node.spec.id == node_id)
 
     def group(self, group_id: str) -> MeasuredGroup:
         return next(group for group in self.groups if group.spec.id == group_id)
+
+    def edge_label(self, edge_id: str) -> TextMetrics | None:
+        return self.edge_label_index.get(edge_id)
+
+    @property
+    def edge_label_index(self) -> dict[str, TextMetrics]:
+        """Non-empty edge label metrics keyed by edge ID."""
+
+        return {
+            edge.id: metrics
+            for edge, metrics in zip(self.semantic.edges, self.edge_labels, strict=False)
+            if metrics.width > 0.0 or metrics.height > 0.0
+        }

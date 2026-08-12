@@ -26,6 +26,12 @@ def measure_figure(
     measured_nodes = tuple(
         _measure_node(node, text_measurer, layout_style) for node in semantic.nodes
     )
+    measured_edge_labels = tuple(text_measurer.measure(edge.label) for edge in semantic.edges)
+    edge_labels = {
+        edge.id: metrics
+        for edge, metrics in zip(semantic.edges, measured_edge_labels, strict=True)
+        if metrics.width > 0.0 or metrics.height > 0.0
+    }
     node_sizes = {node.spec.id: node.intrinsic_size for node in measured_nodes}
     groups_by_id = {group.id: group for group in semantic.groups}
     measured_groups: dict[str, MeasuredGroup] = {}
@@ -46,7 +52,12 @@ def measure_figure(
             tuple(child_sizes),
             group.layout,
             layout_style,
-            gaps=routing_gaps_for_group(semantic, group_id, layout_style),
+            gaps=routing_gaps_for_group(
+                semantic,
+                group_id,
+                layout_style,
+                edge_labels=edge_labels,
+            ),
         )
         padding = (group.layout.padding or layout_style.group_padding).points
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
@@ -72,6 +83,7 @@ def measure_figure(
         measured_nodes,
         tuple(measured_groups[group.id] for group in semantic.groups),
         Size(canvas_width, canvas_height),
+        measured_edge_labels,
     )
 
 

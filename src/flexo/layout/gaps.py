@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
 from flexo.style import LayoutStyle
 
@@ -12,8 +15,15 @@ def routing_gaps_for_group(
     style: LayoutStyle,
     *,
     kind: LayoutKind | None = None,
+    edge_labels: Mapping[str, TextMetrics] | None = None,
 ) -> tuple[float, ...]:
-    """Return a gap for every sibling boundary, enlarged for crossing routes."""
+    """Return a gap for every sibling boundary, enlarged for crossing routes.
+
+    ``edge_labels`` carries measured label metrics keyed by edge ID. A boundary
+    crossed by a labeled connection is widened to hold the label plus one
+    padding on either side, so the label never overlaps the components it sits
+    between.
+    """
 
     groups = {group.id: group for group in figure.groups}
     group = groups[group_id]
@@ -47,26 +57,53 @@ def routing_gaps_for_group(
         for index, child_id in enumerate(group.children)
         for node_id in descendant_nodes(child_id)
     }
+
+    def crossed_boundaries(source_id: str, target_id: str) -> range:
+        source = child_for_node.get(source_id)
+        target = child_for_node.get(target_id)
+        if source is None or target is None or source == target:
+            return range(0)
+        return range(min(source, target), max(source, target))
+
     crossings = [0] * boundary_count
     for connection in layout_connections(figure):
         if connection.externally_routed:
             continue
-        source = child_for_node.get(connection.source.node_id)
-        target = child_for_node.get(connection.target.node_id)
-        if source is None or target is None or source == target:
-            continue
-        for boundary in range(min(source, target), max(source, target)):
+        for boundary in crossed_boundaries(
+            connection.source.node_id, connection.target.node_id
+        ):
             crossings[boundary] += 1
+
+    label_reserves = [0.0] * boundary_count
+    if edge_labels:
+        along_axis = (
+            style.padding_x.points if actual_kind == "row" else style.padding_y.points
+        )
+        for edge in figure.edges:
+            if edge.lane_hint is not None:
+                continue
+            metrics = edge_labels.get(edge.id)
+            if metrics is None:
+                continue
+            extent = metrics.width if actual_kind == "row" else metrics.height
+            reserved = extent + 2.0 * along_axis
+            for boundary in crossed_boundaries(edge.source.node_id, edge.target.node_id):
+                label_reserves[boundary] = max(label_reserves[boundary], reserved)
 
     clearance = style.route_clearance.points
     target_clearance = max(
         clearance,
         2.0 * style.arrow_length.points + style.elbow_radius.points,
     )
-    lane_spacing = style.route_lane_spacing.points
+    # Routing separates parallel tracks by ``port_spacing`` and lint reports an
+    # error below it, so a crossed boundary has to reserve its lanes at that
+    # pitch: reserving less hands the router a gutter it is not allowed to fill.
+    lane_spacing = max(style.route_lane_spacing.points, style.port_spacing.points)
     return tuple(
-        max(base, clearance + target_clearance + max(0, count - 1) * lane_spacing)
-        if count
-        else base
-        for count in crossings
+        max(
+            base,
+            reserved,
+            clearance + target_clearance + max(0, count - 1) * lane_spacing if count else 0.0,
+        )
+        for count, reserved in zip(crossings, label_reserves, strict=True)
     )

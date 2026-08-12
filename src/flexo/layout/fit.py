@@ -43,6 +43,7 @@ class _Fitter:
         self.nodes = {node.spec.id: node for node in measured.nodes}
         self.groups = {group.spec.id: group for group in measured.groups}
         self.child_orders = optimized_child_orders(measured.semantic)
+        self.edge_labels = measured.edge_label_index
         self.fitted_nodes: dict[str, FittedNode] = {}
         self.fitted_groups: dict[str, FittedGroup] = {}
 
@@ -127,6 +128,7 @@ class _Fitter:
                 group.spec.id,
                 self.style,
                 kind=layout.kind,
+                edge_labels=self.edge_labels,
             ),
         )
         fits = (
@@ -146,6 +148,7 @@ class _Fitter:
                     group.spec.id,
                     self.style,
                     kind=layout.reflow,
+                    edge_labels=self.edge_labels,
                 ),
             )
             if (
@@ -191,6 +194,7 @@ class _Fitter:
             group_id,
             self.style,
             kind=kind,
+            edge_labels=self.edge_labels,
         )
         if kind == "row":
             total = sum(size.width for size in sizes) + sum(axis_gaps)

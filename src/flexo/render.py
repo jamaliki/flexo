@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+from flexo.components import vector_grid
 from flexo.ir.fitted import FittedNode
 from flexo.render_common import base_rect, paint_attributes
 from flexo.render_scientific import render_scientific
@@ -51,6 +52,8 @@ def _render_kind(
         _concat(parent, node, style, palette)
     elif kind == "channels":
         _channels(parent, node, style, palette)
+    elif kind == "vector":
+        _vector(parent, node, style, palette)
     elif kind in {"matrix", "attention", "graph", "inset"}:
         render_scientific(parent, node, style, palette)
     else:
@@ -221,6 +224,56 @@ def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
             opacity=0.45 + index * 0.2,
             **paint_attributes(palette=palette, fill_role="block-stroke"),
         )
+
+
+_CELL_STROKE_SCALE = 0.75
+"""Vector cells take a lighter outline than a component body.
+
+A cell is a few points across; the body stroke width would eat a tenth of it.
+"""
+
+_RAMP_LIGHTEST = 0.42
+_RAMP_DARKEST = 1.0
+"""Fill-opacity ends of a vector ramp.
+
+The ramp is paint, not geometry: every cell of a stack names the same palette
+role and differs only by ``fill-opacity``, so ``flexo retheme`` rewrites the
+role and the ramp comes along. Strokes stay fully opaque, which is what keeps
+the pale cells crisp instead of washed out.
+"""
+
+
+def _ramp_fill_opacity(index: int, count: int) -> float:
+    if count < 2:
+        return _RAMP_DARKEST
+    return _RAMP_LIGHTEST + (_RAMP_DARKEST - _RAMP_LIGHTEST) * index / (count - 1)
+
+
+def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    spec = node.measured.spec
+    grid = vector_grid(spec, style, bounds=node.bounds)
+    ramp = str(spec.property("ramp", "ramp-node"))
+    stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp=ramp)
+    for column in range(grid.columns):
+        for row in range(grid.cells):
+            cell = grid.cell_bounds(node.bounds, column, row)
+            element(
+                stack,
+                "rect",
+                id=f"{spec.id}.cell.{column + 1}.{row + 1}",
+                x=cell.x,
+                y=cell.y,
+                width=cell.width,
+                height=cell.height,
+                rx=style.vector_cell_radius.points,
+                fill__opacity=_ramp_fill_opacity(row, grid.cells),
+                **paint_attributes(
+                    palette=palette,
+                    fill_role=ramp,
+                    stroke_role=ramp,
+                    stroke_width=style.stroke_width.points * _CELL_STROKE_SCALE,
+                ),
+            )
 
 
 def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
