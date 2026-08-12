@@ -349,7 +349,7 @@ class GroupBuilder:
         ports = (
             (
                 PortSpec("input", Side.WEST, adaptive=True),
-                PortSpec(_port_name(output), Side.EAST),
+                PortSpec(_port_name(output), Side.EAST, adaptive=True),
             )
             if output
             else ()
@@ -469,7 +469,12 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
     )
     output_names = outputs or ("output",)
     result_outputs = tuple(
-        PortSpec(_port_name(name), Side.EAST, (index + 1) / (len(output_names) + 1))
+        PortSpec(
+            _port_name(name),
+            Side.EAST,
+            (index + 1) / (len(output_names) + 1),
+            adaptive=True,
+        )
         for index, name in enumerate(output_names)
     )
     return inputs + result_outputs

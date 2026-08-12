@@ -13,7 +13,7 @@ from flexo.ir.semantic import LayoutKind, LayoutSpec
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.measure import arrangement_size
 from flexo.layout.order import optimized_child_orders
-from flexo.layout.ports import adapt_target_ports
+from flexo.layout.ports import adapt_ports
 from flexo.style import STYLES, LayoutStyle
 
 _EPSILON = 1e-7
@@ -50,7 +50,7 @@ class _Fitter:
         canvas = self.measured.canvas_size
         self._fit_group(self.measured.semantic.root, Rect(0.0, 0.0, canvas.width, canvas.height))
         nodes = tuple(self.fitted_nodes[node.spec.id] for node in self.measured.nodes)
-        nodes = adapt_target_ports(self.measured.semantic, nodes, self.style)
+        nodes = adapt_ports(self.measured.semantic, nodes, self.style)
         return FittedFigure(
             self.measured,
             nodes,

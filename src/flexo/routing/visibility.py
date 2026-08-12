@@ -26,10 +26,11 @@ def shortest_orthogonal_path(
     *,
     costs: PathCosts,
     occupied: tuple[Segment, ...] = (),
+    boundary: Rect | None = None,
 ) -> tuple[Point, ...] | None:
     if start == end:
         return (start,)
-    points = _candidate_points(start, end, obstacles)
+    points = _candidate_points(start, end, obstacles, boundary)
     index = {point: position for position, point in enumerate(points)}
     adjacency = _visibility_edges(points, obstacles)
     start_index = index[start]
@@ -55,7 +56,7 @@ def shortest_orthogonal_path(
         if point_index == end_index:
             final_state = state
             break
-        for neighbor_index in adjacency[point_index]:
+        for neighbor_index in adjacency.get(point_index, ()):
             segment = Segment(points[point_index], points[neighbor_index])
             next_orientation = 1 if segment.horizontal else 2
             added_bend = costs.bend if orientation and orientation != next_orientation else 0.0
@@ -92,7 +93,12 @@ def shortest_orthogonal_path(
     return _simplify(tuple(route))
 
 
-def _candidate_points(start: Point, end: Point, obstacles: tuple[Rect, ...]) -> tuple[Point, ...]:
+def _candidate_points(
+    start: Point,
+    end: Point,
+    obstacles: tuple[Rect, ...],
+    boundary: Rect | None,
+) -> tuple[Point, ...]:
     obstacle_xs = (value for item in obstacles for value in (item.left, item.right))
     obstacle_ys = (value for item in obstacles for value in (item.top, item.bottom))
     xs = _with_midpoints({start.x, end.x, *obstacle_xs})
@@ -102,7 +108,12 @@ def _candidate_points(start: Point, end: Point, obstacles: tuple[Rect, ...]) -> 
         for x in xs
         for y in ys
         if not any(obstacle.contains_point(Point(x, y), strict=True) for obstacle in obstacles)
+        and (boundary is None or boundary.contains_point(Point(x, y)))
     }
+    if boundary is not None and not (
+        boundary.contains_point(start) and boundary.contains_point(end)
+    ):
+        return ()
     points.update((start, end))
     return tuple(sorted(points, key=lambda point: (point.x, point.y)))
 

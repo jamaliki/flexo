@@ -59,9 +59,10 @@ def routing_gaps_for_group(
             crossings[boundary] += 1
 
     clearance = style.route_clearance.points
+    target_clearance = max(clearance, 2.0 * style.arrow_length.points)
     lane_spacing = style.route_lane_spacing.points
     return tuple(
-        max(base, 2.0 * clearance + max(0, count - 1) * lane_spacing)
+        max(base, clearance + target_clearance + max(0, count - 1) * lane_spacing)
         if count
         else base
         for count in crossings

@@ -14,10 +14,10 @@ def vertical_slice() -> FigureSpec:
             gap="10pt",
             justify="center",
         ) as module:
-            with module.column("inputs", gap="7pt", padding=0, role="layout") as inputs:
+            with module.column("inputs", gap="8pt", padding=0, role="layout") as inputs:
                 nodes = inputs.feature_strip("nodes", label="Node features", cells=7)
                 distances = inputs.feature_strip("distances", label="Distances", cells=5)
-            with module.column("encoders", gap="9pt", padding=0, role="layout") as encoders:
+            with module.column("encoders", gap="5pt", padding=0, role="layout") as encoders:
                 q, v = encoders.mlp(
                     "projection",
                     label="Feature MLP",

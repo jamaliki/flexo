@@ -18,7 +18,7 @@ class ComponentDefinition:
 
 
 _INPUT = PortSpec("input", Side.WEST, adaptive=True)
-_OUTPUT = PortSpec("output", Side.EAST)
+_OUTPUT = PortSpec("output", Side.EAST, adaptive=True)
 _STANDARD = (_INPUT, _OUTPUT)
 _QKV = (
     PortSpec("q", Side.WEST, 0.24, adaptive=True),
@@ -28,8 +28,8 @@ _QKV = (
 )
 _MULTI_OUTPUT = (
     _INPUT,
-    PortSpec("output", Side.EAST, 0.3),
-    PortSpec("branch", Side.EAST, 0.7),
+    PortSpec("output", Side.EAST, 0.3, adaptive=True),
+    PortSpec("branch", Side.EAST, 0.7, adaptive=True),
     PortSpec("residual", Side.WEST, 0.8),
 )
 

@@ -31,9 +31,11 @@ nodes:
   - name: q
     side: east
     offset: 0.3333333333333333
+    adaptive: true
   - name: v
     side: east
     offset: 0.6666666666666666
+    adaptive: true
 - id: cryo.encoders.keys
   kind: cnn
   label: Edge CNN
@@ -45,6 +47,7 @@ nodes:
   - name: k
     side: east
     offset: 0.5
+    adaptive: true
 - id: cryo.attention
   kind: attention
   label: Attention
@@ -108,7 +111,7 @@ groups:
   - cryo.inputs.distances
   layout:
     kind: column
-    gap: 7pt
+    gap: 8pt
     padding: 0pt
   role: layout
 - id: cryo.encoders
@@ -117,6 +120,6 @@ groups:
   - cryo.encoders.keys
   layout:
     kind: column
-    gap: 9pt
+    gap: 5pt
     padding: 0pt
   role: layout

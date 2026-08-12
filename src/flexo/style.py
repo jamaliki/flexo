@@ -15,6 +15,7 @@ _PT_3 = pt(3.0)
 _PT_3_5 = pt(3.5)
 _PT_4 = pt(4.0)
 _PT_5 = pt(5.0)
+_PT_6 = pt(6.0)
 _PT_7 = pt(7.0)
 _PT_8 = pt(8.0)
 _PT_11 = pt(11.0)
@@ -47,14 +48,16 @@ class LayoutStyle:
     padding_y: Length = _PT_5
     gap: Length = _PT_14
     compact_gap: Length = _PT_7
-    group_padding: Length = _PT_11
+    group_padding: Length = _PT_14
     stroke_width: Length = _PT_0_8
     connector_width: Length = _PT_0_9
     corner_radius: Length = _PT_3
     arrow_length: Length = _PT_4
     arrow_width: Length = _PT_3_5
     route_clearance: Length = _PT_5
+    route_boundary_clearance: Length = _PT_8
     route_lane_spacing: Length = _PT_4
+    port_spacing: Length = _PT_6
     bend_penalty: float = 14.0
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
 
