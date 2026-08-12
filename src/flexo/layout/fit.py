@@ -1,0 +1,290 @@
+"""Fit measured components into explicit editorial containers."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.geometry import Rect, Size
+from flexo.ir.fitted import FittedFigure, FittedGroup, FittedNode, ResolvedPort
+from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
+from flexo.ir.semantic import LayoutKind, LayoutSpec
+from flexo.layout.measure import arrangement_size
+from flexo.style import STYLES, LayoutStyle
+
+_EPSILON = 1e-7
+
+
+def fit_figure(
+    measured: MeasuredFigure,
+    *,
+    style: LayoutStyle | None = None,
+) -> FittedFigure:
+    fitter = _Fitter(measured, style or STYLES[measured.semantic.style])
+    return fitter.fit()
+
+
+@dataclass(frozen=True, slots=True)
+class _Child:
+    id: str
+    size: Size
+    node: MeasuredNode | None = None
+    group: MeasuredGroup | None = None
+
+
+class _Fitter:
+    def __init__(self, measured: MeasuredFigure, style: LayoutStyle) -> None:
+        self.measured = measured
+        self.style = style
+        self.nodes = {node.spec.id: node for node in measured.nodes}
+        self.groups = {group.spec.id: group for group in measured.groups}
+        self.fitted_nodes: dict[str, FittedNode] = {}
+        self.fitted_groups: dict[str, FittedGroup] = {}
+
+    def fit(self) -> FittedFigure:
+        canvas = self.measured.canvas_size
+        self._fit_group(self.measured.semantic.root, Rect(0.0, 0.0, canvas.width, canvas.height))
+        return FittedFigure(
+            self.measured,
+            tuple(self.fitted_nodes[node.spec.id] for node in self.measured.nodes),
+            tuple(self.fitted_groups[group.spec.id] for group in self.measured.groups),
+            canvas,
+        )
+
+    def _fit_group(self, group_id: str, bounds: Rect) -> None:
+        measured_group = self.groups[group_id]
+        layout = measured_group.spec.layout
+        padding = (layout.padding or self.style.group_padding).points
+        title_height = (
+            measured_group.label.height + self.style.compact_gap.points
+            if measured_group.spec.label
+            else 0.0
+        )
+        content = Rect(
+            bounds.x + padding,
+            bounds.y + padding + title_height,
+            max(0.0, bounds.width - 2.0 * padding),
+            max(0.0, bounds.height - 2.0 * padding - title_height),
+        )
+        children = tuple(self._child(child_id) for child_id in measured_group.spec.children)
+        kind = self._resolve_kind(measured_group, children, content.size)
+        child_bounds = self._arrange(children, layout, kind, content, group_id)
+        self.fitted_groups[group_id] = FittedGroup(measured_group, bounds, content)
+        for child, child_bounds_value in zip(children, child_bounds, strict=True):
+            if child.node is not None:
+                ports = tuple(
+                    ResolvedPort(
+                        port.name,
+                        port.side,
+                        child_bounds_value.point_on(port.side, port.offset),
+                    )
+                    for port in child.node.spec.ports
+                )
+                self.fitted_nodes[child.id] = FittedNode(
+                    child.node,
+                    child_bounds_value,
+                    ports,
+                )
+            else:
+                self._fit_group(child.id, child_bounds_value)
+
+    def _child(self, child_id: str) -> _Child:
+        node = self.nodes.get(child_id)
+        if node is not None:
+            return _Child(child_id, node.intrinsic_size, node=node)
+        group = self.groups[child_id]
+        layout = group.spec.layout
+        return _Child(
+            child_id,
+            Size(
+                layout.width.points if layout.width is not None else group.intrinsic_size.width,
+                layout.height.points if layout.height is not None else group.intrinsic_size.height,
+            ),
+            group=group,
+        )
+
+    def _resolve_kind(
+        self,
+        group: MeasuredGroup,
+        children: tuple[_Child, ...],
+        available: Size,
+    ) -> LayoutKind:
+        layout = group.spec.layout
+        requested = arrangement_size(tuple(child.size for child in children), layout, self.style)
+        fits = (
+            requested.width <= available.width + _EPSILON
+            and requested.height <= available.height + _EPSILON
+        )
+        if fits:
+            return layout.kind
+        if layout.reflow is not None:
+            reflowed = arrangement_size(
+                tuple(child.size for child in children),
+                layout,
+                self.style,
+                kind=layout.reflow,
+            )
+            if (
+                reflowed.width <= available.width + _EPSILON
+                and reflowed.height <= available.height + _EPSILON
+            ):
+                return layout.reflow
+        contributors = sorted(
+            children,
+            key=lambda item: item.size.width * item.size.height,
+            reverse=True,
+        )
+        summary = ", ".join(
+            f"{child.id} ({child.size.width:.1f} x {child.size.height:.1f} pt)"
+            for child in contributors[:3]
+        )
+        raise FlexoError(
+            Diagnostic(
+                "layout.overflow",
+                f"Needs {requested.width:.1f} x {requested.height:.1f} pt but "
+                f"only {available.width:.1f} x {available.height:.1f} pt is available.",
+                entity_id=group.spec.id,
+                hint=f"Largest contributors: {summary}.",
+            )
+        )
+
+    def _arrange(
+        self,
+        children: tuple[_Child, ...],
+        layout: LayoutSpec,
+        kind: LayoutKind,
+        content: Rect,
+        group_id: str,
+    ) -> tuple[Rect, ...]:
+        if not children:
+            return ()
+        sizes = _equalized(tuple(child.size for child in children)) if layout.equal_size else tuple(
+            child.size for child in children
+        )
+        gap = (layout.gap or self.style.gap).points
+        if kind == "row":
+            total = sum(size.width for size in sizes) + gap * (len(sizes) - 1)
+            start, actual_gap = _justification(
+                layout.justify, content.width, total, gap, len(sizes)
+            )
+            x = content.x + start
+            result = []
+            for size in sizes:
+                height = content.height if layout.align == "stretch" else size.height
+                y = _cross_position(layout.align, content.y, content.height, height)
+                result.append(Rect(x, y, size.width, height))
+                x += size.width + actual_gap
+            return tuple(result)
+        if kind in {"column", "stack"}:
+            total = sum(size.height for size in sizes) + gap * (len(sizes) - 1)
+            start, actual_gap = _justification(
+                layout.justify, content.height, total, gap, len(sizes)
+            )
+            y = content.y + start
+            result = []
+            for size in sizes:
+                width = content.width if layout.align == "stretch" else size.width
+                x = _cross_position(layout.align, content.x, content.width, width)
+                result.append(Rect(x, y, width, size.height))
+                y += size.height + actual_gap
+            return tuple(result)
+        if kind == "overlay":
+            return tuple(
+                Rect(
+                    _cross_position(layout.align, content.x, content.width, size.width),
+                    _cross_position(layout.align, content.y, content.height, size.height),
+                    size.width,
+                    size.height,
+                )
+                for size in sizes
+            )
+        return self._arrange_grid(sizes, layout, content, gap, group_id)
+
+    def _arrange_grid(
+        self,
+        sizes: tuple[Size, ...],
+        layout: LayoutSpec,
+        content: Rect,
+        gap: float,
+        group_id: str,
+    ) -> tuple[Rect, ...]:
+        columns = layout.columns or 1
+        rows = math.ceil(len(sizes) / columns)
+        column_widths = [0.0] * columns
+        row_heights = [0.0] * rows
+        for index, size in enumerate(sizes):
+            column_widths[index % columns] = max(column_widths[index % columns], size.width)
+            row_heights[index // columns] = max(row_heights[index // columns], size.height)
+        needed = Size(
+            sum(column_widths) + gap * (columns - 1),
+            sum(row_heights) + gap * (rows - 1),
+        )
+        if needed.width > content.width + _EPSILON or needed.height > content.height + _EPSILON:
+            raise FlexoError(
+                Diagnostic(
+                    "layout.grid.overflow",
+                    "Grid does not fit content bounds.",
+                    entity_id=group_id,
+                )
+            )
+        start_x, actual_x_gap = _justification(
+            layout.justify, content.width, needed.width, gap, columns
+        )
+        start_y = _cross_position(layout.align, content.y, content.height, needed.height)
+        xs = [content.x + start_x]
+        for width in column_widths[:-1]:
+            xs.append(xs[-1] + width + actual_x_gap)
+        ys = [start_y]
+        for height in row_heights[:-1]:
+            ys.append(ys[-1] + height + gap)
+        return tuple(
+            Rect(
+                _cross_position(
+                    layout.align,
+                    xs[index % columns],
+                    column_widths[index % columns],
+                    size.width,
+                ),
+                _cross_position(
+                    layout.align,
+                    ys[index // columns],
+                    row_heights[index // columns],
+                    size.height,
+                ),
+                size.width,
+                size.height,
+            )
+            for index, size in enumerate(sizes)
+        )
+
+
+def _equalized(values: tuple[Size, ...]) -> tuple[Size, ...]:
+    width = max(size.width for size in values)
+    height = max(size.height for size in values)
+    return tuple(Size(width, height) for _ in values)
+
+
+def _justification(
+    justify: str,
+    available: float,
+    natural: float,
+    gap: float,
+    count: int,
+) -> tuple[float, float]:
+    extra = max(0.0, available - natural)
+    if justify == "center":
+        return extra / 2.0, gap
+    if justify == "end":
+        return extra, gap
+    if justify == "space-between" and count > 1:
+        return 0.0, gap + extra / (count - 1)
+    return 0.0, gap
+
+
+def _cross_position(align: str, start: float, available: float, size: float) -> float:
+    if align == "center":
+        return start + max(0.0, available - size) / 2.0
+    if align == "end":
+        return start + max(0.0, available - size)
+    return start
