@@ -13,7 +13,7 @@ from flexo.compiler import compile_figure
 from flexo.diagnostics import FlexoError
 from flexo.export import export_outputs
 from flexo.gallery import GALLERY, gallery_figure
-from flexo.lint import lint_compilation, lint_svg
+from flexo.lint import LintReport, lint_compilation, lint_svg
 from flexo.schema import load_schema
 from flexo.serialization import load_figure
 from flexo.style import PALETTES
@@ -93,8 +93,6 @@ def _build(arguments: argparse.Namespace) -> int:
 
         figure = replace(figure, palette=arguments.palette)
     compilation = compile_figure(figure)
-    report = lint_compilation(compilation)
-    report.raise_for_errors()
     outputs = export_outputs(
         compilation,
         arguments.output,
@@ -104,7 +102,7 @@ def _build(arguments: argparse.Namespace) -> int:
     )
     for target_file in outputs.existing():
         print(target_file)
-    return 0
+    return _report_exit_code(lint_compilation(compilation))
 
 
 def _check(arguments: argparse.Namespace) -> int:
@@ -136,6 +134,7 @@ def _inspect(arguments: argparse.Namespace) -> int:
 def _gallery(arguments: argparse.Namespace) -> int:
     names = arguments.names or list(GALLERY)
     formats = _formats(arguments.formats)
+    exit_code = 0
     for name in names:
         figure = gallery_figure(name)
         if arguments.palette:
@@ -143,7 +142,6 @@ def _gallery(arguments: argparse.Namespace) -> int:
 
             figure = replace(figure, palette=arguments.palette)
         compilation = compile_figure(figure)
-        lint_compilation(compilation).raise_for_errors()
         outputs = export_outputs(
             compilation,
             arguments.output,
@@ -153,7 +151,21 @@ def _gallery(arguments: argparse.Namespace) -> int:
         )
         for target_file in outputs.existing():
             print(target_file)
-    return 0
+        exit_code = max(exit_code, _report_exit_code(lint_compilation(compilation)))
+    return exit_code
+
+
+def _report_exit_code(report: LintReport) -> int:
+    """Print a lint report next to written outputs and report its severity.
+
+    Outputs are always written: a figure that lints with errors must stay
+    inspectable. Errors go to stderr and make the command exit nonzero; a clean
+    or warning-only report is printed to stdout.
+    """
+
+    if report.diagnostics:
+        print(report.format(), file=sys.stderr if report.errors else sys.stdout)
+    return 0 if report.ok else 1
 
 
 def _schema(arguments: argparse.Namespace) -> int:

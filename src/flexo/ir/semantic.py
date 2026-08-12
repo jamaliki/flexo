@@ -181,6 +181,12 @@ class LayoutConnection:
     source: PortRef
     target: PortRef
     externally_routed: bool = False
+    from_net: bool = False
+    """True when the pair is one leg of a net rather than a point-to-point edge.
+
+    A net leg is served by a rail junction, not by a direct run between the two
+    ports, so port adaptation may only align it along the rail axis.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,7 +241,7 @@ def layout_connections(figure: FigureSpec) -> tuple[LayoutConnection, ...]:
         for edge in figure.edges
     )
     net_connections = tuple(
-        LayoutConnection(source, target, net.rail_hint is not None)
+        LayoutConnection(source, target, net.rail_hint is not None, from_net=True)
         for net in figure.nets
         for source in net.sources
         for target in net.targets

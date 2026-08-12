@@ -12,6 +12,7 @@ from flexo.units import Length, mm, pt
 
 _PT_0_8 = pt(0.8)
 _PT_0_9 = pt(0.9)
+_PT_1_5 = pt(1.5)
 _PT_3 = pt(3.0)
 _PT_3_5 = pt(3.5)
 _PT_4 = pt(4.0)
@@ -19,6 +20,7 @@ _PT_5 = pt(5.0)
 _PT_6 = pt(6.0)
 _PT_7 = pt(7.0)
 _PT_8 = pt(8.0)
+_PT_8_5 = pt(8.5)
 _PT_11 = pt(11.0)
 _PT_14 = pt(14.0)
 _PUBLICATION_WIDTHS = (
@@ -53,7 +55,7 @@ class LayoutStyle:
     stroke_width: Length = _PT_0_8
     connector_width: Length = _PT_0_9
     corner_radius: Length = _PT_3
-    elbow_radius: Length = _PT_3
+    elbow_radius: Length = _PT_6
     arrow_length: Length = _PT_4
     arrow_width: Length = _PT_3_5
     route_clearance: Length = _PT_5
@@ -63,6 +65,16 @@ class LayoutStyle:
     bend_penalty: float = 14.0
     junction_dots: Literal["auto", "always", "never"] = "auto"
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
+    vector_cell: Length = _PT_8_5
+    """Side of one square cell in a vector glyph (R19)."""
+    vector_cell_gap: Length = _PT_1_5
+    """Gap between stacked cells of one vector column."""
+    vector_column_gap: Length = _PT_3
+    """Gap between the side-by-side stacks of a multi-column vector."""
+    vector_cell_radius: Length = _PT_1_5
+    """Corner radius of a vector cell; cells read as rounded squares, not dots."""
+    vector_label_gap: Length = _PT_3
+    """Distance from the bottom cell to the label a ``vector()`` composite puts below it."""
 
     def resolve_width(self, value: str | Length | float) -> Length:
         if isinstance(value, str):
@@ -101,6 +113,24 @@ class Palette:
         return Palette(self.name, {**self.paints, **overrides})
 
 
+RAMP_ROLES = (
+    "ramp-node",
+    "ramp-embedding",
+    "ramp-q",
+    "ramp-kv",
+    "ramp-attended",
+    "ramp-output",
+)
+"""Paint roles a ``vector`` component may name through its ``ramp`` property.
+
+One role carries one ramp: the cells of a stack all paint with that role and
+differ only in ``fill-opacity``, so a ramp survives ``flexo retheme`` (which
+rewrites paint by role) and stays geometrically identical in every palette.
+Every palette must define every role, and the grayscale palette separates them
+by lightness so the ramps remain distinguishable without hue.
+"""
+
+
 DEFAULT_PALETTE = Palette(
     "default",
     {
@@ -119,6 +149,12 @@ DEFAULT_PALETTE = Palette(
         "residual": "#6d4ba0",
         "grid": "#80758b",
         "inset-fill": "#eef4f5",
+        "ramp-node": "#4a6cb0",
+        "ramp-embedding": "#2f8f7d",
+        "ramp-q": "#8a5bb5",
+        "ramp-kv": "#c3792c",
+        "ramp-attended": "#b04a6f",
+        "ramp-output": "#5d8b38",
     },
 )
 
@@ -133,6 +169,14 @@ COLOR_VISION_SAFE_PALETTE = Palette(
         "warm-fill": "#fff0ce",
         "warm-stroke": "#9b6b00",
         "residual": "#8c4b78",
+        # Okabe-Ito hues: the pairs an author is most likely to place side by
+        # side (q / kv / attended) sit at opposite ends of the set.
+        "ramp-node": "#0072b2",
+        "ramp-embedding": "#009e73",
+        "ramp-q": "#cc79a7",
+        "ramp-kv": "#e69f00",
+        "ramp-attended": "#56b4e9",
+        "ramp-output": "#d55e00",
     },
 )
 
@@ -154,6 +198,13 @@ GRAYSCALE_PALETTE = Palette(
         "residual": "#1f1f1f",
         "grid": "#777777",
         "inset-fill": "#f0f0f0",
+        # Six evenly spaced lightness steps: hueless ramps stay tellable apart.
+        "ramp-node": "#0f0f0f",
+        "ramp-embedding": "#333333",
+        "ramp-q": "#575757",
+        "ramp-kv": "#7b7b7b",
+        "ramp-attended": "#9f9f9f",
+        "ramp-output": "#c3c3c3",
     },
 )
 

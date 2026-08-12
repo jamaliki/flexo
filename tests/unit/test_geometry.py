@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from flexo.geometry import Point, Rect, Segment, Side
+from flexo.style import STYLES
 from flexo.svg import polyline_path, rounded_polyline_path
 
 
@@ -37,6 +38,32 @@ def test_rounded_polyline_radius_goldens(radius: float, expected: str) -> None:
     assert rounded_polyline_path(points, radius) == expected
     if radius == 0.0:
         assert rounded_polyline_path(points, radius) == polyline_path(points)
+
+
+def test_rounded_polyline_halves_the_fillet_on_a_short_middle_segment() -> None:
+    """R21: a 6 pt elbow on a 7 pt jog shrinks to 3.5 pt rather than overshooting.
+
+    The two fillets meet exactly at the middle of the short segment -- no
+    straight remainder between them, and no arc reaching past a corner.
+    """
+
+    radius = STYLES["paper"].elbow_radius.points
+    points = (Point(0, 0), Point(20, 0), Point(20, 7), Point(40, 7))
+    assert radius == 6.0
+    assert rounded_polyline_path(points, radius) == (
+        "M 0 0 L 16.5 0 Q 20 0 20 3.5 Q 20 7 23.5 7 L 40 7"
+    )
+
+
+def test_rounded_polyline_keeps_endpoints_when_every_segment_is_short() -> None:
+    """R21: a stair of 4 pt treads still starts and ends exactly on its ports."""
+
+    points = (Point(0, 0), Point(4, 0), Point(4, 4), Point(8, 4), Point(8, 8))
+    # Every fillet is half a tread, so consecutive arcs join without a straight
+    # remainder and neither end of the polyline moves.
+    assert rounded_polyline_path(points, STYLES["paper"].elbow_radius.points) == (
+        "M 0 0 L 2 0 Q 4 0 4 2 Q 4 4 6 4 Q 8 4 8 6 L 8 8"
+    )
 
 
 def test_rounded_polyline_clamps_large_radius_without_self_intersection() -> None:

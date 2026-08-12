@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from collections import defaultdict
-from itertools import combinations
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 
-from flexo.geometry import Segment, segments
+from flexo.geometry import Point, Segment, segments
 from flexo.ir.fitted import FittedGroup
+from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
+from flexo.ir.semantic import TextRun
 from flexo.render import render_node
 from flexo.render_common import paint_attributes
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
@@ -25,6 +27,9 @@ from flexo.svg import (
 from flexo.svg_resources import add_definitions, add_metadata
 from flexo.theme import retheme_svg as retheme_svg
 from flexo.units import MILLIMETRES_PER_INCH, POINTS_PER_INCH
+
+_SHIFTED_SIZE = 0.72
+"""Font-size factor of a superscript or subscript run, as in component labels."""
 
 
 def emit_svg(
@@ -97,7 +102,6 @@ class _Hierarchy:
             node_ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
             owner = self._lowest_common_group_many(node_ids)
             self.nets[owner].append(net)
-        self.connector_crossing = _has_connector_crossing(routed)
 
     def render(self, parent: ET.Element, style: LayoutStyle, palette: Palette) -> None:
         self._render_group(parent, self.routed.fitted.measured.semantic.root, style, palette)
@@ -118,22 +122,6 @@ class _Hierarchy:
         group_layer.set("data-flexo-entity", "group")
         group_layer.set("data-flexo-role", spec.role)
         self._render_container(group_layer, fitted, style, palette)
-        connector_group = element(
-            group_layer,
-            "g",
-            id=f"{group_id}.connectors",
-            **{inkscape_attr("label"): "Connectors"},
-        )
-        for edge in self.edges[group_id]:
-            _render_edge(connector_group, edge, style, palette)
-        for net in self.nets[group_id]:
-            _render_net(
-                connector_group,
-                net,
-                style,
-                palette,
-                crossing=self.connector_crossing,
-            )
         component_group = element(
             group_layer,
             "g",
@@ -145,7 +133,37 @@ class _Hierarchy:
                 self._render_group(component_group, child_id, style, palette)
             else:
                 render_node(component_group, self.nodes[child_id], style, palette)
+        self._render_connectors(group_layer, group_id, style, palette)
         _render_group_label(group_layer, fitted, style, palette)
+
+    def _render_connectors(
+        self,
+        parent: ET.Element,
+        group_id: str,
+        style: LayoutStyle,
+        palette: Palette,
+    ) -> None:
+        """One group's connector ink, painted after the components it joins.
+
+        A connector belongs to the lowest container holding both its endpoints,
+        so a route that enters a module crosses that module's fill on its way to
+        the port. Painting connectors last keeps such a run continuous: drawn
+        first, the stretch between the container boundary and the component
+        disappeared under the container, and the arrow read as detached. Routes
+        never cross component bodies -- lint reports that as an error -- so
+        nothing else changes hands.
+        """
+
+        connector_group = element(
+            parent,
+            "g",
+            id=f"{group_id}.connectors",
+            **{inkscape_attr("label"): "Connectors"},
+        )
+        for edge in self.edges[group_id]:
+            _render_edge(connector_group, edge, style, palette)
+        for net in self.nets[group_id]:
+            _render_net(connector_group, net, style, palette)
 
     def _render_layout_group(
         self,
@@ -155,6 +173,14 @@ class _Hierarchy:
         palette: Palette,
     ) -> None:
         spec = fitted.measured.spec
+        for child_id in spec.children:
+            if child_id in self.group_specs:
+                self._render_group(parent, child_id, style, palette)
+            else:
+                render_node(parent, self.nodes[child_id], style, palette)
+        # A layout group draws no boundary, so its children go straight into the
+        # parent; the marker follows them for the same reason a container's
+        # connectors do -- its connector ink has to paint over what it crosses.
         marker = element(
             parent,
             "g",
@@ -163,27 +189,7 @@ class _Hierarchy:
             data__flexo__role="layout",
             **{inkscape_attr("label"): spec.id},
         )
-        connector_group = element(
-            marker,
-            "g",
-            id=f"{spec.id}.connectors",
-            **{inkscape_attr("label"): "Connectors"},
-        )
-        for edge in self.edges[spec.id]:
-            _render_edge(connector_group, edge, style, palette)
-        for net in self.nets[spec.id]:
-            _render_net(
-                connector_group,
-                net,
-                style,
-                palette,
-                crossing=self.connector_crossing,
-            )
-        for child_id in spec.children:
-            if child_id in self.group_specs:
-                self._render_group(parent, child_id, style, palette)
-            else:
-                render_node(parent, self.nodes[child_id], style, palette)
+        self._render_connectors(marker, spec.id, style, palette)
 
     def _render_container(
         self,
@@ -262,19 +268,14 @@ def _render_edge(
         ),
     )
     if edge.label_metrics is not None and edge.label_position is not None:
-        text = element(
+        _connector_label(
             group,
-            "text",
-            id=f"{edge.spec.id}.label",
-            x=edge.label_position.x,
-            y=edge.label_position.y,
-            text__anchor="middle",
-            font__family=style.typography.family,
-            font__size=style.typography.size.points,
-            fill=palette.get("muted-ink"),
-            data__flexo__fill="muted-ink",
+            f"{edge.spec.id}.label",
+            edge.label_metrics,
+            edge.label_position,
+            style,
+            palette,
         )
-        text.text = "".join(run.text for run in edge.spec.label)
 
 
 def _render_net(
@@ -282,8 +283,6 @@ def _render_net(
     net: RoutedNet,
     style: LayoutStyle,
     palette: Palette,
-    *,
-    crossing: bool,
 ) -> None:
     paint_role = "residual" if net.spec.role == "residual" else "connector"
     marker_role = "residual" if net.spec.role == "residual" else "flow"
@@ -295,32 +294,20 @@ def _render_net(
         data__flexo__kind=net.spec.kind,
         data__flexo__role=net.spec.role,
     )
-    _net_path(group, f"{net.spec.id}.rail", net.rail, style, palette, paint_role)
-    for index, stem in enumerate(net.source_stems, 1):
-        _net_stem(
+    ink = _net_ink(net, style.elbow_radius.points)
+    _net_path(group, f"{net.spec.id}.rail", ink.rail, style, palette, paint_role)
+    for stem_id, shaft, arrow_end in ink.stems:
+        _net_path(
             group,
-            f"{net.spec.id}.source.{index}",
-            stem,
+            stem_id,
+            shaft,
             style,
             palette,
             paint_role,
-            marker_role,
+            marker_role=marker_role if arrow_end else None,
         )
-    for index, stem in enumerate(net.target_stems, 1):
-        _net_stem(
-            group,
-            f"{net.spec.id}.target.{index}",
-            stem,
-            style,
-            palette,
-            paint_role,
-            marker_role,
-        )
-    show_dots = style.junction_dots == "always" or (
-        style.junction_dots == "auto" and crossing
-    )
-    if show_dots:
-        for index, point in enumerate(dict.fromkeys(net.junctions), 1):
+    if style.junction_dots != "never":
+        for index, point in enumerate(_branch_points(net), 1):
             element(
                 group,
                 "circle",
@@ -331,38 +318,156 @@ def _render_net(
                 **paint_attributes(palette=palette, fill_role=paint_role),
             )
     if net.label_metrics is not None and net.label_position is not None:
-        text = element(
+        _connector_label(
             group,
-            "text",
-            id=f"{net.spec.id}.label",
-            x=net.label_position.x,
-            y=net.label_position.y,
-            text__anchor="middle",
-            font__family=style.typography.family,
-            font__size=style.typography.size.points,
-            fill=palette.get("muted-ink"),
-            data__flexo__fill="muted-ink",
+            f"{net.spec.id}.label",
+            net.label_metrics,
+            net.label_position,
+            style,
+            palette,
         )
-        text.text = "".join(run.text for run in net.spec.label)
 
 
-def _net_stem(
+def _connector_label(
     parent: ET.Element,
-    stem_id: str,
-    stem: RoutedStem,
+    element_id: str,
+    metrics: TextMetrics,
+    position: Point,
     style: LayoutStyle,
     palette: Palette,
-    paint_role: str,
-    marker_role: str,
 ) -> None:
-    _net_path(
+    """One connector caption, centred on its anchor, one tspan per styled run.
+
+    Connector labels carry the same styled runs as component labels -- panel-b
+    writes attention as ``softmax(QK^T)V`` above the arrow -- so a superscript or
+    subscript run has to survive into the SVG instead of collapsing into the
+    baseline text.
+    """
+
+    text = element(
         parent,
-        stem_id,
-        stem.shaft,
-        style,
-        palette,
-        paint_role,
-        marker_role=marker_role if stem.arrow_end else None,
+        "text",
+        id=element_id,
+        x=position.x,
+        y=position.y,
+        text__anchor="middle",
+        font__family=style.typography.family,
+        font__size=style.typography.size.points,
+        fill=palette.get("muted-ink"),
+        data__flexo__fill="muted-ink",
+    )
+    for line_index, line in enumerate(metrics.lines):
+        for run_index, run in enumerate(line.runs):
+            tspan = element(
+                text,
+                "tspan",
+                x=position.x if run_index == 0 else None,
+                dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
+                font__weight=run.weight if run.weight != 400 else None,
+                font__style="italic" if run.italic else None,
+                baseline__shift=_shift(run),
+                font__size=(
+                    style.typography.size.points * _SHIFTED_SIZE
+                    if run.baseline_shift != "normal"
+                    else None
+                ),
+            )
+            tspan.text = run.text
+
+
+def _shift(run: TextRun) -> str | None:
+    return None if run.baseline_shift == "normal" else run.baseline_shift
+
+
+@dataclass(frozen=True, slots=True)
+class _NetInk:
+    """Emitted net geometry: the shared rail plus one shaft per stem.
+
+    A rail terminal serving exactly one stem is an elbow, not a branch point, so
+    it must turn on the same fillet as every other corner (R22). The rail gives
+    up its last two radii there and the stem takes them over, which places the
+    corner *inside* one polyline where ``rounded_polyline_path`` rounds it; the
+    drawn extent is unchanged. Terminals serving several stems keep the rail
+    intact, so their junction dots stay exactly on it.
+    """
+
+    rail: tuple[Point, ...]
+    stems: tuple[tuple[str, tuple[Point, ...], bool], ...]
+
+
+def _net_ink(net: RoutedNet, radius: float) -> _NetInk:
+    stems = [
+        (f"{net.spec.id}.source.{index}", stem)
+        for index, stem in enumerate(net.source_stems, 1)
+    ] + [
+        (f"{net.spec.id}.target.{index}", stem)
+        for index, stem in enumerate(net.target_stems, 1)
+    ]
+    shafts = {stem_id: stem.shaft for stem_id, stem in stems}
+    rail = list(net.rail)
+    for position, lead in _terminal_leads(net, radius).items():
+        terminal = net.rail[position]
+        stem_id, stem = next(item for item in stems if _junction(item[1]) == terminal)
+        anchor = _along(terminal, net.rail[-1 - position], lead)
+        shafts[stem_id] = (
+            (anchor, *stem.shaft) if stem.arrow_end else (*stem.shaft, anchor)
+        )
+        rail[position] = anchor
+    return _NetInk(
+        tuple(rail),
+        tuple((stem_id, shafts[stem_id], stem.arrow_end) for stem_id, stem in stems),
+    )
+
+
+def _terminal_leads(net: RoutedNet, radius: float) -> dict[int, float]:
+    """How much rail each single-stem terminal hands to its stem, per terminal."""
+
+    rail = net.rail
+    if radius <= 0.0 or len(rail) != 2 or rail[0] == rail[1]:
+        return {}
+    span = rail[0].distance_to(rail[1])
+    counts = Counter(net.junctions)
+    stems = tuple(net.source_stems + net.target_stems)
+    result: dict[int, float] = {}
+    for position in (0, -1):
+        terminal = rail[position]
+        if counts[terminal] != 1:
+            continue
+        stem = next((item for item in stems if _junction(item) == terminal), None)
+        if stem is None or not _turns_at(stem, rail):
+            continue
+        interior = tuple(
+            terminal.distance_to(point) for point in counts if point != terminal
+        )
+        result[position] = min(2.0 * radius, min(interior, default=span), span)
+    if len(result) == 2:
+        return {position: min(lead, span / 2.0) for position, lead in result.items()}
+    return result
+
+
+def _junction(stem: RoutedStem) -> Point:
+    return stem.centerline[0] if stem.arrow_end else stem.centerline[-1]
+
+
+def _turns_at(stem: RoutedStem, rail: tuple[Point, ...]) -> bool:
+    """True when the stem meets the rail across a corner rather than in line."""
+
+    line = segments(rail)
+    junction = segments(stem.shaft)
+    if not line or not junction:
+        return False
+    approach = junction[0] if stem.arrow_end else junction[-1]
+    return approach.horizontal is not line[0].horizontal
+
+
+def _along(start: Point, toward: Point, distance: float) -> Point:
+    span = start.distance_to(toward)
+    if span <= 0.0:
+        return start
+    ratio = distance / span
+    return Point(
+        start.x + (toward.x - start.x) * ratio,
+        start.y + (toward.y - start.y) * ratio,
     )
 
 
@@ -392,35 +497,33 @@ def _net_path(
     )
 
 
-def _has_connector_crossing(routed: RoutedFigure) -> bool:
-    routes: list[tuple[str, tuple[object, ...]]] = [
-        (edge.spec.id, edge.centerline) for edge in routed.edges
-    ]
-    for net in routed.nets:
-        routes.append((net.spec.id, net.rail))
-        routes.extend((net.spec.id, stem.centerline) for stem in net.source_stems)
-        routes.extend((net.spec.id, stem.centerline) for stem in net.target_stems)
-    return any(
-        first_id != second_id
-        and any(
-            _segments_cross(first, second)
-            for first in segments(first_points)
-            for second in segments(second_points)
+def _branch_points(net: RoutedNet) -> tuple[Point, ...]:
+    """Semantic branch and merge points: where the ink actually forks.
+
+    A junction earns a dot when the rail continues past it, or when several
+    stems leave the same spot. A junction at a rail end serving one stem is
+    only an elbow, so it stays undotted.
+    """
+
+    rail = segments(net.rail)
+    terminals = {net.rail[0], net.rail[-1]}
+    stems = Counter(net.junctions)
+    return tuple(
+        dict.fromkeys(
+            point
+            for point in net.junctions
+            if any(_lies_on(point, segment) for segment in rail)
+            and (point not in terminals or stems[point] > 1)
         )
-        for (first_id, first_points), (second_id, second_points) in combinations(routes, 2)
     )
 
 
-def _segments_cross(first: Segment, second: Segment) -> bool:
-    if first.horizontal == second.horizontal:
-        return False
-    horizontal, vertical = (first, second) if first.horizontal else (second, first)
-    x_low, x_high = sorted((horizontal.start.x, horizontal.end.x))
-    y_low, y_high = sorted((vertical.start.y, vertical.end.y))
-    return (
-        x_low + 1e-7 < vertical.start.x < x_high - 1e-7
-        and y_low + 1e-7 < horizontal.start.y < y_high - 1e-7
-    )
+def _lies_on(point: Point, segment: Segment) -> bool:
+    if segment.horizontal:
+        low, high = sorted((segment.start.x, segment.end.x))
+        return abs(point.y - segment.start.y) < 1e-7 and low - 1e-7 <= point.x <= high + 1e-7
+    low, high = sorted((segment.start.y, segment.end.y))
+    return abs(point.x - segment.start.x) < 1e-7 and low - 1e-7 <= point.y <= high + 1e-7
 
 
 def _render_group_label(

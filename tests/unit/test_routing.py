@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from flexo.compiler import compile_figure
-from flexo.gallery import vertical_slice
-from flexo.geometry import Side, segments
+from flexo.gallery import gallery_figure, vertical_slice
+from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.semantic import (
     EdgeSpec,
     FigureSpec,
@@ -17,6 +17,10 @@ from flexo.ir.semantic import (
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
+from flexo.routing.nets import _vertical_rail
+from flexo.routing.nudge import Run, collapse_zigzags, nudge_routes, rail_label_position
+from flexo.routing.solve import _routing_order
+from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import LayoutStyle
 from flexo.units import pt
 
@@ -114,19 +118,33 @@ def test_gallery_feed_forward_routes_minimize_elbows_globally() -> None:
     feed_forward = tuple(
         edge for edge in compilation.routed.edges if edge.spec.role == "flow"
     )
-    bend_counts = tuple(max(0, len(segments(edge.centerline)) - 1) for edge in feed_forward)
-    assert bend_counts == (0,) * 10
     style = LayoutStyle()
+    # R18: a run is straight whenever its two ports share a coordinate, and a
+    # single centred Z-bend -- never more -- when the band refuses the alignment.
+    for edge in feed_forward:
+        source = compilation.fitted.node(edge.spec.source.node_id).port(
+            edge.spec.source.port_name
+        )
+        target = compilation.fitted.node(edge.spec.target.node_id).port(
+            edge.spec.target.port_name
+        )
+        bends = max(0, len(segments(edge.centerline)) - 1)
+        assert bends == (0 if source.position.y == target.position.y else 2)
     assert all(
         segments(edge.centerline)[-1].length
         >= 2 * style.arrow_length.points + style.elbow_radius.points
         for edge in compilation.routed.edges
     )
-    feature = compilation.fitted.node("cryo.branches.feature-path.inputs.nodes")
     distances = compilation.fitted.node("cryo.branches.feature-path.inputs.distances")
     concat = compilation.fitted.node("cryo.branches.feature-path.concat")
-    assert feature.port("output").position.y == concat.port("input1").position.y
+    # The lower feed is inside the band and lands straight; the upper one is not,
+    # so it keeps the concat's authored first-input offset and bends.
     assert distances.port("output").position.y == concat.port("input2").position.y
+    first = next(port for port in concat.measured.spec.ports if port.name == "input1")
+    assert (
+        concat.port("input1").position.y
+        == concat.bounds.point_on(first.side, first.offset).y
+    )
     assert (
         concat.port("input2").position.y - concat.port("input1").position.y
         >= style.port_spacing.points
@@ -162,6 +180,119 @@ def test_merge_net_has_one_head_and_labeled_combination_rail() -> None:
     assert net.label_position is not None
     assert compilation.document.text.count('marker-end="url(#arrow.flow)"') == 1
     assert "Average" in compilation.document.text
+
+
+def test_rail_orientation_follows_the_target_side_majority() -> None:
+    """R9: the spokes decide the axis, and a tie runs along the hub port axis."""
+
+    horizontal_spokes = (Side.NORTH, Side.NORTH, Side.WEST)
+    vertical_spokes = (Side.WEST, Side.EAST, Side.NORTH)
+    assert not _vertical_rail(None, Side.SOUTH, horizontal_spokes)
+    assert _vertical_rail(None, Side.SOUTH, vertical_spokes)
+    assert _vertical_rail(None, Side.SOUTH, (Side.WEST, Side.NORTH))
+    assert not _vertical_rail(None, Side.EAST, (Side.WEST, Side.NORTH))
+    assert _vertical_rail(Side.WEST, Side.SOUTH, horizontal_spokes)
+    assert not _vertical_rail(Side.NORTH, Side.SOUTH, vertical_spokes)
+
+
+def test_skip_net_drops_one_straight_trunk_at_the_hub_axis() -> None:
+    """R9: a west branch and a north continuation tie, so the trunk stays vertical."""
+
+    compilation = compile_figure(_skip_net_figure())
+    net = compilation.routed.net("skip")
+    hub = compilation.fitted.node("previous").port("output")
+    assert net.rail[0].x == net.rail[-1].x == hub.position.x
+    (trunk,) = net.source_stems
+    assert tuple(point.x for point in trunk.centerline) == (hub.position.x,) * 2
+    branch, continuation = net.target_stems
+    assert branch.port.node_id == "module.nodes"
+    assert segments(branch.centerline)[-1].horizontal
+    assert tuple(point.x for point in continuation.centerline) == (hub.position.x,) * 2
+    assert lint_compilation(compilation).ok
+
+
+def test_reserved_spacer_columns_never_deflect_a_net_rail() -> None:
+    """A spacer draws no body, so it must not push the trunk off the hub axis."""
+
+    without = compile_figure(_skip_net_figure())
+    with_spacer = compile_figure(_skip_net_figure(spacer=True))
+    assert with_spacer.routed.net("skip").rail[0].x == without.routed.net("skip").rail[0].x
+
+
+def _skip_net_figure(*, spacer: bool = False) -> FigureSpec:
+    """A spine block feeding a module's west input and the next spine block."""
+
+    spine_children = ("previous", "strip", "addln") if spacer else ("previous", "addln")
+    reserved = (NodeSpec("reserved", "spacer", width=pt(72), height=pt(0)),) if spacer else ()
+    strip = (
+        (
+            GroupSpec(
+                "strip",
+                ("reserved",),
+                LayoutSpec("row", padding=pt(0)),
+                role="layout",
+            ),
+        )
+        if spacer
+        else ()
+    )
+    return FigureSpec(
+        "skip-net",
+        width=pt(260),
+        nodes=(
+            NodeSpec(
+                "previous",
+                "block",
+                (TextRun("Previous"),),
+                width=pt(72),
+                ports=(PortSpec("output", Side.SOUTH, adaptive=True),),
+            ),
+            *reserved,
+            NodeSpec(
+                "addln",
+                "block",
+                (TextRun("Add LN"),),
+                width=pt(72),
+                ports=(PortSpec("skip", Side.NORTH, adaptive=True),),
+            ),
+            NodeSpec(
+                "module.nodes",
+                "block",
+                (TextRun("Node features"),),
+                ports=(PortSpec("input", Side.WEST, adaptive=True),),
+            ),
+        ),
+        nets=(
+            NetSpec(
+                "skip",
+                "fan-out",
+                (PortRef("previous", "output"),),
+                (PortRef("module.nodes", "input"), PortRef("addln", "skip")),
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("band",), LayoutSpec("column", gap=pt(24))),
+            GroupSpec(
+                "band",
+                ("spine", "module"),
+                LayoutSpec("row", gap=pt(24), padding=pt(0), align="start"),
+                role="layout",
+            ),
+            GroupSpec(
+                "spine",
+                spine_children,
+                LayoutSpec("column", gap=pt(24), padding=pt(0)),
+                role="layout",
+            ),
+            *strip,
+            GroupSpec(
+                "module",
+                ("module.nodes",),
+                LayoutSpec("row"),
+                role="module",
+            ),
+        ),
+    )
 
 
 def _vertical_net_figure() -> FigureSpec:
@@ -272,3 +403,394 @@ def test_lint_rejects_parallel_tracks_below_minimum_separation() -> None:
 
     report = lint_compilation(compile_figure(figure))
     assert "routing.track.separation" in {item.code for item in report.errors}
+
+
+def test_aligned_ports_route_as_one_straight_segment() -> None:
+    """R5: a collinear, unobstructed pair of escape points never gains a jog."""
+
+    figure = FigureSpec(
+        "straight",
+        width=pt(200),
+        nodes=(
+            NodeSpec("source", "block", ports=(PortSpec("output", Side.EAST),)),
+            NodeSpec("target", "block", ports=(PortSpec("input", Side.WEST),)),
+        ),
+        edges=(EdgeSpec("flow", PortRef("source", "output"), PortRef("target", "input")),),
+        groups=(GroupSpec("root", ("source", "target"), LayoutSpec("row", gap=pt(40))),),
+    )
+    edge = route_figure(fit_figure(measure_figure(figure))).edge("flow")
+    assert len(edge.centerline) == 2
+    assert edge.centerline[0].y == edge.centerline[-1].y
+
+
+def test_direct_segment_is_refused_when_it_would_share_a_lane() -> None:
+    start, end = Point(0.0, 0.0), Point(40.0, 0.0)
+    costs = PathCosts(14.0, separation=6.0)
+    assert shortest_orthogonal_path(start, end, (), costs=costs) == (start, end)
+    occupied = (Segment(Point(0.0, 2.0), Point(40.0, 2.0)),)
+    detour = shortest_orthogonal_path(start, end, (), costs=costs, occupied=occupied)
+    assert detour is not None
+    assert len(detour) > 2
+
+
+def test_zigzag_collapse_straightens_a_short_middle_segment() -> None:
+    points = (
+        Point(0.0, 0.0),
+        Point(10.0, 0.0),
+        Point(10.0, 2.0),
+        Point(30.0, 2.0),
+        Point(30.0, 20.0),
+        Point(50.0, 20.0),
+    )
+    collapsed = collapse_zigzags(points, (), 3.0)
+    assert collapsed == (
+        Point(0.0, 0.0),
+        Point(30.0, 0.0),
+        Point(30.0, 20.0),
+        Point(50.0, 20.0),
+    )
+
+
+def test_zigzag_collapse_keeps_a_jog_that_would_cross_an_obstacle() -> None:
+    points = (
+        Point(0.0, 0.0),
+        Point(10.0, 0.0),
+        Point(10.0, 2.0),
+        Point(30.0, 2.0),
+        Point(30.0, 20.0),
+        Point(50.0, 20.0),
+    )
+    blocker = Rect(15.0, -2.0, 5.0, 4.0)
+    assert collapse_zigzags(points, (blocker,), 3.0) == points
+
+
+def _container_figure() -> FigureSpec:
+    """A spine node, a bordered module, and a spine node below it."""
+
+    return FigureSpec(
+        "containers",
+        width=pt(260),
+        nodes=(
+            NodeSpec("top", "block", ports=(PortSpec("output", Side.EAST),)),
+            NodeSpec("inner", "block", ports=(PortSpec("input", Side.WEST),)),
+            NodeSpec("bottom", "block", ports=(PortSpec("input", Side.NORTH),)),
+        ),
+        edges=(
+            EdgeSpec("into", PortRef("top", "output"), PortRef("inner", "input")),
+            EdgeSpec("past", PortRef("top", "output"), PortRef("bottom", "input")),
+        ),
+        groups=(
+            GroupSpec("root", ("top", "module", "bottom"), LayoutSpec("column", gap=pt(30))),
+            GroupSpec("module", ("inner",), LayoutSpec("row"), role="module"),
+        ),
+    )
+
+
+def test_opaque_container_blocks_routes_that_do_not_own_it() -> None:
+    routed = route_figure(fit_figure(measure_figure(_container_figure())))
+    module = routed.fitted.group("module").bounds
+    past = routed.edge("past")
+    assert not any(
+        segment.intersects_rect_interior(module) for segment in segments(past.centerline)
+    )
+    into = routed.edge("into")
+    assert any(
+        segment.intersects_rect_interior(module) for segment in segments(into.centerline)
+    )
+
+
+def test_nudging_redistributes_a_shared_corridor_around_its_mean() -> None:
+    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
+    runs = (
+        Run("first", "first", boundary),
+        Run("second", "second", boundary),
+    )
+    polylines = (
+        (Point(0.0, 0.0), Point(0.0, 50.0), Point(60.0, 50.0), Point(60.0, 100.0)),
+        (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
+    )
+    style = LayoutStyle()
+    spacing = style.port_spacing.points
+    nudged = nudge_routes(runs, polylines, style=style, obstacles=())
+    first = nudged[0][1].y
+    second = nudged[1][1].y
+    assert abs(second - first) == spacing
+    assert (first + second) / 2.0 == (50.0 + 52.0) / 2.0
+    assert nudged[0][0] == polylines[0][0]
+    assert nudged[1][-1] == polylines[1][-1]
+
+
+def test_nudging_leaves_a_group_alone_when_the_move_hits_an_obstacle() -> None:
+    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
+    runs = (
+        Run("first", "first", boundary),
+        Run("second", "second", boundary),
+    )
+    polylines = (
+        (Point(0.0, 0.0), Point(0.0, 50.0), Point(60.0, 50.0), Point(60.0, 100.0)),
+        (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
+    )
+    blocker = Rect(20.0, 47.0, 10.0, 2.0)
+    style = LayoutStyle()
+    assert nudge_routes(runs, polylines, style=style, obstacles=(blocker,)) == polylines
+
+
+def test_gallery_routing_is_deterministic_and_lint_clean() -> None:
+    for name in ("vertical-slice", "modelangelo-gnn"):
+        first = compile_figure(gallery_figure(name))
+        second = compile_figure(gallery_figure(name))
+        assert first.routed == second.routed
+        assert first.document.text == second.document.text
+        assert not lint_compilation(first).errors
+
+
+def test_long_haul_edges_claim_their_lane_before_short_ones() -> None:
+    fitted = fit_figure(measure_figure(_container_figure()))
+    order = _routing_order(fitted, fitted.measured.semantic.edges)
+    assert tuple(edge.id for edge in order) == ("past", "into")
+
+
+def test_long_run_prefers_the_middle_of_its_gutter() -> None:
+    """R1: given a free corridor, the crossing run centres instead of grazing."""
+
+    obstacles = (Rect(0.0, 40.0, 40.0, 20.0), Rect(60.0, 40.0, 40.0, 20.0))
+    costs = PathCosts(14.0, clearance=5.0)
+    route = shortest_orthogonal_path(
+        Point(10.0, 100.0),
+        Point(90.0, 0.0),
+        obstacles,
+        costs=costs,
+    )
+    assert route is not None
+    crossing = tuple(segment for segment in segments(route) if segment.vertical)
+    assert len(crossing) == 1
+    # The gutter runs from x=40 to x=60; hugging either wall costs more length.
+    assert crossing[0].start.x == 50.0
+
+
+def test_departure_orientation_is_charged_against_the_port_stub() -> None:
+    """R5: turning straight out of a port costs a bend, so straight runs win."""
+
+    obstacles = (Rect(20.0, 20.0, 40.0, 40.0),)
+    costs = PathCosts(14.0)
+    turning = shortest_orthogonal_path(
+        Point(0.0, 0.0),
+        Point(100.0, 0.0),
+        obstacles,
+        costs=costs,
+        departure=False,
+    )
+    assert turning == (Point(0.0, 0.0), Point(100.0, 0.0))
+
+
+def _transparent_edge_figure() -> FigureSpec:
+    """A spacer wide and tall enough to be crossed sits between two blocks."""
+
+    return FigureSpec(
+        "transparent-edge",
+        width=pt(240),
+        nodes=(
+            NodeSpec("source", "block", (TextRun("Source"),)),
+            NodeSpec("middle", "spacer", width=pt(60), height=pt(40)),
+            NodeSpec("target", "block", (TextRun("Target"),)),
+        ),
+        edges=(EdgeSpec("flow", PortRef("source", "output"), PortRef("target", "input")),),
+        groups=(
+            GroupSpec(
+                "root",
+                ("source", "middle", "target"),
+                LayoutSpec("row", gap=pt(20)),
+            ),
+        ),
+    )
+
+
+def _transparent_net_figure() -> FigureSpec:
+    """A fan-out whose stems drop straight through a reserved corridor spacer."""
+
+    heads = tuple(
+        NodeSpec(
+            f"head{index}",
+            "block",
+            (TextRun(f"Head {index}"),),
+            ports=(PortSpec("input", Side.NORTH, adaptive=True),),
+        )
+        for index in range(1, 3)
+    )
+    return FigureSpec(
+        "transparent-net",
+        width=pt(280),
+        nodes=(
+            NodeSpec(
+                "hub",
+                "block",
+                (TextRun("Hub"),),
+                ports=(PortSpec("output", Side.SOUTH, adaptive=True),),
+            ),
+            NodeSpec("corridor", "spacer", width=pt(200), height=pt(30)),
+            *heads,
+        ),
+        nets=(
+            NetSpec(
+                "fan",
+                "fan-out",
+                (PortRef("hub", "output"),),
+                tuple(PortRef(head.id, "input") for head in heads),
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("hub", "corridor", "row"), LayoutSpec("column", gap=pt(24))),
+            GroupSpec(
+                "row",
+                tuple(head.id for head in heads),
+                LayoutSpec("row", gap=pt(24), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+
+
+def test_lint_treats_transparent_kinds_as_air_like_the_router_does() -> None:
+    """R17: a spacer draws no body, so crossing one is not an obstacle defect."""
+
+    for figure in (_transparent_edge_figure(), _transparent_net_figure()):
+        compilation = compile_figure(figure)
+        spacer = next(
+            node
+            for node in compilation.routed.fitted.nodes
+            if node.measured.spec.kind == "spacer"
+        )
+        crossed = tuple(
+            segment
+            for route in (
+                *(edge.centerline for edge in compilation.routed.edges),
+                *(
+                    stem.centerline
+                    for net in compilation.routed.nets
+                    for stem in net.source_stems + net.target_stems
+                ),
+            )
+            for segment in segments(route)
+            if segment.intersects_rect_interior(spacer.bounds)
+        )
+        assert crossed, "the fixture must actually route through the spacer"
+        assert lint_compilation(compilation).ok
+
+
+def test_skip_trunk_and_head_taps_run_through_block_centres() -> None:
+    """R14: net taps sit on the centre of the block they leave or enter."""
+
+    compilation = compile_figure(gallery_figure("modelangelo-gnn"))
+    fitted = compilation.fitted
+    for net_id, hub_id in (
+        ("skip.previous", "band1.previous"),
+        ("skip.cryo", "strip1.addln1"),
+        ("skip.sequence", "strip2.addln2"),
+        ("heads.fan-out", "strip3.addln3"),
+    ):
+        net = compilation.routed.net(net_id)
+        centre = fitted.node(hub_id).bounds.center.x
+        (trunk,) = net.source_stems
+        assert trunk.centerline[0].x == centre
+        if net_id != "heads.fan-out":
+            assert net.rail[0].x == net.rail[-1].x == centre
+    for stem in compilation.routed.net("heads.fan-out").target_stems:
+        head = fitted.node(stem.port.node_id)
+        assert stem.centerline[0].x == head.bounds.center.x
+        assert stem.centerline == (
+            Point(head.bounds.center.x, stem.centerline[0].y),
+            head.port("input").position,
+        )
+
+
+def test_attention_merges_read_as_one_formula_labelled_arrow() -> None:
+    """R20: the attention is a merge whose queries run straight into the sink.
+
+    Supersedes the R18 test of the attention *component*: panel-b no longer draws
+    the matrix. Each module merges its query vector with a second source into the
+    attended value, and the query leg plus the arrival have to read as the single
+    horizontal arrow the formula label sits above.
+    """
+
+    compilation = compile_figure(gallery_figure("modelangelo-gnn"))
+    routed = compilation.routed
+    for net_id, query_id in (
+        ("band1.cryo.attention", "band1.cryo.q.cells"),
+        ("band2.sequence.attention", "band2.sequence.q.cells"),
+        ("band3.ipa.attention", "band3.ipa.qv.cells"),
+    ):
+        net = routed.net(net_id)
+        assert net.spec.kind == "merge"
+        query = next(
+            stem for stem in net.source_stems if stem.port.node_id == query_id
+        )
+        (arrival,) = net.target_stems
+        assert len(query.centerline) == 2, "the query leaves east and does not bend"
+        assert query.centerline[0].y == query.centerline[-1].y
+        assert arrival.centerline[0].y == query.centerline[0].y, "one straight arrow"
+        assert arrival.centerline[-1].y == query.centerline[0].y
+        assert net.label_position is not None and net.label_metrics is not None
+        assert net.label_position.y < query.centerline[0].y, "formula above the arrow"
+        assert query.centerline[0].x <= net.label_position.x <= arrival.centerline[-1].x
+        (riser,) = tuple(
+            stem for stem in net.source_stems if stem.port.node_id != query_id
+        )
+        rail = segments(net.rail)
+        assert any(_on_segment(riser.centerline[-1], run) for run in rail), (
+            "the second source joins the shared rail"
+        )
+        assert any(_on_segment(arrival.centerline[0], run) for run in rail)
+
+
+def _on_segment(point: Point, segment: Segment) -> bool:
+    if segment.horizontal:
+        low, high = sorted((segment.start.x, segment.end.x))
+        return point.y == segment.start.y and low <= point.x <= high
+    low, high = sorted((segment.start.y, segment.end.y))
+    return point.x == segment.start.x and low <= point.y <= high
+
+
+def test_junction_dots_never_sit_on_a_rail_corner() -> None:
+    """R21: a filleted corner cuts across the bend, so a dot there would float.
+
+    Rails are straight today; this pins the invariant that keeps the 6 pt elbow
+    radius compatible with junction dots if one ever bends.
+    """
+
+    for name in ("vertical-slice", "modelangelo-gnn"):
+        compilation = compile_figure(gallery_figure(name))
+        for net in compilation.routed.nets:
+            corners = set(net.rail[1:-1])
+            assert not corners & set(net.junctions)
+
+
+def test_ipa_graph_output_rises_north_without_doubling_back() -> None:
+    """R16/R20: the north output faces the merge rail, so the leg never reverses."""
+
+    compilation = compile_figure(gallery_figure("modelangelo-gnn"))
+    routed = compilation.routed
+    graph = routed.fitted.node("band3.ipa.graph")
+    assert graph.port("output").side is Side.NORTH
+    net = routed.net("band3.ipa.attention")
+    stem = next(item for item in net.source_stems if item.port.node_id == "band3.ipa.graph")
+    assert stem.centerline[0] == graph.port("output").position
+    assert len(stem.centerline) == 2, "one straight climb into the rail"
+    assert stem.centerline[-1].x == stem.centerline[0].x
+    assert stem.centerline[-1].y < stem.centerline[0].y
+
+
+def test_rail_label_anchors_above_the_longest_horizontal_run() -> None:
+    """R20: a net caption belongs to the arrow, not to the rail that feeds it."""
+
+    rail = (Point(40.0, 10.0), Point(40.0, 30.0))
+    stems = (
+        (Point(0.0, 10.0), Point(40.0, 10.0)),
+        (Point(40.0, 10.0), Point(90.0, 10.0)),
+        (Point(20.0, 30.0), Point(40.0, 30.0)),
+    )
+    position = rail_label_position(rail, stems)
+    assert position.y < 10.0, "above the run"
+    assert position.x == 45.0, "centred on the collinear run, not on the rail"
+    # With no horizontal ink at all the rail midpoint still carries the caption.
+    vertical = rail_label_position(rail, ((Point(40.0, 10.0), Point(40.0, 30.0)),))
+    assert vertical == Point(44.0, 20.0)

@@ -9,8 +9,24 @@ from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.routed import RoutedEdge, RoutedFigure
 from flexo.ir.semantic import EdgeSpec, Waypoint
-from flexo.routing.nets import net_segments, route_net
-from flexo.routing.nudge import shorten_end
+from flexo.routing.nets import (
+    confined_groups,
+    group_obstacles,
+    net_routing_boundary,
+    net_segments,
+    route_net,
+)
+from flexo.routing.nudge import (
+    Stubs,
+    collapse_zigzags,
+    edge_label_position,
+    figure_runs,
+    nudge_obstacles,
+    nudge_routes,
+    rebuild_figure,
+    shorten_end,
+    simplify_polyline,
+)
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer
@@ -24,18 +40,59 @@ def route_figure(
 ) -> RoutedFigure:
     layout_style = style or STYLES[fitted.measured.semantic.style]
     text_measurer = measurer or TextMeasurer(layout_style.typography)
+    semantic = fitted.measured.semantic
     occupied: tuple[Segment, ...] = ()
     routed_nets = []
-    for net in fitted.measured.semantic.nets:
+    for net in semantic.nets:
         result = route_net(fitted, net, layout_style, text_measurer, occupied)
         routed_nets.append(result)
         occupied += net_segments(result)
-    routed: list[RoutedEdge] = []
-    for edge in fitted.measured.semantic.edges:
+    by_id: dict[str, RoutedEdge] = {}
+    for edge in _routing_order(fitted, semantic.edges):
         result = _route_edge(fitted, edge, layout_style, text_measurer, occupied)
-        routed.append(result)
+        by_id[edge.id] = result
         occupied += segments(result.centerline)
-    return RoutedFigure(fitted, tuple(routed), tuple(routed_nets))
+    routed = RoutedFigure(
+        fitted,
+        tuple(by_id[edge.id] for edge in semantic.edges),
+        tuple(routed_nets),
+    )
+    return _nudge(routed, layout_style)
+
+
+def _routing_order(fitted: FittedFigure, edges: tuple[EdgeSpec, ...]) -> tuple[EdgeSpec, ...]:
+    """Long haul first: the connectors with the least room to spare pick lanes first."""
+
+    def span(edge: EdgeSpec) -> float:
+        source = fitted.node(edge.source.node_id).port(edge.source.port_name).position
+        target = fitted.node(edge.target.node_id).port(edge.target.port_name).position
+        return abs(target.x - source.x) + abs(target.y - source.y)
+
+    return tuple(sorted(edges, key=lambda edge: (-span(edge), edge.id)))
+
+
+def _nudge(routed: RoutedFigure, style: LayoutStyle) -> RoutedFigure:
+    clearance = style.route_boundary_clearance.points
+    boundaries = {
+        edge.spec.id: _routing_boundary(routed.fitted, edge.spec, clearance)
+        for edge in routed.edges
+    }
+    boundaries.update(
+        {
+            net.spec.id: net_routing_boundary(routed.fitted, net.spec, clearance)
+            for net in routed.nets
+        }
+    )
+    runs, polylines = figure_runs(routed, boundaries, style)
+    nudged = nudge_routes(
+        runs,
+        polylines,
+        style=style,
+        obstacles=nudge_obstacles(routed, style),
+    )
+    if nudged == polylines:
+        return routed
+    return rebuild_figure(routed, nudged, arrow_length=style.arrow_length.points)
 
 
 def _route_edge(
@@ -76,14 +133,42 @@ def _route_edge(
         2.0 * style.arrow_length.points + style.elbow_radius.points,
     )
     target_escape = _escape(target_port.position, target_side, target_clearance)
-    obstacles = tuple(
-        node.bounds.inflated(
-            target_clearance
-            if node.measured.spec.id == target_node.measured.spec.id
-            else clearance
-        )
+    endpoint_ids = (edge.source.node_id, edge.target.node_id)
+    endpoint_points = (
+        source_port.position,
+        target_port.position,
+        source_escape,
+        target_escape,
+    )
+    containers = group_obstacles(fitted, endpoint_ids, endpoint_points, clearance)
+    confined = confined_groups(fitted, endpoint_ids, endpoint_points)
+    components = tuple(
+        node
         for node in fitted.nodes
         if node.measured.spec.kind not in {"label", "spacer", "junction"}
+    )
+    obstacles = (
+        tuple(
+            node.bounds.inflated(
+                target_clearance
+                if node.measured.spec.id == target_node.measured.spec.id
+                else clearance
+            )
+            for node in components
+        )
+        + containers
+    )
+    endpoints = {edge.source.node_id, edge.target.node_id}
+    # The port stubs live inside the inflated clearance ring of their own
+    # component, so straightening is judged against raw endpoint bounds.
+    stub_obstacles = (
+        tuple(
+            node.bounds
+            if node.measured.spec.id in endpoints
+            else node.bounds.inflated(clearance)
+            for node in components
+        )
+        + containers
     )
     boundary = _routing_boundary(fitted, edge, style.route_boundary_clearance.points)
     forced = _forced_points(
@@ -95,9 +180,14 @@ def _route_edge(
     )
     anchors = (source_escape, *forced, target_escape)
     interior: list[Point] = []
-    costs = PathCosts(style.bend_penalty)
+    costs = PathCosts(
+        style.bend_penalty,
+        separation=style.port_spacing.points,
+        clearance=clearance,
+    )
     local_occupied = occupied
-    for start, end in pairwise(anchors):
+    last_leg = len(anchors) - 2
+    for position, (start, end) in enumerate(pairwise(anchors)):
         leg = shortest_orthogonal_path(
             start,
             end,
@@ -105,6 +195,9 @@ def _route_edge(
             costs=costs,
             occupied=local_occupied,
             boundary=boundary,
+            confined=confined,
+            departure=_horizontal(source_side) if position == 0 else None,
+            arrival=_horizontal(target_side) if position == last_leg else None,
         )
         if leg is None:
             raise FlexoError(
@@ -117,10 +210,21 @@ def _route_edge(
             )
         interior.extend(leg if not interior else leg[1:])
         local_occupied += segments(leg)
-    centerline = _simplify((source_port.position, *interior, target_port.position))
+    centerline = simplify_polyline((source_port.position, *interior, target_port.position))
+    if not forced:
+        centerline = collapse_zigzags(
+            centerline,
+            stub_obstacles,
+            style.elbow_radius.points,
+            occupied,
+            style.port_spacing.points,
+            Stubs(clearance, target_clearance),
+        )
     shaft = shorten_end(centerline, style.arrow_length.points)
     label_metrics = measurer.measure(edge.label) if edge.label else None
-    label_position = _label_position(centerline) if label_metrics is not None else None
+    label_position = (
+        edge_label_position(centerline, label_metrics) if label_metrics is not None else None
+    )
     return RoutedEdge(edge, centerline, shaft, label_metrics, label_position)
 
 
@@ -262,25 +366,5 @@ def _escape(point: Point, side: Side, distance: float) -> Point:
     return point.translated(vector.x * distance, vector.y * distance)
 
 
-def _simplify(points: tuple[Point, ...]) -> tuple[Point, ...]:
-    result: list[Point] = []
-    for point in points:
-        if result and point == result[-1]:
-            continue
-        if len(result) >= 2:
-            first, middle = result[-2:]
-            if (first.x == middle.x == point.x) or (first.y == middle.y == point.y):
-                result[-1] = point
-                continue
-        result.append(point)
-    return tuple(result)
-
-
-def _label_position(points: tuple[Point, ...]) -> Point:
-    candidates = segments(points)
-    longest = max(candidates, key=lambda segment: segment.length)
-    midpoint = Point(
-        (longest.start.x + longest.end.x) / 2.0,
-        (longest.start.y + longest.end.y) / 2.0,
-    )
-    return midpoint.translated(dy=-4.0) if longest.horizontal else midpoint.translated(dx=4.0)
+def _horizontal(side: Side) -> bool:
+    return side in {Side.EAST, Side.WEST}

@@ -21,6 +21,7 @@ from flexo.ir.semantic import (
     Scalar,
     TextRun,
 )
+from flexo.style import RAMP_ROLES, STYLES, LayoutStyle
 from flexo.units import Length
 from flexo.validate import normalize_and_validate
 
@@ -350,6 +351,59 @@ class GroupBuilder:
             **options,
         )
 
+    def vector(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        ramp: str = "ramp-node",
+        cells: int = 3,
+        columns: int = 1,
+        input: NodeHandle | PortRef | str | None = None,
+        gap: Length | str | float | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A labelled vertical vector glyph: a cell stack with its label below it.
+
+        The composite lowers into a small layout column holding two children --
+        ``<id>.cells`` (kind ``vector``) and, when a label is given,
+        ``<id>.label`` (kind ``label``). Keeping the caption in its own node is
+        what lets the glyph's ports stay the trivial centres of the cell rect:
+        no port arithmetic has to know that a caption hangs underneath, and an
+        arrow arrives on the middle cell rather than on the middle of
+        cells-plus-caption. The returned handle is always the cells node, so
+        edges and nets attach to the glyph itself.
+
+        A caption wider than the stack is fine -- the column centres both -- and
+        a ``\\n`` in the label breaks it across lines instead of widening it.
+        """
+
+        if cells < 1:
+            raise ValueError("a vector needs at least one cell")
+        if columns < 1:
+            raise ValueError("a vector needs at least one column")
+        if ramp not in RAMP_ROLES:
+            valid = ", ".join(RAMP_ROLES)
+            raise ValueError(f'unknown vector ramp "{ramp}"; valid ramps: {valid}')
+        stack = self.column(
+            id,
+            gap=_vector_label_gap(self.figure.style) if gap is None else gap,
+            padding=0,
+            align="center",
+            role="layout",
+        )
+        result = stack.node(
+            "cells",
+            "vector",
+            properties={"cells": cells, "columns": columns, "ramp": ramp},
+            **{"role": "vector", **options},
+        )
+        if _label(label):
+            stack.node("label", "label", label=label, role="label")
+        if input is not None:
+            self.connect(input, result.input)
+        return result
+
     def matrix(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
         return self.node(id, "matrix", label=label, **options)
 
@@ -503,7 +557,7 @@ class GroupBuilder:
         q: NodeHandle | PortRef | str,
         k: NodeHandle | PortRef | str,
         v: NodeHandle | PortRef | str,
-        label: str = "Attention",
+        label: str | tuple[TextRun, ...] = "Attention",
         **options: object,
     ) -> NodeHandle:
         result = self.node(id, "attention", label=label, **options)
@@ -615,6 +669,16 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
         for index, name in enumerate(output_names)
     )
     return inputs + result_outputs
+
+
+def _vector_label_gap(style_name: str) -> Length:
+    """The authored gap between a vector's cells and its caption.
+
+    Composites lower to geometry-free semantics, so the token is resolved here,
+    against the style the figure names; an unknown name is left to validation.
+    """
+
+    return (STYLES.get(style_name) or LayoutStyle()).vector_label_gap
 
 
 def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
