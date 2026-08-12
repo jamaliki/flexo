@@ -12,9 +12,9 @@ from flexo.units import Length, mm, pt
 _PT_0_8 = pt(0.8)
 _PT_0_9 = pt(0.9)
 _PT_3 = pt(3.0)
-_PT_4_5 = pt(4.5)
+_PT_3_5 = pt(3.5)
+_PT_4 = pt(4.0)
 _PT_5 = pt(5.0)
-_PT_5_5 = pt(5.5)
 _PT_7 = pt(7.0)
 _PT_8 = pt(8.0)
 _PT_11 = pt(11.0)
@@ -51,8 +51,8 @@ class LayoutStyle:
     stroke_width: Length = _PT_0_8
     connector_width: Length = _PT_0_9
     corner_radius: Length = _PT_3
-    arrow_length: Length = _PT_5_5
-    arrow_width: Length = _PT_4_5
+    arrow_length: Length = _PT_4
+    arrow_width: Length = _PT_3_5
     route_clearance: Length = _PT_5
     bend_penalty: float = 14.0
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS

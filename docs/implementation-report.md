@@ -61,6 +61,24 @@ internals remain independently editable in Inkscape.
   waypoints while preserving automatic obstacle avoidance.
 - Decision: accepted.
 
+### Cycle 2: Marker orientation and visual weight
+
+- Branch owner: primary agent.
+- Observation: 5.5 pt markers were longer than the 5 pt target approach, so
+  shortening consumed the last segment and oriented several west-port arrows
+  vertically from the preceding elbow.
+- Hypothesis: markers shorter than the routing clearance will preserve final
+  approach orientation and reduce clutter around multi-port components.
+- Mechanism: the shaft retains a positive-length segment in the same direction
+  as the logical centerline before the marker base.
+- Success criteria: centerline and shaft final orientations match for every
+  gallery edge; zero route failures; visibly lighter arrowheads.
+- Minimal experiment: reduce markers to 4.0 x 3.5 pt and lint final-segment
+  orientation plus port-direction conformance.
+- Result: every vertical-slice edge has a matching final orientation; all
+  west-facing targets receive right-pointing arrows; zero lint diagnostics.
+- Decision: accepted.
+
 ## Accepted Changes
 
 - Public repository, compiler contract, and validation objectives established.
@@ -69,6 +87,7 @@ internals remain independently editable in Inkscape.
 - Deterministic lane layout, visibility routing, editable SVG, validation, CLI,
   palette re-theming, and Inkscape-derived outputs.
 - West-side source residual port for deliberate bottom-rail composition.
+- Marker geometry bounded below route clearance, with direction linting.
 
 ## Rejected Changes
 

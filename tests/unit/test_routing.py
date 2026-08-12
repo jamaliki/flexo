@@ -66,3 +66,31 @@ def test_bottom_lane_routes_below_nodes() -> None:
 
 def test_routing_is_deterministic() -> None:
     assert routed_fixture(obstacle=True) == routed_fixture(obstacle=True)
+
+
+def test_marker_orientation_matches_final_approach_after_elbow() -> None:
+    figure = FigureSpec(
+        "elbow",
+        width=pt(180),
+        nodes=(
+            NodeSpec("source", "matrix"),
+            NodeSpec("target", "block"),
+        ),
+        edges=(
+            EdgeSpec("elbow", PortRef("source", "output"), PortRef("target", "input")),
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("source", "target"),
+                LayoutSpec("row", align="start", justify="space-between"),
+            ),
+        ),
+    )
+    edge = route_figure(fit_figure(measure_figure(figure))).edge("elbow")
+    center_final = segments(edge.centerline)[-1]
+    shaft_final = segments(edge.shaft)[-1]
+    assert center_final.horizontal
+    assert shaft_final.horizontal
+    assert center_final.end.x > center_final.start.x
+    assert shaft_final.end.x > shaft_final.start.x

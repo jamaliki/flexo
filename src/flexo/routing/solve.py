@@ -43,11 +43,33 @@ def _route_edge(
     target_node = fitted.node(edge.target.node_id)
     source_port = source_node.port(edge.source.port_name)
     target_port = target_node.port(edge.target.port_name)
-    source_side = edge.depart or source_port.side
-    target_side = edge.arrive or target_port.side
+    if edge.depart is not None and edge.depart is not source_port.side:
+        raise FlexoError(
+            Diagnostic(
+                "routing.depart.port-mismatch",
+                f'Depart hint "{edge.depart}" conflicts with port side "{source_port.side}".',
+                entity_id=edge.id,
+                hint="Choose a port on the requested side instead.",
+            )
+        )
+    if edge.arrive is not None and edge.arrive is not target_port.side:
+        raise FlexoError(
+            Diagnostic(
+                "routing.arrive.port-mismatch",
+                f'Arrive hint "{edge.arrive}" conflicts with port side "{target_port.side}".',
+                entity_id=edge.id,
+                hint="Choose a port on the requested side instead.",
+            )
+        )
+    source_side = source_port.side
+    target_side = target_port.side
     clearance = style.route_clearance.points
     source_escape = _escape(source_port.position, source_side, clearance)
-    target_escape = _escape(target_port.position, target_side, clearance)
+    target_clearance = max(
+        clearance,
+        style.arrow_length.points + max(1.0, style.connector_width.points),
+    )
+    target_escape = _escape(target_port.position, target_side, target_clearance)
     obstacles = tuple(
         node.bounds.inflated(clearance)
         for node in fitted.nodes
