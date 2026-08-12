@@ -13,6 +13,40 @@ Flexo is under active development. The first acceptance target is a compact
 multi-module architecture figure with feature strips, attention, branches,
 residual connections, and a scientific inset.
 
+## Python authoring
+
+```python
+from flexo import Figure
+
+with Figure("attention-flow", width="double-column") as figure:
+    with figure.module("encoder", label="Encoder") as module:
+        features = module.feature_strip("features", label="Node features")
+        q, v = module.mlp("projection", inputs=[features], outputs=["Q", "V"])
+        k = module.cnn("keys", input=features.branch, output="K")
+        attended = module.attention("attention", q=q, k=k, v=v)
+        prediction = module.prediction("prediction", input=attended)
+        module.residual(features, prediction, lane="encoder-bottom")
+
+figure.compile().document.write("attention-flow.editable.svg")
+```
+
+The builder lowers to the same validated, versioned schema used by YAML and
+JSON. See [`examples/vertical_slice.py`](examples/vertical_slice.py) and its
+[`YAML equivalent`](examples/vertical_slice.yaml).
+
+## Command line
+
+```bash
+uv run flexo build examples/vertical_slice.yaml --output examples/build
+uv run flexo check examples/vertical_slice.yaml
+uv run flexo inspect examples/vertical_slice.yaml
+uv run flexo gallery --output examples/build
+```
+
+`build` emits an editable SVG master plus portable SVG, PDF, and PNG derivatives.
+Derived exports require Inkscape on `PATH`, in the standard macOS application
+location, or configured through `FLEXO_INKSCAPE`.
+
 ## Development
 
 ```bash

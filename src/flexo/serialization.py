@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from flexo.components import COMPONENTS
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     EdgeSpec,
@@ -55,6 +56,163 @@ def parse_figure(document: object) -> FigureSpec:
         schema_version=document["schema_version"],
     )
     return normalize_and_validate(figure)
+
+
+def figure_to_document(figure: FigureSpec) -> dict[str, Any]:
+    semantic = normalize_and_validate(figure)
+    document = {
+        "schema_version": semantic.schema_version,
+        "figure": _figure_data(semantic),
+        "nodes": [_node_data(node) for node in semantic.nodes],
+        "edges": [_edge_data(edge) for edge in semantic.edges],
+        "groups": [_group_data(group) for group in semantic.groups],
+    }
+    validate_document(document)
+    return document
+
+
+def dump_figure(figure: FigureSpec, *, format: str = "yaml") -> str:
+    document = figure_to_document(figure)
+    if format == "json":
+        return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    if format != "yaml":
+        raise ValueError("format must be yaml or json")
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+
+
+def save_figure(figure: FigureSpec, destination: str | Path) -> Path:
+    target_file = Path(destination)
+    format = "json" if target_file.suffix.lower() == ".json" else "yaml"
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text(dump_figure(figure, format=format), encoding="utf-8")
+    return target_file
+
+
+def _figure_data(figure: FigureSpec) -> dict[str, object]:
+    result: dict[str, object] = {
+        "id": figure.id,
+        "width": figure.width if isinstance(figure.width, str) else _length_data(figure.width),
+        "root": figure.root,
+        "style": figure.style,
+        "palette": figure.palette,
+    }
+    if figure.height is not None:
+        result["height"] = _length_data(figure.height)
+    return result
+
+
+def _node_data(node: NodeSpec) -> dict[str, object]:
+    result: dict[str, object] = {"id": node.id, "kind": node.kind}
+    _put_label(result, node.label)
+    if node.role != "block":
+        result["role"] = node.role
+    default_ports = COMPONENTS.get(node.kind)
+    if default_ports is None or node.ports != default_ports.ports:
+        result["ports"] = [
+            {"name": port.name, "side": port.side.value, "offset": port.offset}
+            for port in node.ports
+        ]
+    if node.width is not None:
+        result["width"] = _length_data(node.width)
+    if node.height is not None:
+        result["height"] = _length_data(node.height)
+    if node.properties:
+        result["properties"] = dict(node.properties)
+    return result
+
+
+def _edge_data(edge: EdgeSpec) -> dict[str, object]:
+    result: dict[str, object] = {
+        "id": edge.id,
+        "from": str(edge.source),
+        "to": str(edge.target),
+    }
+    if edge.role != "flow":
+        result["role"] = edge.role
+    _put_label(result, edge.label)
+    if edge.lane_hint:
+        result["lane"] = edge.lane_hint
+    if edge.depart:
+        result["depart"] = edge.depart.value
+    if edge.arrive:
+        result["arrive"] = edge.arrive.value
+    if edge.waypoints:
+        result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
+    return result
+
+
+def _group_data(group: GroupSpec) -> dict[str, object]:
+    result: dict[str, object] = {
+        "id": group.id,
+        "children": list(group.children),
+        "layout": _layout_data(group.layout),
+    }
+    if group.collision_policy != "disjoint":
+        result["collision_policy"] = group.collision_policy
+    _put_label(result, group.label)
+    if group.role != "container":
+        result["role"] = group.role
+    return result
+
+
+def _layout_data(layout: LayoutSpec) -> dict[str, object]:
+    result: dict[str, object] = {"kind": layout.kind}
+    for name in ("gap", "padding", "width", "height"):
+        value = getattr(layout, name)
+        if value is not None:
+            result[name] = _length_data(value)
+    if layout.align != "center":
+        result["align"] = layout.align
+    if layout.justify != "start":
+        result["justify"] = layout.justify
+    if layout.columns is not None:
+        result["columns"] = layout.columns
+    if layout.reflow is not None:
+        result["reflow"] = layout.reflow
+    if layout.equal_size:
+        result["equal_size"] = True
+    return result
+
+
+def _waypoint_data(waypoint: Waypoint) -> dict[str, object]:
+    result: dict[str, object] = {}
+    if waypoint.reference:
+        result["reference"] = waypoint.reference
+    if waypoint.side:
+        result["side"] = waypoint.side.value
+    if waypoint.offset != 0.5:
+        result["offset"] = waypoint.offset
+    for name in ("dx", "dy"):
+        value = getattr(waypoint, name)
+        if value.points:
+            result[name] = _length_data(value)
+    for name in ("x", "y"):
+        value = getattr(waypoint, name)
+        if value is not None:
+            result[name] = _length_data(value)
+    return result
+
+
+def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
+    if not label:
+        return
+    if len(label) == 1 and label[0] == TextRun(label[0].text):
+        result["label"] = label[0].text
+        return
+    result["label"] = [
+        {
+            "text": run.text,
+            "weight": run.weight,
+            "italic": run.italic,
+            "baseline_shift": run.baseline_shift,
+        }
+        for run in label
+    ]
+
+
+def _length_data(value: Length) -> str:
+    rendered = f"{value.points:.5f}".rstrip("0").rstrip(".")
+    return f"{rendered}pt"
 
 
 def _label(value: object = "") -> tuple[TextRun, ...]:

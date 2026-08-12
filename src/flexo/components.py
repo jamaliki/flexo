@@ -30,6 +30,7 @@ _MULTI_OUTPUT = (
     _INPUT,
     PortSpec("output", Side.EAST, 0.3),
     PortSpec("branch", Side.EAST, 0.7),
+    PortSpec("residual", Side.WEST, 0.8),
 )
 
 COMPONENTS: dict[str, ComponentDefinition] = {
@@ -48,7 +49,11 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ComponentDefinition("tensor", Size(54.0, 26.0), _STANDARD),
         ComponentDefinition("matrix", Size(50.0, 48.0), _STANDARD),
         ComponentDefinition("sequence", Size(66.0, 26.0), _STANDARD),
-        ComponentDefinition("prediction", Size(58.0, 34.0), _STANDARD),
+        ComponentDefinition(
+            "prediction",
+            Size(58.0, 34.0),
+            (_INPUT, PortSpec("residual", Side.SOUTH), _OUTPUT),
+        ),
         ComponentDefinition("loss", Size(44.0, 32.0), (_INPUT,)),
         ComponentDefinition("junction", Size(8.0, 8.0), _MULTI_OUTPUT),
         ComponentDefinition("graph", Size(70.0, 62.0), _STANDARD),

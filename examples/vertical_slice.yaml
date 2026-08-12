@@ -1,0 +1,119 @@
+schema_version: 1
+figure:
+  id: vertical-slice
+  width: double-column
+  root: root
+  style: paper
+  palette: default
+nodes:
+- id: cryo.inputs.nodes
+  kind: feature-strip
+  label: Node features
+  properties:
+    cells: 7
+- id: cryo.inputs.distances
+  kind: feature-strip
+  label: Distances
+  properties:
+    cells: 5
+- id: cryo.encoders.projection
+  kind: mlp
+  label: Feature MLP
+  ports:
+  - name: input1
+    side: west
+    offset: 0.3333333333333333
+  - name: input2
+    side: west
+    offset: 0.6666666666666666
+  - name: q
+    side: east
+    offset: 0.3333333333333333
+  - name: v
+    side: east
+    offset: 0.6666666666666666
+- id: cryo.encoders.keys
+  kind: cnn
+  label: Edge CNN
+  ports:
+  - name: input
+    side: west
+    offset: 0.5
+  - name: k
+    side: east
+    offset: 0.5
+- id: cryo.attention
+  kind: attention
+  label: Attention
+- id: cryo.prediction
+  kind: prediction
+  label: Prediction
+- id: cryo.density
+  kind: inset
+  label: Scientific inset
+edges:
+- id: edge.1.cryo.inputs.nodes-to-cryo.encoders.projection
+  from: cryo.inputs.nodes.output
+  to: cryo.encoders.projection.input1
+- id: edge.2.cryo.inputs.distances-to-cryo.encoders.projection
+  from: cryo.inputs.distances.output
+  to: cryo.encoders.projection.input2
+- id: edge.3.cryo.inputs.nodes-to-cryo.encoders.keys
+  from: cryo.inputs.nodes.branch
+  to: cryo.encoders.keys.input
+- id: edge.4.cryo.encoders.projection-to-cryo.attention
+  from: cryo.encoders.projection.q
+  to: cryo.attention.q
+- id: edge.5.cryo.encoders.keys-to-cryo.attention
+  from: cryo.encoders.keys.k
+  to: cryo.attention.k
+- id: edge.6.cryo.encoders.projection-to-cryo.attention
+  from: cryo.encoders.projection.v
+  to: cryo.attention.v
+- id: edge.7.cryo.attention-to-cryo.prediction
+  from: cryo.attention.output
+  to: cryo.prediction.input
+- id: cryo.residual
+  from: cryo.inputs.nodes.residual
+  to: cryo.prediction.residual
+  role: residual
+  lane: cryo-bottom
+groups:
+- id: root
+  children:
+  - cryo
+  layout:
+    kind: column
+    justify: center
+  role: canvas
+- id: cryo
+  children:
+  - cryo.inputs
+  - cryo.encoders
+  - cryo.attention
+  - cryo.prediction
+  - cryo.density
+  layout:
+    kind: row
+    gap: 10pt
+    justify: center
+  label: Cryo-EM information flow
+  role: module
+- id: cryo.inputs
+  children:
+  - cryo.inputs.nodes
+  - cryo.inputs.distances
+  layout:
+    kind: column
+    gap: 7pt
+    padding: 0pt
+  role: layout
+- id: cryo.encoders
+  children:
+  - cryo.encoders.projection
+  - cryo.encoders.keys
+  layout:
+    kind: column
+    gap: 9pt
+    padding: 0pt
+  role: layout
