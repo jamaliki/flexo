@@ -23,9 +23,11 @@ nodes:
   - name: input1
     side: west
     offset: 0.3333333333333333
+    adaptive: true
   - name: input2
     side: west
     offset: 0.6666666666666666
+    adaptive: true
   - name: q
     side: east
     offset: 0.3333333333333333
@@ -39,6 +41,7 @@ nodes:
   - name: input
     side: west
     offset: 0.5
+    adaptive: true
   - name: k
     side: east
     offset: 0.5

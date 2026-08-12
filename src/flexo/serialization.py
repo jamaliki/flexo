@@ -109,7 +109,12 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
     default_ports = COMPONENTS.get(node.kind)
     if default_ports is None or node.ports != default_ports.ports:
         result["ports"] = [
-            {"name": port.name, "side": port.side.value, "offset": port.offset}
+            {
+                "name": port.name,
+                "side": port.side.value,
+                "offset": port.offset,
+                **({"adaptive": True} if port.adaptive else {}),
+            }
             for port in node.ports
         ]
     if node.width is not None:
@@ -237,7 +242,12 @@ def _node(data: dict[str, Any]) -> NodeSpec:
         label=_label(data.get("label", "")),
         role=data.get("role", "block"),
         ports=tuple(
-            PortSpec(port["name"], Side(port["side"]), port.get("offset", 0.5))
+            PortSpec(
+                port["name"],
+                Side(port["side"]),
+                port.get("offset", 0.5),
+                port.get("adaptive", False),
+            )
             for port in data.get("ports", [])
         ),
         width=_optional_length(data.get("width")),

@@ -36,17 +36,21 @@ def shortest_orthogonal_path(
     end_index = index[end]
 
     # State orientation: 0 initial, 1 horizontal, 2 vertical.
-    frontier: list[tuple[float, float, int, int, int]] = []
+    frontier: list[tuple[int, float, float, float, int, int, int]] = []
     serial = count()
-    heapq.heappush(frontier, (0.0, 0.0, next(serial), start_index, 0))
-    best: dict[tuple[int, int], tuple[float, float]] = {(start_index, 0): (0.0, 0.0)}
+    heapq.heappush(frontier, (0, 0.0, 0.0, 0.0, next(serial), start_index, 0))
+    best: dict[tuple[int, int], tuple[int, float, float, float]] = {
+        (start_index, 0): (0, 0.0, 0.0, 0.0)
+    }
     previous: dict[tuple[int, int], tuple[int, int]] = {}
     final_state: tuple[int, int] | None = None
 
     while frontier:
-        cost, distance, _, point_index, orientation = heapq.heappop(frontier)
+        interacted, bend_cost, interaction_cost, distance, _, point_index, orientation = (
+            heapq.heappop(frontier)
+        )
         state = (point_index, orientation)
-        if best.get(state) != (cost, distance):
+        if best.get(state) != (interacted, bend_cost, interaction_cost, distance):
             continue
         if point_index == end_index:
             final_state = state
@@ -54,18 +58,25 @@ def shortest_orthogonal_path(
         for neighbor_index in adjacency[point_index]:
             segment = Segment(points[point_index], points[neighbor_index])
             next_orientation = 1 if segment.horizontal else 2
-            bend_cost = costs.bend if orientation and orientation != next_orientation else 0.0
-            interaction_cost = _interaction_cost(segment, occupied, costs)
+            added_bend = costs.bend if orientation and orientation != next_orientation else 0.0
+            added_interaction = _interaction_cost(segment, occupied, costs)
             next_distance = distance + segment.length
-            next_cost = cost + segment.length + bend_cost + interaction_cost
             next_state = (neighbor_index, next_orientation)
-            candidate = (next_cost, next_distance)
-            if candidate < best.get(next_state, (float("inf"), float("inf"))):
+            candidate = (
+                int(bool(interacted or added_interaction)),
+                bend_cost + added_bend,
+                interaction_cost + added_interaction,
+                next_distance,
+            )
+            if candidate < best.get(
+                next_state,
+                (1, float("inf"), float("inf"), float("inf")),
+            ):
                 best[next_state] = candidate
                 previous[next_state] = state
                 heapq.heappush(
                     frontier,
-                    (next_cost, next_distance, next(serial), neighbor_index, next_orientation),
+                    (*candidate, next(serial), neighbor_index, next_orientation),
                 )
 
     if final_state is None:
@@ -84,8 +95,8 @@ def shortest_orthogonal_path(
 def _candidate_points(start: Point, end: Point, obstacles: tuple[Rect, ...]) -> tuple[Point, ...]:
     obstacle_xs = (value for item in obstacles for value in (item.left, item.right))
     obstacle_ys = (value for item in obstacles for value in (item.top, item.bottom))
-    xs = sorted({start.x, end.x, *obstacle_xs})
-    ys = sorted({start.y, end.y, *obstacle_ys})
+    xs = _with_midpoints({start.x, end.x, *obstacle_xs})
+    ys = _with_midpoints({start.y, end.y, *obstacle_ys})
     points = {
         Point(x, y)
         for x in xs
@@ -94,6 +105,18 @@ def _candidate_points(start: Point, end: Point, obstacles: tuple[Rect, ...]) -> 
     }
     points.update((start, end))
     return tuple(sorted(points, key=lambda point: (point.x, point.y)))
+
+
+def _with_midpoints(values: set[float]) -> tuple[float, ...]:
+    ordered = sorted(values)
+    return tuple(
+        sorted(
+            {
+                *ordered,
+                *((first + second) / 2.0 for first, second in pairwise(ordered)),
+            }
+        )
+    )
 
 
 def _visibility_edges(

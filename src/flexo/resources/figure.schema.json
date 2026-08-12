@@ -82,7 +82,8 @@
       "properties": {
         "name": {"$ref": "#/$defs/identifier"},
         "side": {"$ref": "#/$defs/side"},
-        "offset": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5}
+        "offset": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+        "adaptive": {"type": "boolean", "default": false}
       }
     },
     "node": {

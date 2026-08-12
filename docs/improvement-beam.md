@@ -7,13 +7,13 @@
 - Primary metric: zero validation errors plus editorial clarity at 180 mm.
 - Guardrails: deterministic, editable, physical-size-correct output.
 - Reproduction command: `uv run flexo gallery --output examples/build`.
-- Last promotion: first rendered baseline, checkpoint 1.
+- Last promotion: coupled layout and routing, checkpoint 2.
 
 ## Current Ranking
 
 | Rank | Beam | Type | Status | Parent | Current best / log | Next decision | Owner |
 |---:|---|---|---|---|---|---|---|
-| 1 | B1 | exploit | active | vertical slice | first render | singleton | primary agent |
+| 1 | B1 | exploit | promoted | vertical slice | adaptive ports and ordering | combination | primary agent |
 | 2 | B2 | near-miss | active | vertical slice | native motifs | stress test | primary agent |
 | 3 | B3 | structural/high-risk | promoted | vertical slice | semantic residual port | combination | primary agent |
 
@@ -22,7 +22,7 @@
 ### B1: Editorial spacing and hierarchy
 
 - Type: exploit
-- Status: active
+- Status: promoted
 - Rank: 1
 - Owner: primary agent
 - Parent candidate or beam: first functional baseline
@@ -30,12 +30,14 @@
   improve scan order without requiring per-figure coordinates.
 - Mechanism: geometry tokens, alignment, and whitespace encode grouping.
 - Exact code paths: `style.py`, `layout/lanes.py`, gallery specification.
-- Current best candidate: paper spacing tokens in the vertical slice.
-- Evidence for: clear hierarchy and no overflow at 180 x 47.2 mm.
-- Evidence against: none.
-- Next decision: singleton.
-- Next exact experiment: compare compact and editorial spacing tokens on the
-  same gallery geometry.
+- Current best candidate: edge-aware gutters plus bounded adjacent-column
+  coordinate assignment.
+- Evidence for: feed-forward elbows reduced from 14 to 2 and crossings from one
+  to zero, with no overflow or explicit coordinates.
+- Evidence against: small exhaustive ordering is intentionally capped at five
+  children; larger columns will need a barycentric heuristic.
+- Next decision: combination.
+- Next exact experiment: stress the same rules on transformer and U-Net figures.
 - Kill or park condition: no legibility improvement at equal overflow count.
 
 ### B2: Component visual grammar
@@ -53,7 +55,7 @@
 - Current best candidate: restrained feature-strip, MLP, CNN, attention, and
   scientific-inset motifs.
 - Evidence for: motifs distinguish operations without extra legend text.
-- Evidence against: Q/K/V joins are locally dense around attention.
+- Evidence against: none in the vertical slice after adaptive port alignment.
 - Next decision: stress test.
 - Next exact experiment: apply the grammar to transformer and U-Net fixtures.
 - Kill or park condition: motifs harm text fit or add ambiguous detail.
@@ -113,3 +115,19 @@ None.
 - Beams killed or parked and why: none.
 - Next singleton candidates: static font instances; imported inset.
 - Next combination candidates: B1 spacing plus B3 lanes on multi-module figure.
+
+### Checkpoint 2: coupled layout and routing
+
+- Promoted baseline: edge-aware gutters, adaptive generated ports, stable
+  adjacent-column ordering, and lexicographic route search.
+- Ranking changes: B1 promoted after the dense interfaces became crossing-free;
+  B3 remains promoted for explicit long-range residual rails.
+- Experiments since last checkpoint: gutter-only spacing, adaptive ports,
+  crossing-minimizing permutation, and lexicographic visibility search.
+- Capacity added or removed: generated ports gain layout freedom; explicit
+  ports and lanes remain constrained.
+- Near-misses preserved: gutter-only spacing passed geometry checks but still
+  had 17 elbows; adaptive ports alone had seven elbows but one crossing.
+- Beams killed or parked and why: none.
+- Next singleton candidates: imported inset and static font instances.
+- Next combination candidates: B1 plus B3 on multi-module residual figures.

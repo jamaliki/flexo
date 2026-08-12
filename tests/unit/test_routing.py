@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from flexo.compiler import compile_figure
+from flexo.gallery import vertical_slice
 from flexo.geometry import Side, segments
 from flexo.ir.semantic import EdgeSpec, FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortRef
 from flexo.layout import fit_figure, measure_figure
@@ -94,3 +96,17 @@ def test_marker_orientation_matches_final_approach_after_elbow() -> None:
     assert shaft_final.horizontal
     assert center_final.end.x > center_final.start.x
     assert shaft_final.end.x > shaft_final.start.x
+
+
+def test_gallery_feed_forward_routes_minimize_elbows_globally() -> None:
+    compilation = compile_figure(vertical_slice())
+    feed_forward = tuple(
+        edge for edge in compilation.routed.edges if edge.spec.role == "flow"
+    )
+    bend_counts = tuple(max(0, len(segments(edge.centerline)) - 1) for edge in feed_forward)
+    encoder_order = sorted(
+        compilation.measured.semantic.group("cryo.encoders").children,
+        key=lambda node_id: compilation.fitted.node(node_id).bounds.top,
+    )
+    assert bend_counts == (2, 0, 0, 0, 0, 0, 0)
+    assert encoder_order == ["cryo.encoders.keys", "cryo.encoders.projection"]
