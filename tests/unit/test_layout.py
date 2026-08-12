@@ -116,7 +116,12 @@ def test_dense_sibling_routes_reserve_a_lane_gutter() -> None:
     source = routed.fitted.node("source").bounds
     target = routed.fitted.node("target").bounds
     style = LayoutStyle()
-    expected = 2 * style.route_clearance.points + 2 * style.route_lane_spacing.points
+    target_clearance = max(style.route_clearance.points, 2 * style.arrow_length.points)
+    expected = (
+        style.route_clearance.points
+        + target_clearance
+        + 2 * style.route_lane_spacing.points
+    )
     assert target.left - source.right == expected
     for edge in routed.edges:
         route_segments = segments(edge.centerline)

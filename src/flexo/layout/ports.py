@@ -1,4 +1,4 @@
-"""Adaptive receiving-port placement after component bounds are known."""
+"""Adaptive attachment-port placement after component bounds are known."""
 
 from __future__ import annotations
 
@@ -12,29 +12,43 @@ from flexo.ir.semantic import FigureSpec, PortSpec
 from flexo.style import LayoutStyle
 
 
-def adapt_target_ports(
+def adapt_ports(
     figure: FigureSpec,
     nodes: tuple[FittedNode, ...],
     style: LayoutStyle,
 ) -> tuple[FittedNode, ...]:
-    """Align auto-generated receiving ports with producers where bounds permit."""
+    """Align generated target and source ports without changing explicit anchors."""
 
+    result = nodes
+    for move_targets in (True, False, True):
+        result = _adapt_endpoint_ports(figure, result, style, move_targets=move_targets)
+    return result
+
+
+def _adapt_endpoint_ports(
+    figure: FigureSpec,
+    nodes: tuple[FittedNode, ...],
+    style: LayoutStyle,
+    *,
+    move_targets: bool,
+) -> tuple[FittedNode, ...]:
     by_id = {node.measured.spec.id: node for node in nodes}
     desired: defaultdict[tuple[str, str], list[float]] = defaultdict(list)
     for edge in figure.edges:
-        source_node = by_id[edge.source.node_id]
-        target_node = by_id[edge.target.node_id]
-        target_spec = next(
-            port for port in target_node.measured.spec.ports if port.name == edge.target.port_name
+        moving_ref = edge.target if move_targets else edge.source
+        opposite_ref = edge.source if move_targets else edge.target
+        moving_node = by_id[moving_ref.node_id]
+        moving_spec = next(
+            port for port in moving_node.measured.spec.ports if port.name == moving_ref.port_name
         )
-        if not target_spec.adaptive:
+        if not moving_spec.adaptive:
             continue
-        source = source_node.port(edge.source.port_name)
-        if target_spec.side in {Side.NORTH, Side.SOUTH}:
-            coordinate = source.position.x
+        opposite = by_id[opposite_ref.node_id].port(opposite_ref.port_name)
+        if moving_spec.side in {Side.NORTH, Side.SOUTH}:
+            coordinate = opposite.position.x
         else:
-            coordinate = source.position.y
-        desired[(edge.target.node_id, edge.target.port_name)].append(coordinate)
+            coordinate = opposite.position.y
+        desired[(moving_ref.node_id, moving_ref.port_name)].append(coordinate)
 
     result = []
     for node in nodes:
@@ -58,7 +72,7 @@ def adapt_target_ports(
                 candidates,
                 start + margin,
                 end - margin,
-                style.arrow_width.points,
+                max(style.port_spacing.points, style.arrow_width.points),
             )
             for port, coordinate in packed:
                 if vertical:

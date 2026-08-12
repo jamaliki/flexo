@@ -3,8 +3,17 @@ from __future__ import annotations
 from flexo.compiler import compile_figure
 from flexo.gallery import vertical_slice
 from flexo.geometry import Side, segments
-from flexo.ir.semantic import EdgeSpec, FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortRef
+from flexo.ir.semantic import (
+    EdgeSpec,
+    FigureSpec,
+    GroupSpec,
+    LayoutSpec,
+    NodeSpec,
+    PortRef,
+    PortSpec,
+)
 from flexo.layout import fit_figure, measure_figure
+from flexo.lint import lint_compilation
 from flexo.routing import route_figure
 from flexo.style import LayoutStyle
 from flexo.units import pt
@@ -110,3 +119,45 @@ def test_gallery_feed_forward_routes_minimize_elbows_globally() -> None:
     )
     assert bend_counts == (2, 0, 0, 0, 0, 0, 0)
     assert encoder_order == ["cryo.encoders.keys", "cryo.encoders.projection"]
+    style = LayoutStyle()
+    assert all(
+        segments(edge.centerline)[-1].length >= 2 * style.arrow_length.points
+        for edge in compilation.routed.edges
+    )
+    feature = compilation.fitted.node("cryo.inputs.nodes")
+    assert feature.port("branch").position.y < feature.port("output").position.y
+    projection = compilation.fitted.node("cryo.encoders.projection")
+    assert (
+        projection.port("input2").position.y - projection.port("input1").position.y
+        >= style.port_spacing.points
+    )
+    assert lint_compilation(compilation).ok
+
+
+def test_lint_rejects_parallel_tracks_below_minimum_separation() -> None:
+    close_ports = (
+        PortSpec("first", Side.EAST, 0.45),
+        PortSpec("second", Side.EAST, 0.55),
+    )
+    targets = (
+        PortSpec("first", Side.WEST, 0.45),
+        PortSpec("second", Side.WEST, 0.55),
+    )
+    figure = FigureSpec(
+        "close-tracks",
+        width=pt(180),
+        nodes=(
+            NodeSpec("source", "block", ports=close_ports),
+            NodeSpec("target", "block", ports=targets),
+        ),
+        edges=(
+            EdgeSpec("first", PortRef("source", "first"), PortRef("target", "first")),
+            EdgeSpec("second", PortRef("source", "second"), PortRef("target", "second")),
+        ),
+        groups=(
+            GroupSpec("root", ("source", "target"), LayoutSpec("row", gap=pt(20))),
+        ),
+    )
+
+    report = lint_compilation(compile_figure(figure))
+    assert "routing.track.separation" in {item.code for item in report.errors}

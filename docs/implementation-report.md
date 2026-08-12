@@ -30,12 +30,12 @@ internals remain independently editable in Inkscape.
 
 - Best promoted configuration: coordinate-free `vertical-slice` gallery figure.
 - Why it is currently best: zero lint diagnostics; all four output variants;
-  clean 180 x 47.2 mm render; semantic residual lane; live text and named layers.
+  clean 180 x 50.0 mm render; semantic residual lane; live text and named layers.
 - Known weaknesses: the scientific inset is generated rather than imported;
   embedded variable-font CSS produces an Inkscape support warning; the gallery
   does not yet stress multiple modules or encoder-decoder layouts.
 - Live beam note: `docs/improvement-beam.md`.
-- Current beam checkpoint: checkpoint 2.
+- Current beam checkpoint: checkpoint 3.
 
 ## Experimental Log
 
@@ -102,6 +102,30 @@ internals remain independently editable in Inkscape.
   lower bounds imposed by fixed ports.
 - Decision: accepted.
 
+### Cycle 4: Adversarial visual critique
+
+- Branch owner: primary agent.
+- Observation: the bend-count winner still had a false junction where its one
+  dogleg crossed the straight CNN arrow, MLP arrowheads were only one marker
+  width apart, and the residual rail competed with the container border.
+- External critique triage: rejected the claimed diagonal fallback (none
+  exists) and missing node inflation (already implemented); accepted the source
+  anchor, wall clearance, port separation, and final-run-up concerns.
+- Hypothesis: adapting generated source ports as well as targets, coupled with
+  explicit physical clearances, will eliminate the false junction without
+  adding bends.
+- Mechanism: target/source/target port relaxation; 6 pt port separation; 8 pt
+  target run-up; 8 pt container-wall inset; 14 pt container padding; hard owner
+  bounds; crossing and parallel-track lint.
+- Success criteria: one feed-forward dogleg, zero connector crossings, 6 pt
+  port separation, 8 pt final approaches, and zero lint diagnostics.
+- Result: all criteria met; 44 tests pass; the figure remains 180 mm wide and
+  grows from 47.2 to 50.0 mm high to create deliberate rail breathing room.
+- Plots: `examples/build/vertical-slice.critique-pass.png`.
+- Interpretation: visual review must inspect apparent junctions and marker
+  silhouettes, not only count vertices or test obstacle intersection.
+- Decision: accepted.
+
 ## Accepted Changes
 
 - Public repository, compiler contract, and validation objectives established.
@@ -113,6 +137,8 @@ internals remain independently editable in Inkscape.
 - Marker geometry bounded below route clearance, with direction linting.
 - Edge-aware routing gutters, adaptive generated ports, bounded crossing
   minimization, and lexicographic clean-path/bend/length routing.
+- Adaptive source anchors, container-wall routing bounds, minimum final run-up,
+  and crossing/parallel-track validation.
 
 ## Rejected Changes
 

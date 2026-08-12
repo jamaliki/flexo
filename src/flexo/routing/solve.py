@@ -67,7 +67,7 @@ def _route_edge(
     source_escape = _escape(source_port.position, source_side, clearance)
     target_clearance = max(
         clearance,
-        style.arrow_length.points + max(1.0, style.connector_width.points),
+        2.0 * style.arrow_length.points,
     )
     target_escape = _escape(target_port.position, target_side, target_clearance)
     obstacles = tuple(
@@ -79,7 +79,14 @@ def _route_edge(
         for node in fitted.nodes
         if node.measured.spec.kind not in {"label", "spacer", "junction"}
     )
-    forced = _forced_points(fitted, edge, source_escape, target_escape, clearance)
+    boundary = _routing_boundary(fitted, edge, style.route_boundary_clearance.points)
+    forced = _forced_points(
+        fitted,
+        edge,
+        source_escape,
+        target_escape,
+        style.route_boundary_clearance.points,
+    )
     anchors = (source_escape, *forced, target_escape)
     interior: list[Point] = []
     costs = PathCosts(style.bend_penalty)
@@ -91,6 +98,7 @@ def _route_edge(
             obstacles,
             costs=costs,
             occupied=local_occupied,
+            boundary=boundary,
         )
         if leg is None:
             raise FlexoError(
@@ -115,12 +123,19 @@ def _forced_points(
     edge: EdgeSpec,
     source_escape: Point,
     target_escape: Point,
-    clearance: float,
+    boundary_clearance: float,
 ) -> tuple[Point, ...]:
     result: list[Point] = []
     if edge.lane_hint:
         result.extend(
-            _lane_points(fitted, edge.lane_hint, source_escape, target_escape, clearance, edge.id)
+            _lane_points(
+                fitted,
+                edge.lane_hint,
+                source_escape,
+                target_escape,
+                boundary_clearance,
+                edge.id,
+            )
         )
     result.extend(_waypoint(fitted, waypoint, edge.id) for waypoint in edge.waypoints)
     return tuple(result)
@@ -131,7 +146,7 @@ def _lane_points(
     lane: str,
     source: Point,
     target: Point,
-    clearance: float,
+    boundary_clearance: float,
     edge_id: str,
 ) -> tuple[Point, Point]:
     if "-" not in lane:
@@ -154,16 +169,16 @@ def _lane_points(
             )
         ) from exc
     if suffix == "bottom":
-        y = bounds.bottom - clearance
+        y = bounds.bottom - boundary_clearance
         return Point(source.x, y), Point(target.x, y)
     if suffix == "top":
-        y = bounds.top + clearance
+        y = bounds.top + boundary_clearance
         return Point(source.x, y), Point(target.x, y)
     if suffix == "left":
-        x = bounds.left + clearance
+        x = bounds.left + boundary_clearance
         return Point(x, source.y), Point(x, target.y)
     if suffix == "right":
-        x = bounds.right - clearance
+        x = bounds.right - boundary_clearance
         return Point(x, source.y), Point(x, target.y)
     raise FlexoError(
         Diagnostic(
@@ -173,6 +188,41 @@ def _lane_points(
             hint="Use top, bottom, left, or right.",
         )
     )
+
+
+def _routing_boundary(
+    fitted: FittedFigure,
+    edge: EdgeSpec,
+    clearance: float,
+) -> Rect:
+    groups = {group.id: group for group in fitted.measured.semantic.groups}
+    fitted_groups = {
+        group.measured.spec.id: group for group in fitted.groups
+    }
+    parents = {
+        child_id: group.id
+        for group in fitted.measured.semantic.groups
+        for child_id in group.children
+    }
+
+    def ancestors(entity_id: str) -> tuple[str, ...]:
+        result = []
+        current = entity_id
+        while current in parents:
+            current = parents[current]
+            result.append(current)
+        return tuple(result)
+
+    target_ancestors = set(ancestors(edge.target.node_id))
+    owner = next(
+        group_id
+        for group_id in ancestors(edge.source.node_id)
+        if group_id in target_ancestors
+    )
+    while groups[owner].role == "layout" and owner in parents:
+        owner = parents[owner]
+    bounds = fitted_groups[owner].bounds
+    return bounds.inflated(-clearance)
 
 
 def _waypoint(fitted: FittedFigure, waypoint: Waypoint, edge_id: str) -> Point:

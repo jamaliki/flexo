@@ -121,6 +121,14 @@ def _routing_diagnostics(
     routed = compilation.routed
     diagnostics: list[Diagnostic] = []
     canvas = Rect(0.0, 0.0, routed.fitted.canvas_size.width, routed.fitted.canvas_size.height)
+    owner_bounds = {
+        edge.spec.id: _routing_owner_bounds(
+            compilation,
+            edge.spec.source.node_id,
+            edge.spec.target.node_id,
+        )
+        for edge in routed.edges
+    }
     for edge in routed.edges:
         source = routed.fitted.node(edge.spec.source.node_id).port(edge.spec.source.port_name)
         target = routed.fitted.node(edge.spec.target.node_id).port(edge.spec.target.port_name)
@@ -214,7 +222,7 @@ def _routing_diagnostics(
                 )
             target_clearance = max(
                 style.route_clearance.points,
-                style.arrow_length.points + max(1.0, style.connector_width.points),
+                2.0 * style.arrow_length.points,
             )
             if final.length + 1e-5 < target_clearance:
                 diagnostics.append(
@@ -232,7 +240,109 @@ def _routing_diagnostics(
                     entity_id=edge.spec.id,
                 )
             )
+        if any(
+            not owner_bounds[edge.spec.id].contains_point(point)
+            for point in edge.centerline
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    "routing.container.clipped",
+                    "Route leaves its owning editorial container.",
+                    entity_id=edge.spec.id,
+                )
+            )
+    diagnostics.extend(_track_separation_diagnostics(compilation, style))
     return tuple(diagnostics)
+
+
+def _track_separation_diagnostics(
+    compilation: Compilation,
+    style: LayoutStyle,
+) -> tuple[Diagnostic, ...]:
+    diagnostics = []
+    minimum = style.port_spacing.points
+    for first_edge, second_edge in combinations(compilation.routed.edges, 2):
+        crossing = any(
+            _segments_cross(first, second)
+            for first in segments(first_edge.centerline)
+            for second in segments(second_edge.centerline)
+        )
+        if crossing:
+            diagnostics.append(
+                Diagnostic(
+                    "routing.connector.crossing",
+                    f'Route crosses "{second_edge.spec.id}".',
+                    entity_id=first_edge.spec.id,
+                )
+            )
+        violation = any(
+            _parallel_tracks_too_close(first, second, minimum)
+            for first in segments(first_edge.centerline)
+            for second in segments(second_edge.centerline)
+        )
+        if violation:
+            diagnostics.append(
+                Diagnostic(
+                    "routing.track.separation",
+                    f'Parallel route is too close to "{second_edge.spec.id}".',
+                    entity_id=first_edge.spec.id,
+                )
+            )
+    return tuple(diagnostics)
+
+
+def _segments_cross(first: Segment, second: Segment) -> bool:
+    if first.horizontal == second.horizontal:
+        return False
+    horizontal, vertical = (first, second) if first.horizontal else (second, first)
+    x_low, x_high = sorted((horizontal.start.x, horizontal.end.x))
+    y_low, y_high = sorted((vertical.start.y, vertical.end.y))
+    return (
+        x_low + 1e-7 < vertical.start.x < x_high - 1e-7
+        and y_low + 1e-7 < horizontal.start.y < y_high - 1e-7
+    )
+
+
+def _parallel_tracks_too_close(first: Segment, second: Segment, minimum: float) -> bool:
+    if first.horizontal and second.horizontal:
+        distance = abs(first.start.y - second.start.y)
+        overlap = _interval_overlap(first.start.x, first.end.x, second.start.x, second.end.x)
+        return overlap > 1e-7 and distance + 1e-7 < minimum
+    if first.vertical and second.vertical:
+        distance = abs(first.start.x - second.start.x)
+        overlap = _interval_overlap(first.start.y, first.end.y, second.start.y, second.end.y)
+        return overlap > 1e-7 and distance + 1e-7 < minimum
+    return False
+
+
+def _interval_overlap(first_a: float, first_b: float, second_a: float, second_b: float) -> float:
+    first_low, first_high = sorted((first_a, first_b))
+    second_low, second_high = sorted((second_a, second_b))
+    return max(0.0, min(first_high, second_high) - max(first_low, second_low))
+
+
+def _routing_owner_bounds(
+    compilation: Compilation,
+    source_id: str,
+    target_id: str,
+) -> Rect:
+    semantic = compilation.measured.semantic
+    groups = {group.id: group for group in semantic.groups}
+    parents = {child: group.id for group in semantic.groups for child in group.children}
+
+    def ancestors(entity_id: str) -> tuple[str, ...]:
+        result = []
+        current = entity_id
+        while current in parents:
+            current = parents[current]
+            result.append(current)
+        return tuple(result)
+
+    target_ancestors = set(ancestors(target_id))
+    owner = next(group_id for group_id in ancestors(source_id) if group_id in target_ancestors)
+    while groups[owner].role == "layout" and owner in parents:
+        owner = parents[owner]
+    return compilation.fitted.group(owner).bounds
 
 
 def _svg_diagnostics(compilation: Compilation) -> tuple[Diagnostic, ...]:

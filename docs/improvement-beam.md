@@ -7,13 +7,13 @@
 - Primary metric: zero validation errors plus editorial clarity at 180 mm.
 - Guardrails: deterministic, editable, physical-size-correct output.
 - Reproduction command: `uv run flexo gallery --output examples/build`.
-- Last promotion: coupled layout and routing, checkpoint 2.
+- Last promotion: adversarial visual critique, checkpoint 3.
 
 ## Current Ranking
 
 | Rank | Beam | Type | Status | Parent | Current best / log | Next decision | Owner |
 |---:|---|---|---|---|---|---|---|
-| 1 | B1 | exploit | promoted | vertical slice | adaptive ports and ordering | combination | primary agent |
+| 1 | B1 | exploit | promoted | vertical slice | source/target ports and wall bounds | combination | primary agent |
 | 2 | B2 | near-miss | active | vertical slice | native motifs | stress test | primary agent |
 | 3 | B3 | structural/high-risk | promoted | vertical slice | semantic residual port | combination | primary agent |
 
@@ -30,10 +30,10 @@
   improve scan order without requiring per-figure coordinates.
 - Mechanism: geometry tokens, alignment, and whitespace encode grouping.
 - Exact code paths: `style.py`, `layout/lanes.py`, gallery specification.
-- Current best candidate: edge-aware gutters plus bounded adjacent-column
-  coordinate assignment.
-- Evidence for: feed-forward elbows reduced from 14 to 2 and crossings from one
-  to zero, with no overflow or explicit coordinates.
+- Current best candidate: edge-aware gutters, adaptive source/target anchors,
+  bounded adjacent-column assignment, and container-wall constraints.
+- Evidence for: feed-forward elbows reduced from 14 to 2, no false junctions,
+  6 pt port separation, 8 pt arrow run-up, and zero crossings.
 - Evidence against: small exhaustive ordering is intentionally capped at five
   children; larger columns will need a barycentric heuristic.
 - Next decision: combination.
@@ -131,3 +131,21 @@ None.
 - Beams killed or parked and why: none.
 - Next singleton candidates: imported inset and static font instances.
 - Next combination candidates: B1 plus B3 on multi-module residual figures.
+
+### Checkpoint 3: adversarial visual critique
+
+- Promoted baseline: dual-ended adaptive ports plus physical marker, track, and
+  container clearances.
+- Ranking changes: B1 remains promoted; routing quality is now enforced by
+  negative fixtures rather than judged only from a successful render.
+- Experiments since last checkpoint: target run-up, owner-wall bounds, larger
+  rail padding, source-anchor relaxation, and perpendicular-crossing lint.
+- Capacity added or removed: generated source ports may move; explicit author
+  offsets remain fixed.
+- Near-misses preserved: target-only adaptation minimized elbows but left a
+  false junction at the source; stricter run-up initially exposed an
+  under-sized single-edge gutter.
+- Beams killed or parked and why: none.
+- Next singleton candidates: imported scientific inset and static font files.
+- Next combination candidates: current routing constraints on transformer,
+  U-Net, and multi-module fixtures.
