@@ -21,14 +21,37 @@ from flexo import Figure
 with Figure("attention-flow", width="double-column") as figure:
     with figure.module("encoder", label="Encoder") as module:
         features = module.feature_strip("features", label="Node features")
-        q, v = module.mlp("projection", inputs=[features], outputs=["Q", "V"])
-        k = module.cnn("keys", input=features.branch, output="K")
+        distances = module.feature_strip("distances", label="Distances")
+        combined = module.concat("concat", inputs=[features, distances])
+        projection = module.mlp("projection", input=combined)
+        q, v = module.channels("query-value", labels=["Q", "V"], input=projection)
+        keys = module.cnn("keys", input=features.branch)
+        (k,) = module.channels("key", labels=["K"], input=keys)
         attended = module.attention("attention", q=q, k=k, v=v)
         prediction = module.prediction("prediction", input=attended)
         module.residual(features, prediction, lane="encoder-bottom")
 
 figure.compile().document.write("attention-flow.editable.svg")
 ```
+
+Shared values and true combinations are authored explicitly rather than inferred
+from coincident lines:
+
+```python
+figure.net(src=add_norm.s, sinks=[mlp1.n, mlp2.n, mlp3.n])
+figure.merge(
+    sinks=[cryo_prediction.e, sequence_prediction.e, ipa_prediction.e],
+    dst=average.n,
+    rail="east",
+    label="Average",
+)
+```
+
+`net` emits one trunk with branches after the source; `merge` emits one rail and
+combines before the destination. Only destination stems receive arrowheads.
+Ordinary multi-argument blocks retain distinct ports and distinct edges. The
+paper style applies restrained 3 pt elbow fillets; set `elbow_radius=pt(0)` on a
+derived `LayoutStyle` for a sharp technical-drawing treatment.
 
 The builder lowers to the same validated, versioned schema used by YAML and
 JSON. See [`examples/vertical_slice.py`](examples/vertical_slice.py) and its
@@ -64,6 +87,8 @@ and [the improvement beam](docs/improvement-beam.md).
 - immutable, deterministic compiler passes;
 - physical publication dimensions and measured typography;
 - stable semantic IDs, named ports, and localized diagnostics;
+- first-class fan-out nets and authored merge rails;
+- orthogonal routing with a theme-controlled local elbow radius;
 - native SVG primitives, live text, and named Inkscape layers;
 - explicit editorial layout with bounded local automation.
 

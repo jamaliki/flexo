@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from flexo.geometry import Point
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import TextMetrics
-from flexo.ir.semantic import EdgeSpec
+from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +20,37 @@ class RoutedEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class RoutedStem:
+    port: PortRef
+    centerline: tuple[Point, ...]
+    shaft: tuple[Point, ...]
+    arrow_end: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RoutedNet:
+    spec: NetSpec
+    rail: tuple[Point, ...]
+    source_stems: tuple[RoutedStem, ...]
+    target_stems: tuple[RoutedStem, ...]
+    label_metrics: TextMetrics | None = None
+    label_position: Point | None = None
+
+    @property
+    def junctions(self) -> tuple[Point, ...]:
+        return tuple(
+            stem.centerline[-1] for stem in self.source_stems
+        ) + tuple(stem.centerline[0] for stem in self.target_stems)
+
+
+@dataclass(frozen=True, slots=True)
 class RoutedFigure:
     fitted: FittedFigure
     edges: tuple[RoutedEdge, ...]
+    nets: tuple[RoutedNet, ...] = ()
 
     def edge(self, edge_id: str) -> RoutedEdge:
         return next(edge for edge in self.edges if edge.spec.id == edge_id)
+
+    def net(self, net_id: str) -> RoutedNet:
+        return next(net for net in self.nets if net.spec.id == net_id)

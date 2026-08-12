@@ -15,6 +15,7 @@ from flexo.ir.semantic import (
     FigureSpec,
     GroupSpec,
     LayoutSpec,
+    NetSpec,
     NodeSpec,
     PortRef,
     PortSpec,
@@ -52,6 +53,7 @@ def parse_figure(document: object) -> FigureSpec:
         palette=figure_data.get("palette", "default"),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(_edge(item) for item in document["edges"]),
+        nets=tuple(_net(item) for item in document.get("nets", [])),
         groups=tuple(_group(item) for item in document["groups"]),
         schema_version=document["schema_version"],
     )
@@ -67,6 +69,8 @@ def figure_to_document(figure: FigureSpec) -> dict[str, Any]:
         "edges": [_edge_data(edge) for edge in semantic.edges],
         "groups": [_group_data(group) for group in semantic.groups],
     }
+    if semantic.nets:
+        document["nets"] = [_net_data(net) for net in semantic.nets]
     validate_document(document)
     return document
 
@@ -143,6 +147,21 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["arrive"] = edge.arrive.value
     if edge.waypoints:
         result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
+    return result
+
+
+def _net_data(net: NetSpec) -> dict[str, object]:
+    result: dict[str, object] = {
+        "id": net.id,
+        "kind": net.kind,
+        "sources": [str(source) for source in net.sources],
+        "targets": [str(target) for target in net.targets],
+    }
+    if net.role != "flow":
+        result["role"] = net.role
+    _put_label(result, net.label)
+    if net.rail_hint is not None:
+        result["rail"] = net.rail_hint.value
     return result
 
 
@@ -267,6 +286,18 @@ def _edge(data: dict[str, Any]) -> EdgeSpec:
         waypoints=tuple(_waypoint(item) for item in data.get("waypoints", [])),
         depart=Side(data["depart"]) if data.get("depart") else None,
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
+    )
+
+
+def _net(data: dict[str, Any]) -> NetSpec:
+    return NetSpec(
+        id=data["id"],
+        kind=data["kind"],
+        sources=tuple(PortRef.parse(value) for value in data["sources"]),
+        targets=tuple(PortRef.parse(value) for value in data["targets"]),
+        role=data.get("role", "flow"),
+        label=_label(data.get("label", "")),
+        rail_hint=Side(data["rail"]) if data.get("rail") else None,
     )
 
 

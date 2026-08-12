@@ -6,6 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from itertools import pairwise
+from math import hypot
 from pathlib import Path
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -62,6 +63,41 @@ def polyline_path(points: tuple[object, ...]) -> str:
             commands.append(f"V {number(point.y)}")
         else:
             commands.append(f"L {number(point.x)} {number(point.y)}")
+    return " ".join(commands)
+
+
+def rounded_polyline_path(points: tuple[object, ...], radius: float) -> str:
+    """Fillet through-corners while preserving endpoints and orthogonal rails."""
+
+    if radius <= 0.0 or len(points) < 3:
+        return polyline_path(points)
+    commands = [f"M {number(points[0].x)} {number(points[0].y)}"]
+    cursor_x, cursor_y = points[0].x, points[0].y
+    for previous, corner, following in zip(points, points[1:], points[2:], strict=False):
+        incoming = hypot(corner.x - previous.x, corner.y - previous.y)
+        outgoing = hypot(following.x - corner.x, following.y - corner.y)
+        cross = (corner.x - previous.x) * (following.y - corner.y) - (
+            corner.y - previous.y
+        ) * (following.x - corner.x)
+        if incoming == 0.0 or outgoing == 0.0 or abs(cross) < 1e-9:
+            if (cursor_x, cursor_y) != (corner.x, corner.y):
+                commands.append(f"L {number(corner.x)} {number(corner.y)}")
+            cursor_x, cursor_y = corner.x, corner.y
+            continue
+        actual = min(radius, incoming / 2.0, outgoing / 2.0)
+        entry_x = corner.x + (previous.x - corner.x) * actual / incoming
+        entry_y = corner.y + (previous.y - corner.y) * actual / incoming
+        exit_x = corner.x + (following.x - corner.x) * actual / outgoing
+        exit_y = corner.y + (following.y - corner.y) * actual / outgoing
+        if (cursor_x, cursor_y) != (entry_x, entry_y):
+            commands.append(f"L {number(entry_x)} {number(entry_y)}")
+        commands.append(
+            f"Q {number(corner.x)} {number(corner.y)} {number(exit_x)} {number(exit_y)}"
+        )
+        cursor_x, cursor_y = exit_x, exit_y
+    final = points[-1]
+    if (cursor_x, cursor_y) != (final.x, final.y):
+        commands.append(f"L {number(final.x)} {number(final.y)}")
     return " ".join(commands)
 
 

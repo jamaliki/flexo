@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flexo.ir.semantic import FigureSpec, LayoutKind
+from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
 from flexo.style import LayoutStyle
 
 
@@ -48,18 +48,21 @@ def routing_gaps_for_group(
         for node_id in descendant_nodes(child_id)
     }
     crossings = [0] * boundary_count
-    for edge in figure.edges:
-        if edge.lane_hint:
+    for connection in layout_connections(figure):
+        if connection.externally_routed:
             continue
-        source = child_for_node.get(edge.source.node_id)
-        target = child_for_node.get(edge.target.node_id)
+        source = child_for_node.get(connection.source.node_id)
+        target = child_for_node.get(connection.target.node_id)
         if source is None or target is None or source == target:
             continue
         for boundary in range(min(source, target), max(source, target)):
             crossings[boundary] += 1
 
     clearance = style.route_clearance.points
-    target_clearance = max(clearance, 2.0 * style.arrow_length.points)
+    target_clearance = max(
+        clearance,
+        2.0 * style.arrow_length.points + style.elbow_radius.points,
+    )
     lane_spacing = style.route_lane_spacing.points
     return tuple(
         max(base, clearance + target_clearance + max(0, count - 1) * lane_spacing)

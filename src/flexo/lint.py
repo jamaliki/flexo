@@ -9,7 +9,7 @@ from itertools import combinations
 
 from flexo.compiler import Compilation
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
-from flexo.geometry import Rect, Segment, segments
+from flexo.geometry import Point, Rect, Segment, segments
 from flexo.style import STYLES, LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS
 
@@ -222,7 +222,7 @@ def _routing_diagnostics(
                 )
             target_clearance = max(
                 style.route_clearance.points,
-                2.0 * style.arrow_length.points,
+                2.0 * style.arrow_length.points + style.elbow_radius.points,
             )
             if final.length + 1e-5 < target_clearance:
                 diagnostics.append(
@@ -251,7 +251,120 @@ def _routing_diagnostics(
                     entity_id=edge.spec.id,
                 )
             )
+    diagnostics.extend(_net_routing_diagnostics(compilation, style, canvas))
     diagnostics.extend(_track_separation_diagnostics(compilation, style))
+    return tuple(diagnostics)
+
+
+def _net_routing_diagnostics(
+    compilation: Compilation,
+    style: LayoutStyle,
+    canvas: Rect,
+) -> tuple[Diagnostic, ...]:
+    diagnostics: list[Diagnostic] = []
+    fitted = compilation.routed.fitted
+    target_clearance = max(
+        style.route_clearance.points,
+        2.0 * style.arrow_length.points + style.elbow_radius.points,
+    )
+    for net in compilation.routed.nets:
+        routes = (
+            net.rail,
+            *(stem.centerline for stem in net.source_stems + net.target_stems),
+        )
+        for route in routes:
+            for segment in segments(route):
+                if not segment.orthogonal:
+                    diagnostics.append(
+                        Diagnostic(
+                            "routing.net.non-orthogonal",
+                            "Net contains a diagonal segment.",
+                            entity_id=net.spec.id,
+                        )
+                    )
+            if any(not canvas.contains_point(point) for point in route):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.canvas.clipped",
+                        "Net leaves the canvas.",
+                        entity_id=net.spec.id,
+                    )
+                )
+        for stem in net.source_stems:
+            expected = fitted.node(stem.port.node_id).port(stem.port.port_name).position
+            if not stem.centerline or stem.centerline[0] != expected:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.source.mismatch",
+                        "Source stem misses its authored port.",
+                        entity_id=net.spec.id,
+                    )
+                )
+            if stem.arrow_end:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.source.arrow",
+                        "Source stems must not carry arrowheads.",
+                        entity_id=net.spec.id,
+                    )
+                )
+        for stem in net.target_stems:
+            expected = fitted.node(stem.port.node_id).port(stem.port.port_name).position
+            if not stem.centerline or stem.centerline[-1] != expected:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.target.mismatch",
+                        "Target stem misses its authored port.",
+                        entity_id=net.spec.id,
+                    )
+                )
+            if not stem.arrow_end:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.target.arrow",
+                        "Every target stem must carry an arrowhead.",
+                        entity_id=net.spec.id,
+                    )
+                )
+            stem_segments = segments(stem.centerline)
+            if stem_segments and stem_segments[-1].length + 1e-5 < target_clearance:
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.target.clearance",
+                        "Net turns before the arrow clears its target component.",
+                        entity_id=net.spec.id,
+                    )
+                )
+        diagnostics.extend(_net_obstacle_diagnostics(compilation, net.spec.id, routes))
+    return tuple(diagnostics)
+
+
+def _net_obstacle_diagnostics(
+    compilation: Compilation,
+    net_id: str,
+    routes: tuple[tuple[Point, ...], ...],
+) -> tuple[Diagnostic, ...]:
+    net = compilation.routed.net(net_id)
+    diagnostics = []
+    for route_index, route in enumerate(routes):
+        endpoint_id = None
+        if route_index > 0:
+            stems = net.source_stems + net.target_stems
+            endpoint_id = stems[route_index - 1].port.node_id
+        for node in compilation.routed.fitted.nodes:
+            if node.measured.spec.id == endpoint_id:
+                continue
+            if any(
+                segment.intersects_rect_interior(node.bounds)
+                for segment in segments(route)
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.net.obstacle.intersection",
+                        f'Net crosses component "{node.measured.spec.id}".',
+                        entity_id=net_id,
+                    )
+                )
     return tuple(diagnostics)
 
 
@@ -261,31 +374,38 @@ def _track_separation_diagnostics(
 ) -> tuple[Diagnostic, ...]:
     diagnostics = []
     minimum = style.port_spacing.points
-    for first_edge, second_edge in combinations(compilation.routed.edges, 2):
+    routes = [(edge.spec.id, edge.centerline) for edge in compilation.routed.edges]
+    for net in compilation.routed.nets:
+        routes.append((net.spec.id, net.rail))
+        routes.extend((net.spec.id, stem.centerline) for stem in net.source_stems)
+        routes.extend((net.spec.id, stem.centerline) for stem in net.target_stems)
+    for (first_id, first_route), (second_id, second_route) in combinations(routes, 2):
+        if first_id == second_id:
+            continue
         crossing = any(
             _segments_cross(first, second)
-            for first in segments(first_edge.centerline)
-            for second in segments(second_edge.centerline)
+            for first in segments(first_route)
+            for second in segments(second_route)
         )
         if crossing:
             diagnostics.append(
                 Diagnostic(
                     "routing.connector.crossing",
-                    f'Route crosses "{second_edge.spec.id}".',
-                    entity_id=first_edge.spec.id,
+                    f'Route crosses "{second_id}".',
+                    entity_id=first_id,
                 )
             )
         violation = any(
             _parallel_tracks_too_close(first, second, minimum)
-            for first in segments(first_edge.centerline)
-            for second in segments(second_edge.centerline)
+            for first in segments(first_route)
+            for second in segments(second_route)
         )
         if violation:
             diagnostics.append(
                 Diagnostic(
                     "routing.track.separation",
-                    f'Parallel route is too close to "{second_edge.spec.id}".',
-                    entity_id=first_edge.spec.id,
+                    f'Parallel route is too close to "{second_id}".',
+                    entity_id=first_id,
                 )
             )
     return tuple(diagnostics)
@@ -351,6 +471,7 @@ def _svg_diagnostics(compilation: Compilation) -> tuple[Diagnostic, ...]:
         [group.id for group in semantic.groups]
         + [node.id for node in semantic.nodes]
         + [edge.id for edge in semantic.edges]
+        + [net.id for net in semantic.nets]
     )
     return _structural_svg_diagnostics(compilation.document.text, expected_ids)
 

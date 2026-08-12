@@ -14,6 +14,7 @@ from flexo.ir.semantic import (
     GroupSpec,
     LayoutKind,
     LayoutSpec,
+    NetSpec,
     NodeSpec,
     PortRef,
     PortSpec,
@@ -86,7 +87,9 @@ class Figure:
         self._groups: list[_GroupDraft] = [root]
         self._nodes: list[NodeSpec] = []
         self._edges: list[EdgeSpec] = []
+        self._nets: list[NetSpec] = []
         self._edge_counter = 0
+        self._net_counter = 0
         self.root = GroupBuilder(self, root)
 
     def __enter__(self) -> Self:
@@ -136,17 +139,88 @@ class Figure:
         )
         return normalize_and_validate(
             FigureSpec(
-                self.id,
-                self.width,
-                self.height,
-                "root",
-                self.style,
-                self.palette,
-                tuple(self._nodes),
-                tuple(self._edges),
-                groups,
+                id=self.id,
+                width=self.width,
+                height=self.height,
+                root="root",
+                style=self.style,
+                palette=self.palette,
+                nodes=tuple(self._nodes),
+                edges=tuple(self._edges),
+                nets=tuple(self._nets),
+                groups=groups,
             )
         )
+
+    def net(
+        self,
+        *,
+        src: NodeHandle | PortRef | str,
+        sinks: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str],
+        id: str | None = None,
+        rail: Side | str | None = None,
+        label: str | tuple[TextRun, ...] = "",
+        role: str = "flow",
+    ) -> NetSpec:
+        """Author one shared value read by multiple downstream ports."""
+
+        return self._add_net(
+            "fan-out",
+            (_reference(src, "output"),),
+            tuple(_reference(sink, "input") for sink in sinks),
+            id=id,
+            rail=rail,
+            label=label,
+            role=role,
+        )
+
+    def merge(
+        self,
+        *,
+        sinks: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str],
+        dst: NodeHandle | PortRef | str,
+        id: str | None = None,
+        rail: Side | str | None = None,
+        label: str | tuple[TextRun, ...] = "",
+        role: str = "flow",
+    ) -> NetSpec:
+        """Author a true many-to-one combination before one destination."""
+
+        return self._add_net(
+            "merge",
+            tuple(_reference(source, "output") for source in sinks),
+            (_reference(dst, "input"),),
+            id=id,
+            rail=rail,
+            label=label,
+            role=role,
+        )
+
+    def _add_net(
+        self,
+        kind: str,
+        sources: tuple[PortRef, ...],
+        targets: tuple[PortRef, ...],
+        *,
+        id: str | None,
+        rail: Side | str | None,
+        label: str | tuple[TextRun, ...],
+        role: str,
+    ) -> NetSpec:
+        self._net_counter += 1
+        net = NetSpec(
+            id or f"net.{self._net_counter}",
+            kind,  # type: ignore[arg-type]
+            sources,
+            targets,
+            role,
+            _label(label),
+            Side(rail) if isinstance(rail, str) else rail,
+        )
+        self._nets.append(net)
+        return net
 
     def compile(self):
         from flexo.compiler import compile_figure
@@ -303,6 +377,69 @@ class GroupBuilder:
 
     def tensor(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
         return self.node(id, "tensor", label=label, **options)
+
+    def concat(
+        self,
+        id: str,
+        *,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str],
+        label: str = "Concat",
+        **options: object,
+    ) -> NodeHandle:
+        sources = tuple(inputs)
+        if len(sources) < 2:
+            raise ValueError("concat requires at least two inputs")
+        ports = (
+            *(
+                PortSpec(
+                    f"input{index + 1}",
+                    Side.WEST,
+                    (index + 1) / (len(sources) + 1),
+                    adaptive=True,
+                )
+                for index in range(len(sources))
+            ),
+            PortSpec("output", Side.EAST, adaptive=True),
+        )
+        result = self.node(id, "concat", label=label, ports=ports, **options)
+        for index, source in enumerate(sources):
+            self.connect(source, result.port(f"input{index + 1}"))
+        return result
+
+    def channels(
+        self,
+        id: str,
+        *,
+        labels: tuple[str, ...] | list[str],
+        input: NodeHandle | PortRef | str | None = None,
+        **options: object,
+    ) -> tuple[PortRef, ...]:
+        names = tuple(labels)
+        if not names:
+            raise ValueError("channels requires at least one label")
+        ports = (
+            PortSpec("input", Side.WEST, adaptive=True),
+            *(
+                PortSpec(
+                    _port_name(name),
+                    Side.EAST,
+                    (index + 1) / (len(names) + 1),
+                    adaptive=True,
+                )
+                for index, name in enumerate(names)
+            ),
+        )
+        result = self.node(
+            id,
+            "channels",
+            ports=ports,
+            properties={"count": len(names), "labels": ",".join(names)},
+            **options,
+        )
+        if input is not None:
+            self.connect(input, result.input)
+        return tuple(result.port(_port_name(name)) for name in names)
 
     def add_norm(
         self,

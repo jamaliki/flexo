@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from itertools import combinations
 
+from flexo.geometry import Segment, segments
 from flexo.ir.fitted import FittedGroup
-from flexo.ir.routed import RoutedEdge, RoutedFigure
+from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
@@ -18,7 +20,7 @@ from flexo.svg import (
     inkscape_attr,
     layer,
     number,
-    polyline_path,
+    rounded_polyline_path,
 )
 from flexo.svg_resources import add_definitions, add_metadata
 from flexo.theme import retheme_svg as retheme_svg
@@ -90,6 +92,12 @@ class _Hierarchy:
         for edge in routed.edges:
             owner = self._lowest_common_group(edge.spec.source.node_id, edge.spec.target.node_id)
             self.edges[owner].append(edge)
+        self.nets: defaultdict[str, list[RoutedNet]] = defaultdict(list)
+        for net in routed.nets:
+            node_ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
+            owner = self._lowest_common_group_many(node_ids)
+            self.nets[owner].append(net)
+        self.connector_crossing = _has_connector_crossing(routed)
 
     def render(self, parent: ET.Element, style: LayoutStyle, palette: Palette) -> None:
         self._render_group(parent, self.routed.fitted.measured.semantic.root, style, palette)
@@ -103,6 +111,9 @@ class _Hierarchy:
     ) -> None:
         fitted = self.fitted_groups[group_id]
         spec = fitted.measured.spec
+        if spec.role == "layout":
+            self._render_layout_group(parent, fitted, style, palette)
+            return
         group_layer = layer(parent, spec.id, spec.text or spec.id)
         group_layer.set("data-flexo-entity", "group")
         group_layer.set("data-flexo-role", spec.role)
@@ -115,6 +126,14 @@ class _Hierarchy:
         )
         for edge in self.edges[group_id]:
             _render_edge(connector_group, edge, style, palette)
+        for net in self.nets[group_id]:
+            _render_net(
+                connector_group,
+                net,
+                style,
+                palette,
+                crossing=self.connector_crossing,
+            )
         component_group = element(
             group_layer,
             "g",
@@ -127,6 +146,44 @@ class _Hierarchy:
             else:
                 render_node(component_group, self.nodes[child_id], style, palette)
         _render_group_label(group_layer, fitted, style, palette)
+
+    def _render_layout_group(
+        self,
+        parent: ET.Element,
+        fitted: FittedGroup,
+        style: LayoutStyle,
+        palette: Palette,
+    ) -> None:
+        spec = fitted.measured.spec
+        marker = element(
+            parent,
+            "g",
+            id=spec.id,
+            data__flexo__entity="group",
+            data__flexo__role="layout",
+            **{inkscape_attr("label"): spec.id},
+        )
+        connector_group = element(
+            marker,
+            "g",
+            id=f"{spec.id}.connectors",
+            **{inkscape_attr("label"): "Connectors"},
+        )
+        for edge in self.edges[spec.id]:
+            _render_edge(connector_group, edge, style, palette)
+        for net in self.nets[spec.id]:
+            _render_net(
+                connector_group,
+                net,
+                style,
+                palette,
+                crossing=self.connector_crossing,
+            )
+        for child_id in spec.children:
+            if child_id in self.group_specs:
+                self._render_group(parent, child_id, style, palette)
+            else:
+                render_node(parent, self.nodes[child_id], style, palette)
 
     def _render_container(
         self,
@@ -160,6 +217,12 @@ class _Hierarchy:
         target_groups = set(self._ancestors(target))
         return next(group_id for group_id in source_groups if group_id in target_groups)
 
+    def _lowest_common_group_many(self, entity_ids: tuple[str, ...]) -> str:
+        common = set(self._ancestors(entity_ids[0]))
+        for entity_id in entity_ids[1:]:
+            common.intersection_update(self._ancestors(entity_id))
+        return next(group_id for group_id in self._ancestors(entity_ids[0]) if group_id in common)
+
     def _ancestors(self, entity_id: str) -> tuple[str, ...]:
         result = []
         current = entity_id
@@ -188,7 +251,7 @@ def _render_edge(
         group,
         "path",
         id=f"{edge.spec.id}.shaft",
-        d=polyline_path(edge.shaft),
+        d=rounded_polyline_path(edge.shaft, style.elbow_radius.points),
         marker__end=f"url(#arrow.{marker_role})",
         stroke__linecap="round",
         stroke__linejoin="round",
@@ -212,6 +275,152 @@ def _render_edge(
             data__flexo__fill="muted-ink",
         )
         text.text = "".join(run.text for run in edge.spec.label)
+
+
+def _render_net(
+    parent: ET.Element,
+    net: RoutedNet,
+    style: LayoutStyle,
+    palette: Palette,
+    *,
+    crossing: bool,
+) -> None:
+    paint_role = "residual" if net.spec.role == "residual" else "connector"
+    marker_role = "residual" if net.spec.role == "residual" else "flow"
+    group = element(
+        parent,
+        "g",
+        id=net.spec.id,
+        data__flexo__entity="net",
+        data__flexo__kind=net.spec.kind,
+        data__flexo__role=net.spec.role,
+    )
+    _net_path(group, f"{net.spec.id}.rail", net.rail, style, palette, paint_role)
+    for index, stem in enumerate(net.source_stems, 1):
+        _net_stem(
+            group,
+            f"{net.spec.id}.source.{index}",
+            stem,
+            style,
+            palette,
+            paint_role,
+            marker_role,
+        )
+    for index, stem in enumerate(net.target_stems, 1):
+        _net_stem(
+            group,
+            f"{net.spec.id}.target.{index}",
+            stem,
+            style,
+            palette,
+            paint_role,
+            marker_role,
+        )
+    show_dots = style.junction_dots == "always" or (
+        style.junction_dots == "auto" and crossing
+    )
+    if show_dots:
+        for index, point in enumerate(dict.fromkeys(net.junctions), 1):
+            element(
+                group,
+                "circle",
+                id=f"{net.spec.id}.junction.{index}",
+                cx=point.x,
+                cy=point.y,
+                r=max(1.2, style.connector_width.points * 1.5),
+                **paint_attributes(palette=palette, fill_role=paint_role),
+            )
+    if net.label_metrics is not None and net.label_position is not None:
+        text = element(
+            group,
+            "text",
+            id=f"{net.spec.id}.label",
+            x=net.label_position.x,
+            y=net.label_position.y,
+            text__anchor="middle",
+            font__family=style.typography.family,
+            font__size=style.typography.size.points,
+            fill=palette.get("muted-ink"),
+            data__flexo__fill="muted-ink",
+        )
+        text.text = "".join(run.text for run in net.spec.label)
+
+
+def _net_stem(
+    parent: ET.Element,
+    stem_id: str,
+    stem: RoutedStem,
+    style: LayoutStyle,
+    palette: Palette,
+    paint_role: str,
+    marker_role: str,
+) -> None:
+    _net_path(
+        parent,
+        stem_id,
+        stem.shaft,
+        style,
+        palette,
+        paint_role,
+        marker_role=marker_role if stem.arrow_end else None,
+    )
+
+
+def _net_path(
+    parent: ET.Element,
+    element_id: str,
+    points: tuple[object, ...],
+    style: LayoutStyle,
+    palette: Palette,
+    paint_role: str,
+    *,
+    marker_role: str | None = None,
+) -> None:
+    element(
+        parent,
+        "path",
+        id=element_id,
+        d=rounded_polyline_path(points, style.elbow_radius.points),
+        marker__end=f"url(#arrow.{marker_role})" if marker_role is not None else None,
+        stroke__linecap="round",
+        stroke__linejoin="round",
+        **paint_attributes(
+            palette=palette,
+            stroke_role=paint_role,
+            stroke_width=style.connector_width.points,
+        ),
+    )
+
+
+def _has_connector_crossing(routed: RoutedFigure) -> bool:
+    routes: list[tuple[str, tuple[object, ...]]] = [
+        (edge.spec.id, edge.centerline) for edge in routed.edges
+    ]
+    for net in routed.nets:
+        routes.append((net.spec.id, net.rail))
+        routes.extend((net.spec.id, stem.centerline) for stem in net.source_stems)
+        routes.extend((net.spec.id, stem.centerline) for stem in net.target_stems)
+    return any(
+        first_id != second_id
+        and any(
+            _segments_cross(first, second)
+            for first in segments(first_points)
+            for second in segments(second_points)
+        )
+        for (first_id, first_points), (second_id, second_points) in combinations(routes, 2)
+    )
+
+
+def _segments_cross(first: Segment, second: Segment) -> bool:
+    if first.horizontal == second.horizontal:
+        return False
+    horizontal, vertical = (first, second) if first.horizontal else (second, first)
+    x_low, x_high = sorted((horizontal.start.x, horizontal.end.x))
+    y_low, y_high = sorted((vertical.start.y, vertical.end.y))
+    return (
+        x_low + 1e-7 < vertical.start.x < x_high - 1e-7
+        and y_low + 1e-7 < horizontal.start.y < y_high - 1e-7
+    )
 
 
 def _render_group_label(

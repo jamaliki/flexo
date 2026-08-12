@@ -13,6 +13,7 @@ ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
 type LayoutKind = Literal["row", "column", "grid", "overlay", "stack"]
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
+type NetKind = Literal["fan-out", "merge"]
 _ZERO_LENGTH = Length(0.0)
 
 
@@ -150,6 +151,39 @@ class EdgeSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class NetSpec:
+    """A shared-value fan-out or authored many-to-one combination."""
+
+    id: str
+    kind: NetKind
+    sources: tuple[PortRef, ...]
+    targets: tuple[PortRef, ...]
+    role: str = "flow"
+    label: tuple[TextRun, ...] = ()
+    rail_hint: Side | None = None
+
+    def __post_init__(self) -> None:
+        _validate_id(self.id, "Net ID")
+        if self.kind == "fan-out" and (len(self.sources) != 1 or len(self.targets) < 2):
+            raise ValueError("fan-out nets require one source and at least two targets")
+        if self.kind == "merge" and (len(self.sources) < 2 or len(self.targets) != 1):
+            raise ValueError("merge nets require at least two sources and one target")
+        if len(self.sources) != len(set(self.sources)):
+            raise ValueError(f'net "{self.id}" contains duplicate sources')
+        if len(self.targets) != len(set(self.targets)):
+            raise ValueError(f'net "{self.id}" contains duplicate targets')
+
+
+@dataclass(frozen=True, slots=True)
+class LayoutConnection:
+    """One endpoint pair used only for layout spacing and port adaptation."""
+
+    source: PortRef
+    target: PortRef
+    externally_routed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class GroupSpec:
     id: str
     children: tuple[str, ...]
@@ -178,6 +212,7 @@ class FigureSpec:
     palette: str = "default"
     nodes: tuple[NodeSpec, ...] = ()
     edges: tuple[EdgeSpec, ...] = ()
+    nets: tuple[NetSpec, ...] = ()
     groups: tuple[GroupSpec, ...] = ()
     schema_version: int = 1
 
@@ -190,3 +225,19 @@ class FigureSpec:
 
     def group(self, group_id: str) -> GroupSpec:
         return next(group for group in self.groups if group.id == group_id)
+
+
+def layout_connections(figure: FigureSpec) -> tuple[LayoutConnection, ...]:
+    """Project authored connections for geometry-aware layout, not routing."""
+
+    edge_connections = tuple(
+        LayoutConnection(edge.source, edge.target, edge.lane_hint is not None)
+        for edge in figure.edges
+    )
+    net_connections = tuple(
+        LayoutConnection(source, target, net.rail_hint is not None)
+        for net in figure.nets
+        for source in net.sources
+        for target in net.targets
+    )
+    return edge_connections + net_connections

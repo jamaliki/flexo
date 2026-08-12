@@ -116,7 +116,10 @@ def test_dense_sibling_routes_reserve_a_lane_gutter() -> None:
     source = routed.fitted.node("source").bounds
     target = routed.fitted.node("target").bounds
     style = LayoutStyle()
-    target_clearance = max(style.route_clearance.points, 2 * style.arrow_length.points)
+    target_clearance = max(
+        style.route_clearance.points,
+        2 * style.arrow_length.points + style.elbow_radius.points,
+    )
     expected = (
         style.route_clearance.points
         + target_clearance

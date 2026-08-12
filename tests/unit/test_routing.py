@@ -8,9 +8,11 @@ from flexo.ir.semantic import (
     FigureSpec,
     GroupSpec,
     LayoutSpec,
+    NetSpec,
     NodeSpec,
     PortRef,
     PortSpec,
+    TextRun,
 )
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
@@ -113,25 +115,134 @@ def test_gallery_feed_forward_routes_minimize_elbows_globally() -> None:
         edge for edge in compilation.routed.edges if edge.spec.role == "flow"
     )
     bend_counts = tuple(max(0, len(segments(edge.centerline)) - 1) for edge in feed_forward)
-    encoder_order = sorted(
-        compilation.measured.semantic.group("cryo.encoders").children,
-        key=lambda node_id: compilation.fitted.node(node_id).bounds.top,
-    )
-    assert bend_counts == (2, 0, 0, 0, 0, 0, 0)
-    assert encoder_order == ["cryo.encoders.keys", "cryo.encoders.projection"]
+    assert bend_counts == (0,) * 10
     style = LayoutStyle()
     assert all(
-        segments(edge.centerline)[-1].length >= 2 * style.arrow_length.points
+        segments(edge.centerline)[-1].length
+        >= 2 * style.arrow_length.points + style.elbow_radius.points
         for edge in compilation.routed.edges
     )
-    feature = compilation.fitted.node("cryo.inputs.nodes")
-    assert feature.port("branch").position.y < feature.port("output").position.y
-    projection = compilation.fitted.node("cryo.encoders.projection")
+    feature = compilation.fitted.node("cryo.branches.feature-path.inputs.nodes")
+    distances = compilation.fitted.node("cryo.branches.feature-path.inputs.distances")
+    concat = compilation.fitted.node("cryo.branches.feature-path.concat")
+    assert feature.port("output").position.y == concat.port("input1").position.y
+    assert distances.port("output").position.y == concat.port("input2").position.y
     assert (
-        projection.port("input2").position.y - projection.port("input1").position.y
+        concat.port("input2").position.y - concat.port("input1").position.y
         >= style.port_spacing.points
     )
     assert lint_compilation(compilation).ok
+
+
+def test_fanout_net_has_one_trunk_and_heads_only_at_three_sinks() -> None:
+    compilation = compile_figure(_vertical_net_figure())
+    net = compilation.routed.net("shared")
+    assert len(net.rail) == 2
+    assert len(net.source_stems) == 1
+    assert len(net.target_stems) == 3
+    assert not any(stem.arrow_end for stem in net.source_stems)
+    assert all(stem.arrow_end for stem in net.target_stems)
+    assert compilation.document.text.count('marker-end="url(#arrow.flow)"') == 3
+    assert all(
+        segment.orthogonal
+        for route in (
+            net.rail,
+            *(stem.centerline for stem in net.source_stems),
+            *(stem.centerline for stem in net.target_stems),
+        )
+        for segment in segments(route)
+    )
+
+
+def test_merge_net_has_one_head_and_labeled_combination_rail() -> None:
+    compilation = compile_figure(_horizontal_merge_figure())
+    net = compilation.routed.net("combined")
+    assert len(net.source_stems) == 3
+    assert len(net.target_stems) == 1
+    assert net.label_position is not None
+    assert compilation.document.text.count('marker-end="url(#arrow.flow)"') == 1
+    assert "Average" in compilation.document.text
+
+
+def _vertical_net_figure() -> FigureSpec:
+    source = NodeSpec(
+        "source",
+        "block",
+        (TextRun("Source"),),
+        ports=(PortSpec("s", Side.SOUTH, adaptive=True),),
+    )
+    targets = tuple(
+        NodeSpec(
+            f"target{index}",
+            "block",
+            (TextRun(f"T{index}"),),
+            ports=(PortSpec("n", Side.NORTH, adaptive=True),),
+        )
+        for index in range(1, 4)
+    )
+    return FigureSpec(
+        "fanout-net",
+        width=pt(220),
+        nodes=(source, *targets),
+        nets=(
+            NetSpec(
+                "shared",
+                "fan-out",
+                (PortRef("source", "s"),),
+                tuple(PortRef(node.id, "n") for node in targets),
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("source", "targets"), LayoutSpec("column", gap=pt(18))),
+            GroupSpec(
+                "targets",
+                tuple(node.id for node in targets),
+                LayoutSpec("row", gap=pt(18), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+
+
+def _horizontal_merge_figure() -> FigureSpec:
+    sources = tuple(
+        NodeSpec(
+            f"source{index}",
+            "block",
+            (TextRun(f"S{index}"),),
+            ports=(PortSpec("e", Side.EAST, adaptive=True),),
+        )
+        for index in range(1, 4)
+    )
+    target = NodeSpec(
+        "target",
+        "block",
+        (TextRun("Average"),),
+        ports=(PortSpec("w", Side.WEST, adaptive=True),),
+    )
+    return FigureSpec(
+        "merge-net",
+        width=pt(260),
+        nodes=(*sources, target),
+        nets=(
+            NetSpec(
+                "combined",
+                "merge",
+                tuple(PortRef(node.id, "e") for node in sources),
+                (PortRef("target", "w"),),
+                label=(TextRun("Average"),),
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("sources", "target"), LayoutSpec("row", gap=pt(18))),
+            GroupSpec(
+                "sources",
+                tuple(node.id for node in sources),
+                LayoutSpec("column", gap=pt(12), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
 
 
 def test_lint_rejects_parallel_tracks_below_minimum_separation() -> None:

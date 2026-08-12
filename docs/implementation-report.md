@@ -126,6 +126,30 @@ internals remain independently editable in Inkscape.
   silhouettes, not only count vertices or test obstacle intersection.
 - Decision: accepted.
 
+### Cycle 5: Semantic topology and local fillets
+
+- Branch owner: primary agent.
+- Observation: independent edges could look like accidental shared trunks, the
+  scientific inset was decorative rather than causal, and sharp residual elbows
+  made an otherwise calm figure feel mechanically rigid.
+- Hypothesis: authored fan-out/merge nets, explicit combination components, and
+  a small local fillet will make both the semantics and the visual grammar
+  unambiguous without introducing spline-like connector drift.
+- Mechanism: first-class `NetSpec` fan-out and merge rails; arrowheads only on
+  destination stems; explicit Concat and Q/V/K channel glyphs; 3 pt quadratic
+  corner post-pass clamped to half the shorter adjacent segment; no fillet at
+  net T-junctions; final run-up measured after reserving the fillet radius.
+- Success criteria: all feed-forward paths in the Cryo-EM slice are straight;
+  inset feeds the CNN; Q, K, and V remain distinct at Attention; fan-out and
+  merge emit the correct number of heads; zero lint diagnostics.
+- Result: ten of ten feed-forward paths are straight; only the semantic residual
+  rail bends; fan-out and merge fixtures preserve one shared rail and heads only
+  at their sinks; the 180 mm figure is 67.3 mm high; 50 tests and Ruff pass.
+- Plots: `examples/build/vertical-slice.preview.png`.
+- Interpretation: line topology is a model claim, not a router optimization.
+  Small fillets improve finish only after the orthogonal topology is correct.
+- Decision: accepted.
+
 ## Accepted Changes
 
 - Public repository, compiler contract, and validation objectives established.
@@ -139,6 +163,8 @@ internals remain independently editable in Inkscape.
   minimization, and lexicographic clean-path/bend/length routing.
 - Adaptive source anchors, container-wall routing bounds, minimum final run-up,
   and crossing/parallel-track validation.
+- First-class semantic nets, destination-only net arrowheads, labeled merge
+  rails, explicit Concat/channel glyphs, and clamped orthogonal elbow fillets.
 
 ## Rejected Changes
 
@@ -149,7 +175,7 @@ internals remain independently editable in Inkscape.
 - Replace the generated inset with safe imported SVG/image support.
 - Expand the gallery to transformer, U-Net, and multi-module acceptance figures.
 - Compare static font instances against the current variable-font embedding.
-- Add property tests and native/plain SVG round-trip checks.
+- Add native/plain SVG round-trip checks.
 
 ## Reproducibility
 
