@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flexo"
+version = "0.1.0"
+description = "A semantic compiler for editable scientific figures"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Kiarash Jamali" }]
+keywords = ["scientific-visualization", "svg", "neural-networks", "inkscape"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+  "fonttools>=4.59",
+  "jsonschema>=4.25",
+  "pyyaml>=6.0.2",
+  "uharfbuzz>=0.52",
+]
+
+[project.scripts]
+flexo = "flexo.cli:main"
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.138",
+  "pytest>=8.4",
+  "pytest-cov>=6.2",
+  "ruff>=0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flexo"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/flexo", "schemas", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.coverage.run]
+branch = true
+source = ["flexo"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

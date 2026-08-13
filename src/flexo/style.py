@@ -1,0 +1,216 @@
+"""Geometry-affecting layout styles and paint-only palettes."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Literal
+
+from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.units import Length, mm, pt
+
+_PT_0_8 = pt(0.8)
+_PT_0_9 = pt(0.9)
+_PT_1_5 = pt(1.5)
+_PT_3 = pt(3.0)
+_PT_3_5 = pt(3.5)
+_PT_4 = pt(4.0)
+_PT_5 = pt(5.0)
+_PT_6 = pt(6.0)
+_PT_7 = pt(7.0)
+_PT_8 = pt(8.0)
+_PT_8_5 = pt(8.5)
+_PT_11 = pt(11.0)
+_PT_14 = pt(14.0)
+_PUBLICATION_WIDTHS = (
+    ("single-column", mm(85.0)),
+    ("double-column", mm(180.0)),
+    ("presentation", mm(254.0)),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TypographyStyle:
+    family: str = "IBM Plex Sans"
+    size: Length = _PT_8
+    minimum_size: Length = _PT_7
+    line_height: float = 1.22
+    label_weight: int = 500
+    title_weight: int = 600
+
+
+_DEFAULT_TYPOGRAPHY = TypographyStyle()
+
+
+@dataclass(frozen=True, slots=True)
+class LayoutStyle:
+    name: str = "paper"
+    typography: TypographyStyle = _DEFAULT_TYPOGRAPHY
+    padding_x: Length = _PT_7
+    padding_y: Length = _PT_5
+    gap: Length = _PT_14
+    compact_gap: Length = _PT_7
+    group_padding: Length = _PT_14
+    stroke_width: Length = _PT_0_8
+    connector_width: Length = _PT_0_9
+    corner_radius: Length = _PT_3
+    elbow_radius: Length = _PT_6
+    arrow_length: Length = _PT_4
+    arrow_width: Length = _PT_3_5
+    route_clearance: Length = _PT_5
+    route_boundary_clearance: Length = _PT_8
+    route_lane_spacing: Length = _PT_4
+    port_spacing: Length = _PT_6
+    bend_penalty: float = 14.0
+    junction_dots: Literal["auto", "always", "never"] = "auto"
+    widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
+    vector_cell: Length = _PT_8_5
+    """Side of one square cell in a vector glyph (R19)."""
+    vector_cell_gap: Length = _PT_1_5
+    """Gap between stacked cells of one vector column."""
+    vector_column_gap: Length = _PT_3
+    """Gap between the side-by-side stacks of a multi-column vector."""
+    vector_cell_radius: Length = _PT_1_5
+    """Corner radius of a vector cell; cells read as rounded squares, not dots."""
+    vector_label_gap: Length = _PT_3
+    """Distance from the bottom cell to the label a ``vector()`` composite puts below it."""
+
+    def resolve_width(self, value: str | Length | float) -> Length:
+        if isinstance(value, str):
+            presets = dict(self.widths)
+            if value in presets:
+                return presets[value]
+        return Length.parse(value)
+
+    def with_updates(self, **changes: object) -> LayoutStyle:
+        return replace(self, **changes)
+
+
+@dataclass(frozen=True, slots=True)
+class Palette:
+    """Paint tokens only. No field in this type may affect geometry."""
+
+    name: str
+    paints: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "paints", MappingProxyType(dict(self.paints)))
+
+    def get(self, role: str, fallback: str = "#000000") -> str:
+        return self.paints.get(role, fallback)
+
+    def with_overrides(self, overrides: Mapping[str, str]) -> Palette:
+        unknown = sorted(set(overrides) - set(self.paints))
+        if unknown:
+            raise FlexoError(
+                Diagnostic(
+                    "palette.role.unknown",
+                    f"Unknown paint role(s): {', '.join(unknown)}.",
+                    hint=f"Valid roles: {', '.join(sorted(self.paints))}.",
+                )
+            )
+        return Palette(self.name, {**self.paints, **overrides})
+
+
+RAMP_ROLES = (
+    "ramp-node",
+    "ramp-embedding",
+    "ramp-q",
+    "ramp-kv",
+    "ramp-attended",
+    "ramp-output",
+)
+"""Paint roles a ``vector`` component may name through its ``ramp`` property.
+
+One role carries one ramp: the cells of a stack all paint with that role and
+differ only in ``fill-opacity``, so a ramp survives ``flexo retheme`` (which
+rewrites paint by role) and stays geometrically identical in every palette.
+Every palette must define every role, and the grayscale palette separates them
+by lightness so the ramps remain distinguishable without hue.
+"""
+
+
+DEFAULT_PALETTE = Palette(
+    "default",
+    {
+        "canvas": "#ffffff",
+        "ink": "#25232a",
+        "muted-ink": "#625e6b",
+        "container-fill": "#f7f5fa",
+        "container-stroke": "#c9c2d3",
+        "block-fill": "#eee8f5",
+        "block-stroke": "#665477",
+        "accent-fill": "#d9f1f0",
+        "accent-stroke": "#237f84",
+        "warm-fill": "#f8e5d7",
+        "warm-stroke": "#a96133",
+        "connector": "#4e4856",
+        "residual": "#6d4ba0",
+        "grid": "#80758b",
+        "inset-fill": "#eef4f5",
+        "ramp-node": "#4a6cb0",
+        "ramp-embedding": "#2f8f7d",
+        "ramp-q": "#8a5bb5",
+        "ramp-kv": "#c3792c",
+        "ramp-attended": "#b04a6f",
+        "ramp-output": "#5d8b38",
+    },
+)
+
+COLOR_VISION_SAFE_PALETTE = Palette(
+    "color-vision-safe",
+    {
+        **dict(DEFAULT_PALETTE.paints),
+        "block-fill": "#e8eef8",
+        "block-stroke": "#3f6c9e",
+        "accent-fill": "#e1f2e8",
+        "accent-stroke": "#29845a",
+        "warm-fill": "#fff0ce",
+        "warm-stroke": "#9b6b00",
+        "residual": "#8c4b78",
+        # Okabe-Ito hues: the pairs an author is most likely to place side by
+        # side (q / kv / attended) sit at opposite ends of the set.
+        "ramp-node": "#0072b2",
+        "ramp-embedding": "#009e73",
+        "ramp-q": "#cc79a7",
+        "ramp-kv": "#e69f00",
+        "ramp-attended": "#56b4e9",
+        "ramp-output": "#d55e00",
+    },
+)
+
+GRAYSCALE_PALETTE = Palette(
+    "grayscale",
+    {
+        "canvas": "#ffffff",
+        "ink": "#191919",
+        "muted-ink": "#555555",
+        "container-fill": "#f5f5f5",
+        "container-stroke": "#b8b8b8",
+        "block-fill": "#e6e6e6",
+        "block-stroke": "#555555",
+        "accent-fill": "#d7d7d7",
+        "accent-stroke": "#3d3d3d",
+        "warm-fill": "#eeeeee",
+        "warm-stroke": "#707070",
+        "connector": "#444444",
+        "residual": "#1f1f1f",
+        "grid": "#777777",
+        "inset-fill": "#f0f0f0",
+        # Six evenly spaced lightness steps: hueless ramps stay tellable apart.
+        "ramp-node": "#0f0f0f",
+        "ramp-embedding": "#333333",
+        "ramp-q": "#575757",
+        "ramp-kv": "#7b7b7b",
+        "ramp-attended": "#9f9f9f",
+        "ramp-output": "#c3c3c3",
+    },
+)
+
+PALETTES = {
+    palette.name: palette
+    for palette in (DEFAULT_PALETTE, COLOR_VISION_SAFE_PALETTE, GRAYSCALE_PALETTE)
+}
+
+STYLES = {"paper": LayoutStyle()}
