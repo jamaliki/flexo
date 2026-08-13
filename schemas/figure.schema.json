@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamaliki/flexo/schemas/figure.schema.json",
+  "title": "Flexo figure",
+  "description": "Versioned semantic interchange format for Flexo figures.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "figure", "nodes", "edges", "groups"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "figure": {"$ref": "#/$defs/figure"},
+    "nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    },
+    "nets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/net"},
+      "default": []
+    },
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/group"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+    },
+    "length": {
+      "oneOf": [
+        {"type": "number"},
+        {
+          "type": "string",
+          "pattern": "^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?\\s*(?:pt|mm|cm|in|px)$"
+        }
+      ]
+    },
+    "side": {
+      "enum": ["north", "east", "south", "west"]
+    },
+    "text_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {"type": "string"},
+        "weight": {"type": "integer", "minimum": 100, "maximum": 900, "default": 400},
+        "italic": {"type": "boolean", "default": false},
+        "baseline_shift": {"enum": ["normal", "super", "sub"], "default": "normal"}
+      }
+    },
+    "label": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"$ref": "#/$defs/text_run"}}
+      ]
+    },
+    "figure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "width", "root"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "width": {
+          "oneOf": [
+            {"enum": ["single-column", "double-column", "presentation"]},
+            {"$ref": "#/$defs/length"}
+          ]
+        },
+        "height": {"$ref": "#/$defs/length"},
+        "root": {"$ref": "#/$defs/identifier"},
+        "style": {"$ref": "#/$defs/identifier", "default": "paper"},
+        "palette": {"$ref": "#/$defs/identifier", "default": "default"}
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "side"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "side": {"$ref": "#/$defs/side"},
+        "offset": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+        "adaptive": {"type": "boolean", "default": false}
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"$ref": "#/$defs/identifier"},
+        "label": {"$ref": "#/$defs/label", "default": ""},
+        "role": {"$ref": "#/$defs/identifier", "default": "block"},
+        "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "default": []},
+        "width": {"$ref": "#/$defs/length"},
+        "height": {"$ref": "#/$defs/length"},
+        "properties": {
+          "type": "object",
+          "additionalProperties": {"type": ["string", "number", "integer", "boolean"]},
+          "default": {}
+        }
+      }
+    },
+    "waypoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reference": {"$ref": "#/$defs/identifier"},
+        "side": {"$ref": "#/$defs/side"},
+        "offset": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+        "dx": {"$ref": "#/$defs/length"},
+        "dy": {"$ref": "#/$defs/length"},
+        "x": {"$ref": "#/$defs/length"},
+        "y": {"$ref": "#/$defs/length"}
+      },
+      "anyOf": [
+        {"required": ["reference"]},
+        {"required": ["x", "y"]}
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "from": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"},
+        "to": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"},
+        "role": {"$ref": "#/$defs/identifier", "default": "flow"},
+        "label": {"$ref": "#/$defs/label", "default": ""},
+        "lane": {"$ref": "#/$defs/identifier"},
+        "waypoints": {"type": "array", "items": {"$ref": "#/$defs/waypoint"}, "default": []},
+        "depart": {"$ref": "#/$defs/side"},
+        "arrive": {"$ref": "#/$defs/side"}
+      }
+    },
+    "net": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "sources", "targets"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "kind": {"enum": ["fan-out", "merge"]},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+        },
+        "role": {"$ref": "#/$defs/identifier", "default": "flow"},
+        "label": {"$ref": "#/$defs/label", "default": ""},
+        "rail": {"$ref": "#/$defs/side"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "fan-out"}}},
+          "then": {
+            "properties": {
+              "sources": {"maxItems": 1},
+              "targets": {"minItems": 2}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "merge"}}},
+          "then": {
+            "properties": {
+              "sources": {"minItems": 2},
+              "targets": {"maxItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["row", "column", "grid", "overlay", "stack"]},
+        "gap": {"$ref": "#/$defs/length"},
+        "padding": {"$ref": "#/$defs/length"},
+        "align": {"enum": ["start", "center", "end", "stretch"], "default": "center"},
+        "justify": {"enum": ["start", "center", "end", "space-between"], "default": "start"},
+        "columns": {"type": "integer", "minimum": 1},
+        "width": {"$ref": "#/$defs/length"},
+        "height": {"$ref": "#/$defs/length"},
+        "reflow": {"enum": ["row", "column", "grid", "overlay", "stack"]},
+        "equal_size": {"type": "boolean", "default": false}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "grid"}}},
+          "then": {"required": ["columns"]}
+        }
+      ]
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "children", "layout"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "children": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+        "layout": {"$ref": "#/$defs/layout"},
+        "collision_policy": {"enum": ["disjoint", "overlay", "ignore"], "default": "disjoint"},
+        "label": {"$ref": "#/$defs/label", "default": ""},
+        "role": {"$ref": "#/$defs/identifier", "default": "container"}
+      }
+    }
+  }
+}

@@ -1,0 +1,151 @@
+# Improvement Beam
+
+## Promoted Baseline
+
+- Candidate: coordinate-free `vertical-slice` gallery figure.
+- Commit/config: compiler defaults plus semantic source residual port.
+- Primary metric: zero validation errors plus editorial clarity at 180 mm.
+- Guardrails: deterministic, editable, physical-size-correct output.
+- Reproduction command: `uv run flexo gallery --output examples/build`.
+- Last promotion: adversarial visual critique, checkpoint 3.
+
+## Current Ranking
+
+| Rank | Beam | Type | Status | Parent | Current best / log | Next decision | Owner |
+|---:|---|---|---|---|---|---|---|
+| 1 | B1 | exploit | promoted | vertical slice | source/target ports and wall bounds | combination | primary agent |
+| 2 | B2 | near-miss | active | vertical slice | native motifs | stress test | primary agent |
+| 3 | B3 | structural/high-risk | promoted | vertical slice | semantic residual port | combination | primary agent |
+
+## Active Beam Entries
+
+### B1: Editorial spacing and hierarchy
+
+- Type: exploit
+- Status: promoted
+- Rank: 1
+- Owner: primary agent
+- Parent candidate or beam: first functional baseline
+- Hypothesis: a restrained spacing scale and clear container hierarchy will
+  improve scan order without requiring per-figure coordinates.
+- Mechanism: geometry tokens, alignment, and whitespace encode grouping.
+- Exact code paths: `style.py`, `layout/lanes.py`, gallery specification.
+- Current best candidate: edge-aware gutters, adaptive source/target anchors,
+  bounded adjacent-column assignment, and container-wall constraints.
+- Evidence for: feed-forward elbows reduced from 14 to 2, no false junctions,
+  6 pt port separation, 8 pt arrow run-up, and zero crossings.
+- Evidence against: small exhaustive ordering is intentionally capped at five
+  children; larger columns will need a barycentric heuristic.
+- Next decision: combination.
+- Next exact experiment: stress the same rules on transformer and U-Net figures.
+- Kill or park condition: no legibility improvement at equal overflow count.
+
+### B2: Component visual grammar
+
+- Type: near-miss
+- Status: active
+- Rank: 2
+- Owner: primary agent
+- Parent candidate or beam: first functional baseline
+- Hypothesis: kind-specific internal primitives can improve semantic recognition
+  while retaining a coherent visual language.
+- Mechanism: small repeated motifs distinguish matrices, sequences, MLPs, and
+  feature strips without extra labels.
+- Exact code paths: `emit.py`, component registry.
+- Current best candidate: restrained feature-strip, MLP, CNN, attention, and
+  scientific-inset motifs.
+- Evidence for: motifs distinguish operations without extra legend text.
+- Evidence against: none in the vertical slice after adaptive port alignment.
+- Next decision: stress test.
+- Next exact experiment: apply the grammar to transformer and U-Net fixtures.
+- Kill or park condition: motifs harm text fit or add ambiguous detail.
+
+### B3: Connector lane composition
+
+- Type: structural/high-risk
+- Status: promoted
+- Rank: 3
+- Owner: primary agent
+- Parent candidate or beam: first functional baseline
+- Hypothesis: semantic lanes and parallel-path nudging can produce editorial
+  residual rails more reliably than shortest paths alone.
+- Mechanism: protected corridors preserve long-range visual continuity.
+- Exact code paths: `routing/solve.py`, `routing/nudge.py`, edge hints.
+- Current best candidate: source-specific residual port plus `cryo-bottom` lane.
+- Evidence for: five-vertex obstacle-free rail with deliberate departure.
+- Evidence against: corridor constraints may complicate simple routes.
+- Next decision: combination.
+- Next exact experiment: combine semantic lanes with multi-module spacing and
+  parallel residuals.
+- Kill or park condition: lane hints are not deterministic or cause collisions.
+
+## Combination Queue
+
+| Candidate beams | Expected interaction | Why singleton evidence is sufficient | Correctness risk | Exact next test |
+|---|---|---|---|---|
+| B1 + B3 | spacing should create clean route corridors | pending | low | merged gallery render |
+| B1 + B2 | hierarchy should prevent motifs becoming noisy | pending | low | 2x raster comparison |
+
+## Parked And Killed Beams
+
+None.
+
+## Beam Checkpoints
+
+### Checkpoint 0: repository initialization
+
+- Promoted baseline: none.
+- Ranking changes: initial three families seeded.
+- Experiments since last checkpoint: none.
+- Capacity added or removed: three visual-quality beams created.
+- Near-misses preserved: none.
+- Beams killed or parked and why: none.
+- Next singleton candidates: first complete gallery baseline.
+- Next combination candidates: none before singleton evidence.
+
+### Checkpoint 1: first rendered baseline
+
+- Promoted baseline: coordinate-free vertical slice.
+- Ranking changes: B3 promoted; B1 remains the next exploit; B2 retained as a
+  supported motif family requiring broader stress tests.
+- Experiments since last checkpoint: integrated render and semantic residual
+  port comparison.
+- Capacity added or removed: none.
+- Near-misses preserved: variable-font embedding works but warns in Inkscape.
+- Beams killed or parked and why: none.
+- Next singleton candidates: static font instances; imported inset.
+- Next combination candidates: B1 spacing plus B3 lanes on multi-module figure.
+
+### Checkpoint 2: coupled layout and routing
+
+- Promoted baseline: edge-aware gutters, adaptive generated ports, stable
+  adjacent-column ordering, and lexicographic route search.
+- Ranking changes: B1 promoted after the dense interfaces became crossing-free;
+  B3 remains promoted for explicit long-range residual rails.
+- Experiments since last checkpoint: gutter-only spacing, adaptive ports,
+  crossing-minimizing permutation, and lexicographic visibility search.
+- Capacity added or removed: generated ports gain layout freedom; explicit
+  ports and lanes remain constrained.
+- Near-misses preserved: gutter-only spacing passed geometry checks but still
+  had 17 elbows; adaptive ports alone had seven elbows but one crossing.
+- Beams killed or parked and why: none.
+- Next singleton candidates: imported inset and static font instances.
+- Next combination candidates: B1 plus B3 on multi-module residual figures.
+
+### Checkpoint 3: adversarial visual critique
+
+- Promoted baseline: dual-ended adaptive ports plus physical marker, track, and
+  container clearances.
+- Ranking changes: B1 remains promoted; routing quality is now enforced by
+  negative fixtures rather than judged only from a successful render.
+- Experiments since last checkpoint: target run-up, owner-wall bounds, larger
+  rail padding, source-anchor relaxation, and perpendicular-crossing lint.
+- Capacity added or removed: generated source ports may move; explicit author
+  offsets remain fixed.
+- Near-misses preserved: target-only adaptation minimized elbows but left a
+  false junction at the source; stricter run-up initially exposed an
+  under-sized single-edge gutter.
+- Beams killed or parked and why: none.
+- Next singleton candidates: imported scientific inset and static font files.
+- Next combination candidates: current routing constraints on transformer,
+  U-Net, and multi-module fixtures.

@@ -1,0 +1,178 @@
+schema_version: 1
+figure:
+  id: vertical-slice
+  width: double-column
+  root: root
+  style: paper
+  palette: default
+nodes:
+- id: cryo.branches.feature-path.inputs.nodes
+  kind: feature-strip
+  label: Node features
+  properties:
+    cells: 7
+- id: cryo.branches.feature-path.inputs.distances
+  kind: feature-strip
+  label: Distances
+  properties:
+    cells: 5
+- id: cryo.branches.feature-path.concat
+  kind: concat
+  label: Concat
+  ports:
+  - name: input1
+    side: west
+    offset: 0.3333333333333333
+    adaptive: true
+  - name: input2
+    side: west
+    offset: 0.6666666666666666
+    adaptive: true
+  - name: output
+    side: east
+    offset: 0.5
+    adaptive: true
+- id: cryo.branches.feature-path.projection
+  kind: mlp
+  label: Feature MLP
+- id: cryo.branches.feature-path.query-value
+  kind: channels
+  ports:
+  - name: input
+    side: west
+    offset: 0.5
+    adaptive: true
+  - name: q
+    side: east
+    offset: 0.3333333333333333
+    adaptive: true
+  - name: v
+    side: east
+    offset: 0.6666666666666666
+    adaptive: true
+  properties:
+    count: 2
+    labels: Q,V
+- id: cryo.branches.edge-path.neighbourhoods
+  kind: inset
+  label: Edge neighbourhoods
+  width: 82pt
+  height: 48pt
+- id: cryo.branches.edge-path.keys
+  kind: cnn
+  label: Edge CNN
+- id: cryo.branches.edge-path.key
+  kind: channels
+  ports:
+  - name: input
+    side: west
+    offset: 0.5
+    adaptive: true
+  - name: k
+    side: east
+    offset: 0.5
+    adaptive: true
+  properties:
+    count: 1
+    labels: K
+- id: cryo.attention
+  kind: attention
+  label: Attention
+- id: cryo.prediction
+  kind: prediction
+  label: Prediction
+edges:
+- id: edge.1.cryo.branches.feature-path.inputs.nodes-to-cryo.branches.feature-path.concat
+  from: cryo.branches.feature-path.inputs.nodes.output
+  to: cryo.branches.feature-path.concat.input1
+- id: edge.2.cryo.branches.feature-path.inputs.distances-to-cryo.branches.feature-path.concat
+  from: cryo.branches.feature-path.inputs.distances.output
+  to: cryo.branches.feature-path.concat.input2
+- id: edge.3.cryo.branches.feature-path.concat-to-cryo.branches.feature-path.projection
+  from: cryo.branches.feature-path.concat.output
+  to: cryo.branches.feature-path.projection.input
+- id: edge.4.cryo.branches.feature-path.projection-to-cryo.branches.feature-path.query-value
+  from: cryo.branches.feature-path.projection.output
+  to: cryo.branches.feature-path.query-value.input
+- id: edge.5.cryo.branches.edge-path.neighbourhoods-to-cryo.branches.edge-path.keys
+  from: cryo.branches.edge-path.neighbourhoods.output
+  to: cryo.branches.edge-path.keys.input
+- id: edge.6.cryo.branches.edge-path.keys-to-cryo.branches.edge-path.key
+  from: cryo.branches.edge-path.keys.output
+  to: cryo.branches.edge-path.key.input
+- id: edge.7.cryo.branches.feature-path.query-value-to-cryo.attention
+  from: cryo.branches.feature-path.query-value.q
+  to: cryo.attention.q
+- id: edge.8.cryo.branches.edge-path.key-to-cryo.attention
+  from: cryo.branches.edge-path.key.k
+  to: cryo.attention.k
+- id: edge.9.cryo.branches.feature-path.query-value-to-cryo.attention
+  from: cryo.branches.feature-path.query-value.v
+  to: cryo.attention.v
+- id: edge.10.cryo.attention-to-cryo.prediction
+  from: cryo.attention.output
+  to: cryo.prediction.input
+- id: cryo.residual
+  from: cryo.branches.feature-path.inputs.nodes.residual
+  to: cryo.prediction.residual
+  role: residual
+  lane: cryo-bottom
+groups:
+- id: root
+  children:
+  - cryo
+  layout:
+    kind: column
+    justify: center
+  role: canvas
+- id: cryo
+  children:
+  - cryo.branches
+  - cryo.attention
+  - cryo.prediction
+  layout:
+    kind: row
+    gap: 12pt
+    justify: center
+  label: Cryo-EM information flow
+  role: module
+- id: cryo.branches
+  children:
+  - cryo.branches.feature-path
+  - cryo.branches.edge-path
+  layout:
+    kind: column
+    gap: 12pt
+    padding: 0pt
+    align: end
+  role: layout
+- id: cryo.branches.feature-path
+  children:
+  - cryo.branches.feature-path.inputs
+  - cryo.branches.feature-path.concat
+  - cryo.branches.feature-path.projection
+  - cryo.branches.feature-path.query-value
+  layout:
+    kind: row
+    gap: 12pt
+    padding: 0pt
+  role: layout
+- id: cryo.branches.feature-path.inputs
+  children:
+  - cryo.branches.feature-path.inputs.nodes
+  - cryo.branches.feature-path.inputs.distances
+  layout:
+    kind: column
+    gap: 8pt
+    padding: 0pt
+  role: layout
+- id: cryo.branches.edge-path
+  children:
+  - cryo.branches.edge-path.neighbourhoods
+  - cryo.branches.edge-path.keys
+  - cryo.branches.edge-path.key
+  layout:
+    kind: row
+    gap: 12pt
+    padding: 0pt
+  role: layout
