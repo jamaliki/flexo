@@ -1,0 +1,184 @@
+# Flexo Implementation Running Report
+
+## Objective
+
+Build a semantic Python compiler that produces deterministic, attractive,
+publication-sized figures whose text, blocks, connectors, and composite
+internals remain independently editable in Inkscape.
+
+## Baseline
+
+- Code/config baseline: empty public repository at `jamaliki/flexo`.
+- Data/artifacts: no figures or tests.
+- Current promoted settings: none.
+- Reproduction command: `uv run flexo gallery --output examples/build`.
+- Primary metric: acceptance gallery passes structural and geometric lint with
+  no errors and is judged editorially clear at final physical size.
+- Guardrails: deterministic output, minimum 7 pt typography, live editable
+  text, obstacle-free routing, stable IDs, and passing tests.
+
+## Metrics And Views
+
+- Aggregate metric: validation errors and warnings per gallery figure.
+- Grouped metrics: overlaps, overflow, route intersections, text fit, SVG
+  structure, output dimensions, and canonical-repeat equality.
+- Visual artifact checks: PNG render at 2x, full-size SVG inspection, and
+  Inkscape Objects and Layers structure.
+- Validation suite: unit, property, structural, integration, and Inkscape CLI.
+
+## Current Best State
+
+- Best promoted configuration: coordinate-free `vertical-slice` gallery figure.
+- Why it is currently best: zero lint diagnostics; all four output variants;
+  clean 180 x 50.0 mm render; semantic residual lane; live text and named layers.
+- Known weaknesses: the scientific inset is generated rather than imported;
+  embedded variable-font CSS produces an Inkscape support warning; the gallery
+  does not yet stress multiple modules or encoder-decoder layouts.
+- Live beam note: `docs/improvement-beam.md`.
+- Current beam checkpoint: checkpoint 3.
+
+## Experimental Log
+
+### Cycle 1: First integrated editorial baseline
+
+- Branch owner: primary agent.
+- Observation: the initial automatic residual left the normal east output and
+  doubled back around the stacked inputs before reaching the bottom lane.
+- Hypothesis: a semantically named residual port on the source component would
+  turn the skip path into an intentional boundary rail.
+- Mechanism: port side controls the forced departure segment before routing.
+- Branch guardrails: same semantic components, no coordinates, zero lint errors.
+- Success criteria: direct visual departure into the protected lane with no
+  obstacle intersections.
+- Minimal experiment: add a west-side feature-strip residual port and make the
+  builder prefer it for residual edges.
+- Command(s): `uv run python examples/vertical_slice.py`; Inkscape PNG export;
+  `uv run pytest -q`.
+- Result: residual centerline reduced from 7 to 5 vertices; the rail now leaves
+  directly from the component boundary; zero lint diagnostics; 39 tests pass.
+- Plots: `examples/build/vertical-slice.preview.png`.
+- Interpretation: semantic ports provide higher-quality control than raw route
+  waypoints while preserving automatic obstacle avoidance.
+- Decision: accepted.
+
+### Cycle 2: Marker orientation and visual weight
+
+- Branch owner: primary agent.
+- Observation: 5.5 pt markers were longer than the 5 pt target approach, so
+  shortening consumed the last segment and oriented several west-port arrows
+  vertically from the preceding elbow.
+- Hypothesis: markers shorter than the routing clearance will preserve final
+  approach orientation and reduce clutter around multi-port components.
+- Mechanism: the shaft retains a positive-length segment in the same direction
+  as the logical centerline before the marker base.
+- Success criteria: centerline and shaft final orientations match for every
+  gallery edge; zero route failures; visibly lighter arrowheads.
+- Minimal experiment: reduce markers to 4.0 x 3.5 pt and lint final-segment
+  orientation plus port-direction conformance.
+- Result: every vertical-slice edge has a matching final orientation; all
+  west-facing targets receive right-pointing arrows; zero lint diagnostics.
+- Decision: accepted.
+
+### Cycle 3: Coupled layout and routing
+
+- Branch owner: primary agent.
+- Observation: widening dense gutters fixed arrowhead crowding but the
+  edge-at-a-time router still produced 17 elbows and one feed-forward crossing.
+- Hypothesis: routing quality depends on target-port placement and layer order,
+  not just shortest-path search after geometry is frozen.
+- Mechanism: enlarge edge-dense sibling gutters, align adaptive receiving ports
+  with their producers, reorder small adjacent columns only when crossings
+  strictly decrease, then rank visibility paths lexicographically.
+- Guardrails: explicit port offsets and semantic lanes remain fixed; rounded
+  corners retain clearance; author order wins every tie.
+- Success criteria: zero feed-forward crossings, no insufficient port stubs,
+  and at most one non-straight feed-forward connection in the vertical slice.
+- Result: total elbows fell from 17 to 7; feed-forward elbows fell from 14 to 2;
+  seven of eight feed-forward connections are straight; crossings fell from one
+  to zero; zero lint diagnostics; 43 tests pass.
+- Plots: `examples/build/vertical-slice.optimized-routing.png`.
+- Interpretation: orthogonal routing must be coupled to limited coordinate and
+  ordering freedom; a more elaborate path search alone cannot beat geometric
+  lower bounds imposed by fixed ports.
+- Decision: accepted.
+
+### Cycle 4: Adversarial visual critique
+
+- Branch owner: primary agent.
+- Observation: the bend-count winner still had a false junction where its one
+  dogleg crossed the straight CNN arrow, MLP arrowheads were only one marker
+  width apart, and the residual rail competed with the container border.
+- External critique triage: rejected the claimed diagonal fallback (none
+  exists) and missing node inflation (already implemented); accepted the source
+  anchor, wall clearance, port separation, and final-run-up concerns.
+- Hypothesis: adapting generated source ports as well as targets, coupled with
+  explicit physical clearances, will eliminate the false junction without
+  adding bends.
+- Mechanism: target/source/target port relaxation; 6 pt port separation; 8 pt
+  target run-up; 8 pt container-wall inset; 14 pt container padding; hard owner
+  bounds; crossing and parallel-track lint.
+- Success criteria: one feed-forward dogleg, zero connector crossings, 6 pt
+  port separation, 8 pt final approaches, and zero lint diagnostics.
+- Result: all criteria met; 44 tests pass; the figure remains 180 mm wide and
+  grows from 47.2 to 50.0 mm high to create deliberate rail breathing room.
+- Plots: `examples/build/vertical-slice.critique-pass.png`.
+- Interpretation: visual review must inspect apparent junctions and marker
+  silhouettes, not only count vertices or test obstacle intersection.
+- Decision: accepted.
+
+### Cycle 5: Semantic topology and local fillets
+
+- Branch owner: primary agent.
+- Observation: independent edges could look like accidental shared trunks, the
+  scientific inset was decorative rather than causal, and sharp residual elbows
+  made an otherwise calm figure feel mechanically rigid.
+- Hypothesis: authored fan-out/merge nets, explicit combination components, and
+  a small local fillet will make both the semantics and the visual grammar
+  unambiguous without introducing spline-like connector drift.
+- Mechanism: first-class `NetSpec` fan-out and merge rails; arrowheads only on
+  destination stems; explicit Concat and Q/V/K channel glyphs; 3 pt quadratic
+  corner post-pass clamped to half the shorter adjacent segment; no fillet at
+  net T-junctions; final run-up measured after reserving the fillet radius.
+- Success criteria: all feed-forward paths in the Cryo-EM slice are straight;
+  inset feeds the CNN; Q, K, and V remain distinct at Attention; fan-out and
+  merge emit the correct number of heads; zero lint diagnostics.
+- Result: ten of ten feed-forward paths are straight; only the semantic residual
+  rail bends; fan-out and merge fixtures preserve one shared rail and heads only
+  at their sinks; the 180 mm figure is 67.3 mm high; 50 tests and Ruff pass.
+- Plots: `examples/build/vertical-slice.preview.png`.
+- Interpretation: line topology is a model claim, not a router optimization.
+  Small fillets improve finish only after the orthogonal topology is correct.
+- Decision: accepted.
+
+## Accepted Changes
+
+- Public repository, compiler contract, and validation objectives established.
+- Immutable semantic, measured, fitted, and routed IR pipeline.
+- Exact HarfBuzz/fontTools measurement with bundled IBM Plex Sans.
+- Deterministic lane layout, visibility routing, editable SVG, validation, CLI,
+  palette re-theming, and Inkscape-derived outputs.
+- West-side source residual port for deliberate bottom-rail composition.
+- Marker geometry bounded below route clearance, with direction linting.
+- Edge-aware routing gutters, adaptive generated ports, bounded crossing
+  minimization, and lexicographic clean-path/bend/length routing.
+- Adaptive source anchors, container-wall routing bounds, minimum final run-up,
+  and crossing/parallel-track validation.
+- First-class semantic nets, destination-only net arrowheads, labeled merge
+  rails, explicit Concat/channel glyphs, and clamped orthogonal elbow fillets.
+
+## Rejected Changes
+
+- None.
+
+## Remaining Residuals
+
+- Replace the generated inset with safe imported SVG/image support.
+- Expand the gallery to transformer, U-Net, and multi-module acceptance figures.
+- Compare static font instances against the current variable-font embedding.
+- Add native/plain SVG round-trip checks.
+
+## Reproducibility
+
+- Main command: `uv run flexo gallery --output examples/build`.
+- Validation command: `uv run pytest && uv run ruff check .`.
+- Key artifacts: `examples/build/` and `tests/artifacts/`.
