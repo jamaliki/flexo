@@ -109,6 +109,18 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                 diagnostics.append(
                     Diagnostic("group.cycle", "Group contains itself.", entity_id=group.id)
                 )
+        placeable = set(group.children)
+        for placed, row, column in group.layout.placements:
+            if placed not in placeable:
+                diagnostics.append(
+                    Diagnostic(
+                        "layout.grid.placement.unknown-child",
+                        f'Cell (row {row}, column {column}) is given to "{placed}", '
+                        "which is not a child of this group.",
+                        entity_id=group.id,
+                        hint=f"Children: {', '.join(group.children) or 'none'}.",
+                    )
+                )
     for entity_id in known_children - {figure.root}:
         count = child_counts[entity_id]
         if count == 0:

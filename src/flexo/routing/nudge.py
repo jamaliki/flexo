@@ -37,6 +37,45 @@ def shorten_end(points: tuple[Point, ...], distance: float) -> tuple[Point, ...]
     return (points[0],)
 
 
+def shorten_start(points: tuple[Point, ...], distance: float) -> tuple[Point, ...]:
+    """Shorten an orthogonal polyline from its head, preserving its later vertices."""
+    if not points or distance <= 0.0:
+        return points
+    remaining = distance
+    result = list(points)
+    while len(result) >= 2:
+        start = result[0]
+        following = result[1]
+        segment_length = following.distance_to(start)
+        if segment_length > remaining:
+            ratio = (segment_length - remaining) / segment_length
+            result[0] = Point(
+                following.x + (start.x - following.x) * ratio,
+                following.y + (start.y - following.y) * ratio,
+            )
+            return tuple(result)
+        remaining -= segment_length
+        result.pop(0)
+    return (points[-1],)
+
+
+def edge_shaft(
+    centerline: tuple[Point, ...],
+    *,
+    arrow_length: float,
+    standoff: float,
+) -> tuple[Point, ...]:
+    """The painted polyline for a port-to-port centerline.
+
+    Both trims are ink-only; the centerline itself stays port-to-port. The arrow
+    marker is anchored at the path end with its tip a full ``arrow_length``
+    further on, so trimming ``arrow_length + standoff`` leaves the tip
+    ``standoff`` short of the target port.
+    """
+
+    return shorten_start(shorten_end(centerline, arrow_length + standoff), standoff)
+
+
 def simplify_polyline(points: tuple[Point, ...]) -> tuple[Point, ...]:
     """Drop repeated vertices and merge collinear runs."""
     result: list[Point] = []
@@ -258,6 +297,8 @@ class Run:
     rail: bool = False
     junction: int | None = None
     """Index of the vertex pinned to this run's owning rail, if any."""
+    pinned: bool = False
+    """True when the author placed this run themselves and nudging may not move it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +351,8 @@ def _corridors(
         attached[rails[run.owner]].append((index, run.junction % len(polylines[index])))
     result: list[_Corridor] = []
     for index, run in enumerate(runs):
+        if run.pinned:
+            continue
         points = polylines[index]
         count = len(points) - 1
         movable = (0,) if run.rail and count == 1 else tuple(range(1, count - 1))
@@ -517,7 +560,15 @@ def figure_runs(
         polylines.append(edge.centerline)
     for net in routed.nets:
         boundary = boundaries[net.spec.id]
-        runs.append(Run(net.spec.id, f"{net.spec.id}.rail", boundary, rail=True))
+        runs.append(
+            Run(
+                net.spec.id,
+                f"{net.spec.id}.rail",
+                boundary,
+                rail=True,
+                pinned=net.spec.rail_at is not None,
+            )
+        )
         polylines.append(net.rail)
         for index, stem in enumerate(net.source_stems):
             runs.append(
@@ -549,6 +600,7 @@ def rebuild_figure(
     polylines: tuple[tuple[Point, ...], ...],
     *,
     arrow_length: float,
+    standoff: float,
 ) -> RoutedFigure:
     """Re-derive shafts and label anchors from nudged centerlines."""
 
@@ -561,7 +613,7 @@ def rebuild_figure(
             replace(
                 edge,
                 centerline=centerline,
-                shaft=shorten_end(centerline, arrow_length),
+                shaft=edge_shaft(centerline, arrow_length=arrow_length, standoff=standoff),
                 label_position=(
                     edge_label_position(centerline, edge.label_metrics)
                     if edge.label_metrics is not None
@@ -577,7 +629,13 @@ def rebuild_figure(
         for stem in net.source_stems:
             centerline = simplify_polyline(polylines[position])
             position += 1
-            source_stems.append(replace(stem, centerline=centerline, shaft=centerline))
+            source_stems.append(
+                replace(
+                    stem,
+                    centerline=centerline,
+                    shaft=shorten_start(centerline, standoff),
+                )
+            )
         target_stems: list[RoutedStem] = []
         for stem in net.target_stems:
             centerline = simplify_polyline(polylines[position])
@@ -586,7 +644,7 @@ def rebuild_figure(
                 replace(
                     stem,
                     centerline=centerline,
-                    shaft=shorten_end(centerline, arrow_length),
+                    shaft=shorten_end(centerline, arrow_length + standoff),
                 )
             )
         nets.append(

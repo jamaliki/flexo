@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from flexo.builder import Figure
 from flexo.diagnostics import FlexoError
 from flexo.gallery import gallery_figure
 from flexo.geometry import Side, segments
@@ -23,8 +24,8 @@ from flexo.layout.ports import (
     _port_positions,
 )
 from flexo.routing import route_figure
-from flexo.style import STYLES, LayoutStyle
-from flexo.units import pt
+from flexo.style import STYLES, LayoutStyle, vector_stack_height
+from flexo.units import CellSpan, pt
 
 
 def row_figure(*, label: str = "Short") -> FigureSpec:
@@ -636,3 +637,209 @@ def test_edge_label_fits_between_the_components_it_separates() -> None:
     half = edge.label_metrics.width / 2.0
     assert edge.label_position.x - half >= source.right
     assert edge.label_position.x + half <= target.left
+
+
+def grid_figure(
+    *,
+    count: int = 4,
+    columns: int = 2,
+    children: tuple[str, ...] | None = None,
+    nodes: tuple[NodeSpec, ...] | None = None,
+    **layout_options: object,
+) -> FigureSpec:
+    """A plain grid of equal blocks, with the root's own spacing zeroed out."""
+
+    node_specs = nodes or tuple(
+        NodeSpec(f"cell{index}", "block", (TextRun(f"C{index}"),)) for index in range(count)
+    )
+    return FigureSpec(
+        "grid",
+        width=pt(600),
+        nodes=node_specs,
+        groups=(
+            GroupSpec(
+                "root",
+                children if children is not None else tuple(node.id for node in node_specs),
+                LayoutSpec(
+                    kind="grid",
+                    columns=columns,
+                    align="start",
+                    **{"padding": pt(0), **layout_options},  # type: ignore[arg-type]
+                ),
+            ),
+        ),
+    )
+
+
+def test_row_and_column_gaps_separate_their_own_axis() -> None:
+    fitted = fit_figure(measure_figure(grid_figure(row_gap=pt(30), column_gap=pt(9))))
+    first = fitted.node("cell0").bounds
+    beside = fitted.node("cell1").bounds
+    below = fitted.node("cell2").bounds
+    assert beside.left - first.right == pytest.approx(9.0)
+    assert below.top - first.bottom == pytest.approx(30.0)
+
+
+def test_axis_gaps_fall_back_to_gap_then_to_the_style() -> None:
+    uniform = fit_figure(measure_figure(grid_figure(gap=pt(12))))
+    partial = fit_figure(measure_figure(grid_figure(gap=pt(12), row_gap=pt(40))))
+    assert partial.node("cell1").bounds.left == pytest.approx(
+        uniform.node("cell1").bounds.left
+    )
+    assert partial.node("cell2").bounds.top - partial.node("cell0").bounds.bottom == (
+        pytest.approx(40.0)
+    )
+
+
+def test_column_gap_spaces_a_row_and_row_gap_spaces_a_column() -> None:
+    def linear(kind: str, **options: object) -> FigureSpec:
+        return FigureSpec(
+            "linear",
+            width=pt(400),
+            nodes=(
+                NodeSpec("first", "block", (TextRun("A"),)),
+                NodeSpec("second", "block", (TextRun("B"),)),
+            ),
+            groups=(
+                GroupSpec(
+                    "root",
+                    ("first", "second"),
+                    LayoutSpec(kind=kind, padding=pt(0), align="start", **options),  # type: ignore[arg-type]
+                ),
+            ),
+        )
+
+    row = fit_figure(measure_figure(linear("row", column_gap=pt(21), row_gap=pt(3))))
+    assert row.node("second").bounds.left - row.node("first").bounds.right == (
+        pytest.approx(21.0)
+    )
+    column = fit_figure(measure_figure(linear("column", column_gap=pt(3), row_gap=pt(21))))
+    assert column.node("second").bounds.top - column.node("first").bounds.bottom == (
+        pytest.approx(21.0)
+    )
+
+
+def test_padding_sides_apply_independently() -> None:
+    figure = grid_figure(
+        padding=None,
+        padding_top=pt(20),
+        padding_right=pt(3),
+        padding_bottom=pt(11),
+        padding_left=pt(7),
+    )
+    fitted = fit_figure(measure_figure(figure))
+    root = fitted.group("root")
+    assert root.content_bounds.left - root.bounds.left == pytest.approx(7.0)
+    assert root.content_bounds.top - root.bounds.top == pytest.approx(20.0)
+    assert root.bounds.right - root.content_bounds.right == pytest.approx(3.0)
+    assert root.bounds.bottom - root.content_bounds.bottom == pytest.approx(11.0)
+
+
+def test_one_padding_still_pads_every_side_equally() -> None:
+    fitted = fit_figure(measure_figure(grid_figure(padding=pt(9))))
+    root = fitted.group("root")
+    assert root.content_bounds.left - root.bounds.left == pytest.approx(9.0)
+    assert root.bounds.bottom - root.content_bounds.bottom == pytest.approx(9.0)
+
+
+def test_grid_children_take_the_cell_they_address() -> None:
+    figure = grid_figure(
+        count=3,
+        columns=3,
+        gap=pt(10),
+        placements=(("cell2", 0, 0), ("cell0", 1, 2)),
+    )
+    fitted = fit_figure(measure_figure(figure))
+    first = fitted.node("cell2").bounds
+    # cell1 is unaddressed, so it flows into the first cell left over.
+    flowed = fitted.node("cell1").bounds
+    last = fitted.node("cell0").bounds
+    assert flowed.top == pytest.approx(first.top)
+    assert flowed.left > first.left
+    assert last.top > first.top
+    assert last.left > flowed.left
+
+
+def test_sparse_grid_needs_no_spacer_children() -> None:
+    """A hole costs nothing: the same geometry as filling it with a spacer."""
+
+    filled = grid_figure(
+        columns=3,
+        gap=pt(10),
+        nodes=(
+            NodeSpec("cell0", "block", (TextRun("C0"),)),
+            NodeSpec("hole", "spacer"),
+            NodeSpec("cell1", "block", (TextRun("C1"),)),
+            NodeSpec("cell2", "block", (TextRun("C2"),)),
+        ),
+        children=("cell0", "hole", "cell1", "cell2"),
+    )
+    sparse = grid_figure(
+        count=3,
+        columns=3,
+        gap=pt(10),
+        placements=(("cell1", 0, 2), ("cell2", 1, 0)),
+    )
+    filled_fit = fit_figure(measure_figure(filled))
+    sparse_fit = fit_figure(measure_figure(sparse))
+    for node_id in ("cell0", "cell1", "cell2"):
+        assert sparse_fit.node(node_id).bounds == filled_fit.node(node_id).bounds
+
+
+def test_column_widths_reserve_a_lane_no_child_occupies() -> None:
+    lane = pt(50)
+    reserved = grid_figure(
+        count=2,
+        columns=3,
+        gap=pt(10),
+        column_widths=((1, lane),),
+        placements=(("cell1", 0, 2),),
+    )
+    fitted = fit_figure(measure_figure(reserved))
+    left = fitted.node("cell0").bounds
+    right = fitted.node("cell1").bounds
+    # One empty lane wide, with one gap on either side of it.
+    assert right.left - left.right == pytest.approx(50.0 + 2.0 * 10.0)
+
+
+def test_column_widths_only_raise_a_column_that_is_already_narrower() -> None:
+    narrow = fit_figure(measure_figure(grid_figure(gap=pt(10), column_widths=((0, pt(4)),))))
+    plain = fit_figure(measure_figure(grid_figure(gap=pt(10))))
+    assert narrow.node("cell1").bounds.left == pytest.approx(plain.node("cell1").bounds.left)
+
+
+def test_cells_extent_resolves_against_the_figure_style() -> None:
+    style = LayoutStyle()
+    figure = grid_figure(
+        count=1,
+        columns=1,
+        nodes=(NodeSpec("cell0", "block", (TextRun("C0"),), height=CellSpan(4)),),
+    )
+    measured = measure_figure(figure, style=style)
+    assert measured.node("cell0").intrinsic_size.height == pytest.approx(
+        vector_stack_height(style, 4).points
+    )
+
+
+def test_cells_extent_follows_a_restyled_vector_cell() -> None:
+    style = LayoutStyle().with_updates(vector_cell=pt(20), vector_cell_gap=pt(2))
+    figure = grid_figure(
+        count=1,
+        columns=1,
+        nodes=(NodeSpec("cell0", "block", (TextRun("C0"),), height=CellSpan(3)),),
+    )
+    measured = measure_figure(figure, style=style)
+    assert measured.node("cell0").intrinsic_size.height == pytest.approx(64.0)
+
+
+def test_a_box_sized_in_cells_lines_up_with_the_vector_beside_it() -> None:
+    style = LayoutStyle()
+    with Figure("aligned", width=pt(400)) as figure:  # noqa: SIM117
+        with figure.root.row("chain", gap=pt(10), padding=0, align="start") as chain:
+            vector = chain.vector("features", ramp="ramp-node", cells=3)
+            chain.mlp("projection", input=vector, height="cells:3", width=pt(40))
+    fitted = fit_figure(measure_figure(figure.spec, style=style))
+    cells = fitted.node("chain.features.cells").bounds
+    projection = fitted.node("chain.projection").bounds
+    assert projection.top == pytest.approx(cells.top)
+    assert projection.bottom == pytest.approx(cells.bottom)
