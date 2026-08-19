@@ -6,14 +6,19 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from flexo.geometry import Side
-from flexo.units import Length
+from flexo.geometry import Insets, Side
+from flexo.units import Extent, Length
 
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
 type LayoutKind = Literal["row", "column", "grid", "overlay", "stack"]
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
+type JointStyle = Literal["dot", "arrow", "auto"]
+JOINT_STYLES = ("dot", "arrow", "auto")
+"""How a branch is marked where it meets the trunk of its net."""
+TITLE_SIDES = ("left", "right")
+"""Where a group may anchor its title along its own top edge."""
 _ZERO_LENGTH = Length(0.0)
 
 
@@ -98,12 +103,103 @@ class LayoutSpec:
     height: Length | None = None
     reflow: LayoutKind | None = None
     equal_size: bool = False
+    row_gap: Length | None = None
+    """Space between rows; falls back to ``gap``, then to the style token."""
+    column_gap: Length | None = None
+    """Space between columns; falls back to ``gap``, then to the style token."""
+    padding_top: Length | None = None
+    padding_right: Length | None = None
+    padding_bottom: Length | None = None
+    padding_left: Length | None = None
+    """One side of the group's padding; each falls back to ``padding``.
+
+    A panel usually wants more air above and below its content than beside it,
+    and a single ``padding`` can only buy that by widening the panel too.
+    """
+    placements: tuple[tuple[str, int, int], ...] = ()
+    """``(child id, row, column)`` for grid children placed by address.
+
+    Rows and columns are 0-indexed. Children absent from this tuple keep
+    row-major flow order, skipping the cells these claim.
+    """
+    column_widths: tuple[tuple[int, Length], ...] = ()
+    """``(column index, minimum width)`` reserved even when the column is empty."""
 
     def __post_init__(self) -> None:
         if self.kind == "grid" and (self.columns is None or self.columns < 1):
             raise ValueError("grid layout requires a positive column count")
         if self.columns is not None and self.columns < 1:
             raise ValueError("columns must be positive")
+        if self.kind != "grid" and (self.placements or self.column_widths):
+            raise ValueError(
+                f'cell placements and column widths need a grid layout, not "{self.kind}"'
+            )
+        columns = self.columns or 1
+        occupied: dict[tuple[int, int], str] = {}
+        for child_id, row, column in self.placements:
+            _validate_id(child_id, "Placed child ID")
+            if row < 0 or column < 0:
+                raise ValueError(
+                    f'cell (row {row}, column {column}) for "{child_id}" is out of range; '
+                    "grid rows and columns are 0-indexed"
+                )
+            if column >= columns:
+                raise ValueError(
+                    f'column {column} for "{child_id}" is out of range; '
+                    f"the grid has {columns} columns (0-{columns - 1})"
+                )
+            previous = occupied.setdefault((row, column), child_id)
+            if previous != child_id:
+                raise ValueError(
+                    f"cell (row {row}, column {column}) is claimed by both "
+                    f'"{previous}" and "{child_id}"'
+                )
+        placed = [child_id for child_id, _, _ in self.placements]
+        if len(placed) != len(set(placed)):
+            raise ValueError("a grid child may only be placed in one cell")
+        for column, _ in self.column_widths:
+            if not 0 <= column < columns:
+                raise ValueError(
+                    f"reserved width for column {column} is out of range; "
+                    f"the grid has {columns} columns (0-{columns - 1})"
+                )
+        reserved = [column for column, _ in self.column_widths]
+        if len(reserved) != len(set(reserved)):
+            raise ValueError("a grid column may only reserve one minimum width")
+
+    def placement_map(self) -> dict[str, tuple[int, int]]:
+        return {child_id: (row, column) for child_id, row, column in self.placements}
+
+    def resolved_gap(self, default: Length) -> float:
+        return (self.gap or default).points
+
+    def resolved_row_gap(self, default: Length) -> float:
+        return (self.row_gap or self.gap or default).points
+
+    def resolved_column_gap(self, default: Length) -> float:
+        return (self.column_gap or self.gap or default).points
+
+    def axis_gap(self, kind: LayoutKind, default: Length) -> float:
+        """The gap between siblings of a linear arrangement of ``kind``.
+
+        A row lays its children out across columns and a column stacks them into
+        rows, so each linear axis reads the asymmetric token that names it.
+        """
+
+        if kind == "row":
+            return self.resolved_column_gap(default)
+        if kind in {"column", "stack"}:
+            return self.resolved_row_gap(default)
+        return self.resolved_gap(default)
+
+    def resolved_padding(self, default: Length) -> Insets:
+        base = (self.padding or default).points
+        return Insets(
+            self.padding_top.points if self.padding_top is not None else base,
+            self.padding_right.points if self.padding_right is not None else base,
+            self.padding_bottom.points if self.padding_bottom is not None else base,
+            self.padding_left.points if self.padding_left is not None else base,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +209,8 @@ class NodeSpec:
     label: tuple[TextRun, ...] = ()
     role: str = "block"
     ports: tuple[PortSpec, ...] = ()
-    width: Length | None = None
-    height: Length | None = None
+    width: Extent | None = None
+    height: Extent | None = None
     properties: tuple[tuple[str, Scalar], ...] = ()
 
     def __post_init__(self) -> None:
@@ -161,9 +257,47 @@ class NetSpec:
     role: str = "flow"
     label: tuple[TextRun, ...] = ()
     rail_hint: Side | None = None
+    rail_at: float | None = None
+    """Where along the trunk run the shared rail sits, as a fraction in (0, 1).
+
+    The run is measured from the trunk's start toward the destination: for a
+    merge from the source port furthest from the sink up to the sink itself, for
+    a fan-out from the shared source out to the target furthest from it. The
+    fraction is a *request*: the router clamps it to the nearest feasible rail
+    when honouring it would cross a component, and says so with a warning.
+    ``None`` keeps the default placement, one escape short of the hub.
+    """
+    joint: JointStyle = "auto"
+    """How a branch meeting this net's trunk is marked.
+
+    ``"auto"`` follows ``style.junction_dots``; ``"dot"`` always draws the
+    junction dot; ``"arrow"`` ends the joining ink in an arrowhead pointing into
+    the trunk, which the trunk itself crosses unbroken.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")
+        if self.joint not in JOINT_STYLES:
+            raise ValueError(
+                f'unknown joint style "{self.joint}" for net "{self.id}"; '
+                f"valid styles: {', '.join(JOINT_STYLES)}"
+            )
+        if self.joint == "arrow" and self.kind != "merge":
+            raise ValueError(
+                f'net "{self.id}" cannot join with an arrow: an arrowhead marks a branch '
+                "flowing into a trunk, which only a merge has"
+            )
+        if self.rail_at is not None:
+            if not 0.0 < self.rail_at < 1.0:
+                raise ValueError(
+                    f'net "{self.id}" rail_at must lie strictly between 0 and 1, '
+                    f"not {self.rail_at}"
+                )
+            if self.rail_hint is not None:
+                raise ValueError(
+                    f'net "{self.id}" places its rail twice: a side hint pins the rail to '
+                    "the boundary and rail_at measures along the trunk; choose one"
+                )
         if self.kind == "fan-out" and (len(self.sources) != 1 or len(self.targets) < 2):
             raise ValueError("fan-out nets require one source and at least two targets")
         if self.kind == "merge" and (len(self.sources) < 2 or len(self.targets) != 1):
@@ -197,11 +331,22 @@ class GroupSpec:
     collision_policy: CollisionPolicy = "disjoint"
     label: tuple[TextRun, ...] = ()
     role: str = "container"
+    title_side: Literal["left", "right"] = "left"
+    """Which end of the group's top edge its title is anchored to.
+
+    Paint and typography only: the title band is the same height either way, so
+    moving it moves no child.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Group ID")
         if len(self.children) != len(set(self.children)):
             raise ValueError(f'group "{self.id}" contains duplicate children')
+        if self.title_side not in TITLE_SIDES:
+            raise ValueError(
+                f'unknown title side "{self.title_side}" for group "{self.id}"; '
+                f"valid sides: {', '.join(TITLE_SIDES)}"
+            )
 
     @property
     def text(self) -> str:

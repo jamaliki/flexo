@@ -20,11 +20,11 @@ from flexo.routing.nudge import (
     Stubs,
     collapse_zigzags,
     edge_label_position,
+    edge_shaft,
     figure_runs,
     nudge_obstacles,
     nudge_routes,
     rebuild_figure,
-    shorten_end,
     simplify_polyline,
 )
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
@@ -92,7 +92,12 @@ def _nudge(routed: RoutedFigure, style: LayoutStyle) -> RoutedFigure:
     )
     if nudged == polylines:
         return routed
-    return rebuild_figure(routed, nudged, arrow_length=style.arrow_length.points)
+    return rebuild_figure(
+        routed,
+        nudged,
+        arrow_length=style.arrow_length.points,
+        standoff=style.connector_standoff.points,
+    )
 
 
 def _route_edge(
@@ -220,7 +225,11 @@ def _route_edge(
             style.port_spacing.points,
             Stubs(clearance, target_clearance),
         )
-    shaft = shorten_end(centerline, style.arrow_length.points)
+    shaft = edge_shaft(
+        centerline,
+        arrow_length=style.arrow_length.points,
+        standoff=style.connector_standoff.points,
+    )
     label_metrics = measurer.measure(edge.label) if edge.label else None
     label_position = (
         edge_label_position(centerline, label_metrics) if label_metrics is not None else None

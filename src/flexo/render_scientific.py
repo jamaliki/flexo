@@ -6,7 +6,7 @@ import math
 import xml.etree.ElementTree as ET
 
 from flexo.ir.fitted import FittedNode
-from flexo.render_common import base_rect, paint_attributes
+from flexo.render_common import base_rect, motif_enabled, paint_attributes
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, number
 
@@ -53,6 +53,8 @@ def _grid(
     columns: int,
     top_fraction: float,
 ) -> None:
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     motif = element(parent, "g", id=f"{node.measured.spec.id}.grid")
     left = bounds.x + 7.0
@@ -77,6 +79,8 @@ def _grid(
 
 def _graph(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="container-stroke")
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     motif = element(parent, "g", id=f"{node.measured.spec.id}.network")
     points = (
@@ -114,6 +118,8 @@ def _graph(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
 
 def _inset(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="container-stroke")
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     motif = element(parent, "g", id=f"{node.measured.spec.id}.illustration")
     center = (bounds.center.x, bounds.y + bounds.height * 0.67)

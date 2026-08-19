@@ -5,6 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from flexo.geometry import Point, Segment, segments
 from flexo.ir.fitted import FittedGroup
@@ -13,6 +14,7 @@ from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.ir.semantic import TextRun
 from flexo.render import render_node
 from flexo.render_common import paint_attributes
+from flexo.routing.nudge import shorten_end
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
 from flexo.svg import (
     SVG_NS,
@@ -294,20 +296,24 @@ def _render_net(
         data__flexo__kind=net.spec.kind,
         data__flexo__role=net.spec.role,
     )
-    ink = _net_ink(net, style.elbow_radius.points)
-    _net_path(group, f"{net.spec.id}.rail", ink.rail, style, palette, paint_role)
-    for stem_id, shaft, arrow_end in ink.stems:
+    ink = _net_ink(
+        net,
+        style.elbow_radius.points,
+        arrow_length=style.arrow_length.points,
+        standoff=style.connector_standoff.points,
+    )
+    for path_id, points, arrow in ink.rails + ink.stems:
         _net_path(
             group,
-            stem_id,
-            shaft,
+            path_id,
+            points,
             style,
             palette,
             paint_role,
-            marker_role=marker_role if arrow_end else None,
+            marker_role=marker_role if arrow else None,
         )
-    if style.junction_dots != "never":
-        for index, point in enumerate(_branch_points(net), 1):
+    if style.junction_dots != "never" or net.spec.joint == "dot":
+        for index, point in enumerate(ink.dots, 1):
             element(
                 group,
                 "circle",
@@ -379,9 +385,17 @@ def _shift(run: TextRun) -> str | None:
     return None if run.baseline_shift == "normal" else run.baseline_shift
 
 
+class _InkPath(NamedTuple):
+    """One painted polyline of a net: its SVG id, its points, and its marker."""
+
+    id: str
+    points: tuple[Point, ...]
+    arrow: bool
+
+
 @dataclass(frozen=True, slots=True)
 class _NetInk:
-    """Emitted net geometry: the shared rail plus one shaft per stem.
+    """Emitted net geometry: the shared rail, one shaft per stem, and its dots.
 
     A rail terminal serving exactly one stem is an elbow, not a branch point, so
     it must turn on the same fillet as every other corner (R22). The rail gives
@@ -389,13 +403,23 @@ class _NetInk:
     corner *inside* one polyline where ``rounded_polyline_path`` rounds it; the
     drawn extent is unchanged. Terminals serving several stems keep the rail
     intact, so their junction dots stay exactly on it.
+
+    A net that joins with arrowheads instead cuts the rail at the joint and
+    trims each approach back, so the marker points into an unbroken trunk.
     """
 
-    rail: tuple[Point, ...]
-    stems: tuple[tuple[str, tuple[Point, ...], bool], ...]
+    rails: tuple[_InkPath, ...]
+    stems: tuple[_InkPath, ...]
+    dots: tuple[Point, ...]
 
 
-def _net_ink(net: RoutedNet, radius: float) -> _NetInk:
+def _net_ink(
+    net: RoutedNet,
+    radius: float,
+    *,
+    arrow_length: float = 0.0,
+    standoff: float = 0.0,
+) -> _NetInk:
     stems = [
         (f"{net.spec.id}.source.{index}", stem)
         for index, stem in enumerate(net.source_stems, 1)
@@ -413,10 +437,95 @@ def _net_ink(net: RoutedNet, radius: float) -> _NetInk:
             (anchor, *stem.shaft) if stem.arrow_end else (*stem.shaft, anchor)
         )
         rail[position] = anchor
-    return _NetInk(
-        tuple(rail),
-        tuple((stem_id, shafts[stem_id], stem.arrow_end) for stem_id, stem in stems),
+    branches = _branch_points(net)
+    reach = arrow_length + standoff
+    joint, arrowed, marked = (
+        _arrow_joints(net, tuple(rail), shafts, stems, branches, reach)
+        if net.spec.joint == "arrow"
+        else (None, frozenset(), ())
     )
+    for stem_id in arrowed:
+        shafts[stem_id] = shorten_end(shafts[stem_id], reach)
+    return _NetInk(
+        _rail_ink(net.spec.id, tuple(rail), joint, reach),
+        tuple(
+            _InkPath(stem_id, shafts[stem_id], stem.arrow_end or stem_id in arrowed)
+            for stem_id, stem in stems
+        ),
+        tuple(point for point in branches if point not in marked),
+    )
+
+
+def _arrow_joints(
+    net: RoutedNet,
+    rail: tuple[Point, ...],
+    shafts: dict[str, tuple[Point, ...]],
+    stems: list[tuple[str, RoutedStem]],
+    branches: tuple[Point, ...],
+    reach: float,
+) -> tuple[Point | None, frozenset[str], frozenset[Point]]:
+    """Which ink ends in an arrowhead where a branch meets this net's trunk.
+
+    At a branch point the trunk is whatever carries the flow onward -- the target
+    stem that leaves the point, or the rail itself when the target sits
+    elsewhere. Ink that arrives *across* that axis is a branch, so it takes the
+    arrowhead and gives up its dot; ink running along the trunk is the trunk and
+    is left alone. A merge has one target, so at most one branch point can be
+    approached by the rail. Ink with no room for the marker keeps its dot.
+    """
+
+    rail_axis = _rail_horizontal(rail)
+    joint: Point | None = None
+    arrowed: set[str] = set()
+    marked: set[Point] = set()
+    for point in branches:
+        arrival = next(
+            (stem for stem in net.target_stems if stem.centerline[0] == point), None
+        )
+        approach = segments(arrival.shaft) if arrival is not None else ()
+        through = approach[0].horizontal if approach else rail_axis
+        if through is not rail_axis and _rail_reaches(rail, point, reach):
+            joint = point
+            marked.add(point)
+        for stem_id, stem in stems:
+            runs = segments(shafts[stem_id])
+            if stem.arrow_end or not runs or stem.centerline[-1] != point:
+                continue
+            if runs[-1].horizontal is not through and runs[-1].length > reach:
+                arrowed.add(stem_id)
+                marked.add(point)
+    return joint, frozenset(arrowed), frozenset(marked)
+
+
+def _rail_reaches(rail: tuple[Point, ...], joint: Point, reach: float) -> bool:
+    """True when every rail approach to ``joint`` survives the arrow trim."""
+
+    ends = tuple(end for end in (rail[0], rail[-1]) if end != joint)
+    return bool(ends) and all(end.distance_to(joint) > reach for end in ends)
+
+
+def _rail_ink(
+    net_id: str,
+    rail: tuple[Point, ...],
+    joint: Point | None,
+    reach: float,
+) -> tuple[_InkPath, ...]:
+    """The rail as painted: one piece, or one per approach to an arrow joint."""
+
+    ends = tuple(end for end in (rail[0], rail[-1]) if end != joint)
+    if joint is None or not ends:
+        return (_InkPath(f"{net_id}.rail", rail, False),)
+    if len(ends) == 1:
+        return (_InkPath(f"{net_id}.rail", shorten_end((ends[0], joint), reach), True),)
+    return tuple(
+        _InkPath(f"{net_id}.rail.{index}", shorten_end((end, joint), reach), True)
+        for index, end in enumerate(ends, 1)
+    )
+
+
+def _rail_horizontal(rail: tuple[Point, ...]) -> bool:
+    runs = segments(rail)
+    return runs[0].horizontal if runs else False
 
 
 def _terminal_leads(net: RoutedNet, radius: float) -> dict[int, float]:
@@ -532,19 +641,29 @@ def _render_group_label(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
-    if not group.measured.spec.label:
+    spec = group.measured.spec
+    if not spec.label:
         return
-    padding = (group.measured.spec.layout.padding or style.group_padding).points
+    padding = spec.layout.resolved_padding(style.group_padding)
+    # The title hangs off whichever end of the top edge it is anchored to, so
+    # the anchor moves with it; the band it sits in is the same height either
+    # way, which is why title_side is paint rather than layout.
+    right = spec.title_side == "right"
     text = element(
         parent,
         "text",
-        id=f"{group.measured.spec.id}.label",
-        x=group.bounds.x + padding,
-        y=group.bounds.y + padding + group.measured.label.baseline,
+        id=f"{spec.id}.label",
+        x=(
+            group.bounds.right - padding.right
+            if right
+            else group.bounds.x + padding.left
+        ),
+        y=group.bounds.y + padding.top + group.measured.label.baseline,
+        text__anchor="end" if right else None,
         font__family=style.typography.family,
         font__size=style.typography.size.points,
         font__weight=style.typography.title_weight,
         fill=palette.get("ink"),
         data__flexo__fill="ink",
     )
-    text.text = "".join(run.text for run in group.measured.spec.label)
+    text.text = "".join(run.text for run in spec.label)

@@ -57,6 +57,31 @@ class Size:
 
 
 @dataclass(frozen=True, slots=True)
+class Insets:
+    """Space held on the four sides of a box, in points.
+
+    Written in the CSS order -- top, right, bottom, left -- because that is the
+    order authors already spell a four-sided padding in.
+    """
+
+    top: float = 0.0
+    right: float = 0.0
+    bottom: float = 0.0
+    left: float = 0.0
+
+    def __post_init__(self) -> None:
+        _require_finite(self.top, self.right, self.bottom, self.left)
+
+    @property
+    def horizontal(self) -> float:
+        return self.left + self.right
+
+    @property
+    def vertical(self) -> float:
+        return self.top + self.bottom
+
+
+@dataclass(frozen=True, slots=True)
 class Rect:
     x: float
     y: float
