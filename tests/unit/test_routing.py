@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from flexo.compiler import compile_figure
+from flexo.diagnostics import Severity
+from flexo.emit import _net_ink
 from flexo.gallery import gallery_figure, vertical_slice
 from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.semantic import (
@@ -18,14 +22,21 @@ from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
 from flexo.routing.nets import _vertical_rail
-from flexo.routing.nudge import Run, collapse_zigzags, nudge_routes, rail_label_position
+from flexo.routing.nudge import (
+    Run,
+    collapse_zigzags,
+    edge_shaft,
+    nudge_routes,
+    rail_label_position,
+    shorten_start,
+)
 from flexo.routing.solve import _routing_order
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import LayoutStyle
 from flexo.units import pt
 
 
-def routed_fixture(*, obstacle: bool = False, lane: bool = False):
+def routed_fixture(*, obstacle: bool = False, lane: bool = False, style=None):
     nodes = [NodeSpec("source", "block"), NodeSpec("target", "block")]
     children = ["source", "target"]
     if obstacle:
@@ -51,16 +62,51 @@ def routed_fixture(*, obstacle: bool = False, lane: bool = False):
             ),
         ),
     )
-    return route_figure(fit_figure(measure_figure(figure)))
+    return route_figure(fit_figure(measure_figure(figure)), style=style)
 
 
 def test_direct_route_reaches_ports_and_shortens_shaft() -> None:
+    style = LayoutStyle()
     routed = routed_fixture()
     edge = routed.edge("flow")
     assert edge.centerline[0] == routed.fitted.node("source").port("output").position
     assert edge.centerline[-1] == routed.fitted.node("target").port("input").position
-    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == LayoutStyle().arrow_length.points
+    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == (
+        style.arrow_length.points + style.connector_standoff.points
+    )
     assert all(segment.orthogonal for segment in segments(edge.centerline))
+
+
+def test_shaft_leaves_a_standoff_at_both_connector_ends() -> None:
+    style = LayoutStyle()
+    standoff = style.connector_standoff.points
+    edge = routed_fixture().edge("flow")
+    assert edge.shaft[0].distance_to(edge.centerline[0]) == standoff
+    # The marker is anchored at the shaft end and its tip sits an arrow_length
+    # beyond, so the tip lands exactly one standoff short of the target port.
+    tip = edge.shaft[-1].distance_to(edge.centerline[-1]) - style.arrow_length.points
+    assert tip == standoff
+    assert all(segment.orthogonal for segment in segments(edge.shaft))
+
+
+def test_zero_standoff_reproduces_butt_jointed_shafts() -> None:
+    style = LayoutStyle().with_updates(connector_standoff=pt(0))
+    edge = routed_fixture(style=style).edge("flow")
+    assert edge.shaft[0] == edge.centerline[0]
+    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == style.arrow_length.points
+
+
+def test_standoff_never_inverts_a_shaft_shorter_than_its_trims() -> None:
+    centerline = (Point(0.0, 0.0), Point(3.0, 0.0))
+    # Both trims exceed the run: the shaft collapses to a point rather than
+    # reversing, exactly as an over-long arrow trim already degrades.
+    assert edge_shaft(centerline, arrow_length=4.0, standoff=2.5) == (Point(0.0, 0.0),)
+    assert edge_shaft(centerline, arrow_length=0.0, standoff=1.0) == (
+        Point(1.0, 0.0),
+        Point(2.0, 0.0),
+    )
+    assert shorten_start(centerline, 10.0) == (Point(3.0, 0.0),)
+    assert shorten_start(centerline, 1.0) == (Point(1.0, 0.0), Point(3.0, 0.0))
 
 
 def test_visibility_route_avoids_middle_obstacle() -> None:
@@ -180,6 +226,28 @@ def test_merge_net_has_one_head_and_labeled_combination_rail() -> None:
     assert net.label_position is not None
     assert compilation.document.text.count('marker-end="url(#arrow.flow)"') == 1
     assert "Average" in compilation.document.text
+
+
+def test_net_stems_stand_off_at_nodes_while_rail_joints_stay_closed() -> None:
+    style = LayoutStyle()
+    standoff = style.connector_standoff.points
+    net = compile_figure(_vertical_net_figure()).routed.net("shared")
+    for stem in net.source_stems:
+        assert stem.shaft[0].distance_to(stem.centerline[0]) == standoff
+        assert stem.shaft[-1] == stem.centerline[-1]
+    for stem in net.target_stems:
+        assert stem.shaft[0] == stem.centerline[0]
+        assert stem.shaft[-1].distance_to(stem.centerline[-1]) == (
+            style.arrow_length.points + standoff
+        )
+    ink = _net_ink(net, style.elbow_radius.points)
+    for _, shaft, arrow_end in ink.stems:
+        joint = shaft[0] if arrow_end else shaft[-1]
+        assert any(
+            Rect.from_points(segment.start, segment.end).contains_point(joint)
+            for _, points, _ in ink.rails
+            for segment in segments(points)
+        )
 
 
 def test_rail_orientation_follows_the_target_side_majority() -> None:
@@ -794,3 +862,152 @@ def test_rail_label_anchors_above_the_longest_horizontal_run() -> None:
     # With no horizontal ink at all the rail midpoint still carries the caption.
     vertical = rail_label_position(rail, ((Point(40.0, 10.0), Point(40.0, 30.0)),))
     assert vertical == Point(44.0, 20.0)
+
+
+def _riser_merge_figure(**net_options: object) -> FigureSpec:
+    """Panel-b's attention shape: one straight trunk plus one riser into a sink.
+
+    The trunk and the sink share a row, so the merge draws one horizontal run
+    from ``trunk`` to ``sink`` with the riser climbing into it -- exactly the
+    geometry ``rail_at`` measures along.
+    """
+
+    trunk = NodeSpec("trunk", "block", (TextRun("Q"),), ports=(PortSpec("e", Side.EAST),))
+    riser = NodeSpec("riser", "block", (TextRun("KV"),), ports=(PortSpec("e", Side.EAST),))
+    sink = NodeSpec("sink", "block", (TextRun("A"),), ports=(PortSpec("w", Side.WEST),))
+    return FigureSpec(
+        "riser-merge",
+        width=pt(260),
+        nodes=(trunk, riser, sink),
+        nets=(
+            NetSpec(
+                "combined",
+                "merge",
+                (PortRef("trunk", "e"), PortRef("riser", "e")),
+                (PortRef("sink", "w"),),
+                **net_options,  # type: ignore[arg-type]
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("sources", "sink"), LayoutSpec("row", gap=pt(40), align="start")),
+            GroupSpec(
+                "sources",
+                ("trunk", "riser"),
+                LayoutSpec("column", gap=pt(30), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+
+
+def test_net_defaults_keep_the_placement_and_dot_they_have_today() -> None:
+    """The two new hints are inert: this pins today's geometry point for point."""
+
+    compilation = compile_figure(_riser_merge_figure())
+    net = compilation.routed.net("combined")
+    assert net.spec.rail_at is None and net.spec.joint == "auto"
+    # One target clearance short of the sink port at x=98, as before the hints.
+    assert net.rail == (Point(84.0, 28.0), Point(84.0, 86.0))
+    assert tuple(stem.centerline for stem in net.source_stems) == (
+        (Point(58.0, 28.0), Point(84.0, 28.0)),
+        (Point(58.0, 86.0), Point(84.0, 86.0)),
+    )
+    assert tuple(stem.centerline for stem in net.target_stems) == (
+        (Point(84.0, 28.0), Point(98.0, 28.0)),
+    )
+    assert net.diagnostics == ()
+    assert compilation.document.text.count('id="combined.junction.1"') == 1
+
+
+def test_rail_at_slides_the_rail_along_the_trunk_run() -> None:
+    """R20: an authored fraction places the joint, measured from the trunk's start."""
+
+    for fraction, expected in ((0.25, 68.0), (0.5, 78.0), (0.6, 82.0)):
+        compilation = compile_figure(_riser_merge_figure(rail_at=fraction))
+        net = compilation.routed.net("combined")
+        # The run leaves trunk.e at x=58 and ends on sink.w at x=98.
+        assert net.rail[0].x == net.rail[-1].x == expected
+        assert net.rail[0].x == 58.0 + fraction * 40.0
+        assert net.diagnostics == ()
+        assert lint_compilation(compilation).ok
+
+
+def test_a_fan_out_measures_its_run_from_the_shared_source() -> None:
+    """R9: the two kinds read the same fraction in opposite directions."""
+
+    figure = _vertical_net_figure()
+    net = figure.nets[0]
+    routed = compile_figure(
+        FigureSpec(
+            figure.id,
+            width=figure.width,
+            nodes=figure.nodes,
+            nets=(NetSpec(net.id, net.kind, net.sources, net.targets, rail_at=0.25),),
+            groups=figure.groups,
+        )
+    ).routed.net("shared")
+    fitted = compile_figure(figure).fitted
+    source = fitted.node("source").port("s").position.y
+    far = max(
+        fitted.node(f"target{index}").port("n").position.y for index in range(1, 4)
+    )
+    assert routed.rail[0].y == pytest.approx(source + 0.25 * (far - source))
+
+
+def test_an_unreachable_rail_at_is_clamped_and_says_so() -> None:
+    """A placement hint is a request: the router may overrule it, but not quietly."""
+
+    compilation = compile_figure(_riser_merge_figure(rail_at=0.97))
+    net = compilation.routed.net("combined")
+    # 0.97 of the run lands inside the sink's arrival clearance, so the rail
+    # falls back to the nearest position that still clears it.
+    assert net.rail[0].x == 84.0
+    (diagnostic,) = net.diagnostics
+    assert diagnostic.code == "routing.net.rail-at.clamped"
+    assert diagnostic.severity is Severity.WARNING
+    assert diagnostic.entity_id == "combined"
+    assert "0.650" in diagnostic.message
+    report = lint_compilation(compilation)
+    assert report.ok, "a clamped hint is a warning, never an error"
+    assert diagnostic in report.warnings
+
+
+def test_rail_at_refuses_a_fraction_outside_the_run() -> None:
+    for fraction in (0.0, 1.0, -0.5, 1.4):
+        with pytest.raises(ValueError, match="strictly between 0 and 1"):
+            _riser_merge_figure(rail_at=fraction)
+
+
+def test_a_rail_side_hint_and_a_fraction_cannot_place_the_same_rail() -> None:
+    with pytest.raises(ValueError, match="places its rail twice"):
+        _riser_merge_figure(rail_at=0.5, rail_hint=Side.EAST)
+
+
+def test_an_arrow_joint_stands_off_the_trunk_it_points_into() -> None:
+    """R20: the branch ends in an arrowhead; the trunk it meets stays unbroken."""
+
+    style = LayoutStyle()
+    compilation = compile_figure(_riser_merge_figure(rail_at=0.5, joint="arrow"))
+    net = compilation.routed.net("combined")
+    (arrival,) = net.target_stems
+    joint = arrival.centerline[0]
+    assert joint == Point(78.0, 28.0), "the branch still meets the trunk exactly"
+    ink = _net_ink(
+        net,
+        style.elbow_radius.points,
+        arrow_length=style.arrow_length.points,
+        standoff=style.connector_standoff.points,
+    )
+    assert not ink.dots, "the arrowhead stands in for the junction dot"
+    (rail_id, points, arrow) = ink.rails[0]
+    assert (rail_id, arrow) == ("combined.rail", True)
+    # The marker is anchored at the path end and its tip reaches a full arrow
+    # further on, so this leaves the tip exactly one standoff short of the trunk.
+    tip = points[-1].distance_to(joint) - style.arrow_length.points
+    assert tip == pytest.approx(style.connector_standoff.points)
+    trunk = next(stem for stem in net.source_stems if stem.port.node_id == "trunk")
+    assert trunk.shaft[-1] == joint and arrival.shaft[0] == joint
+    assert [stem_id for stem_id, _, arrow in ink.stems if arrow] == ["combined.target.1"], (
+        "the rail carries the joint marker, so no stem gains one"
+    )
+    assert lint_compilation(compilation).ok

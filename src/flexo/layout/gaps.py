@@ -28,10 +28,10 @@ def routing_gaps_for_group(
     groups = {group.id: group for group in figure.groups}
     group = groups[group_id]
     boundary_count = max(0, len(group.children) - 1)
-    base = (group.layout.gap or style.gap).points
+    actual_kind = kind or group.layout.kind
+    base = group.layout.axis_gap(actual_kind, style.gap)
     if boundary_count == 0:
         return ()
-    actual_kind = kind or group.layout.kind
     if actual_kind not in {"row", "column", "stack"}:
         return (base,) * boundary_count
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.components import vector_grid
+from flexo.components import VectorGrid, vector_grid
 from flexo.ir.fitted import FittedNode
-from flexo.render_common import base_rect, paint_attributes
+from flexo.render_common import base_rect, motif_enabled, paint_attributes, paint_override
 from flexo.render_scientific import render_scientific
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, number
@@ -65,7 +65,7 @@ def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
     fill_role = "warm-fill" if kind in {"prediction", "loss"} else "block-fill"
     stroke_role = "warm-stroke" if kind in {"prediction", "loss"} else "block-stroke"
     base_rect(parent, node, style, palette, fill_role=fill_role, stroke_role=stroke_role)
-    if kind in {"mlp", "cnn", "add-norm"}:
+    if kind in {"mlp", "cnn", "add-norm"} and motif_enabled(node.measured.spec):
         motif = element(parent, "g", id=f"{node.measured.spec.id}.motif")
         bounds = node.bounds
         y = bounds.bottom - 6.0
@@ -114,6 +114,8 @@ def _feature_strip(
     palette: Palette,
 ) -> None:
     base_rect(parent, node, style, palette, fill_role="accent-fill", stroke_role="accent-stroke")
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     cells = int(node.measured.spec.property("cells", 6))
     motif = element(parent, "g", id=f"{node.measured.spec.id}.cells")
@@ -144,6 +146,8 @@ def _sequence(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
         fill_role="container-fill",
         stroke_role="container-stroke",
     )
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     motif = element(parent, "g", id=f"{node.measured.spec.id}.tokens")
     count = int(node.measured.spec.property("tokens", 7))
@@ -210,6 +214,8 @@ def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
         fill_role="container-fill",
         stroke_role="block-stroke",
     )
+    if not motif_enabled(node.measured.spec):
+        return
     bounds = node.bounds
     motif = element(parent, "g", id=f"{node.measured.spec.id}.motif")
     for index, width in enumerate((14.0, 10.0, 6.0)):
@@ -249,9 +255,49 @@ def _ramp_fill_opacity(index: int, count: int) -> float:
     return _RAMP_LIGHTEST + (_RAMP_DARKEST - _RAMP_LIGHTEST) * index / (count - 1)
 
 
+def _preset_vector(
+    parent: ET.Element,
+    node: FittedNode,
+    style: LayoutStyle,
+    grid: VectorGrid,
+    encoded: str,
+) -> None:
+    """Paint a vector whose cells carry the author's own shades.
+
+    The shades are literal colour, not roles, so no ``data-flexo-fill`` is
+    emitted and ``flexo retheme`` leaves the cells as authored.
+    """
+
+    spec = node.measured.spec
+    shades = tuple(tuple(column.split(",")) for column in encoded.split(";"))
+    if len(shades) != grid.columns or any(len(column) != grid.cells for column in shades):
+        raise ValueError(f'vector "{spec.id}" carries shades that do not match its grid')
+    stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp="preset")
+    for column in range(grid.columns):
+        for row in range(grid.cells):
+            cell = grid.cell_bounds(node.bounds, column, row)
+            element(
+                stack,
+                "rect",
+                id=f"{spec.id}.cell.{column + 1}.{row + 1}",
+                x=cell.x,
+                y=cell.y,
+                width=cell.width,
+                height=cell.height,
+                rx=style.vector_cell_radius.points,
+                fill=shades[column][row],
+                stroke=shades[column][row],
+                stroke__width=style.stroke_width.points * _CELL_STROKE_SCALE,
+            )
+
+
 def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     spec = node.measured.spec
     grid = vector_grid(spec, style, bounds=node.bounds)
+    encoded = spec.property("shades")
+    if encoded is not None:
+        _preset_vector(parent, node, style, grid, str(encoded))
+        return
     ramp = str(spec.property("ramp", "ramp-node"))
     stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp=ramp)
     for column in range(grid.columns):
@@ -341,6 +387,7 @@ def _render_label(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
+    spec = node.measured.spec
     metrics = node.measured.label
     if not metrics.lines:
         return
@@ -356,23 +403,23 @@ def _render_label(
         "sequence",
     }
     label_height = (
-        bounds.height * 0.24
-        if node.measured.spec.kind in motif_kinds
-        else bounds.height / 2
+        bounds.height * 0.24 if spec.kind in motif_kinds else bounds.height / 2
     )
     center_y = bounds.y + label_height
     first_baseline = center_y - metrics.height / 2.0 + metrics.baseline
+    # Author paint carries no role, so retheme leaves it alone (render_common).
+    literal = paint_override(spec, "label")
     text = element(
         parent,
         "text",
-        id=f"{node.measured.spec.id}.label",
+        id=f"{spec.id}.label",
         x=bounds.center.x,
         y=first_baseline,
         text__anchor="middle",
         font__family=style.typography.family,
         font__size=style.typography.size.points,
-        data__flexo__fill="ink",
-        fill=palette.get("ink"),
+        data__flexo__fill=None if literal is not None else "ink",
+        fill=literal if literal is not None else palette.get("ink"),
     )
     for line_index, line in enumerate(metrics.lines):
         for run_index, run in enumerate(line.runs):

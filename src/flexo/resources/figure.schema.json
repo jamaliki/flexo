@@ -42,6 +42,12 @@
         }
       ]
     },
+    "extent": {
+      "oneOf": [
+        {"$ref": "#/$defs/length"},
+        {"type": "string", "pattern": "^\\s*cells\\s*:\\s*[0-9]+\\s*$"}
+      ]
+    },
     "side": {
       "enum": ["north", "east", "south", "west"]
     },
@@ -101,8 +107,8 @@
         "label": {"$ref": "#/$defs/label", "default": ""},
         "role": {"$ref": "#/$defs/identifier", "default": "block"},
         "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "default": []},
-        "width": {"$ref": "#/$defs/length"},
-        "height": {"$ref": "#/$defs/length"},
+        "width": {"$ref": "#/$defs/extent"},
+        "height": {"$ref": "#/$defs/extent"},
         "properties": {
           "type": "object",
           "additionalProperties": {"type": ["string", "number", "integer", "boolean"]},
@@ -164,15 +170,19 @@
         },
         "role": {"$ref": "#/$defs/identifier", "default": "flow"},
         "label": {"$ref": "#/$defs/label", "default": ""},
-        "rail": {"$ref": "#/$defs/side"}
+        "rail": {"$ref": "#/$defs/side"},
+        "rail_at": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"}
       },
+      "not": {"required": ["rail", "rail_at"]},
       "allOf": [
         {
           "if": {"properties": {"kind": {"const": "fan-out"}}},
           "then": {
             "properties": {
               "sources": {"maxItems": 1},
-              "targets": {"minItems": 2}
+              "targets": {"minItems": 2},
+              "joint": {"enum": ["dot", "auto"]}
             }
           }
         },
@@ -194,14 +204,47 @@
       "properties": {
         "kind": {"enum": ["row", "column", "grid", "overlay", "stack"]},
         "gap": {"$ref": "#/$defs/length"},
+        "row_gap": {"$ref": "#/$defs/length"},
+        "column_gap": {"$ref": "#/$defs/length"},
         "padding": {"$ref": "#/$defs/length"},
+        "padding_top": {"$ref": "#/$defs/length"},
+        "padding_right": {"$ref": "#/$defs/length"},
+        "padding_bottom": {"$ref": "#/$defs/length"},
+        "padding_left": {"$ref": "#/$defs/length"},
         "align": {"enum": ["start", "center", "end", "stretch"], "default": "center"},
         "justify": {"enum": ["start", "center", "end", "space-between"], "default": "start"},
         "columns": {"type": "integer", "minimum": 1},
         "width": {"$ref": "#/$defs/length"},
         "height": {"$ref": "#/$defs/length"},
         "reflow": {"enum": ["row", "column", "grid", "overlay", "stack"]},
-        "equal_size": {"type": "boolean", "default": false}
+        "equal_size": {"type": "boolean", "default": false},
+        "placements": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["child", "row", "column"],
+            "properties": {
+              "child": {"$ref": "#/$defs/identifier"},
+              "row": {"type": "integer", "minimum": 0},
+              "column": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "column_widths": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["column", "width"],
+            "properties": {
+              "column": {"type": "integer", "minimum": 0},
+              "width": {"$ref": "#/$defs/length"}
+            }
+          }
+        }
       },
       "allOf": [
         {
@@ -220,7 +263,8 @@
         "layout": {"$ref": "#/$defs/layout"},
         "collision_policy": {"enum": ["disjoint", "overlay", "ignore"], "default": "disjoint"},
         "label": {"$ref": "#/$defs/label", "default": ""},
-        "role": {"$ref": "#/$defs/identifier", "default": "container"}
+        "role": {"$ref": "#/$defs/identifier", "default": "container"},
+        "title_side": {"enum": ["left", "right"], "default": "left"}
       }
     }
   }

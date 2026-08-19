@@ -23,7 +23,7 @@ from flexo.ir.semantic import (
     Waypoint,
 )
 from flexo.schema import validate_document
-from flexo.units import Length
+from flexo.units import CellSpan, Extent, Length, parse_extent
 from flexo.validate import normalize_and_validate
 
 
@@ -122,9 +122,9 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
             for port in node.ports
         ]
     if node.width is not None:
-        result["width"] = _length_data(node.width)
+        result["width"] = _extent_data(node.width)
     if node.height is not None:
-        result["height"] = _length_data(node.height)
+        result["height"] = _extent_data(node.height)
     if node.properties:
         result["properties"] = dict(node.properties)
     return result
@@ -162,6 +162,10 @@ def _net_data(net: NetSpec) -> dict[str, object]:
     _put_label(result, net.label)
     if net.rail_hint is not None:
         result["rail"] = net.rail_hint.value
+    if net.rail_at is not None:
+        result["rail_at"] = net.rail_at
+    if net.joint != "auto":
+        result["joint"] = net.joint
     return result
 
 
@@ -176,12 +180,25 @@ def _group_data(group: GroupSpec) -> dict[str, object]:
     _put_label(result, group.label)
     if group.role != "container":
         result["role"] = group.role
+    if group.title_side != "left":
+        result["title_side"] = group.title_side
     return result
 
 
 def _layout_data(layout: LayoutSpec) -> dict[str, object]:
     result: dict[str, object] = {"kind": layout.kind}
-    for name in ("gap", "padding", "width", "height"):
+    for name in (
+        "gap",
+        "row_gap",
+        "column_gap",
+        "padding",
+        "padding_top",
+        "padding_right",
+        "padding_bottom",
+        "padding_left",
+        "width",
+        "height",
+    ):
         value = getattr(layout, name)
         if value is not None:
             result[name] = _length_data(value)
@@ -195,6 +212,16 @@ def _layout_data(layout: LayoutSpec) -> dict[str, object]:
         result["reflow"] = layout.reflow
     if layout.equal_size:
         result["equal_size"] = True
+    if layout.placements:
+        result["placements"] = [
+            {"child": child_id, "row": row, "column": column}
+            for child_id, row, column in layout.placements
+        ]
+    if layout.column_widths:
+        result["column_widths"] = [
+            {"column": column, "width": _length_data(width)}
+            for column, width in layout.column_widths
+        ]
     return result
 
 
@@ -239,6 +266,10 @@ def _length_data(value: Length) -> str:
     return f"{rendered}pt"
 
 
+def _extent_data(value: Extent) -> str:
+    return str(value) if isinstance(value, CellSpan) else _length_data(value)
+
+
 def _label(value: object = "") -> tuple[TextRun, ...]:
     if isinstance(value, str):
         return (TextRun(value),) if value else ()
@@ -269,8 +300,8 @@ def _node(data: dict[str, Any]) -> NodeSpec:
             )
             for port in data.get("ports", [])
         ),
-        width=_optional_length(data.get("width")),
-        height=_optional_length(data.get("height")),
+        width=_optional_extent(data.get("width")),
+        height=_optional_extent(data.get("height")),
         properties=tuple(sorted(data.get("properties", {}).items())),
     )
 
@@ -298,6 +329,8 @@ def _net(data: dict[str, Any]) -> NetSpec:
         role=data.get("role", "flow"),
         label=_label(data.get("label", "")),
         rail_hint=Side(data["rail"]) if data.get("rail") else None,
+        rail_at=data.get("rail_at"),
+        joint=data.get("joint", "auto"),
     )
 
 
@@ -329,15 +362,34 @@ def _group(data: dict[str, Any]) -> GroupSpec:
             height=_optional_length(layout.get("height")),
             reflow=layout.get("reflow"),
             equal_size=layout.get("equal_size", False),
+            row_gap=_optional_length(layout.get("row_gap")),
+            column_gap=_optional_length(layout.get("column_gap")),
+            padding_top=_optional_length(layout.get("padding_top")),
+            padding_right=_optional_length(layout.get("padding_right")),
+            padding_bottom=_optional_length(layout.get("padding_bottom")),
+            padding_left=_optional_length(layout.get("padding_left")),
+            placements=tuple(
+                (item["child"], item["row"], item["column"])
+                for item in layout.get("placements", [])
+            ),
+            column_widths=tuple(
+                (item["column"], Length.parse(item["width"]))
+                for item in layout.get("column_widths", [])
+            ),
         ),
         collision_policy=data.get("collision_policy", "disjoint"),
         label=_label(data.get("label", "")),
         role=data.get("role", "container"),
+        title_side=data.get("title_side", "left"),
     )
 
 
 def _optional_length(value: object) -> Length | None:
     return None if value is None else Length.parse(value)  # type: ignore[arg-type]
+
+
+def _optional_extent(value: object) -> Extent | None:
+    return None if value is None else parse_extent(value)  # type: ignore[arg-type]
 
 
 def _length_or_preset(value: object) -> str | Length:

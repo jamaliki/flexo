@@ -184,6 +184,6 @@ def intrinsic_node_size(
             max(definition.minimum_size.width, label.width + 2.0 * style.padding_x.points),
             max(definition.minimum_size.height, label.height + 2.0 * style.padding_y.points),
         )
-    width = node.width.points if node.width is not None else natural.width
-    height = node.height.points if node.height is not None else natural.height
+    width = style.resolve_extent(node.width).points if node.width is not None else natural.width
+    height = style.resolve_extent(node.height).points if node.height is not None else natural.height
     return Size(width, height)

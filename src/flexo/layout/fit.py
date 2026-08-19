@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from flexo.diagnostics import Diagnostic, FlexoError
@@ -11,6 +10,7 @@ from flexo.ir.fitted import FittedFigure, FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import LayoutKind, LayoutSpec
 from flexo.layout.gaps import routing_gaps_for_group
+from flexo.layout.grid import grid_plan, grid_tracks
 from flexo.layout.measure import arrangement_size
 from flexo.layout.order import optimized_child_orders
 from flexo.layout.ports import adapt_ports
@@ -62,17 +62,17 @@ class _Fitter:
     def _fit_group(self, group_id: str, bounds: Rect) -> None:
         measured_group = self.groups[group_id]
         layout = measured_group.spec.layout
-        padding = (layout.padding or self.style.group_padding).points
+        padding = layout.resolved_padding(self.style.group_padding)
         title_height = (
             measured_group.label.height + self.style.compact_gap.points
             if measured_group.spec.label
             else 0.0
         )
         content = Rect(
-            bounds.x + padding,
-            bounds.y + padding + title_height,
-            max(0.0, bounds.width - 2.0 * padding),
-            max(0.0, bounds.height - 2.0 * padding - title_height),
+            bounds.x + padding.left,
+            bounds.y + padding.top + title_height,
+            max(0.0, bounds.width - padding.horizontal),
+            max(0.0, bounds.height - padding.vertical - title_height),
         )
         child_ids = self.child_orders.get(group_id, measured_group.spec.children)
         children = tuple(self._child(child_id) for child_id in child_ids)
@@ -130,6 +130,7 @@ class _Fitter:
                 kind=layout.kind,
                 edge_labels=self.edge_labels,
             ),
+            child_ids=tuple(child.id for child in children),
         )
         fits = (
             requested.width <= available.width + _EPSILON
@@ -150,6 +151,7 @@ class _Fitter:
                     kind=layout.reflow,
                     edge_labels=self.edge_labels,
                 ),
+                child_ids=tuple(child.id for child in children),
             )
             if (
                 reflowed.width <= available.width + _EPSILON
@@ -188,7 +190,6 @@ class _Fitter:
         sizes = _equalized(tuple(child.size for child in children)) if layout.equal_size else tuple(
             child.size for child in children
         )
-        gap = (layout.gap or self.style.gap).points
         axis_gaps = routing_gaps_for_group(
             self.measured.semantic,
             group_id,
@@ -234,26 +235,29 @@ class _Fitter:
                 )
                 for size in sizes
             )
-        return self._arrange_grid(sizes, layout, content, gap, group_id)
+        return self._arrange_grid(
+            sizes,
+            tuple(child.id for child in children),
+            layout,
+            content,
+            group_id,
+        )
 
     def _arrange_grid(
         self,
         sizes: tuple[Size, ...],
+        child_ids: tuple[str, ...],
         layout: LayoutSpec,
         content: Rect,
-        gap: float,
         group_id: str,
     ) -> tuple[Rect, ...]:
-        columns = layout.columns or 1
-        rows = math.ceil(len(sizes) / columns)
-        column_widths = [0.0] * columns
-        row_heights = [0.0] * rows
-        for index, size in enumerate(sizes):
-            column_widths[index % columns] = max(column_widths[index % columns], size.width)
-            row_heights[index // columns] = max(row_heights[index // columns], size.height)
+        row_gap = layout.resolved_row_gap(self.style.gap)
+        column_gap = layout.resolved_column_gap(self.style.gap)
+        plan = grid_plan(layout, child_ids)
+        column_widths, row_heights = grid_tracks(plan, sizes, layout)
         needed = Size(
-            sum(column_widths) + gap * (columns - 1),
-            sum(row_heights) + gap * (rows - 1),
+            sum(column_widths) + column_gap * (plan.columns - 1),
+            sum(row_heights) + row_gap * (plan.rows - 1),
         )
         if needed.width > content.width + _EPSILON or needed.height > content.height + _EPSILON:
             raise FlexoError(
@@ -264,7 +268,7 @@ class _Fitter:
                 )
             )
         start_x, actual_x_gap = _justification(
-            layout.justify, content.width, needed.width, gap, columns
+            layout.justify, content.width, needed.width, column_gap, plan.columns
         )
         start_y = _cross_position(layout.align, content.y, content.height, needed.height)
         xs = [content.x + start_x]
@@ -272,25 +276,15 @@ class _Fitter:
             xs.append(xs[-1] + width + actual_x_gap)
         ys = [start_y]
         for height in row_heights[:-1]:
-            ys.append(ys[-1] + height + gap)
+            ys.append(ys[-1] + height + row_gap)
         return tuple(
             Rect(
-                _cross_position(
-                    layout.align,
-                    xs[index % columns],
-                    column_widths[index % columns],
-                    size.width,
-                ),
-                _cross_position(
-                    layout.align,
-                    ys[index // columns],
-                    row_heights[index // columns],
-                    size.height,
-                ),
+                _cross_position(layout.align, xs[column], column_widths[column], size.width),
+                _cross_position(layout.align, ys[row], row_heights[row], size.height),
                 size.width,
                 size.height,
             )
-            for index, size in enumerate(sizes)
+            for (row, column), size in zip(plan.cells, sizes, strict=True)
         )
 
 

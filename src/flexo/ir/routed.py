@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flexo.diagnostics import Diagnostic
 from flexo.geometry import Point
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import TextMetrics
@@ -35,6 +36,8 @@ class RoutedNet:
     target_stems: tuple[RoutedStem, ...]
     label_metrics: TextMetrics | None = None
     label_position: Point | None = None
+    diagnostics: tuple[Diagnostic, ...] = ()
+    """What the router had to overrule while placing this net, for the lint report."""
 
     @property
     def junctions(self) -> tuple[Point, ...]:

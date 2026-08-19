@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import math
-
 from flexo.components import intrinsic_node_size
 from flexo.geometry import Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import FigureSpec, LayoutKind, LayoutSpec, NodeSpec
 from flexo.layout.gaps import routing_gaps_for_group
+from flexo.layout.grid import grid_plan, grid_tracks
 from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer
 from flexo.validate import normalize_and_validate
@@ -58,13 +57,17 @@ def measure_figure(
                 layout_style,
                 edge_labels=edge_labels,
             ),
+            child_ids=group.children,
         )
-        padding = (group.layout.padding or layout_style.group_padding).points
+        padding = group.layout.resolved_padding(layout_style.group_padding)
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
         measured = MeasuredGroup(
             group,
             label,
-            Size(body.width + 2.0 * padding, body.height + 2.0 * padding + title_height),
+            Size(
+                body.width + padding.horizontal,
+                body.height + padding.vertical + title_height,
+            ),
         )
         measured_groups[group_id] = measured
         return measured
@@ -94,12 +97,16 @@ def arrangement_size(
     *,
     kind: LayoutKind | None = None,
     gaps: tuple[float, ...] | None = None,
+    child_ids: tuple[str, ...] | None = None,
 ) -> Size:
     if not child_sizes:
         return Size(0.0, 0.0)
     actual_kind = kind or layout.kind
-    gap = (layout.gap or style.gap).points
-    axis_gaps = gaps if gaps is not None else (gap,) * (len(child_sizes) - 1)
+    axis_gaps = (
+        gaps
+        if gaps is not None
+        else (layout.axis_gap(actual_kind, style.gap),) * (len(child_sizes) - 1)
+    )
     values = _equalized(child_sizes) if layout.equal_size else child_sizes
     if actual_kind == "row":
         return Size(
@@ -116,18 +123,12 @@ def arrangement_size(
             max(size.width for size in values),
             max(size.height for size in values),
         )
-    columns = layout.columns or 1
-    rows = math.ceil(len(values) / columns)
-    column_widths = [0.0] * columns
-    row_heights = [0.0] * rows
-    for index, size in enumerate(values):
-        column = index % columns
-        row = index // columns
-        column_widths[column] = max(column_widths[column], size.width)
-        row_heights[row] = max(row_heights[row], size.height)
+    # Without names no child can be addressed, so every one of them flows.
+    plan = grid_plan(layout, child_ids if child_ids is not None else ("",) * len(values))
+    column_widths, row_heights = grid_tracks(plan, values, layout)
     return Size(
-        sum(column_widths) + gap * (columns - 1),
-        sum(row_heights) + gap * (rows - 1),
+        sum(column_widths) + layout.resolved_column_gap(style.gap) * (plan.columns - 1),
+        sum(row_heights) + layout.resolved_row_gap(style.gap) * (plan.rows - 1),
     )
 
 

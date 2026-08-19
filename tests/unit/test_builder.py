@@ -7,12 +7,14 @@ import yaml
 
 from flexo.builder import Figure, NodeHandle
 from flexo.compiler import Compilation, compile_figure
+from flexo.diagnostics import FlexoError
 from flexo.gallery import modelangelo_gnn, vertical_slice
 from flexo.geometry import Side
-from flexo.ir.semantic import PortSpec, TextRun
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec, TextRun
 from flexo.serialization import dump_figure, parse_figure
-from flexo.style import STYLES
-from flexo.units import pt
+from flexo.style import STYLES, VectorPreset
+from flexo.units import CellSpan, pt
+from flexo.validate import normalize_and_validate
 
 
 def test_builder_scopes_ids_and_connects_handles() -> None:
@@ -281,6 +283,37 @@ def test_vector_rejects_a_ramp_no_palette_defines() -> None:
             module.vector("v", ramp="ramp-rainbow")
 
 
+def test_vector_preset_carries_its_shades_instead_of_a_ramp_role() -> None:
+    preset = VectorPreset(("#d0568c", "#7fae3f"), "2x3")
+    figure = Figure("preset", width=pt(120.0))
+    with figure.module("m") as module:
+        module.vector("kv", label="K, V", preset=preset)
+    assert dict(figure.spec.node("m.kv.cells").properties) == {
+        "cells": 3,
+        "columns": 2,
+        "shades": preset.encode(),
+    }
+
+
+def test_vector_preset_refuses_to_share_the_job_with_ramp_or_topology() -> None:
+    figure = Figure("preset", width=pt(120.0))
+    with figure.module("m") as module:
+        for conflict in ({"ramp": "ramp-q"}, {"cells": 4}, {"columns": 2}):
+            with pytest.raises(ValueError, match="already carries colour and topology"):
+                module.vector("v", preset=VectorPreset("#4a6cb0", "1x3"), **conflict)
+
+
+def test_vector_without_a_preset_keeps_its_defaults() -> None:
+    figure = Figure("plain", width=pt(120.0))
+    with figure.module("m") as module:
+        module.vector("v")
+    assert dict(figure.spec.node("m.v.cells").properties) == {
+        "cells": 3,
+        "columns": 1,
+        "ramp": "ramp-node",
+    }
+
+
 def test_vector_round_trips_through_the_interchange_format() -> None:
     original = _vector_figure(cells=4, columns=2).spec
     assert parse_figure(yaml.safe_load(dump_figure(original))) == original
@@ -330,3 +363,182 @@ def test_panel_arrows_land_on_vector_side_centres(panel: Compilation) -> None:
         )
         touched.add(reference.node_id)
     assert len(touched) >= 18, "the whole panel speaks the vector language"
+
+
+def test_at_places_children_and_leaves_the_rest_flowing() -> None:
+    with Figure("placed", width=pt(400)) as figure:  # noqa: SIM117
+        with figure.root.grid("panel", columns=4, gap=pt(8)) as panel:
+            panel.block("first", label="A")
+            panel.block("last", label="D", at=(1, 3))
+            panel.block("second", label="B")
+    layout = figure.spec.group("panel").layout
+    assert layout.placements == (("panel.last", 1, 3),)
+    assert layout.placement_map() == {"panel.last": (1, 3)}
+
+
+def test_vector_addresses_its_whole_composite() -> None:
+    with Figure("placed", width=pt(400)) as figure:  # noqa: SIM117
+        with figure.root.grid("panel", columns=3) as panel:
+            panel.vector("q", label="Q", ramp="ramp-q", at=(1, 2))
+    # The grid's child is the column holding cells and caption, not the cells.
+    assert figure.spec.group("panel").layout.placements == (("panel.q", 1, 2),)
+
+
+def test_two_children_in_one_cell_is_rejected_where_it_is_written() -> None:
+    with Figure("clash", width=pt(400)) as figure, figure.root.grid("panel", columns=3) as panel:
+        panel.block("first", label="A", at=(0, 1))
+        with pytest.raises(ValueError, match=r'already taken by "panel\.first"'):
+            panel.block("second", label="B", at=(0, 1))
+
+
+def test_a_column_outside_the_grid_is_rejected() -> None:
+    with (
+        Figure("range", width=pt(400)) as figure,
+        figure.root.grid("panel", columns=3) as panel,
+    ):
+        with pytest.raises(ValueError, match=r"column 3 .* is out of range"):
+            panel.block("first", label="A", at=(0, 3))
+        with pytest.raises(ValueError, match="0-indexed"):
+            panel.block("second", label="B", at=(-1, 0))
+
+
+def test_at_needs_a_grid() -> None:
+    with (
+        Figure("kind", width=pt(400)) as figure,
+        figure.root.row("band") as band,
+        pytest.raises(ValueError, match="lays out as a row"),
+    ):
+        band.block("first", label="A", at=(0, 0))
+
+
+def test_placement_naming_a_stranger_is_a_diagnostic() -> None:
+    figure = FigureSpec(
+        "stranger",
+        width=pt(200),
+        nodes=(NodeSpec("only", "block", (TextRun("A"),)),),
+        groups=(
+            GroupSpec(
+                "root",
+                ("only",),
+                LayoutSpec(kind="grid", columns=2, placements=(("ghost", 0, 1),)),
+            ),
+        ),
+    )
+    with pytest.raises(FlexoError, match="not a child of this group"):
+        normalize_and_validate(figure)
+
+
+def test_padding_takes_one_length_a_pair_or_four_sides() -> None:
+    with Figure("padding", width=pt(400)) as figure:
+        figure.root.group("uniform", padding=pt(6))
+        figure.root.group("pair", padding=(pt(4), pt(20)))
+        figure.root.group("sides", padding=(pt(1), pt(2), pt(3), pt(4)))
+    spec = figure.spec
+    uniform = spec.group("uniform").layout
+    assert uniform.padding == pt(6) and uniform.padding_top is None
+    pair = spec.group("pair").layout
+    assert (pair.padding_top, pair.padding_right) == (pt(20), pt(4))
+    assert (pair.padding_bottom, pair.padding_left) == (pt(20), pt(4))
+    sides = spec.group("sides").layout
+    assert (sides.padding_top, sides.padding_right, sides.padding_bottom, sides.padding_left) == (
+        pt(1),
+        pt(2),
+        pt(3),
+        pt(4),
+    )
+
+
+def test_padding_rejects_a_three_value_shorthand() -> None:
+    with (
+        Figure("padding", width=pt(400)) as figure,
+        pytest.raises(ValueError, match="not 3 values"),
+    ):
+        figure.root.group("odd", padding=(pt(1), pt(2), pt(3)))
+
+
+def test_column_widths_need_a_column_count() -> None:
+    with (
+        Figure("lane", width=pt(400)) as figure,
+        pytest.raises(ValueError, match="need a column count"),
+    ):
+        figure.root.row("band", column_widths={0: pt(50)})
+
+
+def test_cells_extent_survives_a_document_round_trip() -> None:
+    with Figure("extent", width=pt(400)) as figure:  # noqa: SIM117
+        with figure.root.grid("panel", columns=2, row_gap=pt(4), column_gap=pt(18)) as panel:
+            panel.mlp("projection", height="cells:3", width=pt(40))
+            panel.block("tail", label="T", at=(1, 1))
+    original = figure.spec
+    assert original.node("panel.projection").height == CellSpan(3)
+    parsed = parse_figure(yaml.safe_load(dump_figure(original)))
+    assert parsed == original
+
+
+def test_paint_lowers_into_one_scalar_property_per_part() -> None:
+    """A node property holds a scalar, so the three parts travel separately."""
+
+    figure = Figure("paint", width=pt(240.0))
+    with figure.module("m") as module:
+        module.mlp("mlp", label="MLP", paint={"label": "#9fe1cb", "fill": "#085041"})
+    node = figure.spec.node("m.mlp")
+    assert dict(node.properties) == {"paint-fill": "#085041", "paint-label": "#9fe1cb"}
+    assert parse_figure(yaml.safe_load(dump_figure(figure.spec))).node("m.mlp") == node
+
+
+def test_motif_only_reaches_the_properties_when_it_is_off() -> None:
+    figure = Figure("motifs", width=pt(240.0))
+    with figure.module("m") as module:
+        module.mlp("on", label="On")
+        module.mlp("off", label="Off", motif=False)
+        module.feature_strip("strip", label="Strip", cells=4, motif=False)
+    assert figure.spec.node("m.on").properties == ()
+    assert dict(figure.spec.node("m.off").properties) == {"motif": False}
+    # A motif switch may not displace the properties a component already sets.
+    assert dict(figure.spec.node("m.strip").properties) == {"cells": 4, "motif": False}
+
+
+def test_an_unknown_title_side_is_rejected_where_it_is_written() -> None:
+    figure = Figure("titles", width=pt(240.0))
+    with pytest.raises(ValueError, match="valid sides: left, right"):
+        figure.module("m", label="Module", title_side="top")
+    assert figure.module("m", label="Module", title_side="right")
+    assert figure.spec.group("m").title_side == "right"
+
+
+def _joined_figure(**net_options: object) -> Figure:
+    figure = Figure("joins", width=pt(320.0))
+    with figure.module("m", gap="40pt") as module:
+        first = module.block("first", label="First")
+        second = module.block("second", label="Second")
+        sink = module.block("sink", label="Sink")
+    figure.merge(sinks=[first, second], dst=sink, id="combined", **net_options)  # type: ignore[arg-type]
+    return figure
+
+
+def test_merge_carries_its_rail_placement_and_joint_style_into_the_spec() -> None:
+    net = _joined_figure(rail_at=0.55, joint="arrow").spec.nets[0]
+    assert (net.rail_at, net.joint) == (0.55, "arrow")
+    assert parse_figure(yaml.safe_load(dump_figure(_joined_figure(rail_at=0.55).spec))).nets == (
+        _joined_figure(rail_at=0.55).spec.nets
+    )
+
+
+def test_a_net_refuses_a_placement_it_cannot_keep() -> None:
+    with pytest.raises(ValueError, match="strictly between 0 and 1"):
+        _joined_figure(rail_at=1.0)
+    with pytest.raises(ValueError, match="places its rail twice"):
+        _joined_figure(rail_at=0.5, rail="east")
+
+
+def test_only_a_merge_may_join_with_an_arrowhead() -> None:
+    """A fan-out's branches leave the trunk, so an arrow there would point back."""
+
+    figure = Figure("fan", width=pt(320.0))
+    with figure.module("m", gap="40pt") as module:
+        source = module.block("source", label="Source")
+        first = module.block("first", label="First")
+        second = module.block("second", label="Second")
+    with pytest.raises(ValueError, match="only a merge has"):
+        figure.net(src=source, sinks=[first, second], joint="arrow")
+    assert figure.net(src=source, sinks=[first, second], joint="dot", id="shared").joint == "dot"

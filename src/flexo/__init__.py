@@ -15,9 +15,11 @@ from flexo.ir.semantic import (
     PortSpec,
     TextRun,
 )
-from flexo.units import Length, cm, inch, mm, pt, px
+from flexo.style import VectorPreset, shade_ramp, vector_stack_height
+from flexo.units import CellSpan, Length, cm, inch, mm, pt, px
 
 __all__ = [
+    "CellSpan",
     "Compilation",
     "Diagnostic",
     "EdgeSpec",
@@ -39,12 +41,15 @@ __all__ = [
     "Severity",
     "Size",
     "TextRun",
+    "VectorPreset",
     "cm",
     "compile_figure",
     "inch",
     "mm",
     "pt",
     "px",
+    "shade_ramp",
+    "vector_stack_height",
 ]
 
 __version__ = "0.1.0"

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Self
 
 from flexo.components import normalize_node
 from flexo.geometry import Side
 from flexo.ir.semantic import (
+    TITLE_SIDES,
     EdgeSpec,
     FigureSpec,
     GroupSpec,
+    JointStyle,
     LayoutKind,
     LayoutSpec,
     NetSpec,
@@ -21,9 +24,23 @@ from flexo.ir.semantic import (
     Scalar,
     TextRun,
 )
-from flexo.style import RAMP_ROLES, STYLES, LayoutStyle
-from flexo.units import Length
+from flexo.style import (
+    PAINT_PARTS,
+    PAINT_PROPERTY_PREFIX,
+    RAMP_ROLES,
+    STYLES,
+    LayoutStyle,
+    VectorPreset,
+    normalize_colour,
+)
+from flexo.units import Extent, Length, parse_extent
 from flexo.validate import normalize_and_validate
+
+type Padding = Length | str | float | Sequence[Length | str | float]
+"""One length for all four sides, an ``(x, y)`` pair, or ``(top, right, bottom, left)``."""
+
+type Cell = tuple[int, int]
+"""A 0-indexed ``(row, column)`` grid address."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +74,10 @@ class _GroupDraft:
     collision_policy: str
     label: tuple[TextRun, ...]
     role: str
+    title_side: str = "left"
     children: list[str] = field(default_factory=list)
+    placements: dict[str, Cell] = field(default_factory=dict)
+    """Grid cells claimed by ``at=``, collected as children are authored."""
 
 
 class Figure:
@@ -112,6 +132,7 @@ class Figure:
         width: Length | str | float | None = None,
         height: Length | str | float | None = None,
         role: str = "module",
+        title_side: str = "left",
     ) -> GroupBuilder:
         return self.root.group(
             id,
@@ -123,6 +144,7 @@ class Figure:
             width=width,
             height=height,
             role=role,
+            title_side=title_side,
         )
 
     @property
@@ -131,10 +153,11 @@ class Figure:
             GroupSpec(
                 draft.id,
                 tuple(draft.children),
-                draft.layout,
+                _with_placements(draft),
                 draft.collision_policy,  # type: ignore[arg-type]
                 draft.label,
                 draft.role,
+                draft.title_side,  # type: ignore[arg-type]
             )
             for draft in self._groups
         )
@@ -161,6 +184,8 @@ class Figure:
         | list[NodeHandle | PortRef | str],
         id: str | None = None,
         rail: Side | str | None = None,
+        rail_at: float | None = None,
+        joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
     ) -> NetSpec:
@@ -172,6 +197,8 @@ class Figure:
             tuple(_reference(sink, "input") for sink in sinks),
             id=id,
             rail=rail,
+            rail_at=rail_at,
+            joint=joint,
             label=label,
             role=role,
         )
@@ -184,6 +211,8 @@ class Figure:
         dst: NodeHandle | PortRef | str,
         id: str | None = None,
         rail: Side | str | None = None,
+        rail_at: float | None = None,
+        joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
     ) -> NetSpec:
@@ -195,6 +224,8 @@ class Figure:
             (_reference(dst, "input"),),
             id=id,
             rail=rail,
+            rail_at=rail_at,
+            joint=joint,
             label=label,
             role=role,
         )
@@ -207,6 +238,8 @@ class Figure:
         *,
         id: str | None,
         rail: Side | str | None,
+        rail_at: float | None,
+        joint: JointStyle,
         label: str | tuple[TextRun, ...],
         role: str,
     ) -> NetSpec:
@@ -219,6 +252,8 @@ class Figure:
             role,
             _label(label),
             Side(rail) if isinstance(rail, str) else rail,
+            rail_at,
+            joint,
         )
         self._nets.append(net)
         return net
@@ -253,32 +288,66 @@ class GroupBuilder:
         label: str | tuple[TextRun, ...] = "",
         layout: LayoutKind | LayoutSpec = "row",
         gap: Length | str | float | None = None,
-        padding: Length | str | float | None = None,
+        row_gap: Length | str | float | None = None,
+        column_gap: Length | str | float | None = None,
+        padding: Padding | None = None,
         align: str = "center",
         justify: str = "start",
         columns: int | None = None,
+        column_widths: Mapping[int, Length | str | float] | None = None,
         width: Length | str | float | None = None,
         height: Length | str | float | None = None,
         reflow: LayoutKind | None = None,
         equal_size: bool = False,
         collision_policy: str = "disjoint",
         role: str = "container",
+        title_side: str = "left",
+        at: Cell | None = None,
     ) -> GroupBuilder:
+        """Open a nested layout group.
+
+        ``gap`` spaces siblings on both axes; ``row_gap`` and ``column_gap``
+        override it for one axis each, so a grid can breathe vertically without
+        also spreading sideways. ``padding`` is one length for all four sides, an
+        ``(x, y)`` pair, or ``(top, right, bottom, left)``.
+
+        ``at=(row, column)`` places this group in one cell of the enclosing grid
+        (see ``grid`` for the rules), and ``column_widths`` reserves minimum
+        widths in this group's own grid.
+
+        ``title_side="right"`` anchors the group's title to the right end of its
+        top edge instead of the left. The title band is the same height either
+        way, so nothing else in the figure moves.
+        """
+
         scoped_id = self._scoped(id)
+        if title_side not in TITLE_SIDES:
+            raise ValueError(
+                f'unknown title side "{title_side}" for group "{scoped_id}"; '
+                f"valid sides: {', '.join(TITLE_SIDES)}"
+            )
+        uniform, top, right, bottom, left = _padding(padding)
         layout_spec = (
             layout
             if isinstance(layout, LayoutSpec)
             else LayoutSpec(
-                layout,
-                _length(gap),
-                _length(padding),
-                align,  # type: ignore[arg-type]
-                justify,  # type: ignore[arg-type]
-                columns,
-                _length(width),
-                _length(height),
-                reflow,
-                equal_size,
+                kind=layout,
+                gap=_length(gap),
+                padding=uniform,
+                align=align,  # type: ignore[arg-type]
+                justify=justify,  # type: ignore[arg-type]
+                columns=columns,
+                width=_length(width),
+                height=_length(height),
+                reflow=reflow,
+                equal_size=equal_size,
+                row_gap=_length(row_gap),
+                column_gap=_length(column_gap),
+                padding_top=top,
+                padding_right=right,
+                padding_bottom=bottom,
+                padding_left=left,
+                column_widths=_column_widths(column_widths, columns),
             )
         )
         draft = _GroupDraft(
@@ -287,8 +356,10 @@ class GroupBuilder:
             collision_policy,
             _label(label),
             role,
+            title_side,
         )
         self._draft.children.append(scoped_id)
+        self._place(scoped_id, at)
         self.figure._groups.append(draft)
         return GroupBuilder(self.figure, draft)
 
@@ -299,6 +370,28 @@ class GroupBuilder:
         return self.group(id, layout="column", **options)
 
     def grid(self, id: str, *, columns: int, **options: object) -> GroupBuilder:
+        """Open a grid of ``columns`` columns whose children fill it by cell.
+
+        A child may name its cell with ``at=(row, column)``, 0-indexed from the
+        top-left. Mixed mode is deterministic: **addressed children claim their
+        cells first, then the unaddressed ones keep author order and flow
+        row-major into whatever cells are left.** So a child addressed at (0, 4)
+        pushes no sibling sideways -- the flow simply steps over that cell when
+        it reaches it.
+
+        Nothing has to fill the holes. A short last row, an empty column, or a
+        gap in the middle of a row all cost zero children; the grid pads them
+        internally. Rows grow to hold the highest row any child addresses.
+
+        An empty column still occupies its slot, and ``column_widths={index:
+        length}`` reserves a minimum width for one -- that is how a lane that
+        carries only a connector and its caption gets its space, with no node in
+        it at all.
+
+        Two children addressed to the same cell, or a column outside the grid,
+        is an error at the point of authoring.
+        """
+
         return self.group(id, layout="grid", columns=columns, **options)
 
     def overlay(self, id: str, **options: object) -> GroupBuilder:
@@ -312,10 +405,36 @@ class GroupBuilder:
         label: str | tuple[TextRun, ...] = "",
         role: str = "block",
         ports: tuple[PortSpec, ...] = (),
-        width: Length | str | float | None = None,
-        height: Length | str | float | None = None,
+        width: Extent | str | float | None = None,
+        height: Extent | str | float | None = None,
         properties: dict[str, Scalar] | None = None,
+        paint: Mapping[str, str] | None = None,
+        motif: bool = True,
+        at: Cell | None = None,
     ) -> NodeHandle:
+        """Author one component.
+
+        ``width`` and ``height`` take any length, or the string ``"cells:N"`` --
+        the height of an N-cell vector stack under the figure's style, so a box
+        lines its side ports up with a vector without the author computing the
+        stack. ``at=(row, column)`` places the node in one cell of an enclosing
+        grid.
+
+        ``paint={"fill": ..., "stroke": ..., "label": ...}`` overrides the
+        palette role for this node's body fill, body stroke, and label text with
+        literal hex colours. An overridden part carries no paint role into the
+        SVG, so ``flexo retheme`` leaves it as authored -- reach for it when one
+        component has to differ from its palette, and change the palette when
+        every component of a kind does.
+
+        ``motif=False`` drops the component's decorative motif -- an MLP's three
+        dots, a matrix's cell grid -- and changes nothing else.
+        """
+
+        resolved = dict(properties or {})
+        resolved.update(_paint_properties(paint))
+        if not motif:
+            resolved["motif"] = False
         node = normalize_node(
             NodeSpec(
                 self._scoped(id),
@@ -323,13 +442,14 @@ class GroupBuilder:
                 _label(label),
                 role,
                 ports,
-                _length(width),
-                _length(height),
-                tuple(sorted((properties or {}).items())),
+                _extent(width),
+                _extent(height),
+                tuple(sorted(resolved.items())),
             )
         )
         self.figure._nodes.append(node)
         self._draft.children.append(node.id)
+        self._place(node.id, at)
         return NodeHandle(node.id, tuple(port.name for port in node.ports))
 
     def block(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
@@ -356,11 +476,13 @@ class GroupBuilder:
         id: str,
         *,
         label: str | tuple[TextRun, ...] = "",
-        ramp: str = "ramp-node",
-        cells: int = 3,
-        columns: int = 1,
+        preset: VectorPreset | None = None,
+        ramp: str | None = None,
+        cells: int | None = None,
+        columns: int | None = None,
         input: NodeHandle | PortRef | str | None = None,
         gap: Length | str | float | None = None,
+        at: Cell | None = None,
         **options: object,
     ) -> NodeHandle:
         """A labelled vertical vector glyph: a cell stack with its label below it.
@@ -376,26 +498,50 @@ class GroupBuilder:
 
         A caption wider than the stack is fine -- the column centres both -- and
         a ``\\n`` in the label breaks it across lines instead of widening it.
+
+        A ``preset`` replaces ``ramp``, ``cells``, and ``columns``: it carries
+        the author's own base colour and topology, and the cells paint the
+        shades it derives rather than a palette role.
+
+        ``at=(row, column)`` addresses the composite -- caption and all -- in an
+        enclosing grid, because the column holding both is the grid's child.
         """
 
-        if cells < 1:
-            raise ValueError("a vector needs at least one cell")
-        if columns < 1:
-            raise ValueError("a vector needs at least one column")
-        if ramp not in RAMP_ROLES:
-            valid = ", ".join(RAMP_ROLES)
-            raise ValueError(f'unknown vector ramp "{ramp}"; valid ramps: {valid}')
+        if preset is not None:
+            if ramp is not None or cells is not None or columns is not None:
+                raise ValueError(
+                    "a vector preset already carries colour and topology; "
+                    "drop ramp, cells, and columns"
+                )
+            properties: dict[str, Scalar] = {
+                "cells": preset.cells,
+                "columns": preset.columns,
+                "shades": preset.encode(),
+            }
+        else:
+            ramp = "ramp-node" if ramp is None else ramp
+            cells = 3 if cells is None else cells
+            columns = 1 if columns is None else columns
+            if cells < 1:
+                raise ValueError("a vector needs at least one cell")
+            if columns < 1:
+                raise ValueError("a vector needs at least one column")
+            if ramp not in RAMP_ROLES:
+                valid = ", ".join(RAMP_ROLES)
+                raise ValueError(f'unknown vector ramp "{ramp}"; valid ramps: {valid}')
+            properties = {"cells": cells, "columns": columns, "ramp": ramp}
         stack = self.column(
             id,
             gap=_vector_label_gap(self.figure.style) if gap is None else gap,
             padding=0,
             align="center",
             role="layout",
+            at=at,
         )
         result = stack.node(
             "cells",
             "vector",
-            properties={"cells": cells, "columns": columns, "ramp": ramp},
+            properties=properties,
             **{"role": "vector", **options},
         )
         if _label(label):
@@ -647,6 +793,105 @@ class GroupBuilder:
             return id
         return f"{self.id}.{id}"
 
+    def _place(self, child_id: str, at: Cell | None) -> None:
+        """Claim one grid cell for a child, rejecting a clash where it is made."""
+
+        if at is None:
+            return
+        layout = self._draft.layout
+        if layout.kind != "grid":
+            raise ValueError(
+                f'"at" addresses a grid cell, but group "{self.id}" lays out as a {layout.kind}'
+            )
+        if len(tuple(at)) != 2:
+            raise ValueError('"at" takes a (row, column) pair')
+        row, column = (int(value) for value in at)
+        columns = layout.columns or 1
+        if row < 0 or column < 0:
+            raise ValueError(
+                f'cell (row {row}, column {column}) for "{child_id}" is out of range; '
+                "grid rows and columns are 0-indexed"
+            )
+        if column >= columns:
+            raise ValueError(
+                f'column {column} for "{child_id}" is out of range; '
+                f'group "{self.id}" has {columns} columns (0-{columns - 1})'
+            )
+        for other_id, cell in self._draft.placements.items():
+            if cell == (row, column):
+                raise ValueError(
+                    f'cell (row {row}, column {column}) of group "{self.id}" is already '
+                    f'taken by "{other_id}"'
+                )
+        self._draft.placements[child_id] = (row, column)
+
+
+def _with_placements(draft: _GroupDraft) -> LayoutSpec:
+    if not draft.placements:
+        return draft.layout
+    return replace(
+        draft.layout,
+        placements=tuple(
+            (child_id, row, column) for child_id, (row, column) in draft.placements.items()
+        ),
+    )
+
+
+def _paint_properties(paint: Mapping[str, str] | None) -> dict[str, Scalar]:
+    """Lower an authored ``paint`` mapping into one scalar property per part.
+
+    A node property holds a scalar, never a mapping, so the three parts travel
+    separately as ``paint-fill``, ``paint-stroke``, and ``paint-label``. Colours
+    are normalized to ``#rrggbb`` here, which is both the validation and what
+    keeps ``#abc`` and ``#aabbcc`` from serializing as two different figures.
+    """
+
+    if not paint:
+        return {}
+    unknown = sorted(set(paint) - set(PAINT_PARTS))
+    if unknown:
+        raise ValueError(
+            f"unknown paint part(s) {', '.join(unknown)}; "
+            f"valid parts: {', '.join(PAINT_PARTS)}"
+        )
+    return {
+        f"{PAINT_PROPERTY_PREFIX}{part}": normalize_colour(paint[part])
+        for part in PAINT_PARTS
+        if part in paint
+    }
+
+
+def _padding(value: Padding | None) -> tuple[Length | None, ...]:
+    """Normalize an authored padding into (uniform, top, right, bottom, left).
+
+    One length stays uniform, so a figure that never asks for asymmetry keeps
+    exactly the spec it had before the four sides existed.
+    """
+
+    if value is None or isinstance(value, (Length, str, int, float)):
+        return (_length(value), None, None, None, None)
+    sides = tuple(Length.parse(item) for item in value)
+    if len(sides) == 2:
+        x, y = sides
+        return (None, y, x, y, x)
+    if len(sides) == 4:
+        return (None, *sides)
+    raise ValueError(
+        "padding takes one length, an (x, y) pair, or a (top, right, bottom, left) 4-tuple, "
+        f"not {len(sides)} values"
+    )
+
+
+def _column_widths(
+    value: Mapping[int, Length | str | float] | None,
+    columns: int | None,
+) -> tuple[tuple[int, Length], ...]:
+    if not value:
+        return ()
+    if columns is None:
+        raise ValueError("column widths need a column count; give the group columns=")
+    return tuple(sorted((int(column), Length.parse(width)) for column, width in value.items()))
+
 
 def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortSpec, ...]:
     inputs = tuple(
@@ -697,6 +942,10 @@ def _label(value: str | tuple[TextRun, ...]) -> tuple[TextRun, ...]:
 
 def _length(value: Length | str | float | None) -> Length | None:
     return None if value is None else Length.parse(value)
+
+
+def _extent(value: Extent | str | float | None) -> Extent | None:
+    return None if value is None else parse_extent(value)
 
 
 def _port_name(value: str | None) -> str:

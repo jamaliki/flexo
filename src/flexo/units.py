@@ -76,6 +76,45 @@ class Length:
         return Length(self.points / scalar)
 
 
+_CELL_SPAN_PATTERN = re.compile(r"^\s*cells\s*:\s*(\d+)\s*$")
+
+
+@dataclass(frozen=True, slots=True)
+class CellSpan:
+    """An extent written ``"cells:N"``: the height of an N-cell vector stack.
+
+    The physical size depends on the figure's style -- the cell side and the gap
+    between cells are both style tokens -- so a cell span travels through the
+    semantic IR unresolved and becomes a ``Length`` wherever lengths resolve,
+    through ``LayoutStyle.resolve_extent``.
+    """
+
+    cells: int
+
+    def __post_init__(self) -> None:
+        if self.cells < 1:
+            raise ValueError("a cell span needs at least one cell")
+
+    def __str__(self) -> str:
+        return f"cells:{self.cells}"
+
+
+type Extent = Length | CellSpan
+"""A declared node size: a physical length, or a style-relative cell span."""
+
+
+def parse_extent(value: Extent | str | int | float) -> Extent:
+    """Parse a node extent: any length, or the ``"cells:N"`` vector-stack form."""
+
+    if isinstance(value, CellSpan):
+        return value
+    if isinstance(value, str):
+        match = _CELL_SPAN_PATTERN.match(value)
+        if match is not None:
+            return CellSpan(int(match.group(1)))
+    return Length.parse(value)
+
+
 def pt(value: float) -> Length:
     return Length(float(value))
 

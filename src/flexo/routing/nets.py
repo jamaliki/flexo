@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from itertools import pairwise
 
 from flexo.components import TRANSPARENT_KINDS
-from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.fitted import FittedFigure, ResolvedPort
 from flexo.ir.routed import RoutedNet, RoutedStem
@@ -15,6 +16,7 @@ from flexo.routing.nudge import (
     collapse_zigzags,
     rail_label_position,
     shorten_end,
+    shorten_start,
     simplify_polyline,
 )
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
@@ -23,6 +25,9 @@ from flexo.text import TextMeasurer
 
 TRANSPARENT_ROLES = frozenset({"layout", "canvas"})
 """Group roles that draw no boundary and therefore never block a route."""
+
+_RAIL_TOLERANCE = 1e-6
+"""How far a placed rail may sit from the requested one and still count as honoured."""
 
 
 def parent_map(fitted: FittedFigure) -> dict[str, str]:
@@ -142,6 +147,7 @@ def route_net(
         style.route_clearance.points,
     )
     trunk_escapes = _trunk_escapes(all_escapes, hub_escape, hub_port.side, vertical)
+    run = _trunk_run(net, hub_port, tuple(port for port, _ in spokes), vertical)
     coordinate = _rail_coordinate(
         net,
         boundary,
@@ -150,6 +156,7 @@ def route_net(
         escape_sides,
         obstacles,
         vertical,
+        requested=None if run is None else run.requested,
     )
     junctions = tuple(_junction(point, coordinate, vertical) for point in trunk_escapes)
     rail = _rail(junctions, vertical)
@@ -193,7 +200,15 @@ def route_net(
         if label_metrics is not None
         else None
     )
-    return RoutedNet(net, rail, source_stems, target_stems, label_metrics, label_position)
+    return RoutedNet(
+        net,
+        rail,
+        source_stems,
+        target_stems,
+        label_metrics,
+        label_position,
+        _rail_clamp_diagnostics(net, run, coordinate),
+    )
 
 
 def net_segments(net: RoutedNet) -> tuple[Segment, ...]:
@@ -234,6 +249,81 @@ def _horizontal(side: Side) -> bool:
     return side in {Side.EAST, Side.WEST}
 
 
+@dataclass(frozen=True, slots=True)
+class _TrunkRun:
+    """The run a ``rail_at`` fraction measures along, in rail-transverse units.
+
+    Only the coordinate the rail is free to slide along matters here: a vertical
+    rail is placed by an x, a horizontal one by a y. The run points from the
+    trunk's start toward its destination, so fraction 0 sits at the far end of
+    the trunk and fraction 1 on the destination port itself.
+    """
+
+    start: float
+    end: float
+    fraction: float
+
+    @property
+    def length(self) -> float:
+        return self.end - self.start
+
+    @property
+    def requested(self) -> float:
+        return self.start + self.fraction * self.length
+
+    def fraction_of(self, value: float) -> float | None:
+        return None if self.length == 0.0 else (value - self.start) / self.length
+
+
+def _trunk_run(
+    net: NetSpec,
+    hub_port: ResolvedPort,
+    spoke_ports: tuple[ResolvedPort, ...],
+    vertical: bool,
+) -> _TrunkRun | None:
+    """Where fraction 0 and fraction 1 of this net's trunk run lie.
+
+    A merge reads from its furthest source into the sink, a fan-out from its
+    shared source out to the furthest target, so the two kinds run the same
+    measurement in opposite directions.
+    """
+
+    if net.rail_at is None:
+        return None
+    hub = hub_port.position.x if vertical else hub_port.position.y
+    spokes = tuple(port.position.x if vertical else port.position.y for port in spoke_ports)
+    far = max(spokes, key=lambda value: (abs(value - hub), value))
+    if net.kind == "merge":
+        return _TrunkRun(far, hub, net.rail_at)
+    return _TrunkRun(hub, far, net.rail_at)
+
+
+def _rail_clamp_diagnostics(
+    net: NetSpec,
+    run: _TrunkRun | None,
+    coordinate: float,
+) -> tuple[Diagnostic, ...]:
+    """Say out loud that an authored ``rail_at`` had to give way to clearances."""
+
+    if run is None or abs(coordinate - run.requested) <= _RAIL_TOLERANCE:
+        return ()
+    achieved = run.fraction_of(coordinate)
+    placement = (
+        "the trunk run has no length to measure along"
+        if achieved is None
+        else f"the nearest clear rail sits at {achieved:.3f}"
+    )
+    return (
+        Diagnostic(
+            "routing.net.rail-at.clamped",
+            f"Requested rail_at {run.fraction:.3f} leaves no clearance; {placement}.",
+            Severity.WARNING,
+            entity_id=net.id,
+            hint="Open a gap at that fraction of the run, or request a clearer one.",
+        ),
+    )
+
+
 def _rail_coordinate(
     net: NetSpec,
     boundary: Rect,
@@ -242,6 +332,8 @@ def _rail_coordinate(
     escape_sides: tuple[tuple[Point, Side], ...],
     obstacles: tuple[Rect, ...],
     vertical: bool,
+    *,
+    requested: float | None = None,
 ) -> float:
     if net.rail_hint is not None:
         return {
@@ -250,10 +342,21 @@ def _rail_coordinate(
             Side.NORTH: boundary.top,
             Side.SOUTH: boundary.bottom,
         }[net.rail_hint]
-    preferred_value = preferred.x if vertical else preferred.y
+    # An authored fraction replaces the hub escape as the preference; the search
+    # below already walks candidates outward from it, so an infeasible request
+    # lands on the nearest rail that clears every obstacle.
+    preferred_value = (
+        requested if requested is not None else (preferred.x if vertical else preferred.y)
+    )
     transverse = tuple(point.y if vertical else point.x for point in escapes)
     low, high = _rail_interval(boundary, escape_sides, vertical)
     candidates = _rail_candidates(preferred_value, boundary, obstacles, vertical)
+    if requested is not None and low <= high:
+        # The band edge is the closest a request outside the band can be honoured,
+        # and it is nothing any obstacle offers, so the clamp target is added by
+        # hand -- only for an authored request, so unhinted rails never move.
+        clamped = min(high, max(low, requested))
+        candidates = (clamped, *(value for value in candidates if value != clamped))
     if low <= high:
         feasible = tuple(value for value in candidates if low <= value <= high)
         candidates = feasible + tuple(
@@ -378,7 +481,10 @@ def _source_stem(
         departure=_horizontal(port.side),
     )
     centerline = simplify_polyline((port.position, *leg))
-    return RoutedStem(reference, centerline, centerline)
+    # Only the node end takes the standoff; the junction end has to stay on the
+    # rail exactly, or the net opens a gap at its own joint.
+    shaft = shorten_start(centerline, style.connector_standoff.points)
+    return RoutedStem(reference, centerline, shaft)
 
 
 def _target_stem(
@@ -402,7 +508,11 @@ def _target_stem(
         arrival=_horizontal(port.side),
     )
     centerline = simplify_polyline((*leg, port.position))
-    shaft = shorten_end(centerline, style.arrow_length.points)
+    # Node end only: the junction end stays on the rail (see ``_source_stem``).
+    shaft = shorten_end(
+        centerline,
+        style.arrow_length.points + style.connector_standoff.points,
+    )
     return RoutedStem(reference, centerline, shaft, True)
 
 

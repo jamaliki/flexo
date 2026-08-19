@@ -176,11 +176,13 @@ def _routing_diagnostics(
                     )
         center_length = sum(segment.length for segment in segments(edge.centerline))
         shaft_length = sum(segment.length for segment in segments(edge.shaft))
-        if abs(center_length - shaft_length - style.arrow_length.points) > 1e-5:
+        # Arrow length once, standoff twice: the shaft gives up air at both ends.
+        reserved = style.arrow_length.points + 2.0 * style.connector_standoff.points
+        if abs(center_length - shaft_length - reserved) > 1e-5:
             diagnostics.append(
                 Diagnostic(
                     "routing.marker.clearance",
-                    "Visible shaft does not reserve the configured arrow length.",
+                    "Visible shaft does not reserve the arrow length and both standoffs.",
                     entity_id=edge.spec.id,
                 )
             )
@@ -274,6 +276,10 @@ def _net_routing_diagnostics(
         2.0 * style.arrow_length.points + style.elbow_radius.points,
     )
     for net in compilation.routed.nets:
+        # What the router had to overrule -- an unreachable rail_at, say -- is
+        # reported here rather than at route time, so one clamped hint never
+        # costs the author their figure.
+        diagnostics.extend(net.diagnostics)
         routes = (
             net.rail,
             *(stem.centerline for stem in net.source_stems + net.target_stems),
