@@ -147,6 +147,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["depart"] = edge.depart.value
     if edge.arrive:
         result["arrive"] = edge.arrive.value
+    if edge.via:
+        result["via"] = edge.via.value
     if edge.waypoints:
         result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
     return result
@@ -166,6 +168,8 @@ def _net_data(net: NetSpec) -> dict[str, object]:
         result["rail"] = net.rail_hint.value
     if net.rail_at is not None:
         result["rail_at"] = net.rail_at
+    if net.via is not None:
+        result["via"] = net.via.value
     if net.joint != "auto":
         result["joint"] = net.joint
     return result
@@ -188,6 +192,8 @@ def _group_data(group: GroupSpec) -> dict[str, object]:
         result["anchor"] = group.anchor
     if group.shadow:
         result["shadow"] = True
+    if group.paint:
+        result["paint"] = dict(group.paint)
     return result
 
 
@@ -324,6 +330,7 @@ def _edge(data: dict[str, Any]) -> EdgeSpec:
         waypoints=tuple(_waypoint(item) for item in data.get("waypoints", [])),
         depart=Side(data["depart"]) if data.get("depart") else None,
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
+        via=Side(data["via"]) if data.get("via") else None,
     )
 
 
@@ -338,6 +345,7 @@ def _net(data: dict[str, Any]) -> NetSpec:
         rail_hint=Side(data["rail"]) if data.get("rail") else None,
         rail_at=data.get("rail_at"),
         joint=data.get("joint", "auto"),
+        via=Side(data["via"]) if data.get("via") else None,
     )
 
 
@@ -390,6 +398,7 @@ def _group(data: dict[str, Any]) -> GroupSpec:
         title_side=data.get("title_side", "left"),
         anchor=data.get("anchor"),
         shadow=data.get("shadow", False),
+        paint=tuple(sorted(data.get("paint", {}).items())),
     )
 
 

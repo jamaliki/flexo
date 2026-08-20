@@ -25,6 +25,16 @@ One number shared by shaping, component labels, and connector captions, so the
 width a run is measured at is the width it is drawn at.
 """
 
+DEFAULT_RUN_WEIGHT = 400
+"""The weight a ``TextRun`` carries when its author did not ask for one.
+
+A run at this weight asked for nothing, so it inherits whatever the text object
+it sits in declares -- ``title_weight`` for a group title, the text default for a
+component label. Measurement and emission read the same constant, which is what
+makes ``TextMeasurer.measure(runs, weight=...)`` the exact counterpart of the
+``font-weight`` a ``<text>`` element carries.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class FontData:
@@ -54,6 +64,21 @@ def font_data(italic: bool = False) -> FontData:
         subscript_drop=font["OS/2"].ySubscriptYOffset,
         codepoints=frozenset((font.getBestCmap() or {}).keys()),
     )
+
+
+def drawn_weight(run: TextRun, inherited: int | None) -> int:
+    """The weight ``run`` will be set at: its own, or the one it inherits.
+
+    The rule is the emission rule read backwards. A run whose weight is the
+    ``TextRun`` default emits no ``font-weight``, so it comes out at whatever the
+    ``<text>`` element around it declares; one that names a weight overrides it.
+    Measuring through the same rule is what keeps a reserved band the width of
+    the words that land in it.
+    """
+
+    if inherited is None or run.weight != DEFAULT_RUN_WEIGHT:
+        return run.weight
+    return inherited
 
 
 def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
@@ -94,7 +119,19 @@ class TextMeasurer:
         runs: tuple[TextRun, ...],
         *,
         max_width: float | None = None,
+        weight: int | None = None,
     ) -> TextMetrics:
+        """Shape ``runs`` at the weights they will actually be drawn at.
+
+        ``weight`` is what the text object these runs will sit in declares, and a
+        run that named no weight of its own is measured at it -- because that is
+        the weight it will inherit. A group title is the case that matters: its
+        runs carry the ``TextRun`` default and its ``<text>`` element carries
+        ``title_weight``, so measuring at 400 and drawing at 600 reserved a band
+        narrower than the words it holds. Left out, every run is measured at the
+        weight it declares, which is right for a component label or a caption.
+        """
+
         if not runs or not any(run.text for run in runs):
             return TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ())
         self._validate_glyphs(runs)
@@ -102,10 +139,11 @@ class TextMeasurer:
         lines = tuple(
             line
             for hard_line in hard_lines
-            for line in self._wrap_line(hard_line, max_width)
+            for line in self._wrap_line(hard_line, max_width, weight)
         )
         measured_lines = tuple(
-            MeasuredLine(line, sum(self._shape_run(run) for run in line)) for line in lines
+            MeasuredLine(line, sum(self._shape_run(run, weight) for run in line))
+            for line in lines
         )
         font = font_data()
         size = self.typography.size.points
@@ -124,13 +162,13 @@ class TextMeasurer:
             lines=measured_lines,
         )
 
-    def _shape_run(self, run: TextRun) -> float:
+    def _shape_run(self, run: TextRun, inherited: int | None = None) -> float:
         if not run.text:
             return 0.0
         data = font_data(run.italic)
         font = hb.Font(hb.Face(data.raw))
         font.scale = (data.upem, data.upem)
-        font.set_variations({"wght": float(run.weight)})
+        font.set_variations({"wght": float(drawn_weight(run, inherited))})
         buffer = hb.Buffer()
         buffer.add_str(run.text)
         buffer.guess_segment_properties()
@@ -144,6 +182,7 @@ class TextMeasurer:
         self,
         line: tuple[TextRun, ...],
         max_width: float | None,
+        weight: int | None = None,
     ) -> tuple[tuple[TextRun, ...], ...]:
         if max_width is None or max_width <= 0.0:
             return (line,)
@@ -153,7 +192,7 @@ class TextMeasurer:
         for run in line:
             for token in _TOKEN_PATTERN.findall(run.text):
                 token_run = TextRun(token, run.weight, run.italic, run.baseline_shift)
-                token_width = self._shape_run(token_run)
+                token_width = self._shape_run(token_run, weight)
                 is_space = token.isspace()
                 if current and not is_space and current_width + token_width > max_width:
                     wrapped.append(_trim_and_merge(current))

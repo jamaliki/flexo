@@ -8,7 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from itertools import count, pairwise
 
-from flexo.geometry import Point, Rect, Segment
+from flexo.geometry import Point, Rect, Segment, Side
 
 _EPSILON = 1e-8
 _MERGE_TOLERANCE = 0.5
@@ -44,6 +44,54 @@ class PathCosts:
     confinement: float = 0.3
     """Extra cost per point of length spent inside a container the route leaves."""
 
+    off_side: float = 1.5
+    """Extra cost per point of length in the corridor an authored ``via`` refused.
+
+    High, because a ``via`` hint is the author telling the router something it
+    cannot see: the two ways round an obstacle are near enough the same length,
+    and the one that reads is the one that stays in the margin instead of coming
+    back through the figure. At this rate a rejected corridor has to be well
+    under half the length of the hinted one to win, which leaves it available
+    when it is the only corridor there is -- a clamp reported rather than a
+    routing failure.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class SideBias:
+    """The side of its own region a route was asked to favour, and that region.
+
+    The region is the box the two endpoints span, measured on the hint's own
+    axis: a west or east hint reads ``low``/``high`` as left and right, a north
+    or south one as top and bottom. Inside the region nothing is priced -- every
+    route has to cross it -- and neither is a detour on the hinted side. What
+    costs is length spent beyond the region on the *other* side, which is exactly
+    the connector that wrapped the far face of a module and came back through it.
+    """
+
+    side: Side
+    low: float
+    high: float
+
+    @classmethod
+    def of(cls, side: Side, region: Rect) -> SideBias:
+        if side.horizontal:
+            return cls(side, region.left, region.right)
+        return cls(side, region.top, region.bottom)
+
+    @property
+    def vertical(self) -> bool:
+        """Whether the biased coordinate is an x: the hint names east or west."""
+
+        return self.side.horizontal
+
+    def rejected(self, coordinate: float, tolerance: float = 0.0) -> bool:
+        """Whether ``coordinate`` lies beyond the region on the refused side."""
+
+        if self.side in {Side.WEST, Side.NORTH}:
+            return coordinate > self.high + tolerance
+        return coordinate < self.low - tolerance
+
 
 @dataclass(frozen=True, slots=True)
 class _Track:
@@ -66,13 +114,15 @@ def shortest_orthogonal_path(
     confined: tuple[Rect, ...] = (),
     departure: bool | None = None,
     arrival: bool | None = None,
+    bias: SideBias | None = None,
 ) -> tuple[Point, ...] | None:
     """The cheapest orthogonal route, counting bends against the port stubs.
 
     ``departure`` and ``arrival`` state whether the fixed stub before ``start``
     and after ``end`` runs horizontally. Supplying them makes the bend count
     match the assembled route instead of the leg in isolation. ``confined``
-    holds containers the route owns but should leave promptly.
+    holds containers the route owns but should leave promptly, and ``bias``
+    prices the corridor an authored ``via`` hint turned down.
     """
 
     if start == end:
@@ -140,7 +190,8 @@ def shortest_orthogonal_path(
                     added_crossing,
                     segment.length
                     + _hug_cost(segment, relevant, costs)
-                    + _confinement_cost(segment, confined, costs),
+                    + _confinement_cost(segment, confined, costs)
+                    + _off_side_cost(segment, bias, costs),
                     segment.horizontal,
                 )
                 interactions[key] = cached
@@ -473,6 +524,23 @@ def _confinement_cost(
     if not any(rectangle.contains_point(midpoint) for rectangle in confined):
         return 0.0
     return costs.confinement * segment.length
+
+
+def _off_side_cost(
+    segment: Segment,
+    bias: SideBias | None,
+    costs: PathCosts,
+) -> float:
+    """Charge for the stretch a route spends in the corridor its ``via`` refused."""
+
+    if bias is None or costs.off_side <= 0.0:
+        return 0.0
+    coordinate = (
+        (segment.start.x + segment.end.x) / 2.0
+        if bias.vertical
+        else (segment.start.y + segment.end.y) / 2.0
+    )
+    return costs.off_side * segment.length if bias.rejected(coordinate) else 0.0
 
 
 def _simplify(points: tuple[Point, ...]) -> tuple[Point, ...]:
