@@ -872,3 +872,125 @@ offsets are the design"), on the one block in the figure whose skip does not go
 east. The router-side alternative, worth having eventually, would be to price a
 crossing against the run it forces on whatever routes next, rather than counting
 only the ink already on the page.
+
+## R29. Captions beside the glyph, not under it (round 11)
+
+Straight from the user reading the round-10 Transformer:
+
+> The feed arrows into the Q/K/V glyphs bend around the "Q"/"K"/"V" captions
+> beneath them. — The encoder-to-decoder connection turns down at a weird place;
+> it should be an equal S shape rather than a one-sided L.
+
+The first is the round-10 caption gap read back as a defect. That gap was the
+right answer to the question it was asked -- a caption 3pt under an 8.5pt cell
+puts its clearance ring on the port and there is no `routing.net.no-stem`-free
+offset on that edge -- but the question was wrong. The corridor under a glyph is
+the *only* approach that glyph has, and R28 spent 17pt of it on words. Every feed
+then had to leave the corridor, go round the caption's ring and come back: nine
+hooks in the figure, one per glyph, plus the decoder's `an3 -> q` feed, which had
+a clear straight line to its port and drew a five-segment zigzag anyway.
+
+**A caption beside the stack costs nothing.** A lane is wider than the stack in it
+-- 31.2pt of port spacing around an 8.5pt cell for the standard offsets -- and the
+11.35pt of surplus on each side is room no route may use either, because the lane
+is exactly as wide as the separation its neighbours need. So the caption takes the
+half-lane it stands in, less one `caption_clearance` of air against the cells, and
+the glyph reserves that same `reserve + gap` on the stack's other side as padding
+(`_SideCaption`). Two consequences, both load-bearing:
+
+- **the stack does not move.** The glyph stays symmetric about its cells, so a
+  box-centred child of the lane is a *stack*-centred child of the lane, and the
+  port-fraction alignment R28 exists to guarantee survives a caption on one side
+  of it. The glyph comes out exactly one lane wide, so the reserved grid tracks
+  still sum to the block's width and nothing can overflow.
+- **the caption box is measured, not the words.** A `label` node with an authored
+  `width` is exactly that wide whatever it holds, so a wider caption overflows its
+  box symmetrically rather than dragging the stack sideways. The words centre in
+  the room they have; only the visible gap varies, by fractions of a point across
+  Q, K and V.
+
+One side for all three, not the outer side of each. Rendered both ways: mirrored
+(Q left, V right) leaves the middle glyph's caption arbitrary and reads as an
+accident, while three captions leaning the same way read as a convention. It is
+also the only arrangement with no competition -- two captions meeting in one
+inter-lane gap would sit a few points apart, each closer to the other glyph's
+stack than to its own.
+
+The narrow-lane fallback keeps R28's behaviour: below the stack, `arrival_clearance
++ caption_clearance` down, for a block pinned under about 56pt where the half-lane
+cannot hold a caption at all. A standalone `vector()` is unchanged in every case --
+it is wired from the side and has no approach from underneath to protect.
+
+## R30. A Z crosses in the middle of its span (round 11)
+
+The second half of the same critique. Two shapes were involved and they are the
+same shape:
+
+**The cross-attention trunk.** `_trunk_escapes` puts the junction where a trunk
+meets a rail it leaves *along* at the hub escape, which is the earliest place it
+can go. The encoder's output therefore drew a 5pt stub, a 50pt crossbar hard
+against the box it had just left, and then 197pt of rail: a one-sided L. The
+crossbar's own free run is from that escape to the first stem it passes, and its
+middle is the reading of the shape a figure means -- the same default
+`_preferred_rail` already takes one axis over, and a preference in the same way,
+with the candidates walking outward from the midpoint until arm and crossbar both
+clear every obstacle. The descent now lands in the gap between the towers with
+88pt of arm above it and 114pt of rail below.
+
+Two guards matter. The junction only moves when the crossbar is the trunk's alone
+-- a spoke behind the hub escape rides on the same coordinate and dragging that
+with the trunk would reshape a stem this has nothing to say about -- and only when
+there is a crossbar at all: a trunk collinear with its rail (the panel-b skip
+spine, hub and rail on one x) is left exactly where it was.
+
+**Ordinary single-jog edges.** The same tie exists for any Z: every coordinate in
+the span draws the same length with the same one elbow, so the visibility search
+has no reason to prefer one and takes whichever it reached first. On clean geometry
+the candidate grid happens to offer the midpoint and the search happens to find
+it; put a third box near the run and the grid offers that box's edges and their
+midpoints instead, and the crossbar lands 34pt from one endpoint and 145pt from
+the other. `balance_jogs` (`routing/nudge.py`, run before the lane pass so the
+lane pass has the last word) moves it to the midpoint of the free span: between
+the two endpoints' clearance boundaries, less anything an obstacle standing across
+the crossbar takes out of it. Testing the crossbar's extent covers the arms too --
+each arm runs at one end of that extent, so a box in an arm's way reaches into it
+by definition.
+
+Three things are left alone, and the gallery is the argument for each:
+
+- **a C.** Arms that double back over each other (`feedback.*` east then west,
+  `recycle.node-features` west then east) share no span between the endpoints to
+  be centred in, and the corridor they took was chosen against the whole figure.
+  Balancing one would drag a margin route into the middle of the panel.
+- **an aimed route.** A `lane=`, a waypoint or a `via=` is the author naming the
+  corridor (`Run.hinted`). Lane nudging still applies to it: spacing two runs a
+  lane apart is not a change of route.
+- **a fan of parallel jogs.** `vertical-slice`'s three entries into `cryo.attention`
+  all want the same midpoint; the first to reach for it gets it and the others are
+  refused by the same defect test that guards lane nudging. Uniform 6pt spacing
+  survives, which is what makes this change safe to apply figure-wide.
+
+### Acceptance (round 11)
+
+`uv run pytest` green (344, from 336: eight added, one rewritten -- captions beside
+the stack at one `caption_clearance`, centred on the cells' port line; the glyph
+exactly one lane wide and symmetric about its cells with no caption band; net
+feeds arriving as two-point verticals; a Z centring on a span midpoint the
+visibility grid does not offer; a waypoint keeping its corridor; a C left alone; a
+hinted run left alone; the crossing trunk halving its run; and `rail_at`/`via`
+standing the trunk default down). `ruff check` clean.
+
+`flexo gallery` exits 0 with zero lint errors and the one pre-existing
+`routing.connector.crossing` warning, unchanged. Both gallery figures and all four
+other example figures are **byte-identical** to their pre-edit baselines: the two
+new defaults are guarded well enough that nothing in the existing corpus moves.
+
+**The Transformer figure still reports `ok: no diagnostics`,** and the two defects
+are gone. All nine glyph feeds are two-point verticals -- including `an3 -> q`,
+which lost a five-segment hook -- with the captions standing to the left of their
+stacks on the cells' own centre line. The encoder-to-decoder connection leaves
+`an2` east, runs 88pt, descends 77pt mid-gap between the towers, and hands 114pt
+of rail to the junction under V and the two short verticals into V and K. The
+canvas is 53pt shorter than the round-10 render (915.6 from 969.1), because the
+caption bands came out of the towers and the glyph rows are now exactly as tall as
+their cells.

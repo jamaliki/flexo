@@ -19,6 +19,7 @@ from flexo.routing.nets import (
 )
 from flexo.routing.nudge import (
     Stubs,
+    balance_jogs,
     collapse_zigzags,
     edge_label_position,
     edge_shaft,
@@ -91,9 +92,17 @@ def _nudge(routed: RoutedFigure, style: LayoutStyle) -> RoutedFigure:
         }
     )
     runs, polylines = figure_runs(routed, boundaries, style)
-    nudged = nudge_routes(
+    # Where a crossing goes, then how far apart two of them sit: balancing first
+    # means the lane pass has the last word on any pair it brings together.
+    balanced = balance_jogs(
         runs,
         polylines,
+        style=style,
+        obstacles=nudge_obstacles(routed, style, fraction=1.0),
+    )
+    nudged = nudge_routes(
+        runs,
+        balanced,
         style=style,
         obstacles=nudge_obstacles(routed, style),
     )
