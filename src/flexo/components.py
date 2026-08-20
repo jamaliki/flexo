@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from itertools import pairwise
 
 from flexo.artwork import node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
@@ -299,6 +301,67 @@ COMPONENTS: dict[str, ComponentDefinition] = {
 
 def component_names() -> tuple[str, ...]:
     return tuple(COMPONENTS)
+
+
+def component_port_offsets(kind: str, names: Sequence[str]) -> tuple[float, ...]:
+    """The offsets the component grammar gives ``kind``'s ``names`` ports.
+
+    The grammar is the single place that knows an attention block reads its query
+    at 0.24 of its width and its value at 0.76. A composite that has to put
+    something *under* those ports asks here rather than restating the fractions,
+    so moving a port in ``COMPONENTS`` moves whatever the composite aligned to it.
+    """
+
+    offsets = {port.name: port.offset for port in COMPONENTS[kind].ports}
+    missing = [name for name in names if name not in offsets]
+    if missing:
+        raise ValueError(
+            f'component "{kind}" has no port(s) {", ".join(missing)}; '
+            f"its ports are {', '.join(offsets)}"
+        )
+    return tuple(offsets[name] for name in names)
+
+
+def attachment_lane_tracks(offsets: Sequence[float], width: float) -> tuple[float, ...]:
+    """Grid tracks that centre one child under each of ``offsets`` of ``width``.
+
+    Returns ``2n + 1`` widths for ``n`` offsets -- a pad, then a lane and a pad
+    for every offset -- which sum to exactly ``width``. Reserved as the column
+    widths of a one-row grid that wide, they put each lane's centre on its
+    offset, so a glyph centred in its lane is centred under the port it feeds and
+    the connector between them is a plain vertical. That is the arithmetic a
+    figure used to do by hand as a magic inter-glyph gap, and it is arithmetic
+    only this side of the pipeline can do: the offsets belong to the component
+    grammar and the width is the author's.
+
+    Every lane is the same width, and that width is the widest one that keeps the
+    lanes disjoint and inside the box -- half the first offset's reach, half the
+    last one's, and the closest spacing between neighbours. Wider would overlap a
+    neighbour; narrower would waste room a caption could have used.
+    """
+
+    if not offsets:
+        raise ValueError("attachment lanes need at least one offset")
+    if width <= 0.0:
+        raise ValueError(f"attachment lanes need a positive width, not {width}")
+    if any(second <= first for first, second in pairwise(offsets)):
+        raise ValueError(f"attachment lane offsets must ascend, not {tuple(offsets)}")
+    centres = tuple(offset * width for offset in offsets)
+    lane = min(
+        2.0 * centres[0],
+        2.0 * (width - centres[-1]),
+        *(second - first for first, second in pairwise(centres)),
+    )
+    if lane <= 0.0:
+        raise ValueError(
+            f"offsets {tuple(offsets)} leave no room for a lane in {width:.1f} pt"
+        )
+    tracks = [centres[0] - lane / 2.0]
+    for index, centre in enumerate(centres):
+        tracks.append(lane)
+        following = width if index + 1 == len(centres) else centres[index + 1] - lane / 2.0
+        tracks.append(following - (centre + lane / 2.0))
+    return tuple(tracks)
 
 
 def motif_enabled(spec: NodeSpec) -> bool:
