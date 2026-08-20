@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from flexo.geometry import Size
+from flexo.geometry import Point, Size
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, TextRun
+
+_ORIGIN = Point(0.0, 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,14 @@ class MeasuredNode:
     spec: NodeSpec
     label: TextMetrics
     intrinsic_size: Size
+    anchor: Point = _ORIGIN
+    """Where this component's port lines cross, from its own top-left.
+
+    ``anchor.y`` is the y of its west and east ports, ``anchor.x`` the x of its
+    north and south ports -- the two lines an ``align="ports"`` parent lines its
+    children up on. A component answers with its own centre, which is where the
+    grammar puts a side-centre port.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +47,14 @@ class MeasuredGroup:
     spec: GroupSpec
     label: TextMetrics
     intrinsic_size: Size
+    anchor: Point = _ORIGIN
+    """Where this group's port lines cross, from its own top-left.
+
+    A composite answers with its anchor child's line (see ``GroupSpec.anchor``),
+    so a captioned vector reports the middle of the cell stack rather than the
+    middle of cells-plus-caption. Measured at the size the parent will hand the
+    group, which is why it is computed here beside ``intrinsic_size``.
+    """
 
 
 @dataclass(frozen=True, slots=True)

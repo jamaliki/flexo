@@ -8,12 +8,13 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from flexo.geometry import Point, Segment, segments
+from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.ir.semantic import TextRun
 from flexo.render import render_node
-from flexo.render_common import paint_attributes
+from flexo.render_common import paint_attributes, soft_shadow
 from flexo.routing.nudge import shorten_end
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
 from flexo.svg import (
@@ -25,13 +26,12 @@ from flexo.svg import (
     layer,
     number,
     rounded_polyline_path,
+    xml_document,
 )
 from flexo.svg_resources import add_definitions, add_metadata
+from flexo.text import SHIFTED_SIZE
 from flexo.theme import retheme_svg as retheme_svg
 from flexo.units import MILLIMETRES_PER_INCH, POINTS_PER_INCH
-
-_SHIFTED_SIZE = 0.72
-"""Font-size factor of a superscript or subscript run, as in component labels."""
 
 
 def emit_svg(
@@ -78,10 +78,7 @@ def emit_svg(
     )
     hierarchy = _Hierarchy(routed)
     hierarchy.render(root, layout_style, paint_palette)
-    ET.indent(root, space="  ")
-    xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
-    text = f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'
-    return SVGDocument(text, width_mm, height_mm)
+    return SVGDocument(xml_document(root), width_mm, height_mm)
 
 
 class _Hierarchy:
@@ -91,18 +88,17 @@ class _Hierarchy:
         self.group_specs = {group.id: group for group in semantic.groups}
         self.fitted_groups = {group.measured.spec.id: group for group in routed.fitted.groups}
         self.nodes = {node.measured.spec.id: node for node in routed.fitted.nodes}
-        self.parent: dict[str, str] = {}
-        for group in semantic.groups:
-            for child in group.children:
-                self.parent[child] = group.id
+        self.parent = parent_map(semantic.groups)
         self.edges: defaultdict[str, list[RoutedEdge]] = defaultdict(list)
         for edge in routed.edges:
-            owner = self._lowest_common_group(edge.spec.source.node_id, edge.spec.target.node_id)
+            owner = lowest_common_group(
+                self.parent, (edge.spec.source.node_id, edge.spec.target.node_id)
+            )
             self.edges[owner].append(edge)
         self.nets: defaultdict[str, list[RoutedNet]] = defaultdict(list)
         for net in routed.nets:
             node_ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
-            owner = self._lowest_common_group_many(node_ids)
+            owner = lowest_common_group(self.parent, node_ids)
             self.nets[owner].append(net)
 
     def render(self, parent: ET.Element, style: LayoutStyle, palette: Palette) -> None:
@@ -203,6 +199,9 @@ class _Hierarchy:
         spec = group.measured.spec
         if spec.role in {"canvas", "layout"}:
             return
+        radius = style.corner_radius.points * 1.5
+        if spec.shadow:
+            soft_shadow(parent, spec.id, group.bounds, radius, style, palette)
         element(
             parent,
             "rect",
@@ -211,7 +210,7 @@ class _Hierarchy:
             y=group.bounds.y,
             width=group.bounds.width,
             height=group.bounds.height,
-            rx=style.corner_radius.points * 1.5,
+            rx=radius,
             **paint_attributes(
                 palette=palette,
                 fill_role="container-fill",
@@ -219,25 +218,6 @@ class _Hierarchy:
                 stroke_width=style.stroke_width.points,
             ),
         )
-
-    def _lowest_common_group(self, source: str, target: str) -> str:
-        source_groups = self._ancestors(source)
-        target_groups = set(self._ancestors(target))
-        return next(group_id for group_id in source_groups if group_id in target_groups)
-
-    def _lowest_common_group_many(self, entity_ids: tuple[str, ...]) -> str:
-        common = set(self._ancestors(entity_ids[0]))
-        for entity_id in entity_ids[1:]:
-            common.intersection_update(self._ancestors(entity_id))
-        return next(group_id for group_id in self._ancestors(entity_ids[0]) if group_id in common)
-
-    def _ancestors(self, entity_id: str) -> tuple[str, ...]:
-        result = []
-        current = entity_id
-        while current in self.parent:
-            current = self.parent[current]
-            result.append(current)
-        return tuple(result)
 
 
 def _render_edge(
@@ -373,7 +353,7 @@ def _connector_label(
                 font__style="italic" if run.italic else None,
                 baseline__shift=_shift(run),
                 font__size=(
-                    style.typography.size.points * _SHIFTED_SIZE
+                    style.typography.size.points * SHIFTED_SIZE
                     if run.baseline_shift != "normal"
                     else None
                 ),

@@ -5,7 +5,6 @@ from __future__ import annotations
 from flexo.builder import Figure, GroupBuilder, NodeHandle
 from flexo.geometry import Side
 from flexo.ir.semantic import FigureSpec, LayoutSpec, PortSpec, TextRun
-from flexo.style import STYLES
 from flexo.units import Length, pt
 
 
@@ -97,22 +96,15 @@ _IPA_LABEL = (
 _VECTOR_CELLS = 3
 """Cells in every vector glyph of this figure."""
 
-_MODULE_STYLE = STYLES["paper"]
+_INSET_HEIGHT = "60pt"
+"""Height of both scientific insets that open the cryo-EM module.
 
-_BOX_HEIGHT = pt(
-    _VECTOR_CELLS * _MODULE_STYLE.vector_cell.points
-    + (_VECTOR_CELLS - 1) * _MODULE_STYLE.vector_cell_gap.points
-)
-"""Height of every box inside a module: exactly one vector's cell stack.
-
-Module interiors are grids whose cells align to the top, so a box as tall as a
-cell stack puts its side ports at the same y as the vector's middle cell. Every
-run along a module row is then straight by construction, with no port adaptation
-left to absorb a few points of mismatch.
+One height for the two of them, and tall enough for the taller of their two
+labels: an inset stacks its caption, a gap and its molecule, and "Edge
+rectangles" takes two lines where "Centre cube" takes one. Sizing an inset to its
+own label would draw the two of them at different heights and the molecules at
+different sizes.
 """
-
-_INSET_HEIGHT = "42pt"
-"""Height of the scientific insets that open the cryo-EM module."""
 
 _MODULE_GAP = "20pt"
 """Gap on both axes of a module grid: one rail corridor fits in one gap."""
@@ -139,9 +131,12 @@ def _module_grid(band: GroupBuilder, id: str, label: str, columns: int) -> Group
     """A module container laid out as an aligned grid of rows and columns.
 
     Rows are chains that read left to right; columns line the chains up so a
-    reader compares them vertically. ``align="start"`` puts every cell's content
-    at the top of its row, which is what makes boxes and vector cell stacks share
-    a port y (see ``_BOX_HEIGHT``).
+    reader compares them vertically. ``align="ports"`` puts every cell's *port
+    line* on its row's shared line and its column's shared x, so a run along a
+    row is straight by construction and a column of glyphs shares one centre --
+    whatever else the cells contain. Captions hang below the line they belong to
+    instead of dragging their glyph off it, which is why the boxes no longer have
+    to be pinned to a cell stack's height to line up with one.
     """
 
     return band.group(
@@ -150,8 +145,9 @@ def _module_grid(band: GroupBuilder, id: str, label: str, columns: int) -> Group
         layout="grid",
         columns=columns,
         gap=_MODULE_GAP,
-        align="start",
+        align="ports",
         role="module",
+        shadow=True,
     )
 
 
@@ -176,11 +172,11 @@ def _cryo_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle, NodeHandle
     figure = band.figure
     with _module_grid(band, "cryo", "Cryo-EM module", 7) as module:
         rects = module.inset("rectangles", label="Edge\nrectangles", height=_INSET_HEIGHT)
-        edge_cnn = module.cnn("edge-cnn", label="CNN", input=rects, height=_BOX_HEIGHT)
+        edge_cnn = module.cnn("edge-cnn", label="CNN", input=rects)
         kv = module.vector("kv", label="K, V", ramp="ramp-kv", columns=2, input=edge_cnn)
         _cell(module, "formula-lane", _FORMULA_LANE)
         _cell(module, "attention-lane")
-        predict = module.mlp("predict", label="MLP", height=_BOX_HEIGHT)
+        predict = module.mlp("predict", label="MLP")
         predictions = module.vector(
             "predictions",
             label="Residue\npredictions",
@@ -188,14 +184,14 @@ def _cryo_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle, NodeHandle
             input=predict,
         )
         nodes = module.vector("nodes", label="Node features", ramp="ramp-node")
-        q_mlp = module.mlp("q-mlp", label="MLP", input=nodes, height=_BOX_HEIGHT)
+        q_mlp = module.mlp("q-mlp", label="MLP", input=nodes)
         q = module.vector("q", label="Q", ramp="ramp-q", input=q_mlp)
         _cell(module, "formula-lane-2")
         attended = module.vector("attended", label="Attended\nvalue", ramp="ramp-attended")
-        update = module.mlp("update", label="MLP", height=_BOX_HEIGHT)
+        update = module.mlp("update", label="MLP")
         out = module.vector("out", label="Feature\nupdate", ramp="ramp-output", input=update)
         cube = module.inset("cube", label="Centre cube", height=_INSET_HEIGHT)
-        cube_cnn = module.cnn("cube-cnn", label="CNN", input=cube, height=_BOX_HEIGHT)
+        cube_cnn = module.cnn("cube-cnn", label="CNN", input=cube)
         _cell(module, "features-lane")
         _cell(module, "formula-lane-3")
         context = module.vector("c", label="C", ramp="ramp-embedding", input=cube_cnn)
@@ -233,11 +229,11 @@ def _sequence_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle, NodeHa
             label="Sequence\nembedding",
             ramp="ramp-embedding",
         )
-        kv_mlp = module.mlp("kv-mlp", label="MLP", input=embedding, height=_BOX_HEIGHT)
+        kv_mlp = module.mlp("kv-mlp", label="MLP", input=embedding)
         kv = module.vector("kv", label="K, V", ramp="ramp-kv", columns=2, input=kv_mlp)
         _cell(module, "formula-lane", _FORMULA_LANE)
         _cell(module, "attention-lane")
-        predict = module.mlp("predict", label="MLP", height=_BOX_HEIGHT)
+        predict = module.mlp("predict", label="MLP")
         predictions = module.vector(
             "predictions",
             label="Residue\npredictions",
@@ -247,11 +243,11 @@ def _sequence_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle, NodeHa
         nodes = module.vector("nodes", label="Node features", ramp="ramp-node")
         _cell(module, "esm-lane-2")
         _cell(module, "embedding-lane")
-        q_mlp = module.mlp("q-mlp", label="MLP", input=nodes, height=_BOX_HEIGHT)
+        q_mlp = module.mlp("q-mlp", label="MLP", input=nodes)
         q = module.vector("q", label="Q", ramp="ramp-q", input=q_mlp)
         _cell(module, "formula-lane-2")
         attended = module.vector("attended", label="Attended\nvalue", ramp="ramp-attended")
-        update = module.mlp("update", label="MLP", height=_BOX_HEIGHT)
+        update = module.mlp("update", label="MLP")
         out = module.vector("out", label="Feature\nupdate", ramp="ramp-output", input=update)
         module.connect(tokens, embedding, label="ESM-1b")
         figure.merge(
@@ -276,7 +272,7 @@ def _ipa_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle]:
     figure = band.figure
     with _module_grid(band, "ipa", "IPA module", 7) as module:
         nodes = module.vector("nodes", label="Node features", ramp="ramp-node")
-        qv_mlp = module.mlp("qv-mlp", label="MLP", input=nodes, height=_BOX_HEIGHT)
+        qv_mlp = module.mlp("qv-mlp", label="MLP", input=nodes)
         qv = module.vector(
             "qv",
             label="Q points, V",
@@ -286,7 +282,7 @@ def _ipa_module(band: GroupBuilder) -> tuple[NodeHandle, NodeHandle]:
         )
         _cell(module, "formula-lane", _FORMULA_LANE)
         attended = module.vector("attended", label="Attended\nvalue", ramp="ramp-attended")
-        update = module.mlp("update", label="MLP", input=attended, height=_BOX_HEIGHT)
+        update = module.mlp("update", label="MLP", input=attended)
         out = module.vector("out", label="Feature\nupdate", ramp="ramp-output", input=update)
         _cell(module, "inputs-lane")
         _cell(module, "encoders-lane")
@@ -401,9 +397,10 @@ def modelangelo_gnn() -> FigureSpec:
     every feature value is a labelled cell stack in its own colour ramp, boxes
     take one arrow per side centre, and attention is a merge net captioned
     ``softmax(QK^T)V`` above the horizontal run it labels rather than a matrix
-    component. Each module is a grid, so its chains align into rows a reader can
-    compare and into columns that share an x; ``_BOX_HEIGHT`` ties the boxes to
-    the cell stacks, which is what makes those rows come out straight.
+    component. Each module is a grid aligned by **port line** rather than by box
+    (``align="ports"``), so its chains align into rows whose runs are straight
+    from end to end and into columns whose glyphs share one centre, with the
+    captions hanging below the line instead of pulling it about.
     """
 
     with Figure(

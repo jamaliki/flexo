@@ -109,6 +109,7 @@
         "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "default": []},
         "width": {"$ref": "#/$defs/extent"},
         "height": {"$ref": "#/$defs/extent"},
+        "shadow": {"type": "boolean", "default": false},
         "properties": {
           "type": "object",
           "additionalProperties": {"type": ["string", "number", "integer", "boolean"]},
@@ -211,7 +212,7 @@
         "padding_right": {"$ref": "#/$defs/length"},
         "padding_bottom": {"$ref": "#/$defs/length"},
         "padding_left": {"$ref": "#/$defs/length"},
-        "align": {"enum": ["start", "center", "end", "stretch"], "default": "center"},
+        "align": {"enum": ["start", "center", "end", "stretch", "ports"], "default": "center"},
         "justify": {"enum": ["start", "center", "end", "space-between"], "default": "start"},
         "columns": {"type": "integer", "minimum": 1},
         "width": {"$ref": "#/$defs/length"},
@@ -264,7 +265,9 @@
         "collision_policy": {"enum": ["disjoint", "overlay", "ignore"], "default": "disjoint"},
         "label": {"$ref": "#/$defs/label", "default": ""},
         "role": {"$ref": "#/$defs/identifier", "default": "container"},
-        "title_side": {"enum": ["left", "right"], "default": "left"}
+        "title_side": {"enum": ["left", "right"], "default": "left"},
+        "anchor": {"$ref": "#/$defs/identifier"},
+        "shadow": {"type": "boolean", "default": false}
       }
     }
   }

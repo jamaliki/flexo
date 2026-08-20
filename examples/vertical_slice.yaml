@@ -35,6 +35,15 @@ nodes:
 - id: cryo.branches.feature-path.projection
   kind: mlp
   label: Feature MLP
+  ports:
+  - name: input
+    side: west
+    offset: 0.5
+    adaptive: true
+  - name: output
+    side: east
+    offset: 0.5
+    adaptive: true
 - id: cryo.branches.feature-path.query-value
   kind: channels
   ports:
