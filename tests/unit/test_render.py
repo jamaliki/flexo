@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -764,3 +765,31 @@ def test_a_caption_role_paints_muted_ink_and_still_rethemes() -> None:
     assert _element(themed, "m.mha.qkv.q.label.label").get("fill") == GRAYSCALE_PALETTE.get(
         "muted-ink"
     )
+
+
+def test_motif_less_attention_centres_its_label() -> None:
+    """With no motif in the interior, the words centre in the box."""
+
+    def label_y(motif: bool) -> tuple[float, float, float]:
+        with Figure("t") as figure:
+            figure.root.node(
+                "att",
+                "attention",
+                label="Multi-Head Attention",
+                width="120pt",
+                motif=motif,
+            )
+        compilation = compile_figure(figure.spec)
+        fitted = compilation.routed.fitted
+        node = next(n for n in fitted.nodes if n.measured.spec.id == "att")
+        svg = compilation.document.text
+        match = re.search(r'<text[^>]*id="att.label"[^>]*y="([-0-9.]+)"', svg)
+        assert match is not None
+        return node.bounds.y, node.bounds.height, float(match.group(1))
+
+    top, height, banded = label_y(True)
+    top2, height2, centred = label_y(False)
+    assert (top, height) == (top2, height2)  # motif=False changes no geometry
+    assert banded < centred  # the banded label sits higher than the centred one
+    mid = top + height / 2.0
+    assert abs(centred - mid) < height / 4.0  # centred label straddles the middle
