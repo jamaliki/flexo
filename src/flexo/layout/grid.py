@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from flexo.geometry import Size
+from flexo.geometry import Point, Size
 from flexo.ir.semantic import LayoutSpec
 
 
@@ -54,19 +54,56 @@ def grid_tracks(
     plan: GridPlan,
     sizes: tuple[Size, ...],
     layout: LayoutSpec,
+    anchors: tuple[Point, ...] | None = None,
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
     """The width of every column and the height of every row, in points.
 
     A column with no content is not dropped: it keeps its slot, and
     ``column_widths`` may reserve a minimum width for it, which is how a lane
     that only holds a connector and its label gets its space.
+
+    Given ``anchors`` -- one anchor offset per child, from its own top-left --
+    the tracks are measured the way a line of type is: a row is as tall as the
+    furthest reach above its shared anchor line plus the furthest below, which
+    can exceed its tallest child. Without them a track is simply as large as its
+    largest child.
     """
 
     column_widths = [0.0] * plan.columns
     row_heights = [0.0] * plan.rows
-    for (row, column), size in zip(plan.cells, sizes, strict=True):
-        column_widths[column] = max(column_widths[column], size.width)
-        row_heights[row] = max(row_heights[row], size.height)
+    if anchors is None:
+        for (row, column), size in zip(plan.cells, sizes, strict=True):
+            column_widths[column] = max(column_widths[column], size.width)
+            row_heights[row] = max(row_heights[row], size.height)
+    else:
+        lefts, tops = grid_anchor_lines(plan, anchors)
+        rights = [0.0] * plan.columns
+        bottoms = [0.0] * plan.rows
+        for (row, column), size, anchor in zip(plan.cells, sizes, anchors, strict=True):
+            rights[column] = max(rights[column], size.width - anchor.x)
+            bottoms[row] = max(bottoms[row], size.height - anchor.y)
+        column_widths = [left + right for left, right in zip(lefts, rights, strict=True)]
+        row_heights = [top + bottom for top, bottom in zip(tops, bottoms, strict=True)]
     for column, reserved in layout.column_widths:
         column_widths[column] = max(column_widths[column], reserved.points)
     return tuple(column_widths), tuple(row_heights)
+
+
+def grid_anchor_lines(
+    plan: GridPlan,
+    anchors: tuple[Point, ...],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """The shared anchor line of every column and every row, from its own origin.
+
+    A column's line is the furthest left any of its children reaches from its own
+    anchor; a row's is the furthest above. Placing each child so its anchor lands
+    on that line is what puts one x down a column of glyphs and one y along a
+    chain that reads across.
+    """
+
+    lefts = [0.0] * plan.columns
+    tops = [0.0] * plan.rows
+    for (row, column), anchor in zip(plan.cells, anchors, strict=True):
+        lefts[column] = max(lefts[column], anchor.x)
+        tops[row] = max(tops[row], anchor.y)
+    return tuple(lefts), tuple(tops)

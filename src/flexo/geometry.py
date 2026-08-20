@@ -22,12 +22,30 @@ class Side(StrEnum):
 
     @property
     def vector(self) -> Point:
+        """The unit vector pointing out of this side."""
+
         return {
             Side.NORTH: Point(0.0, -1.0),
             Side.EAST: Point(1.0, 0.0),
             Side.SOUTH: Point(0.0, 1.0),
             Side.WEST: Point(-1.0, 0.0),
         }[self]
+
+    @property
+    def horizontal(self) -> bool:
+        """Whether this side's outward normal runs along x: east or west.
+
+        Named for the normal rather than for the edge, because the two readings
+        are opposites and code that mixes them is hard to trust.
+        """
+
+        return self in {Side.EAST, Side.WEST}
+
+    def escaped(self, point: Point, distance: float) -> Point:
+        """``point`` moved ``distance`` straight out of this side."""
+
+        vector = self.vector
+        return point.translated(vector.x * distance, vector.y * distance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +181,6 @@ class Rect:
             self.width + 2.0 * amount,
             self.height + 2.0 * amount,
         )
-
-    def translated(self, dx: float = 0.0, dy: float = 0.0) -> Rect:
-        return Rect(self.x + dx, self.y + dy, self.width, self.height)
 
     def point_on(self, side: Side, offset: float = 0.5) -> Point:
         if not 0.0 <= offset <= 1.0:
