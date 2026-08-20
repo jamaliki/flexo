@@ -8,7 +8,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from flexo.components import attachment_lane_tracks, component_port_offsets, normalize_node
+from flexo.components import (
+    attachment_lane_tracks,
+    component_port_offsets,
+    normalize_node,
+    vector_stack_width,
+)
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     TITLE_SIDES,
@@ -86,15 +91,40 @@ waiting to be improved on, which is why neither is ``auto_side``:
   glyph under its port -- which is exactly what auto-siding *does* choose when
   the value comes from an encoder further up the page, and it costs a
   ``routing.track.separation`` error for the pair.
-- south is the feed's, because a caption hangs under the stack and west or east
-  would send the run between two glyphs. A lane is only as wide as the port
-  spacing it was cut from, so two feeds entering sideways have to thread the same
-  gap at the same height, which is a separation error where it is not simply
-  unreadable.
+- south is the feed's, and the caption stands beside the stack rather than under
+  it (``_SideCaption``) precisely so that this approach is empty: a feed enters
+  the cells dead straight from below. West or east would send the run between two
+  glyphs, and a lane is only as wide as the port spacing it was cut from, so two
+  feeds entering sideways have to thread the same gap at the same height -- a
+  separation error where it is not simply unreadable.
 
 A value computed off to one side therefore travels to below its glyph and comes
 up, the way the paper draws its encoder feeding a decoder's cross-attention.
 """
+
+
+@dataclass(frozen=True, slots=True)
+class _SideCaption:
+    """A vector caption placed beside its stack, and the room it was given.
+
+    ``reserve`` is the width of the caption's own box and ``gap`` the air between
+    that box and the cells; the composite reserves the *same* ``reserve + gap`` on
+    the stack's other side as padding, so the whole glyph stays symmetric about
+    its cells. That is what keeps the stack centred in its attachment lane while
+    the words hang off one side of it: the caption may not move the thing it names
+    off the port it feeds.
+    """
+
+    side: Side
+    """Which side of the stack the words stand on: west or east."""
+    reserve: Length
+    gap: Length
+
+    @property
+    def mirror(self) -> Length:
+        """The padding the far side of the stack takes to balance the caption."""
+
+        return Length(self.reserve.points + self.gap.points)
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,12 +790,20 @@ class GroupBuilder:
         at: Cell | None,
         options: dict[str, object],
         label_role: str = "label",
+        caption: _SideCaption | None = None,
     ) -> NodeHandle:
         """Lower one captioned vector glyph; see ``vector`` for the shape.
 
         ``label_role`` is for a composite that owns the glyph rather than the
         author: ``attention`` captions its Q/K/V glyphs as captions, so they paint
         in muted ink the way every other secondary label in the system does.
+
+        ``caption`` moves those words *beside* the stack instead of under it, on a
+        ports-aligned row so they sit on the cells' own port line, with the same
+        room reserved as padding on the stack's other side. The stack therefore
+        stays exactly where a caption-below composite put it -- centred in
+        whatever cell it was placed in -- and the corridor under it, which is the
+        only approach a south-facing feed has, is left empty.
         """
 
         if preset is not None:
@@ -791,21 +829,55 @@ class GroupBuilder:
                 valid = ", ".join(RAMP_ROLES)
                 raise ValueError(f'unknown vector ramp "{ramp}"; valid ramps: {valid}')
             properties = {"cells": cells, "columns": columns, "ramp": ramp}
-        stack = self.column(
-            id,
-            gap=_vector_label_gap(self.figure.style) if gap is None else gap,
-            padding=0,
-            align="center",
-            role="layout",
-            at=at,
-        )
+        words = _label(label)
+        beside = caption if words else None
+        if beside is None:
+            stack = self.column(
+                id,
+                gap=_vector_label_gap(self.figure.style) if gap is None else gap,
+                padding=0,
+                align="center",
+                role="layout",
+                at=at,
+            )
+        else:
+            zero = pt(0.0)
+            # (top, right, bottom, left): the stack's far side takes the caption's
+            # room back as padding, so the glyph stays symmetric about its cells.
+            padding = (
+                (zero, beside.mirror, zero, zero)
+                if beside.side is Side.WEST
+                else (zero, zero, zero, beside.mirror)
+            )
+            stack = self.row(
+                id,
+                gap=beside.gap,
+                padding=padding,
+                align="ports",
+                anchor="cells",
+                role="layout",
+                at=at,
+            )
+
+        def write_caption() -> None:
+            stack.node(
+                "label",
+                "label",
+                label=words,
+                role=label_role,
+                **({} if beside is None else {"width": beside.reserve}),
+            )
+
+        leads = beside is not None and beside.side is Side.WEST
+        if leads:
+            write_caption()
         result = stack.node(
             "cells",
             "vector",
             **{"role": "vector", **_with_properties(options, **properties)},
         )
-        if _label(label):
-            stack.node("label", "label", label=label, role=label_role)
+        if words and not leads:
+            write_caption()
         if input is not None:
             self.connect(input, result.input)
         return result
@@ -1125,11 +1197,12 @@ class GroupBuilder:
         are ordinary ``connect(source, block.k)`` calls later on.
 
         ``vectors=`` grows the block's three inputs as *vector glyphs* under it,
-        the way the Transformer paper draws them: one captioned cell stack per
-        port, each centred exactly under the port it feeds, joined to it by a
-        plain vertical. ``vectors=True`` takes the palette's own q and k/v ramps;
-        one ``VectorPreset`` or one ramp-role name paints all three alike; a
-        ``{"q": ..., "k": ..., "v": ...}`` mapping paints each its own way.
+        the way the Transformer paper draws them: one cell stack per port, each
+        centred exactly under the port it feeds, joined to it by a plain vertical,
+        and captioned to one side so that nothing stands in the way of the value
+        arriving from below. ``vectors=True`` takes the palette's own q and k/v
+        ramps; one ``VectorPreset`` or one ramp-role name paints all three alike;
+        a ``{"q": ..., "k": ..., "v": ...}`` mapping paints each its own way.
 
         The composite is the block plus the glyph row, and the handle it returns
         still speaks for the block -- ``output`` is the attention output -- but
@@ -1191,6 +1264,11 @@ class GroupBuilder:
         Lanes are filled in *offset* order rather than in q/k/v order, so an
         authored ``ports=`` that puts the value on the left puts its glyph there
         too. Nothing else here knows which name sits where.
+
+        Each caption sits *beside* its stack, in the lane's own padding
+        (``_glyph_caption``), because the corridor under a glyph is the only
+        approach its feed has: a caption parked in it makes every arriving arrow
+        hook around the words. Beside, the feeds enter dead straight.
         """
 
         presets = _attention_vectors(vectors)
@@ -1206,6 +1284,16 @@ class GroupBuilder:
         offsets = _attention_offsets(tuple(options.get("ports") or ()), tuple(presets))
         presets = {name: presets[name] for name in sorted(presets, key=offsets.__getitem__)}
         tracks = attachment_lane_tracks(tuple(offsets[name] for name in presets), block_width)
+        caption = _glyph_caption(
+            tracks[1],
+            max(
+                vector_stack_width(
+                    preset.columns if isinstance(preset, VectorPreset) else 1, style
+                )
+                for preset in presets.values()
+            ),
+            style,
+        )
         composite = self.column(
             id,
             padding=0,
@@ -1233,10 +1321,11 @@ class GroupBuilder:
                 cells=None,
                 columns=None,
                 input=None,
-                gap=_glyph_caption_gap(self.figure.style),
+                gap=None if caption is not None else _glyph_caption_gap(self.figure.style),
                 at=(0, 2 * index + 1),
                 options={"ports": _ATTENTION_VECTOR_PORTS},
                 label_role="caption",
+                caption=caption,
             )
             for index, (name, preset) in enumerate(presets.items())
         }
@@ -1693,8 +1782,49 @@ def _attention_offsets(
     return dict(zip(names, component_port_offsets("attention", names), strict=True))
 
 
+_GLYPH_CAPTION_SIDE = Side.WEST
+"""Which side of its stack a Q/K/V caption stands on.
+
+One side for all three, not the outer side of each: the lanes are cut to the same
+width, so every stack has the same room on either side of it, and a row of
+captions that all lean the same way reads as a convention while a mirrored pair
+around a middle glyph reads as an accident. It is also the side with no
+competition -- two captions meeting in one inter-lane gap would sit a few points
+apart, each nearer the other glyph's stack than to its own.
+"""
+
+
+def _glyph_caption(lane: float, stack: float, style: LayoutStyle) -> _SideCaption | None:
+    """The caption box that fits beside a ``stack``-wide glyph in a ``lane``.
+
+    A lane is wider than the stack standing in it -- it is as wide as the port
+    spacing it was cut from -- and that surplus, half of it on each side, is
+    exactly the room a caption may use without reaching into the neighbouring
+    lane. So the caption takes the half it stands in, less one
+    ``caption_clearance`` of air against the cells, and the glyph reserves the
+    same amount on its other side: the stack then sits dead centre of its lane
+    with the words in the padding, and the whole glyph is precisely as wide as the
+    lane it fills.
+
+    ``None`` when that half-lane holds no more than the air itself, which is a
+    lane too narrow for a caption beside it; the composite then keeps the caption
+    under the stack, where it costs the feeds their straightness but is at least
+    legible.
+    """
+
+    gap = style.caption_clearance.points
+    reserve = max(0.0, lane / 2.0 - stack / 2.0) - gap
+    if reserve <= 0.0:
+        return None
+    return _SideCaption(_GLYPH_CAPTION_SIDE, pt(reserve), pt(gap))
+
+
 def _glyph_caption_gap(style_name: str) -> Length:
-    """Air between one Q/K/V stack and its caption: room for an arrival, and no more.
+    """Air *under* one Q/K/V stack when its caption could not stand beside it.
+
+    Only the narrow-lane fallback reaches this now (see ``_glyph_caption``); a
+    caption with room beside its stack leaves the corridor below empty instead of
+    reserving an arrival's worth of it.
 
     This is the corridor *below* the glyphs, and it is a token sum rather than a
     number chosen by eye. A glyph in this composite is fed from underneath, and a
