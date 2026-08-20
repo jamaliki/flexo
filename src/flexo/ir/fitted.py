@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flexo.diagnostics import Diagnostic
 from flexo.geometry import Point, Rect, Side, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 
@@ -38,6 +39,12 @@ class FittedFigure:
     nodes: tuple[FittedNode, ...]
     groups: tuple[FittedGroup, ...]
     canvas_size: Size
+    diagnostics: tuple[Diagnostic, ...] = ()
+    """Advice raised while placing components -- ports that could not pick a side.
+
+    Nothing here stops the compile; lint reports it alongside its own findings so
+    one run tells the author everything the figure has to say.
+    """
 
     def node(self, node_id: str) -> FittedNode:
         return next(node for node in self.nodes if node.measured.spec.id == node_id)

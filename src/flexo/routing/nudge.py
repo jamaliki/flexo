@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from itertools import combinations
 
+from flexo.components import TRANSPARENT_KINDS, route_clearance
 from flexo.geometry import Point, Rect, Segment, segments
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.style import LayoutStyle
+from flexo.text import ink_descent
 
 _EPSILON = 1e-7
 _NUDGE_OBSTACLE_FRACTION = 0.5
@@ -91,7 +93,35 @@ def simplify_polyline(points: tuple[Point, ...]) -> tuple[Point, ...]:
     return tuple(result)
 
 
-def edge_label_position(points: tuple[Point, ...], metrics: TextMetrics) -> Point:
+def caption_rise(metrics: TextMetrics, style: LayoutStyle) -> float:
+    """How far above a run's centerline a caption's baseline has to sit.
+
+    A connector caption is route geometry, not a node, so the caption-obstacle
+    rule that keeps routes off component captions cannot reach it: nothing stops
+    a caption of its own from landing on the arrow it labels. This is the same
+    clearance measured from the other side -- half the shaft's stroke, then
+    ``caption_clearance`` of air, then the depth of the caption's own lowest ink,
+    which is what a subscript makes deeper than the font's descender.
+    """
+
+    return (
+        style.connector_width.points / 2.0
+        + style.caption_clearance.points
+        + ink_descent(metrics, style.typography)
+    )
+
+
+def caption_reach(metrics: TextMetrics, style: LayoutStyle) -> float:
+    """How far beside a run's centerline a caption's near edge has to sit."""
+
+    return style.connector_width.points / 2.0 + style.caption_clearance.points
+
+
+def edge_label_position(
+    points: tuple[Point, ...],
+    metrics: TextMetrics,
+    style: LayoutStyle,
+) -> Point:
     candidates = segments(points)
     horizontal = tuple(segment for segment in candidates if segment.horizontal)
     longest = max(horizontal or candidates, key=lambda segment: segment.length)
@@ -100,13 +130,15 @@ def edge_label_position(points: tuple[Point, ...], metrics: TextMetrics) -> Poin
         (longest.start.y + longest.end.y) / 2.0,
     )
     if longest.horizontal:
-        return midpoint.translated(dy=-(metrics.descent + 2.0))
-    return midpoint.translated(dx=metrics.width / 2.0 + 4.0)
+        return midpoint.translated(dy=-caption_rise(metrics, style))
+    return midpoint.translated(dx=metrics.width / 2.0 + caption_reach(metrics, style))
 
 
 def rail_label_position(
     rail: tuple[Point, ...],
-    stems: tuple[tuple[Point, ...], ...] = (),
+    stems: tuple[tuple[Point, ...], ...],
+    metrics: TextMetrics,
+    style: LayoutStyle,
 ) -> Point:
     """Anchor a net caption above the horizontal run the net reads along.
 
@@ -116,13 +148,23 @@ def rail_label_position(
     drawn as one line. So the anchor is the midpoint of the longest horizontal
     run the net draws -- collinear pieces counted as one -- and a net whose ink
     is purely vertical keeps its rail midpoint, captioned beside it.
+
+    The run is not all the words have to clear. A riser climbing out of either
+    end of it -- in panel-b the one carrying K and V up to the merge -- passes
+    straight through the band the caption occupies, so the ends the risers claim
+    come off the run before the caption is centred on what is left.
     """
 
     runs: dict[float, list[Segment]] = {}
+    risers: list[Segment] = []
     for polyline in (rail, *stems):
         for segment in segments(polyline):
-            if segment.horizontal and segment.length > _EPSILON:
+            if segment.length <= _EPSILON:
+                continue
+            if segment.horizontal:
                 runs.setdefault(segment.start.y, []).append(segment)
+            else:
+                risers.append(segment)
     if runs:
         coordinate = min(
             runs,
@@ -133,10 +175,61 @@ def rail_label_position(
             for segment in runs[coordinate]
             for value in (segment.start.x, segment.end.x)
         )
-        return Point((min(bounds) + max(bounds)) / 2.0, coordinate - 4.0)
+        centre = _captioned_centre(
+            min(bounds),
+            max(bounds),
+            coordinate,
+            risers,
+            metrics.width,
+            caption_reach(metrics, style),
+        )
+        return Point(centre, coordinate - caption_rise(metrics, style))
     first, last = rail[0], rail[-1]
     midpoint = Point((first.x + last.x) / 2.0, (first.y + last.y) / 2.0)
-    return midpoint.translated(dx=4.0)
+    return midpoint.translated(dx=metrics.width / 2.0 + caption_reach(metrics, style))
+
+
+def _captioned_centre(
+    left: float,
+    right: float,
+    coordinate: float,
+    risers: list[Segment],
+    width: float,
+    clearance: float,
+) -> float:
+    """Centre a caption on the stretch of run no riser reaches up through.
+
+    A riser that climbs out of the middle of the run cuts it in two -- panel-b's
+    K,V riser leaves the merge run a long stretch on one side and a stub on the
+    other -- so the caption takes the widest stretch that is left, not the
+    midpoint of a run it would be sitting across.
+    """
+
+    free = [(left, right)]
+    for riser in risers:
+        if min(riser.start.y, riser.end.y) >= coordinate - _EPSILON:
+            continue  # Drops away below the run; the caption sits above it.
+        blocked = (riser.start.x - clearance, riser.start.x + clearance)
+        free = [piece for span in free for piece in _without(span, blocked)]
+    if not free:
+        return (left + right) / 2.0
+    start, end = max(free, key=lambda span: span[1] - span[0])
+    if end - start >= width:
+        return (start + end) / 2.0
+    # More words than the widest stretch holds. Centre them on it anyway -- it is
+    # still the best place on the run -- but keep the overflow over the run
+    # itself rather than out past its ends.
+    return min(max((start + end) / 2.0, left + width / 2.0), right - width / 2.0)
+
+
+_Span = tuple[float, float]
+
+
+def _without(span: _Span, blocked: _Span) -> tuple[_Span, ...]:
+    """``span`` with ``blocked`` cut out of it: nothing, one piece, or two."""
+
+    pieces = ((span[0], min(span[1], blocked[0])), (max(span[0], blocked[1]), span[1]))
+    return tuple(piece for piece in pieces if piece[1] - piece[0] > _EPSILON)
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,7 +577,8 @@ def _defects(
         # Port stubs always sit inside their own component's clearance ring and
         # never move, so only the interior runs are judged against obstacles.
         # A rail owns no port, so every one of its segments counts.
-        judged = segments(points) if run.rail else segments(points)[1:-1]
+        run_segments = segments(points)
+        judged = run_segments if run.rail else run_segments[1:-1]
         if any(
             not segment.orthogonal
             or any(segment.intersects_rect_interior(obstacle) for obstacle in obstacles)
@@ -542,10 +636,7 @@ def figure_runs(
     """Flatten every routed centerline, rail, and stem into one indexed list."""
 
     departure = style.route_clearance.points
-    arrival = max(
-        departure,
-        2.0 * style.arrow_length.points + style.elbow_radius.points,
-    )
+    arrival = style.arrival_clearance.points
     runs: list[Run] = []
     polylines: list[tuple[Point, ...]] = []
     for edge in routed.edges:
@@ -598,12 +689,12 @@ def figure_runs(
 def rebuild_figure(
     routed: RoutedFigure,
     polylines: tuple[tuple[Point, ...], ...],
-    *,
-    arrow_length: float,
-    standoff: float,
+    style: LayoutStyle,
 ) -> RoutedFigure:
     """Re-derive shafts and label anchors from nudged centerlines."""
 
+    arrow_length = style.arrow_length.points
+    standoff = style.connector_standoff.points
     position = 0
     edges: list[RoutedEdge] = []
     for edge in routed.edges:
@@ -615,7 +706,7 @@ def rebuild_figure(
                 centerline=centerline,
                 shaft=edge_shaft(centerline, arrow_length=arrow_length, standoff=standoff),
                 label_position=(
-                    edge_label_position(centerline, edge.label_metrics)
+                    edge_label_position(centerline, edge.label_metrics, style)
                     if edge.label_metrics is not None
                     else None
                 ),
@@ -656,9 +747,9 @@ def rebuild_figure(
                 label_position=(
                     rail_label_position(
                         rail,
-                        tuple(
-                            stem.shaft for stem in (*source_stems, *target_stems)
-                        ),
+                        tuple(stem.shaft for stem in (*source_stems, *target_stems)),
+                        net.label_metrics,
+                        style,
                     )
                     if net.label_metrics is not None
                     else None
@@ -671,9 +762,10 @@ def rebuild_figure(
 def nudge_obstacles(routed: RoutedFigure, style: LayoutStyle) -> tuple[Rect, ...]:
     """Component bounds a nudged track may not approach."""
 
-    margin = style.route_clearance.points * _NUDGE_OBSTACLE_FRACTION
     return tuple(
-        node.bounds.inflated(margin)
+        node.bounds.inflated(
+            route_clearance(node.measured.spec, style) * _NUDGE_OBSTACLE_FRACTION
+        )
         for node in routed.fitted.nodes
-        if node.measured.spec.kind not in {"label", "spacer", "junction"}
+        if node.measured.spec.kind not in TRANSPARENT_KINDS
     )

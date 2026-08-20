@@ -125,6 +125,8 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
         result["width"] = _extent_data(node.width)
     if node.height is not None:
         result["height"] = _extent_data(node.height)
+    if node.shadow:
+        result["shadow"] = True
     if node.properties:
         result["properties"] = dict(node.properties)
     return result
@@ -182,6 +184,10 @@ def _group_data(group: GroupSpec) -> dict[str, object]:
         result["role"] = group.role
     if group.title_side != "left":
         result["title_side"] = group.title_side
+    if group.anchor is not None:
+        result["anchor"] = group.anchor
+    if group.shadow:
+        result["shadow"] = True
     return result
 
 
@@ -303,6 +309,7 @@ def _node(data: dict[str, Any]) -> NodeSpec:
         width=_optional_extent(data.get("width")),
         height=_optional_extent(data.get("height")),
         properties=tuple(sorted(data.get("properties", {}).items())),
+        shadow=data.get("shadow", False),
     )
 
 
@@ -381,6 +388,8 @@ def _group(data: dict[str, Any]) -> GroupSpec:
         label=_label(data.get("label", "")),
         role=data.get("role", "container"),
         title_side=data.get("title_side", "left"),
+        anchor=data.get("anchor"),
+        shadow=data.get("shadow", False),
     )
 
 

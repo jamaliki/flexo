@@ -11,8 +11,9 @@ from flexo.compiler import Compilation
 from flexo.components import TRANSPARENT_KINDS
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, segments
+from flexo.hierarchy import bounded_owner, parent_map
 from flexo.style import STYLES, LayoutStyle
-from flexo.svg import INKSCAPE_NS, SVG_NS
+from flexo.svg import INKSCAPE_NS, SVG_NS, local_name
 
 _CONTAINMENT_TOLERANCE = 1e-6
 
@@ -64,7 +65,7 @@ def _fitted_diagnostics(
     compilation: Compilation,
 ) -> tuple[Diagnostic, ...]:
     fitted = compilation.fitted
-    diagnostics: list[Diagnostic] = []
+    diagnostics: list[Diagnostic] = list(fitted.diagnostics)
     nodes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
     groups = {group.measured.spec.id: group for group in fitted.groups}
     for group in fitted.groups:
@@ -228,10 +229,7 @@ def _routing_diagnostics(
                         entity_id=edge.spec.id,
                     )
                 )
-            target_clearance = max(
-                style.route_clearance.points,
-                2.0 * style.arrow_length.points + style.elbow_radius.points,
-            )
+            target_clearance = style.arrival_clearance.points
             if final.length + 1e-5 < target_clearance:
                 diagnostics.append(
                     Diagnostic(
@@ -271,10 +269,7 @@ def _net_routing_diagnostics(
 ) -> tuple[Diagnostic, ...]:
     diagnostics: list[Diagnostic] = []
     fitted = compilation.routed.fitted
-    target_clearance = max(
-        style.route_clearance.points,
-        2.0 * style.arrow_length.points + style.elbow_radius.points,
-    )
+    target_clearance = style.arrival_clearance.points
     for net in compilation.routed.nets:
         # What the router had to overrule -- an unreachable rail_at, say -- is
         # reported here rather than at route time, so one clamped hint never
@@ -462,21 +457,7 @@ def _routing_owner_bounds(
     target_id: str,
 ) -> Rect:
     semantic = compilation.measured.semantic
-    groups = {group.id: group for group in semantic.groups}
-    parents = {child: group.id for group in semantic.groups for child in group.children}
-
-    def ancestors(entity_id: str) -> tuple[str, ...]:
-        result = []
-        current = entity_id
-        while current in parents:
-            current = parents[current]
-            result.append(current)
-        return tuple(result)
-
-    target_ancestors = set(ancestors(target_id))
-    owner = next(group_id for group_id in ancestors(source_id) if group_id in target_ancestors)
-    while groups[owner].role == "layout" and owner in parents:
-        owner = parents[owner]
+    owner = bounded_owner(semantic, parent_map(semantic.groups), (source_id, target_id))
     return compilation.fitted.group(owner).bounds
 
 
@@ -516,11 +497,11 @@ def _structural_svg_diagnostics(
                     entity_id=expected_id,
                 )
             )
-    if any(_local_name(item.tag) == "foreignObject" for item in elements):
+    if any(local_name(item.tag) == "foreignObject" for item in elements):
         diagnostics.append(
             Diagnostic("svg.foreign-object", "foreignObject is not editable enough.")
         )
-    text_elements = [item for item in elements if _local_name(item.tag) == "text"]
+    text_elements = [item for item in elements if local_name(item.tag) == "text"]
     if expected_ids and not text_elements:
         diagnostics.append(
             Diagnostic("svg.text.flattened", "Editable master contains no live text.")
@@ -582,10 +563,6 @@ def _publication_diagnostics(
             )
         )
     return tuple(diagnostics)
-
-
-def _local_name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
 
 
 def _tree_depth(root: ET.Element) -> int:

@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Self
+from pathlib import Path
+from typing import TYPE_CHECKING, Self
 
 from flexo.components import normalize_node
 from flexo.geometry import Side
@@ -30,11 +31,16 @@ from flexo.style import (
     RAMP_ROLES,
     STYLES,
     LayoutStyle,
+    Palette,
     VectorPreset,
     normalize_colour,
 )
 from flexo.units import Extent, Length, parse_extent
 from flexo.validate import normalize_and_validate
+
+if TYPE_CHECKING:  # pragma: no cover - the builder never needs the back end at runtime
+    from flexo.compiler import Compilation
+    from flexo.export import Build
 
 type Padding = Length | str | float | Sequence[Length | str | float]
 """One length for all four sides, an ``(x, y)`` pair, or ``(top, right, bottom, left)``."""
@@ -45,10 +51,18 @@ type Cell = tuple[int, int]
 
 @dataclass(frozen=True, slots=True)
 class NodeHandle:
+    """A created component, and the ports it offers.
+
+    Passing a handle where a port is expected takes the port the call needs --
+    ``output`` for a source, ``input`` for a target -- so wiring rarely names one.
+    """
+
     id: str
     ports: tuple[str, ...]
 
     def port(self, name: str) -> PortRef:
+        """This node's ``name`` port, or an error listing the ports it has."""
+
         if name not in self.ports:
             raise AttributeError(
                 f'node "{self.id}" has no port "{name}"; valid ports: {", ".join(self.ports)}'
@@ -75,13 +89,24 @@ class _GroupDraft:
     label: tuple[TextRun, ...]
     role: str
     title_side: str = "left"
+    anchor: str | None = None
+    shadow: bool = False
     children: list[str] = field(default_factory=list)
     placements: dict[str, Cell] = field(default_factory=dict)
     """Grid cells claimed by ``at=``, collected as children are authored."""
 
 
 class Figure:
-    """Context-managed semantic figure builder."""
+    """A figure under construction, and the root group everything hangs from.
+
+    Used as a context manager, leaving the block lowers and validates the
+    figure, so an authoring mistake is raised where it was written rather than at
+    the first call that reads ``spec``.
+
+    ``width`` takes a length or one of the publication presets the style defines
+    (``"single-column"``, ``"double-column"``, ``"presentation"``); ``height`` is
+    normally left out, so the canvas ends at the content plus its margin.
+    """
 
     def __init__(
         self,
@@ -133,7 +158,11 @@ class Figure:
         height: Length | str | float | None = None,
         role: str = "module",
         title_side: str = "left",
+        anchor: str | None = None,
+        shadow: bool = False,
     ) -> GroupBuilder:
+        """Open a titled module directly on the root: ``figure.root.group`` in one call."""
+
         return self.root.group(
             id,
             label=label,
@@ -145,10 +174,18 @@ class Figure:
             height=height,
             role=role,
             title_side=title_side,
+            anchor=anchor,
+            shadow=shadow,
         )
 
     @property
     def spec(self) -> FigureSpec:
+        """This figure lowered into the validated semantic IR.
+
+        Reading it validates, so every read either returns a figure that will
+        compile or raises about the one that will not.
+        """
+
         groups = tuple(
             GroupSpec(
                 draft.id,
@@ -158,6 +195,8 @@ class Figure:
                 draft.label,
                 draft.role,
                 draft.title_side,  # type: ignore[arg-type]
+                _scoped_anchor(draft),
+                draft.shadow,
             )
             for draft in self._groups
         )
@@ -258,14 +297,54 @@ class Figure:
         self._nets.append(net)
         return net
 
-    def compile(self):
+    def compile(
+        self,
+        *,
+        style: LayoutStyle | None = None,
+        palette: Palette | None = None,
+    ) -> Compilation:
+        """Measure, fit, route, and emit this figure, without writing anything."""
+
         from flexo.compiler import compile_figure
 
-        return compile_figure(self.spec)
+        return compile_figure(self.spec, style=style, palette=palette)
+
+    def render(
+        self,
+        output_directory: str | Path = "build",
+        *,
+        stem: str | None = None,
+        formats: tuple[str, ...] = ("editable", "portable", "pdf", "png"),
+        dpi: float = 192.0,
+        style: LayoutStyle | None = None,
+        palette: Palette | None = None,
+    ) -> Build:
+        """Compile, write the requested formats, and lint -- the whole pipeline.
+
+        ``flexo.build(figure_spec, ...)`` is the same call for a figure that
+        already lowered to a ``FigureSpec``.
+        """
+
+        from flexo.export import build
+
+        return build(
+            self.spec,
+            output_directory,
+            stem=stem,
+            formats=formats,
+            dpi=dpi,
+            style=style,
+            palette=palette,
+        )
 
 
 class GroupBuilder:
-    """A scoped editorial group and component factory."""
+    """One layout group, and the factory for everything inside it.
+
+    Every id an author writes here is scoped by the group that owns it, so
+    ``module.mlp("q-mlp")`` inside group ``cryo`` is ``cryo.q-mlp`` -- which is
+    what lets the same component name appear in every module of a figure.
+    """
 
     def __init__(self, figure: Figure, draft: _GroupDraft) -> None:
         self.figure = figure
@@ -302,6 +381,8 @@ class GroupBuilder:
         collision_policy: str = "disjoint",
         role: str = "container",
         title_side: str = "left",
+        anchor: str | None = None,
+        shadow: bool = False,
         at: Cell | None = None,
     ) -> GroupBuilder:
         """Open a nested layout group.
@@ -310,6 +391,13 @@ class GroupBuilder:
         override it for one axis each, so a grid can breathe vertically without
         also spreading sideways. ``padding`` is one length for all four sides, an
         ``(x, y)`` pair, or ``(top, right, bottom, left)``.
+
+        ``align="ports"`` lines this group's children up by the line their side
+        ports sit on rather than by their boxes, and ``anchor="<child>"`` names
+        the child this group in turn presents to a ports-aligned parent (by
+        default, its first child that is neither a label nor a spacer).
+
+        ``shadow=True`` gives the container a soft drop shadow.
 
         ``at=(row, column)`` places this group in one cell of the enclosing grid
         (see ``grid`` for the rules), and ``column_widths`` reserves minimum
@@ -357,6 +445,8 @@ class GroupBuilder:
             _label(label),
             role,
             title_side,
+            anchor,
+            shadow,
         )
         self._draft.children.append(scoped_id)
         self._place(scoped_id, at)
@@ -364,9 +454,13 @@ class GroupBuilder:
         return GroupBuilder(self.figure, draft)
 
     def row(self, id: str, **options: object) -> GroupBuilder:
+        """Open a group whose children run left to right; see ``group``."""
+
         return self.group(id, layout="row", **options)
 
     def column(self, id: str, **options: object) -> GroupBuilder:
+        """Open a group whose children run top to bottom; see ``group``."""
+
         return self.group(id, layout="column", **options)
 
     def grid(self, id: str, *, columns: int, **options: object) -> GroupBuilder:
@@ -395,6 +489,8 @@ class GroupBuilder:
         return self.group(id, layout="grid", columns=columns, **options)
 
     def overlay(self, id: str, **options: object) -> GroupBuilder:
+        """Open a group whose children stack on one another, overlap allowed."""
+
         return self.group(id, layout="overlay", collision_policy="overlay", **options)
 
     def node(
@@ -410,7 +506,11 @@ class GroupBuilder:
         properties: dict[str, Scalar] | None = None,
         paint: Mapping[str, str] | None = None,
         motif: bool = True,
+        shadow: bool = False,
         at: Cell | None = None,
+        input: NodeHandle | PortRef | str | None = None,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str] = (),
     ) -> NodeHandle:
         """Author one component.
 
@@ -429,6 +529,16 @@ class GroupBuilder:
 
         ``motif=False`` drops the component's decorative motif -- an MLP's three
         dots, a matrix's cell grid -- and changes nothing else.
+
+        ``shadow=True`` gives the component a soft drop shadow. Paint only: a
+        shadow moves nothing and reserves no space.
+
+        ``input=`` connects one upstream value into this component after it is
+        created, and ``inputs=`` connects several. Every component factory takes
+        both, with the same meaning, so wiring never depends on which one you
+        reached for: one source lands on the component's ``input`` port, several
+        land on ``input1``, ``input2``, ... when the component has them and on
+        ``input`` when it does not.
         """
 
         resolved = dict(properties or {})
@@ -445,30 +555,65 @@ class GroupBuilder:
                 _extent(width),
                 _extent(height),
                 tuple(sorted(resolved.items())),
+                shadow,
             )
         )
         self.figure._nodes.append(node)
         self._draft.children.append(node.id)
         self._place(node.id, at)
-        return NodeHandle(node.id, tuple(port.name for port in node.ports))
+        handle = NodeHandle(node.id, tuple(port.name for port in node.ports))
+        self.wire(handle, ((input,) if input is not None else ()) + tuple(inputs))
+        return handle
 
-    def block(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
+    def wire(
+        self,
+        target: NodeHandle,
+        sources: tuple[NodeHandle | PortRef | str, ...],
+    ) -> None:
+        """Connect every source into ``target``'s input port or ports.
+
+        One source takes the port named ``input``; several take ``input1`` and
+        friends when the component offers them, and share ``input`` when it does
+        not -- a fan-in the router draws as one arrival. A component with neither
+        says so by name rather than by ``AttributeError`` from somewhere deeper.
+        """
+
+        if not sources:
+            return
+        numbered = tuple(f"input{index + 1}" for index in range(len(sources)))
+        if len(sources) > 1 and all(name in target.ports for name in numbered):
+            names = numbered
+        else:
+            names = (_single_input(target),) * len(sources)
+        for source, name in zip(sources, names, strict=True):
+            self.connect(source, target.port(name))
+
+    def block(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A plain labelled box: the component to reach for when none of the others fit."""
+
         return self.node(id, "block", label=label, **options)
 
     def feature_strip(
         self,
         id: str,
         *,
-        label: str = "",
+        label: str | tuple[TextRun, ...] = "",
         cells: int = 6,
         **options: object,
     ) -> NodeHandle:
+        """A horizontal strip of ``cells`` shaded cells under its label."""
+
         return self.node(
             id,
             "feature-strip",
             label=label,
-            properties={"cells": cells},
-            **options,
+            **_with_properties(options, cells=cells),
         )
 
     def vector(
@@ -541,8 +686,7 @@ class GroupBuilder:
         result = stack.node(
             "cells",
             "vector",
-            properties=properties,
-            **{"role": "vector", **options},
+            **{"role": "vector", **_with_properties(options, **properties)},
         )
         if _label(label):
             stack.node("label", "label", label=label, role="label")
@@ -550,32 +694,128 @@ class GroupBuilder:
             self.connect(input, result.input)
         return result
 
-    def matrix(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
+    def matrix(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A box whose motif is a grid of shaded cells."""
+
         return self.node(id, "matrix", label=label, **options)
 
     def sequence(
         self,
         id: str,
         *,
-        label: str = "",
+        label: str | tuple[TextRun, ...] = "",
         tokens: int = 7,
         **options: object,
     ) -> NodeHandle:
+        """A box whose motif is a run of ``tokens`` dots: a sequence of residues."""
+
         return self.node(
             id,
             "sequence",
             label=label,
-            properties={"tokens": tokens},
-            **options,
+            **_with_properties(options, tokens=tokens),
         )
 
-    def graph(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
+    def graph(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A bordered panel whose motif is a little node-and-edge network."""
+
         return self.node(id, "graph", label=label, **options)
 
-    def inset(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
+    def inset(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A bordered scientific panel whose motif is a molecule illustration.
+
+        Give two insets in one figure the same ``height``: an inset sized to its
+        own label draws its molecule at a different scale from its neighbour's.
+        """
+
         return self.node(id, "inset", label=label, **options)
 
-    def tensor(self, id: str, *, label: str = "", **options: object) -> NodeHandle:
+    def image(
+        self,
+        id: str,
+        source: str | Path,
+        *,
+        width: Extent | str | float | None = None,
+        height: Extent | str | float | None = None,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """Place artwork the author drew, as a first-class node.
+
+        Some ink is not the compiler's to invent -- a molecule, a density map,
+        the one panel that has to be the real thing. Draw it as an ``.svg`` (or
+        render it to a ``.png``) and hand Flexo the file: it becomes an ordinary
+        component with the four side-centre ports, so connectors, layout, and
+        routing treat it exactly as they treat a block, and routes keep clear of
+        it like any other body.
+
+        An SVG source stays vector all the way through. Flexo nests the file's
+        own content at the node's bounds with its viewBox intact, so the drawing
+        is crisp at any zoom and still made of objects an editor can select --
+        and it is *embedded*, not linked, so the editable SVG, the portable SVG,
+        and the PDF each carry the artwork with them.
+
+        Size follows the file. Its intrinsic size comes from its ``width`` and
+        ``height``, or from its viewBox read as CSS pixels; a PNG's comes from
+        its pixel size at 96 dpi. Give ``width`` or ``height`` alone and the
+        other follows the artwork's aspect ratio; give both and the drawing
+        letterboxes inside those bounds rather than distorting. Both extents
+        take any length or ``"cells:N"``, so a panel of icons can be exactly as
+        tall as the vector stack beside it.
+
+        The path resolves against the working directory the figure is
+        *compiled* in, so absolute paths are the reliable choice. A missing
+        file, an unreadable one, or a suffix that is neither ``.svg`` nor
+        ``.png`` is a diagnostic naming this node and that path.
+
+        Artwork is checked before it is inlined, because inlining is what makes
+        it dangerous: a file carrying a ``<script>``, an ``on*`` event handler,
+        or a reference to anything outside itself is rejected with a diagnostic
+        rather than quietly stripped. Every id in the artwork is rewritten under
+        this node's id, so the same file may be embedded twice in one figure
+        without the two copies sharing a gradient.
+
+        A ``label`` sits over the artwork, centred, as on any other node. For a
+        caption *under* the drawing, put the image and a ``label`` node in a
+        column, the way ``vector`` captions its stack.
+        """
+
+        return self.node(
+            id,
+            "image",
+            label=label,
+            width=width,
+            height=height,
+            **_with_properties(options, source=str(source)),  # type: ignore[arg-type]
+        )
+
+    def tensor(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A labelled box drawn as a stacked slab: a multi-dimensional value."""
+
         return self.node(id, "tensor", label=label, **options)
 
     def concat(
@@ -584,13 +824,18 @@ class GroupBuilder:
         *,
         inputs: tuple[NodeHandle | PortRef | str, ...]
         | list[NodeHandle | PortRef | str],
-        label: str = "Concat",
+        label: str | tuple[TextRun, ...] = "Concat",
         **options: object,
     ) -> NodeHandle:
+        """Join two or more values, one west port each, in the order given.
+
+        Two inputs is the minimum: a concat of one is the value itself.
+        """
+
         sources = tuple(inputs)
         if len(sources) < 2:
             raise ValueError("concat requires at least two inputs")
-        ports = (
+        ports = _authored_ports(options) or (
             *(
                 PortSpec(
                     f"input{index + 1}",
@@ -603,8 +848,7 @@ class GroupBuilder:
             PortSpec("output", Side.EAST, adaptive=True),
         )
         result = self.node(id, "concat", label=label, ports=ports, **options)
-        for index, source in enumerate(sources):
-            self.connect(source, result.port(f"input{index + 1}"))
+        self.wire(result, sources)
         return result
 
     def channels(
@@ -615,10 +859,16 @@ class GroupBuilder:
         input: NodeHandle | PortRef | str | None = None,
         **options: object,
     ) -> tuple[PortRef, ...]:
+        """Split one value into a captioned east port per label.
+
+        Returns the ports rather than the node, in ``labels`` order, because what
+        an author wants next is to wire each channel somewhere different.
+        """
+
         names = tuple(labels)
         if not names:
             raise ValueError("channels requires at least one label")
-        ports = (
+        ports = _authored_ports(options) or (
             PortSpec("input", Side.WEST, adaptive=True),
             *(
                 PortSpec(
@@ -634,42 +884,52 @@ class GroupBuilder:
             id,
             "channels",
             ports=ports,
-            properties={"count": len(names), "labels": ",".join(names)},
-            **options,
+            **_with_properties(options, count=len(names), labels=",".join(names)),
         )
         if input is not None:
-            self.connect(input, result.input)
+            self.wire(result, (input,))
         return tuple(result.port(_port_name(name)) for name in names)
 
     def add_norm(
         self,
         id: str,
         *,
-        label: str = "Add + norm",
+        label: str | tuple[TextRun, ...] = "Add + norm",
         input: NodeHandle | PortRef | str | None = None,
         **options: object,
     ) -> NodeHandle:
+        """A residual-normalization box. It carries no motif: the words are the component."""
+
         result = self.node(id, "add-norm", label=label, **options)
         if input is not None:
-            self.connect(input, result)
+            self.wire(result, (input,))
         return result
 
     def mlp(
         self,
         id: str,
         *,
-        label: str = "MLP",
+        label: str | tuple[TextRun, ...] = "MLP",
         input: NodeHandle | PortRef | str | None = None,
         inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         outputs: tuple[str, ...] | list[str] = (),
         **options: object,
     ) -> NodeHandle | tuple[PortRef, ...]:
+        """A multilayer perceptron, sized to its label and wired to its sources.
+
+        Several ``inputs`` give the block one west port each, and named
+        ``outputs`` one east port each, so a component that reads two values and
+        publishes two more needs no port table. An authored ``ports=`` replaces
+        that table wholesale -- the author's sides and offsets are the design --
+        and the sources are then wired to the input ports it declares.
+        """
+
         sources = ((input,) if input is not None else ()) + tuple(inputs)
-        ports = _processing_ports(len(sources), tuple(outputs)) if sources or outputs else ()
+        ports = _authored_ports(options) or (
+            _processing_ports(len(sources), tuple(outputs)) if sources or outputs else ()
+        )
         result = self.node(id, "mlp", label=label, ports=ports, **options)
-        for index, source in enumerate(sources):
-            target_name = "input" if len(sources) == 1 else f"input{index + 1}"
-            self.connect(source, result.port(target_name))
+        self.wire(result, sources)
         if outputs:
             return tuple(result.port(_port_name(name)) for name in outputs)
         return result
@@ -678,12 +938,18 @@ class GroupBuilder:
         self,
         id: str,
         *,
-        label: str = "CNN",
+        label: str | tuple[TextRun, ...] = "CNN",
         input: NodeHandle | PortRef | str | None = None,
         output: str | None = None,
         **options: object,
     ) -> NodeHandle | PortRef:
-        ports = (
+        """A convolutional block, motif a zigzag.
+
+        Naming ``output`` returns that port instead of the node, so a chain can
+        continue from it directly.
+        """
+
+        ports = _authored_ports(options) or (
             (
                 PortSpec("input", Side.WEST, adaptive=True),
                 PortSpec(_port_name(output), Side.EAST, adaptive=True),
@@ -693,7 +959,7 @@ class GroupBuilder:
         )
         result = self.node(id, "cnn", label=label, ports=ports, **options)
         if input is not None:
-            self.connect(input, result.input)
+            self.wire(result, (input,))
         return result.port(_port_name(output)) if output else result
 
     def attention(
@@ -706,6 +972,13 @@ class GroupBuilder:
         label: str | tuple[TextRun, ...] = "Attention",
         **options: object,
     ) -> NodeHandle:
+        """An attention block wired from its three sources at once.
+
+        All three of ``q``, ``k``, and ``v`` are required: this component *is*
+        the three-way join. For attention drawn as a captioned arrow instead,
+        reach for ``merge`` with a formula label.
+        """
+
         result = self.node(id, "attention", label=label, **options)
         self.connect(q, result.q)
         self.connect(k, result.k)
@@ -716,27 +989,88 @@ class GroupBuilder:
         self,
         id: str,
         *,
-        label: str = "Prediction",
+        label: str | tuple[TextRun, ...] = "Prediction",
         input: NodeHandle | PortRef | str | None = None,
         **options: object,
     ) -> NodeHandle:
+        """A terminal readout box, painted in the warm role rather than the block one."""
+
         result = self.node(id, "prediction", label=label, **options)
         if input is not None:
-            self.connect(input, result)
+            self.wire(result, (input,))
         return result
 
     def loss(
         self,
         id: str,
         *,
-        label: str = "Loss",
+        label: str | tuple[TextRun, ...] = "Loss",
         input: NodeHandle | PortRef | str | None = None,
         **options: object,
     ) -> NodeHandle:
+        """A training-objective box, painted in the warm role like ``prediction``."""
+
         result = self.node(id, "loss", label=label, **options)
         if input is not None:
-            self.connect(input, result)
+            self.wire(result, (input,))
         return result
+
+    def net(
+        self,
+        *,
+        src: NodeHandle | PortRef | str,
+        sinks: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
+        id: str | None = None,
+        rail: Side | str | None = None,
+        rail_at: float | None = None,
+        joint: JointStyle = "auto",
+        label: str | tuple[TextRun, ...] = "",
+        role: str = "flow",
+    ) -> NetSpec:
+        """Author one shared value read by multiple downstream ports.
+
+        A net belongs to the figure -- its rail may leave any group it likes --
+        but the group builder is what an author has in hand while writing the
+        components it joins. Reaching for ``figure.net`` mid-block only to name
+        the same handles is a detour, so ``root.net(...)`` works wherever
+        ``root.connect(...)`` does, with the same arguments and the same result.
+        """
+
+        return self.figure.net(
+            src=src,
+            sinks=sinks,
+            id=id,
+            rail=rail,
+            rail_at=rail_at,
+            joint=joint,
+            label=label,
+            role=role,
+        )
+
+    def merge(
+        self,
+        *,
+        sinks: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
+        dst: NodeHandle | PortRef | str,
+        id: str | None = None,
+        rail: Side | str | None = None,
+        rail_at: float | None = None,
+        joint: JointStyle = "auto",
+        label: str | tuple[TextRun, ...] = "",
+        role: str = "flow",
+    ) -> NetSpec:
+        """Author a true many-to-one combination; see ``net`` and ``Figure.merge``."""
+
+        return self.figure.merge(
+            sinks=sinks,
+            dst=dst,
+            id=id,
+            rail=rail,
+            rail_at=rail_at,
+            joint=joint,
+            label=label,
+            role=role,
+        )
 
     def connect(
         self,
@@ -750,6 +1084,14 @@ class GroupBuilder:
         label: str | tuple[TextRun, ...] = "",
         lane: str | None = None,
     ) -> EdgeSpec:
+        """Draw one connector from ``source`` to ``target``.
+
+        Handles take their ``output`` and ``input`` ports; a ``"node.port"``
+        string or a ``PortRef`` names one exactly. ``lane=`` routes the edge
+        through an authored corridor instead of wherever the router would take
+        it, and a lane-routed edge no longer votes on which side its ports face.
+        """
+
         source_ref = _reference(source, source_port)
         target_ref = _reference(target, target_port)
         self.figure._edge_counter += 1
@@ -774,6 +1116,13 @@ class GroupBuilder:
         source_port: str | None = None,
         target_port: str | None = None,
     ) -> EdgeSpec:
+        """A skip connection, painted in the ``residual`` role.
+
+        It prefers a port named ``residual`` at either end and falls back to the
+        ordinary ``output``/``input`` pair, so a component that declares one gets
+        its skip ink where it meant to.
+        """
+
         if source_port is None and isinstance(source, NodeHandle):
             source_port = "residual" if "residual" in source.ports else "output"
         if target_port is None and isinstance(target, NodeHandle):
@@ -826,6 +1175,21 @@ class GroupBuilder:
         self._draft.placements[child_id] = (row, column)
 
 
+def _scoped_anchor(draft: _GroupDraft) -> str | None:
+    """The authored anchor child, resolved to the id this group actually holds.
+
+    Ids are scoped by the group that owns them, so an author naming a child
+    writes the short name they wrote when they made it. A name that is already a
+    child is taken as written, and one that matches neither form is passed
+    through so ``GroupSpec`` raises about the name the author actually typed.
+    """
+
+    if draft.anchor is None or draft.anchor in draft.children:
+        return draft.anchor
+    scoped = f"{draft.id}.{draft.anchor}"
+    return scoped if scoped in draft.children else draft.anchor
+
+
 def _with_placements(draft: _GroupDraft) -> LayoutSpec:
     if not draft.placements:
         return draft.layout
@@ -835,6 +1199,43 @@ def _with_placements(draft: _GroupDraft) -> LayoutSpec:
             (child_id, row, column) for child_id, (row, column) in draft.placements.items()
         ),
     )
+
+
+def _authored_ports(options: dict[str, object]) -> tuple[PortSpec, ...]:
+    """Take an author's ``ports=`` out of a factory's options, if they gave one.
+
+    A factory that computes ports -- an MLP with three inputs, a channels strip
+    -- computes them for the author who did not write any. One who did has said
+    something more specific than the factory knows, so their table wins whole:
+    the alternative used to be ``got multiple values for keyword argument
+    'ports'``, which is a bug report about our signature, not about their figure.
+    """
+
+    authored = options.pop("ports", None)
+    return tuple(authored) if authored else ()  # type: ignore[arg-type]
+
+
+def _with_properties(options: dict[str, object], **defaults: Scalar) -> dict[str, object]:
+    """Merge a factory's own node properties under whatever the author passed."""
+
+    authored = options.pop("properties", None) or {}
+    return {**options, "properties": {**defaults, **authored}}  # type: ignore[dict-item]
+
+
+def _single_input(target: NodeHandle) -> str:
+    """The one port a lone source should arrive on."""
+
+    if "input" in target.ports:
+        return "input"
+    candidates = tuple(name for name in target.ports if name.startswith("input"))
+    if len(candidates) == 1:
+        return candidates[0]
+    detail = (
+        f"it has {', '.join(candidates)}; name the one you mean"
+        if candidates
+        else f'its ports are {", ".join(target.ports) or "none"}'
+    )
+    raise ValueError(f'node "{target.id}" has no "input" port to wire into: {detail}')
 
 
 def _paint_properties(paint: Mapping[str, str] | None) -> dict[str, Scalar]:

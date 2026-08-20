@@ -1,4 +1,4 @@
-"""Derived output generation through the installed Inkscape CLI."""
+"""Derived output generation, and the one call that compiles, writes, and lints."""
 
 from __future__ import annotations
 
@@ -7,11 +7,21 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from flexo.compiler import Compilation
+from flexo.compiler import Compilation, compile_figure
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.ir.semantic import FigureSpec
+from flexo.lint import LintReport, lint_compilation
+from flexo.style import LayoutStyle, Palette
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle only the type checker sees
+    from flexo.builder import Figure
 
 _MACOS_INKSCAPE = Path("/Applications/Inkscape.app/Contents/MacOS/inkscape")
+
+FORMATS = ("editable", "portable", "pdf", "png")
+"""Every output format ``export_outputs`` and ``build`` accept, in write order."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,10 +55,16 @@ def export_outputs(
     output_directory: str | Path,
     *,
     stem: str | None = None,
-    formats: tuple[str, ...] = ("editable", "portable", "pdf", "png"),
+    formats: tuple[str, ...] = FORMATS,
     dpi: float = 192.0,
 ) -> OutputFiles:
-    unknown = sorted(set(formats) - {"editable", "portable", "pdf", "png"})
+    """Write the editable SVG master and whichever derivatives ``formats`` names.
+
+    The editable SVG is always written, because every derivative is produced from
+    it by Inkscape.
+    """
+
+    unknown = sorted(set(formats) - set(FORMATS))
     if unknown:
         raise FlexoError(
             Diagnostic(
@@ -93,6 +109,56 @@ def export_outputs(
                 f"--export-dpi={dpi:g}",
             )
     return OutputFiles(editable, portable, pdf, png)
+
+
+@dataclass(frozen=True, slots=True)
+class Build:
+    """Everything one ``build`` produced: the compilation, the files, the lint."""
+
+    compilation: Compilation
+    outputs: OutputFiles
+    report: LintReport
+
+    @property
+    def ok(self) -> bool:
+        """Whether the figure linted without errors. Files are written either way."""
+
+        return self.report.ok
+
+    def summary(self) -> str:
+        """The written paths and the lint report, ready to print."""
+
+        written = [str(target_file) for target_file in self.outputs.existing()]
+        return "\n".join([*written, self.report.format()])
+
+
+def build(
+    figure: Figure | FigureSpec,
+    output_directory: str | Path = "build",
+    *,
+    stem: str | None = None,
+    formats: tuple[str, ...] = FORMATS,
+    dpi: float = 192.0,
+    style: LayoutStyle | None = None,
+    palette: Palette | None = None,
+) -> Build:
+    """Compile ``figure``, write the requested formats, and lint the result.
+
+    The three calls every figure script used to make by hand. Outputs are written
+    even when the figure lints with errors, so a flawed figure stays inspectable;
+    read ``Build.ok`` or ``Build.report`` to decide what to do about it.
+    """
+
+    spec = figure if isinstance(figure, FigureSpec) else figure.spec
+    compilation = compile_figure(spec, style=style, palette=palette)
+    outputs = export_outputs(
+        compilation,
+        output_directory,
+        stem=stem,
+        formats=formats,
+        dpi=dpi,
+    )
+    return Build(compilation, outputs, lint_compilation(compilation, style=style))
 
 
 def query_bounds(source_file: str | Path) -> dict[str, tuple[float, float, float, float]]:

@@ -6,9 +6,11 @@ import pytest
 
 from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
-from flexo.components import vector_grid
+from flexo.components import INSET_INK, motif_area, vector_grid
 from flexo.geometry import Side
 from flexo.ir.semantic import PortSpec
+from flexo.lint import lint_compilation
+from flexo.render_common import SHADOW_LAYERS
 from flexo.style import DEFAULT_PALETTE, GRAYSCALE_PALETTE, STYLES, Palette, VectorPreset
 from flexo.svg import SVG_NS, number
 from flexo.theme import retheme_svg
@@ -383,3 +385,228 @@ def test_a_motif_may_be_suppressed_without_moving_anything() -> None:
         assert not [item for item in root.iter() if item.get("id") == motif_id]
     assert _element(plain, "m.mlp.body").attrib == _element(drawn, "m.mlp.body").attrib
     assert _element(plain, "m.mlp.label").attrib == _element(drawn, "m.mlp.label").attrib
+
+
+def _add_norm_figure(label: str = "Add LN", **options: object) -> Figure:
+    figure = Figure("norms", width=pt(260.0))
+    with figure.module("m", gap="24pt") as module:
+        module.add_norm("norm", label=label, **options)
+    return figure
+
+
+def _norm_motifs(document: str) -> list[ET.Element]:
+    root = ET.fromstring(document)
+    return [item for item in root.iter() if item.get("id") == "m.norm.motif"]
+
+
+def test_an_add_norm_draws_its_label_and_nothing_else() -> None:
+    """R24: an add-norm is a named box.
+
+    The circled plus of R23 was ornament the figure never asked for -- the words
+    already say what the box does -- so add-norm draws no motif at all, and its
+    label sits on the box's own centre like every other block's.
+    """
+
+    compilation = compile_figure(_add_norm_figure().spec)
+    document = compilation.document.text
+    assert _norm_motifs(document) == []
+    body = _element(document, "m.norm.body")
+    centre = float(body.get("x", "0")) + float(body.get("width", "0")) / 2.0
+    assert float(_element(document, "m.norm.label").get("x", "0")) == pytest.approx(centre)
+
+
+def test_an_add_norm_reserves_no_width_beside_its_label() -> None:
+    """Nothing is set beside the words, so nothing widens the box for it."""
+
+    label = "Add + norm"
+    drawn = compile_figure(_add_norm_figure(label).spec).fitted.node("m.norm").bounds
+    plain = compile_figure(
+        _add_norm_figure(label, motif=False).spec
+    ).fitted.node("m.norm").bounds
+    assert drawn.width == pytest.approx(plain.width)
+    assert drawn.height == pytest.approx(plain.height)
+
+
+def _shadow_figure(*, shadow: bool) -> Figure:
+    figure = Figure("shadows", width=pt(220.0))
+    with figure.module("m", gap="18pt", shadow=shadow) as module:
+        module.block("box", label="Box", shadow=shadow)
+    return figure
+
+
+def _shadow_rects(document: str, entity_id: str) -> list[ET.Element]:
+    root = ET.fromstring(document)
+    group = next(
+        (item for item in root.iter() if item.get("id") == f"{entity_id}.shadow"),
+        None,
+    )
+    return list(group) if group is not None else []
+
+
+def test_a_shadow_is_pure_vector_geometry_and_no_filter() -> None:
+    """R24: Inkscape rasterizes filtered regions on PDF export, so no filter is used."""
+
+    document = compile_figure(_shadow_figure(shadow=True).spec).document.text
+    assert "filter" not in document and "feDropShadow" not in document
+    layers = _shadow_rects(document, "m")
+    assert len(layers) == SHADOW_LAYERS
+    assert {layer.tag for layer in layers} == {f"{{{SVG_NS}}}rect"}
+    assert {layer.get("data-flexo-fill") for layer in layers} == {"shadow"}
+
+
+def test_a_shadow_nests_its_layers_and_offsets_them_below_the_box() -> None:
+    """Each layer reaches less far than the last, which is what grades the falloff."""
+
+    compilation = compile_figure(_shadow_figure(shadow=True).spec)
+    bounds = compilation.fitted.group("m").bounds
+    layers = _shadow_rects(compilation.document.text, "m")
+    widths = [float(layer.get("width", "0")) for layer in layers]
+    assert widths == sorted(widths, reverse=True), "outermost first, tightest last"
+    assert widths[0] == pytest.approx(bounds.width + 2.0 * _STYLE.shadow_spread.points)
+    top = float(layers[-1].get("y", "0")) + float(layers[-1].get("height", "0")) / 2.0
+    assert top > bounds.center.y, "offset below the box, never centred on it"
+    # Subtle: every layer is faint, and the stack composites to the authored value.
+    opacities = [float(layer.get("opacity", "1")) for layer in layers]
+    composed = 1.0
+    for opacity in opacities:
+        composed *= 1.0 - opacity
+    # Rounded to the SVG's own precision, so compare at that precision.
+    assert 1.0 - composed == pytest.approx(_STYLE.shadow_opacity, rel=1e-3)
+    assert max(opacities) < _STYLE.shadow_opacity
+
+
+def test_a_shadow_shows_along_the_bottom_and_right_edges_only() -> None:
+    """R24: the light comes from the top left, so a shadow is not a halo.
+
+    Geometry, not clipping: the widest layer starts on the box's own top-left
+    corner and every tighter one starts further in, so no layer can put ink above
+    the top edge or left of the left edge whatever the corner radius is.
+    """
+
+    compilation = compile_figure(_shadow_figure(shadow=True).spec)
+    for entity_id in ("m", "m.box"):
+        bounds = (
+            compilation.fitted.group("m").bounds
+            if entity_id == "m"
+            else compilation.fitted.node("m.box").bounds
+        )
+        layers = _shadow_rects(compilation.document.text, entity_id)
+        assert layers, entity_id
+        for layer in layers:
+            x = float(layer.get("x", "0"))
+            y = float(layer.get("y", "0"))
+            assert x >= bounds.x - 1e-6, f"{entity_id}: shadow ink left of the box"
+            assert y >= bounds.y - 1e-6, f"{entity_id}: shadow ink above the box"
+            assert x + float(layer.get("width", "0")) > bounds.right, "reaches right"
+            assert y + float(layer.get("height", "0")) > bounds.bottom, "reaches below"
+
+
+def test_nothing_casts_a_shadow_unless_it_asks_to() -> None:
+    document = compile_figure(_shadow_figure(shadow=False).spec).document.text
+    assert _shadow_rects(document, "m") == []
+    assert _shadow_rects(document, "m.box") == []
+
+
+def test_a_shadow_rethemes_by_role_like_every_other_paint() -> None:
+    document = compile_figure(_shadow_figure(shadow=True).spec).document.text
+    assert DEFAULT_PALETTE.get("shadow") in document
+    assert GRAYSCALE_PALETTE.get("shadow") in retheme_svg(document, GRAYSCALE_PALETTE)
+
+
+def _inset_figure(label: str, **options: object) -> Figure:
+    figure = Figure("insets", width=pt(260.0))
+    with figure.module("m", gap="18pt") as module:
+        module.inset("i", label=label, **options)
+    return figure
+
+
+def _ink_box(document: str, element_id: str) -> tuple[float, float, float, float]:
+    """The extent of one motif group, as (left, top, right, bottom).
+
+    Read off the primitives rather than off a renderer, so the assertion is about
+    the geometry Flexo emitted and not about how something rasterizes it.
+    """
+
+    root = ET.fromstring(document)
+    group = next(item for item in root.iter() if item.get("id") == element_id)
+    left = top = float("inf")
+    right = bottom = float("-inf")
+    for item in group.iter():
+        tag = item.tag.rsplit("}", 1)[-1]
+        if tag == "circle":
+            cx, cy = float(item.get("cx", "0")), float(item.get("cy", "0"))
+            radius = float(item.get("r", "0"))
+            box = (cx - radius, cy - radius, cx + radius, cy + radius)
+        elif tag == "rect":
+            x, y = float(item.get("x", "0")), float(item.get("y", "0"))
+            box = (x, y, x + float(item.get("width", "0")), y + float(item.get("height", "0")))
+        else:
+            continue
+        left, top = min(left, box[0]), min(top, box[1])
+        right, bottom = max(right, box[2]), max(bottom, box[3])
+    return left, top, right, bottom
+
+
+@pytest.mark.parametrize("label", ["Centre cube", "Edge\nrectangles"])
+def test_an_inset_keeps_its_label_out_of_its_illustration(label: str) -> None:
+    """R24: the caption owns a band at the top and the molecule what is left.
+
+    The defect this replaces: "Edge rectangles" was centred at a fraction of the
+    box height and the molecule at another, so a two-line label was drawn through
+    the drawing it named.
+    """
+
+    compilation = compile_figure(_inset_figure(label).spec)
+    node = compilation.fitted.node("m.i")
+    metrics = node.measured.label
+    _, top, _, _ = _ink_box(compilation.document.text, "m.i.illustration")
+    band_bottom = node.bounds.y + _STYLE.padding_y.points + metrics.height
+    assert top >= band_bottom + _STYLE.motif_label_gap.points - 1e-6
+    assert top > node.bounds.y + metrics.height, "clear of the words by any reading"
+    assert lint_compilation(compilation).ok
+
+
+def test_a_squeezed_inset_shrinks_its_illustration_instead_of_colliding() -> None:
+    """An authored height too small for both is the drawing's problem, not the words'."""
+
+    compilation = compile_figure(_inset_figure("Edge\nrectangles", height="40pt").spec)
+    node = compilation.fitted.node("m.i")
+    left, top, right, bottom = _ink_box(compilation.document.text, "m.i.illustration")
+    assert bottom - top < INSET_INK.height, "scaled down to the room it has"
+    assert right - left < INSET_INK.width, "and scaled, not cropped"
+    assert (right - left) / (bottom - top) == pytest.approx(
+        INSET_INK.width / INSET_INK.height
+    ), "aspect preserved"
+    band = node.bounds.y + _STYLE.padding_y.points + node.measured.label.height
+    assert top >= band + _STYLE.motif_label_gap.points - 1e-6, "still under the band"
+    assert bottom <= node.bounds.bottom, "and still inside the box"
+
+
+def test_every_motif_label_kind_draws_below_its_label_band() -> None:
+    """One band model, so no kind can grow a collision of its own.
+
+    ``sequence`` is the near miss that proves it: its dots sat a fixed distance
+    off the bottom edge, which happened to clear a one-line label in a box of the
+    default height and nothing else.
+    """
+
+    figure = Figure("motifs", width=pt(420.0))
+    with figure.module("m", gap="16pt") as module:
+        sequence = module.sequence("seq", label="Sequence\nof residues", tokens=6)
+        graph = module.graph("g", label="Distances to\nQ points")
+        module.concat("cat", label="Concat\ntwo ways", inputs=[sequence, graph])
+        module.feature_strip("strip", label="Feature\nstrip", cells=5)
+    compilation = compile_figure(figure.spec)
+    for node_id, motif_id in (
+        ("m.seq", "m.seq.tokens"),
+        ("m.g", "m.g.network"),
+        ("m.cat", "m.cat.motif"),
+        ("m.strip", "m.strip.cells"),
+    ):
+        node = compilation.fitted.node(node_id)
+        area = motif_area(node.measured.spec.kind, node.bounds, node.measured.label, _STYLE)
+        left, top, right, bottom = _ink_box(compilation.document.text, motif_id)
+        assert top >= area.y - 1e-6, f"{motif_id} rises into the label band"
+        assert bottom <= area.bottom + 1e-6, f"{motif_id} spills past its area"
+        assert left >= area.x - 1e-6 and right <= area.right + 1e-6, f"{motif_id} too wide"
+    assert lint_compilation(compilation).ok

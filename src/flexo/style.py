@@ -14,6 +14,8 @@ from flexo.units import CellSpan, Extent, Length, mm, pt
 _PT_0_8 = pt(0.8)
 _PT_0_9 = pt(0.9)
 _PT_1_5 = pt(1.5)
+_PT_2 = pt(2.0)
+_PT_2_5 = pt(2.5)
 _PT_3 = pt(3.0)
 _PT_3_5 = pt(3.5)
 _PT_4 = pt(4.0)
@@ -22,7 +24,6 @@ _PT_6 = pt(6.0)
 _PT_7 = pt(7.0)
 _PT_8 = pt(8.0)
 _PT_8_5 = pt(8.5)
-_PT_11 = pt(11.0)
 _PT_14 = pt(14.0)
 _PUBLICATION_WIDTHS = (
     ("single-column", mm(85.0)),
@@ -68,6 +69,13 @@ class LayoutStyle:
     reproduces butt-jointed connectors exactly.
     """
     route_clearance: Length = _PT_5
+    caption_clearance: Length = _PT_3
+    """Air a route leaves around a caption -- text with no boundary of its own.
+
+    Smaller than ``route_clearance`` on purpose: a caption is thin ink, and
+    charging it a full component's clearance would let a stray word close a
+    corridor that the component it names leaves open.
+    """
     route_boundary_clearance: Length = _PT_8
     route_lane_spacing: Length = _PT_4
     port_spacing: Length = _PT_6
@@ -84,6 +92,53 @@ class LayoutStyle:
     """Corner radius of a vector cell; cells read as rounded squares, not dots."""
     vector_label_gap: Length = _PT_3
     """Distance from the bottom cell to the label a ``vector()`` composite puts below it."""
+    motif_label_gap: Length = _PT_3_5
+    """Air between a component's label band and the motif drawn below it.
+
+    The counterpart of ``vector_label_gap`` inside a single component: a molecule
+    illustration, a token strip or a cell grid starts this far under the last
+    line of the words that name it.
+    """
+    shadow_offset: Length = _PT_2_5
+    """How far down *and to the right* of its box a ``shadow=True`` shadow sits.
+
+    The figure is lit from the top left, so a shadow belongs along the bottom and
+    right edges and nowhere else. That holds only while the offset is at least
+    ``shadow_spread`` -- a shorter one lets the widest layer ring the top and
+    left edges into a halo -- so ``soft_shadow`` raises a smaller value to the
+    spread rather than drawing one.
+    """
+    shadow_spread: Length = _PT_2
+    """How far past the offset box the faintest edge of a drop shadow reaches.
+
+    The stand-in for a blur radius: the shadow is built from nested rounded
+    rectangles rather than from an SVG filter (Inkscape rasterizes filtered
+    regions on PDF export), so this is the width of the graded band, not a
+    Gaussian sigma.
+    """
+    shadow_opacity: float = 0.18
+    """Opacity of a drop shadow directly under its box, where every layer overlaps.
+
+    Subtle on purpose. A shadow's job is to lift a container off the page by a
+    hair; anything a reader notices as a shadow is already too strong for print.
+    """
+
+    @property
+    def arrival_clearance(self) -> Length:
+        """Air a route must leave at the end it points into.
+
+        An arrowhead and the elbow that turns into it need more room than a
+        plain approach, so a run that turns later than this cannot draw its
+        arrow. The layout reserves it, the router escapes to it, the nudger
+        protects it, and lint checks it -- all from this one number.
+        """
+
+        return Length(
+            max(
+                self.route_clearance.points,
+                2.0 * self.arrow_length.points + self.elbow_radius.points,
+            )
+        )
 
     def resolve_width(self, value: str | Length | float) -> Length:
         if isinstance(value, str):
@@ -178,6 +233,7 @@ DEFAULT_PALETTE = Palette(
         "residual": "#6d4ba0",
         "grid": "#80758b",
         "inset-fill": "#eef4f5",
+        "shadow": "#332e3b",
         "ramp-node": "#4a6cb0",
         "ramp-embedding": "#2f8f7d",
         "ramp-q": "#8a5bb5",
@@ -227,6 +283,7 @@ GRAYSCALE_PALETTE = Palette(
         "residual": "#1f1f1f",
         "grid": "#777777",
         "inset-fill": "#f0f0f0",
+        "shadow": "#2b2b2b",
         # Six evenly spaced lightness steps: hueless ramps stay tellable apart.
         "ramp-node": "#0f0f0f",
         "ramp-embedding": "#333333",
