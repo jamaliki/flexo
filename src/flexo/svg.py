@@ -113,5 +113,16 @@ class SVGDocument:
         target_file.write_text(self.text, encoding="utf-8")
         return target_file
 
-    def normalized(self) -> str:
-        return re.sub(r">\s+<", "><", self.text.strip())
+
+def local_name(tag: object) -> str:
+    """An element tag with its ``{namespace}`` prefix stripped."""
+
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def xml_document(root: ET.Element) -> str:
+    """One indented XML document with the declaration Flexo always writes."""
+
+    ET.indent(root, space="  ")
+    xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'

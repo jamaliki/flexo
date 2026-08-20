@@ -91,10 +91,7 @@ def routing_gaps_for_group(
                 label_reserves[boundary] = max(label_reserves[boundary], reserved)
 
     clearance = style.route_clearance.points
-    target_clearance = max(
-        clearance,
-        2.0 * style.arrow_length.points + style.elbow_radius.points,
-    )
+    target_clearance = style.arrival_clearance.points
     # Routing separates parallel tracks by ``port_spacing`` and lint reports an
     # error below it, so a crossed boundary has to reserve its lanes at that
     # pitch: reserving less hands the router a gutter it is not allowed to fill.

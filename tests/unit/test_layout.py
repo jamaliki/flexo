@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from flexo.builder import Figure
-from flexo.diagnostics import FlexoError
+from flexo.components import TRANSPARENT_KINDS, route_clearance
+from flexo.diagnostics import FlexoError, Severity
 from flexo.gallery import gallery_figure
 from flexo.geometry import Side, segments
 from flexo.ir.semantic import (
@@ -843,3 +846,380 @@ def test_a_box_sized_in_cells_lines_up_with_the_vector_beside_it() -> None:
     projection = fitted.node("chain.projection").bounds
     assert projection.top == pytest.approx(cells.top)
     assert projection.bottom == pytest.approx(cells.bottom)
+
+
+def _wired_pair(
+    *,
+    stacked: bool,
+    ports: tuple[PortSpec, ...] = (),
+    lane: str | None = None,
+) -> FigureSpec:
+    """Two blocks wired source-to-target, side by side or one above the other."""
+
+    return FigureSpec(
+        "pair",
+        width=pt(240),
+        nodes=(
+            NodeSpec("first", "block", (TextRun("First"),), ports=ports),
+            NodeSpec("second", "block", (TextRun("Second"),)),
+        ),
+        edges=(
+            EdgeSpec(
+                "flow",
+                PortRef("first", "output"),
+                PortRef("second", "input"),
+                lane_hint=lane,
+            ),
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("first", "second"),
+                LayoutSpec("column" if stacked else "row", gap=pt(40)),
+            ),
+        ),
+    )
+
+
+def _port_sides(figure: FigureSpec) -> dict[tuple[str, str], Side]:
+    fitted = fit_figure(measure_figure(figure))
+    return {
+        (node.measured.spec.id, port.name): port.side
+        for node in fitted.nodes
+        for port in node.ports
+    }
+
+
+def test_a_stacked_pair_takes_south_and_north_ports_with_no_port_table() -> None:
+    """R21: a defaulted port faces what it is wired to, so a column reads downward."""
+
+    sides = _port_sides(_wired_pair(stacked=True))
+    assert sides[("first", "output")] is Side.SOUTH
+    assert sides[("second", "input")] is Side.NORTH
+    # The ports nothing names are invisible, so they keep the grammar's own side.
+    assert sides[("first", "input")] is Side.WEST
+    assert sides[("second", "output")] is Side.EAST
+
+
+def test_a_side_by_side_pair_keeps_the_east_and_west_ports_it_had() -> None:
+    sides = _port_sides(_wired_pair(stacked=False))
+    assert sides[("first", "output")] is Side.EAST
+    assert sides[("second", "input")] is Side.WEST
+
+
+def test_an_authored_port_side_is_pinned_even_when_it_faces_away() -> None:
+    """Writing the side down *is* the choice; nothing may overrule it."""
+
+    pinned = (
+        PortSpec("input", Side.WEST, adaptive=True),
+        PortSpec("output", Side.NORTH, adaptive=True),
+    )
+    sides = _port_sides(_wired_pair(stacked=True, ports=pinned))
+    assert sides[("first", "output")] is Side.NORTH, "authored, so pinned"
+    assert sides[("second", "input")] is Side.NORTH, "defaulted, so re-sided"
+
+
+def test_a_lane_hinted_edge_leaves_its_ports_where_the_grammar_put_them() -> None:
+    """An authored corridor, not the counterpart, says where that ink goes."""
+
+    sides = _port_sides(_wired_pair(stacked=True, lane="root-left"))
+    assert sides[("first", "output")] is Side.EAST
+    assert sides[("second", "input")] is Side.WEST
+
+
+def test_a_near_diagonal_relationship_names_no_side() -> None:
+    """Below the decisive margin the component grammar's own side stands.
+
+    A port that flipped on a few points of layout drift would be worse than one
+    that never moved: the reader sees a different figure, for a fraction of a bend.
+    """
+
+    figure = FigureSpec(
+        "diagonal",
+        width=pt(240),
+        nodes=(
+            NodeSpec("first", "block", (TextRun("First"),)),
+            NodeSpec("filler", "spacer"),
+            NodeSpec("second", "block", (TextRun("Second"),)),
+        ),
+        edges=(EdgeSpec("flow", PortRef("first", "output"), PortRef("second", "input")),),
+        groups=(
+            GroupSpec("root", ("first", "column"), LayoutSpec("row", gap=pt(30))),
+            GroupSpec(
+                "column",
+                ("filler", "second"),
+                LayoutSpec("column", gap=pt(6), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+    sides = _port_sides(figure)
+    assert sides[("first", "output")] is Side.EAST
+    assert sides[("second", "input")] is Side.WEST
+
+
+def _row_fan_out() -> FigureSpec:
+    """One source over a row of three sinks, joined by a fan-out net."""
+
+    return FigureSpec(
+        "fan-out",
+        width=pt(300),
+        nodes=(
+            NodeSpec("source", "block", (TextRun("Trunk"),)),
+            *(
+                NodeSpec(f"head{index}", "mlp", (TextRun("MLP"),))
+                for index in range(1, 4)
+            ),
+        ),
+        nets=(
+            NetSpec(
+                "readout",
+                "fan-out",
+                (PortRef("source", "output"),),
+                tuple(PortRef(f"head{index}", "input") for index in range(1, 4)),
+            ),
+        ),
+        groups=(
+            GroupSpec("root", ("source", "heads"), LayoutSpec("column", gap=pt(40), align="start")),
+            GroupSpec(
+                "heads",
+                ("head1", "head2", "head3"),
+                LayoutSpec("row", gap=pt(20), padding=pt(0)),
+                role="layout",
+            ),
+        ),
+    )
+
+
+def test_a_net_votes_once_for_its_trunk_not_once_per_spoke() -> None:
+    """R21: the rail runs along the spokes' spread, so the trunk leaves across it.
+
+    Voting per spoke would drag the source port east, because a wide readout row
+    puts most of its heads to one side. A stem does not run to the far port -- it
+    runs to the shared rail -- so the whole net asks for one direction.
+    """
+
+    sides = _port_sides(_row_fan_out())
+    assert sides[("source", "output")] is Side.SOUTH
+    for index in range(1, 4):
+        assert sides[(f"head{index}", "input")] is Side.NORTH
+
+
+def test_a_conflicted_port_picks_a_side_and_says_so() -> None:
+    """Two connections facing opposite ways get an answer plus an info diagnostic."""
+
+    figure = FigureSpec(
+        "conflict",
+        width=pt(300),
+        nodes=(
+            NodeSpec("left", "block", (TextRun("Left"),)),
+            NodeSpec("middle", "block", (TextRun("Middle"),)),
+            NodeSpec("right", "block", (TextRun("Right"),)),
+        ),
+        edges=(
+            EdgeSpec("in", PortRef("left", "output"), PortRef("middle", "input")),
+            EdgeSpec("also", PortRef("right", "output"), PortRef("middle", "input")),
+        ),
+        groups=(
+            GroupSpec("root", ("left", "middle", "right"), LayoutSpec("row", gap=pt(30))),
+        ),
+    )
+    fitted = fit_figure(measure_figure(figure))
+    (diagnostic,) = fitted.diagnostics
+    assert diagnostic.code == "layout.port.side.conflicted"
+    assert diagnostic.severity is Severity.INFO
+    assert diagnostic.entity_id == "middle"
+    assert "input" in diagnostic.message
+    assert fitted.node("middle").port("input").side in {Side.EAST, Side.WEST}
+
+
+def test_a_loop_back_leaves_the_spine_the_side_it_needs() -> None:
+    """A node wired both onward and back home does not use one side for both.
+
+    Both connections face south, so both defaulted ports would land there and the
+    router would draw the return alongside the spine, a hair apart. The short hop
+    keeps the straight run; the long return takes the wider margin beside the
+    node, which is where its rail was going to travel anyway.
+    """
+
+    figure = Figure(
+        "loop",
+        width=pt(300),
+        layout=LayoutSpec("column", gap=pt(30), align="start"),
+    )
+    root = figure.root
+    blocks = []
+    for index, name in enumerate(("head", "middle", "tail")):
+        with root.row(f"band{index}", gap=pt(24), padding=0, align="start", role="layout") as band:
+            band.node("lane", "spacer", width=pt(30), height=0.0)
+            blocks.append(band.block(name, label=name.title()))
+            band.group(f"panel{index}", width=pt(120), height=pt(30), role="module")
+    head, middle, tail = blocks
+    root.connect(head, middle)
+    root.connect(middle, tail)
+    root.connect(tail, head)
+    fitted = fit_figure(measure_figure(figure.spec))
+    assert fitted.node("band0.head").port("output").side is Side.SOUTH, "the spine goes on"
+    assert fitted.node("band0.head").port("input").side is Side.WEST, "the return takes the lane"
+    assert fitted.node("band2.tail").port("input").side is Side.NORTH
+    assert fitted.node("band2.tail").port("output").side is Side.WEST
+    assert fitted.diagnostics == ()
+
+
+def test_the_authored_figure_still_serializes_with_the_sides_it_declared() -> None:
+    """Re-siding is a compiler decision; the semantic figure is untouched."""
+
+    fitted = fit_figure(measure_figure(_wired_pair(stacked=True)))
+    assert fitted.node("first").port("output").side is Side.SOUTH
+    ports = fitted.measured.semantic.node("first").ports
+    authored = next(port for port in ports if port.name == "output")
+    assert authored.side is Side.EAST, "the semantic figure keeps the grammar's side"
+    assert authored.auto_side, "and says the side was never the author's choice"
+
+
+def _ports_row(align: str = "ports") -> FigureSpec:
+    """A box beside a captioned vector, in a row that aligns one way or the other.
+
+    The caption is a sibling node, so the composite's box is taller than its
+    glyph and its glyph sits at the top. Bounding-box alignment lines the two
+    boxes up and the arrow between them then runs uphill; ports alignment lines
+    up the two port lines instead.
+    """
+
+    return FigureSpec(
+        "ports",
+        width=pt(400),
+        nodes=(
+            NodeSpec("box", "block", (TextRun("Box"),), height=pt(60)),
+            NodeSpec("cells", "vector", properties=(("cells", 3),)),
+            NodeSpec("caption", "label", (TextRun("Feature\nupdate"),), role="label"),
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("box", "glyph"),
+                LayoutSpec("row", gap=pt(30), padding=pt(0), align=align),  # type: ignore[arg-type]
+            ),
+            GroupSpec(
+                "glyph",
+                ("cells", "caption"),
+                LayoutSpec("column", gap=pt(3), padding=pt(0), align="center"),
+                role="layout",
+            ),
+        ),
+    )
+
+
+def test_ports_alignment_puts_one_line_through_a_row() -> None:
+    """R24: a chain aligned by port line runs straight, whatever hangs off it."""
+
+    boxed = fit_figure(measure_figure(_ports_row(align="start")))
+    aligned = fit_figure(measure_figure(_ports_row()))
+    assert boxed.node("box").bounds.center.y != pytest.approx(
+        boxed.node("cells").bounds.center.y
+    ), "bounding-box alignment lines up the boxes, not the ports"
+    assert aligned.node("box").bounds.center.y == pytest.approx(
+        aligned.node("cells").bounds.center.y
+    )
+    assert aligned.node("box").port("output").position.y == pytest.approx(
+        aligned.node("cells").port("input").position.y
+    )
+
+
+def test_a_composite_answers_with_its_glyph_and_not_with_its_caption() -> None:
+    """The anchor skips label children, so the caption hangs below the line."""
+
+    measured = measure_figure(_ports_row())
+    glyph = measured.group("glyph")
+    cells = measured.node("cells")
+    assert glyph.anchor.y == pytest.approx(cells.intrinsic_size.height / 2.0)
+    assert glyph.anchor.y < glyph.intrinsic_size.height / 2.0, "not the middle of the box"
+
+
+def test_an_explicit_anchor_child_wins_over_the_first_one() -> None:
+    figure = _ports_row()
+    groups = tuple(
+        replace(group, anchor="caption") if group.id == "glyph" else group
+        for group in figure.groups
+    )
+    measured = measure_figure(replace(figure, groups=groups))
+    glyph = measured.group("glyph")
+    caption = measured.node("caption")
+    assert glyph.anchor.y == pytest.approx(
+        glyph.intrinsic_size.height - caption.intrinsic_size.height / 2.0
+    )
+
+
+def test_a_ports_row_reserves_the_reach_above_and_below_its_shared_line() -> None:
+    """Ascent plus descent, as a line of type: it may exceed the tallest child."""
+
+    measured = measure_figure(_ports_row())
+    root = measured.group("root")
+    tallest = max(
+        measured.node("box").intrinsic_size.height,
+        measured.group("glyph").intrinsic_size.height,
+    )
+    assert root.intrinsic_size.height > tallest
+
+
+def test_ports_alignment_shares_one_centre_down_a_grid_column() -> None:
+    """The user's ask: the input features of a module line up with each other."""
+
+    figure = FigureSpec(
+        "column",
+        width=pt(400),
+        nodes=(
+            NodeSpec("wide", "block", (TextRun("Edge rectangles"),)),
+            NodeSpec("pad0", "spacer"),
+            NodeSpec("narrow", "vector", properties=(("cells", 3),)),
+            NodeSpec("pad1", "spacer"),
+        ),
+        groups=(
+            GroupSpec(
+                "root",
+                ("wide", "pad0", "narrow", "pad1"),
+                LayoutSpec("grid", columns=2, padding=pt(0), align="ports"),
+            ),
+        ),
+    )
+    fitted = fit_figure(measure_figure(figure))
+    assert fitted.node("wide").bounds.center.x == pytest.approx(
+        fitted.node("narrow").bounds.center.x
+    )
+
+
+def test_an_anchor_must_name_a_child_of_the_group_it_anchors() -> None:
+    with pytest.raises(ValueError, match="not one of its children"):
+        GroupSpec("g", ("a", "b"), anchor="c")
+
+
+def test_a_caption_costs_less_clearance_than_a_body_but_is_not_transparent() -> None:
+    """R24: routes used to run through caption text, which reads as a clipped word."""
+
+    style = STYLES["paper"]
+    caption = NodeSpec("c", "label", (TextRun("Attended value"),), role="label")
+    body = NodeSpec("b", "block", (TextRun("MLP"),))
+    assert "label" not in TRANSPARENT_KINDS, "a caption is ink, so a route may not cross it"
+    assert route_clearance(caption, style) == pytest.approx(style.caption_clearance.points)
+    assert route_clearance(body, style) == pytest.approx(style.route_clearance.points)
+    assert route_clearance(caption, style) < route_clearance(body, style)
+
+
+def test_no_connector_in_the_panel_touches_a_caption() -> None:
+    """The acceptance for R24, read off the figure the critique was written about."""
+
+    routed = route_figure(fit_figure(measure_figure(gallery_figure("modelangelo-gnn"))))
+    clearance = STYLES["paper"].caption_clearance.points
+    captions = tuple(
+        node.bounds.inflated(clearance - 0.01)
+        for node in routed.fitted.nodes
+        if node.measured.spec.kind == "label"
+    )
+    runs = [edge.centerline for edge in routed.edges]
+    for net in routed.nets:
+        runs.append(net.rail)
+        runs.extend(stem.centerline for stem in net.source_stems + net.target_stems)
+    for run in runs:
+        for segment in segments(run):
+            for caption in captions:
+                assert not segment.intersects_rect_interior(caption)

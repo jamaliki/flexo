@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
 from flexo.ir.semantic import NodeSpec
 from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette
@@ -52,15 +53,70 @@ def paint_attributes(
     return values
 
 
-def motif_enabled(spec: NodeSpec) -> bool:
-    """Whether ``spec`` draws its decorative motif.
+SHADOW_LAYERS = 5
+"""Nested rectangles one drop shadow is built from.
 
-    A motif is ornament -- the MLP's three dots, a matrix's cell grid -- so
-    ``motif=False`` suppresses it and changes nothing else about the component:
-    same size, same body, same ports.
+Enough that the steps between them fall below what a 300 dpi press can resolve
+across a 2.5 pt band -- three were still visible as rings under magnification --
+and few enough that a figure of shadowed modules stays a handful of rectangles
+rather than a gradient mesh.
+"""
+
+
+def soft_shadow(
+    parent: ET.Element,
+    entity_id: str,
+    bounds: Rect,
+    radius: float,
+    style: LayoutStyle,
+    palette: Palette,
+) -> ET.Element | None:
+    """A soft drop shadow drawn as pure vector geometry, never as a filter.
+
+    Flexo's figures leave as editable SVG and arrive as PDF through Inkscape,
+    and Inkscape rasterizes any region it has to filter -- ``feDropShadow`` is
+    not even a shape it knows, and ``feGaussianBlur`` turns its whole subtree
+    into a 96 dpi bitmap. Either would put a raster patch behind every module in
+    a vector figure, so the shadow is made of the only thing that survives the
+    trip: rounded rectangles.
+
+    Five of them, nested and equally faint, offset together *down and to the
+    right*. Each reaches a fifth less far than the last, so one layer covers the
+    outer band and five the ring against the box -- a stepped falloff that
+    composites to ``style.shadow_opacity`` where they all overlap. Everything
+    under the box itself is hidden by its own fill.
+
+    The light comes from the top left, so the shadow shows along the bottom and
+    right edges and nowhere else. That is geometry rather than clipping: with the
+    stack offset by at least its own spread, the widest layer's top-left corner
+    lands on the box's own top-left corner and every narrower layer starts
+    further in, so no layer can put ink above the top edge or left of the left
+    edge -- true at any corner radius, and still five plain rectangles.
     """
 
-    return bool(spec.property("motif", True))
+    spread = style.shadow_spread.points
+    if spread <= 0.0 or style.shadow_opacity <= 0.0:
+        return None
+    # A shorter offset than the spread would let the outer layers ring the top
+    # and left edges, which is the halo this shadow exists not to be.
+    offset = max(style.shadow_offset.points, spread)
+    # Alpha per layer, chosen so all of them together reach the authored opacity.
+    layer_opacity = 1.0 - (1.0 - style.shadow_opacity) ** (1.0 / SHADOW_LAYERS)
+    group = element(parent, "g", id=f"{entity_id}.shadow")
+    for index in range(SHADOW_LAYERS):
+        reach = spread * (SHADOW_LAYERS - index) / SHADOW_LAYERS
+        element(
+            group,
+            "rect",
+            x=bounds.x + offset - reach,
+            y=bounds.y + offset - reach,
+            width=bounds.width + 2.0 * reach,
+            height=bounds.height + 2.0 * reach,
+            rx=radius + reach,
+            opacity=layer_opacity,
+            **paint_attributes(palette=palette, fill_role="shadow"),
+        )
+    return group
 
 
 def base_rect(
