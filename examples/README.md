@@ -21,14 +21,16 @@ are one thing.
 
 A dark attention panel from palette overrides alone: `VectorPreset` glyphs, a
 reserved grid lane holding the attention corridor open, and `rail_at`/`joint`
-placing the merge.
+placing the merge. Its presets name no `order`, so every glyph takes the
+default — shades permuted per column, reading as a feature vector.
 
 [![attention module](build/attention-module.preview.png)](build/attention-module.preview.png)
 
-The same panel with `order="shuffled"` — every colour kept, permuted per column,
-so each glyph reads as a feature vector rather than as a gradient.
+The same panel with `order="ramp"` — every colour kept, run light-to-dark
+instead, so each glyph reads as a gradient. A ramp claims the cells are
+*ordered*, which is why it is asked for by name rather than defaulted to.
 
-[![attention module, shuffled](build/attention-module-shuffled.preview.png)](build/attention-module-shuffled.preview.png)
+[![attention module, ramped](build/attention-module-ramp.preview.png)](build/attention-module-ramp.preview.png)
 
 ## [`modelangelo_gnn.py`](modelangelo_gnn.py)
 
@@ -42,7 +44,9 @@ grids, and a five-head readout that recycles into the top. Authored in
 
 The Transformer from "Attention Is All You Need" (Vaswani et al. 2017): two
 towers authored bottom-up, residual skips on the add-norm `branch`/`skip`
-ports, Q/K/V triples as one `fan_out` each, and hand-drawn positional-encoding
-glyphs embedded with `image()`.
+ports — all five bowing out to the east, because those two ports are pinned
+there so a bypass reads the same way in both towers — Q/K/V triples as one
+`fan_out` each, and hand-drawn positional-encoding glyphs embedded with
+`image()`.
 
 ![transformer](build/transformer.preview.png)

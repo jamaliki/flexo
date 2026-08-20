@@ -447,7 +447,9 @@ SHADE_ORDERS = ("ramp", "shuffled")
 
 ``"ramp"`` keeps them light-to-dark, so the glyph reads as a gradient.
 ``"shuffled"`` permutes them, so it reads as a feature *vector*: cells whose
-values have no order, which is what a real activation looks like.
+values have no order, which is what a real activation looks like. ``"shuffled"``
+is the default for that reason -- the gradient is the special case, and it is
+asked for by name.
 """
 
 _SHUFFLE_ATTEMPTS = 8
@@ -503,11 +505,13 @@ class VectorPreset:
     whitespace or a multiplication sign. ``base`` is one hex colour for every column, or one per
     column; each column derives its own light-to-dark shades from it.
 
-    ``order`` is how each column arranges its shades. ``"ramp"`` runs them
-    light-to-dark; ``"shuffled"`` permutes them so the glyph reads as a feature
+    ``order`` is how each column arranges its shades, and it defaults to
+    ``"shuffled"``: the shades are permuted so the glyph reads as a feature
     vector rather than a gradient, deterministically from ``seed`` -- the same
     preset always yields the same figure, and different columns of one glyph get
-    different permutations.
+    different permutations. A ramp claims the cells are *ordered*, which is a
+    claim about the data almost no activation supports, so an author who wants
+    the gradient asks for it with ``order="ramp"``.
 
     ``tint`` and ``shade`` are how far the light and dark ends of each column
     travel from its base colour (see ``shade_ramp``).
@@ -518,7 +522,7 @@ class VectorPreset:
 
     base: str | tuple[str, ...]
     topology: int | str | tuple[int, int]
-    order: Literal["ramp", "shuffled"] = "ramp"
+    order: Literal["ramp", "shuffled"] = "shuffled"
     seed: int = 0
     tint: float = _TINT_LIMIT
     shade: float = _SHADE_LIMIT
