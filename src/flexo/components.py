@@ -60,6 +60,7 @@ MOTIF_LABEL_KINDS = frozenset(
         "concat",
         "feature-strip",
         "graph",
+        "image",
         "inset",
         "matrix",
         "sequence",
@@ -72,6 +73,12 @@ happens to fit -- is how "Edge rectangles" came to sit on top of its own
 molecule. Sizing (``intrinsic_node_size``), the label baseline, and every motif
 that paints read the same two functions below, so the band a label is given and
 the area a motif is allowed are the same band and the same area by construction.
+
+``image`` belongs here for the same reason (R27), and its "motif" is the author's
+own artwork: a label centred over a positional-encoding glyph is a caption
+printed across the drawing it names. An *unlabelled* image asks for no band and
+therefore gets none -- its bounds stay exactly its artwork, which is the whole
+promise of the kind.
 """
 
 
@@ -113,6 +120,31 @@ _CONCAT = (
     _default_port("input2", Side.WEST, 0.7, adaptive=True),
     _OUTPUT,
 )
+_RESIDUAL_TARGET = (
+    _INPUT,
+    _default_port("skip", Side.WEST, 0.8, adaptive=True),
+    _OUTPUT,
+    _default_port("branch", Side.EAST, 0.8, adaptive=True),
+)
+"""A component that adds a bypassed value to a sublayer's output (R27).
+
+Such a component sits on *two* wires, not one, and the second is not a copy of
+the first: ``input`` carries what the sublayer computed and ``skip`` carries what
+went round it. One defaulted ``input`` for both is what put two arrowheads on one
+point in the first Transformer figure authored with Flexo -- two runs a hair
+apart, each with a hook where the router pulled it off its twin, and a
+``routing.track.separation`` error for the pair.
+
+``branch`` is the same story read forwards. The value leaving one residual block
+feeds the next sublayer *and* bypasses it, so two runs leave here too;
+``branch`` is the second departure, named as ``feature-strip`` and ``junction``
+already name theirs. A figure that taps it instead of doubling up on ``output``
+comes out with one arrow per wire, which is what the reference Transformer
+figure draws.
+
+All four are auto-sided, so a tower that reads upward gets them on the edges its
+ink actually uses without a port table.
+"""
 _VECTOR_PORTS = (
     PortSpec("input", Side.WEST),
     PortSpec("output", Side.EAST),
@@ -236,11 +268,7 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ComponentDefinition("block", Size(44.0, 28.0), _STANDARD),
         ComponentDefinition("mlp", Size(48.0, 32.0), _STANDARD),
         ComponentDefinition("cnn", Size(48.0, 32.0), _STANDARD),
-        ComponentDefinition(
-            "add-norm",
-            Size(50.0, 34.0),
-            (_INPUT, _default_port("residual", Side.SOUTH), _OUTPUT),
-        ),
+        ComponentDefinition("add-norm", Size(50.0, 34.0), _RESIDUAL_TARGET),
         ComponentDefinition("attention", Size(60.0, 58.0), _QKV, motif_height=22.0),
         ComponentDefinition("concat", Size(32.0, 42.0), _CONCAT, motif_height=8.0),
         ComponentDefinition("channels", Size(22.0, 34.0), _STANDARD),
@@ -336,8 +364,8 @@ def normalize_node(node: NodeSpec) -> NodeSpec:
     return replace(node, ports=COMPONENTS[node.kind].ports)
 
 
-def image_size(node: NodeSpec, style: LayoutStyle) -> Size:
-    """The bounds of an ``image``: the artwork's own size, or the author's.
+def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
+    """The bounds of an ``image``: its artwork, its label band, or the author's box.
 
     One authored extent is enough. Artwork arrives with an aspect ratio, and a
     figure that scales a molecule icon to a column width should not have to
@@ -345,9 +373,27 @@ def image_size(node: NodeSpec, style: LayoutStyle) -> Size:
     height, ``height`` alone scales the width, and giving both is the deliberate
     act of boxing the artwork, which then letterboxes inside those bounds rather
     than distorting.
+
+    A label is *not* part of the artwork, so it takes its own band off the top
+    (``label_band_height`` and ``motif_area``, the same two functions every other
+    motif-label kind reads) and the drawing gets what is left. Which is why an
+    authored extent shrinks the drawing rather than the words: ``height`` names
+    the box, and the caption's line is the one thing in it whose size the author
+    did not choose. An image with no label reserves nothing and comes out exactly
+    as large as the file it carries.
     """
 
     artwork = node_artwork(node)
+    band = label_band_height(node.kind, label, style)
+    chrome = (
+        Size(
+            2.0 * style.padding_x.points,
+            band + style.motif_label_gap.points + style.padding_y.points,
+        )
+        if band
+        else Size(0.0, 0.0)
+    )
+    least_width = label.width + 2.0 * style.padding_x.points if band else 0.0
     width = style.resolve_extent(node.width).points if node.width is not None else None
     height = style.resolve_extent(node.height).points if node.height is not None else None
     if width is not None and height is not None:
@@ -364,10 +410,15 @@ def image_size(node: NodeSpec, style: LayoutStyle) -> Size:
             )
         )
     if width is not None:
-        return Size(width, width / aspect)
+        drawn = max(0.0, width - chrome.width)
+        return Size(width, drawn / aspect + chrome.height)
     if height is not None:
-        return Size(height * aspect, height)
-    return Size(artwork.width or 0.0, artwork.height or 0.0)
+        drawn = max(0.0, height - chrome.height)
+        return Size(max(drawn * aspect + chrome.width, least_width), height)
+    return Size(
+        max((artwork.width or 0.0) + chrome.width, least_width),
+        (artwork.height or 0.0) + chrome.height,
+    )
 
 
 def intrinsic_node_size(
@@ -388,7 +439,7 @@ def intrinsic_node_size(
         # Artwork has a size of its own, and one authored extent implies the
         # other, so image sizing answers on its own rather than through the
         # declared-or-natural tail below.
-        return image_size(node, style)
+        return image_size(node, label, style)
     else:
         # A motif-label kind stacks its band, its gap and its motif; every other
         # kind centres its words, so the label alone sets the height it needs.

@@ -29,6 +29,13 @@ _INFINITY = float("inf")
 _RAIL_TOLERANCE = 1e-6
 """How far a placed rail may sit from the requested one and still count as honoured."""
 
+_OPPOSITE = {
+    Side.NORTH: Side.SOUTH,
+    Side.SOUTH: Side.NORTH,
+    Side.EAST: Side.WEST,
+    Side.WEST: Side.EAST,
+}
+
 
 def group_obstacles(
     fitted: FittedFigure,
@@ -106,6 +113,7 @@ def route_net(
     spokes = targets if net.kind == "fan-out" else sources
     vertical = _vertical_rail(
         net.rail_hint,
+        net.via,
         hub_port.side,
         tuple(port.side for port, _ in spokes),
     )
@@ -194,7 +202,8 @@ def route_net(
         target_stems,
         label_metrics,
         label_position,
-        _rail_clamp_diagnostics(net, run, coordinate),
+        _rail_clamp_diagnostics(net, run, coordinate)
+        + _via_clamp_diagnostics(net, coordinate, all_escapes, vertical),
     )
 
 
@@ -214,17 +223,27 @@ def _escape(port: ResolvedPort, distance: float) -> Point:
     return port.side.escaped(port.position, distance)
 
 
-def _vertical_rail(hint: Side | None, hub_side: Side, spoke_sides: tuple[Side, ...]) -> bool:
+def _vertical_rail(
+    hint: Side | None,
+    via: Side | None,
+    hub_side: Side,
+    spoke_sides: tuple[Side, ...],
+) -> bool:
     """Which axis the shared rail runs along, decided by the spokes it feeds.
 
-    An explicit hint always wins. Otherwise the spoke ports vote: east/west
-    spokes are entered from a vertical rail, north/south spokes from a
-    horizontal one. A tie runs the trunk *along* the hub port axis, so a south
-    hub keeps one straight drop instead of doglegging into a cross rail.
+    An explicit hint always wins, and a ``via`` hint answers the same question
+    the same way -- a rail on the west is a rail that runs north to south -- so
+    the two read the side identically and differ only in what they then do with
+    the coordinate. Otherwise the spoke ports vote: east/west spokes are entered
+    from a vertical rail, north/south spokes from a horizontal one. A tie runs
+    the trunk *along* the hub port axis, so a south hub keeps one straight drop
+    instead of doglegging into a cross rail.
     """
 
     if hint is not None:
         return hint.horizontal
+    if via is not None:
+        return via.horizontal
     votes = sum(1 if side.horizontal else -1 for side in spoke_sides)
     if votes == 0:
         return not hub_side.horizontal
@@ -306,6 +325,56 @@ def _rail_clamp_diagnostics(
     )
 
 
+_BOUNDARY_EDGE = {
+    Side.WEST: lambda bounds: bounds.left,
+    Side.EAST: lambda bounds: bounds.right,
+    Side.NORTH: lambda bounds: bounds.top,
+    Side.SOUTH: lambda bounds: bounds.bottom,
+}
+"""The coordinate a side names on a routing boundary: one reading for two hints."""
+
+
+_VIA_TOLERANCE = 0.5
+"""How far past its ports a rail may sit before it counts as taking that side."""
+
+
+def _via_clamp_diagnostics(
+    net: NetSpec,
+    coordinate: float,
+    escapes: tuple[Point, ...],
+    vertical: bool,
+) -> tuple[Diagnostic, ...]:
+    """Say out loud that an authored ``via`` could not have the side it asked for.
+
+    The hint is honoured as long as the rail is not parked beyond every port on
+    the side it refused: anywhere between them is the corridor the layout left,
+    and the search already took it as far toward ``via`` as the clearances allow.
+    """
+
+    if net.via is None:
+        return ()
+    values = tuple(point.x if vertical else point.y for point in escapes)
+    low, high = min(values), max(values)
+    refused = (
+        coordinate > high + _VIA_TOLERANCE
+        if net.via in {Side.WEST, Side.NORTH}
+        else coordinate < low - _VIA_TOLERANCE
+    )
+    if not refused:
+        return ()
+    achieved = _OPPOSITE[net.via]
+    return (
+        Diagnostic(
+            "routing.net.via.clamped",
+            f"Requested via {net.via.value} leaves no clear rail; the shared rail "
+            f"sits {achieved.value} of this net's ports instead.",
+            Severity.WARNING,
+            entity_id=net.id,
+            hint=f"Open a corridor {net.via.value} of the ports, or drop the hint.",
+        ),
+    )
+
+
 def _rail_coordinate(
     net: NetSpec,
     boundary: Rect,
@@ -319,20 +388,20 @@ def _rail_coordinate(
     caption: float = 0.0,
 ) -> float:
     if net.rail_hint is not None:
-        return {
-            Side.WEST: boundary.left,
-            Side.EAST: boundary.right,
-            Side.NORTH: boundary.top,
-            Side.SOUTH: boundary.bottom,
-        }[net.rail_hint]
+        return _BOUNDARY_EDGE[net.rail_hint](boundary)
     transverse = tuple(point.y if vertical else point.x for point in escapes)
     low, high = _rail_interval(boundary, escape_sides, vertical)
     # An authored fraction replaces the corridor midpoint as the preference; the
     # search below already walks candidates outward from it, so an infeasible
-    # request lands on the nearest rail that clears every obstacle.
+    # request lands on the nearest rail that clears every obstacle. A ``via``
+    # hint prefers the boundary edge on its own side the way ``rail`` pins to it
+    # -- and then, unlike ``rail``, lets the candidate search walk back inward
+    # until the rail is clear, which is what makes it a lean rather than a pin.
     preferred_value = (
         requested
         if requested is not None
+        else _BOUNDARY_EDGE[net.via](boundary)
+        if net.via is not None
         else _preferred_rail(
             _corridor(escape_sides, vertical),
             preferred.x if vertical else preferred.y,

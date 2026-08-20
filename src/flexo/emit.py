@@ -12,9 +12,8 @@ from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
-from flexo.ir.semantic import TextRun
 from flexo.render import render_node
-from flexo.render_common import paint_attributes, soft_shadow
+from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
 from flexo.routing.nudge import shorten_end
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
 from flexo.svg import (
@@ -29,7 +28,6 @@ from flexo.svg import (
     xml_document,
 )
 from flexo.svg_resources import add_definitions, add_metadata
-from flexo.text import SHIFTED_SIZE
 from flexo.theme import retheme_svg as retheme_svg
 from flexo.units import MILLIMETRES_PER_INCH, POINTS_PER_INCH
 
@@ -211,11 +209,15 @@ class _Hierarchy:
             width=group.bounds.width,
             height=group.bounds.height,
             rx=radius,
+            # A container takes author paint exactly as a component body does:
+            # an overridden part carries no role, so retheme leaves it alone.
             **paint_attributes(
                 palette=palette,
                 fill_role="container-fill",
                 stroke_role="container-stroke",
                 stroke_width=style.stroke_width.points,
+                fill=paint_override(spec, "fill"),
+                stroke=paint_override(spec, "stroke"),
             ),
         )
 
@@ -322,47 +324,25 @@ def _connector_label(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
-    """One connector caption, centred on its anchor, one tspan per styled run.
+    """One connector caption, centred on its anchor, painted ``muted-ink``.
 
     Connector labels carry the same styled runs as component labels -- panel-b
-    writes attention as ``softmax(QK^T)V`` above the arrow -- so a superscript or
-    subscript run has to survive into the SVG instead of collapsing into the
-    baseline text.
+    writes attention as ``softmax(QK^T)V`` above the arrow -- so they are set by
+    the same helper, and a superscript or subscript run survives into the SVG
+    instead of collapsing into the baseline text.
     """
 
-    text = element(
+    render_runs(
         parent,
-        "text",
-        id=element_id,
+        element_id,
+        metrics,
         x=position.x,
         y=position.y,
-        text__anchor="middle",
-        font__family=style.typography.family,
-        font__size=style.typography.size.points,
-        fill=palette.get("muted-ink"),
-        data__flexo__fill="muted-ink",
+        typography=style.typography,
+        palette=palette,
+        fill_role="muted-ink",
+        anchor="middle",
     )
-    for line_index, line in enumerate(metrics.lines):
-        for run_index, run in enumerate(line.runs):
-            tspan = element(
-                text,
-                "tspan",
-                x=position.x if run_index == 0 else None,
-                dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
-                font__weight=run.weight if run.weight != 400 else None,
-                font__style="italic" if run.italic else None,
-                baseline__shift=_shift(run),
-                font__size=(
-                    style.typography.size.points * SHIFTED_SIZE
-                    if run.baseline_shift != "normal"
-                    else None
-                ),
-            )
-            tspan.text = run.text
-
-
-def _shift(run: TextRun) -> str | None:
-    return None if run.baseline_shift == "normal" else run.baseline_shift
 
 
 class _InkPath(NamedTuple):
@@ -621,29 +601,34 @@ def _render_group_label(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
+    """One group title, set from its measured runs at the style's title weight.
+
+    A title is styled text like any other caption -- ``Panel b`` and a module
+    named ``QK^T`` are the same authoring surface -- so it goes through the
+    shared helper rather than being flattened into one plain string. The weight
+    is declared once on the text object, which is what its runs inherit.
+    """
+
     spec = group.measured.spec
-    if not spec.label:
-        return
     padding = spec.layout.resolved_padding(style.group_padding)
     # The title hangs off whichever end of the top edge it is anchored to, so
     # the anchor moves with it; the band it sits in is the same height either
     # way, which is why title_side is paint rather than layout.
     right = spec.title_side == "right"
-    text = element(
+    render_runs(
         parent,
-        "text",
-        id=f"{spec.id}.label",
+        f"{spec.id}.label",
+        group.measured.label,
         x=(
             group.bounds.right - padding.right
             if right
             else group.bounds.x + padding.left
         ),
         y=group.bounds.y + padding.top + group.measured.label.baseline,
-        text__anchor="end" if right else None,
-        font__family=style.typography.family,
-        font__size=style.typography.size.points,
-        font__weight=style.typography.title_weight,
-        fill=palette.get("ink"),
-        data__flexo__fill="ink",
+        typography=style.typography,
+        palette=palette,
+        fill_role="ink",
+        fill=paint_override(spec, "label"),
+        anchor="end" if right else None,
+        weight=style.typography.title_weight,
     )
-    text.text = "".join(run.text for run in spec.label)

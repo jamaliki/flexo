@@ -11,10 +11,11 @@ import yaml
 from flexo.artwork import load_artwork
 from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
+from flexo.components import label_band_height, motif_area
 from flexo.diagnostics import FlexoError
 from flexo.geometry import Point, Side
 from flexo.serialization import dump_figure, parse_figure
-from flexo.style import PALETTES
+from flexo.style import PALETTES, STYLES
 from flexo.svg import SVG_NS
 from flexo.theme import retheme_svg
 from flexo.units import pt
@@ -330,10 +331,81 @@ def test_an_image_is_a_solid_obstacle_for_routing(tmp_path: Path) -> None:
     assert all(not bounds.contains_point(point, strict=True) for point in route)
 
 
-def test_a_label_rides_on_the_image_like_any_other_node(tmp_path: Path) -> None:
+def test_a_label_takes_a_band_off_the_top_and_the_artwork_takes_the_rest(
+    tmp_path: Path,
+) -> None:
+    """R27: an image captions like an inset, never across its own drawing."""
+
     compilation = compiled(write_artwork(tmp_path), width="96pt", label="Ligand")
+    node = compilation.fitted.node("panel.art")
+    style = STYLES["paper"]
+    band = label_band_height("image", node.measured.label, style)
+    area = motif_area("image", node.bounds, node.measured.label, style)
     root = ET.fromstring(compilation.document.text)
     label = next(item for item in root.iter() if item.get("id") == "panel.art.label")
-    bounds = compilation.fitted.node("panel.art").bounds
     assert "".join(item.text or "" for item in label.iter()).strip() == "Ligand"
-    assert float(label.get("x", "")) == pytest.approx(bounds.center.x)
+    assert float(label.get("x", "")) == pytest.approx(node.bounds.center.x)
+    baseline = float(label.get("y", ""))
+    assert baseline == pytest.approx(
+        node.bounds.y + style.padding_y.points + node.measured.label.baseline
+    )
+    artwork = artwork_element(compilation)
+    assert float(artwork.get("y", "")) == pytest.approx(area.y)
+    assert area.y >= node.bounds.y + band, "the drawing starts below the words"
+    assert float(artwork.get("height", "")) == pytest.approx(area.height)
+    assert float(artwork.get("width", "")) == pytest.approx(area.width)
+    # The band is reserved rather than taken from the drawing: an unlabelled
+    # image of the same authored width keeps its whole aspect-ratio height.
+    plain = compiled(write_artwork(tmp_path), width="96pt").fitted.node("panel.art")
+    assert node.bounds.height > plain.bounds.height
+
+
+def test_a_height_only_extent_shrinks_the_artwork_and_not_the_label(
+    tmp_path: Path,
+) -> None:
+    """The author chose the box; the caption's line is the one size they did not."""
+
+    style = STYLES["paper"]
+    roomy = compiled(write_artwork(tmp_path), height="80pt", label="Ligand")
+    tight = compiled(write_artwork(tmp_path), height="50pt", label="Ligand")
+    for compilation in (roomy, tight):
+        node = compilation.fitted.node("panel.art")
+        area = motif_area("image", node.bounds, node.measured.label, style)
+        assert node.bounds.height == pytest.approx(
+            80.0 if compilation is roomy else 50.0
+        )
+        assert float(artwork_element(compilation).get("height", "")) == pytest.approx(
+            area.height
+        )
+    roomy_label = roomy.fitted.node("panel.art").measured.label
+    tight_label = tight.fitted.node("panel.art").measured.label
+    assert roomy_label.height == tight_label.height, "the words keep their line"
+    assert (
+        motif_area(
+            "image",
+            tight.fitted.node("panel.art").bounds,
+            tight_label,
+            style,
+        ).height
+        < motif_area(
+            "image",
+            roomy.fitted.node("panel.art").bounds,
+            roomy_label,
+            style,
+        ).height
+    )
+
+
+def test_an_unlabelled_image_reserves_no_band_at_all(tmp_path: Path) -> None:
+    """The whole promise of the kind: the bounds are the artwork."""
+
+    compilation = compiled(write_artwork(tmp_path))
+    bounds = compilation.fitted.node("panel.art").bounds
+    artwork = artwork_element(compilation)
+    assert (float(artwork.get("x", "")), float(artwork.get("y", ""))) == pytest.approx(
+        (bounds.x, bounds.y)
+    )
+    assert (
+        float(artwork.get("width", "")),
+        float(artwork.get("height", "")),
+    ) == pytest.approx((bounds.width, bounds.height))

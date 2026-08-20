@@ -80,6 +80,56 @@ Ids are scoped by the group that owns them, so `module.mlp("head")` inside
 `encoder` is `encoder.head`; that is what lets the same component name appear in
 every module of a figure.
 
+#### Components you can create before their inputs exist
+
+Wiring at creation is a convenience, never a requirement. **No component needs a
+source to be created**, `attention` included: `q`, `k`, and `v` wire straight into
+its three ports when they are given, and the ports are there either way.
+
+```python
+import flexo
+
+with flexo.Figure("transformer", width="double-column") as figure:
+    with figure.module("decoder", layout="column") as decoder:
+        cross = decoder.attention("xmha", label="Multi-Head\nAttention")
+    with figure.module("encoder", layout="column") as encoder:
+        top = encoder.add_norm("an", label="Add & Norm")
+    figure.net(src=top, sinks=[cross.k, cross.v], id="cross-kv")
+```
+
+A figure is not always written in flow order. A decoder's cross-attention reads
+keys and values from an encoder that appears *later* in the source, and a
+component that could not exist before its inputs would force the whole tower to be
+authored inside out.
+
+#### Residual blocks name both of their wires
+
+`add_norm` is a residual join, so it has a port for each wire rather than one
+`input` doing double duty:
+
+```python
+import flexo
+
+with flexo.Figure("residual", width="double-column") as figure:
+    with figure.module("m", layout="column", gap="18pt") as module:
+        norm = module.add_norm("an", label="Add & Norm")
+        sublayer = module.block("ff", label="Feed Forward")
+        fork = module.node("fork", "junction")
+        module.connect(fork, sublayer)
+        module.connect(sublayer, norm)                            # -> an.input
+        module.connect(fork.branch, norm, target_port="skip")     # -> an.skip
+```
+
+`input` is what the sublayer computed and `skip` is what went round it; `output`
+carries the sum onward and `branch` is the same value tapped for the *next*
+block's skip. Sending two values into one `input` puts two arrowheads on one point
+— two runs a hair apart, each with a hook where the router pulled it off its twin,
+and a `routing.track.separation` error for the pair. Naming the second arrival is
+the fix, and `add_norm(input=..., skip=...)` says it at the point of creation.
+`residual()` prefers a `residual` or `skip` port automatically for the same
+reason. All four ports are auto-sided, so a tower that reads upward gets them on
+the edges its ink actually uses with no port table written down.
+
 #### Ports pick the side they face
 
 A component's default ports carry a side because geometry needs one, and the
@@ -100,6 +150,10 @@ The rules, in full:
   whichever head happens to sit furthest out.
 - **an edge routed through an authored corridor casts no vote.** Its ink goes
   where `lane=` sent it, not where its counterpart sits.
+- **`via=` decides the side it arrives on.** Ink that comes round the west arrives
+  from the west, so a `via` hint settles the *entry* side of an auto-sided target
+  port — see *`via=`: which side a route should keep to*. The departure keeps its
+  own vote.
 - **a near-diagonal relationship names no side.** Below a decisive margin the
   grammar's own side stands, because a port that flipped on a few points of
   layout drift would be a worse surprise than one that never moved.
@@ -452,6 +506,44 @@ standoff short of the run it points into, leaving the trunk unbroken and droppin
 the dot that would otherwise mark the branch; `joint="dot"` insists on the dot
 even under `junction_dots="never"`.
 
+#### `via=`: which side a route should keep to
+
+A route that has to leave the straight line between its endpoints has two ways
+round whatever stands in the way, and the router cannot see which one *reads*. A
+connector that wraps the far face of a tower comes back through it; the same
+connector taken round the near side stays in the margin. `via=` is one word for
+which margin:
+
+```python
+root.connect(source, target, via="west")
+figure.net(src=encoder_top, sinks=[cross.k, cross.v], via="west")
+figure.merge(sinks=[first, second], dst=average, via="south")
+```
+
+It takes a `Side` or a side name on `connect`, `residual`, `net`, and `merge`, and
+defaults to no hint at all. Three things follow from it:
+
+- **the route pays for the corridor it refused.** Length spent beyond the region
+  its two endpoints span, on the side opposite the hint, costs extra
+  (`PathCosts.off_side`) — enough that the near corridor wins wherever it exists,
+  little enough that the far one is still available when it is the only one.
+  Inside the region nothing is priced: every route has to cross it.
+- **a net answers with its rail.** The side names the axis the rail runs along —
+  west and east rail vertically, north and south horizontally, exactly as `rail=`
+  reads it — and the rail is then placed as far toward that side as its stems and
+  the obstacles allow. Unlike `rail=`, which *pins* the rail to the routing
+  boundary, `via=` is a lean, so it may not be combined with `rail=` or `rail_at=`.
+- **the arrival faces the hint.** Ink that comes round the west arrives from the
+  west, so an auto-sided target port takes that side (an authored `PortSpec` or a
+  `depart`/`arrive` hint still wins). The departure keeps its own vote: a route may
+  perfectly well leave east and still be asked to stay west of the tower it is
+  crossing to.
+
+Like `rail_at`, it is a request. Where the geometry leaves no corridor on that
+side the router takes the nearest one and reports it —
+`routing.via.clamped` for an edge, `routing.net.via.clamped` for a net — naming
+the side it actually achieved, rather than failing or silently obeying.
+
 A connector's own caption — a net's formula, an edge's `ESM-1b` — is route
 geometry rather than a node, so no obstacle rule reaches it and it has to place
 itself clear. It does, with `caption_clearance` measured from the other side: the
@@ -499,21 +591,22 @@ without hue). `flexo retheme` re-paints a *finished* SVG by role, with no
 recompile — which is what the `data-flexo-fill` and `data-flexo-stroke`
 attributes on every emitted shape are for.
 
-When exactly one component must differ — a caption that has to clear its own dark
-body, say — `paint` overrides the role for that node alone:
+When exactly one component or module must differ — a caption that has to clear its
+own dark body, say — `paint` overrides the role for that one entity:
 
 ```python
 import flexo
 
 with flexo.Figure("painted", width="double-column") as figure:
-    with figure.module("m", label="Attention") as module:
+    with figure.module("m", label="Attention", paint={"fill": "#0d2b26"}) as module:
         module.mlp("q-mlp", label="MLP", paint={"label": "#9fe1cb"})
         module.block("panel", label="Panel", paint={"fill": "#085041", "stroke": "#56bb9a"})
 ```
 
-The three parts are `fill` and `stroke` (the component body) and `label` (its
-text); any other key is an error where it is written, as is a colour that is not
-`#rgb` or `#rrggbb`. Parts left out keep their role and retheme normally.
+The three parts are `fill` and `stroke` (the component or container body) and
+`label` (its text or title); any other key is an error where it is written, as is
+a colour that is not `#rgb` or `#rrggbb`. Parts left out keep their role and
+retheme normally. `paint` is paint: it moves nothing, on a group or a node.
 
 Three kinds of ink are **literal colour rather than a role**, and `flexo retheme`
 walks straight past all three: `VectorPreset` cells, any `paint=` override, and an
@@ -535,7 +628,10 @@ with flexo.Figure("ornament", width="double-column") as figure:
 ```
 
 `title_side="right"` anchors the title to the right end instead. The title band is
-the same height either way, so nothing in the figure moves; and `motif=False`
+the same height either way, so nothing in the figure moves. A title takes styled
+runs like any other label — `label=(TextRun("QK"), TextRun("T",
+baseline_shift="super"))` — and is set at the style's `title_weight`, which a run
+inherits unless it asks for a weight of its own; and `motif=False`
 changes nothing else either — same size, same body, same ports, same label. Reach
 for it when a panel repeats a component often enough that its ornament becomes
 noise.
@@ -600,9 +696,14 @@ re-export it. The XML declaration, the DOCTYPE, and comments never travel. Every
 id in the artwork is rewritten under the node's id, so the same file may be
 embedded twice in one figure without the two copies sharing a gradient.
 
-A `label` sits over the artwork, centred, as on any other node; for a caption
-*under* the drawing, put the image and a `label` node in a column, the way
-`vector` captions its stack.
+A `label` **takes a band off the top and the artwork takes the rest**, exactly as
+it does on an `inset` or a `matrix`: the words name the drawing, so they are never
+printed across it. An authored extent is the box, which means `height="40pt"` on a
+captioned image shrinks the *drawing* — the caption's line is the one size in
+there the author did not choose. An image with no label reserves nothing and comes
+out exactly as large as the file it carries. For a caption that hangs *under* the
+drawing instead, put the image and a `label` node in a column, the way `vector`
+captions its stack.
 
 ### Shadows
 

@@ -61,7 +61,13 @@ def measure_figure(
             return measured_groups[group_id]
         group = groups_by_id[group_id]
         child_sizes, child_anchors = child_geometry(group.children)
-        label = text_measurer.measure(group.label)
+        # A title is drawn at the style's title weight, so it is measured there
+        # too: a semibold "Sequence module" is wider than the same words at 400,
+        # and the band this reserves is the band those glyphs land in.
+        label = text_measurer.measure(
+            group.label,
+            weight=layout_style.typography.title_weight,
+        )
         gaps = routing_gaps_for_group(
             semantic,
             group_id,
@@ -79,7 +85,7 @@ def measure_figure(
         padding = group.layout.resolved_padding(layout_style.group_padding)
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
         intrinsic = Size(
-            body.width + padding.horizontal,
+            max(body.width, label.width) + padding.horizontal,
             body.height + padding.vertical + title_height,
         )
         measured = MeasuredGroup(

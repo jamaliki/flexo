@@ -135,6 +135,10 @@ def _routing_diagnostics(
         for edge in routed.edges
     }
     for edge in routed.edges:
+        # What the router had to overrule -- a ``via`` corridor that did not
+        # exist, say -- is reported here rather than at route time, so one
+        # clamped hint never costs the author their figure.
+        diagnostics.extend(edge.diagnostics)
         source = routed.fitted.node(edge.spec.source.node_id).port(edge.spec.source.port_name)
         target = routed.fitted.node(edge.spec.target.node_id).port(edge.spec.target.port_name)
         if not edge.centerline or edge.centerline[0] != source.position:
