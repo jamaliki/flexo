@@ -392,6 +392,13 @@ class Run:
     """Index of the vertex pinned to this run's owning rail, if any."""
     pinned: bool = False
     """True when the author placed this run themselves and nudging may not move it."""
+    hinted: bool = False
+    """True when the author aimed this route -- a lane, a waypoint, a ``via`` side.
+
+    Such a route keeps the corridor it was sent through, so the jog-balancing
+    default below leaves it alone. Lane nudging still applies: spacing two runs a
+    lane apart is not a change of route.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +413,130 @@ class _Corridor:
     high: float
     pins: tuple[tuple[int, int], ...]
     slack: float
+
+
+def balance_jogs(
+    runs: tuple[Run, ...],
+    polylines: tuple[tuple[Point, ...], ...],
+    *,
+    style: LayoutStyle,
+    obstacles: tuple[Rect, ...],
+) -> tuple[tuple[Point, ...], ...]:
+    """Centre the crossbar of every single-jog route in the run it has free.
+
+    A Z -- two parallel end segments pointing the same way, joined by one crossbar
+    -- has a whole span to put that crossbar in, and the search that found the
+    route took whichever coordinate it reached first. Against one endpoint the
+    shape reads as an L with a kink in it; in the middle it reads as the step
+    across it is, with an arm of the same length on either side. So the default is
+    the midpoint of the crossbar's free span: the stretch between the two
+    endpoints' clearance boundaries, less anything an obstacle takes out of it.
+
+    A C -- end segments pointing *opposite* ways, which is how a route wraps a
+    module or runs back up a margin -- is left alone. Its crossbar has no span
+    between the endpoints to be centred in: the two arms overlap, and the corridor
+    it sits in was chosen against the whole figure rather than between two ports.
+
+    Every move is provisional. It is kept only if it leaves no route touching an
+    obstacle, crowding another lane, or losing a port stub that was intact before
+    -- which is also what keeps a fan of parallel jogs spread: the second of them
+    to reach for the shared midpoint finds the first already there.
+    """
+
+    spacing = style.port_spacing.points
+    current = polylines
+    baseline = _defects(current, runs, obstacles, spacing, polylines)
+    for index, run in enumerate(runs):
+        if run.rail or run.pinned or run.hinted:
+            continue
+        candidate = _balanced_jog(current[index], run, obstacles)
+        if candidate is None:
+            continue
+        trial = (*current[:index], candidate, *current[index + 1 :])
+        if not _no_worse(_defects(trial, runs, obstacles, spacing, polylines), baseline):
+            continue
+        current = trial
+    return current
+
+
+def _balanced_jog(
+    points: tuple[Point, ...],
+    run: Run,
+    obstacles: tuple[Rect, ...],
+) -> tuple[Point, ...] | None:
+    """``points`` with its one crossbar moved to the middle of its free span."""
+
+    simplified = simplify_polyline(points)
+    runs = segments(simplified)
+    if len(runs) != 3:
+        return None
+    first, crossbar, last = runs
+    if first.horizontal != last.horizontal or first.horizontal == crossbar.horizontal:
+        return None
+    if _direction(first) != _direction(last):
+        return None  # A C, not a Z: the arms double back over each other.
+    horizontal = first.horizontal
+    step = _direction(first)[0] if horizontal else _direction(first)[1]
+    head, tail = run.stubs.head, run.stubs.tail
+    start = (simplified[0].x if horizontal else simplified[0].y) + step * head
+    end = (simplified[3].x if horizontal else simplified[3].y) - step * tail
+    low, high = sorted((start, end))
+    coordinate = crossbar.start.x if horizontal else crossbar.start.y
+    low, high = _free_span(crossbar, obstacles, coordinate, horizontal, low, high)
+    if high - low <= _EPSILON:
+        return None
+    target = (low + high) / 2.0
+    if abs(target - coordinate) <= _EPSILON:
+        return None
+    moved = tuple(
+        Point(target, point.y) if horizontal else Point(point.x, target)
+        for point in simplified[1:3]
+    )
+    return (simplified[0], *moved, simplified[3])
+
+
+def _free_span(
+    crossbar: Segment,
+    obstacles: tuple[Rect, ...],
+    coordinate: float,
+    horizontal: bool,
+    low: float,
+    high: float,
+) -> tuple[float, float]:
+    """``[low, high]`` narrowed to the obstacle-free stretch holding ``coordinate``.
+
+    An obstacle counts when it stands across the crossbar's own extent: such a box
+    is what the crossbar would have to cut through, so the span stops at its near
+    edge. One standing clear of that extent is behind or in front of the crossing
+    and takes nothing away from it.
+
+    That one test covers the arms as well. Each arm runs at one end of the
+    crossbar's extent, so a box in an arm's way reaches into that extent by
+    definition, and the near edge that stops the crossbar is the same edge that
+    stops the arm sweeping over it.
+    """
+
+    span_low, span_high = (
+        sorted((crossbar.start.y, crossbar.end.y))
+        if horizontal
+        else sorted((crossbar.start.x, crossbar.end.x))
+    )
+    for obstacle in obstacles:
+        low_across, high_across = (
+            (obstacle.top, obstacle.bottom) if horizontal else (obstacle.left, obstacle.right)
+        )
+        if low_across >= span_high - _EPSILON or high_across <= span_low + _EPSILON:
+            continue
+        near, far = (
+            (obstacle.left, obstacle.right) if horizontal else (obstacle.top, obstacle.bottom)
+        )
+        if near < coordinate < far:
+            return coordinate, coordinate
+        if far <= coordinate:
+            low = max(low, far)
+        else:
+            high = min(high, near)
+    return low, high
 
 
 def nudge_routes(
@@ -646,11 +777,13 @@ def figure_runs(
                 edge.spec.id,
                 boundaries[edge.spec.id],
                 Stubs(departure, arrival),
+                hinted=bool(edge.spec.lane_hint or edge.spec.waypoints or edge.spec.via),
             )
         )
         polylines.append(edge.centerline)
     for net in routed.nets:
         boundary = boundaries[net.spec.id]
+        hinted = bool(net.spec.rail_hint or net.spec.rail_at is not None or net.spec.via)
         runs.append(
             Run(
                 net.spec.id,
@@ -658,6 +791,7 @@ def figure_runs(
                 boundary,
                 rail=True,
                 pinned=net.spec.rail_at is not None,
+                hinted=hinted,
             )
         )
         polylines.append(net.rail)
@@ -669,6 +803,7 @@ def figure_runs(
                     boundary,
                     Stubs(head=departure),
                     junction=-1,
+                    hinted=hinted,
                 )
             )
             polylines.append(stem.centerline)
@@ -680,6 +815,7 @@ def figure_runs(
                     boundary,
                     Stubs(tail=arrival),
                     junction=0,
+                    hinted=hinted,
                 )
             )
             polylines.append(stem.centerline)
@@ -759,13 +895,23 @@ def rebuild_figure(
     return replace(routed, edges=tuple(edges), nets=tuple(nets))
 
 
-def nudge_obstacles(routed: RoutedFigure, style: LayoutStyle) -> tuple[Rect, ...]:
-    """Component bounds a nudged track may not approach."""
+def nudge_obstacles(
+    routed: RoutedFigure,
+    style: LayoutStyle,
+    fraction: float = _NUDGE_OBSTACLE_FRACTION,
+) -> tuple[Rect, ...]:
+    """Component bounds a post-pass may not approach, at ``fraction`` of clearance.
+
+    Lane nudging asks for half a clearance: it moves a run a lane at a time to
+    separate it from another run, and refusing a move that ends a couple of points
+    nearer a box than the router would have gone leaves the runs on top of each
+    other instead. Jog balancing asks for the whole of it, because it is choosing
+    where a crossing goes rather than rescuing one, and the whole clearance is what
+    "clear of that box" means everywhere else in the router.
+    """
 
     return tuple(
-        node.bounds.inflated(
-            route_clearance(node.measured.spec, style) * _NUDGE_OBSTACLE_FRACTION
-        )
+        node.bounds.inflated(route_clearance(node.measured.spec, style) * fraction)
         for node in routed.fitted.nodes
         if node.measured.spec.kind not in TRANSPARENT_KINDS
     )
