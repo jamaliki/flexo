@@ -152,6 +152,16 @@ def route_net(
         requested=None if run is None else run.requested,
         caption=_caption_run(label_metrics, style, vertical),
     )
+    trunk_escapes = _balanced_trunk(
+        net,
+        trunk_escapes,
+        hub_escape,
+        hub_port.side,
+        vertical,
+        coordinate,
+        obstacles,
+        hub_index=0 if net.kind == "fan-out" else len(sources),
+    )
     junctions = tuple(_junction(point, coordinate, vertical) for point in trunk_escapes)
     rail = _rail(junctions, vertical)
     source_count = len(sources)
@@ -574,6 +584,104 @@ def _trunk_escapes(
         return tuple(Point(point.x, reach(point.y, hub_escape.y)) for point in escapes)
     reach = max if hub_side is Side.EAST else min
     return tuple(Point(reach(point.x, hub_escape.x), point.y) for point in escapes)
+
+
+def _balanced_trunk(
+    net: NetSpec,
+    escapes: tuple[Point, ...],
+    hub_escape: Point,
+    hub_side: Side,
+    vertical: bool,
+    coordinate: float,
+    obstacles: tuple[Rect, ...],
+    *,
+    hub_index: int,
+) -> tuple[Point, ...]:
+    """Put the trunk's own junction in the middle of the run it has to itself.
+
+    A trunk that leaves along the rail's own axis and finds the rail offset from
+    it -- the encoder's output crossing the page into a decoder's cross-attention
+    -- draws a Z: a stretch along the port axis, a crossbar over to the rail, and
+    the rail carrying on the same way. ``_trunk_escapes`` puts the crossbar at the
+    hub escape, which is the earliest place it can go, and the result is a
+    one-sided L: a stub, a long crossbar drawn against the box it just left, then
+    the whole run on the far side of it.
+
+    The crossbar's own free run is from that escape to the nearest junction ahead
+    of it, and its middle is the reading of that shape a figure means: two arms of
+    roughly equal length with the crossing between them. Same default as
+    ``_preferred_rail`` one axis over, and a preference in the same way -- the
+    candidates walk outward from the midpoint until the arm and the crossbar both
+    clear every obstacle, and an authored ``rail``, ``rail_at`` or ``via`` keeps
+    the placement it asked for.
+
+    Nothing moves unless the crossbar is the trunk's alone: a spoke behind the hub
+    escape rides on the same coordinate (``_trunk_escapes`` clamps it there), and
+    dragging that with the trunk would reshape a stem this has nothing to say
+    about.
+    """
+
+    if net.rail_hint is not None or net.rail_at is not None or net.via is not None:
+        return escapes
+    if vertical is hub_side.horizontal:
+        return escapes
+    start = hub_escape.y if vertical else hub_escape.x
+    if abs(coordinate - (hub_escape.x if vertical else hub_escape.y)) <= _RAIL_TOLERANCE:
+        return escapes  # Trunk and rail are one straight line; there is no crossbar.
+    forward = -1.0 if hub_side in {Side.NORTH, Side.WEST} else 1.0
+    spokes = tuple(
+        (point.y if vertical else point.x)
+        for index, point in enumerate(escapes)
+        if index != hub_index
+    )
+    if not spokes or any((value - start) * forward <= 0.0 for value in spokes):
+        return escapes
+    limit = min(spokes, key=lambda value: (value - start) * forward)
+    for candidate in _trunk_candidates(start, limit, obstacles, vertical):
+        if _trunk_clear(hub_escape, candidate, coordinate, vertical, obstacles):
+            hub = escapes[hub_index]
+            moved = Point(hub.x, candidate) if vertical else Point(candidate, hub.y)
+            return (*escapes[:hub_index], moved, *escapes[hub_index + 1 :])
+    return escapes
+
+
+def _trunk_candidates(
+    start: float,
+    limit: float,
+    obstacles: tuple[Rect, ...],
+    vertical: bool,
+) -> tuple[float, ...]:
+    """Where the trunk's crossbar may sit, midpoint first and outward from it."""
+
+    low, high = sorted((start, limit))
+    preferred = (low + high) / 2.0
+    values = {preferred, start}
+    for obstacle in obstacles:
+        edges = (obstacle.top, obstacle.bottom) if vertical else (obstacle.left, obstacle.right)
+        values.update(value for value in edges if low <= value <= high)
+    for first, second in tuple(pairwise(sorted(values))):
+        values.add((first + second) / 2.0)
+    return tuple(sorted(values, key=lambda value: (abs(value - preferred), value)))
+
+
+def _trunk_clear(
+    hub_escape: Point,
+    candidate: float,
+    coordinate: float,
+    vertical: bool,
+    obstacles: tuple[Rect, ...],
+) -> bool:
+    """Whether the trunk's arm and crossbar both clear every obstacle at ``candidate``."""
+
+    corner = (
+        Point(hub_escape.x, candidate) if vertical else Point(candidate, hub_escape.y)
+    )
+    junction = Point(coordinate, candidate) if vertical else Point(candidate, coordinate)
+    return not any(
+        segment.intersects_rect_interior(obstacle)
+        for segment in (Segment(hub_escape, corner), Segment(corner, junction))
+        for obstacle in obstacles
+    )
 
 
 def _junction(point: Point, coordinate: float, vertical: bool) -> Point:
