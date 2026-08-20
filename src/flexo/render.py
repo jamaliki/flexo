@@ -468,12 +468,15 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
 
     A motif-label kind sets its words at the top of the band ``motif_area``
     reserves for them, so the band a caption is measured into is the band it is
-    drawn in. Every other kind centres its label in the box.
+    drawn in. Every other kind centres its label in the box -- and so does a
+    motif-label kind whose motif is off: with nothing else in the interior,
+    words at the top read as misaligned, not as a band.
     """
 
     metrics = node.measured.label
     bounds = node.bounds
-    if node.measured.spec.kind in MOTIF_LABEL_KINDS:
+    spec = node.measured.spec
+    if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
     return bounds.y + bounds.height / 2.0 - metrics.height / 2.0 + metrics.baseline
 
