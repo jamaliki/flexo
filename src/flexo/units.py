@@ -12,16 +12,19 @@ POINTS_PER_INCH = 72.0
 MILLIMETRES_PER_INCH = 25.4
 CSS_PIXELS_PER_INCH = 96.0
 
-_UNIT_FACTORS = {
+POINTS_PER_UNIT = {
     "pt": 1.0,
     "mm": POINTS_PER_INCH / MILLIMETRES_PER_INCH,
     "cm": 10.0 * POINTS_PER_INCH / MILLIMETRES_PER_INCH,
     "in": POINTS_PER_INCH,
     "px": POINTS_PER_INCH / CSS_PIXELS_PER_INCH,
 }
-_LENGTH_PATTERN = re.compile(
-    r"^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(pt|mm|cm|in|px)\s*$"
-)
+"""How many points one of each unit is worth. Internal geometry is points."""
+
+NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+"""A signed decimal with an optional exponent -- the number half of any length."""
+
+_LENGTH_PATTERN = re.compile(rf"^\s*({NUMBER_PATTERN})\s*(pt|mm|cm|in|px)\s*$")
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -54,11 +57,11 @@ class Length:
                 )
             )
         amount, unit = match.groups()
-        return cls(float(amount) * _UNIT_FACTORS[unit])
+        return cls(float(amount) * POINTS_PER_UNIT[unit])
 
     def to(self, unit: str) -> float:
         try:
-            factor = _UNIT_FACTORS[unit]
+            factor = POINTS_PER_UNIT[unit]
         except KeyError as exc:
             raise ValueError(f"unknown unit: {unit}") from exc
         return self.points / factor
@@ -120,16 +123,16 @@ def pt(value: float) -> Length:
 
 
 def mm(value: float) -> Length:
-    return Length(float(value) * _UNIT_FACTORS["mm"])
+    return Length(float(value) * POINTS_PER_UNIT["mm"])
 
 
 def cm(value: float) -> Length:
-    return Length(float(value) * _UNIT_FACTORS["cm"])
+    return Length(float(value) * POINTS_PER_UNIT["cm"])
 
 
 def inch(value: float) -> Length:
-    return Length(float(value) * _UNIT_FACTORS["in"])
+    return Length(float(value) * POINTS_PER_UNIT["in"])
 
 
 def px(value: float) -> Length:
-    return Length(float(value) * _UNIT_FACTORS["px"])
+    return Length(float(value) * POINTS_PER_UNIT["px"])

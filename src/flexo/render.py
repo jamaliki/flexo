@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.components import VectorGrid, vector_grid
+from flexo.artwork import node_artwork
+from flexo.components import (
+    MOTIF_LABEL_KINDS,
+    VectorGrid,
+    motif_area,
+    motif_enabled,
+    vector_grid,
+)
 from flexo.ir.fitted import FittedNode
-from flexo.render_common import base_rect, motif_enabled, paint_attributes, paint_override
+from flexo.render_common import base_rect, paint_attributes, paint_override, soft_shadow
 from flexo.render_scientific import render_scientific
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, number
+from flexo.text import SHIFTED_SIZE
 
 
 def render_node(
@@ -28,6 +36,9 @@ def render_node(
         data__flexo__role=spec.role,
     )
     if spec.kind not in {"label", "spacer"}:
+        # Behind the body, so the box's own fill hides all but the ring.
+        if spec.shadow:
+            soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
         _render_kind(group, node, style, palette)
     _render_label(group, node, style, palette)
     return group
@@ -54,57 +65,57 @@ def _render_kind(
         _channels(parent, node, style, palette)
     elif kind == "vector":
         _vector(parent, node, style, palette)
+    elif kind == "image":
+        _image(parent, node)
     elif kind in {"matrix", "attention", "graph", "inset"}:
         render_scientific(parent, node, style, palette)
     else:
         _block(parent, node, style, palette)
 
 
+_STRIP_CELL_HEIGHT = 4.0
+"""Height of one cell of a feature strip's motif, when its band has the room."""
+
+_TOKEN_RADIUS = 1.6
+"""Radius of one token dot of a sequence's motif, when its band has the room."""
+
+_CONCAT_PITCH = 3.0
+_CONCAT_BAR = 1.5
+"""Row pitch and bar height of the concat motif's stack of tapering bars."""
+
+
 def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
-    kind = node.measured.spec.kind
+    spec = node.measured.spec
+    kind = spec.kind
     fill_role = "warm-fill" if kind in {"prediction", "loss"} else "block-fill"
     stroke_role = "warm-stroke" if kind in {"prediction", "loss"} else "block-stroke"
     base_rect(parent, node, style, palette, fill_role=fill_role, stroke_role=stroke_role)
-    if kind in {"mlp", "cnn", "add-norm"} and motif_enabled(node.measured.spec):
-        motif = element(parent, "g", id=f"{node.measured.spec.id}.motif")
-        bounds = node.bounds
-        y = bounds.bottom - 6.0
-        if kind == "mlp":
-            for index, radius in enumerate((1.2, 1.6, 1.2)):
-                element(
-                    motif,
-                    "circle",
-                    cx=bounds.center.x + (index - 1) * 5.0,
-                    cy=y,
-                    r=radius,
-                    **paint_attributes(palette=palette, fill_role="block-stroke"),
-                )
-        elif kind == "cnn":
+    if kind not in {"mlp", "cnn"} or not motif_enabled(spec):
+        return
+    motif = element(parent, "g", id=f"{spec.id}.motif")
+    bounds = node.bounds
+    y = bounds.bottom - 6.0
+    if kind == "mlp":
+        for index, radius in enumerate((1.2, 1.6, 1.2)):
             element(
                 motif,
-                "path",
-                d=f"M {number(bounds.center.x - 9)} {number(y)} l 4 -3 l 4 3 l 4 -3 l 4 3",
-                **paint_attributes(
-                    palette=palette,
-                    stroke_role="block-stroke",
-                    stroke_width=style.stroke_width.points,
-                ),
+                "circle",
+                cx=bounds.center.x + (index - 1) * 5.0,
+                cy=y,
+                r=radius,
+                **paint_attributes(palette=palette, fill_role="block-stroke"),
             )
-        else:
-            element(
-                motif,
-                "path",
-                d=(
-                    f"M {number(bounds.center.x - 5)} {number(y)} h 10 "
-                    f"M {number(bounds.center.x)} {number(y - 5)} v 10"
-                ),
-                stroke__linecap="round",
-                **paint_attributes(
-                    palette=palette,
-                    stroke_role="block-stroke",
-                    stroke_width=style.stroke_width.points,
-                ),
-            )
+    else:
+        element(
+            motif,
+            "path",
+            d=f"M {number(bounds.center.x - 9)} {number(y)} l 4 -3 l 4 3 l 4 -3 l 4 3",
+            **paint_attributes(
+                palette=palette,
+                stroke_role="block-stroke",
+                stroke_width=style.stroke_width.points,
+            ),
+        )
 
 
 def _feature_strip(
@@ -114,23 +125,22 @@ def _feature_strip(
     palette: Palette,
 ) -> None:
     base_rect(parent, node, style, palette, fill_role="accent-fill", stroke_role="accent-stroke")
-    if not motif_enabled(node.measured.spec):
+    spec = node.measured.spec
+    if not motif_enabled(spec):
         return
-    bounds = node.bounds
-    cells = int(node.measured.spec.property("cells", 6))
-    motif = element(parent, "g", id=f"{node.measured.spec.id}.cells")
-    left = bounds.x + 6.0
-    width = bounds.width - 12.0
-    cell_width = width / cells
-    y = bounds.bottom - 7.0
+    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    cells = int(spec.property("cells", 6))
+    motif = element(parent, "g", id=f"{spec.id}.cells")
+    cell_width = area.width / cells
+    height = min(_STRIP_CELL_HEIGHT, area.height)
     for index in range(cells):
         element(
             motif,
             "rect",
-            x=left + index * cell_width,
-            y=y - 2.0,
+            x=area.x + index * cell_width,
+            y=area.center.y - height / 2.0,
             width=max(1.0, cell_width - 1.2),
-            height=4.0,
+            height=height,
             rx=0.7,
             opacity=0.35 + 0.55 * (index + 1) / cells,
             **paint_attributes(palette=palette, fill_role="accent-stroke"),
@@ -146,20 +156,21 @@ def _sequence(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
         fill_role="container-fill",
         stroke_role="container-stroke",
     )
-    if not motif_enabled(node.measured.spec):
+    spec = node.measured.spec
+    if not motif_enabled(spec):
         return
-    bounds = node.bounds
-    motif = element(parent, "g", id=f"{node.measured.spec.id}.tokens")
-    count = int(node.measured.spec.property("tokens", 7))
-    spacing = min(7.0, (bounds.width - 14.0) / max(1, count - 1))
-    x0 = bounds.center.x - spacing * (count - 1) / 2.0
+    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    motif = element(parent, "g", id=f"{spec.id}.tokens")
+    count = int(spec.property("tokens", 7))
+    spacing = min(7.0, area.width / max(1, count - 1))
+    x0 = area.center.x - spacing * (count - 1) / 2.0
     for index in range(count):
         element(
             motif,
             "circle",
             cx=x0 + index * spacing,
-            cy=bounds.bottom - 6.5,
-            r=1.6,
+            cy=area.center.y,
+            r=min(_TOKEN_RADIUS, area.height / 2.0),
             opacity=0.45 + 0.5 * index / max(1, count - 1),
             **paint_attributes(palette=palette, fill_role="block-stroke"),
         )
@@ -214,18 +225,22 @@ def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
         fill_role="container-fill",
         stroke_role="block-stroke",
     )
-    if not motif_enabled(node.measured.spec):
+    spec = node.measured.spec
+    if not motif_enabled(spec):
         return
-    bounds = node.bounds
-    motif = element(parent, "g", id=f"{node.measured.spec.id}.motif")
-    for index, width in enumerate((14.0, 10.0, 6.0)):
+    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    motif = element(parent, "g", id=f"{spec.id}.motif")
+    widths = (14.0, 10.0, 6.0)
+    pitch = min(_CONCAT_PITCH, area.height / len(widths))
+    top = area.center.y - (pitch * (len(widths) - 1) + _CONCAT_BAR) / 2.0
+    for index, width in enumerate(widths):
         element(
             motif,
             "rect",
-            x=bounds.center.x - width / 2.0,
-            y=bounds.bottom - 11.0 + index * 3.0,
+            x=area.center.x - width / 2.0,
+            y=top + index * pitch,
             width=width,
-            height=1.5,
+            height=_CONCAT_BAR,
             rx=0.75,
             opacity=0.45 + index * 0.2,
             **paint_attributes(palette=palette, fill_role="block-stroke"),
@@ -322,6 +337,59 @@ def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
             )
 
 
+_ARTWORK_FIT = "xMidYMid meet"
+"""How artwork sits in bounds that are not its own aspect ratio.
+
+Letterboxed and centred, never stretched: an author who boxes a molecule icon
+into a grid cell wants the cell filled to the extent the drawing allows, not a
+drawing that lies about its proportions.
+"""
+
+
+def _image(parent: ET.Element, node: FittedNode) -> None:
+    """Place the author's artwork at the node's bounds, exactly as drawn.
+
+    An SVG source becomes a nested ``<svg>`` viewport carrying the source's own
+    viewBox, so the artwork stays real vector content -- crisp at any zoom, and
+    still made of ordinary objects an editor can open. A PNG becomes an
+    ``<image>`` holding its own bytes. Either way the ink is embedded, not
+    linked, so the editable and portable SVG are each self-contained.
+
+    Nothing here names a palette role. Author artwork is author paint, and
+    ``flexo retheme`` rewrites paint by role, so an embedded illustration comes
+    through a retheme untouched -- the same convention preset vector cells and
+    ``paint`` overrides follow.
+    """
+
+    spec = node.measured.spec
+    bounds = node.bounds
+    artwork = node_artwork(spec)
+    if artwork.format == "png":
+        element(
+            parent,
+            "image",
+            id=f"{spec.id}.artwork",
+            x=bounds.x,
+            y=bounds.y,
+            width=bounds.width,
+            height=bounds.height,
+            preserveAspectRatio=_ARTWORK_FIT,
+            href=artwork.data_uri,
+        )
+        return
+    nested = ET.fromstring(artwork.markup)
+    for name, value in (
+        ("id", f"{spec.id}.artwork"),
+        ("x", number(bounds.x)),
+        ("y", number(bounds.y)),
+        ("width", number(bounds.width)),
+        ("height", number(bounds.height)),
+        ("preserveAspectRatio", _ARTWORK_FIT),
+    ):
+        nested.set(name, value)
+    parent.append(nested)
+
+
 def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     bounds = node.bounds
     labels = str(node.measured.spec.property("labels", "K")).split(",")
@@ -381,6 +449,21 @@ def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
         )
 
 
+def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
+    """The y of the label's first baseline.
+
+    A motif-label kind sets its words at the top of the band ``motif_area``
+    reserves for them, so the band a caption is measured into is the band it is
+    drawn in. Every other kind centres its label in the box.
+    """
+
+    metrics = node.measured.label
+    bounds = node.bounds
+    if node.measured.spec.kind in MOTIF_LABEL_KINDS:
+        return bounds.y + style.padding_y.points + metrics.baseline
+    return bounds.y + bounds.height / 2.0 - metrics.height / 2.0 + metrics.baseline
+
+
 def _render_label(
     parent: ET.Element,
     node: FittedNode,
@@ -391,29 +474,15 @@ def _render_label(
     metrics = node.measured.label
     if not metrics.lines:
         return
-    bounds = node.bounds
-    motif_kinds = {
-        "attention",
-        "channels",
-        "concat",
-        "feature-strip",
-        "graph",
-        "inset",
-        "matrix",
-        "sequence",
-    }
-    label_height = (
-        bounds.height * 0.24 if spec.kind in motif_kinds else bounds.height / 2
-    )
-    center_y = bounds.y + label_height
-    first_baseline = center_y - metrics.height / 2.0 + metrics.baseline
+    center_x = node.bounds.center.x
+    first_baseline = _label_baseline(node, style)
     # Author paint carries no role, so retheme leaves it alone (render_common).
     literal = paint_override(spec, "label")
     text = element(
         parent,
         "text",
         id=f"{spec.id}.label",
-        x=bounds.center.x,
+        x=center_x,
         y=first_baseline,
         text__anchor="middle",
         font__family=style.typography.family,
@@ -426,13 +495,13 @@ def _render_label(
             tspan = element(
                 text,
                 "tspan",
-                x=bounds.center.x if run_index == 0 else None,
+                x=center_x if run_index == 0 else None,
                 dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
                 font__weight=run.weight,
                 font__style="italic" if run.italic else "normal",
                 baseline__shift=run.baseline_shift if run.baseline_shift != "normal" else None,
                 font__size=(
-                    style.typography.size.points * 0.72
+                    style.typography.size.points * SHIFTED_SIZE
                     if run.baseline_shift != "normal"
                     else style.typography.size.points
                 ),

@@ -44,6 +44,16 @@ class PortSpec:
     side: Side
     offset: float = 0.5
     adaptive: bool = False
+    auto_side: bool = False
+    """Whether this port's ``side`` is a component default rather than a choice.
+
+    A port carried over from the component grammar names a side because every
+    port needs one, not because the author meant that edge: the same block reads
+    left-to-right in one figure and top-to-bottom in the next. Such a port lets
+    the compiler pick the side facing whatever it is wired to (see
+    ``flexo.layout.sides``). An authored ``PortSpec`` is never auto-sided --
+    writing the side down *is* the choice -- so an explicit spec always wins.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.name, "Port name")
@@ -96,7 +106,13 @@ class LayoutSpec:
     kind: LayoutKind = "row"
     gap: Length | None = None
     padding: Length | None = None
-    align: Literal["start", "center", "end", "stretch"] = "center"
+    align: Literal["start", "center", "end", "stretch", "ports"] = "center"
+    """How children sit across the axis they are not laid out along.
+
+    ``start``/``center``/``end``/``stretch`` all align *boxes*. ``ports`` aligns
+    the line each child's side ports live on instead, the way type sits on a
+    baseline -- see ``flexo.layout.arrange``.
+    """
     justify: Literal["start", "center", "end", "space-between"] = "start"
     columns: int | None = None
     width: Length | None = None
@@ -212,6 +228,8 @@ class NodeSpec:
     width: Extent | None = None
     height: Extent | None = None
     properties: tuple[tuple[str, Scalar], ...] = ()
+    shadow: bool = False
+    """Whether this component casts a soft drop shadow. Paint only; off by default."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Node ID")
@@ -337,6 +355,21 @@ class GroupSpec:
     Paint and typography only: the title band is the same height either way, so
     moving it moves no child.
     """
+    anchor: str | None = None
+    """The child whose port line this group presents to ``align="ports"``.
+
+    A composite is aligned by the part that carries the arrows, not by the box
+    around it: a captioned vector answers with its cell stack, so the caption
+    hangs below the shared line rather than dragging it down. Left unset the
+    group answers with its first child that is neither a label nor a spacer,
+    which is that rule spelled out for the common case.
+    """
+    shadow: bool = False
+    """Whether this container casts a soft drop shadow.
+
+    Paint only, and off by default: a shadow lifts a module off the page in a
+    slide or a poster, and is noise in a dense journal panel.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Group ID")
@@ -347,6 +380,13 @@ class GroupSpec:
                 f'unknown title side "{self.title_side}" for group "{self.id}"; '
                 f"valid sides: {', '.join(TITLE_SIDES)}"
             )
+        if self.anchor is not None:
+            _validate_id(self.anchor, "Anchor child ID")
+            if self.anchor not in self.children:
+                raise ValueError(
+                    f'group "{self.id}" anchors on "{self.anchor}", which is not one of '
+                    f"its children"
+                )
 
     @property
     def text(self) -> str:

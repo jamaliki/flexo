@@ -18,6 +18,13 @@ from flexo.style import TypographyStyle
 
 _TOKEN_PATTERN = re.compile(r"\S+|\s+")
 
+SHIFTED_SIZE = 0.72
+"""Font-size factor of a superscript or subscript run.
+
+One number shared by shaping, component labels, and connector captions, so the
+width a run is measured at is the width it is drawn at.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class FontData:
@@ -25,7 +32,7 @@ class FontData:
     upem: int
     ascent: int
     descent: int
-    line_gap: int
+    subscript_drop: int
     codepoints: frozenset[int]
 
 
@@ -41,9 +48,34 @@ def font_data(italic: bool = False) -> FontData:
         upem=font["head"].unitsPerEm,
         ascent=font["hhea"].ascent,
         descent=abs(font["hhea"].descent),
-        line_gap=font["hhea"].lineGap,
+        # How far below the running baseline `baseline-shift="sub"` drops one.
+        # The renderers Flexo targets read it from OS/2, so the depth of a
+        # subscript is knowable at measure time rather than a guess.
+        subscript_drop=font["OS/2"].ySubscriptYOffset,
         codepoints=frozenset((font.getBestCmap() or {}).keys()),
     )
+
+
+def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
+    """How far the lowest ink of measured text falls below its last baseline.
+
+    ``TextMetrics.descent`` is the font's descender for text on one baseline. A
+    subscript run sits on a *dropped* baseline and takes its own descender from
+    there, so ``softmax(-ΣD_q)V`` reaches lower than its metrics claim -- which
+    is exactly the amount that decides whether a caption grazes the arrow it
+    labels.
+    """
+
+    size = typography.size.points
+    depth = metrics.descent
+    for line in metrics.lines:
+        for run in line.runs:
+            if run.baseline_shift != "sub":
+                continue
+            font = font_data(run.italic)
+            drop = font.subscript_drop / font.upem * size
+            depth = max(depth, drop + SHIFTED_SIZE * font.descent / font.upem * size)
+    return depth
 
 
 @cache
@@ -103,7 +135,7 @@ class TextMeasurer:
         buffer.add_str(run.text)
         buffer.guess_segment_properties()
         hb.shape(font, buffer, {"kern": True, "liga": True})
-        scale = 0.72 if run.baseline_shift != "normal" else 1.0
+        scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
         return sum(position.x_advance for position in buffer.glyph_positions) / data.upem * (
             self.typography.size.points * scale
         )

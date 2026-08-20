@@ -6,9 +6,11 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
+/build/
 dist/
 htmlcov/
 .coverage
-examples/build/
+# The examples' own outputs, except the previews examples/README.md links to.
+examples/build/*
+!examples/build/*.preview.png
 tests/artifacts/

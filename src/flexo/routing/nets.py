@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 
-from flexo.components import TRANSPARENT_KINDS
+from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, Side, segments
+from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, ResolvedPort
+from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedNet, RoutedStem
 from flexo.ir.semantic import NetSpec, PortRef
 from flexo.routing.nudge import (
@@ -23,28 +24,10 @@ from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer
 
-TRANSPARENT_ROLES = frozenset({"layout", "canvas"})
-"""Group roles that draw no boundary and therefore never block a route."""
+_INFINITY = float("inf")
 
 _RAIL_TOLERANCE = 1e-6
 """How far a placed rail may sit from the requested one and still count as honoured."""
-
-
-def parent_map(fitted: FittedFigure) -> dict[str, str]:
-    return {
-        child_id: group.id
-        for group in fitted.measured.semantic.groups
-        for child_id in group.children
-    }
-
-
-def ancestor_ids(parents: Mapping[str, str], entity_id: str) -> tuple[str, ...]:
-    result: list[str] = []
-    current = entity_id
-    while current in parents:
-        current = parents[current]
-        result.append(current)
-    return tuple(result)
 
 
 def group_obstacles(
@@ -61,10 +44,10 @@ def group_obstacles(
     the container's own padding.
     """
 
-    parents = parent_map(fitted)
+    parents = parent_map(fitted.measured.semantic.groups)
     protected: set[str] = set()
     for node_id in node_ids:
-        protected.update(ancestor_ids(parents, node_id))
+        protected.update(ancestors(parents, node_id))
     return tuple(
         group.bounds.inflated(clearance)
         for group in fitted.groups
@@ -86,10 +69,10 @@ def confined_groups(
     is charged for lingering and leaves through the nearest padding instead.
     """
 
-    parents = parent_map(fitted)
+    parents = parent_map(fitted.measured.semantic.groups)
     owned: set[str] = set()
     for node_id in node_ids:
-        owned.update(ancestor_ids(parents, node_id))
+        owned.update(ancestors(parents, node_id))
     return tuple(
         group.bounds
         for group in fitted.groups
@@ -108,11 +91,12 @@ def route_net(
 ) -> RoutedNet:
     sources = tuple((_resolved(fitted, ref), ref) for ref in net.sources)
     targets = tuple((_resolved(fitted, ref), ref) for ref in net.targets)
-    boundary = net_routing_boundary(fitted, net, style.route_boundary_clearance.points)
-    target_clearance = max(
-        style.route_clearance.points,
-        2.0 * style.arrow_length.points + style.elbow_radius.points,
+    boundary = routing_boundary(
+        fitted,
+        tuple(ref.node_id for ref in net.sources + net.targets),
+        style.route_boundary_clearance.points,
     )
+    target_clearance = style.arrival_clearance.points
     source_escapes = tuple(
         (_escape(port, style.route_clearance.points), ref) for port, ref in sources
     )
@@ -137,7 +121,7 @@ def route_net(
     endpoint_ids = tuple(ref.node_id for ref in net.sources + net.targets)
     endpoint_positions = tuple(port.position for port, _ in sources + targets) + all_escapes
     obstacles = tuple(
-        node.bounds.inflated(style.route_clearance.points)
+        node.bounds.inflated(route_clearance(node.measured.spec, style))
         for node in fitted.nodes
         if node.measured.spec.kind not in TRANSPARENT_KINDS
     ) + group_obstacles(
@@ -148,6 +132,7 @@ def route_net(
     )
     trunk_escapes = _trunk_escapes(all_escapes, hub_escape, hub_port.side, vertical)
     run = _trunk_run(net, hub_port, tuple(port for port, _ in spokes), vertical)
+    label_metrics = measurer.measure(net.label) if net.label else None
     coordinate = _rail_coordinate(
         net,
         boundary,
@@ -157,6 +142,7 @@ def route_net(
         obstacles,
         vertical,
         requested=None if run is None else run.requested,
+        caption=_caption_run(label_metrics, style, vertical),
     )
     junctions = tuple(_junction(point, coordinate, vertical) for point in trunk_escapes)
     rail = _rail(junctions, vertical)
@@ -191,11 +177,12 @@ def route_net(
             zip(targets, target_escapes, strict=True)
         )
     )
-    label_metrics = measurer.measure(net.label) if net.label else None
     label_position = (
         rail_label_position(
             rail,
             tuple(stem.shaft for stem in (*source_stems, *target_stems)),
+            label_metrics,
+            style,
         )
         if label_metrics is not None
         else None
@@ -224,8 +211,7 @@ def _resolved(fitted: FittedFigure, reference: PortRef) -> ResolvedPort:
 
 
 def _escape(port: ResolvedPort, distance: float) -> Point:
-    vector = port.side.vector
-    return port.position.translated(vector.x * distance, vector.y * distance)
+    return port.side.escaped(port.position, distance)
 
 
 def _vertical_rail(hint: Side | None, hub_side: Side, spoke_sides: tuple[Side, ...]) -> bool:
@@ -238,15 +224,11 @@ def _vertical_rail(hint: Side | None, hub_side: Side, spoke_sides: tuple[Side, .
     """
 
     if hint is not None:
-        return _horizontal(hint)
-    votes = sum(1 if _horizontal(side) else -1 for side in spoke_sides)
+        return hint.horizontal
+    votes = sum(1 if side.horizontal else -1 for side in spoke_sides)
     if votes == 0:
-        return not _horizontal(hub_side)
+        return not hub_side.horizontal
     return votes > 0
-
-
-def _horizontal(side: Side) -> bool:
-    return side in {Side.EAST, Side.WEST}
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +316,7 @@ def _rail_coordinate(
     vertical: bool,
     *,
     requested: float | None = None,
+    caption: float = 0.0,
 ) -> float:
     if net.rail_hint is not None:
         return {
@@ -342,20 +325,27 @@ def _rail_coordinate(
             Side.NORTH: boundary.top,
             Side.SOUTH: boundary.bottom,
         }[net.rail_hint]
-    # An authored fraction replaces the hub escape as the preference; the search
-    # below already walks candidates outward from it, so an infeasible request
-    # lands on the nearest rail that clears every obstacle.
-    preferred_value = (
-        requested if requested is not None else (preferred.x if vertical else preferred.y)
-    )
     transverse = tuple(point.y if vertical else point.x for point in escapes)
     low, high = _rail_interval(boundary, escape_sides, vertical)
+    # An authored fraction replaces the corridor midpoint as the preference; the
+    # search below already walks candidates outward from it, so an infeasible
+    # request lands on the nearest rail that clears every obstacle.
+    preferred_value = (
+        requested
+        if requested is not None
+        else _preferred_rail(
+            _corridor(escape_sides, vertical),
+            preferred.x if vertical else preferred.y,
+            caption,
+        )
+    )
     candidates = _rail_candidates(preferred_value, boundary, obstacles, vertical)
-    if requested is not None and low <= high:
-        # The band edge is the closest a request outside the band can be honoured,
-        # and it is nothing any obstacle offers, so the clamp target is added by
-        # hand -- only for an authored request, so unhinted rails never move.
-        clamped = min(high, max(low, requested))
+    if low <= high:
+        # The band edge is the closest a preference outside the band can be
+        # honoured, and it is nothing any obstacle offers, so the clamp target is
+        # added by hand: a corridor too narrow to hold its own midpoint still
+        # rails as close to the middle as the stems allow.
+        clamped = min(high, max(low, preferred_value))
         candidates = (clamped, *(value for value in candidates if value != clamped))
     if low <= high:
         feasible = tuple(value for value in candidates if low <= value <= high)
@@ -381,15 +371,22 @@ def _rail_coordinate(
     )
 
 
-def _rail_interval(
-    boundary: Rect,
+def _corridor(
     escape_sides: tuple[tuple[Point, Side], ...],
     vertical: bool,
 ) -> tuple[float, float]:
-    """The rail band whose stems never double back against their port sides."""
+    """The gap this net's stems leave for its rail, as seen from the ports alone.
 
-    low = boundary.left if vertical else boundary.top
-    high = boundary.right if vertical else boundary.bottom
+    Each port facing along the trunk axis walls off everything behind its own
+    escape -- a rail there would make the stem double back -- so what is left
+    between the walls is the corridor the layout opened for this net. A port
+    facing *across* the axis walls off nothing: its stem turns at the rail
+    whatever coordinate the rail has. Either end may therefore come back
+    unbounded, which is the honest answer that there is no corridor on that side.
+    """
+
+    low = -_INFINITY
+    high = _INFINITY
     for escape, side in escape_sides:
         if vertical:
             if side is Side.WEST:
@@ -401,6 +398,70 @@ def _rail_interval(
         elif side is Side.SOUTH:
             low = max(low, escape.y)
     return low, high
+
+
+def _caption_run(
+    label: TextMetrics | None,
+    style: LayoutStyle,
+    vertical: bool,
+) -> float:
+    """How much straight run this net's caption needs beside its rail.
+
+    A caption is written above the horizontal run its net reads along. When the
+    rail is horizontal, that run *is* the rail, and the caption rides on top of it
+    however the rail is placed. When the rail is vertical, the captioned run is
+    the trunk crossing it, and the rail may not be parked in the middle of the
+    words -- so a vertical rail is told how wide the caption is and stays out of
+    its way.
+    """
+
+    if label is None or not vertical:
+        return 0.0
+    return label.width + 2.0 * style.padding_x.points
+
+
+def _preferred_rail(
+    corridor: tuple[float, float],
+    escape: float,
+    caption: float,
+) -> float:
+    """Where an unhinted rail would rather sit: the middle of its free corridor.
+
+    A rail one escape short of the hub -- what this used to be -- is a line drawn
+    against the box the branches come out of, with the space the layout opened
+    for them left empty beyond it. The middle of the corridor reads as a corridor
+    the figure meant to leave: the same distance from the row above as from the
+    row below, and the trunk and the stems each get half the run.
+
+    A corridor too narrow to hold both halves of a captioned run is the exception.
+    Halving it would leave the caption nowhere to sit but across the rail, so such
+    a rail stays at the end of the corridor and hands the whole run to the words.
+
+    Either way it is a *preference*. The candidate search still moves it to the
+    nearest rail that clears every obstacle, and an authored ``rail`` or
+    ``rail_at`` replaces it outright.
+    """
+
+    low, high = corridor
+    if low == -_INFINITY or high == _INFINITY or low > high:
+        return escape
+    if caption > 0.0 and (high - low) / 2.0 < caption:
+        return escape
+    return (low + high) / 2.0
+
+
+def _rail_interval(
+    boundary: Rect,
+    escape_sides: tuple[tuple[Point, Side], ...],
+    vertical: bool,
+) -> tuple[float, float]:
+    """The rail band whose stems never double back, inside the routing boundary."""
+
+    low, high = _corridor(escape_sides, vertical)
+    return (
+        max(low, boundary.left if vertical else boundary.top),
+        min(high, boundary.right if vertical else boundary.bottom),
+    )
 
 
 def _rail_candidates(
@@ -437,7 +498,7 @@ def _trunk_escapes(
     junction, and `_rail_interval` guards their coordinate instead.
     """
 
-    if vertical is _horizontal(hub_side):
+    if vertical is hub_side.horizontal:
         return escapes
     if vertical:
         reach = max if hub_side is Side.SOUTH else min
@@ -478,7 +539,7 @@ def _source_stem(
         style,
         boundary,
         occupied,
-        departure=_horizontal(port.side),
+        departure=port.side.horizontal,
     )
     centerline = simplify_polyline((port.position, *leg))
     # Only the node end takes the standoff; the junction end has to stay on the
@@ -505,7 +566,7 @@ def _target_stem(
         style,
         boundary,
         occupied,
-        arrival=_horizontal(port.side),
+        arrival=port.side.horizontal,
     )
     centerline = simplify_polyline((*leg, port.position))
     # Node end only: the junction end stays on the rail (see ``_source_stem``).
@@ -530,7 +591,7 @@ def _route_leg(
 ) -> tuple[Point, ...]:
     clearance = style.route_clearance.points
     obstacles = tuple(
-        node.bounds.inflated(clearance)
+        node.bounds.inflated(route_clearance(node.measured.spec, style))
         for node in fitted.nodes
         if node.measured.spec.id != endpoint.node_id
         and node.measured.spec.kind not in TRANSPARENT_KINDS
@@ -563,21 +624,4 @@ def _route_leg(
     return collapse_zigzags(route, obstacles, style.elbow_radius.points, occupied)
 
 
-def net_routing_boundary(
-    fitted: FittedFigure,
-    net: NetSpec,
-    clearance: float,
-) -> Rect:
-    groups = {group.id: group for group in fitted.measured.semantic.groups}
-    fitted_groups = {group.measured.spec.id: group for group in fitted.groups}
-    parents = parent_map(fitted)
-    node_ids = tuple(ref.node_id for ref in net.sources + net.targets)
-    common = set(ancestor_ids(parents, node_ids[0]))
-    for node_id in node_ids[1:]:
-        common.intersection_update(ancestor_ids(parents, node_id))
-    owner = next(
-        group_id for group_id in ancestor_ids(parents, node_ids[0]) if group_id in common
-    )
-    while groups[owner].role == "layout" and owner in parents:
-        owner = parents[owner]
-    return fitted_groups[owner].bounds.inflated(-clearance)
+
