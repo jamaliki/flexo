@@ -3,15 +3,16 @@
 Two towers side by side, each authored bottom-up as one column: terminal ->
 embedding -> positional-encoding junction -> the N-times block stack. Residual
 skips are ordinary edges -- the router walks them around the sublayer they
-bypass -- and every Q/K/V triple is one ``fan_out`` into the attention
-component's three ports.
+bypass -- and every attention block grows its own Q, K and V glyphs from
+``vectors=``, so each triple is one ``net`` into three cell stacks the composite
+has already centred under the ports they feed.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from flexo import Figure, LayoutSpec, build, pt
+from flexo import Figure, LayoutSpec, PortSpec, Side, VectorPreset, build, pt
 
 HERE = Path(__file__).resolve().parent
 
@@ -31,9 +32,53 @@ TERMINAL = {"fill": "#ffffff", "stroke": "#ffffff"}
 
 PE_GLYPH = str(HERE / "assets" / "pe_glyph.svg")
 
+QKV = {
+    "q": VectorPreset("#9a6fb8", "1x3"),
+    "k": VectorPreset("#c9853d", "1x3"),
+    "v": VectorPreset("#4f9b8f", "1x3"),
+}
+"""One colour per value, handed to ``attention(vectors=...)`` as it is.
 
-def add_norm(tower, id):
-    return tower.add_norm(id, label="Add & Norm", width=BLOCK, paint=PAINTS["add-norm"])
+The composite grows the three glyphs itself and centres each under the port it
+feeds, so the gap between them is the engine's arithmetic rather than a constant
+reverse-engineered from the component's port offsets.
+"""
+
+
+CROSS_PORTS = (
+    PortSpec("v", Side.SOUTH, 0.24, adaptive=True, auto_side=True),
+    PortSpec("k", Side.SOUTH, 0.5, adaptive=True, auto_side=True),
+    PortSpec("q", Side.SOUTH, 0.76, adaptive=True, auto_side=True),
+    PortSpec("output", Side.NORTH, 0.5, adaptive=True, auto_side=True),
+)
+"""Cross-attention reads V and K on the left and Q on the right, as the paper draws it.
+
+The glyphs follow the ports, so this is also the order they stand in: the encoder
+arrives from the left and finds the two values it feeds nearest to it, and the
+decoder's own query stands clear of that line on the right.
+"""
+
+
+LEFT_BRANCH = (
+    PortSpec("input", Side.SOUTH, 0.5, adaptive=True, auto_side=True),
+    PortSpec("skip", Side.SOUTH, 0.8, adaptive=True, auto_side=True),
+    PortSpec("output", Side.NORTH, 0.5, adaptive=True, auto_side=True),
+    PortSpec("branch", Side.NORTH, 0.2, adaptive=True, auto_side=True),
+)
+"""``add_norm``'s own port table with its branch moved to the left of the spine.
+
+The encoder's feed-forward skip travels up the left margin (``via="west"``
+below), because the right one is where the cross-attention line crosses to the
+decoder. A branch that leaves on the right and then has to reach a left-hand
+margin cuts the spine it bypasses on the way; leaving on the left is the same
+wire without the crossing. Everything else is the grammar's own table.
+"""
+
+
+def add_norm(tower, id, **options):
+    return tower.add_norm(
+        id, label="Add & Norm", width=BLOCK, paint=PAINTS["add-norm"], **options
+    )
 
 
 def io_stack(column, id, *, embedding, terminal):
@@ -67,7 +112,7 @@ def transformer() -> Figure:
                 "tower",
                 label="N\u00d7",
                 gap=pt(14),
-                padding=(pt(16), pt(16), pt(16), pt(40)),
+                padding=(pt(16), pt(34), pt(16), pt(34)),
                 role="module",
                 shadow=True,
             ) as tower:
@@ -75,13 +120,14 @@ def transformer() -> Figure:
                 ff = tower.block(
                     "ff", label="Feed\nForward", width=BLOCK, paint=PAINTS["feed-forward"]
                 )
-                an1 = add_norm(tower, "an1")
+                an1 = add_norm(tower, "an1", ports=LEFT_BRANCH)
                 mha = tower.attention(
                     "mha",
                     label="Multi-Head\nAttention",
                     width=BLOCK,
                     motif=False,
                     paint=PAINTS["attention"],
+                    vectors=QKV,
                 )
             enc_pe = io_stack(
                 col, "input-embedding", embedding="Input\nEmbedding", terminal="Inputs"
@@ -102,7 +148,7 @@ def transformer() -> Figure:
                 label="N\u00d7",
                 title_side="right",
                 gap=pt(14),
-                padding=(pt(16), pt(40), pt(16), pt(16)),
+                padding=(pt(16), pt(34), pt(16), pt(34)),
                 role="module",
                 shadow=True,
             ) as tower:
@@ -117,6 +163,8 @@ def transformer() -> Figure:
                     width=BLOCK,
                     motif=False,
                     paint=PAINTS["attention"],
+                    vectors=QKV,
+                    ports=CROSS_PORTS,
                 )
                 an3 = add_norm(tower, "an3")
                 mmha = tower.attention(
@@ -125,6 +173,7 @@ def transformer() -> Figure:
                     width=BLOCK,
                     motif=False,
                     paint=PAINTS["attention"],
+                    vectors=QKV,
                 )
             dec_pe = io_stack(
                 col,
@@ -134,16 +183,21 @@ def transformer() -> Figure:
             )
 
         # Encoder flow: self-attention, then feed-forward, each with its skip.
-        figure.net(src=enc_pe, sinks=[mha.q, mha.k, mha.v], id="enc-qkv")
+        # ``rail_at`` fans the triple halfway up from the embedding rather than
+        # one escape short of it, which keeps the rail clear of the skip beside
+        # it; ``via="west"`` sends the feed-forward skip up the left margin,
+        # because the right one is where the cross-attention line crosses to the
+        # decoder (see LEFT_BRANCH).
+        figure.net(src=enc_pe, sinks=[mha.q, mha.k, mha.v], id="enc-qkv", rail_at=0.5)
         root.connect(mha, an1)
         root.connect(enc_pe, an1, id="skip1", source_port="branch", target_port="skip")
         root.connect(an1, ff)
         root.connect(ff, an2)
-        root.connect(an1, an2, id="skip2", source_port="branch", target_port="skip")
+        root.connect(an1, an2, id="skip2", source_port="branch", target_port="skip", via="west")
 
         # Decoder flow: masked self-attention, cross-attention on the encoder
         # output, feed-forward -- and up through the readout.
-        figure.net(src=dec_pe, sinks=[mmha.q, mmha.k, mmha.v], id="dec-qkv")
+        figure.net(src=dec_pe, sinks=[mmha.q, mmha.k, mmha.v], id="dec-qkv", rail_at=0.5)
         root.connect(mmha, an3)
         root.connect(dec_pe, an3, id="skip3", source_port="branch", target_port="skip")
         figure.net(src=an2, sinks=[xmha.k, xmha.v], id="cross-kv")

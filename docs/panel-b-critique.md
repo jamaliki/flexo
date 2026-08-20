@@ -747,3 +747,128 @@ same pattern — `an1.output` feeding both the sublayer and the skip, so two edg
 leave one point — and taking those five to `source_port="branch"` leaves the
 figure with **no diagnostics at all**. No `via=` hint is needed anywhere in it:
 the cross-attention net already crosses to the decoder's near side.
+
+## R28. An attention block that grows its own Q, K, V (round 10)
+
+The round-9 Transformer drew its Q/K/V as `vector()` glyphs in a hand-authored
+row under each attention block, and the authoring cost of that row was the
+round's real finding. Three things were wrong with it, and all three are the same
+thing:
+
+**A magic gap reverse-engineered from a port table.** `row(gap=pt(22.7))` put the
+three glyph centres under the component's q/k/v ports at 0.24/0.5/0.76 of a 120pt
+block — 31.2pt of port spacing less an 8.5pt cell. It is correct arithmetic and
+it is *unowned* arithmetic: nothing in the figure says it depends on
+`COMPONENTS["attention"]`, so moving a port there would leave three glyphs
+quietly off their arrows. It also only worked because the enclosing tower happens
+to centre its children and the offsets happen to be symmetric about 0.5.
+
+**Three authored edges per block.** `for vec, port in ((q, mha.q), ...)` — nine
+lines across the figure saying the one thing the composite is *for*.
+
+**Corridor contention that produced a warning.** The glyph-to-port drops left the
+glyphs' east ports and hooked up into the block's south, so each drop had two
+bends in the corridor that the cross-attention net also wanted; `cross-kv`
+reported a `routing.connector.crossing` and several tried variants reported
+separation errors instead.
+
+`attention(..., vectors=...)` lowers all of it. The composite is the block over a
+one-row grid whose reserved column widths come from `attachment_lane_tracks` and
+the block's own port offsets: a pad, then a lane per port, then a pad, summing to
+exactly the block's width. A glyph centred in its lane *is* centred under its
+port, so every drop is a two-point vertical, and the corridor above the glyphs is
+the ordinary edge-aware sibling gap — the three drops cross one boundary of the
+composite's column, so `routing_gaps_for_group` reserves clearance, an arrival and
+a lane per drop and arrives at the same 31pt the hand-authored version got by
+accident.
+
+Three findings came out of building it, none of which were visible from the
+outside:
+
+**A caption under a stack closes the only approach that stack has.** The glyph
+feed arrives from underneath, and a route arriving at a port must run straight at
+it for `arrival_clearance` — 14pt, the elbow plus two arrow lengths. A caption
+3pt below the cells (the `vector_label_gap` a plain glyph uses) puts its own
+clearance ring *on* the port: `routing.net.no-stem`, at any gap, because the
+caption's ring is wider than an 8.5pt cell and no offset on that edge escapes it.
+So the composite's caption gap is `arrival_clearance + caption_clearance`, and
+that is the "corridor below the glyphs" the round asked for — a token sum, and
+the reason these captions hang further from their stack than a `vector()` caption
+does.
+
+**An auto-sided feed port will choose the one side that must stay clear.** With
+the feed declared south but `auto_side`, a cross-attention reading from an
+encoder further *up* the page re-sides it to north — onto the drop's own edge,
+two runs on one edge, `routing.track.separation`. `_separate_opposing` cannot
+save it, because it only arbitrates between ports that are both auto-sided and
+the drop is pinned. Both of a glyph's ports are therefore pinned: north is the
+drop's and south is the feed's. The alternative reading — a west entry, which is
+what the round-9 figure drew — is worse than it looks: a lane is only as wide as
+the port spacing it was cut from, so two runs entering sideways thread the same
+gap at the same height.
+
+**The glyph order is the port order, and the port order is a design decision.**
+Lanes are filled by ascending offset rather than in q/k/v order, so an authored
+`ports=` moves the glyphs with the ports. That turned out to be the whole
+cross-attention entry: with `q` leftmost, an encoder arriving from the left must
+cross the decoder's own query feed to reach `k` and `v`, and the crossing is
+*topological* — no `via`, `rail` or `rail_at` removes it. The paper draws V and K
+on the left and Q on the right for exactly this reason. With that port table the
+entry comes out as the figure in the paper: one horizontal from the encoder, a
+junction under V, and two short verticals up into V and K, with no route through
+a glyph gap and no hooks.
+
+### Acceptance (round 10)
+
+`uv run pytest` green (336, from 318: eighteen added — the composite's lowered
+shape, its exact port-aligned x's, its two-point drops, its pinned port table,
+handle resolution for `q`/`k`/`v` and `output`, wiring at creation, `vectors=True`
+role defaults, single-preset and single-ramp broadcast, a case-insensitive
+mapping, the partial/unknown/ill-typed rejections, the missing width, the block
+anchor in a ports-aligned row, lanes following an authored port table, the caption
+gap as a token sum, `vectors=None`/`False` lowering byte-for-byte to the plain
+component, the lane-track arithmetic with its three rejections, and a
+`caption`-role label painting `muted-ink` by role so it still rethemes). `ruff
+check` clean.
+
+`flexo gallery` exits 0 with zero lint errors and the one pre-existing
+`routing.connector.crossing` warning, unchanged; both editable SVGs, both
+portable SVGs and both preview PNGs are byte-identical to their pre-edit
+baselines. (The PDFs differ, and differ between two consecutive runs of the
+unmodified tool: Inkscape stamps a creation date.) `vectors=` is opt-in, and the
+render path only changed for a node whose role is `caption`, which nothing else
+in the gallery declares.
+
+**The Transformer figure reports `ok: no diagnostics`** -- zero errors and zero
+warnings, from three warnings before the round. All nine glyph-to-port drops are
+two-point verticals; the self-attention triples come up into the glyph bottoms
+from a rail halfway up from their embedding; and the cross-attention entry is the
+figure in the paper: one horizontal from the encoder, a junction under V, and two
+short verticals up into V and K, with no route through a glyph gap and no hooks.
+
+Getting the last warning out took one authored port table, and it is worth
+recording why, because the constraint is the router's rather than the figure's.
+`shortest_orthogonal_path` minimizes crossings with *already-placed* runs
+lexicographically ahead of bends and length, and nets are placed before edges. By
+the time the encoder's feed-forward skip routes, `cross-kv`'s rail is lying across
+the encoder's right margin at the one y it is allowed to occupy -- the decoder's
+cross-attention glyphs are `arrival_clearance` above it and their captions
+`caption_clearance` below, so the legal interval for that rail is a single point.
+The skip has to cross that y somewhere, and everything from the blocks' left edge
+to the right margin is the `ff` box at that height, so its choices are the right
+margin (crossing the rail) or the left margin (crossing nothing yet placed -- and
+then the 25pt `an1 -> ff` spine run, placed afterwards, has no lane of its own and
+crosses *it*). An exhaustive sweep over `via`/`rail`/`rail_at`/`lane` on the three
+nets and the five skips -- 180 combinations -- bottoms out at one warning, reached
+several ways and never bettered.
+
+What removes it is not a hint at all: the skip leaves on the wrong side. Its
+`branch` port sits at 0.8 of the north edge, right of the spine, and the margin it
+travels in is the left one, so it cuts the spine on the way across. `LEFT_BRANCH`
+is `add_norm`'s own port table with `branch` moved to 0.2 -- the same wire, leaving
+the side it was always going to travel on -- and the figure comes out clean. That
+is `ports=` doing exactly what it is documented for ("the author's sides and
+offsets are the design"), on the one block in the figure whose skip does not go
+east. The router-side alternative, worth having eventually, would be to price a
+crossing against the run it forces on whatever routes next, rather than counting
+only the ink already on the page.
