@@ -13,11 +13,16 @@ from flexo.components import (
     vector_grid,
 )
 from flexo.ir.fitted import FittedNode
-from flexo.render_common import base_rect, paint_attributes, paint_override, soft_shadow
+from flexo.render_common import (
+    base_rect,
+    paint_attributes,
+    paint_override,
+    render_runs,
+    soft_shadow,
+)
 from flexo.render_scientific import render_scientific
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, number
-from flexo.text import SHIFTED_SIZE
 
 
 def render_node(
@@ -66,7 +71,7 @@ def _render_kind(
     elif kind == "vector":
         _vector(parent, node, style, palette)
     elif kind == "image":
-        _image(parent, node)
+        _image(parent, node, style)
     elif kind in {"matrix", "attention", "graph", "inset"}:
         render_scientific(parent, node, style, palette)
     else:
@@ -346,8 +351,13 @@ drawing that lies about its proportions.
 """
 
 
-def _image(parent: ET.Element, node: FittedNode) -> None:
+def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
     """Place the author's artwork at the node's bounds, exactly as drawn.
+
+    A labelled image hands the top of those bounds to its caption and draws in
+    what ``motif_area`` leaves, exactly as a matrix or an inset does: the words
+    name the drawing, so they may not be printed across it. An unlabelled image
+    has no band to give up and fills its bounds.
 
     An SVG source becomes a nested ``<svg>`` viewport carrying the source's own
     viewBox, so the artwork stays real vector content -- crisp at any zoom, and
@@ -362,7 +372,11 @@ def _image(parent: ET.Element, node: FittedNode) -> None:
     """
 
     spec = node.measured.spec
-    bounds = node.bounds
+    bounds = (
+        motif_area(spec.kind, node.bounds, node.measured.label, style)
+        if node.measured.label.lines
+        else node.bounds
+    )
     artwork = node_artwork(spec)
     if artwork.format == "png":
         element(
@@ -471,39 +485,16 @@ def _render_label(
     palette: Palette,
 ) -> None:
     spec = node.measured.spec
-    metrics = node.measured.label
-    if not metrics.lines:
-        return
-    center_x = node.bounds.center.x
-    first_baseline = _label_baseline(node, style)
-    # Author paint carries no role, so retheme leaves it alone (render_common).
-    literal = paint_override(spec, "label")
-    text = element(
+    render_runs(
         parent,
-        "text",
-        id=f"{spec.id}.label",
-        x=center_x,
-        y=first_baseline,
-        text__anchor="middle",
-        font__family=style.typography.family,
-        font__size=style.typography.size.points,
-        data__flexo__fill=None if literal is not None else "ink",
-        fill=literal if literal is not None else palette.get("ink"),
+        f"{spec.id}.label",
+        node.measured.label,
+        x=node.bounds.center.x,
+        y=_label_baseline(node, style),
+        typography=style.typography,
+        palette=palette,
+        fill_role="ink",
+        # Author paint carries no role, so retheme leaves it alone (render_common).
+        fill=paint_override(spec, "label"),
+        anchor="middle",
     )
-    for line_index, line in enumerate(metrics.lines):
-        for run_index, run in enumerate(line.runs):
-            tspan = element(
-                text,
-                "tspan",
-                x=center_x if run_index == 0 else None,
-                dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
-                font__weight=run.weight,
-                font__style="italic" if run.italic else "normal",
-                baseline__shift=run.baseline_shift if run.baseline_shift != "normal" else None,
-                font__size=(
-                    style.typography.size.points * SHIFTED_SIZE
-                    if run.baseline_shift != "normal"
-                    else style.typography.size.points
-                ),
-            )
-            tspan.text = run.text

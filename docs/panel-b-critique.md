@@ -554,3 +554,196 @@ one pre-existing `routing.connector.crossing` warning, unchanged. Both PDFs
 carry no raster objects and embedded fonts. The scratchpad bones script shows the
 directional shadow on all three bands; the attention module re-renders with no
 diagnostics and its formula caption improved with the rest.
+
+## R26. Two renderer defects the round-7 audit found (round 8)
+
+Both were paint bugs with the same shape: an entity Flexo drew as a special case
+rather than as an instance of what it actually is.
+
+- **A group title flattened its styled runs.** `emit._render_group_label` built
+  the same `<text>` object a component label does and then set
+  `"".join(run.text for run in spec.label)` on it, so a title written as
+  `(TextRun("QK"), TextRun("T", baseline_shift="super"))` came out as the plain
+  string `QKT` — the one text object in a figure that silently dropped what its
+  author wrote. It was the only one because it was the only one not built by a
+  run loop, and there were two of those: `emit._connector_label` and
+  `render._render_label`, twenty-eight-line near-copies that had drifted apart on
+  which attributes a `tspan` spells out.
+
+  Unified into one `render_common.render_runs`, now the single place Flexo sets
+  text — component labels, connector captions, and group titles all go through
+  it, so a superscript reaches all three or none. **The emission rule is the
+  economical one, not the explicit one:** a run emits `font-weight` only where
+  its author asked for a weight other than the `TextRun` default, `font-style`
+  only where it is italic, and `baseline-shift` with the reduced `font-size` only
+  where it is shifted. This is a correctness requirement rather than a taste for
+  short attributes. A title declares `title_weight` once on its `<text>`, so the
+  alternative — `render`'s habit of writing `font-weight="400"`,
+  `font-style="normal"` and a redundant `font-size` onto every plain run — would
+  have unbolded every group title in every figure the moment titles started
+  emitting tspans. Inheritance from the text object is the mechanism that lets
+  one helper serve a caption at 400 and a title at 600.
+
+- **`paint=` did not reach a container.** `paint={"fill": ..., "stroke": ...,
+  "label": ...}` worked on every node and was a `TypeError` on `group()`, so a
+  module whose body had to differ from its palette could not be authored at all.
+  Now `GroupSpec` carries `paint` as its own sorted `(part, colour)` pairs — a
+  node routes the three parts through its property bag because a property holds a
+  scalar and never a mapping, and a group has no bag to route them through — and
+  `render_common.paint_override` answers for both spec kinds. `_render_container`
+  honours `fill` and `stroke` on the container body and `_render_group_label`
+  honours `label` on the title, with the node convention intact: an overridden
+  part emits no `data-flexo-fill` or `data-flexo-stroke`, so `flexo retheme`
+  leaves author paint exactly as written. Wired end to end — `group(paint=...)`
+  and `module(paint=...)` validate and normalize to `#rrggbb` at the point of
+  authoring through the same `_paint_parts` check nodes use, the pairs serialize
+  as a `paint` object and round-trip, and both copies of the schema gained a
+  `paint` definition constrained to the three parts and a hex colour.
+
+Two things were noted and deliberately left alone, both older than this round and
+both geometry rather than paint. A title is *measured* at its runs' own weights
+and *drawn* at `title_weight`, so a semibold title is slightly wider than the
+metrics that reserved its band; fixing that moves every figure with a titled
+module. And a run beginning with a space loses it, because SVG whitespace
+processing strips the leading whitespace of each `tspan` chunk — true of every
+component and connector label since they were first drawn as tspans, and now
+reachable from a title too, so `(TextRun("QK"), TextRun(" module"))` sets as
+`QKmodule`. The fix is per-run advance rather than an `xml:space` switch, which
+is a text-shaping change and not this round's business either.
+
+## Acceptance (round 8)
+
+`uv run pytest` green (295, from 286: nine added — a title's runs surviving into
+tspans, a title run inheriting `title_weight` while an explicit weight overrides
+it, container and title paint with no roles left for retheme, a part left out
+keeping its role, group paint moving nothing, the builder lowering group paint to
+sorted normalized pairs, both rejections, and the serialization round-trip).
+`ruff check` clean. `flexo gallery` exits 0 with zero lint errors and the one
+pre-existing `routing.connector.crossing` warning, unchanged.
+
+Visual parity is exact rather than argued: both gallery preview PNGs at 300 dpi
+are **byte-identical** to their pre-edit baselines (`compare -metric AE` = 0,
+RMSE = 0), and crops of a group title, a node label, and the `softmax(QKᵀ)V` net
+caption each differ in zero pixels. Structurally the only changed elements in
+either editable SVG are `text` and `tspan` — no geometry, paint, or path moved:
+node-label tspans shed `font-weight="400"`, `font-style="normal"` and their
+redundant `font-size`; each `text` element's `fill` and `data-flexo-fill` swapped
+order; and the three module titles gained the `tspan` they should always have
+had. Connector captions are unchanged byte for byte. All three examples run
+clean.
+
+## R27. Five authoring gaps the Transformer figure found (round 9)
+
+Panel b is not the only figure Flexo has to be able to write. Authoring the
+Transformer ("Attention Is All You Need") — two towers, ten residual joins, a
+cross-attention net between them — surfaced five gaps that had nothing to do with
+paint and everything to do with what an author is *allowed to say*. Each one is
+the same shape: the compiler knew the right answer and there was no way to write
+it down.
+
+- **`attention()` was the one component that could not be created first.** Its
+  `q`, `k`, and `v` were required keywords, so an attention block could only be
+  authored after all three of its sources existed. A Transformer decoder reads its
+  keys and values from an encoder that is written *later* in the source, which made
+  the whole pair of towers un-authorable in flow order: either the encoder moved
+  above the decoder it feeds, or the decoder was built inside out. All three are
+  optional now. They wire exactly as before when given; the q/k/v ports exist
+  either way, so the missing legs are ordinary `connect(top, block.k)` calls once
+  the source exists. Nothing else about the component changed.
+
+- **A residual target had one arrival port and two arrivals.** `add-norm` offered
+  `input`, so the sublayer output and the skip both landed on it — two arrowheads
+  on one point, which the router draws as two runs a hair apart with a hook where
+  it pulled each off its twin, and a `routing.track.separation` error per pair.
+  Ten of them in the Transformer, which is why that figure reached for a plain
+  `block()`: `add_norm()` had no advantage to offer. It does now. The grammar's
+  table is `input`, `skip`, `output`, `branch` — the two wires a residual join sits
+  on, named on the way in *and* on the way out, since the value leaving one block
+  feeds the next sublayer and bypasses it too. All four are auto-sided, so a tower
+  that reads upward gets them on the edges its ink uses with no port table.
+  `add_norm(input=..., skip=...)` says it at creation,
+  `connect(x, an, target_port="skip")` for a value authored later, and
+  `residual()` now prefers a `residual` *or* `skip` port so a skip edge lands
+  where the component meant it to. The gallery's hand-written `_add_norm` port
+  table — which already called its skip port `skip` — is what named this.
+
+- **Nothing could say which way round an obstacle a route should go.** The router
+  prices bends, crossings, grazing and confinement, and between two corridors of
+  similar length it takes the cheaper one — which is sometimes the one that wraps
+  the far face of a module and slices back through it. `via=` is the missing word:
+  a `Side` on `connect`, `residual`, `net`, and `merge`, `None` by default.
+  It lands in three places, because a corridor preference is three separate
+  decisions. **In the cost function** (`PathCosts.off_side`, 1.5 per point) it
+  charges only for length spent *beyond the endpoints' own region on the side the
+  hint refused* — never inside the region, which every route has to cross, and
+  never on the hinted side. **In the net rail** it reads the side exactly as
+  `rail=` does for the axis (west and east rail vertically) and then prefers the
+  boundary edge on that side, letting the ordinary candidate search walk back
+  inward to the nearest clear rail: a lean where `rail=` is a pin, which is why it
+  may not be written beside `rail=` or `rail_at=`. **In the auto-side pass** it
+  settles the *entry* side of an auto-sided target port, because ink arriving from
+  the west arrives on a west port; the departure keeps its own vote, since a route
+  may leave east and still be asked to stay west of what it crosses to. It is a
+  request, and it borrows `rail_at`'s convention when it cannot be had:
+  `routing.via.clamped` / `routing.net.via.clamped`, a warning naming the side
+  actually achieved. `RoutedEdge` grew the `diagnostics` field `RoutedNet` already
+  had, so an edge-level clamp reaches lint the same way.
+
+- **An image's label painted over its own artwork.** `image` was the last
+  motif-bearing kind still centring its label in the middle of its box, so
+  "Positional Encoding" printed across the sine glyph it named. It joins
+  `MOTIF_LABEL_KINDS` and reads the same `label_band_height` / `motif_area` pair
+  R25 gave the inset: band on top, `motif_label_gap`, the drawing in what is left.
+  Sizing follows — a labelled image is band + gap + artwork + padding, so an
+  authored `height` shrinks the *drawing* and never the caption's line, and one
+  authored extent still implies the other through the aspect ratio. An *unlabelled*
+  image reserves nothing and its bounds stay exactly its artwork, which is the
+  whole promise of the kind.
+
+- **Both text bugs from round 8 are fixed.** A title was measured at its runs' own
+  weights and drawn at `title_weight`; `TextMeasurer.measure(runs, weight=...)`
+  now measures a run that named no weight at the weight it will *inherit*, which
+  is the emission rule read backwards and shares one `DEFAULT_RUN_WEIGHT`
+  constant with the emitter. The measurement had no consumer before — a group's
+  intrinsic width came from its children alone — so `max(body.width,
+  label.width)` makes the band real: a module can only grow, and only when its
+  title is wider than its content. And a run beginning with a space lost it,
+  because XML strips the leading whitespace of every `tspan` chunk, so
+  `(TextRun("QK", weight=700), TextRun(" module"))` set as `QKmodule`. The fix is
+  `xml:space="preserve"` on the run that owns the space, not on the text object:
+  the document is indented, and preserving whitespace *around* the tspans would
+  turn the indentation into ink. Verified through Inkscape rather than argued —
+  the same three-variant probe shows `QKmodule`, `QKmodule`, `QK module`. Per-run
+  absolute `x` was the alternative and was rejected: an `x` on a tspan starts a new
+  text chunk, and `text-anchor="middle"` then centres every run on its own.
+
+### Acceptance (round 9)
+
+`uv run pytest` green (318, from 295: twenty-three added — unwired and partly
+wired attention, the add-norm port table and its auto-siding, a skip edge that no
+longer crowds its input, `residual()` preferring `skip`, `via` lowering on edges
+and both net kinds, its rejections, its serialization round trip in both places
+and its absence from a document that never asked for it, a detour routed both ways
+round one wall, the entry side it settles, the edge clamp end to end and the net
+clamp at the unit that decides it, a net rail leaning west and north, the image
+label band, a height-only extent shrinking the drawing, an unlabelled image
+reserving nothing, inherited weight in measurement and in wrapping, and a leading
+space surviving into the SVG). `ruff check` clean.
+
+`flexo gallery` exits 0 with zero lint errors and the one pre-existing
+`routing.connector.crossing` warning, unchanged. **Both preview PNGs are
+byte-identical to their pre-edit baselines**, and both editable SVGs diff to zero
+lines: the title-weight fix moves nothing in either figure because every titled
+module there is far wider than its own title, and every other change is reachable
+only through authoring neither gallery figure uses. All three examples run clean.
+
+The Transformer figure itself, unedited, still reports its ten
+`routing.track.separation` errors, because it draws its Add & Norm boxes with
+`block()` — which is the round's point, not a regression. Switching its one
+helper to `tower.add_norm(...)` and adding `target_port="skip"` to its five skip
+edges takes it to five errors, and every residual *arrival* comes out as two clean
+separate arrows with no hooks. The five that remain are the departure half of the
+same pattern — `an1.output` feeding both the sublayer and the skip, so two edges
+leave one point — and taking those five to `source_port="branch"` leaves the
+figure with **no diagnostics at all**. No `via=` hint is needed anywhere in it:
+the cross-attention net already crosses to the decoder's near side.

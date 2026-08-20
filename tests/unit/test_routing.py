@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.diagnostics import Severity
 from flexo.emit import _net_ink
@@ -21,7 +22,7 @@ from flexo.ir.semantic import (
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
-from flexo.routing.nets import _vertical_rail, net_segments
+from flexo.routing.nets import _vertical_rail, _via_clamp_diagnostics, net_segments
 from flexo.routing.nudge import (
     Run,
     caption_reach,
@@ -258,12 +259,15 @@ def test_rail_orientation_follows_the_target_side_majority() -> None:
 
     horizontal_spokes = (Side.NORTH, Side.NORTH, Side.WEST)
     vertical_spokes = (Side.WEST, Side.EAST, Side.NORTH)
-    assert not _vertical_rail(None, Side.SOUTH, horizontal_spokes)
-    assert _vertical_rail(None, Side.SOUTH, vertical_spokes)
-    assert _vertical_rail(None, Side.SOUTH, (Side.WEST, Side.NORTH))
-    assert not _vertical_rail(None, Side.EAST, (Side.WEST, Side.NORTH))
-    assert _vertical_rail(Side.WEST, Side.SOUTH, horizontal_spokes)
-    assert not _vertical_rail(Side.NORTH, Side.SOUTH, vertical_spokes)
+    assert not _vertical_rail(None, None, Side.SOUTH, horizontal_spokes)
+    assert _vertical_rail(None, None, Side.SOUTH, vertical_spokes)
+    assert _vertical_rail(None, None, Side.SOUTH, (Side.WEST, Side.NORTH))
+    assert not _vertical_rail(None, None, Side.EAST, (Side.WEST, Side.NORTH))
+    assert _vertical_rail(Side.WEST, None, Side.SOUTH, horizontal_spokes)
+    assert not _vertical_rail(Side.NORTH, None, Side.SOUTH, vertical_spokes)
+    # A via hint reads the side exactly as a rail hint does: west rails vertically.
+    assert _vertical_rail(None, Side.WEST, Side.SOUTH, horizontal_spokes)
+    assert not _vertical_rail(None, Side.NORTH, Side.SOUTH, vertical_spokes)
 
 
 def test_skip_net_drops_one_straight_trunk_at_the_hub_axis() -> None:
@@ -1101,3 +1105,111 @@ def test_an_arrow_joint_stands_off_the_trunk_it_points_into() -> None:
         "the rail carries the joint marker, so no stem gains one"
     )
     assert lint_compilation(compilation).ok
+
+
+def _detour_figure(**options: object) -> Figure:
+    """One route that has to go round a wall, with a corridor either side of it."""
+
+    figure = Figure("detour", width=pt(300.0))
+    with figure.root.column("col", gap="30pt", align="center", role="layout") as column:
+        top = column.block("top", label="Top", width="60pt")
+        column.block("wall", label="Wall", width="200pt")
+        bottom = column.block("bottom", label="Bottom", width="60pt")
+    figure.root.connect(top, bottom, id="around", **options)
+    return figure
+
+
+def test_via_sends_a_detour_down_the_corridor_the_author_named() -> None:
+    """R27: the same figure, routed both ways round its wall, on one word."""
+
+    wall = compile_figure(_detour_figure().spec).fitted.node("col.wall").bounds
+    west = compile_figure(_detour_figure(via="west").spec).routed.edge("around")
+    east = compile_figure(_detour_figure(via="east").spec).routed.edge("around")
+    assert min(point.x for point in west.centerline) < wall.left
+    assert max(point.x for point in west.centerline) <= wall.right
+    assert max(point.x for point in east.centerline) > wall.right
+    assert min(point.x for point in east.centerline) >= wall.left
+    assert not west.diagnostics and not east.diagnostics
+
+
+def test_via_decides_the_side_an_auto_sided_port_is_entered_from() -> None:
+    """The ink comes round the west, so the arrival faces west."""
+
+    for side in (Side.WEST, Side.EAST):
+        fitted = compile_figure(_detour_figure(via=side).spec).fitted
+        entry = fitted.node("col.bottom").port("input")
+        assert entry.side is side
+
+
+def _walled_figure(**options: object) -> Figure:
+    """The same detour with its west corridor built shut."""
+
+    figure = Figure("walled", width=pt(400.0))
+    with figure.root.row("row", gap="0pt", padding=0, align="center", role="layout") as row:
+        row.block("blocker", label="Blocker", width="70pt", height="150pt")
+        with row.column("col", gap="30pt", padding=0, align="center", role="layout") as column:
+            top = column.block("top", label="Top", width="60pt")
+            column.block("wall", label="Wall", width="150pt")
+            bottom = column.block("bottom", label="Bottom", width="60pt")
+    figure.root.connect(top, bottom, id="around", **options)
+    return figure
+
+
+def test_an_infeasible_via_takes_the_nearest_corridor_and_names_it() -> None:
+    """R27: the rail_at convention -- clamp, then say which side you got."""
+
+    edge = compile_figure(_walled_figure(via="west").spec).routed.edge("around")
+    wall = compile_figure(_walled_figure(via="west").spec).fitted.node("row.col.wall").bounds
+    assert max(point.x for point in edge.centerline) > wall.right, "it went east"
+    (diagnostic,) = edge.diagnostics
+    assert diagnostic.code == "routing.via.clamped"
+    assert diagnostic.severity is Severity.WARNING
+    assert "runs east" in diagnostic.message
+    report = lint_compilation(compile_figure(_walled_figure(via="west").spec))
+    assert not report.errors, report.format()
+    assert any(item.code == "routing.via.clamped" for item in report.warnings)
+
+
+def _bus_figure(**options: object) -> Figure:
+    figure = Figure("bus", width=pt(320.0))
+    with figure.root.row("row", gap="90pt", align="center", role="layout") as row:
+        hub = row.block("hub", label="Hub", width="60pt")
+        with row.column("heads", gap="24pt", padding=0, role="layout") as heads:
+            first = heads.block("first", label="First", width="60pt")
+            second = heads.block("second", label="Second", width="60pt")
+    figure.net(src=hub, sinks=[first, second], id="bus", **options)
+    return figure
+
+
+def test_via_leans_a_net_rail_toward_the_side_it_names() -> None:
+    """A via net rails on the axis its side implies, as close to that side as it can."""
+
+    plain = compile_figure(_bus_figure().spec)
+    west = compile_figure(_bus_figure(via="west").spec)
+    north = compile_figure(_bus_figure(via="north").spec)
+    hub = plain.fitted.node("row.hub").bounds
+    assert plain.routed.net("bus").rail[0].x > west.routed.net("bus").rail[0].x > hub.right
+    start, end = north.routed.net("bus").rail
+    assert start.y == end.y, "a north hint rails horizontally"
+    assert start.y < hub.top, "and above what it feeds"
+    for compilation in (plain, west, north):
+        report = lint_compilation(compilation)
+        assert not report.errors and not report.warnings, report.format()
+
+
+def test_a_net_rail_parked_on_the_refused_side_says_so() -> None:
+    """The net counterpart of the edge clamp, at the unit that decides it."""
+
+    net = NetSpec(
+        "bus",
+        "fan-out",
+        (PortRef("hub", "output"),),
+        (PortRef("first", "input"), PortRef("second", "input")),
+        via=Side.WEST,
+    )
+    escapes = (Point(10.0, 0.0), Point(40.0, 0.0))
+    assert _via_clamp_diagnostics(net, 25.0, escapes, vertical=True) == ()
+    (clamped,) = _via_clamp_diagnostics(net, 90.0, escapes, vertical=True)
+    assert clamped.code == "routing.net.via.clamped"
+    assert clamped.severity is Severity.WARNING
+    assert "sits east" in clamped.message
