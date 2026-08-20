@@ -891,3 +891,207 @@ def test_a_net_may_not_place_its_rail_twice() -> None:
         figure.net(src=first, sinks=[second, third], rail="west", via="west")
     with pytest.raises(ValueError, match="places its rail twice"):
         figure.net(src=first, sinks=[second, third], rail_at=0.4, via="west")
+
+
+def _attention_figure(**options: object) -> Figure:
+    """One attention composite in a column, with nothing wired into it."""
+
+    figure = Figure("grown", width=pt(320.0))
+    with figure.root.column("m", role="layout") as column:
+        column.attention("mha", label="Attention", width=pt(120.0), **options)
+    return figure
+
+
+def test_attention_without_vectors_is_the_plain_component() -> None:
+    """R28: ``vectors=`` is opt-in, so a figure that never asks for it never moves."""
+
+    plain = _attention_figure().spec
+    assert [node.id for node in plain.nodes] == ["m.mha"]
+    assert plain.groups[1].children == ("m.mha",)
+    assert not plain.edges
+    assert _attention_figure(vectors=None).spec == plain
+    assert _attention_figure(vectors=False).spec == plain
+
+
+def test_attention_vectors_lower_into_a_block_over_three_glyphs() -> None:
+    semantic = _attention_figure(vectors=True).spec
+    assert semantic.group("m.mha").children == ("m.mha.block", "m.mha.qkv")
+    assert semantic.group("m.mha").anchor == "m.mha.block"
+    assert semantic.group("m.mha.qkv").children == (
+        "m.mha.qkv.q",
+        "m.mha.qkv.k",
+        "m.mha.qkv.v",
+    )
+    assert semantic.node("m.mha.block").kind == "attention"
+    for name in ("q", "k", "v"):
+        assert semantic.group(f"m.mha.qkv.{name}").children == (
+            f"m.mha.qkv.{name}.cells",
+            f"m.mha.qkv.{name}.label",
+        )
+        assert semantic.node(f"m.mha.qkv.{name}.cells").kind == "vector"
+        caption = semantic.node(f"m.mha.qkv.{name}.label")
+        assert (caption.text, caption.role) == (name.upper(), "caption")
+
+
+def test_attention_vectors_centre_every_glyph_on_its_own_port() -> None:
+    """The composite's whole reason to exist: no author arithmetic, exact x."""
+
+    compiled = compile_figure(_attention_figure(vectors=True).spec)
+    block = compiled.fitted.node("m.mha.block")
+    for name, offset in (("q", 0.24), ("k", 0.5), ("v", 0.76)):
+        cells = compiled.fitted.node(f"m.mha.qkv.{name}.cells")
+        assert cells.bounds.center.x == pytest.approx(
+            block.bounds.left + offset * block.bounds.width
+        ), f"{name} is not centred under its port"
+        assert cells.bounds.center.x == pytest.approx(block.port(name).position.x)
+    row = compiled.fitted.group("m.mha.qkv")
+    assert row.bounds.width == pytest.approx(block.bounds.width)
+
+
+def test_attention_vector_drops_are_plain_verticals() -> None:
+    compiled = compile_figure(_attention_figure(vectors=True).spec)
+    drops = [
+        edge
+        for edge in compiled.routed.edges
+        if edge.spec.target.node_id == "m.mha.block"
+    ]
+    assert len(drops) == 3
+    for drop in drops:
+        start, end = drop.centerline
+        assert len(drop.centerline) == 2, "a centred drop needs no bend"
+        assert start.x == pytest.approx(end.x)
+        assert start.y > end.y, "the glyph feeds the block above it"
+    assert not lint_compilation(compiled).errors
+
+
+def test_attention_vector_glyphs_are_fed_from_below_and_leave_north() -> None:
+    cells = _attention_figure(vectors=True).spec.node("m.mha.qkv.k.cells")
+    assert [(port.name, port.side.value, port.auto_side) for port in cells.ports] == [
+        ("input", "south", False),
+        ("output", "north", False),
+    ]
+
+
+def test_attention_handle_answers_q_k_v_from_the_glyphs() -> None:
+    with Figure("wired", width=pt(320.0)) as figure:
+        with figure.root.column("m", role="layout") as column:
+            grown = column.attention("mha", label="Attention", width=pt(120.0), vectors=True)
+            source = column.block("src", label="Source")
+        figure.root.connect(source, grown.k)
+    assert grown.id == "m.mha.block"
+    assert str(grown.output) == "m.mha.block.output"
+    assert str(grown.q) == "m.mha.qkv.q.cells.input"
+    assert str(grown.v) == "m.mha.qkv.v.cells.input"
+    authored = figure.spec.edges[-1]
+    assert str(authored.target) == "m.mha.qkv.k.cells.input"
+
+
+def test_attention_wires_its_sources_into_the_glyphs_at_creation() -> None:
+    with (
+        Figure("wired", width=pt(320.0)) as figure,
+        figure.root.column("m", role="layout") as column,
+    ):
+        source = column.block("src", label="Source")
+        column.attention(
+            "mha", label="Attention", width=pt(120.0), vectors=True, q=source, v=source
+        )
+    targets = [str(edge.target) for edge in figure.spec.edges if edge.source.node_id == "m.src"]
+    assert targets == ["m.mha.qkv.q.cells.input", "m.mha.qkv.v.cells.input"]
+
+
+def test_attention_vectors_true_takes_the_palette_ramp_roles() -> None:
+    semantic = _attention_figure(vectors=True).spec
+    ramps = {
+        name: semantic.node(f"m.mha.qkv.{name}.cells").property("ramp")
+        for name in ("q", "k", "v")
+    }
+    assert ramps == {"q": "ramp-q", "k": "ramp-kv", "v": "ramp-kv"}
+
+
+def test_attention_broadcasts_one_preset_or_one_ramp_to_all_three() -> None:
+    preset = VectorPreset("#4a6cb0", "1x4")
+    shared = _attention_figure(vectors=preset).spec
+    for name in ("q", "k", "v"):
+        assert dict(shared.node(f"m.mha.qkv.{name}.cells").properties) == {
+            "cells": 4,
+            "columns": 1,
+            "shades": preset.encode(),
+        }
+    named = _attention_figure(vectors="ramp-attended").spec
+    assert named.node("m.mha.qkv.v.cells").property("ramp") == "ramp-attended"
+
+
+def test_attention_vectors_take_one_paint_per_name_case_insensitively() -> None:
+    presets = {
+        "Q": VectorPreset("#9a6fb8", "1x3"),
+        "K": VectorPreset("#c9853d", "1x3"),
+        "V": VectorPreset("#4f9b8f", "1x3"),
+    }
+    semantic = _attention_figure(vectors=presets).spec
+    assert semantic.node("m.mha.qkv.q.cells").property("shades") == presets["Q"].encode()
+    assert semantic.node("m.mha.qkv.v.cells").property("shades") == presets["V"].encode()
+
+
+def test_attention_vectors_reject_a_partial_or_unknown_mapping() -> None:
+    with pytest.raises(ValueError, match="leaves k, v unpainted"):
+        _attention_figure(vectors={"q": "ramp-q"})
+    with pytest.raises(ValueError, match="does not know the key"):
+        _attention_figure(vectors={"q": "ramp-q", "k": "ramp-kv", "v": "ramp-kv", "x": "ramp-q"})
+    with pytest.raises(ValueError, match="vectors= takes True"):
+        _attention_figure(vectors=[1, 2, 3])
+
+
+def test_attention_vectors_need_a_width_to_centre_against() -> None:
+    figure = Figure("unsized", width=pt(320.0))
+    with figure.root.column("m", role="layout") as column:  # noqa: SIM117
+        with pytest.raises(ValueError, match="needs a width to grow its vectors"):
+            column.attention("mha", label="Attention", vectors=True)
+
+
+def test_attention_composite_aligns_a_ports_row_on_the_block() -> None:
+    """The tower lines up on the attention boxes, not on the captions beneath."""
+
+    with (
+        Figure("towers", width=pt(460.0)) as figure,
+        figure.root.row("row", align="ports", role="layout") as row,
+    ):
+        with row.column("left", role="layout") as left:
+            left.attention("mha", label="Attention", width=pt(120.0), vectors=True)
+        with row.column("right", role="layout") as right:
+            right.block("plain", label="Plain", width=pt(120.0), height=pt(58.0))
+    compiled = compile_figure(figure.spec)
+    block = compiled.fitted.node("row.left.mha.block").bounds
+    plain = compiled.fitted.node("row.right.plain").bounds
+    assert block.center.y == pytest.approx(plain.center.y)
+
+
+def test_attention_vector_lanes_follow_an_authored_port_table() -> None:
+    """A cross-attention that reads its value on the left puts that glyph there."""
+
+    vaswani = (
+        PortSpec("v", Side.SOUTH, 0.24, adaptive=True, auto_side=True),
+        PortSpec("k", Side.SOUTH, 0.5, adaptive=True, auto_side=True),
+        PortSpec("q", Side.SOUTH, 0.76, adaptive=True, auto_side=True),
+        PortSpec("output", Side.NORTH, 0.5, adaptive=True, auto_side=True),
+    )
+    compiled = compile_figure(_attention_figure(vectors=True, ports=vaswani).spec)
+    block = compiled.fitted.node("m.mha.block")
+    xs = {
+        name: compiled.fitted.node(f"m.mha.qkv.{name}.cells").bounds.center.x
+        for name in ("q", "k", "v")
+    }
+    assert xs["v"] < xs["k"] < xs["q"], "the glyphs read in port order, not in q/k/v order"
+    for name, offset in (("v", 0.24), ("k", 0.5), ("q", 0.76)):
+        assert xs[name] == pytest.approx(block.bounds.left + offset * block.bounds.width)
+
+
+def test_attention_vector_captions_clear_the_approach_to_their_glyph() -> None:
+    """R28: the corridor under a glyph is two clearance tokens, not a chosen number."""
+
+    style = STYLES["paper"]
+    compiled = compile_figure(_attention_figure(vectors=True).spec)
+    cells = compiled.fitted.node("m.mha.qkv.q.cells").bounds
+    caption = compiled.fitted.node("m.mha.qkv.q.label").bounds
+    assert caption.top - cells.bottom == pytest.approx(
+        style.arrival_clearance.points + style.caption_clearance.points
+    )

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from flexo.components import normalize_node
+from flexo.components import attachment_lane_tracks, component_port_offsets, normalize_node
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     TITLE_SIDES,
@@ -35,7 +35,7 @@ from flexo.style import (
     VectorPreset,
     normalize_colour,
 )
-from flexo.units import Extent, Length, parse_extent
+from flexo.units import Extent, Length, parse_extent, pt
 from flexo.validate import normalize_and_validate
 
 if TYPE_CHECKING:  # pragma: no cover - the builder never needs the back end at runtime
@@ -48,6 +48,54 @@ type Padding = Length | str | float | Sequence[Length | str | float]
 type Cell = tuple[int, int]
 """A 0-indexed ``(row, column)`` grid address."""
 
+type AttentionVectors = (
+    bool | VectorPreset | str | Mapping[str, VectorPreset | str] | None
+)
+"""How ``attention`` paints the vector glyphs it grows under its three ports.
+
+``None`` (or ``False``) grows none, which is the plain attention block. ``True``
+takes the role defaults; one preset or one ramp-role name paints all three alike;
+a mapping keyed ``q``/``k``/``v`` paints each its own way.
+"""
+
+_QKV_PORTS = ("q", "k", "v")
+"""The attention ports a vector composite grows a glyph for, in reading order."""
+
+_QKV_RAMPS = {"q": "ramp-q", "k": "ramp-kv", "v": "ramp-kv"}
+"""``vectors=True``: the palette's own names for these three values.
+
+The palette already separates a query from a key/value pair -- that is what
+``ramp-q`` and ``ramp-kv`` are for -- and keys and values share a ramp because
+they are read together, which is how the rest of the system draws them. An author
+who wants three distinct colours says so with three presets.
+"""
+
+_ATTENTION_VECTOR_PORTS = (
+    PortSpec("input", Side.SOUTH),
+    PortSpec("output", Side.NORTH),
+)
+"""The two ports one Q/K/V glyph offers, and why both of them are pinned.
+
+A glyph in this composite sits on exactly two wires, and the composite exists to
+say where each one runs: the value arrives from underneath and the drop leaves
+straight up into the attention port above. Neither side is a component default
+waiting to be improved on, which is why neither is ``auto_side``:
+
+- north is the drop's, and only the drop's. A feed re-sided onto it would put two
+  runs on the one edge whose straightness is the whole point of centring the
+  glyph under its port -- which is exactly what auto-siding *does* choose when
+  the value comes from an encoder further up the page, and it costs a
+  ``routing.track.separation`` error for the pair.
+- south is the feed's, because a caption hangs under the stack and west or east
+  would send the run between two glyphs. A lane is only as wide as the port
+  spacing it was cut from, so two feeds entering sideways have to thread the same
+  gap at the same height, which is a separation error where it is not simply
+  unreadable.
+
+A value computed off to one side therefore travels to below its glyph and comes
+up, the way the paper draws its encoder feeding a decoder's cross-attention.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class NodeHandle:
@@ -59,10 +107,25 @@ class NodeHandle:
 
     id: str
     ports: tuple[str, ...]
+    aliases: tuple[tuple[str, PortRef], ...] = ()
+    """Ports of this handle that resolve to some *other* node's port.
+
+    A composite has one handle but more than one node, and the author should not
+    have to know which. ``attention(..., vectors=...)`` is the case that needs it:
+    the handle still answers ``output`` from the attention block, while ``q``,
+    ``k`` and ``v`` now answer from the vector glyphs that feed the block's own
+    q/k/v ports -- so wiring a source into ``.k`` reaches the glyph, and the
+    block's port stays internal to the composite. The alias is a ``PortRef``
+    rather than another handle, because what a caller does with it is name one
+    endpoint.
+    """
 
     def port(self, name: str) -> PortRef:
         """This node's ``name`` port, or an error listing the ports it has."""
 
+        for alias, reference in self.aliases:
+            if alias == name:
+                return reference
         if name not in self.ports:
             raise AttributeError(
                 f'node "{self.id}" has no port "{name}"; valid ports: {", ".join(self.ports)}'
@@ -670,6 +733,41 @@ class GroupBuilder:
         enclosing grid, because the column holding both is the grid's child.
         """
 
+        return self._vector_composite(
+            id,
+            label=label,
+            preset=preset,
+            ramp=ramp,
+            cells=cells,
+            columns=columns,
+            input=input,
+            gap=gap,
+            at=at,
+            options=options,
+        )
+
+    def _vector_composite(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...],
+        preset: VectorPreset | None,
+        ramp: str | None,
+        cells: int | None,
+        columns: int | None,
+        input: NodeHandle | PortRef | str | None,
+        gap: Length | str | float | None,
+        at: Cell | None,
+        options: dict[str, object],
+        label_role: str = "label",
+    ) -> NodeHandle:
+        """Lower one captioned vector glyph; see ``vector`` for the shape.
+
+        ``label_role`` is for a composite that owns the glyph rather than the
+        author: ``attention`` captions its Q/K/V glyphs as captions, so they paint
+        in muted ink the way every other secondary label in the system does.
+        """
+
         if preset is not None:
             if ramp is not None or cells is not None or columns is not None:
                 raise ValueError(
@@ -707,7 +805,7 @@ class GroupBuilder:
             **{"role": "vector", **_with_properties(options, **properties)},
         )
         if _label(label):
-            stack.node("label", "label", label=label, role="label")
+            stack.node("label", "label", label=label, role=label_role)
         if input is not None:
             self.connect(input, result.input)
         return result
@@ -1011,6 +1109,7 @@ class GroupBuilder:
         q: NodeHandle | PortRef | str | None = None,
         k: NodeHandle | PortRef | str | None = None,
         v: NodeHandle | PortRef | str | None = None,
+        vectors: AttentionVectors = None,
         label: str | tuple[TextRun, ...] = "Attention",
         **options: object,
     ) -> NodeHandle:
@@ -1025,12 +1124,130 @@ class GroupBuilder:
         written inside out. The q/k/v ports exist either way, so the missing legs
         are ordinary ``connect(source, block.k)`` calls later on.
 
+        ``vectors=`` grows the block's three inputs as *vector glyphs* under it,
+        the way the Transformer paper draws them: one captioned cell stack per
+        port, each centred exactly under the port it feeds, joined to it by a
+        plain vertical. ``vectors=True`` takes the palette's own q and k/v ramps;
+        one ``VectorPreset`` or one ramp-role name paints all three alike; a
+        ``{"q": ..., "k": ..., "v": ...}`` mapping paints each its own way.
+
+        The composite is the block plus the glyph row, and the handle it returns
+        still speaks for the block -- ``output`` is the attention output -- but
+        ``q``, ``k`` and ``v`` now answer from the *glyphs*, because that is where
+        a value entering this attention now arrives. Every glyph is fed from
+        underneath and drops straight up into its port
+        (``_ATTENTION_VECTOR_PORTS``), so a value computed off to one side
+        travels to below its glyph and comes up, the way the paper draws an
+        encoder feeding a decoder's cross-attention.
+
+        Lanes fill in port-offset order, so an authored ``ports=`` that reads the
+        value on the left puts that glyph on the left too -- which is how a
+        cross-attention is drawn, and what keeps the line feeding it clear of the
+        query arriving from the decoder's own spine.
+
+        A composite needs a ``width``: centring a glyph under a port fraction is
+        arithmetic on the block's width, and the whole point of ``vectors=`` is
+        that the author does not do that arithmetic. In a ports-aligned parent the
+        composite answers with the *block*, so a row of towers lines up on the
+        attention boxes rather than on the glyphs and captions hanging beneath
+        them.
+
         For attention drawn as a captioned arrow instead of a box, reach for
         ``merge`` with a formula label.
         """
 
-        result = self.node(id, "attention", label=label, **options)
-        for source, name in ((q, "q"), (k, "k"), (v, "v")):
+        if not vectors:
+            result = self.node(id, "attention", label=label, **options)
+            for source, name in ((q, "q"), (k, "k"), (v, "v")):
+                if source is not None:
+                    self.connect(source, result.port(name))
+            return result
+        return self._attention_composite(
+            id, vectors, sources=(q, k, v), label=label, options=options
+        )
+
+    def _attention_composite(
+        self,
+        id: str,
+        vectors: AttentionVectors,
+        *,
+        sources: tuple[NodeHandle | PortRef | str | None, ...],
+        label: str | tuple[TextRun, ...],
+        options: dict[str, object],
+    ) -> NodeHandle:
+        """Lower ``attention(..., vectors=...)`` into a block over a row of glyphs.
+
+        The row is a one-row grid as wide as the block, whose reserved column
+        widths come from the block's own port offsets
+        (``attachment_lane_tracks``): a pad, then a lane per port, then a pad.
+        Each glyph is centred in its lane, so its cells' centre is the port's x by
+        construction and the connector between them is a vertical with nothing to
+        route around -- which is also why the corridor above the glyphs is not a
+        number written here. The block and the row are siblings of one column, so
+        the three drops cross that column's one sibling boundary and the ordinary
+        edge-aware gap machinery reserves clearance, an arrival, and a lane per
+        drop, exactly as it does for any crossed boundary.
+
+        Lanes are filled in *offset* order rather than in q/k/v order, so an
+        authored ``ports=`` that puts the value on the left puts its glyph there
+        too. Nothing else here knows which name sits where.
+        """
+
+        presets = _attention_vectors(vectors)
+        width = options.pop("width", None)
+        if width is None:
+            raise ValueError(
+                f'attention "{self._scoped(id)}" needs a width to grow its vectors: '
+                "the glyphs are centred under the block's q/k/v ports, which is a "
+                "fraction of a width the block would otherwise take from its label"
+            )
+        style = STYLES.get(self.figure.style) or LayoutStyle()
+        block_width = style.resolve_extent(parse_extent(width)).points  # type: ignore[arg-type]
+        offsets = _attention_offsets(tuple(options.get("ports") or ()), tuple(presets))
+        presets = {name: presets[name] for name in sorted(presets, key=offsets.__getitem__)}
+        tracks = attachment_lane_tracks(tuple(offsets[name] for name in presets), block_width)
+        composite = self.column(
+            id,
+            padding=0,
+            role="layout",
+            anchor="block",
+            at=options.pop("at", None),  # type: ignore[arg-type]
+        )
+        block = composite.node("block", "attention", label=label, width=width, **options)
+        row = composite.grid(
+            "qkv",
+            columns=len(tracks),
+            column_widths={index: pt(track) for index, track in enumerate(tracks)},
+            width=pt(block_width),
+            gap=pt(0.0),
+            padding=0,
+            align="center",
+            role="layout",
+        )
+        glyphs = {
+            name: row._vector_composite(
+                name,
+                label=name.upper(),
+                preset=preset if isinstance(preset, VectorPreset) else None,
+                ramp=None if isinstance(preset, VectorPreset) else preset,
+                cells=None,
+                columns=None,
+                input=None,
+                gap=_glyph_caption_gap(self.figure.style),
+                at=(0, 2 * index + 1),
+                options={"ports": _ATTENTION_VECTOR_PORTS},
+                label_role="caption",
+            )
+            for index, (name, preset) in enumerate(presets.items())
+        }
+        for name, glyph in glyphs.items():
+            composite.connect(glyph, block.port(name))
+        result = NodeHandle(
+            block.id,
+            block.ports,
+            tuple((name, glyph.input) for name, glyph in glyphs.items()),
+        )
+        for source, name in zip(sources, _QKV_PORTS, strict=True):
             if source is not None:
                 self.connect(source, result.port(name))
         return result
@@ -1417,6 +1634,84 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
         for index, name in enumerate(output_names)
     )
     return inputs + result_outputs
+
+
+def _attention_vectors(value: AttentionVectors) -> dict[str, VectorPreset | str]:
+    """One paint per q/k/v glyph, from whichever of the four forms was written.
+
+    Keys are matched case-insensitively, because a figure that names its presets
+    ``Q``, ``K``, ``V`` -- which is what the captions say -- should be able to hand
+    that same mapping straight over.
+    """
+
+    if value is True:
+        return dict(_QKV_RAMPS)
+    if isinstance(value, (VectorPreset, str)):
+        return {name: value for name in _QKV_PORTS}
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            f"vectors= takes True, one preset or ramp role, or a mapping keyed "
+            f'{", ".join(_QKV_PORTS)}, not {type(value).__name__}'
+        )
+    given = {str(key).lower(): item for key, item in value.items()}
+    unknown = sorted(set(given) - set(_QKV_PORTS))
+    if unknown:
+        raise ValueError(
+            f'vectors= does not know the key(s) {", ".join(unknown)}; '
+            f'an attention block reads {", ".join(_QKV_PORTS)}'
+        )
+    missing = [name for name in _QKV_PORTS if name not in given]
+    if missing:
+        raise ValueError(
+            f'vectors= leaves {", ".join(missing)} unpainted; give every key, or one '
+            "preset for all three"
+        )
+    return {name: given[name] for name in _QKV_PORTS}
+
+
+def _attention_offsets(
+    authored: tuple[PortSpec, ...],
+    names: tuple[str, ...],
+) -> dict[str, float]:
+    """Where along the block's bottom edge each of ``names`` attaches.
+
+    An authored ``ports=`` is the design -- it is the one way to say that this
+    attention reads its value on the left, which is how the paper draws a
+    cross-attention -- so its offsets win. Otherwise the component grammar's own
+    fractions do, read from ``COMPONENTS`` rather than repeated here.
+    """
+
+    if authored:
+        offsets = {port.name: port.offset for port in authored}
+        missing = [name for name in names if name not in offsets]
+        if missing:
+            raise ValueError(
+                f'the authored port table declares no {", ".join(missing)} port, so '
+                "vectors= has nothing to hang those glyphs under"
+            )
+        return {name: offsets[name] for name in names}
+    return dict(zip(names, component_port_offsets("attention", names), strict=True))
+
+
+def _glyph_caption_gap(style_name: str) -> Length:
+    """Air between one Q/K/V stack and its caption: room for an arrival, and no more.
+
+    This is the corridor *below* the glyphs, and it is a token sum rather than a
+    number chosen by eye. A glyph in this composite is fed from underneath, and a
+    route arriving at a port needs ``arrival_clearance`` of straight run to turn
+    its elbow and draw its arrowhead in; the caption then hangs one
+    ``caption_clearance`` clear of that run. Anything less and the caption's own
+    words close the only approach its glyph has -- which is a
+    ``routing.net.no-stem`` error, not a cramped picture -- so the composite
+    reserves it whether or not this particular figure feeds from below.
+
+    It is why these captions sit further from their stack than a plain
+    ``vector()`` caption does: a plain vector is wired from the side, and has no
+    approach to protect.
+    """
+
+    style = STYLES.get(style_name) or LayoutStyle()
+    return Length(style.arrival_clearance.points + style.caption_clearance.points)
 
 
 def _vector_label_gap(style_name: str) -> Length:

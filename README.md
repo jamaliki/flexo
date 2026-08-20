@@ -102,6 +102,87 @@ keys and values from an encoder that appears *later* in the source, and a
 component that could not exist before its inputs would force the whole tower to be
 authored inside out.
 
+#### Attention that grows its own Q, K, V
+
+`vectors=` draws the three values an attention block reads as vector glyphs
+underneath it, the way the Transformer paper does — one captioned cell stack per
+port, each **centred exactly under the port it feeds**:
+
+```python
+import flexo
+
+QKV = {
+    "q": flexo.VectorPreset("#9a6fb8", "1x3"),
+    "k": flexo.VectorPreset("#c9853d", "1x3"),
+    "v": flexo.VectorPreset("#4f9b8f", "1x3"),
+}
+
+with flexo.Figure("grown", width="double-column") as figure:
+    with figure.module("encoder", layout="column", gap="14pt") as tower:
+        norm = tower.add_norm("an", label="Add & Norm", width="120pt")
+        mha = tower.attention(
+            "mha", label="Multi-Head\nAttention", width="120pt", vectors=QKV
+        )
+    figure.root.connect(mha, norm)
+```
+
+`vectors=True` takes the palette's own `ramp-q` and `ramp-kv` roles (keys and
+values share one, because they are read together). One `VectorPreset` or one ramp
+role name paints all three alike, and a `{"q": ..., "k": ..., "v": ...}` mapping
+paints each its own way — keyed case-insensitively, so the mapping you named `Q`,
+`K`, `V` after the captions goes straight in. `vectors=None`, the default, is the
+plain block: nothing about a figure that never asks for glyphs changes.
+
+**The engine does the arithmetic.** Centring a glyph under a port at 0.24 of a
+120pt block is the sort of sum that ends up as a magic inter-glyph gap in the
+figure that needs it — and then silently wrong the next time the component's port
+table moves. Here the block's own port offsets become the reserved column widths
+of a one-row grid exactly as wide as the block: a pad, then a lane per port, then
+a pad. A glyph centred in its lane *is* centred under its port, so the connector
+between them comes out a plain two-point vertical with nothing to route around,
+and the corridor above the glyphs is the ordinary edge-aware sibling gap rather
+than a number anybody wrote down. The composite needs a `width` for that reason,
+and says so if it does not get one.
+
+The handle still speaks for the block — `output` is the attention output — but
+`q`, `k` and `v` now answer from the **glyphs**, because that is where a value
+entering this attention arrives:
+
+```python
+figure.net(src=embedding, sinks=[mha.q, mha.k, mha.v], id="qkv")   # into the glyphs
+figure.root.connect(mha, norm)                                     # out of the block
+```
+
+Both of a glyph's ports are pinned, and that is the point: north is the drop into
+the attention port above it, south is the feed. A value computed off to one side
+travels to below its glyph and comes up, rather than entering between two glyphs
+— a lane is only as wide as the port spacing it was cut from, so two runs
+entering sideways would have to thread the same gap at the same height. The gap
+between a stack and its caption is `arrival_clearance + caption_clearance`, which
+is the room that approach from underneath needs; it is why these captions sit a
+little further from their stack than a plain `vector()` caption does.
+
+Lanes are filled in **port-offset order**, not in q/k/v order, so an authored
+`ports=` that reads the value on the left puts that glyph on the left too — which
+is how the paper draws a cross-attention, with the encoder's V and K nearest the
+line that feeds them and the decoder's own Q clear of it on the right:
+
+```python
+CROSS_PORTS = (
+    flexo.PortSpec("v", flexo.Side.SOUTH, 0.24, adaptive=True, auto_side=True),
+    flexo.PortSpec("k", flexo.Side.SOUTH, 0.5, adaptive=True, auto_side=True),
+    flexo.PortSpec("q", flexo.Side.SOUTH, 0.76, adaptive=True, auto_side=True),
+    flexo.PortSpec("output", flexo.Side.NORTH, 0.5, adaptive=True, auto_side=True),
+)
+```
+
+In a ports-aligned parent the composite answers with the **block**, so a row of
+towers lines up on the attention boxes rather than on the glyphs and captions
+hanging beneath them — the same principle as a `vector()` answering with its cell
+stack rather than with its caption. See
+[`examples/transformer.py`](examples/transformer.py) for all three attention
+blocks of a Transformer authored this way.
+
 #### Residual blocks name both of their wires
 
 `add_norm` is a residual join, so it has a port for each wire rather than one

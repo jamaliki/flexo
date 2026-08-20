@@ -745,3 +745,22 @@ def test_a_run_that_begins_with_a_space_still_sets_one() -> None:
     # Nothing else gains the attribute: a run with no edge whitespace is unchanged.
     plain = list(_element(_titled_figure(), "m.label"))
     assert [span.get(space) for span in plain] == [None, None, None]
+
+
+def test_a_caption_role_paints_muted_ink_and_still_rethemes() -> None:
+    """R28: the Q/K/V captions a composite grows are notes, not statements."""
+
+    with (
+        Figure("captions", width=pt(320.0)) as figure,
+        figure.root.column("m", role="layout") as column,
+    ):
+        column.attention("mha", label="Attention", width=pt(120.0), vectors=True)
+    document = compile_figure(figure.spec).document.text
+    caption = _element(document, "m.mha.qkv.q.label.label")
+    assert caption.get("fill") == DEFAULT_PALETTE.get("muted-ink")
+    assert caption.get("data-flexo-fill") == "muted-ink", "a role, so retheme reaches it"
+    assert _element(document, "m.mha.block.label").get("data-flexo-fill") == "ink"
+    themed = retheme_svg(document, GRAYSCALE_PALETTE)
+    assert _element(themed, "m.mha.qkv.q.label.label").get("fill") == GRAYSCALE_PALETTE.get(
+        "muted-ink"
+    )
