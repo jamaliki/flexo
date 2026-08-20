@@ -241,6 +241,27 @@ class VectorGrid:
         )
 
 
+def vector_stack_width(columns: int, style: LayoutStyle) -> float:
+    """How wide a vector glyph's cell grid is at ``columns`` columns.
+
+    A composite that reserves room *beside* a stack -- ``attention``, putting its
+    Q/K/V captions next to the glyphs rather than under them -- needs that width
+    while it is still writing semantics, long before there is a node to measure.
+    The arithmetic is the grid's own, read from the same tokens, so a wider cell
+    or a second column moves the caption instead of overlapping it.
+    """
+
+    side = style.vector_cell.points
+    return VectorGrid(
+        1,
+        max(1, columns),
+        side,
+        side,
+        style.vector_cell_gap.points,
+        style.vector_column_gap.points,
+    ).size.width
+
+
 def vector_grid(
     node: NodeSpec,
     style: LayoutStyle,

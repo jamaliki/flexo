@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from flexo.builder import Figure
@@ -18,6 +20,7 @@ from flexo.ir.semantic import (
     PortRef,
     PortSpec,
     TextRun,
+    Waypoint,
 )
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
@@ -25,6 +28,8 @@ from flexo.routing import route_figure
 from flexo.routing.nets import _vertical_rail, _via_clamp_diagnostics, net_segments
 from flexo.routing.nudge import (
     Run,
+    Stubs,
+    balance_jogs,
     caption_reach,
     caption_rise,
     collapse_zigzags,
@@ -1213,3 +1218,163 @@ def test_a_net_rail_parked_on_the_refused_side_says_so() -> None:
     assert clamped.code == "routing.net.via.clamped"
     assert clamped.severity is Severity.WARNING
     assert "sits east" in clamped.message
+
+
+def _jog_figure(**hint: object) -> FigureSpec:
+    """A route whose one crossbar has a whole span to sit in.
+
+    ``A`` is low on the left, ``B`` high on the right, so the connector between
+    them is a Z: east out of A, up, east into B. ``C`` sits below the run between
+    them, out of the crossbar's way but close enough to put its own edges into the
+    candidate grid -- which is what leaves the search a set of coordinates that
+    does not include the middle of the span.
+    """
+
+    with Figure(
+        "jog",
+        width=pt(420.0),
+        height=pt(320.0),
+        layout=LayoutSpec("grid", columns=3, gap=pt(60.0), padding=pt(20.0)),
+    ) as figure:
+        root = figure.root
+        source = root.block("a", label="A", width=pt(60.0), at=(1, 0))
+        target = root.block("b", label="B", width=pt(60.0), at=(0, 2))
+        root.block("c", label="C", width=pt(60.0), at=(2, 1))
+        root.connect(source, target, **hint)  # type: ignore[arg-type]
+    return figure.spec
+
+
+def test_a_single_jog_route_centres_its_crossbar() -> None:
+    """R30: a Z's crossbar sits in the middle of the span its endpoints leave it.
+
+    Both arms then read as arms of the same step. The coordinate is not one the
+    visibility search offers -- C's edges and their midpoints are -- so this is
+    the default asserting itself over whatever the search reached first.
+    """
+
+    compilation = compile_figure(_jog_figure())
+    style = LayoutStyle()
+    (edge,) = compilation.routed.edges
+    first, crossbar, last = segments(edge.centerline)
+    source = compilation.fitted.node("a").bounds
+    target = compilation.fitted.node("b").bounds
+    span = (
+        source.right + style.route_clearance.points,
+        target.left - style.arrival_clearance.points,
+    )
+    assert crossbar.vertical and first.horizontal and last.horizontal
+    assert crossbar.start.x == pytest.approx(sum(span) / 2.0)
+    assert first.length == pytest.approx(crossbar.start.x - source.right)
+    assert lint_compilation(compilation).ok
+
+
+def test_jog_balancing_leaves_an_aimed_route_where_it_was_sent() -> None:
+    """An authored waypoint is the corridor; a default may not pull it back."""
+
+    plain = compile_figure(_jog_figure())
+    aimed = _jog_figure()
+    edge = aimed.edges[0]
+    pinned = replace(
+        edge,
+        waypoints=(Waypoint(reference="c", side=Side.NORTH, dy=pt(-30.0)),),
+    )
+    compilation = compile_figure(replace(aimed, edges=(pinned,)))
+    (routed,) = compilation.routed.edges
+    waypoint = compilation.fitted.node("c").bounds.center.x
+    crossbar = next(segment for segment in segments(routed.centerline) if segment.vertical)
+    assert crossbar.start.x == pytest.approx(waypoint)
+    assert crossbar.start.x != pytest.approx(
+        next(
+            segment for segment in segments(plain.routed.edges[0].centerline) if segment.vertical
+        ).start.x
+    )
+
+
+def test_balancing_leaves_a_c_shaped_route_alone() -> None:
+    """Arms that double back share no span, so their crossbar keeps its corridor."""
+
+    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
+    runs = (Run("loop", "loop", boundary, Stubs(5.0, 14.0)),)
+    # East out of the source, up, then *west* into the target: a C.
+    polylines = ((Point(0.0, 100.0), Point(90.0, 100.0), Point(90.0, 10.0), Point(20.0, 10.0)),)
+    assert balance_jogs(runs, polylines, style=LayoutStyle(), obstacles=()) == polylines
+
+
+def test_balancing_never_moves_a_run_the_author_placed() -> None:
+    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
+    polylines = ((Point(0.0, 100.0), Point(20.0, 100.0), Point(20.0, 10.0), Point(200.0, 10.0)),)
+    style = LayoutStyle()
+    stubs = Stubs(5.0, 14.0)
+    free = balance_jogs(
+        (Run("edge", "edge", boundary, stubs),), polylines, style=style, obstacles=()
+    )
+    assert free[0][1].x == pytest.approx((5.0 + 186.0) / 2.0)
+    hinted = balance_jogs(
+        (Run("edge", "edge", boundary, stubs, hinted=True),),
+        polylines,
+        style=style,
+        obstacles=(),
+    )
+    assert hinted == polylines
+
+
+def _crossing_net_figure(**hint: object) -> FigureSpec:
+    """A fan-out whose trunk leaves along the axis its rail runs on.
+
+    The source reads east, the two sinks are entered from below and away to the
+    right: the trunk has to run east, cross down to the rail, and the rail carries
+    on east -- the shape an encoder makes feeding a decoder's cross-attention.
+    """
+
+    source_ports = (PortSpec("output", Side.EAST),)
+    sink_ports = (PortSpec("input", Side.SOUTH),)
+    with Figure(
+        "crossing",
+        width=pt(420.0),
+        height=pt(180.0),
+        layout=LayoutSpec(
+            "grid", columns=2, row_gap=pt(20.0), column_gap=pt(160.0), padding=pt(20.0)
+        ),
+    ) as figure:
+        root = figure.root
+        source = root.block("src", label="Source", width=pt(60.0), at=(0, 0), ports=source_ports)
+        with root.row("sinks", gap=pt(40.0), at=(1, 1), role="layout") as row:
+            first = row.block("one", label="One", width=pt(40.0), ports=sink_ports)
+            second = row.block("two", label="Two", width=pt(40.0), ports=sink_ports)
+        figure.net(src=source, sinks=[first, second], id="fan", **hint)  # type: ignore[arg-type]
+    return figure.spec
+
+
+def test_a_crossing_trunk_meets_its_rail_halfway() -> None:
+    """R30: the trunk's crossbar halves the run between the hub and the first stem.
+
+    Left at the hub escape it draws a stub, a long crossbar against the box it
+    just left, and the whole run beyond it. Halved, the two arms are arms of one
+    step -- the same default the rail coordinate itself takes.
+    """
+
+    compilation = compile_figure(_crossing_net_figure())
+    net = compilation.routed.net("fan")
+    style = LayoutStyle()
+    escape = compilation.fitted.node("src").bounds.right + style.route_clearance.points
+    nearest = min(stem.centerline[0].x for stem in net.target_stems)
+    stem = net.source_stems[0].centerline
+    assert len(stem) == 3, "port, corner, junction"
+    assert stem[1].x == pytest.approx((escape + nearest) / 2.0)
+    assert stem[-1] == net.rail[0], "the rail starts where the trunk lands on it"
+    assert net.diagnostics == ()
+    assert lint_compilation(compilation).ok
+
+
+def test_an_authored_rail_keeps_the_trunk_where_it_asked() -> None:
+    """``rail_at`` and ``via`` place the whole net; the midpoint default stands down."""
+
+    escape = (
+        compile_figure(_crossing_net_figure()).fitted.node("src").bounds.right
+        + LayoutStyle().route_clearance.points
+    )
+    for hint in ({"rail_at": 0.5}, {"via": "north"}):
+        compilation = compile_figure(_crossing_net_figure(**hint))
+        net = compilation.routed.net("fan")
+        assert net.source_stems[0].centerline[1].x == pytest.approx(escape), hint
+        assert lint_compilation(compilation).ok

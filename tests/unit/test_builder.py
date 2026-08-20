@@ -8,6 +8,7 @@ import yaml
 import flexo
 from flexo.builder import Figure, NodeHandle
 from flexo.compiler import Compilation, compile_figure
+from flexo.components import attachment_lane_tracks
 from flexo.diagnostics import FlexoError
 from flexo.gallery import modelangelo_gnn, vertical_slice
 from flexo.geometry import Side
@@ -896,9 +897,10 @@ def test_a_net_may_not_place_its_rail_twice() -> None:
 def _attention_figure(**options: object) -> Figure:
     """One attention composite in a column, with nothing wired into it."""
 
+    options.setdefault("width", pt(120.0))
     figure = Figure("grown", width=pt(320.0))
     with figure.root.column("m", role="layout") as column:
-        column.attention("mha", label="Attention", width=pt(120.0), **options)
+        column.attention("mha", label="Attention", **options)
     return figure
 
 
@@ -925,9 +927,10 @@ def test_attention_vectors_lower_into_a_block_over_three_glyphs() -> None:
     assert semantic.node("m.mha.block").kind == "attention"
     for name in ("q", "k", "v"):
         assert semantic.group(f"m.mha.qkv.{name}").children == (
-            f"m.mha.qkv.{name}.cells",
             f"m.mha.qkv.{name}.label",
-        )
+            f"m.mha.qkv.{name}.cells",
+        ), "the caption stands beside the stack, on the side the convention names"
+        assert semantic.group(f"m.mha.qkv.{name}").anchor == f"m.mha.qkv.{name}.cells"
         assert semantic.node(f"m.mha.qkv.{name}.cells").kind == "vector"
         caption = semantic.node(f"m.mha.qkv.{name}.label")
         assert (caption.text, caption.role) == (name.upper(), "caption")
@@ -1085,13 +1088,72 @@ def test_attention_vector_lanes_follow_an_authored_port_table() -> None:
         assert xs[name] == pytest.approx(block.bounds.left + offset * block.bounds.width)
 
 
-def test_attention_vector_captions_clear_the_approach_to_their_glyph() -> None:
-    """R28: the corridor under a glyph is two clearance tokens, not a chosen number."""
+def test_attention_vector_captions_stand_beside_their_glyph() -> None:
+    """R29: the caption leaves the corridor under the stack empty for the feed.
+
+    Beside, not below: one ``caption_clearance`` of air from the cells, centred on
+    the port line the cells' own side ports sit on, and inside the lane the
+    composite cut for this glyph.
+    """
 
     style = STYLES["paper"]
     compiled = compile_figure(_attention_figure(vectors=True).spec)
-    cells = compiled.fitted.node("m.mha.qkv.q.cells").bounds
-    caption = compiled.fitted.node("m.mha.qkv.q.label").bounds
+    for name in ("q", "k", "v"):
+        cells = compiled.fitted.node(f"m.mha.qkv.{name}.cells").bounds
+        caption = compiled.fitted.node(f"m.mha.qkv.{name}.label").bounds
+        assert cells.left - caption.right == pytest.approx(style.caption_clearance.points)
+        assert caption.center.y == pytest.approx(cells.center.y)
+        assert caption.top >= cells.top and caption.bottom <= cells.bottom
+
+
+def test_attention_vector_captions_leave_the_stacks_where_they_were() -> None:
+    """A caption may not move the thing it names off the port that thing feeds.
+
+    The glyph reserves the caption's room on the stack's other side too, so the
+    glyph is exactly as wide as its lane and symmetric about its cells -- which is
+    what keeps the stack on the port's x whichever side the words take.
+    """
+
+    compiled = compile_figure(_attention_figure(vectors=True).spec)
+    lanes = attachment_lane_tracks((0.24, 0.5, 0.76), 120.0)
+    for name in ("q", "k", "v"):
+        cells = compiled.fitted.node(f"m.mha.qkv.{name}.cells").bounds
+        glyph = compiled.fitted.group(f"m.mha.qkv.{name}").bounds
+        assert glyph.width == pytest.approx(lanes[1])
+        assert glyph.center.x == pytest.approx(cells.center.x)
+        assert glyph.height == pytest.approx(cells.height), "the caption adds no band"
+
+
+def test_a_lane_too_narrow_for_a_side_caption_keeps_it_underneath() -> None:
+    """The degrade is the old arrangement, not a caption jammed into 3pt of lane."""
+
+    style = STYLES["paper"]
+    below = compile_figure(_attention_figure(vectors=True, width=pt(50.0)).spec)
+    assert below.measured.semantic.group("m.mha.qkv.q").children == (
+        "m.mha.qkv.q.cells",
+        "m.mha.qkv.q.label",
+    )
+    cells = below.fitted.node("m.mha.qkv.q.cells").bounds
+    caption = below.fitted.node("m.mha.qkv.q.label").bounds
     assert caption.top - cells.bottom == pytest.approx(
         style.arrival_clearance.points + style.caption_clearance.points
     )
+    assert cells.center.x == pytest.approx(below.fitted.node("m.mha.block").port("q").position.x)
+
+
+def test_attention_vector_feeds_arrive_as_plain_verticals() -> None:
+    """The point of the whole arrangement: nothing to hook around under a glyph."""
+
+    with Figure("fed", width=pt(320.0)) as figure:
+        with figure.root.column("m", role="layout") as column:
+            grown = column.attention("mha", label="Attention", width=pt(120.0), vectors=True)
+            source = column.block("src", label="Source", width=pt(120.0))
+        figure.net(src=source, sinks=[grown.q, grown.k, grown.v], id="qkv")
+    compiled = compile_figure(figure.spec)
+    net = compiled.routed.net("qkv")
+    for stem in net.target_stems:
+        assert len(stem.centerline) == 2, f"{stem.port} hooks around something"
+        start, end = stem.centerline
+        assert start.x == pytest.approx(end.x)
+        assert start.y > end.y, "the feed arrives from below"
+    assert not lint_compilation(compiled).errors
