@@ -91,6 +91,7 @@ class _GroupDraft:
     title_side: str = "left"
     anchor: str | None = None
     shadow: bool = False
+    paint: tuple[tuple[str, str], ...] = ()
     children: list[str] = field(default_factory=list)
     placements: dict[str, Cell] = field(default_factory=dict)
     """Grid cells claimed by ``at=``, collected as children are authored."""
@@ -160,6 +161,7 @@ class Figure:
         title_side: str = "left",
         anchor: str | None = None,
         shadow: bool = False,
+        paint: Mapping[str, str] | None = None,
     ) -> GroupBuilder:
         """Open a titled module directly on the root: ``figure.root.group`` in one call."""
 
@@ -176,6 +178,7 @@ class Figure:
             title_side=title_side,
             anchor=anchor,
             shadow=shadow,
+            paint=paint,
         )
 
     @property
@@ -197,6 +200,7 @@ class Figure:
                 draft.title_side,  # type: ignore[arg-type]
                 _scoped_anchor(draft),
                 draft.shadow,
+                draft.paint,
             )
             for draft in self._groups
         )
@@ -224,6 +228,7 @@ class Figure:
         id: str | None = None,
         rail: Side | str | None = None,
         rail_at: float | None = None,
+        via: Side | str | None = None,
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
@@ -237,6 +242,7 @@ class Figure:
             id=id,
             rail=rail,
             rail_at=rail_at,
+            via=via,
             joint=joint,
             label=label,
             role=role,
@@ -251,6 +257,7 @@ class Figure:
         id: str | None = None,
         rail: Side | str | None = None,
         rail_at: float | None = None,
+        via: Side | str | None = None,
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
@@ -264,6 +271,7 @@ class Figure:
             id=id,
             rail=rail,
             rail_at=rail_at,
+            via=via,
             joint=joint,
             label=label,
             role=role,
@@ -278,6 +286,7 @@ class Figure:
         id: str | None,
         rail: Side | str | None,
         rail_at: float | None,
+        via: Side | str | None,
         joint: JointStyle,
         label: str | tuple[TextRun, ...],
         role: str,
@@ -290,9 +299,10 @@ class Figure:
             targets,
             role,
             _label(label),
-            Side(rail) if isinstance(rail, str) else rail,
+            _side(rail, "rail side"),
             rail_at,
             joint,
+            _side(via, "via side"),
         )
         self._nets.append(net)
         return net
@@ -383,6 +393,7 @@ class GroupBuilder:
         title_side: str = "left",
         anchor: str | None = None,
         shadow: bool = False,
+        paint: Mapping[str, str] | None = None,
         at: Cell | None = None,
     ) -> GroupBuilder:
         """Open a nested layout group.
@@ -398,6 +409,12 @@ class GroupBuilder:
         default, its first child that is neither a label nor a spacer).
 
         ``shadow=True`` gives the container a soft drop shadow.
+
+        ``paint={"fill": ..., "stroke": ..., "label": ...}`` overrides the
+        palette role for this container's body fill, body stroke, and title with
+        literal hex colours, exactly as it does for a component. An overridden
+        part carries no paint role into the SVG, so ``flexo retheme`` leaves it
+        as authored.
 
         ``at=(row, column)`` places this group in one cell of the enclosing grid
         (see ``grid`` for the rules), and ``column_widths`` reserves minimum
@@ -447,6 +464,7 @@ class GroupBuilder:
             title_side,
             anchor,
             shadow,
+            _paint_parts(paint),
         )
         self._draft.children.append(scoped_id)
         self._place(scoped_id, at)
@@ -896,13 +914,37 @@ class GroupBuilder:
         *,
         label: str | tuple[TextRun, ...] = "Add + norm",
         input: NodeHandle | PortRef | str | None = None,
+        skip: NodeHandle | PortRef | str | None = None,
         **options: object,
     ) -> NodeHandle:
-        """A residual-normalization box. It carries no motif: the words are the component."""
+        """A residual-normalization box, with a port for each wire it sits on.
+
+        It carries no motif: the words are the component. What it does carry is a
+        port table shaped like a residual join. ``skip`` is a third default port
+        beside ``input`` and ``output``, because a residual target takes *two*
+        values and they are not interchangeable -- ``input`` is the sublayer's
+        output and ``skip`` is the value that bypassed it. Sending both into
+        ``input`` puts two arrowheads on one point, which the router draws as two
+        runs a hair apart with a hook on each.
+
+        So ``add_norm("an", input=attention, skip=embedding)`` is the idiom, and
+        ``connect(x, an, target_port="skip")`` says the same thing for a value
+        authored later. ``branch`` completes it on the way out: the value leaving
+        here feeds the next sublayer through ``output`` and bypasses it through
+        ``branch``, so a spine of these reads as one arrow per wire instead of
+        two arrows leaving one point.
+
+        Every port is auto-sided, so in a tower that reads upward they all end up
+        where the ink is with no port table written down. Everything else
+        composes as on any block -- ``width``, ``paint``, ``input=``/``inputs=``,
+        and ``ports=`` to replace the table wholesale.
+        """
 
         result = self.node(id, "add-norm", label=label, **options)
         if input is not None:
             self.wire(result, (input,))
+        if skip is not None:
+            self.connect(skip, result.port("skip"))
         return result
 
     def mlp(
@@ -966,23 +1008,31 @@ class GroupBuilder:
         self,
         id: str,
         *,
-        q: NodeHandle | PortRef | str,
-        k: NodeHandle | PortRef | str,
-        v: NodeHandle | PortRef | str,
+        q: NodeHandle | PortRef | str | None = None,
+        k: NodeHandle | PortRef | str | None = None,
+        v: NodeHandle | PortRef | str | None = None,
         label: str | tuple[TextRun, ...] = "Attention",
         **options: object,
     ) -> NodeHandle:
-        """An attention block wired from its three sources at once.
+        """An attention block, wired from as many of its three sources as exist yet.
 
-        All three of ``q``, ``k``, and ``v`` are required: this component *is*
-        the three-way join. For attention drawn as a captioned arrow instead,
-        reach for ``merge`` with a formula label.
+        ``q``, ``k``, and ``v`` wire straight into the component's three ports
+        when they are given, which is what an author writes when the sources
+        already exist. All three are optional, because a figure is not always
+        written in flow order: a decoder's cross-attention reads keys and values
+        from an encoder that is authored *after* it, and a component that could
+        not be created before its inputs would force the whole tower to be
+        written inside out. The q/k/v ports exist either way, so the missing legs
+        are ordinary ``connect(source, block.k)`` calls later on.
+
+        For attention drawn as a captioned arrow instead of a box, reach for
+        ``merge`` with a formula label.
         """
 
         result = self.node(id, "attention", label=label, **options)
-        self.connect(q, result.q)
-        self.connect(k, result.k)
-        self.connect(v, result.v)
+        for source, name in ((q, "q"), (k, "k"), (v, "v")):
+            if source is not None:
+                self.connect(source, result.port(name))
         return result
 
     def prediction(
@@ -1023,6 +1073,7 @@ class GroupBuilder:
         id: str | None = None,
         rail: Side | str | None = None,
         rail_at: float | None = None,
+        via: Side | str | None = None,
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
@@ -1042,6 +1093,7 @@ class GroupBuilder:
             id=id,
             rail=rail,
             rail_at=rail_at,
+            via=via,
             joint=joint,
             label=label,
             role=role,
@@ -1055,6 +1107,7 @@ class GroupBuilder:
         id: str | None = None,
         rail: Side | str | None = None,
         rail_at: float | None = None,
+        via: Side | str | None = None,
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
@@ -1067,6 +1120,7 @@ class GroupBuilder:
             id=id,
             rail=rail,
             rail_at=rail_at,
+            via=via,
             joint=joint,
             label=label,
             role=role,
@@ -1083,6 +1137,7 @@ class GroupBuilder:
         role: str = "flow",
         label: str | tuple[TextRun, ...] = "",
         lane: str | None = None,
+        via: Side | str | None = None,
     ) -> EdgeSpec:
         """Draw one connector from ``source`` to ``target``.
 
@@ -1090,6 +1145,13 @@ class GroupBuilder:
         string or a ``PortRef`` names one exactly. ``lane=`` routes the edge
         through an authored corridor instead of wherever the router would take
         it, and a lane-routed edge no longer votes on which side its ports face.
+
+        ``via="west"`` (or any side) leans the route toward that side of the
+        region between its two endpoints rather than pinning it anywhere: the
+        router pays extra for corridors beyond that region on the *opposite*
+        side, and the arriving port faces the hinted side when its own side is a
+        component default. It is one word for "go round the near side", and it
+        reports ``routing.via.clamped`` if the geometry left it no choice.
         """
 
         source_ref = _reference(source, source_port)
@@ -1102,6 +1164,7 @@ class GroupBuilder:
             role,
             _label(label),
             lane,
+            via=_side(via, "via side"),
         )
         self.figure._edges.append(edge)
         return edge
@@ -1113,20 +1176,23 @@ class GroupBuilder:
         *,
         id: str | None = None,
         lane: str | None = None,
+        via: Side | str | None = None,
         source_port: str | None = None,
         target_port: str | None = None,
     ) -> EdgeSpec:
         """A skip connection, painted in the ``residual`` role.
 
-        It prefers a port named ``residual`` at either end and falls back to the
-        ordinary ``output``/``input`` pair, so a component that declares one gets
-        its skip ink where it meant to.
+        It prefers whichever port a component dedicates to skip traffic --
+        ``residual``, then ``skip`` -- and falls back to the ordinary
+        ``output``/``input`` pair, so a component that declares one gets its skip
+        ink where it meant to instead of crowding the port its sublayer output
+        already arrives on.
         """
 
         if source_port is None and isinstance(source, NodeHandle):
-            source_port = "residual" if "residual" in source.ports else "output"
+            source_port = _skip_port(source, "output")
         if target_port is None and isinstance(target, NodeHandle):
-            target_port = "residual" if "residual" in target.ports else "input"
+            target_port = _skip_port(target, "input")
         return self.connect(
             source,
             target,
@@ -1135,6 +1201,7 @@ class GroupBuilder:
             target_port=target_port or "input",
             role="residual",
             lane=lane,
+            via=via,
         )
 
     def _scoped(self, id: str) -> str:
@@ -1238,27 +1305,62 @@ def _single_input(target: NodeHandle) -> str:
     raise ValueError(f'node "{target.id}" has no "input" port to wire into: {detail}')
 
 
-def _paint_properties(paint: Mapping[str, str] | None) -> dict[str, Scalar]:
-    """Lower an authored ``paint`` mapping into one scalar property per part.
+_SKIP_PORTS = ("residual", "skip")
+"""Port names a component may dedicate to skip traffic, in preference order.
 
-    A node property holds a scalar, never a mapping, so the three parts travel
-    separately as ``paint-fill``, ``paint-stroke``, and ``paint-label``. Colours
-    are normalized to ``#rrggbb`` here, which is both the validation and what
-    keeps ``#abc`` and ``#aabbcc`` from serializing as two different figures.
+``residual`` came first and stays first; ``skip`` is what the residual-target
+components call the same thing now (see ``add_norm``). One tuple, so a component
+declaring either gets its skip ink on it.
+"""
+
+
+def _skip_port(handle: NodeHandle, fallback: str) -> str:
+    """The port a skip connection should use on ``handle``."""
+
+    return next((name for name in _SKIP_PORTS if name in handle.ports), fallback)
+
+
+def _side(value: Side | str | None, label: str) -> Side | None:
+    """One authored side, by name or by value, or ``None`` for no hint."""
+
+    if value is None or isinstance(value, Side):
+        return value
+    try:
+        return Side(value)
+    except ValueError:
+        valid = ", ".join(side.value for side in Side)
+        raise ValueError(f'unknown {label} "{value}"; valid sides: {valid}') from None
+
+
+def _paint_parts(paint: Mapping[str, str] | None) -> tuple[tuple[str, str], ...]:
+    """One authored ``paint`` mapping, validated and sorted, as ``(part, colour)``.
+
+    Colours are normalized to ``#rrggbb`` here, which is both the validation and
+    what keeps ``#abc`` and ``#aabbcc`` from serializing as two different
+    figures. Components and containers take the same three parts, so they take
+    the same check.
     """
 
     if not paint:
-        return {}
+        return ()
     unknown = sorted(set(paint) - set(PAINT_PARTS))
     if unknown:
         raise ValueError(
             f"unknown paint part(s) {', '.join(unknown)}; "
             f"valid parts: {', '.join(PAINT_PARTS)}"
         )
+    return tuple(sorted((part, normalize_colour(colour)) for part, colour in paint.items()))
+
+
+def _paint_properties(paint: Mapping[str, str] | None) -> dict[str, Scalar]:
+    """Lower an authored ``paint`` mapping into one scalar property per part.
+
+    A node property holds a scalar, never a mapping, so the three parts travel
+    separately as ``paint-fill``, ``paint-stroke``, and ``paint-label``.
+    """
+
     return {
-        f"{PAINT_PROPERTY_PREFIX}{part}": normalize_colour(paint[part])
-        for part in PAINT_PARTS
-        if part in paint
+        f"{PAINT_PROPERTY_PREFIX}{part}": colour for part, colour in _paint_parts(paint)
     }
 
 

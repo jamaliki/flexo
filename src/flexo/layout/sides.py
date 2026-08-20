@@ -330,13 +330,31 @@ def _trunk_direction(
 
 
 def _hint_pins(figure: FigureSpec) -> dict[tuple[str, str], Side]:
-    """Sides an edge already named through ``depart``/``arrive``."""
+    """Sides a connection already named, in the order they overrule each other.
+
+    ``depart``/``arrive`` name a port's side outright, so they go in first and a
+    later hint cannot displace them. Then comes ``via``, which names the side a
+    route travels on: ink that comes round the west arrives *from* the west, so
+    the port it arrives on faces west, and the author who wrote one word about
+    the corridor should not also have to write a port table about the arrival.
+    That is the entry side only -- the departure keeps its own vote, because a
+    route may perfectly well leave east and still be asked to keep west of the
+    tower it is crossing to.
+    """
 
     pins: dict[tuple[str, str], Side] = {}
     for edge in figure.edges:
         for reference, side in ((edge.source, edge.depart), (edge.target, edge.arrive)):
             if side is not None:
                 pins.setdefault((reference.node_id, reference.port_name), side)
+    for edge in figure.edges:
+        if edge.via is not None:
+            pins.setdefault((edge.target.node_id, edge.target.port_name), edge.via)
+    for net in figure.nets:
+        if net.via is None:
+            continue
+        for reference in net.targets:
+            pins.setdefault((reference.node_id, reference.port_name), net.via)
     return pins
 
 
