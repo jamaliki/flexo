@@ -18,6 +18,13 @@ class RoutedEdge:
     shaft: tuple[Point, ...]
     label_metrics: TextMetrics | None = None
     label_position: Point | None = None
+    diagnostics: tuple[Diagnostic, ...] = ()
+    """What the router had to overrule while drawing this edge, for the lint report.
+
+    The net counterpart below carries the same field for the same reason: a hint
+    the geometry could not honour is a warning about the figure, not a reason to
+    refuse to draw it.
+    """
 
 
 @dataclass(frozen=True, slots=True)

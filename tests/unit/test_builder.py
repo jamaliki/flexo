@@ -12,6 +12,7 @@ from flexo.diagnostics import FlexoError
 from flexo.gallery import modelangelo_gnn, vertical_slice
 from flexo.geometry import Side
 from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec, TextRun
+from flexo.lint import lint_compilation
 from flexo.serialization import dump_figure, parse_figure
 from flexo.style import STYLES, VectorPreset
 from flexo.units import CellSpan, pt
@@ -487,6 +488,29 @@ def test_paint_lowers_into_one_scalar_property_per_part() -> None:
     assert parse_figure(yaml.safe_load(dump_figure(figure.spec))).node("m.mlp") == node
 
 
+def test_a_group_takes_the_same_three_paint_parts_a_node_does() -> None:
+    """A container has no property bag, so its paint travels as typed pairs."""
+
+    figure = Figure("paint", width=pt(240.0))
+    with figure.module("m", label="Module", paint={"label": "#9FE1CB", "fill": "#abc"}) as module:
+        module.mlp("mlp", label="MLP")
+        module.row("plain", paint=None)
+    group = figure.spec.group("m")
+    assert group.paint == (("fill", "#aabbcc"), ("label", "#9fe1cb"))
+    assert figure.spec.group("m.plain").paint == ()
+    assert parse_figure(yaml.safe_load(dump_figure(figure.spec))).group("m") == group
+
+
+def test_a_group_rejects_paint_it_cannot_apply() -> None:
+    figure = Figure("paint", width=pt(240.0))
+    with pytest.raises(ValueError, match="valid parts: fill, stroke, label"):
+        figure.module("bad", paint={"title": "#123456"})
+    with pytest.raises(ValueError, match="invalid colour"):
+        figure.module("worse", paint={"fill": "teal"})
+    with pytest.raises(ValueError, match="valid parts: fill, stroke, label"):
+        GroupSpec("direct", (), paint=(("body", "#123456"),))
+
+
 def test_motif_only_reaches_the_properties_when_it_is_off() -> None:
     figure = Figure("motifs", width=pt(240.0))
     with figure.module("m") as module:
@@ -761,3 +785,109 @@ def test_the_authoring_surface_is_reachable_from_the_top_level_package() -> None
     ):
         assert name in flexo.__all__, name
         assert getattr(flexo, name) is not None, name
+
+
+def test_attention_can_be_created_before_its_sources_exist() -> None:
+    """R27: q/k/v are optional, so a decoder may be authored before its encoder."""
+
+    with Figure("cross", width=pt(320.0)) as figure:
+        with figure.module("decoder") as module:
+            block = module.attention("xmha", label="Multi-Head\nAttention")
+        with figure.module("encoder") as module:
+            top = module.block("top", label="Add & Norm")
+        figure.net(src=top, sinks=[block.k, block.v], id="cross-kv")
+    semantic = figure.spec
+    assert block.ports == ("q", "k", "v", "output")
+    assert semantic.edges == (), "an unwired attention block authors no connectors"
+    assert tuple(str(target) for target in semantic.nets[0].targets) == (
+        "decoder.xmha.k",
+        "decoder.xmha.v",
+    )
+
+
+def test_attention_wires_only_the_sources_it_was_given() -> None:
+    with Figure("partial", width=pt(320.0)) as figure:  # noqa: SIM117
+        with figure.module("m") as module:
+            query = module.block("query", label="Q")
+            module.attention("mha", q=query)
+    assert [str(edge.target) for edge in figure.spec.edges] == ["m.mha.q"]
+
+
+def test_add_norm_names_both_of_its_arrivals_and_both_of_its_departures() -> None:
+    """R27: input/skip on the way in, output/branch on the way out."""
+
+    with Figure("residual", width=pt(320.0)) as figure:  # noqa: SIM117
+        with figure.module("m", layout="column") as module:
+            sublayer = module.block("sublayer", label="Feed Forward")
+            bypassed = module.block("bypassed", label="Embedding")
+            block = module.add_norm("an", label="Add & Norm", input=sublayer, skip=bypassed)
+    assert block.ports == ("input", "skip", "output", "branch")
+    semantic = figure.spec
+    assert [str(edge.target) for edge in semantic.edges] == ["m.an.input", "m.an.skip"]
+    assert all(port.auto_side for port in semantic.node("m.an").ports)
+
+
+def test_a_skip_edge_lands_on_the_skip_port_rather_than_crowding_the_input() -> None:
+    """The two arrivals get two ports, so neither route is dragged off its twin."""
+
+    with Figure("tower", width=pt(320.0)) as figure:  # noqa: SIM117
+        with figure.module("m", layout="column", gap="30pt") as module:
+            an = module.add_norm("an", label="Add & Norm", width="90pt")
+            sublayer = module.block("sublayer", label="Attention", width="90pt")
+            fork = module.node("fork", "junction")
+            module.connect(fork, sublayer)
+            module.connect(sublayer, an)
+            module.connect(fork.branch, an.skip, id="skip")
+    compiled = compile_figure(figure.spec)
+    node = compiled.fitted.node("m.an")
+    entries = {port.name: port.position for port in node.ports}
+    assert entries["input"] != entries["skip"]
+    report = lint_compilation(compiled)
+    assert not report.errors, report.format()
+
+
+def test_residual_prefers_a_component_s_own_skip_port() -> None:
+    with Figure("skip", width=pt(320.0)) as figure:  # noqa: SIM117
+        with figure.module("m", layout="column") as module:
+            source = module.block("source", label="Source")
+            target = module.add_norm("an", label="Add & Norm")
+            edge = module.residual(source, target)
+    assert str(edge.target) == "m.an.skip"
+    assert edge.role == "residual"
+
+
+def test_via_lowers_onto_an_edge_and_a_net_as_a_side() -> None:
+    """R27: one word about the corridor, on both authoring surfaces."""
+
+    with Figure("hints", width=pt(320.0)) as figure:
+        with figure.module("m", layout="column") as module:
+            first = module.block("first", label="First")
+            second = module.block("second", label="Second")
+            third = module.block("third", label="Third")
+        edge = figure.root.connect(first, second, id="round", via="west")
+        net = figure.net(src=first, sinks=[second, third], id="bus", via=Side.NORTH)
+        merged = figure.merge(sinks=[second, third], dst=first, id="join", via="south")
+    assert edge.via is Side.WEST
+    assert (net.via, merged.via) == (Side.NORTH, Side.SOUTH)
+    assert figure.spec.edges[0].via is Side.WEST
+
+
+def test_an_unknown_via_side_is_rejected_where_it_is_written() -> None:
+    figure = Figure("bad", width=pt(320.0))
+    with figure.module("m") as module:
+        first = module.block("first", label="First")
+        second = module.block("second", label="Second")
+    with pytest.raises(ValueError, match="unknown via side"):
+        module.connect(first, second, via="left")
+
+
+def test_a_net_may_not_place_its_rail_twice() -> None:
+    figure = Figure("twice", width=pt(320.0))
+    with figure.module("m") as module:
+        first = module.block("first", label="First")
+        second = module.block("second", label="Second")
+        third = module.block("third", label="Third")
+    with pytest.raises(ValueError, match="places its rail twice"):
+        figure.net(src=first, sinks=[second, third], rail="west", via="west")
+    with pytest.raises(ValueError, match="places its rail twice"):
+        figure.net(src=first, sinks=[second, third], rail_at=0.4, via="west")

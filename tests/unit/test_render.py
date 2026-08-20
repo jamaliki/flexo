@@ -8,11 +8,12 @@ from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
 from flexo.components import INSET_INK, motif_area, vector_grid
 from flexo.geometry import Side
-from flexo.ir.semantic import PortSpec
+from flexo.ir.semantic import PortSpec, TextRun
 from flexo.lint import lint_compilation
 from flexo.render_common import SHADOW_LAYERS
 from flexo.style import DEFAULT_PALETTE, GRAYSCALE_PALETTE, STYLES, Palette, VectorPreset
 from flexo.svg import SVG_NS, number
+from flexo.text import SHIFTED_SIZE, TextMeasurer
 from flexo.theme import retheme_svg
 from flexo.units import pt
 
@@ -369,6 +370,99 @@ def test_a_group_title_may_be_anchored_right() -> None:
         assert _element(left, element_id).attrib == _element(right, element_id).attrib
 
 
+_TITLE = (
+    TextRun("QK"),
+    TextRun("T", baseline_shift="super"),
+    TextRun("-attention", weight=700),
+)
+"""A group title that exercises every axis a run has: shift, weight, plain."""
+
+
+def _titled_figure(title: tuple[TextRun, ...] = _TITLE, **options: object) -> str:
+    figure = Figure("titled", width=pt(240.0))
+    with figure.module("m", label=title, **options) as module:
+        module.mlp("mlp", label="MLP")
+    return compile_figure(figure.spec).document.text
+
+
+def test_a_group_title_keeps_its_styled_runs() -> None:
+    """A title is styled text: a superscript must reach the SVG, not flatten.
+
+    Group titles used to be joined into one plain string, so ``QK^T`` came out as
+    ``QKT`` -- the one text object in the figure that silently dropped what its
+    author wrote.
+    """
+
+    title = _element(_titled_figure(), "m.label")
+    spans = list(title)
+    assert [span.text for span in spans] == ["QK", "T", "-attention"]
+    assert [span.get("baseline-shift") for span in spans] == [None, "super", None]
+    shifted = STYLES["paper"].typography.size.points * SHIFTED_SIZE
+    assert [span.get("font-size") for span in spans] == [None, number(shifted), None]
+
+
+def test_a_title_run_inherits_the_title_weight_unless_it_asks() -> None:
+    """The weight is declared once on the text object, so runs may inherit it.
+
+    Spelling ``font-weight="400"`` onto every run would unbold every title in
+    every figure -- which is why a run emits a weight only where its author
+    asked for one.
+    """
+
+    title = _element(_titled_figure(), "m.label")
+    assert title.get("font-weight") == str(STYLES["paper"].typography.title_weight)
+    weights = [span.get("font-weight") for span in title]
+    assert weights == [None, None, "700"], "only the bold run overrides the title"
+    # A component label declares no weight, so its plain runs stay unadorned.
+    plain = _element(_titled_figure(), "m.mlp.label")
+    assert plain.get("font-weight") is None
+    assert [span.get("font-weight") for span in plain] == [None]
+    assert [span.get("font-style") for span in plain] == [None]
+
+
+def test_a_group_takes_paint_the_way_a_component_does() -> None:
+    """``paint=`` has to reach the container body and its title, not just nodes."""
+
+    document = _titled_figure(paint={"fill": "#085041", "stroke": "#56bb9a", "label": "#9fe1cb"})
+    container = _element(document, "m.container")
+    assert container.get("fill") == "#085041"
+    assert container.get("stroke") == "#56bb9a"
+    assert container.get("data-flexo-fill") is None
+    assert container.get("data-flexo-stroke") is None
+    title = _element(document, "m.label")
+    assert title.get("fill") == "#9fe1cb"
+    assert title.get("data-flexo-fill") is None
+    # An overridden part carries no role, so retheme walks straight past it.
+    themed = retheme_svg(document, GRAYSCALE_PALETTE)
+    assert _element(themed, "m.container").get("fill") == "#085041"
+    assert _element(themed, "m.container").get("stroke") == "#56bb9a"
+    assert _element(themed, "m.label").get("fill") == "#9fe1cb"
+
+
+def test_a_group_part_left_out_keeps_its_role() -> None:
+    document = _titled_figure(paint={"fill": "#085041"})
+    container = _element(document, "m.container")
+    assert container.get("data-flexo-fill") is None
+    assert container.get("data-flexo-stroke") == "container-stroke"
+    assert container.get("stroke") == DEFAULT_PALETTE.get("container-stroke")
+    title = _element(document, "m.label")
+    assert title.get("data-flexo-fill") == "ink"
+    assert title.get("fill") == DEFAULT_PALETTE.get("ink")
+
+
+def test_group_paint_is_paint_only() -> None:
+    """Recolouring a container may not move it, or anything inside it."""
+
+    plain = _titled_figure()
+    painted = _titled_figure(paint={"fill": "#085041", "label": "#9fe1cb"})
+    for element_id in ("m.mlp.body", "m.mlp.label", "canvas.background"):
+        assert _element(plain, element_id).attrib == _element(painted, element_id).attrib
+    for name in ("x", "y", "width", "height", "rx"):
+        assert _element(plain, "m.container").get(name) == _element(
+            painted, "m.container"
+        ).get(name)
+
+
 def test_a_motif_may_be_suppressed_without_moving_anything() -> None:
     def _document(**options: object) -> str:
         figure = Figure("motifs", width=pt(260.0))
@@ -610,3 +704,44 @@ def test_every_motif_label_kind_draws_below_its_label_band() -> None:
         assert bottom <= area.bottom + 1e-6, f"{motif_id} spills past its area"
         assert left >= area.x - 1e-6 and right <= area.right + 1e-6, f"{motif_id} too wide"
     assert lint_compilation(compilation).ok
+
+
+def test_a_title_band_is_measured_at_the_weight_the_title_draws_at() -> None:
+    """R27: measured at 400 and drawn at 600 reserved a band too narrow.
+
+    The title is the one text object whose weight comes from the style rather
+    than from its runs, so it was the one measured at a weight it never used.
+    """
+
+    title = (TextRun("Sequence module"),)
+    figure = Figure("band", width=pt(240.0))
+    with figure.module("m", label=title) as module:
+        module.block("tiny", label="x", width="20pt")
+    compilation = compile_figure(figure.spec)
+    metrics = compilation.measured.group("m").label
+    measurer = TextMeasurer(_STYLE.typography)
+    assert metrics.width == pytest.approx(
+        measurer.measure(title, weight=_STYLE.typography.title_weight).width
+    )
+    assert metrics.width > measurer.measure(title).width
+    # And the band that measurement reserves holds the words it is measured for.
+    module_bounds = compilation.fitted.group("m").bounds
+    padding = compilation.measured.group("m").spec.layout.resolved_padding(
+        _STYLE.group_padding
+    )
+    assert module_bounds.width >= metrics.width + padding.horizontal
+    report = lint_compilation(compilation)
+    assert not report.errors, report.format()
+
+
+def test_a_run_that_begins_with_a_space_still_sets_one() -> None:
+    """XML strips a tspan's leading whitespace, so the run that owns it says preserve."""
+
+    space = "{http://www.w3.org/XML/1998/namespace}space"
+    title = (TextRun("QK", weight=700), TextRun(" module"))
+    spans = list(_element(_titled_figure(title), "m.label"))
+    assert [span.text for span in spans] == ["QK", " module"]
+    assert [span.get(space) for span in spans] == [None, "preserve"]
+    # Nothing else gains the attribute: a run with no edge whitespace is unchanged.
+    plain = list(_element(_titled_figure(), "m.label"))
+    assert [span.get(space) for span in plain] == [None, None, None]

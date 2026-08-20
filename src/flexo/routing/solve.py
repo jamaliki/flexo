@@ -5,8 +5,8 @@ from __future__ import annotations
 from itertools import pairwise
 
 from flexo.components import TRANSPARENT_KINDS, route_clearance
-from flexo.diagnostics import Diagnostic, FlexoError
-from flexo.geometry import Point, Rect, Segment, segments
+from flexo.diagnostics import Diagnostic, FlexoError, Severity
+from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.hierarchy import routing_boundary
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.routed import RoutedEdge, RoutedFigure
@@ -28,7 +28,7 @@ from flexo.routing.nudge import (
     rebuild_figure,
     simplify_polyline,
 )
-from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
+from flexo.routing.visibility import PathCosts, SideBias, shortest_orthogonal_path
 from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer
 
@@ -191,6 +191,13 @@ def _route_edge(
         separation=style.port_spacing.points,
         clearance=clearance,
     )
+    region = Rect.union(
+        (
+            Rect.from_points(source_port.position, target_port.position),
+            Rect.from_points(source_escape, target_escape),
+        )
+    )
+    bias = None if edge.via is None else SideBias.of(edge.via, region)
     local_occupied = occupied
     last_leg = len(anchors) - 2
     for position, (start, end) in enumerate(pairwise(anchors)):
@@ -204,6 +211,7 @@ def _route_edge(
             confined=confined,
             departure=source_side.horizontal if position == 0 else None,
             arrival=target_side.horizontal if position == last_leg else None,
+            bias=bias,
         )
         if leg is None:
             raise FlexoError(
@@ -235,7 +243,74 @@ def _route_edge(
     label_position = (
         edge_label_position(centerline, label_metrics, style) if label_metrics is not None else None
     )
-    return RoutedEdge(edge, centerline, shaft, label_metrics, label_position)
+    return RoutedEdge(
+        edge,
+        centerline,
+        shaft,
+        label_metrics,
+        label_position,
+        _via_diagnostics(edge, centerline, bias),
+    )
+
+
+_VIA_TOLERANCE = 0.5
+"""How far past its region a run may stray before it counts as taking that side.
+
+Half a point: a stub that ends exactly on the region edge, or a lane nudged off
+an obstacle by a fraction, has not chosen a corridor.
+"""
+
+_OPPOSITE = {
+    Side.NORTH: Side.SOUTH,
+    Side.SOUTH: Side.NORTH,
+    Side.EAST: Side.WEST,
+    Side.WEST: Side.EAST,
+}
+
+
+def _via_diagnostics(
+    edge: EdgeSpec,
+    centerline: tuple[Point, ...],
+    bias: SideBias | None,
+) -> tuple[Diagnostic, ...]:
+    """Say out loud that an authored ``via`` had to give way to the geometry.
+
+    The hint is honoured whenever the route keeps out of the corridor it refused
+    -- including the ordinary case of a route that never leaves the region
+    between its endpoints at all, which needed no corridor. It is clamped only
+    when every point of detour ended up on the wrong side, and then the warning
+    names the side the route actually took, the way a clamped ``rail_at`` names
+    the fraction it reached.
+    """
+
+    if bias is None or edge.via is None:
+        return ()
+    favoured = 0.0
+    refused = 0.0
+    mirror = SideBias(_OPPOSITE[bias.side], bias.low, bias.high)
+    for segment in segments(centerline):
+        coordinate = (
+            (segment.start.x + segment.end.x) / 2.0
+            if bias.vertical
+            else (segment.start.y + segment.end.y) / 2.0
+        )
+        if bias.rejected(coordinate, _VIA_TOLERANCE):
+            refused += segment.length
+        elif mirror.rejected(coordinate, _VIA_TOLERANCE):
+            favoured += segment.length
+    if refused <= _VIA_TOLERANCE or favoured > _VIA_TOLERANCE:
+        return ()
+    achieved = _OPPOSITE[edge.via]
+    return (
+        Diagnostic(
+            "routing.via.clamped",
+            f"Requested via {edge.via.value} leaves no corridor; the route runs "
+            f"{achieved.value} of its endpoints instead.",
+            Severity.WARNING,
+            entity_id=edge.id,
+            hint=f"Open a corridor {edge.via.value} of the endpoints, or drop the hint.",
+        ),
+    )
 
 
 def _forced_points(

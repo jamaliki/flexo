@@ -1,4 +1,4 @@
-"""Shared paint metadata and component-body primitives."""
+"""Shared paint metadata, text setting, and component-body primitives."""
 
 from __future__ import annotations
 
@@ -6,14 +6,24 @@ import xml.etree.ElementTree as ET
 
 from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
-from flexo.ir.semantic import NodeSpec
-from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette
+from flexo.ir.measured import TextMetrics
+from flexo.ir.semantic import GroupSpec, NodeSpec
+from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette, TypographyStyle
 from flexo.svg import element
+from flexo.text import DEFAULT_RUN_WEIGHT, SHIFTED_SIZE
 
 
-def paint_override(spec: NodeSpec, part: str) -> str | None:
-    """The author's literal colour for one part of ``spec``, if any."""
+def paint_override(spec: NodeSpec | GroupSpec, part: str) -> str | None:
+    """The author's literal colour for one part of ``spec``, if any.
 
+    A component carries its parts as ``paint-<part>`` properties -- a node
+    property holds a scalar and never a mapping -- while a group, which has no
+    property bag, carries them as its own typed ``paint`` pairs. Both answer the
+    same question, so both answer it here.
+    """
+
+    if isinstance(spec, GroupSpec):
+        return dict(spec.paint).get(part)
     value = spec.property(f"{PAINT_PROPERTY_PREFIX}{part}")
     return None if value is None else str(value)
 
@@ -51,6 +61,87 @@ def paint_attributes(
     if stroke_width is not None:
         values["stroke__width"] = stroke_width
     return values
+
+
+_XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+"""The attribute that stops SVG from throwing away a run's own leading space.
+
+XML whitespace processing strips the leading and trailing whitespace of every
+``tspan`` chunk, so ``(TextRun("QK"), TextRun(" module", italic=True))`` -- two
+runs because their styles differ -- sets as ``QKmodule``: a space the author
+wrote, measured into the width, and then not drawn. Marking *that* run
+``xml:space="preserve"`` is the whole fix, and it goes on the run rather than on
+the text object because the document is indented: preserving whitespace around
+the tspans would turn the indentation itself into ink.
+"""
+
+
+def render_runs(
+    parent: ET.Element,
+    element_id: str,
+    metrics: TextMetrics,
+    *,
+    x: float,
+    y: float,
+    typography: TypographyStyle,
+    palette: Palette,
+    fill_role: str,
+    fill: str | None = None,
+    anchor: str | None = None,
+    weight: int | None = None,
+) -> ET.Element | None:
+    """One text object, one ``tspan`` per styled run -- wherever Flexo sets text.
+
+    Component labels, connector captions, and group titles are the same object:
+    measured runs set on a baseline. They differ only in where they sit and what
+    the text object itself declares -- a title carries the style's
+    ``title_weight``, a caption paints ``muted-ink`` -- so one helper draws all
+    three, and a superscript survives into every one of them rather than into
+    whichever call site remembered to loop over the runs.
+
+    A run emits only what its author actually asked for: a weight other than the
+    ``TextRun`` default, ``font-style`` where it is italic,
+    ``baseline-shift`` with the reduced ``font-size`` where it is shifted, and
+    ``xml:space="preserve"`` where its own text begins or ends in a space that
+    XML would otherwise discard. Inheritance is the point rather than economy: a
+    group title declares ``title_weight`` once on the text object, so a run
+    spelling out ``font-weight="400"`` on top of it would silently unbold the
+    title it belongs to -- and it is why ``TextMeasurer.measure`` takes the same
+    weight, so the words are measured at the weight they inherit.
+    """
+
+    if not metrics.lines:
+        return None
+    size = typography.size.points
+    text = element(
+        parent,
+        "text",
+        id=element_id,
+        x=x,
+        y=y,
+        text__anchor=anchor,
+        font__family=typography.family,
+        font__size=size,
+        font__weight=weight,
+        **paint_attributes(palette=palette, fill_role=fill_role, fill=fill),
+    )
+    for line_index, line in enumerate(metrics.lines):
+        for run_index, run in enumerate(line.runs):
+            shifted = run.baseline_shift != "normal"
+            span = element(
+                text,
+                "tspan",
+                x=x if run_index == 0 else None,
+                dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
+                font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
+                font__style="italic" if run.italic else None,
+                baseline__shift=run.baseline_shift if shifted else None,
+                font__size=size * SHIFTED_SIZE if shifted else None,
+            )
+            span.text = run.text
+            if run.text != run.text.strip():
+                span.set(_XML_SPACE, "preserve")
+    return text
 
 
 SHADOW_LAYERS = 5
