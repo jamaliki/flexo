@@ -478,6 +478,20 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
     return bounds.y + bounds.height / 2.0 - metrics.height / 2.0 + metrics.baseline
 
 
+CAPTION_ROLE = "caption"
+"""Role that paints a node's words as secondary ink rather than as a statement.
+
+The name of a thing paints ``ink``; a note *about* it paints ``muted-ink``, which
+is already how a connector's caption is painted. A composite that grows its own
+furniture -- the Q/K/V captions under an ``attention(..., vectors=...)`` glyph row
+-- says so with this role rather than with a literal colour, so the words are
+still secondary in every palette and ``flexo retheme`` still reaches them.
+
+Only a node that asks for it is affected: a ``vector()`` caption an author wrote
+keeps the ink it always had.
+"""
+
+
 def _render_label(
     parent: ET.Element,
     node: FittedNode,
@@ -493,7 +507,7 @@ def _render_label(
         y=_label_baseline(node, style),
         typography=style.typography,
         palette=palette,
-        fill_role="ink",
+        fill_role="muted-ink" if spec.role == CAPTION_ROLE else "ink",
         # Author paint carries no role, so retheme leaves it alone (render_common).
         fill=paint_override(spec, "label"),
         anchor="middle",

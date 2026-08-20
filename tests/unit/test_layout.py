@@ -5,7 +5,12 @@ from dataclasses import replace
 import pytest
 
 from flexo.builder import Figure
-from flexo.components import TRANSPARENT_KINDS, route_clearance
+from flexo.components import (
+    TRANSPARENT_KINDS,
+    attachment_lane_tracks,
+    component_port_offsets,
+    route_clearance,
+)
 from flexo.diagnostics import FlexoError, Severity
 from flexo.gallery import gallery_figure
 from flexo.geometry import Side, segments
@@ -1223,3 +1228,30 @@ def test_no_connector_in_the_panel_touches_a_caption() -> None:
         for segment in segments(run):
             for caption in captions:
                 assert not segment.intersects_rect_interior(caption)
+
+
+def test_attachment_lane_tracks_put_a_lane_centre_on_every_offset() -> None:
+    """R28: the arithmetic a figure used to write as a magic inter-glyph gap."""
+
+    offsets = component_port_offsets("attention", ("q", "k", "v"))
+    assert offsets == (0.24, 0.5, 0.76)
+    tracks = attachment_lane_tracks(offsets, 120.0)
+    assert len(tracks) == 7
+    assert sum(tracks) == pytest.approx(120.0)
+    lanes = tracks[1::2]
+    assert lanes == pytest.approx((31.2, 31.2, 31.2)), "one width, the widest that stays disjoint"
+    edges = [0.0]
+    for track in tracks:
+        edges.append(edges[-1] + track)
+    centres = [(edges[index], edges[index + 1]) for index in range(1, len(tracks), 2)]
+    for (low, high), offset in zip(centres, offsets, strict=True):
+        assert (low + high) / 2.0 == pytest.approx(offset * 120.0)
+
+
+def test_attachment_lanes_reject_offsets_that_cannot_hold_one() -> None:
+    with pytest.raises(ValueError, match="must ascend"):
+        attachment_lane_tracks((0.5, 0.24), 120.0)
+    with pytest.raises(ValueError, match="leave no room"):
+        attachment_lane_tracks((0.0, 0.5), 120.0)
+    with pytest.raises(ValueError, match="positive width"):
+        attachment_lane_tracks((0.24, 0.76), 0.0)
