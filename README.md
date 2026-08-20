@@ -222,8 +222,21 @@ block's skip. Sending two values into one `input` puts two arrowheads on one poi
 and a `routing.track.separation` error for the pair. Naming the second arrival is
 the fix, and `add_norm(input=..., skip=...)` says it at the point of creation.
 `residual()` prefers a `residual` or `skip` port automatically for the same
-reason. All four ports are auto-sided, so a tower that reads upward gets them on
-the edges its ink actually uses with no port table written down.
+reason.
+
+`input` and `output` are auto-sided, so a tower that reads upward gets its spine
+on the edges its ink actually uses with no port table written down. `skip` and
+`branch` are **pinned east** instead: a residual is a convention, not a per-node
+optimisation, and auto-siding sent one tower's bypass up the right margin and its
+neighbour's up the left, so a reader who had learnt "the residual is the wire on
+the right" had to learn it again per tower. Both stay adaptive — each slides
+along the east edge to meet its counterpart — and they take two lanes there,
+`skip` low and `branch` high, because a bypass arrives from below the block it
+rejoins and leaves for the one above. The consequence to plan for is room: a
+pinned bypass routes *outside* the block, so a content-hugging container needs
+side padding (the reference Transformer's towers carry `34pt`) or routing has
+nowhere to put the corridor. An author who wants a left-handed figure writes
+`ports=` and gets it, exactly as an explicit port table has always worked.
 
 #### Ports pick the side they face
 
@@ -240,6 +253,10 @@ The rules, in full:
 - **an authored `PortSpec` is pinned.** Writing the side down is the choice, and
   nothing overrules it — neither for that port nor for the offset and adaptivity
   beside it. So is a port named by an edge carrying a `depart`/`arrive` hint.
+- **a port whose side *is* the convention is pinned by the grammar.** `add_norm`'s
+  `skip` and `branch` are the case in the box: a residual that changed hands from
+  tower to tower would make the reader re-learn the figure, so those two are born
+  east and stay east while the spine beside them auto-sides.
 - **a net votes once, for its trunk.** A stem runs to the shared rail, not to the
   far port, so a wide fan-out does not drag its source port sideways toward
   whichever head happens to sit furthest out.
@@ -312,16 +329,18 @@ with flexo.Figure("presets", width="double-column") as figure:
 ```
 
 A ramp says *ordered*, which is a claim about the data. Real activations are not
-ordered, so `order="shuffled"` permutes each column's shades and the glyph reads
-as a feature vector rather than a gradient:
+ordered, so a preset **shuffles by default**: `order="shuffled"` permutes each
+column's shades and the glyph reads as a feature vector. The gradient is the
+special case, and it is asked for by name:
 
 ```python
 import flexo
 
-preset = flexo.VectorPreset("#e2703a", "1x3", order="shuffled")
-with flexo.Figure("shuffled", width="double-column") as figure:
+with flexo.Figure("ordered", width="double-column") as figure:
     with figure.module("m", label="Attention") as module:
-        module.vector("q", label="Q", preset=preset)
+        module.vector("q", label="Q", preset=flexo.VectorPreset("#e2703a", "1x3"))
+        ramped = flexo.VectorPreset("#e2703a", "1x3", order="ramp")
+        module.vector("scale", label="Scale", preset=ramped)
 ```
 
 The permutation is deterministic: it is drawn from `seed` (default `0`), so one
@@ -507,10 +526,13 @@ with flexo.Figure("gnn", width="presentation", layout=layout) as figure:
 ```
 
 No port table appears in that sketch. The spine reads downward, so the spine
-blocks' defaulted ports face north and south on their own (see *Ports pick the
-side they face*); the one port that has to be named is the `feedback` port a
+blocks' `input` and `output` face north and south on their own (see *Ports pick
+the side they face*); the one port that has to be named is the `feedback` port a
 residual rail arrives on, because that rail is routed through an authored lane and
-so has no counterpart to face.
+so has no counterpart to face. A spine block whose bypass arrives from an
+authored lane rather than from the block below names its arrival too — the
+gallery's `add-norm` puts `skip` on the north, which is a port table overruling
+the east-pinned default on purpose.
 
 Why the alternation matters: a spine block level with the *top* of the module it
 feeds has no reachable east side, so its feedback rail is forced up and over the

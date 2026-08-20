@@ -994,3 +994,96 @@ of rail to the junction under V and the two short verticals into V and K. The
 canvas is 53pt shorter than the round-10 render (915.6 from 969.1), because the
 caption bands came out of the towers and the glyph rows are now exactly as tall as
 their cells.
+
+## R31. A preset that ramps by default lies about its data (round 12)
+
+`VectorPreset.order` defaulted to `"ramp"`, so the shortest way to write a vector
+glyph -- one base colour and a topology -- produced a light-to-dark gradient. A
+gradient is a claim: it says the cells are *ordered*, that cell 1 is less than
+cell 2 is less than cell 3. That is true of a positional index or a sorted
+similarity score and false of every activation a paper draws Q, K and V for. The
+default was therefore the wrong way round: the common case had to be asked for by
+name (`order="shuffled"`) and the rare case came for free.
+
+The default is now `"shuffled"`. Nothing about the mechanism changes -- the
+permutation is still drawn per column from `seed`, still rejects an identity draw,
+still encodes byte-for-byte the same on every rebuild -- only which of the two an
+author gets for free. `order="ramp"` is how the gradient is asked for now, and it
+is still exactly the ramp: `shade_ramp`'s own output, monotone light-to-dark.
+
+The blast radius is small by construction, because a preset is literal author
+paint and both gallery figures colour their vectors with palette *ramp roles*
+instead (`ramp-node`, `ramp-kv`, ...). Roles are untouched: a role still means the
+palette's ramp, which is what makes `flexo retheme` work. Only figures that
+authored a `VectorPreset` move, and in the corpus that is the Transformer (whose
+Q/K/V triples now read as feature vectors, which is what the paper's own glyphs
+depict) and `examples/attention_module.py`.
+
+That example was rendering the ramp as its main figure and the shuffle as a named
+variant. It is now the other way up: `attention-module` takes the default and
+`attention-module-ramp` asks for `order="ramp"`, so the pair still demonstrates
+both orders and the one shown first is the one an author will get.
+
+## R32. A residual that changes hands from tower to tower (round 12)
+
+`add-norm`'s `skip` and `branch` were auto-side eligible, so each one picked the
+edge facing whatever it happened to be wired to. Per node that is the right
+answer; per *figure* it is not. In the Transformer the decoder's three skips bowed
+out to the east and the encoder's two were pushed west, and the encoder needed a
+hand-written `LEFT_BRANCH` port table plus a `via="west"` to come out clean at
+all. A reader who has learnt "the residual is the wire on the right" then has to
+learn the encoder separately -- the figure carries two conventions for one
+concept.
+
+Both ports are now pinned to `Side.EAST`. They stay adaptive, so each still slides
+along that edge to meet its counterpart, and the spine beside them (`input`,
+`output`) still auto-sides, so a tower that reads upward still gets north and
+south for free. What is gone is the per-node choice on the one relationship whose
+whole value is being the same everywhere.
+
+Sharing a side forced one further decision. Both ports sat at offset 0.8 on
+opposite edges, where the collision could not happen; on one edge that is a single
+point, and an arrival and a departure on a single point is the two-arrowheads
+defect `_RESIDUAL_TARGET` exists to prevent -- it reported as
+`routing.track.separation` for the overlapping jogs the moment the pin landed.
+The pair now takes two lanes on the east edge, `skip` at 0.8 and `branch` at 0.2,
+which is also the way the wire travels: a bypass arrives from *below* the block it
+rejoins and leaves for the one *above*, so the low lane is the arrival and the
+high lane the departure. It is the same 0.8/0.2 split the retired `LEFT_BRANCH`
+table had already arrived at by hand.
+
+The consequence an author has to plan for is room. A pinned bypass routes
+*outside* the block it rejoins, so a content-hugging container leaves the corridor
+nowhere to go and routing fails with `routing.no-path`; about 22pt of side padding
+is enough, and the reference Transformer's towers already carry 34pt. `ports=`
+still overrides the whole table, which is how the gallery's spine blocks keep
+`skip` on the north for a rail that arrives from an authored lane, and how an
+author who wants a left-handed figure gets one.
+
+### Acceptance (round 12)
+
+`uv run pytest` green (349, from 346: three added -- the shuffled default with
+`order="ramp"` still yielding the monotone ramp, a mirrored pair of towers whose
+bypasses both leave east with the arrival below the departure, and an explicit
+port table still buying a left-handed residual -- and three rewritten to pin the
+order they were assuming or to give a default residual its corridor). `ruff check`
+clean.
+
+`flexo gallery` exits 0 with zero lint errors and the one pre-existing
+`routing.connector.crossing` warning, unchanged. Both gallery figures are
+**byte-identical** to their pre-edit baselines in every SVG and PNG: they paint
+vectors from ramp roles rather than presets, and they author `add-norm` ports
+explicitly, so neither default reaches them.
+
+**The Transformer figure still reports `ok: no diagnostics`** -- zero errors and
+zero warnings -- with `LEFT_BRANCH` and the `via="west"` hint both deleted and
+nothing put in their place. All five skips now bow east: each leaves its block's
+east edge high, runs up the margin inside its own tower, and enters the next Add &
+Norm's east edge low. The encoder reads as the decoder does. Nothing crosses the
+central spine, and the encoder-to-decoder run into V and K is untouched -- the
+skip corridors sit outboard of it. The Q, K, V glyphs in all three attention
+blocks now read as feature vectors rather than gradients.
+
+`examples/attention_module.py` renders `attention-module` (the default, shuffled)
+and `attention-module-ramp` (`order="ramp"`), both `ok: no diagnostics`, at the
+same 180.0mm x 77.4mm as before: the change is paint, not geometry.
