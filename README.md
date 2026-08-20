@@ -105,8 +105,8 @@ authored inside out.
 #### Attention that grows its own Q, K, V
 
 `vectors=` draws the three values an attention block reads as vector glyphs
-underneath it, the way the Transformer paper does — one captioned cell stack per
-port, each **centred exactly under the port it feeds**:
+underneath it, the way the Transformer paper does — one cell stack per port, each
+**centred exactly under the port it feeds**, captioned to one side:
 
 ```python
 import flexo
@@ -157,10 +157,24 @@ Both of a glyph's ports are pinned, and that is the point: north is the drop int
 the attention port above it, south is the feed. A value computed off to one side
 travels to below its glyph and comes up, rather than entering between two glyphs
 — a lane is only as wide as the port spacing it was cut from, so two runs
-entering sideways would have to thread the same gap at the same height. The gap
-between a stack and its caption is `arrival_clearance + caption_clearance`, which
-is the room that approach from underneath needs; it is why these captions sit a
-little further from their stack than a plain `vector()` caption does.
+entering sideways would have to thread the same gap at the same height.
+
+**The caption stands beside its stack**, not under it, and that follows from the
+same sentence: the corridor under a glyph is the only approach its feed has, so a
+caption parked in it makes every arriving arrow hook around the words. Beside, the
+feeds are dead-straight verticals. The room is the lane's own surplus — a lane is
+wider than the stack in it — so the caption takes the half-lane it stands in less
+one `caption_clearance` of air, the glyph reserves that same room on the stack's
+other side as padding, and the whole glyph comes out exactly one lane wide and
+symmetric about its cells. The stack therefore keeps the port's x whichever side
+the words take, and it is one side for all three: three captions leaning the same
+way read as a convention, a mirrored pair around a middle glyph reads as an
+accident. A lane too narrow to hold a caption beside the stack (an attention
+pinned under about 56pt) puts it back underneath, `arrival_clearance +
+caption_clearance` down, so the approach is at least still open.
+
+A standalone `vector()` keeps its caption below, as it always has: it is wired
+from the side and has no approach from underneath to protect.
 
 Lanes are filled in **port-offset order**, not in q/k/v order, so an authored
 `ports=` that reads the value on the left puts that glyph on the left too — which
@@ -177,9 +191,9 @@ CROSS_PORTS = (
 ```
 
 In a ports-aligned parent the composite answers with the **block**, so a row of
-towers lines up on the attention boxes rather than on the glyphs and captions
-hanging beneath them — the same principle as a `vector()` answering with its cell
-stack rather than with its caption. See
+towers lines up on the attention boxes rather than on the glyph row hanging
+beneath them — the same principle as a `vector()` answering with its cell stack
+rather than with its caption. See
 [`examples/transformer.py`](examples/transformer.py) for all three attention
 blocks of a Transformer authored this way.
 
@@ -564,6 +578,15 @@ caption is written above the run, so halving it would draw the rail through the
 words, and such a rail stays at the end of the corridor and hands the whole run to
 the caption.
 
+A trunk that leaves **along** the axis its rail runs on — an encoder's output
+crossing the page into a decoder's cross-attention — halves its own run the same
+way. Such a trunk draws a Z: a stretch along the port axis, a crossbar over to the
+rail, and the rail carrying on the same way. The crossbar defaults to the middle of
+the run between the hub's escape and the first stem it passes, so the two arms are
+arms of one step instead of a stub, a long crossbar drawn against the box the
+trunk just left, and the whole run beyond it. `rail`, `rail_at` and `via` place
+the net themselves, and switch the default off.
+
 Two hints place and mark that joint:
 
 ```python
@@ -586,6 +609,24 @@ obeying or failing. `joint="arrow"` then ends the joining ink in an arrowhead on
 standoff short of the run it points into, leaving the trunk unbroken and dropping
 the dot that would otherwise mark the branch; `joint="dot"` insists on the dot
 even under `junction_dots="never"`.
+
+#### Single-jog routes cross in the middle
+
+Two ports that do not line up give a **Z**: a run out of the source, one crossbar,
+and a run into the target the same way. Any coordinate in the span between the two
+ports' clearance boundaries draws that shape with the same length and the same one
+elbow, so the search has no reason to prefer one — and picking whichever it reached
+first leaves the crossbar against an endpoint, which reads as an L with a kink in
+it rather than as a step across. The default is the **midpoint of the free span**:
+the stretch between those two clearance boundaries, less anything an obstacle
+standing across the crossbar takes out of it.
+
+A **C** — a route whose two arms double back over each other, wrapping a module or
+running up a margin — keeps its corridor. Its arms share no span to be centred in,
+and the corridor it took was chosen against the whole figure rather than between
+two ports. So does any route the author aimed with `lane=`, a waypoint, or `via=`,
+and any pair of parallel jogs a lane apart: balancing never overrides a hint, and
+never pulls two crossings onto one coordinate.
 
 #### `via=`: which side a route should keep to
 
