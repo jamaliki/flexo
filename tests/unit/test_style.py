@@ -100,9 +100,10 @@ def test_vector_preset_rejects_an_unreadable_topology() -> None:
 
 
 def test_vector_preset_takes_one_base_per_column_or_one_for_all() -> None:
-    broadcast = VectorPreset(("#4a6cb0",), "2x3").column_shades()
+    # Ramped, so the shades a base derives are readable straight off the ramp.
+    broadcast = VectorPreset(("#4a6cb0",), "2x3", order="ramp").column_shades()
     assert broadcast[0] == broadcast[1] == shade_ramp("#4a6cb0", 3)
-    per_column = VectorPreset(("#d0568c", "#7fae3f"), "2x3").column_shades()
+    per_column = VectorPreset(("#d0568c", "#7fae3f"), "2x3", order="ramp").column_shades()
     assert per_column == (shade_ramp("#d0568c", 3), shade_ramp("#7fae3f", 3))
     with pytest.raises(ValueError, match="base colours"):
         VectorPreset(("#d0568c", "#7fae3f", "#4a6cb0"), "2x3")
@@ -180,7 +181,7 @@ def test_shade_ramp_rejects_limits_outside_the_unit_interval() -> None:
 
 
 def test_vector_preset_plumbs_its_limits_into_every_column() -> None:
-    preset = VectorPreset(("#d0568c", "#7fae3f"), "2x3", tint=0.35, shade=0.5)
+    preset = VectorPreset(("#d0568c", "#7fae3f"), "2x3", order="ramp", tint=0.35, shade=0.5)
     assert preset.column_shades() == (
         shade_ramp("#d0568c", 3, tint=0.35, shade=0.5),
         shade_ramp("#7fae3f", 3, tint=0.35, shade=0.5),
@@ -241,5 +242,18 @@ def test_a_seed_changes_the_permutation() -> None:
 def test_vector_preset_rejects_an_unknown_shade_order() -> None:
     with pytest.raises(ValueError, match="unknown vector shade order"):
         VectorPreset("#4a6cb0", "1x3", order="gradient")  # type: ignore[arg-type]
-    assert VectorPreset("#4a6cb0", "1x3").order == "ramp"
-    assert VectorPreset("#4a6cb0", "1x3").column_shades() == (shade_ramp("#4a6cb0", 3),)
+
+
+def test_a_preset_shuffles_unless_it_is_asked_for_the_ramp() -> None:
+    """The default is the feature vector; the gradient is asked for by name."""
+
+    default = VectorPreset("#4a6cb0", "1x3")
+    assert default.order == "shuffled"
+    (column,) = default.column_shades()
+    assert column != shade_ramp("#4a6cb0", 3)
+    assert sorted(column) == sorted(shade_ramp("#4a6cb0", 3))
+    ramped = VectorPreset("#4a6cb0", "1x3", order="ramp")
+    assert ramped.column_shades() == (shade_ramp("#4a6cb0", 3),)
+    # Monotone light-to-dark, which is the whole claim "ramp" makes.
+    weights = [_channel_sum(shade) for shade in ramped.column_shades()[0]]
+    assert weights == sorted(weights, reverse=True)
