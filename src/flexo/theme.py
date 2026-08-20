@@ -6,7 +6,7 @@ import json
 import xml.etree.ElementTree as ET
 
 from flexo.style import Palette
-from flexo.svg import SVG_NS
+from flexo.svg import SVG_NS, xml_document
 
 
 def retheme_svg(svg_text: str, palette: Palette) -> str:
@@ -27,6 +27,4 @@ def retheme_svg(svg_text: str, palette: Palette) -> str:
             metadata.text = json.dumps(value, sort_keys=True, separators=(",", ":"))
         except json.JSONDecodeError:
             pass
-    ET.indent(root, space="  ")
-    xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'
+    return xml_document(root)

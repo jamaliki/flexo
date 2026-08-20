@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import pytest
 import yaml
 
+import flexo
 from flexo.builder import Figure, NodeHandle
 from flexo.compiler import Compilation, compile_figure
 from flexo.diagnostics import FlexoError
@@ -542,3 +543,221 @@ def test_only_a_merge_may_join_with_an_arrowhead() -> None:
     with pytest.raises(ValueError, match="only a merge has"):
         figure.net(src=source, sinks=[first, second], joint="arrow")
     assert figure.net(src=source, sinks=[first, second], joint="dot", id="shared").joint == "dot"
+
+
+_WRAPPERS = (
+    "block",
+    "matrix",
+    "sequence",
+    "graph",
+    "inset",
+    "tensor",
+    "feature_strip",
+    "add_norm",
+    "prediction",
+    "loss",
+    "mlp",
+    "cnn",
+)
+
+
+@pytest.mark.parametrize("wrapper", _WRAPPERS)
+def test_every_component_factory_takes_input_and_inputs(wrapper: str) -> None:
+    """R23: one way to wire a component, whichever factory made it."""
+
+    for keyword in ("input", "inputs"):
+        with Figure("uniform", width=pt(240)) as figure, figure.module("m", gap="20pt") as module:
+            upstream = module.block("upstream", label="Up")
+            value = upstream if keyword == "input" else (upstream,)
+            getattr(module, wrapper)("target", **{keyword: value})
+        (edge,) = figure.spec.edges
+        assert str(edge.source) == "m.upstream.output"
+        assert str(edge.target) == "m.target.input"
+
+
+def test_node_itself_takes_input_and_inputs() -> None:
+    """The factories are conveniences over ``node``, so ``node`` accepts them too."""
+
+    with Figure("wired", width=pt(300)) as figure, figure.module("m", gap="20pt") as module:
+        first = module.block("first", label="One")
+        second = module.block("second", label="Two")
+        module.node("concat", "concat", inputs=(first, second))
+        module.node("sink", "block", input=first)
+    wired = {(str(edge.source), str(edge.target)) for edge in figure.spec.edges}
+    assert wired == {
+        ("m.first.output", "m.concat.input1"),
+        ("m.second.output", "m.concat.input2"),
+        ("m.first.output", "m.sink.input"),
+    }
+
+
+def test_several_inputs_share_one_port_when_the_component_has_only_one() -> None:
+    with Figure("fan-in", width=pt(300)) as figure, figure.module("m", gap="20pt") as module:
+        first = module.block("first", label="One")
+        second = module.block("second", label="Two")
+        module.add_norm("norm", inputs=(first, second))
+    assert [str(edge.target) for edge in figure.spec.edges] == [
+        "m.norm.input",
+        "m.norm.input",
+    ]
+
+
+def test_wiring_a_component_with_no_input_port_says_which_ports_it_has() -> None:
+    figure = Figure("bad", width=pt(240))
+    with figure.module("m") as module:
+        source = module.block("source", label="Source")
+        with pytest.raises(ValueError, match="no \"input\" port"):
+            module.attention("attn", q=source, k=source, v=source, input=source)
+
+
+def test_authored_ports_win_over_the_ones_a_factory_would_compute() -> None:
+    """``mlp(ports=...)`` used to raise "multiple values for keyword argument"."""
+
+    ports = (
+        PortSpec("input", Side.NORTH, adaptive=True),
+        PortSpec("output", Side.SOUTH, adaptive=True),
+    )
+    with Figure("ports", width=pt(240)) as figure, figure.module("m", gap="20pt") as module:
+        source = module.block("source", label="Source")
+        head = module.mlp("head", ports=ports, input=source)
+        module.cnn("conv", ports=ports, input=source)
+    assert isinstance(head, NodeHandle) and head.ports == ("input", "output")
+    for node_id in ("m.head", "m.conv"):
+        assert figure.spec.node(node_id).ports == ports
+    assert [str(edge.target) for edge in figure.spec.edges] == ["m.head.input", "m.conv.input"]
+
+
+def test_a_factory_computes_its_ports_only_when_the_author_gave_none() -> None:
+    with Figure("computed", width=pt(300)) as figure, figure.module("m", gap="20pt") as module:
+        first = module.block("first", label="One")
+        second = module.block("second", label="Two")
+        module.mlp("head", inputs=(first, second))
+    names = [port.name for port in figure.spec.node("m.head").ports]
+    assert names == ["input1", "input2", "output"]
+
+
+def test_authored_ports_receive_the_inputs_a_factory_was_given() -> None:
+    """Author ports plus several inputs: the numbered ports they declared, if any."""
+
+    ports = (
+        PortSpec("input1", Side.NORTH, 0.3, adaptive=True),
+        PortSpec("input2", Side.NORTH, 0.7, adaptive=True),
+        PortSpec("output", Side.SOUTH, adaptive=True),
+    )
+    with Figure("authored", width=pt(300)) as figure, figure.module("m", gap="20pt") as module:
+        first = module.block("first", label="One")
+        second = module.block("second", label="Two")
+        module.mlp("head", ports=ports, inputs=(first, second))
+    assert [str(edge.target) for edge in figure.spec.edges] == [
+        "m.head.input1",
+        "m.head.input2",
+    ]
+
+
+def test_a_factory_merges_its_own_properties_under_the_authors() -> None:
+    with Figure("props", width=pt(240)) as figure, figure.module("m") as module:
+        module.sequence("tokens", tokens=6, properties={"tokens": 9, "extra": "yes"})
+    assert dict(figure.spec.node("m.tokens").properties) == {"extra": "yes", "tokens": 9}
+
+
+def test_a_group_authors_nets_and_merges_like_the_figure_does() -> None:
+    """R23: ``root.net(...)`` works wherever ``root.connect(...)`` does."""
+
+    with Figure("nets", width=pt(320)) as figure:
+        root = figure.root
+        with root.column("stack", gap="20pt") as stack:
+            source = stack.block("source", label="Source")
+            first = stack.block("first", label="One")
+            second = stack.block("second", label="Two")
+            net = stack.net(src=source, sinks=[first, second], id="fan", rail_at=0.4)
+            merged = stack.merge(sinks=[first, second], dst=source, id="join", joint="dot")
+    assert figure.spec.nets == (net, merged)
+    assert net.kind == "fan-out" and net.rail_at == 0.4
+    assert merged.kind == "merge" and merged.joint == "dot"
+    assert [str(ref) for ref in net.targets] == ["stack.first.input", "stack.second.input"]
+
+
+def test_build_compiles_exports_and_lints_in_one_call(tmp_path) -> None:
+    """The three calls every figure script used to make by hand."""
+
+    result = flexo.build(
+        vertical_slice(),
+        tmp_path,
+        stem="slice",
+        formats=("editable",),
+    )
+    assert result.outputs.editable_svg == tmp_path / "slice.editable.svg"
+    assert result.outputs.editable_svg.is_file()
+    assert result.outputs.existing() == (result.outputs.editable_svg,)
+    assert isinstance(result.compilation, Compilation)
+    assert result.ok and result.report.ok
+    assert "slice.editable.svg" in result.summary()
+
+
+def test_build_writes_its_outputs_even_when_the_figure_lints_with_errors(tmp_path) -> None:
+    figure = FigureSpec(
+        "clipped",
+        width=pt(120),
+        nodes=(
+            NodeSpec(
+                "tiny",
+                "block",
+                (TextRun("A label far too long for this block"),),
+                width=pt(12),
+                height=pt(8),
+            ),
+        ),
+        groups=(GroupSpec("root", ("tiny",), LayoutSpec("row"), role="canvas"),),
+    )
+    result = flexo.build(figure, tmp_path, formats=("editable",))
+    assert result.outputs.editable_svg.is_file()
+    assert not result.ok
+    assert any(item.code == "layout.text.overflow" for item in result.report.errors)
+
+
+def test_figure_render_is_build_on_the_builder(tmp_path) -> None:
+    with Figure("rendered", width=pt(180)) as figure, figure.module("m") as module:
+        module.block("only", label="One")
+    result = figure.render(tmp_path, formats=("editable",))
+    assert result.outputs.editable_svg == tmp_path / "rendered.editable.svg"
+    assert result.outputs.editable_svg.is_file()
+
+
+def test_figure_compile_takes_the_style_and_palette_it_will_be_drawn_with() -> None:
+    with Figure("styled", width=pt(180)) as figure, figure.module("m") as module:
+        module.block("only", label="One")
+    large = STYLES["paper"].with_updates(typography=flexo.TypographyStyle(size=pt(16.0)))
+    dark = flexo.DEFAULT_PALETTE.with_overrides({"container-fill": "#101010"})
+    styled = figure.compile(style=large, palette=dark)
+    plain = figure.compile()
+    assert styled.document.height_mm > plain.document.height_mm
+    assert "#101010" in styled.document.text
+    assert "#101010" not in plain.document.text
+
+
+def test_the_authoring_surface_is_reachable_from_the_top_level_package() -> None:
+    """One import line has to be enough to write and build a figure."""
+
+    for name in (
+        "Figure",
+        "VectorPreset",
+        "TextRun",
+        "LayoutStyle",
+        "TypographyStyle",
+        "Palette",
+        "DEFAULT_PALETTE",
+        "STYLES",
+        "build",
+        "compile_figure",
+        "export_outputs",
+        "lint_compilation",
+        "load_figure",
+        "save_figure",
+        "retheme_svg",
+        "vector_stack_height",
+        "shade_ramp",
+        "Side",
+        "pt",
+    ):
+        assert name in flexo.__all__, name
+        assert getattr(flexo, name) is not None, name

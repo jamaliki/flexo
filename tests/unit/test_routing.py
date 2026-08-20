@@ -21,9 +21,11 @@ from flexo.ir.semantic import (
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
-from flexo.routing.nets import _vertical_rail
+from flexo.routing.nets import _vertical_rail, net_segments
 from flexo.routing.nudge import (
     Run,
+    caption_reach,
+    caption_rise,
     collapse_zigzags,
     edge_shaft,
     nudge_routes,
@@ -33,6 +35,7 @@ from flexo.routing.nudge import (
 from flexo.routing.solve import _routing_order
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import LayoutStyle
+from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
 
@@ -850,18 +853,85 @@ def test_ipa_graph_output_rises_north_without_doubling_back() -> None:
 def test_rail_label_anchors_above_the_longest_horizontal_run() -> None:
     """R20: a net caption belongs to the arrow, not to the rail that feeds it."""
 
+    style = LayoutStyle()
+    metrics = TextMeasurer(style.typography).measure((TextRun("softmax(QK"),))
     rail = (Point(40.0, 10.0), Point(40.0, 30.0))
+    # The rail drops *below* the run here, so nothing climbs through the caption
+    # and the words keep the whole collinear stretch.
     stems = (
         (Point(0.0, 10.0), Point(40.0, 10.0)),
         (Point(40.0, 10.0), Point(90.0, 10.0)),
         (Point(20.0, 30.0), Point(40.0, 30.0)),
     )
-    position = rail_label_position(rail, stems)
+    position = rail_label_position(rail, stems, metrics, style)
     assert position.y < 10.0, "above the run"
     assert position.x == 45.0, "centred on the collinear run, not on the rail"
+    assert position.y == pytest.approx(10.0 - caption_rise(metrics, style))
     # With no horizontal ink at all the rail midpoint still carries the caption.
-    vertical = rail_label_position(rail, ((Point(40.0, 10.0), Point(40.0, 30.0)),))
-    assert vertical == Point(44.0, 20.0)
+    vertical = rail_label_position(
+        rail,
+        ((Point(40.0, 10.0), Point(40.0, 30.0)),),
+        metrics,
+        style,
+    )
+    assert vertical.y == 20.0
+    assert vertical.x == pytest.approx(
+        40.0 + metrics.width / 2.0 + caption_reach(metrics, style)
+    )
+
+
+def test_a_caption_clears_the_riser_that_climbs_through_its_band() -> None:
+    """R24: a riser out of the middle of a run cuts the run the caption may use.
+
+    The words go over the wider of the two stretches the riser leaves, keeping
+    ``caption_clearance`` off the vertical ink -- the panel-b defect where
+    ``softmax(QK^T)V`` ended flush against the K,V riser.
+    """
+
+    style = LayoutStyle()
+    metrics = TextMeasurer(style.typography).measure((TextRun("softmax(QK"),))
+    rail = (Point(70.0, -20.0), Point(70.0, 10.0))  # climbs into the run's band
+    stems = ((Point(0.0, 10.0), Point(70.0, 10.0)), (Point(70.0, 10.0), Point(80.0, 10.0)))
+    position = rail_label_position(rail, stems, metrics, style)
+    clearance = caption_reach(metrics, style)
+    assert position.x + metrics.width / 2.0 <= 70.0 - clearance, "clear of the riser"
+    assert position.x == pytest.approx((0.0 + 70.0 - clearance) / 2.0)
+
+
+def test_the_panel_b_formulas_clear_both_their_run_and_their_riser() -> None:
+    """Every merge caption in panel b keeps its clearance from all the net's ink."""
+
+    style = LayoutStyle()
+    routed = compile_figure(gallery_figure("modelangelo-gnn")).routed
+    for net_id in ("band1.cryo.attention", "band2.sequence.attention", "band3.ipa.attention"):
+        net = routed.net(net_id)
+        assert net.label_metrics is not None and net.label_position is not None
+        descent = ink_descent(net.label_metrics, style.typography)
+        bottom = net.label_position.y + descent
+        left = net.label_position.x - net.label_metrics.width / 2.0
+        right = net.label_position.x + net.label_metrics.width / 2.0
+        top = net.label_position.y - net.label_metrics.ascent
+        caption = Rect(left, top, right - left, bottom - top)
+        half = style.connector_width.points / 2.0
+        for segment in net_segments(net):
+            ink = Rect(
+                min(segment.start.x, segment.end.x) - half,
+                min(segment.start.y, segment.end.y) - half,
+                abs(segment.end.x - segment.start.x) + 2.0 * half,
+                abs(segment.end.y - segment.start.y) + 2.0 * half,
+            )
+            gap = _rect_gap(caption, ink)
+            assert gap >= style.caption_clearance.points - 1e-6, (
+                f"{net_id} caption is {gap:.2f} pt from {segment}"
+            )
+
+
+def _rect_gap(first: Rect, second: Rect) -> float:
+    """Nearest distance between two axis-aligned rectangles, 0 if they touch."""
+
+    dx = max(first.x - second.right, second.x - first.right, 0.0)
+    dy = max(first.y - second.bottom, second.y - first.bottom, 0.0)
+    return max(dx, dy) if (dx == 0.0 or dy == 0.0) else (dx * dx + dy * dy) ** 0.5
 
 
 def _riser_merge_figure(**net_options: object) -> FigureSpec:
@@ -900,23 +970,43 @@ def _riser_merge_figure(**net_options: object) -> FigureSpec:
     )
 
 
-def test_net_defaults_keep_the_placement_and_dot_they_have_today() -> None:
-    """The two new hints are inert: this pins today's geometry point for point."""
+def test_an_unhinted_rail_sits_in_the_middle_of_its_corridor() -> None:
+    """R9: with no hint at all the rail halves the gap its stems leave it.
+
+    The corridor runs from the sources' escapes at x=63 to the sink's at x=84,
+    so the rail lands at 73.5 -- trunk and stems each get half the run, instead
+    of the rail hugging the sink it feeds.
+    """
 
     compilation = compile_figure(_riser_merge_figure())
     net = compilation.routed.net("combined")
     assert net.spec.rail_at is None and net.spec.joint == "auto"
-    # One target clearance short of the sink port at x=98, as before the hints.
-    assert net.rail == (Point(84.0, 28.0), Point(84.0, 86.0))
+    assert net.rail == (Point(73.5, 28.0), Point(73.5, 86.0))
     assert tuple(stem.centerline for stem in net.source_stems) == (
-        (Point(58.0, 28.0), Point(84.0, 28.0)),
-        (Point(58.0, 86.0), Point(84.0, 86.0)),
+        (Point(58.0, 28.0), Point(73.5, 28.0)),
+        (Point(58.0, 86.0), Point(73.5, 86.0)),
     )
     assert tuple(stem.centerline for stem in net.target_stems) == (
-        (Point(84.0, 28.0), Point(98.0, 28.0)),
+        (Point(73.5, 28.0), Point(98.0, 28.0)),
     )
     assert net.diagnostics == ()
     assert compilation.document.text.count('id="combined.junction.1"') == 1
+    assert lint_compilation(compilation).ok
+
+
+def test_a_captioned_rail_leaves_its_caption_the_run() -> None:
+    """A corridor too narrow to halve keeps the rail at its end, not in the words.
+
+    The caption is written above the run the net reads along, so a rail parked in
+    the middle of the corridor would be drawn straight through it.
+    """
+
+    labelled = compile_figure(_riser_merge_figure(label=(TextRun("softmax(QK"),)))
+    net = labelled.routed.net("combined")
+    assert net.rail == (Point(84.0, 28.0), Point(84.0, 86.0)), "one escape short of the sink"
+    assert net.label_metrics is not None and net.label_position is not None
+    assert net.label_position.x < net.rail[0].x, "and the caption owns the whole run"
+    assert lint_compilation(labelled).ok
 
 
 def test_rail_at_slides_the_rail_along_the_trunk_run() -> None:

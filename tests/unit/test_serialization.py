@@ -4,8 +4,11 @@ import pytest
 import yaml
 
 from flexo.diagnostics import FlexoError
+from flexo.geometry import Side
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec
 from flexo.serialization import dump_figure, figure_to_document, parse_figure
 from flexo.units import CellSpan, Length
+from flexo.validate import normalize_and_validate
 
 
 def document() -> dict[str, object]:
@@ -153,3 +156,79 @@ def test_a_fan_out_may_not_ask_for_an_arrow_joint() -> None:
     value["nets"][0]["targets"] = ["projection.input", "residual.input"]  # type: ignore[index]
     with pytest.raises(FlexoError, match="schema"):
         parse_figure(value)
+
+
+def test_a_documents_ports_round_trip_as_pinned_or_defaulted() -> None:
+    """Whether a side was the author's choice survives the document.
+
+    Default ports are omitted from the document and restored from the component
+    grammar, so they come back free to pick a side. An authored table is written
+    out in full and comes back pinned -- the same figure, and the same picture.
+    """
+
+    figure = FigureSpec(
+        "ports",
+        nodes=(
+            NodeSpec("defaulted", "block"),
+            NodeSpec(
+                "authored",
+                "block",
+                ports=(PortSpec("input", Side.WEST, adaptive=True),),
+            ),
+        ),
+        groups=(GroupSpec("root", ("defaulted", "authored")),),
+    )
+    document = yaml.safe_load(dump_figure(normalize_and_validate(figure)))
+    assert "ports" not in document["nodes"][0]
+    restored = parse_figure(document)
+    assert all(port.auto_side for port in restored.node("defaulted").ports)
+    assert not any(port.auto_side for port in restored.node("authored").ports)
+
+
+def test_ports_alignment_anchor_and_shadow_survive_a_round_trip() -> None:
+    """R24's three new fields are interchange, not just Python."""
+
+    figure = FigureSpec(
+        "aligned",
+        nodes=(
+            NodeSpec("cells", "vector"),
+            NodeSpec("caption", "label", role="label"),
+            NodeSpec("lit", "block", shadow=True),
+        ),
+        groups=(
+            GroupSpec("root", ("glyph", "lit"), LayoutSpec("row", align="ports"), shadow=True),
+            GroupSpec(
+                "glyph",
+                ("cells", "caption"),
+                LayoutSpec("column"),
+                role="layout",
+                anchor="cells",
+            ),
+        ),
+    )
+    document = figure_to_document(figure)
+    layout = document["groups"][0]["layout"]  # type: ignore[index]
+    assert layout["align"] == "ports"
+    assert document["groups"][0]["shadow"] is True  # type: ignore[index]
+    assert document["groups"][1]["anchor"] == "cells"  # type: ignore[index]
+    assert document["nodes"][2]["shadow"] is True  # type: ignore[index]
+    restored = parse_figure(document)
+    assert restored.group("root").layout.align == "ports"
+    assert restored.group("root").shadow is True
+    assert restored.group("glyph").anchor == "cells"
+    assert restored.node("lit").shadow is True
+
+
+def test_the_defaults_of_the_new_fields_stay_out_of_the_document() -> None:
+    """A figure that asks for none of them serializes exactly as it did before."""
+
+    document = figure_to_document(
+        FigureSpec(
+            "plain",
+            nodes=(NodeSpec("only", "block"),),
+            groups=(GroupSpec("root", ("only",), LayoutSpec("row")),),
+        )
+    )
+    assert "shadow" not in document["nodes"][0]  # type: ignore[operator]
+    assert "shadow" not in document["groups"][0]  # type: ignore[operator]
+    assert "anchor" not in document["groups"][0]  # type: ignore[operator]
