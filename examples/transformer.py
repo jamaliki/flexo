@@ -3,7 +3,9 @@
 Two towers side by side, each authored bottom-up as one column: terminal ->
 embedding -> positional-encoding junction -> the N-times block stack. Residual
 skips are ordinary edges -- the router walks them around the sublayer they
-bypass -- and every attention block grows its own Q, K and V glyphs from
+bypass -- and all five bow out to the east in both towers, because ``add-norm``
+pins ``skip`` and ``branch`` there so a bypass reads the same way whichever tower
+it is in. Every attention block grows its own Q, K and V glyphs from
 ``vectors=``, so each triple is one ``net`` into three cell stacks the composite
 has already centred under the ports they feed.
 """
@@ -59,22 +61,6 @@ decoder's own query stands clear of that line on the right.
 """
 
 
-LEFT_BRANCH = (
-    PortSpec("input", Side.SOUTH, 0.5, adaptive=True, auto_side=True),
-    PortSpec("skip", Side.SOUTH, 0.8, adaptive=True, auto_side=True),
-    PortSpec("output", Side.NORTH, 0.5, adaptive=True, auto_side=True),
-    PortSpec("branch", Side.NORTH, 0.2, adaptive=True, auto_side=True),
-)
-"""``add_norm``'s own port table with its branch moved to the left of the spine.
-
-The encoder's feed-forward skip travels up the left margin (``via="west"``
-below), because the right one is where the cross-attention line crosses to the
-decoder. A branch that leaves on the right and then has to reach a left-hand
-margin cuts the spine it bypasses on the way; leaving on the left is the same
-wire without the crossing. Everything else is the grammar's own table.
-"""
-
-
 def add_norm(tower, id, **options):
     return tower.add_norm(
         id, label="Add & Norm", width=BLOCK, paint=PAINTS["add-norm"], **options
@@ -120,7 +106,7 @@ def transformer() -> Figure:
                 ff = tower.block(
                     "ff", label="Feed\nForward", width=BLOCK, paint=PAINTS["feed-forward"]
                 )
-                an1 = add_norm(tower, "an1", ports=LEFT_BRANCH)
+                an1 = add_norm(tower, "an1")
                 mha = tower.attention(
                     "mha",
                     label="Multi-Head\nAttention",
@@ -185,15 +171,15 @@ def transformer() -> Figure:
         # Encoder flow: self-attention, then feed-forward, each with its skip.
         # ``rail_at`` fans the triple halfway up from the embedding rather than
         # one escape short of it, which keeps the rail clear of the skip beside
-        # it; ``via="west"`` sends the feed-forward skip up the left margin,
-        # because the right one is where the cross-attention line crosses to the
-        # decoder (see LEFT_BRANCH).
+        # it. Both skips bow out to the east, like the decoder's three: the
+        # add-norm grammar pins ``skip``/``branch`` there so a residual reads the
+        # same way in every tower.
         figure.net(src=enc_pe, sinks=[mha.q, mha.k, mha.v], id="enc-qkv", rail_at=0.5)
         root.connect(mha, an1)
         root.connect(enc_pe, an1, id="skip1", source_port="branch", target_port="skip")
         root.connect(an1, ff)
         root.connect(ff, an2)
-        root.connect(an1, an2, id="skip2", source_port="branch", target_port="skip", via="west")
+        root.connect(an1, an2, id="skip2", source_port="branch", target_port="skip")
 
         # Decoder flow: masked self-attention, cross-attention on the encoder
         # output, feed-forward -- and up through the readout.

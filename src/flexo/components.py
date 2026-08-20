@@ -124,9 +124,9 @@ _CONCAT = (
 )
 _RESIDUAL_TARGET = (
     _INPUT,
-    _default_port("skip", Side.WEST, 0.8, adaptive=True),
+    PortSpec("skip", Side.EAST, 0.8, adaptive=True),
     _OUTPUT,
-    _default_port("branch", Side.EAST, 0.8, adaptive=True),
+    PortSpec("branch", Side.EAST, 0.2, adaptive=True),
 )
 """A component that adds a bypassed value to a sublayer's output (R27).
 
@@ -144,8 +144,23 @@ already name theirs. A figure that taps it instead of doubling up on ``output``
 comes out with one arrow per wire, which is what the reference Transformer
 figure draws.
 
-All four are auto-sided, so a tower that reads upward gets them on the edges its
-ink actually uses without a port table.
+``input`` and ``output`` are auto-sided, so a tower that reads upward gets its
+spine on the edges its ink actually uses without a port table. ``skip`` and
+``branch`` are *pinned* east instead, because a residual is a convention rather
+than a per-node optimisation: auto-siding sent one tower's bypass up the right
+margin and its neighbour's up the left, and a reader who has learnt "the residual
+is the wire on the right" has to learn it again per tower. Pinning them to one
+side -- still adaptive, so each slides along that edge to meet its counterpart --
+makes every default residual in every tower read identically. An author who wants
+a left-handed figure writes ``ports=`` and gets it, which is what an explicit port
+spec has always meant.
+
+Sharing a side is also why the two are offset 0.8 and 0.2 rather than both 0.8:
+a bypass arrives from *below* the block it rejoins and leaves for the one
+*above*, so the low lane is the arrival and the high lane the departure. Giving
+them one offset puts an arrowhead and a departure on a single point -- two runs
+overlapping for the width of a jog, which is the ``routing.track.separation``
+pair this component's ports exist to avoid.
 """
 _VECTOR_PORTS = (
     PortSpec("input", Side.WEST),

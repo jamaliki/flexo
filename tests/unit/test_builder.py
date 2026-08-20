@@ -825,14 +825,75 @@ def test_add_norm_names_both_of_its_arrivals_and_both_of_its_departures() -> Non
     assert block.ports == ("input", "skip", "output", "branch")
     semantic = figure.spec
     assert [str(edge.target) for edge in semantic.edges] == ["m.an.input", "m.an.skip"]
-    assert all(port.auto_side for port in semantic.node("m.an").ports)
+    sides = {port.name: (port.side, port.auto_side) for port in semantic.node("m.an").ports}
+    # The spine follows the figure's reading direction; the bypass does not.
+    assert sides["input"] == (Side.WEST, True)
+    assert sides["output"] == (Side.EAST, True)
+    assert sides["skip"] == (Side.EAST, False)
+    assert sides["branch"] == (Side.EAST, False)
+
+
+def test_a_default_residual_always_enters_and_leaves_on_the_east_side() -> None:
+    """One convention per figure: a bypass is the wire on the right, in every tower.
+
+    Auto-siding chose per node, so a mirrored pair of towers came out
+    mirror-handed and a reader had to learn each one. The pinned pair also takes
+    two lanes -- arrival low, departure high -- so neither run starts where the
+    other one ends.
+    """
+
+    def tower(pair, name: str) -> None:
+        with pair.column(name, gap=pt(30.0), padding=pt(24.0), role="module") as column:
+            an = column.add_norm(f"{name}-an", label="Add & Norm", width=pt(90.0))
+            sublayer = column.block(f"{name}-ff", label="Feed Forward", width=pt(90.0))
+            fork = column.node(f"{name}-fork", "junction")
+            column.connect(fork, sublayer)
+            column.connect(sublayer, an)
+            column.connect(fork.branch, an.skip, id=f"{name}-skip")
+
+    with (
+        Figure("towers", width=pt(520.0)) as figure,
+        figure.root.row("pair", gap=pt(40.0), role="layout") as pair,
+    ):
+        tower(pair, "left")
+        tower(pair, "right")
+    compiled = compile_figure(figure.spec)
+    for name in ("left", "right"):
+        node = compiled.fitted.node(f"pair.{name}.{name}-an")
+        ports = {port.name: port for port in node.ports}
+        assert ports["skip"].side is Side.EAST
+        assert ports["branch"].side is Side.EAST
+        assert ports["skip"].position.x == node.bounds.right
+        # The arrival sits below the departure, the way the wire travels.
+        assert ports["skip"].position.y > ports["branch"].position.y
+    assert not lint_compilation(compiled).errors
+
+
+def test_an_explicit_port_table_still_buys_a_left_handed_residual() -> None:
+    left_handed = (
+        PortSpec("input", Side.SOUTH, 0.5, adaptive=True),
+        PortSpec("skip", Side.WEST, 0.8, adaptive=True),
+        PortSpec("output", Side.NORTH, 0.5, adaptive=True),
+        PortSpec("branch", Side.WEST, 0.2, adaptive=True),
+    )
+    with Figure("mirror", width=pt(320.0)) as figure:  # noqa: SIM117
+        with figure.module("m", layout="column") as module:
+            module.add_norm("an", label="Add & Norm", ports=left_handed)
+    sides = {port.name: port.side for port in figure.spec.node("m.an").ports}
+    assert sides["skip"] is Side.WEST and sides["branch"] is Side.WEST
 
 
 def test_a_skip_edge_lands_on_the_skip_port_rather_than_crowding_the_input() -> None:
-    """The two arrivals get two ports, so neither route is dragged off its twin."""
+    """The two arrivals get two ports, so neither route is dragged off its twin.
+
+    The container carries side padding because the pinned bypass routes *outside*
+    the block it rejoins: a content-hugging column leaves the corridor no room.
+    """
 
     with Figure("tower", width=pt(320.0)) as figure:  # noqa: SIM117
-        with figure.module("m", layout="column", gap="30pt") as module:
+        with figure.root.group(
+            "m", role="module", layout="column", gap="30pt", padding=pt(24.0)
+        ) as module:
             an = module.add_norm("an", label="Add & Norm", width="90pt")
             sublayer = module.block("sublayer", label="Attention", width="90pt")
             fork = module.node("fork", "junction")

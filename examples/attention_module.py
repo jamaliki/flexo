@@ -5,16 +5,20 @@ One module, two rows, seven grid columns::
     node features -> MLP -> Q ---- softmax(QK^T)V ----> attended -> MLP -> output
     embedding     -> MLP -> K,V .............^
 
-Rendered twice: once with ramped presets, and once with ``order="shuffled"`` --
-the same colours permuted per column, so each glyph reads as a feature vector
-rather than as a gradient.
+Rendered twice, once for each shade order a preset offers. The main figure takes
+the default, ``order="shuffled"``: the same colours permuted per column, so each
+glyph reads as a feature vector. The ``-ramp`` variant asks for
+``order="ramp"`` and gets the light-to-dark gradient, which claims the cells are
+*ordered* -- true of a positional index or a similarity score, not of an
+activation.
 
 What this example is here to show:
 
 * **palette overrides** turn the default light theme dark without touching a
   coordinate (``DEFAULT_PALETTE.with_overrides``);
 * **``VectorPreset``** gives every glyph the author's own base colour and
-  topology instead of a palette ramp role, and ``order="shuffled"`` permutes it;
+  topology instead of a palette ramp role, and ``order=`` chooses between the
+  shuffled default and the ramp;
 * **a reserved grid lane** (``column_widths={3: ...}``) holds the attention
   corridor open with no node in it, and everything past that lane names its cell
   with ``at=``, because flow would fall into the empty column;
@@ -99,6 +103,8 @@ TINT = 0.35
 which mixes them towards the page."""
 
 PRESETS = {
+    # No ``order=``, so every one of these is the default: shuffled. The ``-ramp``
+    # variant re-derives the same six presets with ``order="ramp"`` instead.
     "nodes": VectorPreset("#8a7de8", "1x3", tint=TINT),
     "embedding": VectorPreset("#eaa53e", "1x3", tint=TINT),
     "q": VectorPreset("#e0603a", "1x3", tint=TINT),
@@ -129,8 +135,8 @@ def caption(text: str, weight: int = CAPTION_WEIGHT) -> tuple[TextRun, ...]:
     return (TextRun(text, weight=weight),)
 
 
-def attention_module(*, order: str = "ramp") -> FigureSpec:
-    """The panel, with every glyph ramped or every glyph shuffled."""
+def attention_module(*, order: str = "shuffled") -> FigureSpec:
+    """The panel, with every glyph shuffled (the default) or every glyph ramped."""
 
     shades = {name: replace(preset, order=order) for name, preset in PRESETS.items()}
     # Every box is one cell stack tall, so its side ports share the vectors' y.
@@ -207,7 +213,7 @@ def attention_module(*, order: str = "ramp") -> FigureSpec:
 
 
 def main() -> None:
-    for stem, order in (("attention-module", "ramp"), ("attention-module-shuffled", "shuffled")):
+    for stem, order in (("attention-module", "shuffled"), ("attention-module-ramp", "ramp")):
         result = build(
             attention_module(order=order),
             OUTPUT,
