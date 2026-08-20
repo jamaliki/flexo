@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from flexo.geometry import Insets, Side
+from flexo.style import PAINT_PARTS
 from flexo.units import Extent, Length
 
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
@@ -257,6 +258,23 @@ class EdgeSpec:
     waypoints: tuple[Waypoint, ...] = ()
     depart: Side | None = None
     arrive: Side | None = None
+    via: Side | None = None
+    """Which side of its own source-to-target region this route should favour.
+
+    A route that has to leave the straight line between its endpoints has two
+    ways round whatever stands in the way, and the cheaper one is not always the
+    one that reads: a connector wrapping the far side of a tower slices back
+    through it, while the same connector taken round the near side stays in the
+    margin. ``via`` is the author saying which margin, in one word, without
+    pinning a corridor the way ``lane_hint`` does.
+
+    It is a preference, priced rather than enforced: corridors beyond the region
+    on the *opposite* side cost extra length (``PathCosts.off_side``), so a route
+    still takes them when nothing else exists -- and says so, as a
+    ``routing.via.clamped`` warning naming the side it actually achieved. Where
+    the arriving port's side is a component default, ``via`` also decides it: the
+    ink comes from that side, so the port faces it (see ``flexo.layout.sides``).
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Edge ID")
@@ -292,6 +310,17 @@ class NetSpec:
     junction dot; ``"arrow"`` ends the joining ink in an arrowhead pointing into
     the trunk, which the trunk itself crosses unbroken.
     """
+    via: Side | None = None
+    """Which side this net's trunk should favour; see ``EdgeSpec.via``.
+
+    A net answers the hint with its rail. The side names the axis the rail runs
+    along -- a west or east hint rails vertically, a north or south one
+    horizontally, exactly as ``rail_hint`` does -- and then the rail is placed as
+    far toward that side as its stems and the obstacles allow. Unlike ``rail``,
+    which pins the rail to the routing boundary, ``via`` is a preference: it
+    yields to clearances, and reports ``routing.net.via.clamped`` when what it
+    got was the other side.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")
@@ -316,6 +345,12 @@ class NetSpec:
                     f'net "{self.id}" places its rail twice: a side hint pins the rail to '
                     "the boundary and rail_at measures along the trunk; choose one"
                 )
+        if self.via is not None and (self.rail_hint is not None or self.rail_at is not None):
+            raise ValueError(
+                f'net "{self.id}" places its rail twice: via leans the trunk toward a side, '
+                "rail pins it to the boundary, and rail_at measures along the trunk; "
+                "choose one"
+            )
         if self.kind == "fan-out" and (len(self.sources) != 1 or len(self.targets) < 2):
             raise ValueError("fan-out nets require one source and at least two targets")
         if self.kind == "merge" and (len(self.sources) < 2 or len(self.targets) != 1):
@@ -370,6 +405,15 @@ class GroupSpec:
     Paint only, and off by default: a shadow lifts a module off the page in a
     slide or a poster, and is noise in a dense journal panel.
     """
+    paint: tuple[tuple[str, str], ...] = ()
+    """``(part, colour)`` for parts painted literally instead of by role.
+
+    The parts are a component's parts: ``fill`` and ``stroke`` for the container
+    body, ``label`` for its title. A group has no property bag, so unlike a node
+    it carries them as their own typed pairs -- sorted, so one figure has one
+    serialization. The convention is the node's: an overridden part emits no
+    paint role, so ``flexo retheme`` leaves it exactly as authored.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Group ID")
@@ -379,6 +423,12 @@ class GroupSpec:
             raise ValueError(
                 f'unknown title side "{self.title_side}" for group "{self.id}"; '
                 f"valid sides: {', '.join(TITLE_SIDES)}"
+            )
+        unknown = sorted({part for part, _ in self.paint} - set(PAINT_PARTS))
+        if unknown:
+            raise ValueError(
+                f'group "{self.id}" paints unknown part(s) {", ".join(unknown)}; '
+                f"valid parts: {', '.join(PAINT_PARTS)}"
             )
         if self.anchor is not None:
             _validate_id(self.anchor, "Anchor child ID")

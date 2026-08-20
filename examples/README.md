@@ -37,3 +37,12 @@ grids, and a five-head readout that recycles into the top. Authored in
 [`flexo/gallery.py`](../src/flexo/gallery.py).
 
 [![ModelAngelo GNN](build/modelangelo-gnn.preview.png)](build/modelangelo-gnn.preview.png)
+
+## transformer.py
+
+The Transformer from "Attention Is All You Need" (Vaswani et al. 2017): two
+towers authored bottom-up, residual skips on the add-norm `branch`/`skip`
+ports, Q/K/V triples as one `fan_out` each, and hand-drawn positional-encoding
+glyphs embedded with `image()`.
+
+![transformer](build/transformer.preview.png)

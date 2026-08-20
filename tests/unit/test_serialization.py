@@ -98,6 +98,31 @@ def test_title_side_and_node_paint_round_trip() -> None:
     assert figure_to_document(figure)["groups"][0]["title_side"] == "right"  # type: ignore[index]
 
 
+def test_group_paint_round_trips_and_stays_out_when_unset() -> None:
+    value = document()
+    value["groups"][0]["label"] = "Attention module"  # type: ignore[index]
+    value["groups"][0]["paint"] = {  # type: ignore[index]
+        "label": "#9fe1cb",
+        "fill": "#085041",
+    }
+    figure = parse_figure(value)
+    assert figure.group("root").paint == (("fill", "#085041"), ("label", "#9fe1cb"))
+    assert parse_figure(yaml.safe_load(dump_figure(figure))) == figure
+    assert figure_to_document(figure)["groups"][0]["paint"] == {  # type: ignore[index]
+        "fill": "#085041",
+        "label": "#9fe1cb",
+    }
+    assert "paint" not in figure_to_document(parse_figure(document()))["groups"][0]  # type: ignore[operator]
+
+
+def test_a_group_may_only_paint_the_parts_it_has() -> None:
+    for paint in ({"title": "#9fe1cb"}, {"fill": "teal"}):
+        bad = document()
+        bad["groups"][0]["paint"] = paint  # type: ignore[index]
+        with pytest.raises(FlexoError, match="paint"):
+            parse_figure(bad)
+
+
 def test_a_left_title_stays_out_of_the_document() -> None:
     figure = parse_figure(document())
     assert "title_side" not in figure_to_document(figure)["groups"][0]  # type: ignore[operator]
@@ -232,3 +257,41 @@ def test_the_defaults_of_the_new_fields_stay_out_of_the_document() -> None:
     assert "shadow" not in document["nodes"][0]  # type: ignore[operator]
     assert "shadow" not in document["groups"][0]  # type: ignore[operator]
     assert "anchor" not in document["groups"][0]  # type: ignore[operator]
+
+
+def test_a_via_hint_round_trips_on_an_edge_and_on_a_net() -> None:
+    """R27: one word about a corridor, written down and read back."""
+
+    value = _net_document()
+    del value["nets"][0]["rail_at"]  # type: ignore[index]
+    del value["nets"][0]["joint"]  # type: ignore[index]
+    value["nets"][0]["via"] = "west"  # type: ignore[index]
+    value["edges"] = [
+        {
+            "id": "input-to-projection",
+            "from": "input.output",
+            "to": "projection.input",
+            "via": "south",
+        }
+    ]
+    figure = parse_figure(value)
+    assert figure.nets[0].via is Side.WEST
+    assert figure.edges[0].via is Side.SOUTH
+    assert parse_figure(yaml.safe_load(dump_figure(figure))) == figure
+    written = figure_to_document(figure)
+    assert written["nets"][0]["via"] == "west"  # type: ignore[index]
+    assert written["edges"][0]["via"] == "south"  # type: ignore[index]
+
+
+def test_no_via_hint_stays_out_of_the_document() -> None:
+    figure = parse_figure(document())
+    assert "via" not in figure_to_document(figure)["edges"][0]  # type: ignore[operator]
+
+
+def test_a_via_side_cannot_be_written_beside_a_rail_or_a_fraction() -> None:
+    for placement in ({"rail": "north"}, {"rail_at": 0.4}):
+        value = _net_document()
+        del value["nets"][0]["rail_at"]  # type: ignore[index]
+        value["nets"][0].update({"via": "west", **placement})  # type: ignore[index]
+        with pytest.raises(FlexoError, match="schema"):
+            parse_figure(value)

@@ -68,6 +68,19 @@
         {"type": "array", "items": {"$ref": "#/$defs/text_run"}}
       ]
     },
+    "colour": {
+      "type": "string",
+      "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+    },
+    "paint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fill": {"$ref": "#/$defs/colour"},
+        "stroke": {"$ref": "#/$defs/colour"},
+        "label": {"$ref": "#/$defs/colour"}
+      }
+    },
     "figure": {
       "type": "object",
       "additionalProperties": false,
@@ -147,7 +160,8 @@
         "lane": {"$ref": "#/$defs/identifier"},
         "waypoints": {"type": "array", "items": {"$ref": "#/$defs/waypoint"}, "default": []},
         "depart": {"$ref": "#/$defs/side"},
-        "arrive": {"$ref": "#/$defs/side"}
+        "arrive": {"$ref": "#/$defs/side"},
+        "via": {"$ref": "#/$defs/side"}
       }
     },
     "net": {
@@ -173,9 +187,16 @@
         "label": {"$ref": "#/$defs/label", "default": ""},
         "rail": {"$ref": "#/$defs/side"},
         "rail_at": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "via": {"$ref": "#/$defs/side"},
         "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"}
       },
-      "not": {"required": ["rail", "rail_at"]},
+      "not": {
+        "anyOf": [
+          {"required": ["rail", "rail_at"]},
+          {"required": ["rail", "via"]},
+          {"required": ["rail_at", "via"]}
+        ]
+      },
       "allOf": [
         {
           "if": {"properties": {"kind": {"const": "fan-out"}}},
@@ -267,7 +288,8 @@
         "role": {"$ref": "#/$defs/identifier", "default": "container"},
         "title_side": {"enum": ["left", "right"], "default": "left"},
         "anchor": {"$ref": "#/$defs/identifier"},
-        "shadow": {"type": "boolean", "default": false}
+        "shadow": {"type": "boolean", "default": false},
+        "paint": {"$ref": "#/$defs/paint"}
       }
     }
   }
