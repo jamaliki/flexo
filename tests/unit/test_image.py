@@ -340,7 +340,7 @@ def test_a_label_takes_a_band_off_the_top_and_the_artwork_takes_the_rest(
     node = compilation.fitted.node("panel.art")
     style = STYLES["paper"]
     band = label_band_height("image", node.measured.label, style)
-    area = motif_area("image", node.bounds, node.measured.label, style)
+    area = motif_area(node.measured.spec, node.bounds, node.measured.label, style)
     root = ET.fromstring(compilation.document.text)
     label = next(item for item in root.iter() if item.get("id") == "panel.art.label")
     assert "".join(item.text or "" for item in label.iter()).strip() == "Ligand"
@@ -370,7 +370,7 @@ def test_a_height_only_extent_shrinks_the_artwork_and_not_the_label(
     tight = compiled(write_artwork(tmp_path), height="50pt", label="Ligand")
     for compilation in (roomy, tight):
         node = compilation.fitted.node("panel.art")
-        area = motif_area("image", node.bounds, node.measured.label, style)
+        area = motif_area(node.measured.spec, node.bounds, node.measured.label, style)
         assert node.bounds.height == pytest.approx(
             80.0 if compilation is roomy else 50.0
         )
@@ -382,13 +382,13 @@ def test_a_height_only_extent_shrinks_the_artwork_and_not_the_label(
     assert roomy_label.height == tight_label.height, "the words keep their line"
     assert (
         motif_area(
-            "image",
+            tight.fitted.node("panel.art").measured.spec,
             tight.fitted.node("panel.art").bounds,
             tight_label,
             style,
         ).height
         < motif_area(
-            "image",
+            roomy.fitted.node("panel.art").measured.spec,
             roomy.fitted.node("panel.art").bounds,
             roomy_label,
             style,

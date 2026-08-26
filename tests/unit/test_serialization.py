@@ -5,7 +5,7 @@ import yaml
 
 from flexo.diagnostics import FlexoError
 from flexo.geometry import Side
-from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec, TextRun
 from flexo.serialization import dump_figure, figure_to_document, parse_figure
 from flexo.units import CellSpan, Length
 from flexo.validate import normalize_and_validate
@@ -295,3 +295,50 @@ def test_a_via_side_cannot_be_written_beside_a_rail_or_a_fraction() -> None:
         value["nets"][0].update({"via": "west", **placement})  # type: ignore[index]
         with pytest.raises(FlexoError, match="schema"):
             parse_figure(value)
+
+
+def test_a_typed_superscript_stays_the_string_its_author_wrote() -> None:
+    """R36: the translation is downstream of the spec, so YAML never sees it.
+
+    ``softmax(QKᵀ)V`` becomes three baseline-shifted runs when it is measured
+    and painted, and *only* then. Canonicalizing it into the ``FigureSpec``
+    would rewrite a one-line ``label:`` into a three-entry run list the author
+    never wrote, and would make the document depend on which characters the
+    bundled face happens to carry -- so the spec keeps the characters, the
+    document keeps the plain scalar, and a round trip is a no-op.
+    """
+
+    value = document()
+    value["nodes"][1]["label"] = "softmax(QKᵀ)V"  # type: ignore[index]
+    value["edges"][0]["label"] = "xₖ"  # type: ignore[index]
+    value["groups"][0]["label"] = "QKᵀ-attention"  # type: ignore[index]
+    figure = parse_figure(value)
+    assert figure.node("projection").label == (TextRun("softmax(QKᵀ)V"),)
+    assert figure.node("projection").text == "softmax(QKᵀ)V"
+    emitted = figure_to_document(figure)
+    assert emitted["nodes"][1]["label"] == "softmax(QKᵀ)V"  # type: ignore[index]
+    assert emitted["edges"][0]["label"] == "xₖ"  # type: ignore[index]
+    assert emitted["groups"][0]["label"] == "QKᵀ-attention"  # type: ignore[index]
+    rendered = dump_figure(figure)
+    assert "softmax(QKᵀ)V" in rendered, "written out as typed, not escaped"
+    reparsed = parse_figure(yaml.safe_load(rendered))
+    assert reparsed == figure
+    assert dump_figure(reparsed) == rendered
+
+
+def test_a_hand_built_superscript_still_round_trips_as_runs() -> None:
+    """Typing ``ᵀ`` is a second spelling, not a replacement for the first."""
+
+    value = document()
+    value["nodes"][1]["label"] = [  # type: ignore[index]
+        {"text": "softmax(QK"},
+        {"text": "T", "baseline_shift": "super"},
+        {"text": ")V"},
+    ]
+    figure = parse_figure(value)
+    assert figure.node("projection").label == (
+        TextRun("softmax(QK"),
+        TextRun("T", baseline_shift="super"),
+        TextRun(")V"),
+    )
+    assert parse_figure(yaml.safe_load(dump_figure(figure))) == figure

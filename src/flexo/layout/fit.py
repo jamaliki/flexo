@@ -10,6 +10,7 @@ from flexo.ir.fitted import FittedFigure, FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import LayoutKind, LayoutSpec
 from flexo.layout.arrange import arrange, arrangement_size, declared_size
+from flexo.layout.corridors import corridor_plan
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.layout.ports import adapt_ports
@@ -43,6 +44,9 @@ class _Fitter:
         self.nodes = {node.spec.id: node for node in measured.nodes}
         self.groups = {group.spec.id: group for group in measured.groups}
         self.child_orders = optimized_child_orders(measured.semantic)
+        # The same reservation measurement made, so the content rectangle a group
+        # hands its children leaves exactly the margin the group was sized for.
+        self.corridors = corridor_plan(measured.semantic)
         self.edge_labels = measured.edge_label_index
         self.fitted_nodes: dict[str, FittedNode] = {}
         self.fitted_groups: dict[str, FittedGroup] = {}
@@ -61,7 +65,7 @@ class _Fitter:
     def _fit_group(self, group_id: str, bounds: Rect) -> None:
         measured_group = self.groups[group_id]
         layout = measured_group.spec.layout
-        padding = layout.resolved_padding(self.style.group_padding)
+        padding = self.corridors.padding(measured_group.spec, self.style)
         title_height = (
             measured_group.label.height + self.style.compact_gap.points
             if measured_group.spec.label

@@ -11,6 +11,8 @@ from flexo.hierarchy import routing_boundary
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.routed import RoutedEdge, RoutedFigure
 from flexo.ir.semantic import EdgeSpec, Waypoint
+from flexo.layout.corridors import Corridor, CorridorPlan, corridor_plan, track_coordinate
+from flexo.routing.hops import assign_hops, routing_order
 from flexo.routing.nets import (
     confined_groups,
     group_obstacles,
@@ -43,6 +45,9 @@ def route_figure(
     layout_style = style or STYLES[fitted.measured.semantic.style]
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     semantic = fitted.measured.semantic
+    # The margins were sized for these tracks before the figure was fitted; this
+    # is the same walk of the group tree, reading out who travels where.
+    corridors = corridor_plan(semantic)
     occupied: tuple[Segment, ...] = ()
     routed_nets = []
     for net in semantic.nets:
@@ -50,8 +55,8 @@ def route_figure(
         routed_nets.append(result)
         occupied += net_segments(result)
     by_id: dict[str, RoutedEdge] = {}
-    for edge in _routing_order(fitted, semantic.edges):
-        result = _route_edge(fitted, edge, layout_style, text_measurer, occupied)
+    for edge in routing_order(fitted, semantic.edges):
+        result = _route_edge(fitted, edge, layout_style, text_measurer, occupied, corridors)
         by_id[edge.id] = result
         occupied += segments(result.centerline)
     routed = RoutedFigure(
@@ -59,21 +64,12 @@ def route_figure(
         tuple(by_id[edge.id] for edge in semantic.edges),
         tuple(routed_nets),
     )
-    return _nudge(routed, layout_style)
+    # Hops read the ink as it finally lies, so they are decided after nudging:
+    # a crossing the lane pass removes never leaves a bridge over nothing.
+    return assign_hops(_nudge(routed, layout_style, corridors), layout_style)
 
 
-def _routing_order(fitted: FittedFigure, edges: tuple[EdgeSpec, ...]) -> tuple[EdgeSpec, ...]:
-    """Long haul first: the connectors with the least room to spare pick lanes first."""
-
-    def span(edge: EdgeSpec) -> float:
-        source = fitted.node(edge.source.node_id).port(edge.source.port_name).position
-        target = fitted.node(edge.target.node_id).port(edge.target.port_name).position
-        return abs(target.x - source.x) + abs(target.y - source.y)
-
-    return tuple(sorted(edges, key=lambda edge: (-span(edge), edge.id)))
-
-
-def _nudge(routed: RoutedFigure, style: LayoutStyle) -> RoutedFigure:
+def _nudge(routed: RoutedFigure, style: LayoutStyle, corridors: CorridorPlan) -> RoutedFigure:
     clearance = style.route_boundary_clearance.points
     boundaries = {
         edge.spec.id: routing_boundary(
@@ -91,7 +87,9 @@ def _nudge(routed: RoutedFigure, style: LayoutStyle) -> RoutedFigure:
             for net in routed.nets
         }
     )
-    runs, polylines = figure_runs(routed, boundaries, style)
+    runs, polylines = figure_runs(
+        routed, boundaries, style, aimed=frozenset(corridors.corridors)
+    )
     # Where a crossing goes, then how far apart two of them sit: balancing first
     # means the lane pass has the last word on any pair it brings together.
     balanced = balance_jogs(
@@ -117,6 +115,7 @@ def _route_edge(
     style: LayoutStyle,
     measurer: TextMeasurer,
     occupied: tuple[Segment, ...],
+    corridors: CorridorPlan,
 ) -> RoutedEdge:
     source_node = fitted.node(edge.source.node_id)
     target_node = fitted.node(edge.target.node_id)
@@ -191,7 +190,8 @@ def _route_edge(
         edge,
         source_escape,
         target_escape,
-        style.route_boundary_clearance.points,
+        style,
+        corridors,
     )
     anchors = (source_escape, *forced, target_escape)
     interior: list[Point] = []
@@ -327,8 +327,16 @@ def _forced_points(
     edge: EdgeSpec,
     source_escape: Point,
     target_escape: Point,
-    boundary_clearance: float,
+    style: LayoutStyle,
+    corridors: CorridorPlan,
 ) -> tuple[Point, ...]:
+    """The interior points this route has to pass through, in order.
+
+    An authored ``lane=`` is the whole answer where there is one: the engine's
+    own corridor allocation is read only when the author named no lane, so a
+    hint always outranks the arithmetic.
+    """
+
     result: list[Point] = []
     if edge.lane_hint:
         result.extend(
@@ -337,12 +345,41 @@ def _forced_points(
                 edge.lane_hint,
                 source_escape,
                 target_escape,
-                boundary_clearance,
+                style.route_boundary_clearance.points,
                 edge.id,
             )
         )
+    else:
+        corridor = corridors.corridor(edge.id)
+        if corridor is not None:
+            result.extend(
+                _corridor_points(
+                    fitted, corridors, corridor, source_escape, target_escape, style
+                )
+            )
     result.extend(_waypoint(fitted, waypoint, edge.id) for waypoint in edge.waypoints)
     return tuple(result)
+
+
+def _corridor_points(
+    fitted: FittedFigure,
+    corridors: CorridorPlan,
+    corridor: Corridor,
+    source: Point,
+    target: Point,
+    style: LayoutStyle,
+) -> tuple[Point, Point]:
+    """An engine-allocated track, spelled the way a ``lane=`` hint is spelled.
+
+    Both ends of the run are pulled onto the track's own coordinate, so the
+    route leaves its source, crosses the margin once, travels the track, and
+    crosses back -- the shape the nesting order was proved planar for.
+    """
+
+    value = track_coordinate(fitted, corridors, corridor, style)
+    if corridor.side.horizontal:
+        return Point(value, source.y), Point(value, target.y)
+    return Point(source.x, value), Point(target.x, value)
 
 
 def _lane_points(

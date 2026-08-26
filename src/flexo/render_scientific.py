@@ -55,7 +55,7 @@ def render_scientific(
 
 
 def _motif_bounds(node: FittedNode, style: LayoutStyle) -> Rect:
-    return motif_area(node.measured.spec.kind, node.bounds, node.measured.label, style)
+    return motif_area(node.measured.spec, node.bounds, node.measured.label, style)
 
 
 def _grid(

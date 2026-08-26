@@ -7,9 +7,14 @@ import xml.etree.ElementTree as ET
 from flexo.artwork import node_artwork
 from flexo.components import (
     MOTIF_LABEL_KINDS,
+    OPERATOR_SHAPES,
     VectorGrid,
+    body_rect,
     motif_area,
     motif_enabled,
+    note_baseline,
+    note_metrics,
+    note_typography,
     vector_grid,
 )
 from flexo.ir.fitted import FittedNode
@@ -46,6 +51,7 @@ def render_node(
             soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
         _render_kind(group, node, style, palette)
     _render_label(group, node, style, palette)
+    _render_note(group, node, style, palette)
     return group
 
 
@@ -70,6 +76,8 @@ def _render_kind(
         _channels(parent, node, style, palette)
     elif kind == "vector":
         _vector(parent, node, style, palette)
+    elif kind == "operator":
+        _operator(parent, node, style, palette)
     elif kind == "image":
         _image(parent, node, style)
     elif kind in {"matrix", "attention", "graph", "inset"}:
@@ -98,7 +106,9 @@ def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
     if kind not in {"mlp", "cnn"} or not motif_enabled(spec):
         return
     motif = element(parent, "g", id=f"{spec.id}.motif")
-    bounds = node.bounds
+    # The foot of the *body*, which is the foot of the box until a note takes a
+    # band off it -- the dots belong to the component, not on top of its note.
+    bounds = body_rect(spec, node.bounds, style)
     y = bounds.bottom - 6.0
     if kind == "mlp":
         for index, radius in enumerate((1.2, 1.6, 1.2)):
@@ -133,7 +143,7 @@ def _feature_strip(
     spec = node.measured.spec
     if not motif_enabled(spec):
         return
-    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    area = motif_area(spec, node.bounds, node.measured.label, style)
     cells = int(spec.property("cells", 6))
     motif = element(parent, "g", id=f"{spec.id}.cells")
     cell_width = area.width / cells
@@ -164,7 +174,7 @@ def _sequence(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
     spec = node.measured.spec
     if not motif_enabled(spec):
         return
-    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    area = motif_area(spec, node.bounds, node.measured.label, style)
     motif = element(parent, "g", id=f"{spec.id}.tokens")
     count = int(spec.property("tokens", 7))
     spacing = min(7.0, area.width / max(1, count - 1))
@@ -182,7 +192,7 @@ def _sequence(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
 
 
 def _tensor(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
-    bounds = node.bounds
+    bounds = body_rect(node.measured.spec, node.bounds, style)
     for index in reversed(range(3)):
         inset = index * 2.0
         element(
@@ -221,6 +231,37 @@ def _junction(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
     )
 
 
+def _operator(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A small square or circle bearing one glyph, painted like a block.
+
+    The glyph itself is the node's label and is set by ``_render_label`` with
+    every other component's, centred in the body: an operator is a labelled shape
+    whose label happens to be a single character, so nothing here paints text.
+    """
+
+    spec = node.measured.spec
+    if str(spec.property("shape", OPERATOR_SHAPES[0])) != "circle":
+        base_rect(parent, node, style, palette)
+        return
+    bounds = body_rect(spec, node.bounds, style)
+    element(
+        parent,
+        "circle",
+        id=f"{spec.id}.body",
+        cx=bounds.center.x,
+        cy=bounds.center.y,
+        r=min(bounds.width, bounds.height) / 2.0,
+        **paint_attributes(
+            palette=palette,
+            fill_role="block-fill",
+            stroke_role="block-stroke",
+            stroke_width=style.stroke_width.points,
+            fill=paint_override(spec, "fill"),
+            stroke=paint_override(spec, "stroke"),
+        ),
+    )
+
+
 def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     base_rect(
         parent,
@@ -233,7 +274,7 @@ def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
     spec = node.measured.spec
     if not motif_enabled(spec):
         return
-    area = motif_area(spec.kind, node.bounds, node.measured.label, style)
+    area = motif_area(spec, node.bounds, node.measured.label, style)
     motif = element(parent, "g", id=f"{spec.id}.motif")
     widths = (14.0, 10.0, 6.0)
     pitch = min(_CONCAT_PITCH, area.height / len(widths))
@@ -373,7 +414,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
 
     spec = node.measured.spec
     bounds = (
-        motif_area(spec.kind, node.bounds, node.measured.label, style)
+        motif_area(spec, node.bounds, node.measured.label, style)
         if node.measured.label.lines
         else node.bounds
     )
@@ -471,11 +512,14 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
     drawn in. Every other kind centres its label in the box -- and so does a
     motif-label kind whose motif is off: with nothing else in the interior,
     words at the top read as misaligned, not as a band.
+
+    What it centres in is the *body* rather than the bounds, so a note at the
+    foot moves the label up by half its band instead of being centred around.
     """
 
     metrics = node.measured.label
-    bounds = node.bounds
     spec = node.measured.spec
+    bounds = body_rect(spec, node.bounds, style)
     if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
     return bounds.y + bounds.height / 2.0 - metrics.height / 2.0 + metrics.baseline
@@ -513,5 +557,37 @@ def _render_label(
         fill_role="muted-ink" if spec.role == CAPTION_ROLE else "ink",
         # Author paint carries no role, so retheme leaves it alone (render_common).
         fill=paint_override(spec, "label"),
+        anchor="middle",
+    )
+
+
+def _render_note(
+    parent: ET.Element,
+    node: FittedNode,
+    style: LayoutStyle,
+    palette: Palette,
+) -> None:
+    """A component's note: small muted words along the inside of its bottom edge.
+
+    Inside the bounds, like a motif and unlike a caption node -- so the south port
+    is still on the body edge, no stem hangs off the box to carry the words, and
+    nothing in the layout has to know the note exists. The band it sits in was
+    already reserved at measurement (``note_band``), which is why this only has to
+    set a baseline.
+    """
+
+    spec = node.measured.spec
+    metrics = note_metrics(spec, style)
+    if not metrics.lines:
+        return
+    render_runs(
+        parent,
+        f"{spec.id}.note",
+        metrics,
+        x=node.bounds.center.x,
+        y=note_baseline(spec, node.bounds, style),
+        typography=note_typography(style.typography),
+        palette=palette,
+        fill_role="muted-ink",
         anchor="middle",
     )

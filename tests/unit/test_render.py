@@ -7,7 +7,14 @@ import pytest
 
 from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
-from flexo.components import INSET_INK, motif_area, vector_grid
+from flexo.components import (
+    INSET_INK,
+    OPERATOR_SIZE,
+    motif_area,
+    note_band,
+    note_metrics,
+    vector_grid,
+)
 from flexo.geometry import Side
 from flexo.ir.semantic import PortSpec, TextRun
 from flexo.lint import lint_compilation
@@ -402,6 +409,61 @@ def test_a_group_title_keeps_its_styled_runs() -> None:
     assert [span.get("font-size") for span in spans] == [None, number(shifted), None]
 
 
+def _typed_figure() -> Compilation:
+    """Every kind of text object in one figure, each with a typed shift in it."""
+
+    figure = Figure("typed", width=pt(300.0))
+    with figure.module("m", label="QKᵀ-attention", gap="40pt") as module:
+        head = module.mlp("head", label="softmax(QKᵀ)V")
+        tail = module.block("tail", label="hₖ pooling")
+        module.connect(head, tail, label="Aᵀx₀")
+    return compile_figure(figure.spec)
+
+
+def test_a_typed_superscript_is_painted_as_a_superscript() -> None:
+    """R36: ``softmax(QKᵀ)V`` typed into a plain label reaches the SVG raised.
+
+    The face has no ``ᵀ``, so this label used to be a ``font.glyph.missing``
+    error that only a hand-built ``TextRun`` tuple could get past. Every text
+    object is painted from the runs measurement produced, so translating there
+    lands the superscript in a component label, a group title, and a connector
+    caption alike -- and the figure still lints clean.
+    """
+
+    compilation = _typed_figure()
+    document = compilation.document.text
+    shifted = number(STYLES["paper"].typography.size.points * SHIFTED_SIZE)
+    label = _element(document, "m.head.label")
+    assert [span.text for span in label] == ["softmax(QK", "T", ")V"]
+    assert [span.get("baseline-shift") for span in label] == [None, "super", None]
+    assert [span.get("font-size") for span in label] == [None, shifted, None]
+    title = _element(document, "m.label")
+    assert [(span.text, span.get("baseline-shift")) for span in title] == [
+        ("QK", None),
+        ("T", "super"),
+        ("-attention", None),
+    ]
+    assert lint_compilation(compilation).ok
+
+
+def test_a_typed_subscript_is_painted_as_a_subscript() -> None:
+    """A caption mixes both shifts, and the digit the face draws stays a digit."""
+
+    document = _typed_figure().document.text
+    label = _element(document, "m.tail.label")
+    assert [(span.text, span.get("baseline-shift")) for span in label] == [
+        ("h", None),
+        ("k", "sub"),
+        (" pooling", None),
+    ]
+    caption = _element(document, "edge.1.m.head-to-m.tail.label")
+    assert [(span.text, span.get("baseline-shift")) for span in caption] == [
+        ("A", None),
+        ("T", "super"),
+        ("x₀", None),
+    ], "IBM Plex draws ₀ itself, so that one is left exactly as typed"
+
+
 def test_a_title_run_inherits_the_title_weight_unless_it_asks() -> None:
     """The weight is declared once on the text object, so runs may inherit it.
 
@@ -699,7 +761,7 @@ def test_every_motif_label_kind_draws_below_its_label_band() -> None:
         ("m.strip", "m.strip.cells"),
     ):
         node = compilation.fitted.node(node_id)
-        area = motif_area(node.measured.spec.kind, node.bounds, node.measured.label, _STYLE)
+        area = motif_area(node.measured.spec, node.bounds, node.measured.label, _STYLE)
         left, top, right, bottom = _ink_box(compilation.document.text, motif_id)
         assert top >= area.y - 1e-6, f"{motif_id} rises into the label band"
         assert bottom <= area.bottom + 1e-6, f"{motif_id} spills past its area"
@@ -793,3 +855,140 @@ def test_motif_less_attention_centres_its_label() -> None:
     assert banded < centred  # the banded label sits higher than the centred one
     mid = top + height / 2.0
     assert abs(centred - mid) < height / 4.0  # centred label straddles the middle
+
+
+# --- R35: notes and operator symbols -------------------------------------
+
+
+def _noted(
+    kind: str = "block",
+    *,
+    note: str = "384 → 768 → 384",
+    label: str = "GEGLU FFN",
+    **options: object,
+) -> Compilation:
+    """One component of ``kind``, alone on the canvas, carrying ``note``."""
+
+    with Figure("notes", width=pt(220.0)) as figure:
+        figure.root.node(
+            "n",
+            kind,
+            label=label,
+            note=note,
+            ports=(PortSpec("input", Side.WEST, adaptive=True), PortSpec("south", Side.SOUTH)),
+            **options,
+        )
+    return compile_figure(figure.spec)
+
+
+def test_a_note_is_set_inside_the_body_and_leaves_the_south_port_on_the_edge() -> None:
+    """R35: a note is drawn like a motif, so nothing about the box moves for it."""
+
+    compilation = _noted()
+    node = compilation.fitted.node("n")
+    metrics = note_metrics(node.measured.spec, _STYLE)
+    note = _element(compilation.document.text, "n.note")
+    assert "".join(item.text or "" for item in note.iter()).strip() == "384 → 768 → 384"
+    assert float(note.get("font-size", "0")) == pytest.approx(
+        _STYLE.typography.minimum_size.points
+    ), "smaller than the label it sits under"
+    assert note.get("data-flexo-fill") == "muted-ink", "a role, so retheme reaches it"
+    assert float(note.get("x", "0")) == pytest.approx(node.bounds.center.x)
+    top = float(note.get("y", "0")) - metrics.baseline
+    assert top > node.bounds.y
+    assert top + metrics.height <= node.bounds.bottom, "inside the bounds, like a motif"
+    assert node.bounds.bottom - (top + metrics.height) == pytest.approx(
+        _STYLE.padding_y.points
+    ), "the box's own bottom padding, and no stem"
+    # The port is where it would have been with no note: a note is not a caption
+    # node, so it neither sits on the south port nor hangs off it.
+    assert node.port("south").position.y == pytest.approx(node.bounds.bottom)
+    assert node.port("south").position.x == pytest.approx(node.bounds.center.x)
+
+
+def _mlp_figure(*, note: str = "") -> Figure:
+    figure = Figure("noted-mlp", width=pt(220.0))
+    with figure.module("m") as module:
+        module.mlp("mlp", label="GEGLU FFN", note=note)
+    return figure
+
+
+def test_a_note_grows_the_box_and_clears_the_label_and_the_motif() -> None:
+    """The band is reserved, so the words underneath cost the label nothing."""
+
+    plain = compile_figure(_mlp_figure().spec).fitted.node("m.mlp")
+    compilation = compile_figure(_mlp_figure(note="384 → 768 → 384").spec)
+    noted = compilation.fitted.node("m.mlp")
+    metrics = note_metrics(noted.measured.spec, _STYLE)
+    band = metrics.height + _STYLE.padding_y.points
+    assert note_band(noted.measured.spec, _STYLE) == pytest.approx(band)
+    assert note_band(plain.measured.spec, _STYLE) == 0.0
+    assert noted.bounds.height - plain.bounds.height == pytest.approx(band), (
+        "exactly the band: the body keeps every point it had"
+    )
+    document = compilation.document.text
+    note_top = float(_element(document, "m.mlp.note").get("y", "0")) - metrics.baseline
+    label = noted.measured.label
+    label_bottom = (
+        float(_element(document, "m.mlp.label").get("y", "0")) - label.baseline + label.height
+    )
+    assert label_bottom < note_top, "the label clears the words below it"
+    dots = [
+        float(item.get("cy", "0"))
+        for item in _element(document, "m.mlp.motif").iter(f"{{{SVG_NS}}}circle")
+    ]
+    assert len(dots) == 3
+    assert max(dots) < note_top, "and so does the motif"
+
+
+def test_a_multi_line_note_reserves_every_line() -> None:
+    """``\\n`` breaks a note the way it breaks a label, and the box grows for it."""
+
+    one = compile_figure(_mlp_figure(note="stride 2").spec).fitted.node("m.mlp")
+    two = compile_figure(_mlp_figure(note="stride 2\nk = 3").spec).fitted.node("m.mlp")
+    metrics = note_metrics(two.measured.spec, _STYLE)
+    assert len(metrics.lines) == 2
+    assert two.bounds.height - one.bounds.height == pytest.approx(metrics.line_height)
+
+
+def _operator_figure(glyph: str = "+", **options: object) -> Figure:
+    figure = Figure("ops", width=pt(200.0))
+    with figure.module("m") as module:
+        module.operator("op", glyph, **options)
+    return figure
+
+
+def test_an_operator_is_a_small_glyph_bearing_square_with_four_side_ports() -> None:
+    """R2/R35: an operation costs one glyph's worth of ink, not a module's."""
+
+    compilation = compile_figure(_operator_figure().spec)
+    node = compilation.fitted.node("m.op")
+    assert node.bounds.size == OPERATOR_SIZE, "a symbol takes no label padding"
+    for name, point in (
+        ("input", (node.bounds.left, node.bounds.center.y)),
+        ("output", (node.bounds.right, node.bounds.center.y)),
+        ("north", (node.bounds.center.x, node.bounds.top)),
+        ("south", (node.bounds.center.x, node.bounds.bottom)),
+    ):
+        port = node.port(name)
+        assert (port.position.x, port.position.y) == pytest.approx(point)
+    body = _element(compilation.document.text, "m.op.body")
+    assert body.tag == f"{{{SVG_NS}}}rect"
+    assert float(body.get("rx", "0")) == pytest.approx(_STYLE.corner_radius.points)
+    assert body.get("data-flexo-fill") == "block-fill"
+    assert body.get("data-flexo-stroke") == "block-stroke"
+    glyph = _element(compilation.document.text, "m.op.label")
+    assert "".join(item.text or "" for item in glyph.iter()).strip() == "+"
+    assert float(glyph.get("x", "0")) == pytest.approx(node.bounds.center.x)
+
+
+def test_an_operator_may_be_a_circle_and_grows_for_a_wider_glyph() -> None:
+    compilation = compile_figure(_operator_figure("Σ", shape="circle").spec)
+    node = compilation.fitted.node("m.op")
+    body = _element(compilation.document.text, "m.op.body")
+    assert body.tag == f"{{{SVG_NS}}}circle"
+    assert float(body.get("r", "0")) == pytest.approx(
+        min(node.bounds.width, node.bounds.height) / 2.0
+    )
+    assert float(body.get("cx", "0")) == pytest.approx(node.bounds.center.x)
+    assert node.bounds.width >= OPERATOR_SIZE.width

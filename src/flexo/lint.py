@@ -12,6 +12,7 @@ from flexo.components import TRANSPARENT_KINDS
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, segments
 from flexo.hierarchy import bounded_owner, parent_map
+from flexo.routing.hops import crossing_points, figure_routes, hopped_by
 from flexo.style import STYLES, LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS, local_name
 
@@ -385,27 +386,42 @@ def _track_separation_diagnostics(
     compilation: Compilation,
     style: LayoutStyle,
 ) -> tuple[Diagnostic, ...]:
+    """Who crosses whom, and how close two parallel runs dare to sit.
+
+    A crossing the engine bridged is reported, not warned about: the figure says
+    out loud which shaft hops which, and the reader can see it on the page. The
+    warning is kept for the crossings nothing was drawn for -- hops switched off
+    by style, or a crossing no shaft could take an arc at.
+    """
+
+    routed = compilation.routed
     diagnostics = []
     minimum = style.port_spacing.points
-    routes = [(edge.spec.id, edge.centerline) for edge in compilation.routed.edges]
-    for net in compilation.routed.nets:
-        routes.append((net.spec.id, net.rail))
-        routes.extend((net.spec.id, stem.centerline) for stem in net.source_stems)
-        routes.extend((net.spec.id, stem.centerline) for stem in net.target_stems)
-    for (first_id, first_route), (second_id, second_route) in combinations(routes, 2):
+    for (first_id, first_route), (second_id, second_route) in combinations(
+        figure_routes(routed), 2
+    ):
         if first_id == second_id:
             continue
-        crossing = any(
-            _segments_cross(first, second)
-            for first in segments(first_route)
-            for second in segments(second_route)
-        )
-        if crossing:
+        crossings = crossing_points(first_route, second_route)
+        hoppers = {
+            point: hopped_by(routed, first_id, second_id, point) for point in crossings
+        }
+        if any(hopper is None for hopper in hoppers.values()):
             diagnostics.append(
                 Diagnostic(
                     "routing.connector.crossing",
                     f'Route crosses "{second_id}".',
                     Severity.WARNING,
+                    entity_id=first_id,
+                )
+            )
+        bridged = sorted({hopper for hopper in hoppers.values() if hopper is not None})
+        if bridged:
+            diagnostics.append(
+                Diagnostic(
+                    "routing.connector.hop",
+                    f'Route crosses "{second_id}" {_hop_phrasing(bridged, first_id)}.',
+                    Severity.INFO,
                     entity_id=first_id,
                 )
             )
@@ -425,16 +441,14 @@ def _track_separation_diagnostics(
     return tuple(diagnostics)
 
 
-def _segments_cross(first: Segment, second: Segment) -> bool:
-    if first.horizontal == second.horizontal:
-        return False
-    horizontal, vertical = (first, second) if first.horizontal else (second, first)
-    x_low, x_high = sorted((horizontal.start.x, horizontal.end.x))
-    y_low, y_high = sorted((vertical.start.y, vertical.end.y))
-    return (
-        x_low + 1e-7 < vertical.start.x < x_high - 1e-7
-        and y_low + 1e-7 < horizontal.start.y < y_high - 1e-7
-    )
+def _hop_phrasing(bridged: list[str], first_id: str) -> str:
+    """Which way round the bridge goes, said in words rather than in ids."""
+
+    if bridged == [first_id]:
+        return "and hops over it"
+    if len(bridged) == 1:
+        return "and is hopped over by it"
+    return "and each hops the other"
 
 
 def _parallel_tracks_too_close(first: Segment, second: Segment, minimum: float) -> bool:

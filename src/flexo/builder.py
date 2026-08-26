@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 from flexo.components import (
+    NOTE_LESS_KINDS,
+    NOTE_PROPERTY,
+    OPERATOR_SHAPES,
     attachment_lane_tracks,
     component_port_offsets,
     normalize_node,
@@ -61,6 +64,16 @@ type AttentionVectors = (
 ``None`` (or ``False``) grows none, which is the plain attention block. ``True``
 takes the role defaults; one preset or one ramp-role name paints all three alike;
 a mapping keyed ``q``/``k``/``v`` paints each its own way.
+"""
+
+_OPERATOR_INPUTS = ("input", "south", "north")
+"""The edges an ``operator``'s ``inputs=`` arrive on, in order.
+
+West first because that is where a value comes from in a figure that reads across;
+then south, which is where a residual rejoins the spine it bypassed; then north.
+Sharing one ``input`` between them -- what ``wire`` does for a component with no
+numbered ports -- would put every arrowhead of a join on the same point, which is
+two runs a hair apart and a ``routing.track.separation`` error for the pair.
 """
 
 _QKV_PORTS = ("q", "k", "v")
@@ -246,6 +259,7 @@ class Figure:
         label: str | tuple[TextRun, ...] = "",
         layout: LayoutKind | LayoutSpec = "row",
         gap: Length | str | float | None = None,
+        padding: Padding | None = None,
         align: str = "center",
         justify: str = "center",
         width: Length | str | float | None = None,
@@ -256,13 +270,22 @@ class Figure:
         shadow: bool = False,
         paint: Mapping[str, str] | None = None,
     ) -> GroupBuilder:
-        """Open a titled module directly on the root: ``figure.root.group`` in one call."""
+        """Open a titled module directly on the root: ``figure.root.group`` in one call.
+
+        ``padding`` is the same knob, and the same grammar, that ``group`` takes:
+        one length for all four sides, an ``(x, y)`` pair, or a ``(top, right,
+        bottom, left)`` 4-tuple. It is here because a module is a group -- a figure
+        that needed to pull a port up to its module's wall had to abandon
+        ``module()`` and rebuild it as a raw ``group`` for the sake of one
+        asymmetric edge (R35).
+        """
 
         return self.root.group(
             id,
             label=label,
             layout=layout,
             gap=gap,
+            padding=padding,
             align=align,
             justify=justify,
             width=width,
@@ -610,6 +633,7 @@ class GroupBuilder:
         kind: str = "block",
         *,
         label: str | tuple[TextRun, ...] = "",
+        note: str = "",
         role: str = "block",
         ports: tuple[PortSpec, ...] = (),
         width: Extent | str | float | None = None,
@@ -638,6 +662,13 @@ class GroupBuilder:
         component has to differ from its palette, and change the palette when
         every component of a kind does.
 
+        ``note="384 → 768 → 384"`` prints a remark about the component in small
+        muted type along the inside of its bottom edge, and grows the box enough
+        to hold it. It is drawn like a motif rather than placed like a caption, so
+        it neither blocks the south port nor hangs off a stem, and no wrapper
+        column is needed to hold the two together; ``\\n`` breaks it into lines.
+        Keep the label the name of the operation and put the dimensions here.
+
         ``motif=False`` drops the component's decorative motif -- an MLP's three
         dots, a matrix's cell grid -- and changes nothing else.
 
@@ -656,6 +687,14 @@ class GroupBuilder:
         resolved.update(_paint_properties(paint))
         if not motif:
             resolved["motif"] = False
+        if note:
+            if kind in NOTE_LESS_KINDS:
+                raise ValueError(
+                    f'a "{kind}" has no body to hold a note: its bounds are exactly '
+                    "the one thing it draws. Put the words in a label node beside it, "
+                    "the way vector() captions its stack."
+                )
+            resolved[NOTE_PROPERTY] = note
         node = normalize_node(
             NodeSpec(
                 self._scoped(id),
@@ -709,6 +748,69 @@ class GroupBuilder:
         """A plain labelled box: the component to reach for when none of the others fit."""
 
         return self.node(id, "block", label=label, **options)
+
+    def operator(
+        self,
+        id: str,
+        glyph: str = "+",
+        *,
+        shape: str = "square",
+        input: NodeHandle | PortRef | str | None = None,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str] = (),
+        **options: object,
+    ) -> NodeHandle:
+        """One arithmetic symbol: a 14 pt square or circle bearing a single glyph.
+
+        Simple operations are symbols, not modules (R2). ``+`` is a residual
+        join, a multiplication sign a gate, ``·`` a matrix or affine
+        application, ``Σ`` a weighted sum -- and nothing else goes inside the
+        shape, so an operation that needs qualification takes a caption or an
+        edge label beside it rather than a second word in the glyph. A ``block``
+        labelled "Add" is a module-sized claim about an operation that costs one
+        character to draw.
+
+        It offers the four side centres -- ``input`` west, ``output`` east, plus
+        ``north`` and ``south`` -- because a symbol this small has no edge for an
+        adaptive port to slide along, and because a join is normally drawn with one
+        value arriving along the spine and the other from the side it was tapped
+        from. Wiring follows the standard keywords: ``input=`` lands on ``input``,
+        and ``inputs=`` fills ``input``, then ``south``, then ``north``, so
+        ``operator("join", "+", inputs=(sublayer, skip))`` draws two arrivals on
+        two edges rather than two arrowheads on one point. An authored ``ports=``
+        replaces the table and the sources are wired through it as usual.
+
+        ``shape="circle"`` draws the same symbol as a circle. ``paint=``,
+        ``width``/``height``, and ``at=`` all behave as they do on any component.
+        """
+
+        if shape not in OPERATOR_SHAPES:
+            raise ValueError(
+                f'unknown operator shape "{shape}" for "{id}"; '
+                f"valid shapes: {', '.join(OPERATOR_SHAPES)}"
+            )
+        if len(glyph.strip()) != 1:
+            raise ValueError(
+                f'an operator carries exactly one glyph, not "{glyph}"; '
+                "qualify the operation with a caption or an edge label beside it"
+            )
+        ports = _authored_ports(options)
+        if shape != OPERATOR_SHAPES[0]:
+            options = _with_properties(options, shape=shape)
+        result = self.node(id, "operator", label=glyph.strip(), ports=ports, **options)
+        sources = ((input,) if input is not None else ()) + tuple(inputs)
+        if len(sources) > 1 and not ports:
+            if len(sources) > len(_OPERATOR_INPUTS):
+                raise ValueError(
+                    f'operator "{id}" has {len(_OPERATOR_INPUTS)} sides to read from '
+                    f"({', '.join(_OPERATOR_INPUTS)}), not {len(sources)}; "
+                    "give it a ports= table, or feed it from a net"
+                )
+            for source, name in zip(sources, _OPERATOR_INPUTS, strict=False):
+                self.connect(source, result.port(name))
+        else:
+            self.wire(result, sources)
+        return result
 
     def feature_strip(
         self,

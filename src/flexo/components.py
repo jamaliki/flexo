@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import cache
 from itertools import pairwise
 
 from flexo.artwork import node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.geometry import Rect, Side, Size
 from flexo.ir.measured import TextMetrics
-from flexo.ir.semantic import NodeSpec, PortSpec
-from flexo.style import LayoutStyle
+from flexo.ir.semantic import NodeSpec, PortSpec, TextRun
+from flexo.style import LayoutStyle, TypographyStyle
+from flexo.text import TextMeasurer
 
 TRANSPARENT_KINDS = frozenset({"spacer", "junction"})
 """Node kinds nothing has to keep clear of: they paint no ink a route can spoil.
@@ -38,6 +40,90 @@ TRANSPARENT_ROLES = frozenset({"layout", "canvas"})
 The container counterpart of ``TRANSPARENT_KINDS``, and read the same way by
 every pass that asks what is in the way.
 """
+
+
+_EMPTY_TEXT = TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ())
+"""What measurement answers for text nobody wrote: no lines, and no room asked for."""
+
+NOTE_PROPERTY = "note"
+"""Property carrying a component's note: small muted type at the foot of its body.
+
+A note is a remark *about* the component -- the dimension transition
+"384 → 768 → 384" under a GEGLU FFN -- rather than a second name for it, so it is
+set smaller, painted as muted ink, and kept inside the node's own bounds the way a
+motif is. That is the whole point of it being a property rather than a caption
+node in a column: a caption below the box sits on the south port and takes part in
+layout, and the figure that needed one had to spend a wrapper group and a downward
+stem to say something that belongs to the box itself (R35).
+"""
+
+NOTE_LESS_KINDS = frozenset({"image", "label", "spacer", "vector"})
+"""Kinds with no body a note could sit in.
+
+Each of these is exactly as big as the one thing it draws -- a caption is its
+words, a vector is its cell grid, an image is its artwork -- so a band taken off
+the foot would either falsify that size or push the ink off the ports measured
+from it. The words a ``vector()`` carries are already a sibling ``label`` node for
+this reason, and a note under an image is that same sibling.
+"""
+
+
+@cache
+def _measured_note(text: str, typography: TypographyStyle) -> TextMetrics:
+    """Shape one note's words, cached: the same remark is measured then painted."""
+
+    return TextMeasurer(typography).measure((TextRun(text),))
+
+
+def note_typography(typography: TypographyStyle) -> TypographyStyle:
+    """The type a note is set in: the style's smallest size, family and all.
+
+    ``minimum_size`` is what the rest of the system already sets subordinate type
+    at (a channels strip's per-channel labels), so a note is quieter than the
+    label above it without inventing a token.
+    """
+
+    return replace(typography, size=typography.minimum_size)
+
+
+def note_metrics(spec: NodeSpec, style: LayoutStyle) -> TextMetrics:
+    """``spec``'s note as measured text, or empty metrics where it carries none.
+
+    Sizing and painting both ask here, so the band a note reserves is the band its
+    words land in -- including the extra lines a ``\\n`` in the note splits it
+    into.
+    """
+
+    text = spec.property(NOTE_PROPERTY)
+    if not text or spec.kind in NOTE_LESS_KINDS:
+        return _EMPTY_TEXT
+    return _measured_note(str(text), note_typography(style.typography))
+
+
+def note_band(spec: NodeSpec, style: LayoutStyle) -> float:
+    """Height a note takes off the foot of its node: the words plus the air below.
+
+    Everything that draws inside a component -- the label it centres, the motif
+    ``motif_area`` hands out, the dots under an MLP -- measures against the body
+    this leaves, so growing a node by exactly this much is what keeps the note
+    from colliding with any of them.
+    """
+
+    metrics = note_metrics(spec, style)
+    return metrics.height + style.padding_y.points if metrics.lines else 0.0
+
+
+def body_rect(spec: NodeSpec, bounds: Rect, style: LayoutStyle) -> Rect:
+    """``bounds`` less the note's band: the room the component itself has to draw in."""
+
+    return Rect(bounds.x, bounds.y, bounds.width, max(0.0, bounds.height - note_band(spec, style)))
+
+
+def note_baseline(spec: NodeSpec, bounds: Rect, style: LayoutStyle) -> float:
+    """The y of the note's first baseline: its band sits on the body's bottom padding."""
+
+    metrics = note_metrics(spec, style)
+    return bounds.bottom - style.padding_y.points - metrics.height + metrics.baseline
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +275,37 @@ know that about an illustration the author drew, so an image pins all four side
 centres and lets the counterpart adapt instead.
 """
 
+_OPERATOR_PORTS = _VECTOR_PORTS
+"""An operator wires like a vector: one fixed centre port per side (R35).
+
+A symbol this small has no edge long enough for an adaptive port to slide along
+-- the whole glyph is a couple of cell-widths across -- so all four ports stay on
+the side centres and the *counterpart* adapts to meet them. None is auto-sided
+either, for the reason a vector's are not: a component that offers every side has
+already handed the choice to the author, who makes it by wiring ``south`` rather
+than ``input``. That is what puts a residual join's bypass on the edge the author
+drew it entering.
+"""
+
+OPERATOR_SHAPES = ("square", "circle")
+"""The two bodies an operator symbol may wear, the default first.
+
+A rounded square is the default because it is what the fleet drew by hand and
+because it sits in a row of blocks without reading as a routing junction; a circle
+is the same symbol for a figure that draws its operations as beads on a wire.
+Nothing else differs -- same ports, same size, same glyph.
+"""
+
+OPERATOR_SIZE = Size(14.0, 14.0)
+"""The box one operator symbol is drawn in (R2/R35).
+
+Fourteen points is the size the see-more fleet settled on by hand, as
+``node(..., "block", label="+", width=pt(14), height=pt(14))`` -- big enough that
+a ``+`` reads at print size, small enough that an operation costs a fraction of
+the ink a module does. It is a floor rather than a fixed size: a wider glyph grows
+its own box instead of overflowing it.
+"""
+
 _DEFAULT_CELLS = 3
 _DEFAULT_COLUMNS = 1
 
@@ -321,6 +438,9 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ),
         ComponentDefinition("loss", Size(44.0, 32.0), (_INPUT,)),
         ComponentDefinition("junction", Size(8.0, 8.0), _MULTI_OUTPUT),
+        # A symbol, not a labelled box: its glyph may grow it, but padding may
+        # not, which is why intrinsic_node_size gives it a branch of its own.
+        ComponentDefinition("operator", OPERATOR_SIZE, _OPERATOR_PORTS),
         ComponentDefinition("graph", Size(70.0, 62.0), _STANDARD, motif_height=GRAPH_INK_HEIGHT),
         ComponentDefinition("inset", Size(82.0, 60.0), _STANDARD, motif_height=INSET_INK.height),
         # A vector's size is exactly its cell grid, so it comes from the style
@@ -437,18 +557,22 @@ def label_band_height(kind: str, label: TextMetrics, style: LayoutStyle) -> floa
     return style.padding_y.points + label.height
 
 
-def motif_area(kind: str, bounds: Rect, label: TextMetrics, style: LayoutStyle) -> Rect:
+def motif_area(spec: NodeSpec, bounds: Rect, label: TextMetrics, style: LayoutStyle) -> Rect:
     """The interior a motif may paint in: below the label band, inside the padding.
 
     A caption and the drawing it names are not allowed to negotiate for the same
     points. The band comes off the top, ``motif_label_gap`` of air comes off after
     it, and what is left is the motif's -- which is why an authored height too
     small for both makes the drawing smaller instead of making it collide.
+
+    A note takes its own band off the *foot* on the same terms (``note_band``), so
+    a component that carries one draws its motif in what is left rather than
+    across the words.
     """
 
-    band = label_band_height(kind, label, style)
+    band = label_band_height(spec.kind, label, style)
     top = bounds.y + (band + style.motif_label_gap.points if band else style.padding_y.points)
-    bottom = bounds.bottom - style.padding_y.points
+    bottom = body_rect(spec, bounds, style).bottom - style.padding_y.points
     return Rect(
         bounds.x + style.padding_x.points,
         top,
@@ -484,6 +608,7 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
 
     artwork = node_artwork(node)
     band = label_band_height(node.kind, label, style)
+    # An image is a NOTE_LESS_KIND, so nothing here has a note band to allow for.
     chrome = (
         Size(
             2.0 * style.padding_x.points,
@@ -539,6 +664,14 @@ def intrinsic_node_size(
         # other, so image sizing answers on its own rather than through the
         # declared-or-natural tail below.
         return image_size(node, label, style)
+    elif node.kind == "operator":
+        # The glyph *is* the component, so it takes no padding: an operator
+        # padded like a label would be half again the size the design asks for.
+        # It is still a floor -- a glyph wider than the box grows the box.
+        natural = Size(
+            max(definition.minimum_size.width, label.width),
+            max(definition.minimum_size.height, label.height),
+        )
     else:
         # A motif-label kind stacks its band, its gap and its motif; every other
         # kind centres its words, so the label alone sets the height it needs.
@@ -556,6 +689,16 @@ def intrinsic_node_size(
                 label.width + 2.0 * style.padding_x.points,
             ),
             max(definition.minimum_size.height, stacked),
+        )
+    # A note is furniture the component grew, so it grows the component: the
+    # minimum size, the label band and the motif all keep the room they had and
+    # the words go underneath them. An authored extent still wins, on the same
+    # terms as everywhere else -- naming the box is naming the box.
+    note = note_metrics(node, style)
+    if note.lines:
+        natural = Size(
+            max(natural.width, note.width + 2.0 * style.padding_x.points),
+            natural.height + note.height + style.padding_y.points,
         )
     width = style.resolve_extent(node.width).points if node.width is not None else natural.width
     height = style.resolve_extent(node.height).points if node.height is not None else natural.height
