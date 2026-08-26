@@ -1218,3 +1218,117 @@ def test_attention_vector_feeds_arrive_as_plain_verticals() -> None:
         assert start.x == pytest.approx(end.x)
         assert start.y > end.y, "the feed arrives from below"
     assert not lint_compilation(compiled).errors
+
+
+# --- R35: module padding, notes, and operator symbols ---------------------
+
+
+def test_module_takes_the_same_asymmetric_padding_a_group_does() -> None:
+    """R35: ``module`` is a group, so the one layout knob it swallowed is back.
+
+    The figure this replaces had to abandon ``module()`` and rebuild it as a raw
+    ``group`` to pull a port up to its module's wall.
+    """
+
+    with Figure("padded", width=pt(220)) as figure:  # noqa: SIM117
+        with figure.module("m", label="Module", padding=(pt(20), pt(3), pt(11), pt(7))) as module:
+            module.block("b", label="Body")
+    layout = next(group for group in figure.spec.groups if group.id == "m").layout
+    assert (layout.padding_top, layout.padding_right) == (pt(20), pt(3))
+    assert (layout.padding_bottom, layout.padding_left) == (pt(11), pt(7))
+    assert layout.padding is None, "asymmetry is four sides, not one length"
+    fitted = compile_figure(figure.spec).fitted
+    group = fitted.group("m")
+    assert group.bounds.right - group.content_bounds.right == pytest.approx(3.0)
+    assert group.bounds.bottom - group.content_bounds.bottom == pytest.approx(11.0)
+    assert group.content_bounds.left - group.bounds.left == pytest.approx(7.0)
+    assert parse_figure(yaml.safe_load(dump_figure(figure.spec))) == figure.spec
+
+
+def test_module_and_row_take_one_padding_and_an_xy_pair_too() -> None:
+    """The whole padding grammar, not a special case of it."""
+
+    with Figure("padded", width=pt(220)) as figure:
+        figure.module("uniform", padding=pt(9)).block("a")
+        figure.root.row("pair", padding=(pt(4), pt(6))).block("b")
+        figure.root.column("none").block("c")
+    layouts = {group.id: group.layout for group in figure.spec.groups}
+    assert layouts["uniform"].padding == pt(9)
+    assert layouts["pair"].padding_left == pt(4) and layouts["pair"].padding_top == pt(6)
+    assert layouts["none"].padding is None, "an author who asked for nothing gets the default"
+
+
+def test_a_note_travels_as_a_node_property_and_round_trips() -> None:
+    """R35: a remark about a component belongs to the component, not to a column."""
+
+    with Figure("noted", width=pt(220)) as figure:  # noqa: SIM117
+        with figure.module("m") as module:
+            module.mlp("ffn", label="GEGLU FFN", note="384 → 768 → 384")
+            module.cnn("conv", label="Conv", note="stride 2\nk = 3")
+    nodes = {node.id: node for node in figure.spec.nodes}
+    assert nodes["m.ffn"].property("note") == "384 → 768 → 384"
+    assert nodes["m.conv"].property("note") == "stride 2\nk = 3"
+    assert len(figure.spec.groups) == 2, "no wrapper column was grown to hold the words"
+    assert parse_figure(yaml.safe_load(dump_figure(figure.spec))) == figure.spec
+
+
+def test_a_note_needs_a_body_to_sit_in() -> None:
+    with Figure("noted", width=pt(220)) as figure:
+        with pytest.raises(ValueError, match="no body to hold a note"):
+            figure.root.node("v", "vector", note="N × 3")  # noqa: RUF001
+        figure.root.block("b", label="Body")
+
+
+def test_operator_spreads_its_inputs_over_the_edges_it_offers() -> None:
+    """R2/R35: two arrivals on two edges, never two arrowheads on one point."""
+
+    with Figure("ops", width=pt(220)) as figure:  # noqa: SIM117
+        with figure.module("m") as module:
+            sublayer = module.block("sublayer", label="Sublayer")
+            skip = module.block("skip", label="Skip")
+            join = module.operator("join", "+", inputs=(sublayer, skip))
+            assert join.ports == ("input", "output", "north", "south")
+    targets = [str(edge.target) for edge in figure.spec.edges]
+    assert targets == ["m.join.input", "m.join.south"]
+    node = next(node for node in figure.spec.nodes if node.id == "m.join")
+    assert node.kind == "operator"
+    assert node.text == "+"
+    assert node.properties == (), "the default shape says nothing"
+    assert {port.side for port in node.ports} == set(Side)
+    assert all(port.offset == 0.5 and not port.adaptive for port in node.ports)
+
+
+def test_operator_takes_the_standard_wiring_keywords() -> None:
+    with Figure("ops", width=pt(220)) as figure:  # noqa: SIM117
+        with figure.module("m") as module:
+            source = module.block("source", label="Source")
+            module.operator("scale", "×", shape="circle", input=source)  # noqa: RUF001
+            module.operator(
+                "sum",
+                "Σ",
+                ports=(PortSpec("input1", Side.WEST, 0.3), PortSpec("input2", Side.WEST, 0.7)),
+                inputs=(source, source),
+            )
+    assert [str(edge.target) for edge in figure.spec.edges] == [
+        "m.scale.input",
+        "m.sum.input1",
+        "m.sum.input2",
+    ]
+    scale = next(node for node in figure.spec.nodes if node.id == "m.scale")
+    assert scale.property("shape") == "circle"
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"glyph": "Add"}, "exactly one glyph"),
+        ({"glyph": ""}, "exactly one glyph"),
+        ({"shape": "hexagon"}, "unknown operator shape"),
+    ],
+)
+def test_operator_refuses_what_is_not_a_symbol(options: dict[str, str], message: str) -> None:
+    glyph = options.pop("glyph", "+")
+    with Figure("ops", width=pt(220)) as figure:
+        with pytest.raises(ValueError, match=message):
+            figure.root.operator("op", glyph, **options)
+        figure.root.block("b", label="Body")

@@ -7,9 +7,10 @@ import pytest
 from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.diagnostics import Severity
-from flexo.emit import _net_ink
+from flexo.emit import _net_ink, shaft_path
 from flexo.gallery import gallery_figure, vertical_slice
 from flexo.geometry import Point, Rect, Segment, Side, segments
+from flexo.ir.routed import Hop
 from flexo.ir.semantic import (
     EdgeSpec,
     FigureSpec,
@@ -25,6 +26,7 @@ from flexo.ir.semantic import (
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
+from flexo.routing.hops import crossing_points, hop_site, routing_order, routing_rank
 from flexo.routing.nets import _vertical_rail, _via_clamp_diagnostics, net_segments
 from flexo.routing.nudge import (
     Run,
@@ -38,9 +40,9 @@ from flexo.routing.nudge import (
     rail_label_position,
     shorten_start,
 )
-from flexo.routing.solve import _routing_order
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
 from flexo.style import LayoutStyle
+from flexo.svg import rounded_polyline_path
 from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
@@ -626,7 +628,7 @@ def test_gallery_routing_is_deterministic_and_lint_clean() -> None:
 
 def test_long_haul_edges_claim_their_lane_before_short_ones() -> None:
     fitted = fit_figure(measure_figure(_container_figure()))
-    order = _routing_order(fitted, fitted.measured.semantic.edges)
+    order = routing_order(fitted, fitted.measured.semantic.edges)
     assert tuple(edge.id for edge in order) == ("past", "into")
 
 
@@ -1378,3 +1380,227 @@ def test_an_authored_rail_keeps_the_trunk_where_it_asked() -> None:
         net = compilation.routed.net("fan")
         assert net.source_stems[0].centerline[1].x == pytest.approx(escape), hint
         assert lint_compilation(compilation).ok
+
+
+def _crossroads_figure() -> Figure:
+    """Four blocks around one junction: two straight runs that must cross.
+
+    Nothing here is a routing mistake to be argued out of -- west to east and
+    north to south share one square of canvas, and no lane, jog or detour
+    changes that. It is R34's case in its simplest form.
+    """
+
+    figure = Figure(
+        "crossroads",
+        width=pt(460.0),
+        layout=LayoutSpec(
+            "grid", columns=3, row_gap=pt(50.0), column_gap=pt(70.0), padding=pt(20.0)
+        ),
+    )
+    root = figure.root
+    west = root.block("west", label="West", width="70pt", at=(1, 0))
+    north = root.block("north", label="North", width="70pt", at=(0, 1))
+    south = root.block("south", label="South", width="70pt", at=(2, 1))
+    east = root.block("east", label="East", width="70pt", at=(1, 2))
+    root.connect(west, east, id="across")
+    root.connect(north, south, id="down")
+    return figure
+
+
+def _swapped_bands_figure() -> Figure:
+    """Two flows that trade height across one gap, each jogging at the crossing.
+
+    The crossing lands one elbow radius past both jogs, so it falls inside both
+    shafts' fillets: the degenerate case, where a bridge would have to grow out
+    of a curve.
+    """
+
+    figure = Figure("swapped", width=pt(340.0))
+    with figure.root.row("bands", gap=pt(90.0), justify="space-between", role="layout") as row:
+        with row.column("left", gap="50pt") as left:
+            upper = left.block("upper", label="Upper", width="60pt")
+            lower = left.block("lower", label="Lower", width="60pt")
+        with row.column("right", gap="50pt") as right:
+            first = right.block("first", label="First", width="60pt")
+            second = right.block("second", label="Second", width="60pt")
+    figure.root.connect(upper, second, id="descending")
+    figure.root.connect(lower, first, id="climbing")
+    return figure
+
+
+def test_a_forced_crossing_is_drawn_as_a_hop_by_the_later_routed_shaft() -> None:
+    """R34: the route drawn later bridges the one already on the page."""
+
+    compilation = compile_figure(_crossroads_figure().spec)
+    rank = routing_rank(compilation.routed)
+    assert rank["across"] < rank["down"], "the long haul routes first"
+    across = compilation.routed.edge("across")
+    down = compilation.routed.edge("down")
+    assert across.hops == (), "the earlier route is the one hopped over"
+    assert down.hops == (Hop(Point(195.0, 112.0), "across"),)
+    assert crossing_points(across.centerline, down.centerline) == (down.hops[0].point,)
+
+
+def test_a_hop_is_one_arc_inside_the_shafts_own_path_data() -> None:
+    """One editable object per connector: the bridge is a segment of ``d``."""
+
+    compilation = compile_figure(_crossroads_figure().spec)
+    style = LayoutStyle()
+    radius = style.hop_radius.points
+    assert radius == pytest.approx(2.25), "2.5 stroke widths, under the clearance cap"
+    hopped = _shaft_data(compilation.document.text, "down")
+    assert hopped.count(" A ") == 1, "one crossing, one arc, one path"
+    assert f"A {radius} {radius} 0 0 1" in hopped
+    # The arc spans exactly one diameter of the run it interrupts, and the ink
+    # either side of it is the shaft the router laid down.
+    assert hopped.startswith("M 195 51 L 195 109.75 A")
+    assert hopped.endswith("114.25 L 195 169")
+    assert " A " not in _shaft_data(compilation.document.text, "across"), "only one hops"
+
+
+def test_a_hopped_crossing_reports_information_and_drops_the_warning() -> None:
+    """R34: the crossing is drawn, so lint says what was drawn instead of warning."""
+
+    report = lint_compilation(compile_figure(_crossroads_figure().spec))
+    codes = [item.code for item in report.diagnostics]
+    assert "routing.connector.crossing" not in codes
+    hop = next(item for item in report.diagnostics if item.code == "routing.connector.hop")
+    assert hop.severity is Severity.INFO
+    assert hop.entity_id == "across"
+    assert hop.message == 'Route crosses "down" and is hopped over by it.'
+    # Information is not a defect: the report still passes, and it still says so
+    # in the summary, which counts every diagnostic line it prints.
+    assert report.ok and not report.errors and not report.warnings
+    assert report.format() == hop.format() != "ok: no diagnostics"
+
+
+def test_switching_hops_off_restores_the_warning_and_the_plain_shaft() -> None:
+    """The knob is opt-out: same geometry, no arc, and the crossing warns again."""
+
+    figure = _crossroads_figure().spec
+    style = LayoutStyle().with_updates(connector_hops=False)
+    plain = compile_figure(figure, style=style)
+    assert plain.routed.edge("down").hops == ()
+    assert plain.routed.edge("down").centerline == (
+        compile_figure(figure).routed.edge("down").centerline
+    ), "hops are ink, not geometry"
+    assert _shaft_data(plain.document.text, "down") == rounded_polyline_path(
+        plain.routed.edge("down").shaft, style.elbow_radius.points
+    )
+    report = lint_compilation(plain, style=style)
+    assert [item.code for item in report.diagnostics] == ["routing.connector.crossing"]
+    assert report.diagnostics[0].severity is Severity.WARNING
+
+
+def test_a_crossing_inside_both_elbows_keeps_its_warning() -> None:
+    """R34 degrades safely: no room for a clean arc, so no arc and no silence."""
+
+    compilation = compile_figure(_swapped_bands_figure().spec)
+    style = LayoutStyle()
+    crossing = crossing_points(
+        compilation.routed.edge("descending").centerline,
+        compilation.routed.edge("climbing").centerline,
+    )
+    assert len(crossing) == 1
+    for edge_id in ("descending", "climbing"):
+        edge = compilation.routed.edge(edge_id)
+        assert edge.hops == ()
+        assert not hop_site(
+            edge.shaft,
+            crossing[0],
+            radius=style.hop_radius.points,
+            elbow=style.elbow_radius.points,
+        ), edge_id
+        assert " A " not in _shaft_data(compilation.document.text, edge_id)
+    codes = [item.code for item in lint_compilation(compilation).diagnostics]
+    assert codes == ["routing.connector.crossing"]
+
+
+def test_the_gallery_crossing_falls_back_to_the_shaft_with_room() -> None:
+    """R34's fallback: the later route's own bend is in the way, so the other hops.
+
+    ``edge.8`` is drawn after ``edge.9`` and would take the hop by the rule, but
+    the crossing sits exactly at the tangent of its elbow. The earlier route
+    crosses in open ink, so the bridge goes there rather than nowhere.
+    """
+
+    compilation = compile_figure(vertical_slice())
+    style = LayoutStyle()
+    key = compilation.routed.edge(_gallery_edge(compilation, "edge.8."))
+    query = compilation.routed.edge(_gallery_edge(compilation, "edge.9."))
+    rank = routing_rank(compilation.routed)
+    assert rank[query.spec.id] < rank[key.spec.id], "edge.8 is the later of the two"
+    point = crossing_points(key.centerline, query.centerline)[0]
+    radius, elbow = style.hop_radius.points, style.elbow_radius.points
+    assert not hop_site(key.shaft, point, radius=radius, elbow=elbow)
+    assert hop_site(query.shaft, point, radius=radius, elbow=elbow)
+    assert key.hops == () and query.hops == (Hop(point, key.spec.id),)
+    report = lint_compilation(compilation)
+    assert [item.code for item in report.diagnostics] == ["routing.connector.hop"]
+    assert report.diagnostics[0].entity_id == key.spec.id
+    assert report.diagnostics[0].message == (
+        f'Route crosses "{query.spec.id}" and is hopped over by it.'
+    )
+
+
+def test_a_hop_keeps_clear_of_bends_arrowheads_and_other_hops() -> None:
+    """The three ways a site is refused, on one L-shaped shaft."""
+
+    shaft = (Point(0.0, 0.0), Point(0.0, 40.0), Point(30.0, 40.0))
+    site = {"radius": 2.0, "elbow": 6.0}
+    assert hop_site(shaft, Point(0.0, 20.0), **site)
+    assert not hop_site(shaft, Point(0.0, 33.0), **site), "inside the elbow fillet"
+    assert not hop_site(shaft, Point(0.0, 1.0), **site), "no straight ink before it"
+    assert not hop_site(shaft, Point(15.0, 20.0), **site), "not on the shaft at all"
+    assert not hop_site(shaft, Point(0.0, 20.0), taken=(Point(0.0, 23.0),), **site)
+    assert hop_site(shaft, Point(0.0, 20.0), taken=(Point(0.0, 25.0),), **site)
+    # An elbow on a short run gives up radius to that run's other end, which
+    # leaves straight ink a full-sized fillet would have swallowed: the site
+    # arithmetic reads the fillet the path will actually draw, not the token.
+    stubby = (Point(0.0, 0.0), Point(0.0, 8.0), Point(30.0, 8.0))
+    assert hop_site(stubby, Point(0.0, 2.0), **site)
+    assert not hop_site(stubby, Point(0.0, 5.0), **site), "past the fillet it does take"
+
+
+def test_a_shaft_without_hops_emits_the_path_it_always_did() -> None:
+    """The one guarantee every hop-free figure rests on: identical ``d``."""
+
+    points = (Point(0.0, 0.0), Point(0.0, 40.0), Point(30.0, 40.0))
+    plain = rounded_polyline_path(points, 6.0)
+    assert shaft_path(points, (), elbow=6.0, radius=2.0) == plain
+    hopped = shaft_path(points, (Hop(Point(0.0, 20.0), "other"),), elbow=6.0, radius=2.0)
+    assert hopped != plain
+    # Only the straight ink changed hands: the elbow is the same fillet, drawn
+    # from the same tangent to the same tangent.
+    assert hopped.endswith("L 0 34 Q 0 40 6 40 L 30 40")
+    assert hopped.startswith("M 0 0 L 0 18 A 2 2 0 0 1 0 22 ")
+
+
+def test_a_hop_bulges_north_on_horizontal_ink_and_east_on_vertical() -> None:
+    """One bridge convention per axis, whichever way the flow runs through it."""
+
+    hop = (Hop(Point(20.0, 0.0), "other"),)
+    eastward = shaft_path((Point(0.0, 0.0), Point(40.0, 0.0)), hop, elbow=6.0, radius=2.0)
+    westward = shaft_path((Point(40.0, 0.0), Point(0.0, 0.0)), hop, elbow=6.0, radius=2.0)
+    assert "A 2 2 0 0 1 22 0" in eastward
+    assert "A 2 2 0 0 0 18 0" in westward
+    vertical = (Hop(Point(0.0, 20.0), "other"),)
+    southward = shaft_path((Point(0.0, 0.0), Point(0.0, 40.0)), vertical, elbow=6.0, radius=2.0)
+    northward = shaft_path((Point(0.0, 40.0), Point(0.0, 0.0)), vertical, elbow=6.0, radius=2.0)
+    assert "A 2 2 0 0 1 0 22" in southward
+    assert "A 2 2 0 0 0 0 18" in northward
+
+
+def _shaft_data(svg: str, edge_id: str) -> str:
+    """The ``d`` of one connector's shaft, read back out of the emitted SVG."""
+
+    marker = f'id="{edge_id}.shaft"'
+    tail = svg[svg.index(marker) + len(marker) :]
+    start = tail.index('d="') + 3
+    return tail[start : tail.index('"', start)]
+
+
+def _gallery_edge(compilation, prefix: str) -> str:
+    return next(
+        edge.spec.id for edge in compilation.routed.edges if edge.spec.id.startswith(prefix)
+    )

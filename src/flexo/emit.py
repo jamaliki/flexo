@@ -11,9 +11,10 @@ from flexo.geometry import Point, Segment, segments
 from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
 from flexo.ir.measured import TextMetrics
-from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
+from flexo.ir.routed import Hop, RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
+from flexo.routing.hops import fillet_lengths, lies_on
 from flexo.routing.nudge import shorten_end
 from flexo.style import DEFAULT_PALETTE, STYLES, LayoutStyle, Palette
 from flexo.svg import (
@@ -241,7 +242,12 @@ def _render_edge(
         group,
         "path",
         id=f"{edge.spec.id}.shaft",
-        d=rounded_polyline_path(edge.shaft, style.elbow_radius.points),
+        d=shaft_path(
+            edge.shaft,
+            edge.hops,
+            elbow=style.elbow_radius.points,
+            radius=style.hop_radius.points,
+        ),
         marker__end=f"url(#arrow.{marker_role})",
         stroke__linecap="round",
         stroke__linejoin="round",
@@ -260,6 +266,90 @@ def _render_edge(
             style,
             palette,
         )
+
+
+def shaft_path(
+    points: tuple[Point, ...],
+    hops: tuple[Hop, ...],
+    *,
+    elbow: float,
+    radius: float,
+) -> str:
+    """One connector's ``d``: its filleted polyline, bridged where it hops.
+
+    Still one path, and still one object an author can select and drag in
+    Inkscape -- a hop is an ``A`` segment spliced into the run it interrupts,
+    not a second shape floating over the join. A shaft with no hops takes the
+    ordinary rounded path untouched, so every figure without a crossing emits
+    byte for byte what it emitted before hops existed.
+
+    The bump always points the same way for a given axis -- north on horizontal
+    ink, east on vertical -- so a reader scanning a figure sees one bridge
+    convention rather than one per flow direction.
+    """
+
+    if not hops:
+        return rounded_polyline_path(points, elbow)
+    fillets = fillet_lengths(points, elbow)
+    commands = [f"M {number(points[0].x)} {number(points[0].y)}"]
+    cursor = points[0]
+
+    def line_to(point: Point) -> None:
+        nonlocal cursor
+        if (point.x, point.y) != (cursor.x, cursor.y):
+            commands.append(f"L {number(point.x)} {number(point.y)}")
+            cursor = point
+
+    for index in range(len(points) - 1):
+        start, end = points[index], points[index + 1]
+        unit = _unit(start, end)
+        if unit is not None:
+            for hop in _hops_along(hops, start, end):
+                line_to(_advanced(hop, unit, -radius))
+                exit_point = _advanced(hop, unit, radius)
+                sweep = 1 if unit.x + unit.y > 0.0 else 0
+                commands.append(
+                    f"A {number(radius)} {number(radius)} 0 0 {sweep} "
+                    f"{number(exit_point.x)} {number(exit_point.y)}"
+                )
+                cursor = exit_point
+            line_to(_advanced(end, unit, -fillets[index + 1]))
+        following = points[index + 2] if index + 2 < len(points) else None
+        if following is None or fillets[index + 1] <= 0.0:
+            continue
+        outgoing = _unit(end, following)
+        if outgoing is None:
+            continue
+        exit_point = _advanced(end, outgoing, fillets[index + 1])
+        commands.append(
+            f"Q {number(end.x)} {number(end.y)} "
+            f"{number(exit_point.x)} {number(exit_point.y)}"
+        )
+        cursor = exit_point
+    line_to(points[-1])
+    return " ".join(commands)
+
+
+def _unit(start: Point, end: Point) -> Point | None:
+    span = start.distance_to(end)
+    if span <= 0.0:
+        return None
+    return Point((end.x - start.x) / span, (end.y - start.y) / span)
+
+
+def _advanced(point: Point, unit: Point, distance: float) -> Point:
+    return Point(point.x + unit.x * distance, point.y + unit.y * distance)
+
+
+def _hops_along(hops: tuple[Hop, ...], start: Point, end: Point) -> tuple[Point, ...]:
+    """This run's hop points, in the order the pen will meet them."""
+
+    return tuple(
+        sorted(
+            (hop.point for hop in hops if lies_on(hop.point, start, end)),
+            key=start.distance_to,
+        )
+    )
 
 
 def _render_net(

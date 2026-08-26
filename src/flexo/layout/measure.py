@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from flexo.components import intrinsic_node_size
-from flexo.geometry import Point, Rect, Size
+from flexo.geometry import Insets, Point, Rect, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec
 from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, declared_size
+from flexo.layout.corridors import corridor_plan
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.style import STYLES, LayoutStyle
@@ -41,6 +42,9 @@ def measure_figure(
     node_anchors = {node.spec.id: node.anchor for node in measured_nodes}
     groups_by_id = {group.id: group for group in semantic.groups}
     child_orders = optimized_child_orders(semantic)
+    # Corridors are reserved before anything is sized, so a margin that owes two
+    # long runs is already wide enough to hold them when the router arrives.
+    corridors = corridor_plan(semantic)
     measured_groups: dict[str, MeasuredGroup] = {}
 
     def child_geometry(child_ids: tuple[str, ...]) -> tuple[tuple[Size, ...], tuple[Point, ...]]:
@@ -82,7 +86,7 @@ def measure_figure(
             child_ids=group.children,
             anchors=child_anchors,
         )
-        padding = group.layout.resolved_padding(layout_style.group_padding)
+        padding = corridors.padding(group, layout_style)
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
         intrinsic = Size(
             max(body.width, label.width) + padding.horizontal,
@@ -101,6 +105,7 @@ def measure_figure(
                 child_orders.get(group_id, group.children),
                 child_geometry,
                 gaps,
+                padding,
             ),
         )
         measured_groups[group_id] = measured
@@ -146,6 +151,7 @@ def _group_anchor(
     child_ids: tuple[str, ...],
     child_geometry: Callable[[tuple[str, ...]], tuple[tuple[Size, ...], tuple[Point, ...]]],
     gaps: tuple[float, ...],
+    padding: Insets,
 ) -> Point:
     """A group's port line: its anchor child's, carried up into group coordinates.
 
@@ -161,7 +167,6 @@ def _group_anchor(
     if primary is None or primary not in child_ids:
         return centre
     layout = group.layout
-    padding = layout.resolved_padding(style.group_padding)
     content = Rect(
         padding.left,
         padding.top + title_height,

@@ -14,6 +14,7 @@ from fontTools.ttLib import TTFont
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.ir.measured import MeasuredLine, TextMetrics
 from flexo.ir.semantic import TextRun
+from flexo.shifted import shifted_runs
 from flexo.style import TypographyStyle
 
 _TOKEN_PATTERN = re.compile(r"\S+|\s+")
@@ -108,6 +109,12 @@ def font_bytes(italic: bool = False) -> bytes:
     return font_data(italic).raw
 
 
+def drawable(character: str, italic: bool = False) -> bool:
+    """Whether the bundled face has a glyph for ``character``."""
+
+    return ord(character) in font_data(italic).codepoints
+
+
 class TextMeasurer:
     """Shape text with HarfBuzz using the exact bundled output font."""
 
@@ -130,10 +137,21 @@ class TextMeasurer:
         ``title_weight``, so measuring at 400 and drawing at 600 reserved a band
         narrower than the words it holds. Left out, every run is measured at the
         weight it declares, which is right for a component label or a caption.
+
+        Typed superscripts and subscripts are cut into their own shifted runs
+        here, before anything is measured (see ``flexo.shifted``). This is the
+        one place a label stops being the author's characters and becomes the
+        runs that are shaped, wrapped, and -- since every text object in the
+        figure is painted from the ``MeasuredLine`` runs this returns -- drawn:
+        translating here is what makes ``softmax(QKᵀ)V`` measure at the width it
+        will occupy and reach the SVG as a raised ``T``, while the ``FigureSpec``
+        keeps the string its author wrote and round-trips through YAML as that
+        string.
         """
 
         if not runs or not any(run.text for run in runs):
             return TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ())
+        runs = shifted_runs(runs, drawable)
         self._validate_glyphs(runs)
         hard_lines = _split_hard_lines(runs)
         lines = tuple(

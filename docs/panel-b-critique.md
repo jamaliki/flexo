@@ -1087,3 +1087,107 @@ blocks now read as feature vectors rather than gradients.
 `examples/attention_module.py` renders `attention-module` (the default, shuffled)
 and `attention-module-ramp` (`order="ramp"`), both `ok: no diagnostics`, at the
 same 180.0mm x 77.4mm as before: the change is paint, not geometry.
+
+## R33. Long edges that share a margin fight for it (round 13)
+
+The see-more-alpha suite (`sketches/see-more/`, not for merging) is the first
+figure whose semantics genuinely need long cross-band edges: a feature volume
+and a token stream feeding two mid-stack sublayers, two logit streams leaving
+those sublayers for a readout band below, and a recycle rail climbing back up.
+Authored as edges, every margin scheme lost: five agents and one coordinator
+proved by enumeration that with feeds and taps sharing one margin, some pair
+must cross, and short of that ceiling the author still had to hand-build
+nested spacer groups (`_lanes`) to give each run its own corridor. The shipped
+figure works around the engine by moving values *by name* — glyphs redrawn
+beside their consumers — which is good design language but must be a choice,
+not a forced move.
+
+Fix, part one — **corridors are the engine's to reserve**. Before fit, count
+the long edges that must traverse each side margin (an edge is margin-bound
+when its endpoints' groups do not share an ancestor row/column cell adjacent
+along the route axis). Reserve that margin's width as `tracks × track pitch`
+(pitch = clearance + stroke, the same arithmetic `nudge` uses), and have the
+router assign tracks in nesting order — deeper arrival, outer track — the
+provably-planar assignment wherever one exists. `lane=` hints stay as
+overrides; a figure that authored no lanes gets the corridor arithmetic the
+see-more suite wrote by hand.
+
+## R34. A crossing the topology forces should be drawn, not warned about (round 13)
+
+Where no planar assignment exists (the see-more feed/tap interleave), the
+right answer is the one circuit diagrams settled on decades ago: the
+later-routed edge hops the earlier one with a small bridge arc. Routed IR
+records crossing points; emit paints the hop into the shaft path (`d` gains an
+arc segment, still one editable object); lint reports a hopped crossing as
+`info: routing.connector.hop` and reserves the `routing.connector.crossing`
+warning for the un-hopped overlap of two shafts that genuinely obscures one.
+Hops are opt-out (`style` knob), never opt-in: an author should get a legible
+figure by default and remove hops only deliberately.
+
+## R35. Three authoring conveniences the R2 design language earned (round 13)
+
+The see-more user review (sketches/see-more/CRITIQUE.md, R2) settled a design
+language the engine should carry natively rather than via idioms:
+
+1. **`note=` on any component** — small muted type at the bottom edge of the
+   body (dimension transitions: "384 → 768 → 384"), rendered inside the node's
+   bounds like a motif so it neither blocks the south port nor sits on a
+   downward stem (the caption-column workaround did both).
+2. **`padding=` on `figure.module(...)`** — the one layout knob `module`
+   swallows today; the R2 fleet needed asymmetric padding to pull a port up to
+   its wall and had to rebuild the module as a raw `group` to get it.
+3. **`operator()` factory** — a 14 pt circle-or-square bearing one glyph
+   (`+`, `×`, `·`, `Σ`), four side ports, painted like a junction with ink.
+   The 14 pt labelled-block idiom works but every figure re-authors it.
+
+## R36. Superscripts an author can type (round 13)
+
+The bundled face has no `ᵀ ∈ ⊕ ⊙`; today `softmax(QKᵀ)V` in a prose label is a
+`font.glyph.missing` error and the only spelling is a hand-built `TextRun`
+tuple. Normalization should translate Unicode super/subscript characters in
+label strings (`ᵀ`, `₀`–`₉`, `ₖ`, …) into baseline-shifted runs automatically,
+so the natural spelling of a formula measures, paints, and round-trips through
+YAML without the author knowing `TextRun` exists.
+
+## Acceptance (round 13)
+
+`uv run pytest` green (349 baseline plus round-13 tests), `ruff check` clean.
+`flexo gallery` and `examples/` figures byte-stable or improved (no new
+diagnostics anywhere). The proof figure is `sketches/see-more/full_rails.py`:
+the integration diagram with the mermaid's real long edges — volume → cryo,
+tokens → sequence, both logit streams → IdentityFusion, and the layer loop —
+authored with **zero** lane hints and **zero** hand-built spacer corridors,
+compiling to `ok: no diagnostics` (hops rendered where topology forces them),
+while the shipped `full.py` (values-by-name) still compiles byte-identically.
+
+## Acceptance as landed (rounds 13-14)
+
+Round 13 landed in four parts (corridor reservation, bridge hops, the three
+authoring conveniences, typed super/subscripts) and one follow-up: the
+acceptance figure showed the round-13 allocator planned only past-a-cell runs,
+while the see-more edges thread a container's side margin to reach side ports
+of nodes inside it. Round 14 extended the margin-bound definition to those
+subtree traversals (one margin per edge, the deepest container threaded;
+half-integer sentinels for runs that leave the group), taught the corridor
+base to clear intruders standing in the margin, and left the allocator handing
+`hops.py` cleanly separated tracks.
+
+One amendment to the round-13 wording: `format()` has always printed info
+lines, so a figure with hops does not literally say `ok: no diagnostics` —
+the bar for the proof figure is zero errors, zero warnings, hops as
+`info: routing.connector.hop`. `Build.ok` is unchanged and true.
+
+Final state: `uv run pytest` **411 passed** (349 at open; +19 shifted runs,
++14 conveniences, +14 corridors, +9 hops, +6 traversal corridors, +9 from
+test updates in flight), `ruff check` clean. Gallery and examples byte-stable
+except `vertical-slice`, whose one pre-existing crossing warning is now a
+drawn bridge arc and an info line — the SVG diff is a single `A 2.25 2.25`
+arc segment in one shaft path. All nine `sketches/see-more` figures
+byte-stable. The proof figure `sketches/see-more/full_rails.py` draws the
+mermaid's real long edges with zero lane hints: the engine reserves a
+four-track corridor on the layer's east margin (40pt, tracks one pitch
+apart), nests the five runs shortest-reach-first, and bridges the nine
+properly-overlapping pairs — the provable minimum, since a proper overlap
+crosses on any track assignment. Zero warnings, zero errors, nine hop infos.
+The values-by-name `full.py` still compiles byte-identically beside it: the
+idiom is now a choice, which is what R33 asked for.

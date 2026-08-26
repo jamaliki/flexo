@@ -80,6 +80,18 @@ class LayoutStyle:
     route_lane_spacing: Length = _PT_4
     port_spacing: Length = _PT_6
     bend_penalty: float = 14.0
+    connector_hops: bool = True
+    """Whether a shaft that crosses another bridges it with a hop arc (R34).
+
+    On by default, and opt-out rather than opt-in: an author should get a
+    legible figure without asking for one. A figure that wants the plain
+    crossing back -- because it is being traced by hand, or because its house
+    style forbids bridges -- compiles under
+    ``style.with_updates(connector_hops=False)``, which restores the
+    ``routing.connector.crossing`` warning for every crossing it disables.
+    """
+    hop_scale: float = 2.5
+    """How many connector stroke widths wide the radius of one bridge arc is."""
     junction_dots: Literal["auto", "always", "never"] = "auto"
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
     vector_cell: Length = _PT_8_5
@@ -137,6 +149,24 @@ class LayoutStyle:
             max(
                 self.route_clearance.points,
                 2.0 * self.arrow_length.points + self.elbow_radius.points,
+            )
+        )
+
+    @property
+    def hop_radius(self) -> Length:
+        """The radius of one bridge arc where a connector hops another (R34).
+
+        Stroke width sets the scale -- a bump proportional to the ink it
+        interrupts reads as one wire passing over another rather than as a
+        wobble -- and clearance sets the ceiling: half the minimum separation
+        two parallel tracks are allowed, so an arc can never reach out of its
+        own lane into a neighbouring one.
+        """
+
+        return Length(
+            min(
+                self.hop_scale * self.connector_width.points,
+                self.port_spacing.points / 2.0,
             )
         )
 

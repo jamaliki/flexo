@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
+from flexo.layout.corridors import track_pitch
 from flexo.style import LayoutStyle
 
 
@@ -95,7 +96,8 @@ def routing_gaps_for_group(
     # Routing separates parallel tracks by ``port_spacing`` and lint reports an
     # error below it, so a crossed boundary has to reserve its lanes at that
     # pitch: reserving less hands the router a gutter it is not allowed to fill.
-    lane_spacing = max(style.route_lane_spacing.points, style.port_spacing.points)
+    # The margins next door reserve at the same pitch (``layout.corridors``).
+    lane_spacing = track_pitch(style)
     return tuple(
         max(
             base,

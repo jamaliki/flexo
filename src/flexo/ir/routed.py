@@ -12,6 +12,21 @@ from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef
 
 
 @dataclass(frozen=True, slots=True)
+class Hop:
+    """One bridge arc: where this shaft crosses ``over``, and hops it (R34).
+
+    ``point`` is the crossing itself, on the hopping shaft's centerline; emit
+    turns it into a semicircle of the style's hop radius centred there, inserted
+    into that shaft's own path data. Only the hopper records the crossing --
+    exactly one of the two shafts is interrupted, so the pair reads as one wire
+    passing over the other.
+    """
+
+    point: Point
+    over: str
+
+
+@dataclass(frozen=True, slots=True)
 class RoutedEdge:
     spec: EdgeSpec
     centerline: tuple[Point, ...]
@@ -24,6 +39,14 @@ class RoutedEdge:
     The net counterpart below carries the same field for the same reason: a hint
     the geometry could not honour is a warning about the figure, not a reason to
     refuse to draw it.
+    """
+    hops: tuple[Hop, ...] = ()
+    """Where this shaft bridges another connector it crosses (R34).
+
+    Nets carry no hops: their ink is a rail and a fan of stems rather than one
+    shaft, so where a net and an edge cross it is always the edge that hops --
+    it is routed later in every figure -- and a net crossing another net keeps
+    the plain crossing warning.
     """
 
 

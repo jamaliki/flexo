@@ -763,8 +763,16 @@ def figure_runs(
     routed: RoutedFigure,
     boundaries: dict[str, Rect],
     style: LayoutStyle,
+    *,
+    aimed: frozenset[str] = frozenset(),
 ) -> tuple[tuple[Run, ...], tuple[tuple[Point, ...], ...]]:
-    """Flatten every routed centerline, rail, and stem into one indexed list."""
+    """Flatten every routed centerline, rail, and stem into one indexed list.
+
+    ``aimed`` names the edges the engine allocated a margin track to. Such a
+    route was placed on a coordinate chosen against the whole corridor, exactly
+    as an authored lane is, so it reads as ``hinted`` here and the jog-balancing
+    default leaves the crossbar where the allocation put it.
+    """
 
     departure = style.route_clearance.points
     arrival = style.arrival_clearance.points
@@ -777,7 +785,12 @@ def figure_runs(
                 edge.spec.id,
                 boundaries[edge.spec.id],
                 Stubs(departure, arrival),
-                hinted=bool(edge.spec.lane_hint or edge.spec.waypoints or edge.spec.via),
+                hinted=bool(
+                    edge.spec.lane_hint
+                    or edge.spec.waypoints
+                    or edge.spec.via
+                    or edge.spec.id in aimed
+                ),
             )
         )
         polylines.append(edge.centerline)
