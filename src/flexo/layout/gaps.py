@@ -88,7 +88,13 @@ def routing_gaps_for_group(
             metrics = edge_labels.get(edge.id)
             if metrics is None:
                 continue
-            for boundary in crossed_boundaries(edge.source.node_id, edge.target.node_id):
+            crossed = crossed_boundaries(edge.source.node_id, edge.target.node_id)
+            if len(crossed) != 1:
+                # A caption on an edge between neighbours sits in the gap it
+                # crosses; a longer edge's caption goes on whichever of its runs
+                # has room (routing.labels), so it widens no gap of its own.
+                continue
+            for boundary in crossed:
                 if actual_kind == "row":
                     # Captions over parallel horizontal runs stack across the
                     # gap, so the gap need only be as wide as the widest one.
