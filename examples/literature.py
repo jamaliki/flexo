@@ -25,16 +25,16 @@ def inception(theme: str = "paper") -> Figure:
     with Figure("inception", theme=theme) as figure:
         with figure.module("m", label="Inception module", layout="column") as m:
             previous = m.block("previous", label="Previous layer")
-            with m.row("branches", role="layout") as row:
-                with row.column("b1", role="layout") as column:
+            with m.row("branches") as row:
+                with row.column("b1") as column:
                     one = column.block("conv", label="1×1 conv")
-                with row.column("b2", role="layout") as column:
+                with row.column("b2") as column:
                     reduce3 = column.block("reduce", label="1×1 conv")
                     three = column.block("conv", label="3×3 conv", input=reduce3)
-                with row.column("b3", role="layout") as column:
+                with row.column("b3") as column:
                     reduce5 = column.block("reduce", label="1×1 conv")
                     five = column.block("conv", label="5×5 conv", input=reduce5)
-                with row.column("b4", role="layout") as column:
+                with row.column("b4") as column:
                     pool = column.block("pool", label="3×3 max pool")
                     project = column.block("conv", label="1×1 conv", input=pool)
             concat = m.block("concat", label="Filter concatenation")
@@ -134,7 +134,7 @@ def alphafold(theme: str = "paper") -> Figure:
     with Figure("alphafold", theme=theme) as figure:
         with figure.module("m", label="AlphaFold 2") as m:
             sequence = m.text("sequence", "Input\nsequence")
-            with m.column("representations", role="layout") as column:
+            with m.column("representations") as column:
                 msa = column.block("msa", label="MSA\nrepresentation", tone="msa")
                 pair = column.block("pair", label="Pair\nrepresentation", tone="pair")
             evoformer = m.block(
@@ -156,17 +156,17 @@ def bert(theme: str = "paper") -> Figure:
     outputs = ("$C$", "$T_1$", "$T_2$", "$T_{[SEP]}$")
     with Figure("bert", width="single-column", theme=theme) as figure:
         with figure.module("m", label="BERT", layout="column") as m:
-            with m.row("outputs", role="layout") as row:
+            with m.row("outputs") as row:
                 heads = [row.text(f"o{index}", label) for index, label in enumerate(outputs)]
             encoder = m.block(
                 "encoder", label="Transformer encoder", tone="attention", width="200pt"
             )
-            with m.row("embeddings", role="layout") as row:
+            with m.row("embeddings") as row:
                 embeddings = [
                     row.block(f"e{index}", label=f"$E_{{{index}}}$", tone="embedding")
                     for index in range(len(tokens))
                 ]
-            with m.row("tokens", role="layout") as row:
+            with m.row("tokens") as row:
                 words = [row.text(f"t{index}", token) for index, token in enumerate(tokens)]
         for word, embedding in zip(words, embeddings, strict=True):
             m.connect(word, embedding)
@@ -184,7 +184,7 @@ def vision_transformer(theme: str = "paper") -> Figure:
         with figure.module("m", label="Vision Transformer", layout="column") as m:
             patches = m.text("patches", "Image patches")
             projection = m.block("proj", label="Linear projection", tone="embedding", input=patches)
-            with m.row("pe", role="layout") as row:
+            with m.row("pe") as row:
                 position = row.text("pos", "Position embedding")
                 total = row.add("sum", inputs=[projection, position])
             encoder = m.block("encoder", label="Transformer encoder", tone="attention", input=total)
@@ -197,9 +197,9 @@ def attention_panels(theme: str = "paper") -> Figure:
     """Scaled dot-product and multi-head attention (Vaswani et al. 2017, Figure 2)."""
 
     with Figure("attention", theme=theme) as figure:
-        with figure.root.row("panels", role="layout") as panels:
+        with figure.root.row("panels") as panels:
             with panels.group("a", label="Scaled dot-product attention", layout="column") as a:
-                with a.row("inputs", role="layout") as row:
+                with a.row("inputs") as row:
                     q = row.text("q", "Q")
                     k = row.text("k", "K")
                     v = row.text("v", "V")
@@ -209,9 +209,9 @@ def attention_panels(theme: str = "paper") -> Figure:
                 softmax = a.block("softmax", label="SoftMax", input=mask)
                 a.block("weighted", label="MatMul", inputs=[softmax, v])
             with panels.group("b", label="Multi-head attention", layout="column") as b:
-                with b.row("inputs", role="layout") as row:
+                with b.row("inputs") as row:
                     inputs = [row.text(name.lower(), name) for name in ("V", "K", "Q")]
-                with b.row("projections", role="layout") as row:
+                with b.row("projections") as row:
                     projections = [
                         row.block(f"linear-{index}", label="Linear", input=value)
                         for index, value in enumerate(inputs)
@@ -249,13 +249,13 @@ def mamba(theme: str = "paper") -> Figure:
     with Figure("mamba", width="single-column", theme=theme) as figure:
         with figure.module("m", label="Mamba block", layout="column") as m:
             x = m.text("x", "$x$")
-            with m.row("paths", role="layout") as row:
-                with row.column("main", role="layout") as column:
+            with m.row("paths") as row:
+                with row.column("main") as column:
                     project = column.block("proj", label="Linear")
                     conv = column.block("conv", label="Conv", input=project)
                     act = column.block("act", label="SiLU", input=conv)
                     ssm = column.block("ssm", label="SSM", tone="attention", input=act)
-                with row.column("gate", role="layout") as column:
+                with row.column("gate") as column:
                     gate_project = column.block("proj", label="Linear")
                     gate = column.block("act", label="SiLU", input=gate_project)
             product = m.multiply("product", inputs=[ssm, gate])
@@ -271,7 +271,7 @@ def swiglu(theme: str = "paper") -> Figure:
     with Figure("swiglu", width="single-column", theme=theme) as figure:
         with figure.module("m", label="SwiGLU feed-forward", layout="column") as m:
             x = m.text("x", "$x$")
-            with m.row("projections", role="layout") as row:
+            with m.row("projections") as row:
                 w = row.block("w", label="$W$")
                 v = row.block("v", label="$V$")
             swish = m.block("swish", label="Swish", input=w)
@@ -287,12 +287,12 @@ def seq2seq(theme: str = "paper") -> Figure:
 
     with Figure("seq2seq", theme=theme) as figure:
         with figure.module("m", label="Encoder–decoder with attention", layout="column") as m:
-            with m.row("decoder", role="layout") as row:
+            with m.row("decoder") as row:
                 s1 = row.block("s1", label="$s_1$", tone="decoder")
                 s2 = row.block("s2", label="$s_2$", tone="decoder", input=s1)
                 s3 = row.block("s3", label="$s_3$", tone="decoder", input=s2)
             context = m.op("context", "Σ")
-            with m.row("encoder", role="layout") as row:
+            with m.row("encoder") as row:
                 states = [row.block("h1", label="$h_1$", tone="encoder")]
                 for index in (2, 3, 4):
                     states.append(
@@ -349,7 +349,7 @@ def multilayer_perceptron(theme: str = "paper") -> Figure:
                 ("h2", 4, "h"),
                 ("out", 2, "y"),
             ):
-                with m.column(name, role="layout") as column:
+                with m.column(name) as column:
                     layers.append(
                         [
                             column.circle(f"n{index}", f"${symbol}_{index}$", tone=symbol)
@@ -419,13 +419,13 @@ def simclr(theme: str = "paper") -> Figure:
     with Figure("simclr", width="single-column", theme=theme) as figure:
         with figure.module("m", label="SimCLR", layout="column") as m:
             x = m.text("x", "$x$")
-            with m.row("views", role="layout") as row:
+            with m.row("views") as row:
                 first = row.text("first", r"$\tilde{x}_i$")
                 second = row.text("second", r"$\tilde{x}_j$")
-            with m.row("encoders", role="layout") as row:
+            with m.row("encoders") as row:
                 h_first = row.block("first", label=r"$f(\cdot)$", tone="encoder", input=first)
                 h_second = row.block("second", label=r"$f(\cdot)$", tone="encoder", input=second)
-            with m.row("heads", role="layout") as row:
+            with m.row("heads") as row:
                 z_first = row.block("first", label=r"$g(\cdot)$", tone="head", input=h_first)
                 z_second = row.block("second", label=r"$g(\cdot)$", tone="head", input=h_second)
             m.loss("agreement", label="Maximize agreement", inputs=[z_first, z_second])
@@ -462,7 +462,7 @@ def clip(theme: str = "paper") -> Figure:
 
     with Figure("clip", theme=theme) as figure:
         with figure.module("m", label="Contrastive pre-training") as m:
-            with m.grid("encoders", columns=2, role="layout") as grid:
+            with m.grid("encoders", columns=2) as grid:
                 text = grid.text("text", "Text")
                 text_encoder = grid.block(
                     "text-encoder", label="Text encoder", tone="text", input=text
@@ -556,7 +556,7 @@ def ci_pipeline(theme: str = "paper") -> Figure:
             build = m.block(
                 "build", label="Build", tone="build", input=m.terminal("push", label="Push")
             )
-            with m.column("checks", role="layout") as column:
+            with m.column("checks") as column:
                 checks = [
                     column.block(name, label=label, tone="check")
                     for name, label in (

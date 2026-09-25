@@ -632,14 +632,18 @@ class GroupBuilder:
         return GroupBuilder(self.figure, draft)
 
     def row(self, id: str, **options: object) -> GroupBuilder:
-        """Open a group whose children run left to right; see ``group``."""
+        """Open a group whose children run left to right; see ``group``.
 
-        return self.group(id, layout="row", **options)
+        An unlabelled row only arranges its children and draws nothing
+        (``role="layout"``); give it a ``label`` and it is a titled container.
+        """
+
+        return self.group(id, layout="row", **_arranging(options))
 
     def column(self, id: str, **options: object) -> GroupBuilder:
-        """Open a group whose children run top to bottom; see ``group``."""
+        """Open a group whose children run top to bottom; see ``row`` and ``group``."""
 
-        return self.group(id, layout="column", **options)
+        return self.group(id, layout="column", **_arranging(options))
 
     def grid(self, id: str, *, columns: int, **options: object) -> GroupBuilder:
         """Open a grid of ``columns`` columns whose children fill it by cell.
@@ -664,7 +668,7 @@ class GroupBuilder:
         is an error at the point of authoring.
         """
 
-        return self.group(id, layout="grid", columns=columns, **options)
+        return self.group(id, layout="grid", columns=columns, **_arranging(options))
 
     def overlay(self, id: str, **options: object) -> GroupBuilder:
         """Open a group whose children stack on one another, overlap allowed."""
@@ -2218,6 +2222,18 @@ def _vector_label_gap(style_name: str) -> Length:
     """
 
     return resolve_style(style_name).vector_label_gap
+
+
+def _arranging(options: dict[str, object]) -> dict[str, object]:
+    """``options`` with the role an arranging group takes when none is given.
+
+    A ``row``, ``column`` or ``grid`` is almost always furniture -- it lines
+    things up and draws nothing -- unless it has a title to show.
+    """
+
+    if "role" not in options:
+        return {**options, "role": "container" if options.get("label") else "layout"}
+    return options
 
 
 TONE_NAMES = {
