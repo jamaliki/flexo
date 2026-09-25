@@ -41,7 +41,7 @@ def embed(column, id, *, label, terminal):
     so it is written top first and wired afterwards.
     """
 
-    with column.row(f"{id}-pe", gap="8pt", role="layout") as row:
+    with column.row(f"{id}-pe", gap="8pt") as row:
         row.text("caption", "Positional\nEncoding")
         wave = row.op("wave", "~")
         total = row.add("sum", input=wave)
@@ -54,8 +54,8 @@ def embed(column, id, *, label, terminal):
 
 def transformer(theme: str = "paper") -> Figure:
     with Figure("transformer", width="double-column", theme=theme) as figure:
-        with figure.root.row("towers", gap="30pt", align="end", role="layout") as towers:
-            with towers.column("encoder", gap="18pt", role="layout") as encoder:
+        with figure.root.row("towers", gap="30pt", align="end") as towers:
+            with towers.column("encoder", gap="18pt") as encoder:
                 with encoder.column("tower", label="N\u00d7", gap="14pt", role="module") as tower:
                     an2 = tower.add_norm("an2", label="Add & Norm", width="110pt")
                     ff = tower.mlp("ff", label="Feed\nForward", motif=False, width="110pt")
@@ -67,7 +67,7 @@ def transformer(theme: str = "paper") -> Figure:
                 source = embed(encoder, "input-embedding", label="Input\nEmbedding",
                                terminal="Inputs")
 
-            with towers.column("decoder", gap="18pt", role="layout") as decoder:
+            with towers.column("decoder", gap="18pt") as decoder:
                 probabilities = decoder.text("out-prob", "Output\nProbabilities")
                 softmax = decoder.block("softmax", label="Softmax", tone="softmax",
                                         width="110pt")

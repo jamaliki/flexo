@@ -62,7 +62,7 @@ the [gallery](examples/README.md#literaturepy).
 
 A figure is groups of components. `figure.module(...)` opens a titled
 container; inside any group, `row`, `column`, and `grid` arrange their children
-without drawing anything. Every component is a method on the group it goes in:
+and, unless given a label, draw nothing. Every component is a method on the group it goes in:
 
 | Kind | Methods |
 | --- | --- |
@@ -98,7 +98,7 @@ a stream of tokens -- goes in a row with the operator. The row is aligned on
 the operator, so the stream stays straight:
 
 ```python
-with m.row("pe", role="layout") as row:
+with m.row("pe") as row:
     pos = row.text("pos", "Position embedding")
     total = row.add("sum", inputs=[projection, pos])
 ```
@@ -151,9 +151,9 @@ import flexo
 
 with flexo.Figure("mlp", conventions={"lines": "straight"}) as figure:
     with figure.module("m", label="Multilayer perceptron") as m:
-        with m.column("in", role="layout") as column:
+        with m.column("in") as column:
             inputs = [column.circle(f"x{i}", f"$x_{i}$", tone="input") for i in (1, 2, 3)]
-        with m.column("hidden", role="layout") as column:
+        with m.column("hidden") as column:
             hidden = [column.circle(f"h{i}", f"$h_{i}$", tone="hidden") for i in (1, 2, 3, 4)]
         m.connect_all(inputs, hidden)
 ```
@@ -209,8 +209,10 @@ then meets both components, or `"both"`. Nets take `line=` too.
 
 ### Layout groups
 
-A group with `role="layout"` -- the `row`s and `column`s you nest to arrange
-things -- draws nothing. Layout adds a few rules of its own:
+A `row`, `column`, or `grid` without a label is a layout group
+(`role="layout"`): it arranges its children and draws nothing. Give it a
+`label` and it is a titled container instead. Layout adds a few rules of its
+own:
 
 - A layout group has no padding unless you give it one, so the space between
   its children and its neighbours is exactly its `gap`.
