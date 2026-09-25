@@ -8,9 +8,12 @@ A string label is plain text, except for what sits between a pair of ``$``:
 - Latin letters are italic, as in TeX; digits, punctuation, and Greek capitals
   are upright. ``\\text{out}`` and ``\\mathrm{out}`` set words upright, and
   ``\\mathbf{x}`` sets them bold.
-- ``\\alpha`` ... ``\\omega``, ``\\Gamma`` ... ``\\Omega``, and a few operators
-  (``\\times``, ``\\cdot``, ``\\sim``, ``\\to``, ``\\sum``, ``\\le``, ...) become
-  their symbols; ``-`` becomes a minus sign.
+- ``\\alpha`` ... ``\\omega``, ``\\Gamma`` ... ``\\Omega``, and common operators
+  and relations (``\\times``, ``\\cdot``, ``\\sim``, ``\\in``, ``\\nabla``,
+  ``\\to``, ``\\sum``, ``\\le``, ...) become their symbols; ``-`` becomes a
+  minus sign. ``\\log``, ``\\exp``, ``\\max`` and the other named functions are
+  upright. ``\\mathcal{L}``, ``\\mathbb{E}`` and ``\\mathfrak{g}`` give script,
+  blackboard, and fraktur capitals.
 - ``\\hat{x}``, ``\\bar{x}``, ``\\tilde{x}`` and ``\\dot{x}`` put the accent on
   the character.
 
@@ -65,9 +68,21 @@ SYMBOLS = {
     "Psi": "Ψ",
     "Omega": "Ω",
     # operators and relations
+    "in": "∈",
+    "notin": "∉",
+    "subset": "⊂",
+    "cup": "∪",
+    "cap": "∩",
+    "forall": "∀",
+    "exists": "∃",
+    "nabla": "∇",
+    "top": "⊤",
+    "perp": "⊥",
+    "propto": "∝",
+    "mid": "|",
     "times": "×",
     "cdot": "·",
-    "sim": "~",
+    "sim": "∼",
     "to": "→",
     "rightarrow": "→",
     "leftarrow": "←",
@@ -109,6 +124,22 @@ ACCENTS = {"hat": "̂", "bar": "̄", "tilde": "̃", "dot": "̇", "vec": "⃗"}
 """Commands that put a combining accent on their argument."""
 
 UPRIGHT = {"text", "mathrm", "operatorname"}
+
+OPERATORS = frozenset(
+    {"log", "exp", "max", "min", "sin", "cos", "tanh", "arg", "det", "lim", "sup", "inf"}
+)
+"""Named functions TeX sets upright: ``\\log x``, ``\\max_i``."""
+
+ALPHABETS = {
+    "mathcal": (
+        0x1D49C,
+        {"B": "ℬ", "E": "ℰ", "F": "ℱ", "H": "ℋ", "I": "ℐ", "L": "ℒ", "M": "ℳ", "R": "ℛ"},
+    ),
+    "mathbb": (0x1D538, {"C": "ℂ", "H": "ℍ", "N": "ℕ", "P": "ℙ", "Q": "ℚ", "R": "ℝ", "Z": "ℤ"}),
+    "mathfrak": (0x1D504, {"C": "ℭ", "H": "ℌ", "I": "ℑ", "R": "ℜ", "Z": "ℨ"}),
+}
+"""Capital-letter alphabets by their first Unicode code point, with the letters
+Unicode placed early in its Letterlike Symbols block instead."""
 BOLD = {"mathbf", "boldsymbol"}
 
 _REPLACEMENTS = {"-": "−", "*": "∗", "'": "′"}
@@ -197,6 +228,19 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                         last.text + ACCENTS[name], last.weight, last.italic, last.baseline_shift
                     )  # type: ignore[arg-type]
                 runs.extend(accented)
+                continue
+            if name in ALPHABETS:
+                argument, index = _argument(source, index)
+                start, exceptions = ALPHABETS[name]
+                letters = "".join(
+                    exceptions.get(letter)
+                    or (chr(start + ord(letter) - ord("A")) if "A" <= letter <= "Z" else letter)
+                    for letter in argument
+                )
+                runs.append(TextRun(letters, weight, False, shift))  # type: ignore[arg-type]
+                continue
+            if name in OPERATORS:
+                runs.append(TextRun(name, weight, False, shift))  # type: ignore[arg-type]
                 continue
             if name in UPRIGHT or name in BOLD:
                 argument, index = _argument(source, index)

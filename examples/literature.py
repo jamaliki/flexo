@@ -413,6 +413,50 @@ def siamese(theme: str = "paper") -> Figure:
     return figure
 
 
+def simclr(theme: str = "paper") -> Figure:
+    """SimCLR (Chen et al. 2020, Figure 2): two views, one agreement."""
+
+    with Figure("simclr", width="single-column", theme=theme) as figure:
+        with figure.module("m", label="SimCLR", layout="column") as m:
+            x = m.text("x", "$x$")
+            with m.row("views", role="layout") as row:
+                first = row.text("first", r"$\tilde{x}_i$")
+                second = row.text("second", r"$\tilde{x}_j$")
+            with m.row("encoders", role="layout") as row:
+                h_first = row.block("first", label=r"$f(\cdot)$", tone="encoder", input=first)
+                h_second = row.block("second", label=r"$f(\cdot)$", tone="encoder", input=second)
+            with m.row("heads", role="layout") as row:
+                z_first = row.block("first", label=r"$g(\cdot)$", tone="head", input=h_first)
+                z_second = row.block("second", label=r"$g(\cdot)$", tone="head", input=h_second)
+            m.loss("agreement", label="Maximize agreement", inputs=[z_first, z_second])
+        m.connect(x, first, label=r"$t \sim \mathcal{T}$")
+        m.connect(x, second, label=r"$t' \sim \mathcal{T}$")
+    return figure
+
+
+def feature_pyramid(theme: str = "paper") -> Figure:
+    """A feature pyramid network (Lin et al. 2017, Figure 3)."""
+
+    with Figure("fpn", width="single-column", theme=theme) as figure:
+        with figure.module("m", label="Feature pyramid network", layout="grid", columns=3) as m:
+            c5 = m.block("c5", label="$C_5$", tone="backbone", at=(0, 0))
+            c4 = m.block("c4", label="$C_4$", tone="backbone", at=(1, 0))
+            c3 = m.block("c3", label="$C_3$", tone="backbone", at=(2, 0))
+            p5 = m.block("p5", label="$P_5$", tone="pyramid", at=(0, 2))
+            sum4 = m.add("sum4", at=(1, 1))
+            p4 = m.block("p4", label="$P_4$", tone="pyramid", input=sum4, at=(1, 2))
+            sum3 = m.add("sum3", at=(2, 1))
+            m.block("p3", label="$P_3$", tone="pyramid", input=sum3, at=(2, 2))
+        m.connect(c3, c4)
+        m.connect(c4, c5)
+        m.connect(c5, p5, label="1×1")
+        m.connect(c4, sum4, label="1×1")
+        m.connect(c3, sum3, label="1×1")
+        m.connect(p5, sum4, label="2× up")
+        m.connect(p4, sum3, label="2× up")
+    return figure
+
+
 def clip(theme: str = "paper") -> Figure:
     """Contrastive language-image pre-training (Radford et al. 2021, Figure 1)."""
 
@@ -509,6 +553,8 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         hidden_markov_model,
         variational_autoencoder,
         siamese,
+        simclr,
+        feature_pyramid,
         clip,
         gan,
         diffusion,
