@@ -30,9 +30,13 @@ that names nothing in the figure is still an error.)
    least, and spaced one lane apart by a constraint solver (VPSC). The
    crossbar of a Z and the trunk of a tree sit in the middle of the room they
    have.
-5. **Uncross.** If lines still cross, neighbouring pins on the sides those
-   lines attach to are swapped one pair at a time. The figure is rerouted and
-   separated after each swap, and a swap is kept when it removes crossings.
+5. **Uncross.** If lines still cross, or run closer than a lane, neighbouring
+   pins on the sides those lines attach to are swapped one pair at a time;
+   then each end of such a line whose side is a default is tried on the two
+   sides across from its own. The figure is rerouted and separated after each
+   trial, and a trial is kept when fewer pairs of lines cross or crowd. This is
+   what sends a loop back to an earlier step over the top instead of through
+   everything between.
 6. **Room.** A connector or caption that had to leave the container it belongs
    to, or a run pressed between a box and the container's edge, asks that
    container for more room, and the figure is laid out again (up to three
