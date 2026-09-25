@@ -531,6 +531,49 @@ def training_loop(theme: str = "paper") -> Figure:
     return figure
 
 
+def state_machine(theme: str = "paper") -> Figure:
+    """A state machine: states as circles, transitions as labelled straight lines."""
+
+    with Figure("states", theme=theme, conventions={"lines": "straight"}) as figure:
+        with figure.module("m", label="Connection states", layout="grid", columns=3) as m:
+            closed = m.circle("closed", "Closed", at=(0, 0))
+            sent = m.circle("sent", "SYN sent", at=(0, 1))
+            established = m.circle("established", "Established", shaded=True, at=(0, 2))
+            waiting = m.circle("waiting", "FIN wait", at=(1, 2))
+        m.connect(closed, sent, label="connect")
+        m.connect(sent, established, label="SYN-ACK")
+        m.connect(established, waiting, label="close")
+        m.connect(waiting, closed, label="ACK")
+        m.connect(sent, closed, label="timeout")
+    return figure
+
+
+def ci_pipeline(theme: str = "paper") -> Figure:
+    """A continuous-integration flowchart, with its loop back on failure."""
+
+    with Figure("ci", theme=theme) as figure:
+        with figure.module("m", label="Continuous integration") as m:
+            build = m.block(
+                "build", label="Build", tone="build", input=m.terminal("push", label="Push")
+            )
+            with m.column("checks", role="layout") as column:
+                checks = [
+                    column.block(name, label=label, tone="check")
+                    for name, label in (
+                        ("unit", "Unit tests"),
+                        ("lint", "Lint"),
+                        ("types", "Type check"),
+                    )
+                ]
+            ok = m.decision("ok", label="All green?")
+            deploy = m.terminal("deploy", label="Deploy")
+        figure.net(src=build, sinks=checks)
+        figure.merge(sinks=checks, dst=ok)
+        m.connect(ok, deploy, label="yes")
+        m.connect(ok, build, label="no", line="dashed")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -559,6 +602,8 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         gan,
         diffusion,
         training_loop,
+        ci_pipeline,
+        state_machine,
     )
 }
 """Every figure here, by name."""

@@ -88,7 +88,7 @@ FOREIGN_COST = 4.0
 LEAVE_COST = 1.2
 """Price per point inside a container the route belongs to but has to leave."""
 
-CROSSING_COST = 1.5
+CROSSING_COST = 4.0
 """Price of crossing another connector, in bends: a short detour beats a crossing."""
 
 OVERLAP_COST = 0.03
@@ -268,6 +268,9 @@ def route_figure(
 SIDE_TRIALS = 8
 """Most end sides tried, per figure, to take a crossing out."""
 
+LOOP_TRIALS = 4
+"""Most two-ended loop trials, per figure, after the single-end ones."""
+
 PIN_ORDER_TRIALS = 12
 """Most pin orders tried, per figure, to take a crossing out."""
 
@@ -351,7 +354,18 @@ def _turn_crossing_ends(
 
     sides: dict[int, Side] = {}
     trials = 0
-    tried: set[tuple[int, Side]] = set()
+    tried: set[tuple] = set()
+    # Which ends may turn -- those whose side is a default, never an authored
+    # one -- decided once, since every trial marks the ends it turns as fixed.
+    free = {
+        index
+        for index, end in enumerate(ends)
+        if not end.fixed
+        and any(
+            port.name == end.reference.port_name and port.auto_side
+            for port in end.node.measured.spec.ports
+        )
+    }
     while best and trials < SIDE_TRIALS:
         involved = {index for pair in best for index in pair}
         candidates = [
@@ -360,7 +374,7 @@ def _turn_crossing_ends(
             for member in bundles[index].members
             if isinstance(members[member].spec, EdgeSpec)
             for end_index in members[member].ends
-            if not ends[end_index].fixed and end_index not in sides
+            if end_index in free and end_index not in sides
         ]
         improved = False
         for end_index in candidates:
@@ -381,12 +395,65 @@ def _turn_crossing_ends(
             if improved:
                 break
         if not improved:
-            break
+            improved, trials = _try_loops(
+                attempt,
+                separated,
+                overrides,
+                bundles,
+                members,
+                ends,
+                free,
+                sides,
+                tried,
+                trials,
+                spacing,
+                best,
+            )
+            if improved is None:
+                break
+            sides, (pins, bundles, wires), best = improved
     if trials:
         # Every trial re-plans the ends in place; plan once more with the sides
         # that were kept, so the ends agree with the pins returned.
         pins, bundles, wires, _ = attempt(overrides, sides)
     return pins, bundles, wires
+
+
+def _try_loops(
+    attempt, separated, overrides, bundles, members, ends, free, sides, tried, trials, spacing, best
+):
+    """Both ends of a defective edge on one side: the edge becomes a C round the rest.
+
+    A feedback loop -- a decision back to the step it repeats -- is drawn out of
+    the top of one and into the top of the other, over everything between;
+    turning one end at a time never finds that, because half a loop is worse
+    than none. Each defective edge is tried with both ends on each side across
+    from the line joining them.
+    """
+
+    involved = {index for pair in best for index in pair}
+    for index in sorted(involved):
+        for member in bundles[index].members:
+            spec = members[member].spec
+            if not isinstance(spec, EdgeSpec):
+                continue
+            first, second = members[member].ends
+            if first not in free or second not in free:
+                continue
+            here, there = ends[first].node.bounds.center, ends[second].node.bounds.center
+            across = abs(there.x - here.x) >= abs(there.y - here.y)
+            for side in (Side.NORTH, Side.SOUTH) if across else (Side.WEST, Side.EAST):
+                key = (first, second, side)
+                if key in tried or trials >= SIDE_TRIALS + LOOP_TRIALS:
+                    continue
+                tried.add(key)
+                trials += 1
+                chosen = {**sides, first: side, second: side}
+                trial = attempt(overrides, chosen)
+                defects = _defects(separated(trial[2]), spacing)
+                if len(defects) < len(best):
+                    return (chosen, trial[:3], defects), trials
+    return None, trials
 
 
 def _defects(wires: list[Wire], spacing: float) -> list[tuple[int, int]]:

@@ -348,6 +348,10 @@ def _terminal(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
     body.set("rx", number(node.bounds.height / 2.0))
 
 
+SHADED_OPACITY = 0.2
+"""How much ink a shaded circle -- an observed variable -- is filled with."""
+
+
 def _circle(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     """A labelled circle; ``shaded`` fills it grey, as an observed variable is drawn."""
 
@@ -363,9 +367,12 @@ def _circle(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
         cx=centre.x,
         cy=centre.y,
         r=radius - stroke / 2.0,
+        # Shading is the ink itself, thinned: a light grey on a light page and a
+        # light tint on a dark one, so the label stays legible in every theme.
+        fill__opacity=SHADED_OPACITY if shaded else None,
         **paint_attributes(
             palette=palette,
-            fill_role="container-stroke" if shaded else "block-fill",
+            fill_role="ink" if shaded else "block-fill",
             stroke_role="block-stroke",
             stroke_width=stroke,
             fill=paint_override(spec, "fill"),
