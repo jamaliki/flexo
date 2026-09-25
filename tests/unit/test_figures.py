@@ -289,3 +289,26 @@ def test_a_duplicate_id_is_named() -> None:
     ):
         m.block("b", label="B")
         m.block("b", label="again")
+
+
+def test_a_legend_keys_every_tone_in_the_colour_it_names() -> None:
+    import xml.etree.ElementTree as ET
+
+    with Figure("keyed") as figure, figure.module("m", layout="column") as m:
+        m.mlp("mlp", label="MLP", input=m.block("embed", label="Embed", tone="embedding"))
+        m.legend()
+    compiled = compile_figure(figure.spec)
+    names = [
+        node.spec.label[0].text
+        for node in compiled.measured.nodes
+        if node.spec.id.startswith("m.legend.") and node.spec.id.endswith(".name")
+    ]
+    assert names == ["Embedding", "MLP"]
+    root = ET.fromstring(compiled.document.text)
+    fills = {
+        item.get("id"): item.get("fill")
+        for item in root.iter()
+        if item.get("id", "").endswith(".body")
+    }
+    assert fills["m.legend.entry-0.swatch.body"] == fills["m.embed.body"]
+    assert fills["m.legend.entry-1.swatch.body"] == fills["m.mlp.body"]
