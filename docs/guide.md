@@ -32,8 +32,8 @@ value and `inputs=` takes several. They work on `node` and on `block`, `circle`,
 - One source connects to the component's `input` port.
 - Several sources connect to `input1`, `input2`, ... when the component has
   those ports. Otherwise they all connect to `input`.
-- `concat` requires `inputs=` with at least two sources and gives each its own
-  west port.
+- `concat` gives each source its own west port, `input1`, `input2`, ....
+  Created before its sources exist, it takes `count=` ports (two by default).
 - `attention` maps sources by name. `input=x` is self-attention: `x` feeds `q`,
   `k`, and `v`. `inputs=[x, memory]` is cross-attention: `x` feeds `q` and
   `memory` feeds `k` and `v`. Three sources feed `q`, `k`, and `v` in order.
@@ -50,8 +50,8 @@ appear in every module of a figure.
 
 ### Components you can create before their inputs exist
 
-Wiring at creation is optional. Every factory except `concat` creates its
-component without sources. An `attention` block has its `q`, `k`, and `v` ports
+Wiring at creation is optional. Every factory creates its component without
+sources. An `attention` block has its `q`, `k`, and `v` ports
 whether or not sources were given, so a later `connect` or `net` can reach them:
 
 ```python
