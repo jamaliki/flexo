@@ -514,6 +514,41 @@ def diffusion(theme: str = "paper") -> Figure:
     return figure
 
 
+def rlhf(theme: str = "paper") -> Figure:
+    """Reinforcement learning from human feedback (Ouyang et al. 2022, Figure 2)."""
+
+    steps = {
+        "Step 1: supervised fine-tuning": (
+            ("A prompt is sampled from the prompt dataset", "data"),
+            ("A labeler demonstrates the desired output", "human"),
+            ("The demonstration fine-tunes the model with supervised learning", "model"),
+        ),
+        "Step 2: reward model": (
+            ("A prompt and several model outputs are sampled", "data"),
+            ("A labeler ranks the outputs from best to worst", "human"),
+            ("The ranking trains the reward model", "model"),
+        ),
+        "Step 3: reinforcement learning": (
+            ("A new prompt is sampled from the dataset", "data"),
+            ("The policy generates an output", "model"),
+            ("The reward model scores the output", "model"),
+            ("The reward updates the policy with PPO", "model"),
+        ),
+    }
+    with Figure("rlhf", theme=theme) as figure:
+        with figure.root.row("steps", gap="18pt") as row:
+            for index, (title, boxes) in enumerate(steps.items(), 1):
+                with row.group(
+                    f"step{index}", label=title, layout="column", equal_size=True
+                ) as step:
+                    previous = None
+                    for position, (words, tone) in enumerate(boxes):
+                        previous = step.block(
+                            f"b{position}", label=words, tone=tone, input=previous
+                        )
+    return figure
+
+
 def training_loop(theme: str = "paper") -> Figure:
     """A flowchart: the loop every training script runs."""
 
@@ -601,6 +636,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         clip,
         gan,
         diffusion,
+        rlhf,
         training_loop,
         ci_pipeline,
         state_machine,

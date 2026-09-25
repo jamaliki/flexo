@@ -104,7 +104,9 @@ def arrangement_size(
     )
     values = _equalized(child_sizes) if layout.equal_size else child_sizes
     ports = layout.align == PORT_ALIGN
-    lines = resolved_anchors(values, anchors)
+    # Equal sizes line up by their centres: an anchor measured on a child's own
+    # size would set each resized box off by a different amount.
+    lines = resolved_anchors(values, None if layout.equal_size else anchors)
     if actual_kind == "row":
         height = (
             sum(cross_extent(values, lines, vertical=True))
@@ -164,7 +166,7 @@ def arrange(
         return ()
     sizes = _equalized(child_sizes) if layout.equal_size else child_sizes
     ports = layout.align == PORT_ALIGN
-    lines = resolved_anchors(sizes, anchors)
+    lines = resolved_anchors(sizes, None if layout.equal_size else anchors)
     if kind == "row":
         total = sum(size.width for size in sizes) + sum(gaps)
         start, actual_gaps = linear_justification(layout.justify, content.width, total, gaps)

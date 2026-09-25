@@ -343,3 +343,13 @@ def test_a_concat_can_be_made_before_its_inputs() -> None:
         "input3",
     }
     assert not lint_compilation(compiled).errors
+
+
+def test_equal_size_children_share_a_width_and_a_centre_line() -> None:
+    with Figure("equal") as figure, figure.module("m", layout="column", equal_size=True) as m:
+        first = m.block("a", label="A short one")
+        m.block("b", label="A much longer label than the first", input=first)
+    compiled = compile_figure(figure.spec)
+    a, b = compiled.fitted.node("m.a").bounds, compiled.fitted.node("m.b").bounds
+    assert a.width == pytest.approx(b.width)
+    assert a.center.x == pytest.approx(b.center.x)
