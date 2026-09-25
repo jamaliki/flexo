@@ -120,9 +120,9 @@ minus sign. `\alpha` to `\omega`, `\Gamma` to `\Omega`, and common operators
 and relations (`\times`, `\cdot`, `\sim`, `\in`, `\nabla`, `\to`, `\le`,
 `\sum`, ...) become their symbols; `\log`, `\exp`, `\max` and the other named
 functions are upright; `\mathcal{L}`, `\mathbb{E}` and `\mathfrak{g}` give
-script, blackboard, and fraktur capitals. Spaces are kept as typed. Write `\$` for a literal dollar sign; a
-single `$` with no closing partner is also literal. A script cannot contain
-another script.
+script, blackboard, and fraktur capitals. Spaces are kept as typed. Write `\$`
+for a literal dollar sign; a single `$` with no closing partner is also
+literal. A script cannot contain another script.
 
 A character that the figure's font does not have is set in the next font of the
 fallback stack that does; the stack ends in IBM Plex Sans, Liberation Sans, and
@@ -139,9 +139,10 @@ horizontal run and on either side of each vertical run, at the middle and then
 further toward either end. A caption takes the first candidate that overlaps no
 component, title, other caption, or line, and the least-overlapping one when
 none is free. A caption names the value its edge carries, so a captioned
-edge always gets its own line, even next to another edge between the same two
-ports. If a caption does not fit inside its container, the container is given
-the room.
+edge gets pins of its own and is drawn as its own line, even next to another
+edge between the same two ports; only where it leaves a side too short for a
+pin each does it share a stem with its neighbours. If a caption does not fit
+inside its container, the container is given the room.
 
 ### Node-link figures: circles and straight lines
 
@@ -206,17 +207,20 @@ then meets both components, or `"both"`. Nets take `line=` too.
 
 ### Layout groups
 
-A group with `role="layout"` (the `row` and `column` you nest to arrange
-things) draws nothing, and has no padding unless you give it one: the space
-between its children and its neighbours is exactly the `gap`. A row of such
-columns side by side, not wired to each other, is read as parallel branches:
-the columns are aligned at the top. Two rows stacked in a column, with the same
-number of children and child *i* of one wired to child *i* of the other (and to
-nothing else in the pair), are laid out as one grid, so each child sits over its
-partner; the same holds for two columns side by side. If a figure is wider than its page, the
-compiler first tries tighter gaps and group padding (down to half), and only
-then grows the page, with a `layout.width.grown` warning. (It does not tighten
-a figure compiled with an explicit `style=`, which it keeps exactly.)
+A group with `role="layout"` -- the `row`s and `column`s you nest to arrange
+things -- draws nothing. Layout adds a few rules of its own:
+
+- A layout group has no padding unless you give it one, so the space between
+  its children and its neighbours is exactly its `gap`.
+- Columns side by side that are not wired to each other are parallel branches,
+  and are aligned at the top.
+- Two rows stacked in a column, with the same number of children and child *i*
+  of one wired to child *i* of the other (and to nothing else in the pair),
+  are laid out as one grid, so each child sits over its partner. The same holds
+  for two columns side by side.
+- A figure wider than its page first gets tighter gaps and group padding (down
+  to half), and only then a wider page, with a `layout.width.grown` warning.
+  A figure compiled with an explicit `style=` keeps its spacing exactly.
 
 ## Themes, palettes, and fonts
 
@@ -254,15 +258,15 @@ figure's own choice from the command line.
 
 **Fonts** resolve by family name, and whatever Flexo measures with is what the
 SVG, the PDF and the PNG are drawn in. IBM Plex Sans, Figtree, Liberation Sans
-(metric-compatible with Arial and Helvetica) and Latin Modern Roman ship with
-Flexo and work everywhere; any installed family works by name, and
-`flexo.register_font("path/to/Face.ttf")` (or `FLEXO_FONT_PATH`) adds a file.
-Characters a family lacks -- Greek in Figtree, say -- fall back to the next
-family that has them, measured in the face that will draw them. Bundled faces
-are embedded in the SVG, cut down to the characters the figure uses, so an
-editable SVG is tens of kilobytes rather than a megabyte and a half, and export
-hands Inkscape the same files, so the PDF never falls back to a substitute
-face.
+(metric-compatible with Arial and Helvetica), Latin Modern Roman and Latin
+Modern Math ship with Flexo and work everywhere; any installed family works by
+name, and `flexo.register_font("path/to/Face.ttf")` (or `FLEXO_FONT_PATH`) adds
+a file. Characters a family lacks -- Greek in Figtree, say -- fall back to the
+next family that has them, measured in the face that will draw them. Bundled
+faces are embedded in the SVG, cut down to the characters the figure uses, so
+an editable SVG is tens of kilobytes rather than a megabyte and a half, and
+export hands Inkscape the same files, so the PDF never falls back to a
+substitute face.
 
 ### Colour by kind
 
@@ -287,8 +291,8 @@ stack the entries.
 
 ## Conventions: branches, merges, arrivals, and lines
 
-Lines meet in three ways, and papers draw each of them differently. The
-defaults are:
+Papers draw lines by different conventions, and Flexo lets a figure choose.
+Lines meet in three ways; the defaults are:
 
 - **Branch.** A value read by several components is drawn as one tree that
   forks with a plain T. There is no dot.
@@ -301,7 +305,8 @@ defaults are:
 
 If the lines combine by an operation, author the operation with `add`,
 `multiply` or `op`. It is then drawn as a circle, and the arrows point into
-it.
+it. A fourth convention, `lines`, chooses between routed right-angled lines
+(the default) and straight ones.
 
 Change a convention for a whole figure with `conventions=`, or in YAML with a
 `conventions:` mapping on the figure:
@@ -331,11 +336,15 @@ connectors, it is laid out again with the room they need. A hint that cannot
 be honoured is reported as a warning, not an error. (A `lane=` or waypoint
 that names nothing in the figure is still an error.)
 
-The steps -- pins, search, rip-up and reroute, separation, uncrossing, and room -- and the hints that steer them (`via=`, `rail=`, `rail_at=`, `lane=`) are described in [docs/routing.md](docs/routing.md).
+The steps -- pins, search, rip-up and reroute, separation, uncrossing, and
+room -- and the hints that steer them (`via=`, `rail=`, `rail_at=`, `lane=`) are
+described in [docs/routing.md](docs/routing.md).
 
 ## Documentation
 
-- [Authoring guide](docs/guide.md): every component, grids and alignment, vector glyphs, band rows, paint and retheming, artwork, shadows, export formats, and which palette role paints what.
+- [Authoring guide](docs/guide.md): every component, grids and alignment,
+  vector glyphs, band rows, paint and retheming, artwork, shadows, export
+  formats, and which palette role paints what.
 - [Routing](docs/routing.md): how connectors are routed, and nets, rails, and `via=`.
 - [Architecture](docs/architecture.md): the compiler's passes and modules.
 - [Examples](examples/README.md): the scripts in `examples/` and what each shows.
@@ -373,8 +382,10 @@ uv run ruff check
 uv run flexo --help
 ```
 
-See [the architecture](docs/architecture.md), [the implementation report](docs/implementation-report.md),
-and [the improvement beam](docs/improvement-beam.md).
+See [the architecture](docs/architecture.md). The
+[implementation report](docs/implementation-report.md) and
+[improvement beam](docs/improvement-beam.md) are the history of the first
+version.
 
 ## Design principles
 
@@ -387,7 +398,8 @@ and [the improvement beam](docs/improvement-beam.md).
 - first-class fan-out nets and merges: branches are plain Ts, a merge of two ends
   in an arrow, and an operation is an operator node;
 - defaults that read the figure they are in, and authored values that always win;
-- orthogonal routing with a theme-controlled local elbow radius;
+- orthogonal routing with a theme-controlled local elbow radius, and straight
+  lines where a figure asks for them;
 - themes that change the whole look -- type, line work, colour rules -- and move
   nothing a reader relies on;
 - connector ink painted after the components it joins, so no run is interrupted
