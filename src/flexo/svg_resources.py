@@ -42,6 +42,8 @@ def add_definitions(parent: ET.Element, style: LayoutStyle, palette: Palette) ->
     stylesheet = element(definitions, "style", id="flexo.fonts", type="text/css")
     for role, paint_role in (("flow", "connector"), ("residual", "residual")):
         _arrow_marker(definitions, role, paint_role, style, palette)
+        # The same head for the start of a line, turned to point back along it.
+        _arrow_marker(definitions, role, paint_role, style, palette, start=True)
     return stylesheet
 
 
@@ -51,8 +53,13 @@ def _arrow_marker(
     paint_role: str,
     style: LayoutStyle,
     palette: Palette,
+    *,
+    start: bool = False,
 ) -> None:
     """One arrowhead, in the style's shape, tip ``arrow_length`` beyond the path end.
+
+    ``start=True`` makes the marker for the other end of a line
+    (``arrow.<role>.start``), turned round with ``auto-start-reverse``.
 
     ``triangle`` is a plain filled wedge. ``stealth`` is TikZ's Stealth: a dart
     whose back is notched in by a third of its length. ``latex`` is TikZ's Latex:
@@ -66,7 +73,7 @@ def _arrow_marker(
     marker = element(
         definitions,
         "marker",
-        id=f"arrow.{role}",
+        id=f"arrow.{role}.start" if start else f"arrow.{role}",
         viewBox=f"{number(-width)} {number(-half - width)} "
         f"{number(length + 2 * width)} {number(2 * half + 2 * width)}",
         refX=0.0,
@@ -74,9 +81,11 @@ def _arrow_marker(
         markerWidth=length + 2 * width,
         markerHeight=2 * half + 2 * width,
         markerUnits="userSpaceOnUse",
-        orient="auto",
+        orient="auto-start-reverse" if start else "auto",
         overflow="visible",
     )
+    if start:
+        role = f"{role}.start"
     shape = style.arrow_shape
     if shape == "open":
         element(

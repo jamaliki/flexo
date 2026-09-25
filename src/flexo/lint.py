@@ -194,8 +194,14 @@ def _routing_diagnostics(
                     )
         center_length = sum(segment.length for segment in segments(edge.centerline))
         shaft_length = sum(segment.length for segment in segments(edge.shaft))
-        # Arrow length once, standoff twice: the shaft gives up air at both ends.
-        reserved = style.arrow_length.points + 2.0 * style.connector_standoff.points
+        # Each arrowhead reserves its length plus the standoff; the start gives
+        # up a standoff of air even without one, unless the edge has no heads.
+        head = style.arrow_length.points + style.connector_standoff.points
+        reserved = {
+            "end": head + style.connector_standoff.points,
+            "both": 2.0 * head,
+            "none": 0.0,
+        }[edge.spec.arrow]
         if edge.joined_at is None and abs(center_length - shaft_length - reserved) > 1e-5:
             diagnostics.append(
                 Diagnostic(

@@ -43,7 +43,7 @@ stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws eighteen figures from
+[`examples/literature.py`](examples/literature.py) draws nineteen figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -234,6 +234,18 @@ side by side. Choose straight lines for a whole figure with
 `conventions={"lines": "straight"}`, or for one edge with
 `connect(a, b, shape="straight")`. `connect_all(sources, targets)` connects
 every source to every target.
+
+### Line styles and arrowheads
+
+```python
+m.connect(x, z, line="dashed")                  # or "dotted"
+m.connect(top, bottom, arrow="none", label="shared weights")  # undirected
+m.connect(a, b, arrow="both")
+```
+
+`line=` changes only the stroke. `arrow=` says where the arrowheads go:
+`"end"` (the default, at the target), `"none"` for an undirected link, which
+then meets both components, or `"both"`. Nets take `line=` too.
 
 ### Flowcharts
 

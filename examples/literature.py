@@ -287,8 +287,25 @@ def variational_autoencoder(theme: str = "paper") -> Figure:
         m.connect(z, x)
         m.connect(theta, z)
         m.connect(theta, x)
-        m.connect(x, z, role="residual")
-        m.connect(phi, z, role="residual")
+        # The inference model, dashed as in the paper.
+        m.connect(x, z, line="dashed")
+        m.connect(phi, z, line="dashed")
+    return figure
+
+
+def siamese(theme: str = "paper") -> Figure:
+    """A Siamese network: two encoders sharing weights (Bromley et al. 1993)."""
+
+    with Figure("siamese", width="single-column", theme=theme) as figure:
+        with figure.module("m", label="Siamese network", layout="grid", columns=3) as m:
+            first = m.text("x1", "$x_1$", at=(0, 0))
+            second = m.text("x2", "$x_2$", at=(1, 0))
+            top = m.block("top", label="Encoder", tone="encoder", input=first, at=(0, 1))
+            bottom = m.block("bottom", label="Encoder", tone="encoder", input=second, at=(1, 1))
+            distance = m.op("distance", "$d$", at=(0, 2))
+        m.connect(top, distance)
+        m.connect(bottom, distance)
+        m.connect(top, bottom, line="dashed", arrow="none", label="shared weights")
     return figure
 
 
@@ -383,6 +400,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         multilayer_perceptron,
         hidden_markov_model,
         variational_autoencoder,
+        siamese,
         clip,
         gan,
         diffusion,

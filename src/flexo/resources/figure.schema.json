@@ -173,7 +173,9 @@
         "depart": {"$ref": "#/$defs/side"},
         "arrive": {"$ref": "#/$defs/side"},
         "via": {"$ref": "#/$defs/side"},
-        "shape": {"enum": ["auto", "orthogonal", "straight"]}
+        "shape": {"enum": ["auto", "orthogonal", "straight"]},
+        "line": {"enum": ["solid", "dashed", "dotted"]},
+        "arrow": {"enum": ["end", "none", "both"]}
       }
     },
     "net": {
@@ -200,7 +202,8 @@
         "rail": {"$ref": "#/$defs/side"},
         "rail_at": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
         "via": {"$ref": "#/$defs/side"},
-        "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"}
+        "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"},
+        "line": {"enum": ["solid", "dashed", "dotted"]}
       },
       "not": {
         "anyOf": [
