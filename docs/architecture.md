@@ -79,10 +79,13 @@ side the author or the component grammar declared, not the one layout chose.
    a small `OVERLAP_COST` per point.
 5. **Separate** (`separate.separate`). Per axis, runs in one corridor are
    ordered to cross least and spaced by VPSC.
-6. **Uncross** (`router._reorder_crossing_pins`). While lines cross after
-   separation, neighbouring pins on the affected sides are swapped, and the
-   figure rerouted and separated again; a swap that removes crossings is kept
-   (at most `PIN_ORDER_TRIALS` tries).
+6. **Uncross** (`router._reorder_crossing_pins`, then
+   `router._turn_crossing_ends`). While pairs of lines cross or run closer than
+   a lane after separation (`_defects`), neighbouring pins on the affected
+   sides are swapped (at most `PIN_ORDER_TRIALS` tries), then the ends of the
+   affected edges are tried on the two perpendicular sides (at most
+   `SIDE_TRIALS`); each trial is rerouted and separated, and kept when it
+   leaves fewer defective pairs.
 7. **Straight edges** (`trees.straight_edge`) skip steps 1-6: one segment from
    outline to outline, offset a lane apart when two join the same pair.
 8. **Captions** (`labels.place_edge_labels`). Each edge caption takes the first
