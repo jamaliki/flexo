@@ -128,6 +128,55 @@ def lstm(theme: str = "paper") -> Figure:
     return figure
 
 
+def alphafold(theme: str = "paper") -> Figure:
+    """AlphaFold 2 (Jumper et al. 2021, Figure 1e), with its recycling loop."""
+
+    with Figure("alphafold", theme=theme) as figure:
+        with figure.module("m", label="AlphaFold 2") as m:
+            sequence = m.text("sequence", "Input\nsequence")
+            with m.column("representations", role="layout") as column:
+                msa = column.block("msa", label="MSA\nrepresentation", tone="msa")
+                pair = column.block("pair", label="Pair\nrepresentation", tone="pair")
+            evoformer = m.block(
+                "evoformer", label="Evoformer\n(48 blocks)", tone="evoformer", inputs=[msa, pair]
+            )
+            structure = m.block(
+                "structure", label="Structure module\n(8 blocks)", tone="structure", input=evoformer
+            )
+            m.text("out", "3D\nstructure", input=structure)
+        figure.net(src=sequence, sinks=[msa, pair])
+        m.connect(structure, msa, label="Recycling (three times)", line="dashed", via="north")
+    return figure
+
+
+def bert(theme: str = "paper") -> Figure:
+    """BERT pre-training (Devlin et al. 2019, Figure 1)."""
+
+    tokens = ("[CLS]", "Tok 1", "Tok 2", "[SEP]")
+    outputs = ("$C$", "$T_1$", "$T_2$", "$T_{[SEP]}$")
+    with Figure("bert", width="single-column", theme=theme) as figure:
+        with figure.module("m", label="BERT", layout="column") as m:
+            with m.row("outputs", role="layout") as row:
+                heads = [row.text(f"o{index}", label) for index, label in enumerate(outputs)]
+            encoder = m.block(
+                "encoder", label="Transformer encoder", tone="attention", width="200pt"
+            )
+            with m.row("embeddings", role="layout") as row:
+                embeddings = [
+                    row.block(f"e{index}", label=f"$E_{{{index}}}$", tone="embedding")
+                    for index in range(len(tokens))
+                ]
+            with m.row("tokens", role="layout") as row:
+                words = [row.text(f"t{index}", token) for index, token in enumerate(tokens)]
+        for word, embedding in zip(words, embeddings, strict=True):
+            m.connect(word, embedding)
+        for embedding in embeddings:
+            m.connect(embedding, encoder)
+        for head in heads:
+            m.connect(encoder, head)
+    return figure
+
+
 def vision_transformer(theme: str = "paper") -> Figure:
     """The Vision Transformer (Dosovitskiy et al. 2021, Figure 1)."""
 
@@ -448,6 +497,8 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         lstm,
         vision_transformer,
         attention_panels,
+        bert,
+        alphafold,
         gpt_block,
         mamba,
         swiglu,
