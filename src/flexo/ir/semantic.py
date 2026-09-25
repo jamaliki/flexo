@@ -489,7 +489,12 @@ class GroupSpec:
     def __post_init__(self) -> None:
         _validate_id(self.id, "Group ID")
         if len(self.children) != len(set(self.children)):
-            raise ValueError(f'group "{self.id}" contains duplicate children')
+            seen: set[str] = set()
+            twice = sorted({child for child in self.children if child in seen or seen.add(child)})
+            raise ValueError(
+                f'group "{self.id}" holds {", ".join(repr(item) for item in twice)} twice: '
+                "every component and group needs an id of its own"
+            )
         if self.title_side not in TITLE_SIDES:
             raise ValueError(
                 f'unknown title side "{self.title_side}" for group "{self.id}"; '
