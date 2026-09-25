@@ -159,6 +159,10 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["via"] = edge.via.value
     if edge.shape != "auto":
         result["shape"] = edge.shape
+    if edge.line != "solid":
+        result["line"] = edge.line
+    if edge.arrow != "end":
+        result["arrow"] = edge.arrow
     if edge.waypoints:
         result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
     return result
@@ -182,6 +186,8 @@ def _net_data(net: NetSpec) -> dict[str, object]:
         result["via"] = net.via.value
     if net.joint != "auto":
         result["joint"] = net.joint
+    if net.line != "solid":
+        result["line"] = net.line
     return result
 
 
@@ -342,6 +348,8 @@ def _edge(data: dict[str, Any]) -> EdgeSpec:
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
         via=Side(data["via"]) if data.get("via") else None,
         shape=data.get("shape", "auto"),
+        line=data.get("line", "solid"),
+        arrow=data.get("arrow", "end"),
     )
 
 
@@ -356,6 +364,7 @@ def _net(data: dict[str, Any]) -> NetSpec:
         rail_hint=Side(data["rail"]) if data.get("rail") else None,
         rail_at=data.get("rail_at"),
         joint=data.get("joint", "auto"),
+        line=data.get("line", "solid"),
         via=Side(data["via"]) if data.get("via") else None,
     )
 

@@ -18,6 +18,7 @@ from flexo.conventions import Conventions, parse_conventions
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     TITLE_SIDES,
+    ArrowEnds,
     EdgeShape,
     EdgeSpec,
     FigureSpec,
@@ -25,6 +26,7 @@ from flexo.ir.semantic import (
     JointStyle,
     LayoutKind,
     LayoutSpec,
+    LineStyle,
     NetSpec,
     NodeSpec,
     PortRef,
@@ -336,6 +338,7 @@ class Figure:
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
+        line: LineStyle = "solid",
     ) -> NetSpec:
         """Author one shared value read by multiple downstream ports."""
 
@@ -350,6 +353,7 @@ class Figure:
             joint=joint,
             label=label,
             role=role,
+            line=line,
         )
 
     def merge(
@@ -365,6 +369,7 @@ class Figure:
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
+        line: LineStyle = "solid",
     ) -> NetSpec:
         """Author a true many-to-one combination before one destination."""
 
@@ -379,6 +384,7 @@ class Figure:
             joint=joint,
             label=label,
             role=role,
+            line=line,
         )
 
     def _add_net(
@@ -394,6 +400,7 @@ class Figure:
         joint: JointStyle,
         label: str | tuple[TextRun, ...],
         role: str,
+        line: LineStyle = "solid",
     ) -> NetSpec:
         self._net_counter += 1
         net = NetSpec(
@@ -407,6 +414,7 @@ class Figure:
             rail_at,
             joint,
             _side(via, "via side"),
+            line=line,
         )
         self._nets.append(net)
         return net
@@ -1571,6 +1579,7 @@ class GroupBuilder:
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
+        line: LineStyle = "solid",
     ) -> NetSpec:
         """Author one shared value read by multiple downstream ports.
 
@@ -1591,6 +1600,7 @@ class GroupBuilder:
             joint=joint,
             label=label,
             role=role,
+            line=line,
         )
 
     def merge(
@@ -1605,6 +1615,7 @@ class GroupBuilder:
         joint: JointStyle = "auto",
         label: str | tuple[TextRun, ...] = "",
         role: str = "flow",
+        line: LineStyle = "solid",
     ) -> NetSpec:
         """Author a true many-to-one combination; see ``net`` and ``Figure.merge``."""
 
@@ -1618,6 +1629,7 @@ class GroupBuilder:
             joint=joint,
             label=label,
             role=role,
+            line=line,
         )
 
     def connect(
@@ -1633,6 +1645,8 @@ class GroupBuilder:
         lane: str | None = None,
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
+        line: LineStyle = "solid",
+        arrow: ArrowEnds = "end",
     ) -> EdgeSpec:
         """Draw one connector from ``source`` to ``target``.
 
@@ -1650,7 +1664,8 @@ class GroupBuilder:
 
         ``shape="straight"`` draws one straight segment between the two outlines
         instead of a routed path; ``"auto"`` follows the figure's ``lines``
-        convention.
+        convention. ``line="dashed"`` or ``"dotted"`` strokes it that way, and
+        ``arrow="none"`` (an undirected link) or ``"both"`` moves its arrowheads.
         """
 
         source_ref = _reference(source, source_port)
@@ -1665,6 +1680,8 @@ class GroupBuilder:
             lane,
             via=_side(via, "via side"),
             shape=shape,
+            line=line,
+            arrow=arrow,
         )
         self.figure._edges.append(edge)
         return edge
@@ -1676,6 +1693,8 @@ class GroupBuilder:
         *,
         shape: EdgeShape = "auto",
         role: str = "flow",
+        line: LineStyle = "solid",
+        arrow: ArrowEnds = "end",
     ) -> list[EdgeSpec]:
         """Connect every source to every target: a fully connected layer.
 
@@ -1684,7 +1703,7 @@ class GroupBuilder:
         """
 
         return [
-            self.connect(source, target, shape=shape, role=role)
+            self.connect(source, target, shape=shape, role=role, line=line, arrow=arrow)
             for source in sources
             for target in targets
         ]

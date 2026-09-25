@@ -158,3 +158,28 @@ def test_a_decision_meets_each_line_at_a_corner_of_its_own() -> None:
     assert len(touching) == 3
     assert {(round(point.x, 6), round(point.y, 6)) for point in touching} <= corners
     assert len({(round(point.x, 6), round(point.y, 6)) for point in touching}) == 3
+
+
+def test_line_styles_and_arrow_ends_change_only_the_ink() -> None:
+    import xml.etree.ElementTree as ET
+
+    with Figure("ends") as figure:
+        with figure.module("m", layout="column") as m:
+            a = m.block("a", label="A")
+            b = m.block("b", label="B")
+            c = m.block("c", label="C")
+        m.connect(a, b, line="dashed", arrow="none")
+        m.connect(b, c, line="dotted", arrow="both")
+    compiled = compile_figure(figure.spec)
+    root = ET.fromstring(compiled.document.text)
+    by_id = {item.get("id"): item for item in root.iter() if item.get("id")}
+    first, second = compiled.routed.edges
+    assert by_id[first.spec.id].get("stroke-dasharray")
+    assert by_id[second.spec.id].get("stroke-dasharray", "").startswith("0 ")
+    assert by_id[f"{first.spec.id}.shaft"].get("marker-end") is None
+    assert first.shaft == first.centerline, "an undirected link meets both components"
+    shaft = by_id[f"{second.spec.id}.shaft"]
+    assert shaft.get("marker-start") == "url(#arrow.flow.start)"
+    assert shaft.get("marker-end") == "url(#arrow.flow)"
+    assert by_id["arrow.flow.start"].get("orient") == "auto-start-reverse"
+    assert not lint_compilation(compiled).errors
