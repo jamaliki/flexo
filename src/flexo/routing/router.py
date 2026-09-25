@@ -39,7 +39,7 @@ from dataclasses import dataclass, field, replace
 from flexo.components import CAPTION_KINDS, TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.geometry import Point, Rect, Side, segments
-from flexo.hierarchy import ancestors, parent_map, routing_boundary
+from flexo.hierarchy import ancestors, lowest_common_group, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
@@ -173,9 +173,7 @@ def route_figure(
     layout_style = style or figure_style(fitted.measured.semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     semantic = fitted.measured.semantic
-    straight = {
-        edge.id for edge in semantic.edges if _is_straight(edge, layout_style)
-    }
+    straight = {edge.id for edge in semantic.edges if _is_straight(edge, layout_style)}
     members, ends = _connections(fitted, straight)
     scene = _Scene(fitted, layout_style, text_measurer)
 
@@ -365,11 +363,7 @@ def _crossing_pairs(wires: list[Wire]) -> list[tuple[int, int]]:
     runs = [_straight_runs(wire) for wire in wires]
     pairs = []
     for first, second in itertools.combinations(range(len(wires)), 2):
-        if any(
-            _perpendicular_cross(a, b, c, d)
-            for a, b in runs[first]
-            for c, d in runs[second]
-        ):
+        if any(_perpendicular_cross(a, b, c, d) for a, b in runs[first] for c, d in runs[second]):
             pairs.append((first, second))
     return pairs
 
@@ -418,6 +412,39 @@ def _joined(a: Point, b: Point, c: Point, d: Point) -> tuple[Point, Point] | Non
         return None
     points = sorted((a, b, c, d), key=lambda point: point.x if horizontal else point.y)
     return points[0], points[-1]
+
+
+def _flow_defaults(
+    fitted: FittedFigure, members: list[_Member], ends: list[_End]
+) -> dict[int, Side]:
+    """The side each end takes when its two gaps are comparable: the layout's flow.
+
+    A connection whose ends share a column runs vertically, and one whose ends
+    share a row runs horizontally -- whichever way its component's grammar
+    points. Ends whose innermost shared group is a grid or an overlay keep the
+    grammar's side.
+    """
+
+    semantic = fitted.measured.semantic
+    parents = parent_map(semantic.groups)
+    groups = {group.id: group for group in semantic.groups}
+    result: dict[int, Side] = {}
+    for member in members:
+        spec = member.spec
+        node_ids = (
+            (spec.source.node_id, spec.target.node_id)
+            if isinstance(spec, EdgeSpec)
+            else tuple(reference.node_id for reference in spec.sources + spec.targets)
+        )
+        kind = groups[lowest_common_group(parents, node_ids)].layout.kind
+        for index in member.ends:
+            end = ends[index]
+            here, there = end.node.bounds.center, end.counterpart.center
+            if kind == "column":
+                result[id(end)] = Side.SOUTH if there.y > here.y else Side.NORTH
+            elif kind == "row":
+                result[id(end)] = Side.EAST if there.x > here.x else Side.WEST
+    return result
 
 
 def _port_hints(figure) -> dict[tuple[str, str], Side]:
@@ -627,9 +654,7 @@ def _connections(
 
     def add(member: int, reference: PortRef, arriving: bool, counterpart: Rect) -> None:
         members[member].ends.append(len(ends))
-        ends.append(
-            _End(member, reference, arriving, fitted.node(reference.node_id), counterpart)
-        )
+        ends.append(_End(member, reference, arriving, fitted.node(reference.node_id), counterpart))
 
     for edge in semantic.edges:
         if edge.id in skip:
@@ -710,6 +735,7 @@ def _pins(
     """
 
     hints = _port_hints(fitted.measured.semantic)
+    flow = _flow_defaults(fitted, members, ends)
     for end in ends:
         spec = end.node.measured.spec
         port_spec = _authored_port(fitted, spec.id, end.reference.port_name)
@@ -717,9 +743,10 @@ def _pins(
         side = fitted_port.side
         pinned = hints.get((spec.id, end.reference.port_name))
         member = members[end.member].spec
-        steered = (isinstance(member, EdgeSpec) and (
-            member.lane_hint is not None or bool(member.waypoints)
-        )) or (isinstance(member, NetSpec) and member.rail_hint is not None)
+        steered = (
+            isinstance(member, EdgeSpec)
+            and (member.lane_hint is not None or bool(member.waypoints))
+        ) or (isinstance(member, NetSpec) and member.rail_hint is not None)
         via = _via_side(member, end)
         authored = _authored_side(member, end)
         end.fixed = authored is not None or (via is not None and port_spec.auto_side)
@@ -730,12 +757,20 @@ def _pins(
         elif pinned is not None:
             side = pinned
         elif port_spec.auto_side and not steered:
-            side = _facing(end.node.bounds, end.counterpart, port_spec.side)
+            side = _facing(end.node.bounds, end.counterpart, flow.get(id(end), port_spec.side))
         name = _SAME_VALUE.get(spec.kind, {}).get(end.reference.port_name, end.reference.port_name)
         separate = style.conventions.arrivals == "separate"
-        if isinstance(member, EdgeSpec) and member.label and spec.kind != "op":
+        span = end.node.bounds.width if side in {Side.NORTH, Side.SOUTH} else end.node.bounds.height
+        if (
+            isinstance(member, EdgeSpec)
+            and member.label
+            and spec.kind != "op"
+            and (end.arriving or span >= 3.0 * style.port_spacing.points)
+        ):
             # A caption names the value an edge carries, so a captioned edge is
-            # its own line end to end, even beside another between the same ports.
+            # its own line end to end, even beside another between the same
+            # ports -- unless it leaves a side too short for a pin each, where
+            # the edges share a stem and each caption goes on its own branch.
             name = f"{name}@{member.id}"
         elif end.arriving and separate and isinstance(member, EdgeSpec) and spec.kind != "op":
             # Two values arriving at one port are two arrows, not a merge: only
@@ -831,17 +866,15 @@ def _common_net_sides(
             toward = Side.EAST if spread.center.x >= hub.center.x else Side.WEST
         # Beside the row rather than over it, the hub still feeds a row from
         # above: the bus runs along the row, each branch dropping in.
-        level = (
-            spread_x >= spread_y and hub.bottom > spread.top and hub.top < spread.bottom
-        ) or (spread_x < spread_y and hub.right > spread.left and hub.left < spread.right)
+        level = (spread_x >= spread_y and hub.bottom > spread.top and hub.top < spread.bottom) or (
+            spread_x < spread_y and hub.right > spread.left and hub.left < spread.right
+        )
 
         def movable(end: _End) -> bool:
             spec = end.node.measured.spec
             port = _authored_port(fitted, spec.id, end.reference.port_name)
             return (
-                not end.fixed
-                and port.auto_side
-                and (spec.id, end.reference.port_name) not in hints
+                not end.fixed and port.auto_side and (spec.id, end.reference.port_name) not in hints
             )
 
         changed = False
@@ -871,9 +904,7 @@ def _clear_approaches(
     """
 
     boxes = [
-        node.bounds
-        for node in fitted.nodes
-        if node.measured.spec.kind not in TRANSPARENT_KINDS
+        node.bounds for node in fitted.nodes if node.measured.spec.kind not in TRANSPARENT_KINDS
     ]
     for end in ends:
         assert end.group is not None
@@ -899,9 +930,7 @@ def _approach_clear(bounds: Rect, side: Side, reach: float, boxes: list[Rect]) -
     centre = bounds.point_on(side, 0.5)
     tip = side.escaped(centre, reach)
     band = Rect.from_points(centre, tip).inflated(0.5)
-    return not any(
-        box != bounds and box.intersects(band, strict=True) for box in boxes
-    )
+    return not any(box != bounds and box.intersects(band, strict=True) for box in boxes)
 
 
 def _authored_port(fitted: FittedFigure, node_id: str, port_name: str) -> PortSpec:
@@ -928,9 +957,7 @@ def _separate_directions(
     """
 
     boxes = [
-        node.bounds
-        for node in fitted.nodes
-        if node.measured.spec.kind not in TRANSPARENT_KINDS
+        node.bounds for node in fitted.nodes if node.measured.spec.kind not in TRANSPARENT_KINDS
     ]
     by_side: dict[tuple[str, Side], list[_End]] = defaultdict(list)
     for end in ends:
@@ -953,9 +980,7 @@ def _separate_directions(
             if side is port_spec.side:
                 continue  # The side the grammar gives this port: sharing it is by design.
             ranked = _facing_sides(end.node.bounds, end.counterpart, side)
-            reach = (
-                style.arrival_clearance.points if end.arriving else style.route_clearance.points
-            )
+            reach = style.arrival_clearance.points if end.arriving else style.route_clearance.points
             alternatives = [
                 candidate
                 for candidate in ranked[1:]
@@ -1102,8 +1127,7 @@ def _place_on_side(
 
     def target(key: tuple[str, str, Side, bool]) -> float:
         values = [
-            end.counterpart.center.x if along_x else end.counterpart.center.y
-            for end in groups[key]
+            end.counterpart.center.x if along_x else end.counterpart.center.y for end in groups[key]
         ]
         return sum(values) / len(values)
 
@@ -1368,9 +1392,7 @@ def _align(
                 constraints.append((dummy, position, 0.0) if is_low else (position, dummy, 0.0))
         constraints = _without_cycles(constraints)
         solved = solve(desired, weights, constraints)
-        anchored = {
-            find(key): slots[key].desired for key in keys if not slots[key].movable
-        }
+        anchored = {find(key): slots[key].desired for key in keys if not slots[key].movable}
         for key in keys:
             root = find(key)
             low, high = ranges[root]
@@ -1619,9 +1641,7 @@ class _Scene:
         ys.extend((boundary.top, boundary.bottom))
         zones = self._zones(pins)
         if lean is not None:
-            region = Rect.union(
-                Rect.from_points(pin.point, pin.escape) for pin in pins
-            )
+            region = Rect.union(Rect.from_points(pin.point, pin.escape) for pin in pins)
             refused = _refused(lean, region, self.canvas.inflated(1000.0))
             zones = (*zones, Zone(refused, OFF_SIDE_COST))
             if lean in {Side.EAST, Side.WEST}:
@@ -1710,8 +1730,7 @@ class _Scene:
                 count = len(spec.sources)
                 sources = [pins[ends[end].group] for end in members[member_index].ends[:count]]
                 targets = [
-                    pins[ends[end].group]
-                    for end in members[member_index].ends[len(spec.sources) :]
+                    pins[ends[end].group] for end in members[member_index].ends[len(spec.sources) :]
                 ]
                 wire.flow_from = Point(
                     sum(pin.point.x for pin in sources) / len(sources),
@@ -1723,11 +1742,14 @@ class _Scene:
                 else:
                     wire.flow_to = targets[0].point
                     wire.flow_from = max(
-                        sources, key=lambda pin: -abs(
-                            (pin.point.y - targets[0].point.y)
-                            if targets[0].side in {Side.EAST, Side.WEST}
-                            else (pin.point.x - targets[0].point.x)
-                        )
+                        sources,
+                        key=lambda pin: (
+                            -abs(
+                                (pin.point.y - targets[0].point.y)
+                                if targets[0].side in {Side.EAST, Side.WEST}
+                                else (pin.point.x - targets[0].point.x)
+                            )
+                        ),
                     ).point
                 # A captioned net hands its run to the caption: the joint goes to
                 # the far end of its corridor unless the author placed it.
@@ -2223,7 +2245,6 @@ def _routed_edge(
     position = edge_label_position(centerline, metrics, style) if metrics is not None else None
     diagnostics: tuple[Diagnostic, ...] = ()
     if edge.via is not None and len(centerline) >= 2:
-
         region = Rect.union(
             (
                 Rect.from_points(centerline[0], centerline[-1]),
@@ -2343,9 +2364,7 @@ def _routed_net(
     dots_removed: set[tuple[float, float]] = set()
     marked: list[tuple[Point, ...]] = []
     if joins:
-        source_stems, trunks, marked, dots_removed = _mark_joins(
-            source_stems, trunks, joins, reach
-        )
+        source_stems, trunks, marked, dots_removed = _mark_joins(source_stems, trunks, joins, reach)
     order = {reference: index for index, reference in enumerate(net.sources + net.targets)}
     source_stems.sort(key=lambda stem: order[stem.port])
     target_stems.sort(key=lambda stem: order[stem.port])

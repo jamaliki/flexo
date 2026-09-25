@@ -43,7 +43,7 @@ stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws twenty-three figures from
+[`examples/literature.py`](examples/literature.py) draws twenty-five figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -112,13 +112,16 @@ m.block("w", label=r"$W_{\text{out}}$")  # \text{} and \mathrm{} are upright
 
 Latin letters in math are italic and digits are upright, as in TeX. `-` is a
 minus sign. `\alpha` to `\omega`, `\Gamma` to `\Omega`, and common operators
-(`\times`, `\cdot`, `\sim`, `\to`, `\le`, `\sum`, ...) become their
-symbols. Spaces are kept as typed. Write `\$` for a literal dollar sign; a
+and relations (`\times`, `\cdot`, `\sim`, `\in`, `\nabla`, `\to`, `\le`,
+`\sum`, ...) become their symbols; `\log`, `\exp`, `\max` and the other named
+functions are upright; `\mathcal{L}`, `\mathbb{E}` and `\mathfrak{g}` give
+script, blackboard, and fraktur capitals. Spaces are kept as typed. Write `\$` for a literal dollar sign; a
 single `$` with no closing partner is also literal. A script cannot contain
 another script.
 
 A character that the figure's font does not have is set in the next font of
-the fallback stack that does. An accent is kept with its letter: if the
+the fallback stack that does; the stack ends in IBM Plex Sans, Liberation Sans,
+and Latin Modern Math, which together cover Greek and mathematical symbols. An accent is kept with its letter: if the
 primary font has the accent but cannot position it on that letter, the letter
 and the accent are both set in a fallback font that can.
 

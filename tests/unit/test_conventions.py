@@ -170,3 +170,10 @@ def test_module_takes_every_group_option() -> None:
     group = figure.spec.group("m")
     assert group.layout.columns == 2
     assert group.layout.row_gap is not None
+
+
+def test_math_alphabets_operators_and_relations() -> None:
+    assert parse_label(r"$\mathcal{L}$") == (TextRun("\u2112"),)
+    assert parse_label(r"$\mathbb{E}$") == (TextRun("\U0001d53c"),)
+    assert parse_label(r"$\log p$") == (TextRun("log "), TextRun("p", italic=True))
+    assert parse_label(r"$x \in X$")[1] == TextRun(" \u2208 ")

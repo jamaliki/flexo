@@ -53,14 +53,16 @@ class FontData:
     codepoints: frozenset[int]
 
 
-DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans")
+DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans", "Latin Modern Math")
 """Bundled families every stack ends in, for the glyphs its own families lack.
 
 Figtree has no Greek and Latin Modern has no subscripts; Plex covers Greek and
-most of the mathematical letters a caption reaches for, and Liberation Sans the
-modifier letters (``ᵀ``) Plex does not. Both always resolve, so a glyph
-missing from the author's family is still measured in the face that will draw
-it rather than rejected.
+most of the mathematical letters a caption reaches for, Liberation Sans the
+modifier letters (``ᵀ``) Plex does not, and Latin Modern Math the rest of
+mathematics: script, blackboard and fraktur capitals, and symbols such as
+``∇`` and ``∈``. All three always resolve, so a glyph missing from the
+author's family is still measured in the face that will draw it rather than
+rejected.
 """
 
 
