@@ -38,8 +38,10 @@ print(result.summary())
 That is the whole figure: no coordinates, no port tables, no colours, no
 routing hints. `flexo.build` compiles, writes the formats you asked for, and
 lints; outputs are written even when the report has errors, so a flawed figure
-stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
-`editable` never does.
+stays inspectable. The editable SVG and the PNG preview need nothing else; the
+portable SVG and the PDF are made by Inkscape. (With Inkscape installed, the
+PNG is made by Inkscape too; without it, by resvg.) In a Jupyter notebook, a
+figure displays itself: end a cell with `figure`.
 
 ## Figures from the literature
 

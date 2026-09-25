@@ -502,6 +502,11 @@ class Figure:
             palette=palette,
         )
 
+    def _repr_svg_(self) -> str:
+        """The compiled figure, for Jupyter: evaluating a figure in a cell draws it."""
+
+        return self.compile().document.text
+
 
 class GroupBuilder:
     """One layout group, and the factory for everything inside it.

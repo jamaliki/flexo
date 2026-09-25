@@ -88,13 +88,18 @@ def export_outputs(
     if any(target_file is not None for target_file in derived):
         inkscape = find_inkscape()
         if inkscape is None:
-            raise FlexoError(
-                Diagnostic(
-                    "export.inkscape.missing",
-                    "Inkscape is required for portable SVG, PDF, and PNG outputs.",
-                    hint="Install Inkscape or set FLEXO_INKSCAPE to its executable.",
+            if portable is not None or pdf is not None:
+                raise FlexoError(
+                    Diagnostic(
+                        "export.inkscape.missing",
+                        "Inkscape is required for portable SVG and PDF outputs.",
+                        hint="Install Inkscape or set FLEXO_INKSCAPE to its executable; "
+                        "editable SVG and PNG need no Inkscape.",
+                    )
                 )
-            )
+            if png is not None:
+                _resvg_png(compilation, png, dpi)
+            return OutputFiles(editable, portable, pdf, png)
         if portable is not None:
             _run(
                 inkscape,
@@ -113,6 +118,23 @@ def export_outputs(
                 f"--export-dpi={dpi:g}",
             )
     return OutputFiles(editable, portable, pdf, png)
+
+
+def _resvg_png(compilation: Compilation, target: Path, dpi: float) -> None:
+    """Rasterise the figure with resvg, for machines without Inkscape.
+
+    resvg reads the bundled and registered font files directly, so the preview
+    is set in the faces the figure was measured with.
+    """
+
+    import resvg_py
+
+    data = resvg_py.svg_to_bytes(
+        svg_string=compilation.document.text,
+        font_dirs=[str(directory) for directory in font_directories()],
+        dpi=dpi,
+    )
+    target.write_bytes(bytes(data))
 
 
 @dataclass(frozen=True, slots=True)

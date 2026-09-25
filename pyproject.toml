@@ -20,6 +20,7 @@ dependencies = [
   "fonttools>=4.59",
   "jsonschema>=4.25",
   "pyyaml>=6.0.2",
+  "resvg-py>=0.2",
   "uharfbuzz>=0.52",
 ]
 
