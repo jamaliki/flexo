@@ -7,9 +7,12 @@ lints.
 """
 
 from flexo.builder import Figure, GroupBuilder, NodeHandle
+from flexo.colour import design_palettes as palettes
 from flexo.compiler import Compilation, compile_figure
+from flexo.conventions import Conventions
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.export import FORMATS, Build, OutputFiles, build, export_outputs, find_inkscape
+from flexo.fonts import available_families, bundled_families, register_font
 from flexo.geometry import Point, Rect, Segment, Side, Size
 from flexo.ir.semantic import (
     EdgeSpec,
@@ -41,6 +44,7 @@ from flexo.style import (
     vector_stack_height,
 )
 from flexo.theme import retheme_svg
+from flexo.themes import THEMES, Theme, resolve_palette, resolve_style
 from flexo.units import CellSpan, Extent, Length, cm, inch, mm, pt, px
 
 __all__ = [
@@ -51,9 +55,11 @@ __all__ = [
     "PALETTES",
     "RAMP_ROLES",
     "STYLES",
+    "THEMES",
     "Build",
     "CellSpan",
     "Compilation",
+    "Conventions",
     "Diagnostic",
     "EdgeSpec",
     "Extent",
@@ -82,9 +88,12 @@ __all__ = [
     "Side",
     "Size",
     "TextRun",
+    "Theme",
     "TypographyStyle",
     "VectorPreset",
+    "available_families",
     "build",
+    "bundled_families",
     "cm",
     "compile_figure",
     "dump_figure",
@@ -95,8 +104,12 @@ __all__ = [
     "lint_svg",
     "load_figure",
     "mm",
+    "palettes",
     "pt",
     "px",
+    "register_font",
+    "resolve_palette",
+    "resolve_style",
     "retheme_svg",
     "save_figure",
     "shade_ramp",

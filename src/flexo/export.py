@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from xml.sax.saxutils import escape
 
 from flexo.compiler import Compilation, compile_figure
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.fonts import font_directories
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import LintReport, lint_compilation
 from flexo.style import LayoutStyle, Palette
@@ -176,16 +180,54 @@ def query_bounds(source_file: str | Path) -> dict[str, tuple[float, float, float
     return result
 
 
+def _fontconfig_file(executable: Path) -> Path:
+    """A fontconfig file that adds Flexo's fonts to whatever Inkscape already sees.
+
+    Flexo measures text in its bundled (and registered) faces, so the PDF and PNG
+    have to be drawn in them too -- on a machine where they are not installed,
+    Inkscape would otherwise substitute a fallback and every label would be set
+    wider or narrower than the box that was sized for it. The generated file
+    includes the configuration Inkscape would have used and adds our
+    directories, so installed fonts keep working.
+    """
+
+    candidates = [
+        os.environ.get("FONTCONFIG_FILE"),
+        str(executable.resolve().parent.parent / "Resources/etc/fonts/fonts.conf"),
+        "/etc/fonts/fonts.conf",
+        "/usr/local/etc/fonts/fonts.conf",
+        "/opt/homebrew/etc/fonts/fonts.conf",
+    ]
+    base = next((item for item in candidates if item and Path(item).is_file()), None)
+    directories = "".join(
+        f"  <dir>{escape(str(directory))}</dir>\n" for directory in font_directories()
+    )
+    include = f'  <include ignore_missing="yes">{escape(base)}</include>\n' if base else ""
+    cache = Path(tempfile.gettempdir()) / "flexo-fontconfig-cache"
+    text = (
+        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n'
+        f"{include}{directories}  <cachedir>{escape(str(cache))}</cachedir>\n</fontconfig>\n"
+    )
+    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+    target = Path(tempfile.gettempdir()) / f"flexo-fonts-{digest}.conf"
+    if not target.is_file():
+        target.write_text(text, encoding="utf-8")
+    return target
+
+
 def _run(
     executable: Path,
     source_file: Path,
     *arguments: str,
 ) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ)
+    environment["FONTCONFIG_FILE"] = str(_fontconfig_file(executable))
     completed = subprocess.run(
         [str(executable), str(source_file), *arguments],
         check=False,
         capture_output=True,
         text=True,
+        env=environment,
     )
     if completed.returncode:
         stderr = _compact_subprocess_message(completed.stderr)

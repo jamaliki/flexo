@@ -10,16 +10,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from flexo import __version__
+from flexo.colour import design_palettes
 from flexo.compiler import compile_figure
 from flexo.diagnostics import FlexoError
 from flexo.export import build
+from flexo.fonts import bundled_families
 from flexo.gallery import GALLERY, gallery_figure
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation, lint_svg
 from flexo.schema import load_schema
 from flexo.serialization import load_figure
-from flexo.style import PALETTES
 from flexo.theme import retheme_svg
+from flexo.themes import THEMES, resolve_palette
 
 
 def parser() -> argparse.ArgumentParser:
@@ -50,8 +52,18 @@ def parser() -> argparse.ArgumentParser:
 
     retheme = subcommands.add_parser("retheme", help="Patch paint roles without changing geometry.")
     retheme.add_argument("source", type=Path)
-    retheme.add_argument("palette", choices=tuple(PALETTES))
+    retheme.add_argument(
+        "palette",
+        help="A palette name (see `flexo themes`), '#hex,#hex,...', or 'default'.",
+    )
+    retheme.add_argument(
+        "--theme",
+        default="paper",
+        help="Whose colour rules to paint with (paint only: geometry is kept).",
+    )
     retheme.add_argument("--output", "-o", type=Path, required=True)
+
+    subcommands.add_parser("themes", help="List themes, palettes, and bundled fonts.")
     return result
 
 
@@ -63,7 +75,9 @@ def _output_arguments(command: argparse.ArgumentParser) -> None:
         help="Comma-separated: editable, portable, pdf, png.",
     )
     command.add_argument("--dpi", type=float, default=192.0)
-    command.add_argument("--palette", choices=tuple(PALETTES))
+    command.add_argument("--theme", help="Override the figure's theme (see `flexo themes`).")
+    command.add_argument("--palette", help="Override the figure's palette.")
+    command.add_argument("--font", help="Set the figure in another font family.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -81,6 +95,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _schema(arguments)
         if arguments.command == "retheme":
             return _retheme(arguments)
+        if arguments.command == "themes":
+            return _themes()
         parser().print_help()
         return 0
     except (FlexoError, OSError, ValueError) as error:
@@ -133,8 +149,12 @@ def _write(figure: FigureSpec, arguments: argparse.Namespace, *, stem: str) -> i
     or warning-only report is printed to stdout.
     """
 
+    if arguments.theme:
+        figure = replace(figure, style=arguments.theme)
     if arguments.palette:
         figure = replace(figure, palette=arguments.palette)
+    if arguments.font:
+        figure = replace(figure, font=arguments.font)
     result = build(
         figure,
         arguments.output,
@@ -165,10 +185,24 @@ def _schema(arguments: argparse.Namespace) -> int:
 
 def _retheme(arguments: argparse.Namespace) -> int:
     source = arguments.source.read_text(encoding="utf-8")
-    themed = retheme_svg(source, PALETTES[arguments.palette])
+    themed = retheme_svg(source, resolve_palette(arguments.theme, arguments.palette))
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(themed, encoding="utf-8")
     print(arguments.output)
+    return 0
+
+
+def _themes() -> int:
+    width = max(len(name) for name in THEMES)
+    print("Themes (Figure(theme=...)):")
+    for name, entry in THEMES.items():
+        print(f"  {name:<{width}}  {entry.description}")
+    print("\nPalettes (Figure(palette=...), or a list of hex colours):")
+    for name, colours in design_palettes().items():
+        print(f"  {name:<24} {' '.join(colours)}")
+    print("\nBundled fonts (Figure(font=...); any installed font works too):")
+    for family in bundled_families():
+        print(f"  {family}")
     return 0
 
 

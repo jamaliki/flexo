@@ -32,6 +32,15 @@ class Side(StrEnum):
         }[self]
 
     @property
+    def opposite(self) -> Side:
+        return {
+            Side.NORTH: Side.SOUTH,
+            Side.SOUTH: Side.NORTH,
+            Side.EAST: Side.WEST,
+            Side.WEST: Side.EAST,
+        }[self]
+
+    @property
     def horizontal(self) -> bool:
         """Whether this side's outward normal runs along x: east or west.
 
@@ -241,6 +250,32 @@ class Segment:
         return rectangle.left < self.start.x < rectangle.right and max(low, rectangle.top) < min(
             high, rectangle.bottom
         )
+
+
+def segment_crosses_rect(start: Point, end: Point, rect: Rect) -> bool:
+    """Whether the segment passes through ``rect``'s interior, at any angle.
+
+    Liang-Barsky clipping: the segment is trimmed against each slab of the
+    rectangle in turn, and crosses it when anything of positive length is left.
+    """
+
+    low, high = 0.0, 1.0
+    dx, dy = end.x - start.x, end.y - start.y
+    for delta, begin, lower, upper in (
+        (dx, start.x, rect.left, rect.right),
+        (dy, start.y, rect.top, rect.bottom),
+    ):
+        if abs(delta) < 1e-12:
+            if not lower < begin < upper:
+                return False
+            continue
+        first, second = (lower - begin) / delta, (upper - begin) / delta
+        if first > second:
+            first, second = second, first
+        low, high = max(low, first), min(high, second)
+        if high - low <= 1e-9:
+            return False
+    return True
 
 
 def segments(points: tuple[Point, ...]) -> tuple[Segment, ...]:

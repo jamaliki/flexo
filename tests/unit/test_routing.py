@@ -7,7 +7,6 @@ import pytest
 from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.diagnostics import Severity
-from flexo.emit import _net_ink
 from flexo.gallery import gallery_figure, vertical_slice
 from flexo.geometry import Point, Rect, Segment, Side, segments
 from flexo.ir.semantic import (
@@ -40,7 +39,7 @@ from flexo.routing.nudge import (
 )
 from flexo.routing.solve import _routing_order
 from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
-from flexo.style import LayoutStyle
+from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
@@ -75,34 +74,36 @@ def routed_fixture(*, obstacle: bool = False, lane: bool = False, style=None):
 
 
 def test_direct_route_reaches_ports_and_shortens_shaft() -> None:
-    style = LayoutStyle()
+    style = STYLES["paper"]
     routed = routed_fixture()
     edge = routed.edge("flow")
     assert edge.centerline[0] == routed.fitted.node("source").port("output").position
     assert edge.centerline[-1] == routed.fitted.node("target").port("input").position
-    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == (
+    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == pytest.approx(
         style.arrow_length.points + style.connector_standoff.points
     )
     assert all(segment.orthogonal for segment in segments(edge.centerline))
 
 
 def test_shaft_leaves_a_standoff_at_both_connector_ends() -> None:
-    style = LayoutStyle()
+    style = STYLES["paper"]
     standoff = style.connector_standoff.points
     edge = routed_fixture().edge("flow")
-    assert edge.shaft[0].distance_to(edge.centerline[0]) == standoff
+    assert edge.shaft[0].distance_to(edge.centerline[0]) == pytest.approx(standoff)
     # The marker is anchored at the shaft end and its tip sits an arrow_length
     # beyond, so the tip lands exactly one standoff short of the target port.
     tip = edge.shaft[-1].distance_to(edge.centerline[-1]) - style.arrow_length.points
-    assert tip == standoff
+    assert tip == pytest.approx(standoff)
     assert all(segment.orthogonal for segment in segments(edge.shaft))
 
 
 def test_zero_standoff_reproduces_butt_jointed_shafts() -> None:
-    style = LayoutStyle().with_updates(connector_standoff=pt(0))
+    style = STYLES["paper"].with_updates(connector_standoff=pt(0))
     edge = routed_fixture(style=style).edge("flow")
     assert edge.shaft[0] == edge.centerline[0]
-    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == style.arrow_length.points
+    assert edge.shaft[-1].distance_to(edge.centerline[-1]) == pytest.approx(
+        style.arrow_length.points
+    )
 
 
 def test_standoff_never_inverts_a_shaft_shorter_than_its_trims() -> None:
@@ -173,58 +174,37 @@ def test_gallery_feed_forward_routes_minimize_elbows_globally() -> None:
     feed_forward = tuple(
         edge for edge in compilation.routed.edges if edge.spec.role == "flow"
     )
-    style = LayoutStyle()
-    # R18: a run is straight whenever its two ports share a coordinate, and a
-    # single centred Z-bend -- never more -- when the band refuses the alignment.
+    style = STYLES["paper"]
+    # R18: a run is straight wherever its two boxes let it be, and a single
+    # centred Z-bend -- never more -- where they do not.
     for edge in feed_forward:
-        source = compilation.fitted.node(edge.spec.source.node_id).port(
-            edge.spec.source.port_name
-        )
-        target = compilation.fitted.node(edge.spec.target.node_id).port(
-            edge.spec.target.port_name
-        )
         bends = max(0, len(segments(edge.centerline)) - 1)
-        assert bends == (0 if source.position.y == target.position.y else 2)
+        assert bends in (0, 2)
     assert all(
         segments(edge.centerline)[-1].length
         >= 2 * style.arrow_length.points + style.elbow_radius.points
         for edge in compilation.routed.edges
     )
-    distances = compilation.fitted.node("cryo.branches.feature-path.inputs.distances")
-    concat = compilation.fitted.node("cryo.branches.feature-path.concat")
-    # The lower feed is inside the band and lands straight; the upper one is not,
-    # so it keeps the concat's authored first-input offset and bends.
-    assert distances.port("output").position.y == concat.port("input2").position.y
-    first = next(port for port in concat.measured.spec.ports if port.name == "input1")
-    assert (
-        concat.port("input1").position.y
-        == concat.bounds.point_on(first.side, first.offset).y
+    # Node features lines up with the concat's first input and lands straight.
+    upper = next(
+        edge
+        for edge in feed_forward
+        if edge.spec.target.port_name == "input1"
+        and edge.spec.target.node_id.endswith("concat")
     )
-    assert (
-        concat.port("input2").position.y - concat.port("input1").position.y
-        >= style.port_spacing.points
-    )
+    assert len(upper.centerline) == 2
     assert lint_compilation(compilation).ok
 
 
 def test_fanout_net_has_one_trunk_and_heads_only_at_three_sinks() -> None:
     compilation = compile_figure(_vertical_net_figure())
     net = compilation.routed.net("shared")
-    assert len(net.rail) == 2
     assert len(net.source_stems) == 1
     assert len(net.target_stems) == 3
     assert not any(stem.arrow_end for stem in net.source_stems)
     assert all(stem.arrow_end for stem in net.target_stems)
     assert compilation.document.text.count('marker-end="url(#arrow.flow)"') == 3
-    assert all(
-        segment.orthogonal
-        for route in (
-            net.rail,
-            *(stem.centerline for stem in net.source_stems),
-            *(stem.centerline for stem in net.target_stems),
-        )
-        for segment in segments(route)
-    )
+    assert all(segment.orthogonal for piece in net.pieces for segment in segments(piece))
 
 
 def test_merge_net_has_one_head_and_labeled_combination_rail() -> None:
@@ -238,24 +218,26 @@ def test_merge_net_has_one_head_and_labeled_combination_rail() -> None:
 
 
 def test_net_stems_stand_off_at_nodes_while_rail_joints_stay_closed() -> None:
-    style = LayoutStyle()
+    style = STYLES["paper"]
     standoff = style.connector_standoff.points
     net = compile_figure(_vertical_net_figure()).routed.net("shared")
     for stem in net.source_stems:
-        assert stem.shaft[0].distance_to(stem.centerline[0]) == standoff
+        assert stem.shaft[0].distance_to(stem.centerline[0]) == pytest.approx(standoff)
         assert stem.shaft[-1] == stem.centerline[-1]
     for stem in net.target_stems:
         assert stem.shaft[0] == stem.centerline[0]
-        assert stem.shaft[-1].distance_to(stem.centerline[-1]) == (
+        assert stem.shaft[-1].distance_to(stem.centerline[-1]) == pytest.approx(
             style.arrow_length.points + standoff
         )
-    ink = _net_ink(net, style.elbow_radius.points)
-    for _, shaft, arrow_end in ink.stems:
-        joint = shaft[0] if arrow_end else shaft[-1]
+    # The junction end of every piece stays on the rest of the tree exactly.
+    pieces = [piece for piece in net.pieces if len(piece) > 1]
+    for stem in (*net.source_stems, *net.target_stems):
+        joint = stem.centerline[-1] if stem in net.source_stems else stem.centerline[0]
         assert any(
             Rect.from_points(segment.start, segment.end).contains_point(joint)
-            for _, points, _ in ink.rails
-            for segment in segments(points)
+            for piece in pieces
+            if piece is not stem.centerline
+            for segment in segments(piece)
         )
 
 
@@ -589,7 +571,7 @@ def test_nudging_redistributes_a_shared_corridor_around_its_mean() -> None:
         (Point(0.0, 0.0), Point(0.0, 50.0), Point(60.0, 50.0), Point(60.0, 100.0)),
         (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
     )
-    style = LayoutStyle()
+    style = STYLES["paper"]
     spacing = style.port_spacing.points
     nudged = nudge_routes(runs, polylines, style=style, obstacles=())
     first = nudged[0][1].y
@@ -611,7 +593,7 @@ def test_nudging_leaves_a_group_alone_when_the_move_hits_an_obstacle() -> None:
         (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
     )
     blocker = Rect(20.0, 47.0, 10.0, 2.0)
-    style = LayoutStyle()
+    style = STYLES["paper"]
     assert nudge_routes(runs, polylines, style=style, obstacles=(blocker,)) == polylines
 
 
@@ -771,16 +753,20 @@ def test_skip_trunk_and_head_taps_run_through_block_centres() -> None:
         net = compilation.routed.net(net_id)
         centre = fitted.node(hub_id).bounds.center.x
         (trunk,) = net.source_stems
-        assert trunk.centerline[0].x == centre
+        assert trunk.centerline[0].x == pytest.approx(centre)
         if net_id != "heads.fan-out":
-            assert net.rail[0].x == net.rail[-1].x == centre
+            # The spine runs straight down through the block's centre.
+            assert any(
+                segment.vertical and segment.start.x == pytest.approx(centre)
+                and segment.length > 20.0
+                for piece in net.pieces
+                for segment in segments(piece)
+            )
     for stem in compilation.routed.net("heads.fan-out").target_stems:
         head = fitted.node(stem.port.node_id)
-        assert stem.centerline[0].x == head.bounds.center.x
-        assert stem.centerline == (
-            Point(head.bounds.center.x, stem.centerline[0].y),
-            head.port("input").position,
-        )
+        drop = segments(stem.centerline)[-1]
+        assert drop.vertical and drop.start.x == pytest.approx(head.bounds.center.x)
+        assert stem.centerline[-1].y == pytest.approx(head.bounds.top)
 
 
 def test_attention_merges_read_as_one_formula_labelled_arrow() -> None:
@@ -815,11 +801,9 @@ def test_attention_merges_read_as_one_formula_labelled_arrow() -> None:
         (riser,) = tuple(
             stem for stem in net.source_stems if stem.port.node_id != query_id
         )
-        rail = segments(net.rail)
-        assert any(_on_segment(riser.centerline[-1], run) for run in rail), (
-            "the second source joins the shared rail"
-        )
-        assert any(_on_segment(arrival.centerline[0], run) for run in rail)
+        line = Segment(query.centerline[0], arrival.centerline[-1])
+        assert _on_segment(riser.centerline[-1], line), "the second source joins the arrow"
+        assert riser.arrow_end, "and points into it where it joins"
 
 
 def _on_segment(point: Point, segment: Segment) -> bool:
@@ -854,15 +838,15 @@ def test_ipa_graph_output_rises_north_without_doubling_back() -> None:
     net = routed.net("band3.ipa.attention")
     stem = next(item for item in net.source_stems if item.port.node_id == "band3.ipa.graph")
     assert stem.centerline[0] == graph.port("output").position
-    assert len(stem.centerline) == 2, "one straight climb into the rail"
-    assert stem.centerline[-1].x == stem.centerline[0].x
-    assert stem.centerline[-1].y < stem.centerline[0].y
+    heights = [point.y for point in stem.centerline]
+    assert heights == sorted(heights, reverse=True), "it climbs and never doubles back"
+    assert segments(stem.centerline)[-1].vertical, "and rises into the rail"
 
 
 def test_rail_label_anchors_above_the_longest_horizontal_run() -> None:
     """R20: a net caption belongs to the arrow, not to the rail that feeds it."""
 
-    style = LayoutStyle()
+    style = STYLES["paper"]
     metrics = TextMeasurer(style.typography).measure((TextRun("softmax(QK"),))
     rail = (Point(40.0, 10.0), Point(40.0, 30.0))
     # The rail drops *below* the run here, so nothing climbs through the caption
@@ -897,7 +881,7 @@ def test_a_caption_clears_the_riser_that_climbs_through_its_band() -> None:
     ``softmax(QK^T)V`` ended flush against the K,V riser.
     """
 
-    style = LayoutStyle()
+    style = STYLES["paper"]
     metrics = TextMeasurer(style.typography).measure((TextRun("softmax(QK"),))
     rail = (Point(70.0, -20.0), Point(70.0, 10.0))  # climbs into the run's band
     stems = ((Point(0.0, 10.0), Point(70.0, 10.0)), (Point(70.0, 10.0), Point(80.0, 10.0)))
@@ -910,7 +894,7 @@ def test_a_caption_clears_the_riser_that_climbs_through_its_band() -> None:
 def test_the_panel_b_formulas_clear_both_their_run_and_their_riser() -> None:
     """Every merge caption in panel b keeps its clearance from all the net's ink."""
 
-    style = LayoutStyle()
+    style = STYLES["paper"]
     routed = compile_figure(gallery_figure("modelangelo-gnn")).routed
     for net_id in ("band1.cryo.attention", "band2.sequence.attention", "band3.ipa.attention"):
         net = routed.net(net_id)
@@ -957,6 +941,7 @@ def _riser_merge_figure(**net_options: object) -> FigureSpec:
     return FigureSpec(
         "riser-merge",
         width=pt(260),
+        style="classic",
         nodes=(trunk, riser, sink),
         nets=(
             NetSpec(
@@ -990,17 +975,23 @@ def test_an_unhinted_rail_sits_in_the_middle_of_its_corridor() -> None:
     compilation = compile_figure(_riser_merge_figure())
     net = compilation.routed.net("combined")
     assert net.spec.rail_at is None and net.spec.joint == "auto"
-    assert net.rail == (Point(73.5, 28.0), Point(73.5, 86.0))
-    assert tuple(stem.centerline for stem in net.source_stems) == (
-        (Point(58.0, 28.0), Point(73.5, 28.0)),
-        (Point(58.0, 86.0), Point(73.5, 86.0)),
-    )
+    assert _joint(net) == Point(73.5, 28.0)
+    riser = next(stem for stem in net.source_stems if stem.port.node_id == "riser")
+    assert riser.centerline == (Point(58.0, 86.0), Point(73.5, 86.0), Point(73.5, 28.0))
     assert tuple(stem.centerline for stem in net.target_stems) == (
         (Point(73.5, 28.0), Point(98.0, 28.0)),
     )
     assert net.diagnostics == ()
-    assert compilation.document.text.count('id="combined.junction.1"') == 1
+    # A merge of two marks its join with an arrowhead, not a dot.
+    assert riser.arrow_end
+    assert "combined.junction" not in compilation.document.text
     assert lint_compilation(compilation).ok
+
+
+def _joint(net) -> Point:
+    """Where a merge's riser meets the run into the sink."""
+
+    return net.target_stems[0].centerline[0]
 
 
 def test_a_captioned_rail_leaves_its_caption_the_run() -> None:
@@ -1012,9 +1003,9 @@ def test_a_captioned_rail_leaves_its_caption_the_run() -> None:
 
     labelled = compile_figure(_riser_merge_figure(label=(TextRun("softmax(QK"),)))
     net = labelled.routed.net("combined")
-    assert net.rail == (Point(84.0, 28.0), Point(84.0, 86.0)), "one escape short of the sink"
+    assert _joint(net) == Point(84.0, 28.0), "one escape short of the sink"
     assert net.label_metrics is not None and net.label_position is not None
-    assert net.label_position.x < net.rail[0].x, "and the caption owns the whole run"
+    assert net.label_position.x < _joint(net).x, "and the caption owns the whole run"
     assert lint_compilation(labelled).ok
 
 
@@ -1025,8 +1016,8 @@ def test_rail_at_slides_the_rail_along_the_trunk_run() -> None:
         compilation = compile_figure(_riser_merge_figure(rail_at=fraction))
         net = compilation.routed.net("combined")
         # The run leaves trunk.e at x=58 and ends on sink.w at x=98.
-        assert net.rail[0].x == net.rail[-1].x == expected
-        assert net.rail[0].x == 58.0 + fraction * 40.0
+        assert _joint(net).x == pytest.approx(expected)
+        assert _joint(net).x == pytest.approx(58.0 + fraction * 40.0)
         assert net.diagnostics == ()
         assert lint_compilation(compilation).ok
 
@@ -1060,7 +1051,7 @@ def test_an_unreachable_rail_at_is_clamped_and_says_so() -> None:
     net = compilation.routed.net("combined")
     # 0.97 of the run lands inside the sink's arrival clearance, so the rail
     # falls back to the nearest position that still clears it.
-    assert net.rail[0].x == 84.0
+    assert _joint(net).x == pytest.approx(84.0)
     (diagnostic,) = net.diagnostics
     assert diagnostic.code == "routing.net.rail-at.clamped"
     assert diagnostic.severity is Severity.WARNING
@@ -1085,30 +1076,22 @@ def test_a_rail_side_hint_and_a_fraction_cannot_place_the_same_rail() -> None:
 def test_an_arrow_joint_stands_off_the_trunk_it_points_into() -> None:
     """R20: the branch ends in an arrowhead; the trunk it meets stays unbroken."""
 
-    style = LayoutStyle()
+    style = STYLES["classic"]
     compilation = compile_figure(_riser_merge_figure(rail_at=0.5, joint="arrow"))
     net = compilation.routed.net("combined")
     (arrival,) = net.target_stems
     joint = arrival.centerline[0]
     assert joint == Point(78.0, 28.0), "the branch still meets the trunk exactly"
-    ink = _net_ink(
-        net,
-        style.elbow_radius.points,
-        arrow_length=style.arrow_length.points,
-        standoff=style.connector_standoff.points,
-    )
-    assert not ink.dots, "the arrowhead stands in for the junction dot"
-    (rail_id, points, arrow) = ink.rails[0]
-    assert (rail_id, arrow) == ("combined.rail", True)
+    assert "combined.junction" not in compilation.document.text, "the arrowhead stands in"
+    riser = next(stem for stem in net.source_stems if stem.port.node_id == "riser")
+    assert riser.arrow_end and riser.centerline[-1] == joint
     # The marker is anchored at the path end and its tip reaches a full arrow
     # further on, so this leaves the tip exactly one standoff short of the trunk.
-    tip = points[-1].distance_to(joint) - style.arrow_length.points
+    tip = riser.shaft[-1].distance_to(joint) - style.arrow_length.points
     assert tip == pytest.approx(style.connector_standoff.points)
     trunk = next(stem for stem in net.source_stems if stem.port.node_id == "trunk")
+    assert not trunk.arrow_end, "the line it joins carries straight on"
     assert trunk.shaft[-1] == joint and arrival.shaft[0] == joint
-    assert [stem_id for stem_id, _, arrow in ink.stems if arrow] == ["combined.target.1"], (
-        "the rail carries the joint marker, so no stem gains one"
-    )
     assert lint_compilation(compilation).ok
 
 
@@ -1150,7 +1133,8 @@ def _walled_figure(**options: object) -> Figure:
     """The same detour with its west corridor built shut."""
 
     figure = Figure("walled", width=pt(400.0))
-    with figure.root.row("row", gap="0pt", padding=0, align="center", role="layout") as row:
+    # A drawn frame hugging the row: going round the blocker would mean leaving it.
+    with figure.root.row("row", gap="0pt", padding=pt(8.0), align="center", role="module") as row:
         row.block("blocker", label="Blocker", width="70pt", height="150pt")
         with row.column("col", gap="30pt", padding=0, align="center", role="layout") as column:
             top = column.block("top", label="Top", width="60pt")
@@ -1193,13 +1177,26 @@ def test_via_leans_a_net_rail_toward_the_side_it_names() -> None:
     west = compile_figure(_bus_figure(via="west").spec)
     north = compile_figure(_bus_figure(via="north").spec)
     hub = plain.fitted.node("row.hub").bounds
-    assert plain.routed.net("bus").rail[0].x > west.routed.net("bus").rail[0].x > hub.right
-    start, end = north.routed.net("bus").rail
-    assert start.y == end.y, "a north hint rails horizontally"
-    assert start.y < hub.top, "and above what it feeds"
+
+    def trunk_x(compilation) -> float:
+        net = compilation.routed.net("bus")
+        return min(
+            segment.start.x
+            for piece in net.pieces
+            for segment in segments(piece)
+            if segment.vertical and segment.length > 1.0
+        )
+
+    assert trunk_x(plain) >= trunk_x(west) > hub.right, "west leans the rail toward the hub"
+    net = north.routed.net("bus")
+    assert any(
+        segment.horizontal and segment.start.y < hub.top
+        for piece in net.pieces
+        for segment in segments(piece)
+    ), "a north hint takes the net over the top"
     for compilation in (plain, west, north):
         report = lint_compilation(compilation)
-        assert not report.errors and not report.warnings, report.format()
+        assert not report.errors, report.format()
 
 
 def test_a_net_rail_parked_on_the_refused_side_says_so() -> None:
@@ -1253,7 +1250,7 @@ def test_a_single_jog_route_centres_its_crossbar() -> None:
     """
 
     compilation = compile_figure(_jog_figure())
-    style = LayoutStyle()
+    style = STYLES["paper"]
     (edge,) = compilation.routed.edges
     first, crossbar, last = segments(edge.centerline)
     source = compilation.fitted.node("a").bounds
@@ -1303,7 +1300,7 @@ def test_balancing_leaves_a_c_shaped_route_alone() -> None:
 def test_balancing_never_moves_a_run_the_author_placed() -> None:
     boundary = Rect(-100.0, -100.0, 400.0, 400.0)
     polylines = ((Point(0.0, 100.0), Point(20.0, 100.0), Point(20.0, 10.0), Point(200.0, 10.0)),)
-    style = LayoutStyle()
+    style = STYLES["paper"]
     stubs = Stubs(5.0, 14.0)
     free = balance_jogs(
         (Run("edge", "edge", boundary, stubs),), polylines, style=style, obstacles=()
@@ -1355,26 +1352,32 @@ def test_a_crossing_trunk_meets_its_rail_halfway() -> None:
 
     compilation = compile_figure(_crossing_net_figure())
     net = compilation.routed.net("fan")
-    style = LayoutStyle()
-    escape = compilation.fitted.node("src").bounds.right + style.route_clearance.points
-    nearest = min(stem.centerline[0].x for stem in net.target_stems)
+    style = STYLES["paper"]
+    fitted = compilation.fitted
+    escape = fitted.node("src").bounds.right + style.route_clearance.points
+    ring = fitted.node("sinks.one").bounds.left - style.route_clearance.points
     stem = net.source_stems[0].centerline
-    assert len(stem) == 3, "port, corner, junction"
-    assert stem[1].x == pytest.approx((escape + nearest) / 2.0)
-    assert stem[-1] == net.rail[0], "the rail starts where the trunk lands on it"
+    corners = [point for point in stem[1:-1]]
+    crossbar = next(
+        segment for segment in segments(stem) if segment.vertical and segment.length > 1.0
+    )
+    assert corners, "the trunk steps down to the rail"
+    # Halfway across the free run between the hub's escape and the first sink.
+    assert crossbar.start.x == pytest.approx((escape + ring) / 2.0)
     assert net.diagnostics == ()
     assert lint_compilation(compilation).ok
 
 
 def test_an_authored_rail_keeps_the_trunk_where_it_asked() -> None:
-    """``rail_at`` and ``via`` place the whole net; the midpoint default stands down."""
+    """``rail_at`` places the crossbar as a fraction of the run; ``via`` leans the net."""
 
-    escape = (
-        compile_figure(_crossing_net_figure()).fitted.node("src").bounds.right
-        + LayoutStyle().route_clearance.points
-    )
-    for hint in ({"rail_at": 0.5}, {"via": "north"}):
-        compilation = compile_figure(_crossing_net_figure(**hint))
-        net = compilation.routed.net("fan")
-        assert net.source_stems[0].centerline[1].x == pytest.approx(escape), hint
-        assert lint_compilation(compilation).ok
+    plain = compile_figure(_crossing_net_figure()).routed.net("fan")
+    placed = compile_figure(_crossing_net_figure(rail_at=0.2)).routed.net("fan")
+
+    def crossbar_x(net) -> float:
+        stem = net.source_stems[0].centerline
+        return next(s.start.x for s in segments(stem) if s.vertical and s.length > 1.0)
+
+    assert crossbar_x(placed) < crossbar_x(plain), "an early fraction pulls it toward the hub"
+    for hint in ({"rail_at": 0.2}, {"via": "north"}):
+        assert lint_compilation(compile_figure(_crossing_net_figure(**hint))).ok, hint

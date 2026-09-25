@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
 
 from flexo.components import intrinsic_node_size
+from flexo.diagnostics import Diagnostic, Severity
 from flexo.geometry import Point, Rect, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
-from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec
+from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, layout_connections
 from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, declared_size
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
-from flexo.style import STYLES, LayoutStyle
-from flexo.text import TextMeasurer
-from flexo.validate import normalize_and_validate
+from flexo.style import LayoutStyle
+from flexo.text import TextMeasurer, title_runs, title_typography
+from flexo.themes import figure_style
+from flexo.validate import normalize_and_validate, resolve_alignment
 
 __all__ = ["arrangement_size", "measure_figure"]
 
@@ -24,9 +27,15 @@ def measure_figure(
     style: LayoutStyle | None = None,
     measurer: TextMeasurer | None = None,
 ) -> MeasuredFigure:
-    semantic = normalize_and_validate(figure)
-    layout_style = style or STYLES[semantic.style]
+    # Layout reads concrete alignments; the authored figure keeps its "auto".
+    semantic = resolve_alignment(normalize_and_validate(figure))
+    layout_style = style or figure_style(semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
+    title_measurer = (
+        text_measurer
+        if layout_style.typography.title_size == 1.0
+        else TextMeasurer(title_typography(layout_style.typography))
+    )
     measured_nodes = tuple(
         _measure_node(node, text_measurer, layout_style) for node in semantic.nodes
     )
@@ -41,6 +50,7 @@ def measure_figure(
     node_anchors = {node.spec.id: node.anchor for node in measured_nodes}
     groups_by_id = {group.id: group for group in semantic.groups}
     child_orders = optimized_child_orders(semantic)
+    outward = _outward_connections(semantic)
     measured_groups: dict[str, MeasuredGroup] = {}
 
     def child_geometry(child_ids: tuple[str, ...]) -> tuple[tuple[Size, ...], tuple[Point, ...]]:
@@ -64,8 +74,8 @@ def measure_figure(
         # A title is drawn at the style's title weight, so it is measured there
         # too: a semibold "Sequence module" is wider than the same words at 400,
         # and the band this reserves is the band those glyphs land in.
-        label = text_measurer.measure(
-            group.label,
+        label = title_measurer.measure(
+            title_runs(group.label, layout_style.typography),
             weight=layout_style.typography.title_weight,
         )
         gaps = routing_gaps_for_group(
@@ -101,6 +111,7 @@ def measure_figure(
                 child_orders.get(group_id, group.children),
                 child_geometry,
                 gaps,
+                outward.get(group_id, {}),
             ),
         )
         measured_groups[group_id] = measured
@@ -115,12 +126,48 @@ def measure_figure(
         if semantic.height is not None
         else declared_size(root.spec.layout, root.intrinsic_size).height
     )
+    diagnostics: tuple[Diagnostic, ...] = tuple(
+        Diagnostic(
+            "layout.size.grown",
+            "The label does not fit the authored size; the component grew to hold it.",
+            Severity.WARNING,
+            entity_id=node.spec.id,
+            hint="Give it a larger width or height, or a shorter label.",
+        )
+        for node in measured_nodes
+        if (
+            node.spec.width is not None
+            and node.intrinsic_size.width
+            > layout_style.resolve_extent(node.spec.width).points + 1e-6
+        )
+        or (
+            node.spec.height is not None
+            and node.intrinsic_size.height
+            > layout_style.resolve_extent(node.spec.height).points + 1e-6
+        )
+    )
+    needed = declared_size(root.spec.layout, root.intrinsic_size).width
+    if needed > canvas_width + 1e-6:
+        # Wider than the page it was given: draw it anyway and say so, rather
+        # than refusing to compile a figure that is merely too big.
+        diagnostics += (
+            Diagnostic(
+                "layout.width.grown",
+                f"The figure needs {needed:.1f} pt but its width is {canvas_width:.1f} pt; "
+                "the canvas grew to fit.",
+                Severity.WARNING,
+                entity_id=semantic.id,
+                hint="Give the figure a wider width, a smaller theme, or fewer columns.",
+            ),
+        )
+        canvas_width = needed
     return MeasuredFigure(
         semantic,
         measured_nodes,
         tuple(measured_groups[group.id] for group in semantic.groups),
         Size(canvas_width, canvas_height),
         measured_edge_labels,
+        diagnostics,
     )
 
 
@@ -146,6 +193,7 @@ def _group_anchor(
     child_ids: tuple[str, ...],
     child_geometry: Callable[[tuple[str, ...]], tuple[tuple[Size, ...], tuple[Point, ...]]],
     gaps: tuple[float, ...],
+    outward: dict[str, int] | None = None,
 ) -> Point:
     """A group's port line: its anchor child's, carried up into group coordinates.
 
@@ -156,7 +204,7 @@ def _group_anchor(
     and spacers) the group falls back to its own centre.
     """
 
-    primary = _anchor_child(group, node_kinds)
+    primary = _anchor_child(group, node_kinds, outward or {})
     centre = Point(size.width / 2.0, size.height / 2.0)
     if primary is None or primary not in child_ids:
         return centre
@@ -188,18 +236,61 @@ def _group_anchor(
     )
 
 
-def _anchor_child(group: GroupSpec, node_kinds: dict[str, str]) -> str | None:
-    """The child a group takes its port line from: the author's, or the first real one."""
+def _anchor_child(
+    group: GroupSpec,
+    node_kinds: dict[str, str],
+    outward: dict[str, int],
+) -> str | None:
+    """The child a group takes its port line from.
+
+    The author's, when named. Otherwise the child that carries the group's
+    connections to the rest of the figure -- the encoder at the bottom of a
+    tower, not the input at its top -- because that is the line a sibling wired
+    to this group wants to share. Ties, and groups wired to nothing outside,
+    fall back to the first real child.
+    """
 
     if group.anchor is not None:
         return group.anchor
-    return next(
-        (
-            child_id
-            for child_id in group.children
-            if node_kinds.get(child_id, "") not in NON_ANCHOR_KINDS
-        ),
-        None,
-    )
+    candidates = [
+        child_id
+        for child_id in group.children
+        if node_kinds.get(child_id, "") not in NON_ANCHOR_KINDS
+    ]
+    if not candidates:
+        return None
+    best = max(outward.get(child_id, 0) for child_id in candidates)
+    leaders = [child_id for child_id in candidates if outward.get(child_id, 0) == best]
+    if best > 0 and len(leaders) > 1:
+        # Several children carry the group's connections equally -- a column of
+        # experts fed by one router: the group speaks from its middle.
+        return None
+    return leaders[0]
+
+
+def _outward_connections(figure: FigureSpec) -> dict[str, dict[str, int]]:
+    """For every group, how many connections each child carries out of the group."""
+
+    groups = {group.id: group for group in figure.groups}
+    parents = {child: group.id for group in figure.groups for child in group.children}
+
+    def chain(entity_id: str) -> list[str]:
+        result = [entity_id]
+        while result[-1] in parents:
+            result.append(parents[result[-1]])
+        return result
+
+    counts: dict[str, dict[str, int]] = {}
+    for connection in layout_connections(figure):
+        source = chain(connection.source.node_id)
+        target = chain(connection.target.node_id)
+        for path, other in ((source, set(target)), (target, set(source))):
+            for child, group_id in itertools.pairwise(path):
+                if group_id in other:
+                    break
+                if group_id in groups:
+                    bucket = counts.setdefault(group_id, {})
+                    bucket[child] = bucket.get(child, 0) + 1
+    return counts
 
 

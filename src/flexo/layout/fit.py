@@ -14,7 +14,8 @@ from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.layout.ports import adapt_ports
 from flexo.layout.sides import choose_port_sides
-from flexo.style import STYLES, LayoutStyle
+from flexo.style import LayoutStyle
+from flexo.themes import figure_style
 
 _EPSILON = 1e-7
 
@@ -24,7 +25,7 @@ def fit_figure(
     *,
     style: LayoutStyle | None = None,
 ) -> FittedFigure:
-    fitter = _Fitter(measured, style or STYLES[measured.semantic.style])
+    fitter = _Fitter(measured, style or figure_style(measured.semantic))
     return fitter.fit()
 
 

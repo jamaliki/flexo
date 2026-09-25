@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from functools import cache
-from importlib import resources
-from io import BytesIO
 
 import uharfbuzz as hb
-from fontTools.ttLib import TTFont
 
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.fonts import (
+    FontFace,
+    LoadedFace,
+    css_family_list,
+    family_faces,
+    hb_font,
+    load_face,
+    require_family,
+    select_face,
+)
 from flexo.ir.measured import MeasuredLine, TextMetrics
 from flexo.ir.semantic import TextRun
 from flexo.style import TypographyStyle
@@ -46,23 +54,143 @@ class FontData:
     codepoints: frozenset[int]
 
 
+DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans")
+"""Bundled families every stack ends in, for the glyphs its own families lack.
+
+Figtree has no Greek and Latin Modern has no subscripts; Plex covers Greek and
+most of the mathematical letters a caption reaches for, and Liberation Sans the
+modifier letters (``ᵀ``) Plex does not. Both always resolve, so a glyph
+missing from the author's family is still measured in the face that will draw
+it rather than rejected.
+"""
+
+
+class FontStack:
+    """The families one typography draws with, in fallback order.
+
+    Each character is set in the first family that has it -- which is what a
+    browser and Inkscape do with a ``font-family`` list -- so a width is always
+    the width of the glyphs that will actually be drawn. The first family is the
+    one whose vertical metrics (ascent, descent, subscript drop) set the line.
+    """
+
+    def __init__(self, typography: TypographyStyle) -> None:
+        self.typography = typography
+        names =(typography.family, *typography.fallbacks, *DEFAULT_FALLBACKS)
+        primary = require_family(typography.family)
+        families: list[tuple[FontFace, ...]] = [primary]
+        seen = {primary[0].family.casefold()}
+        for name in names[1:]:
+            faces = family_faces(name)
+            if faces and faces[0].family.casefold() not in seen:
+                seen.add(faces[0].family.casefold())
+                families.append(faces)
+        self.families = tuple(families)
+
+    @property
+    def css(self) -> str:
+        """The ``font-family`` value that draws what this stack measures."""
+
+        names = [self.typography.family] + [faces[0].family for faces in self.families]
+        return css_family_list(names, self.typography.generic)
+
+    def face(self, weight: int, italic: bool, family: int = 0) -> FontFace:
+        return select_face(self.families[family], weight, italic)
+
+    def primary(self, italic: bool = False, weight: int = 400) -> LoadedFace:
+        return load_face(self.face(weight, italic))
+
+    def segments(self, text: str, weight: int, italic: bool) -> list[tuple[FontFace, str]]:
+        """``text`` split into runs of one face each.
+
+        Each cluster -- a character and the combining marks after it -- is set
+        in the first face that has all of its characters and, when it carries a
+        mark, places that mark on the letter (a face with the glyphs but no
+        anchor for that letter would draw the accent beside it).
+        """
+
+        faces = [self.face(weight, italic, index) for index in range(len(self.families))]
+        loaded = [load_face(face) for face in faces]
+        pieces: list[tuple[FontFace, str]] = []
+        for cluster in _clusters(text):
+            if cluster.isspace():
+                if pieces:
+                    pieces[-1] = (pieces[-1][0], pieces[-1][1] + cluster)
+                    continue
+                choice = 0
+            else:
+                covering = [
+                    index
+                    for index, item in enumerate(loaded)
+                    if all(item.has(character) for character in cluster)
+                ]
+                choice = next(
+                    (index for index in covering if _places_marks(faces[index], cluster)),
+                    covering[0] if covering else 0,
+                )
+            face = faces[choice]
+            if pieces and pieces[-1][0] == face:
+                pieces[-1] = (face, pieces[-1][1] + cluster)
+            else:
+                pieces.append((face, cluster))
+        return pieces
+
+    def missing(self, text: str, italic: bool) -> set[str]:
+        loaded = [load_face(self.face(400, italic, index)) for index in range(len(self.families))]
+        return {
+            character
+            for character in text
+            if not character.isspace() and not any(item.has(character) for item in loaded)
+        }
+
+
+def _clusters(text: str) -> list[str]:
+    """``text`` as characters, each with the combining marks that follow it."""
+
+    clusters: list[str] = []
+    for character in text:
+        if clusters and unicodedata.combining(character):
+            clusters[-1] += character
+        else:
+            clusters.append(character)
+    return clusters
+
+
 @cache
-def font_data(italic: bool = False) -> FontData:
-    filename = (
-        "IBMPlexSans-Italic-Variable.ttf" if italic else "IBMPlexSans-Variable.ttf"
+def _places_marks(face: FontFace, cluster: str) -> bool:
+    """Whether ``face`` draws every mark of ``cluster`` on its letter, not beside it."""
+
+    if len(cluster) < 2:
+        return True
+    font = hb_font(face, 400)
+    buffer = hb.Buffer()
+    buffer.add_str(cluster)
+    buffer.guess_segment_properties()
+    hb.shape(font, buffer, {})
+    positions = buffer.glyph_positions
+    if len(positions) == 1:
+        return True  # composed into one glyph
+    return all(
+        position.x_offset != 0 or position.y_offset != 0 for position in positions[1:]
     )
-    raw = resources.files("flexo.resources.fonts").joinpath(filename).read_bytes()
-    font = TTFont(BytesIO(raw), lazy=True)
+
+
+@cache
+def font_stack(typography: TypographyStyle) -> FontStack:
+    return FontStack(typography)
+
+
+def font_data(italic: bool = False, typography: TypographyStyle | None = None) -> FontData:
+    """The primary face's metrics for ``typography`` (default: the paper style)."""
+
+    loaded = font_stack(typography or TypographyStyle()).primary(italic)
     return FontData(
-        raw=raw,
-        upem=font["head"].unitsPerEm,
-        ascent=font["hhea"].ascent,
-        descent=abs(font["hhea"].descent),
-        # How far below the running baseline `baseline-shift="sub"` drops one.
-        # The renderers Flexo targets read it from OS/2, so the depth of a
-        # subscript is knowable at measure time rather than a guess.
-        subscript_drop=font["OS/2"].ySubscriptYOffset,
-        codepoints=frozenset((font.getBestCmap() or {}).keys()),
+        raw=loaded.raw,
+        upem=loaded.upem,
+        ascent=loaded.ascent,
+        descent=loaded.descent,
+        subscript_drop=loaded.subscript_drop,
+        codepoints=loaded.codepoints,
     )
 
 
@@ -97,13 +225,12 @@ def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
         for run in line.runs:
             if run.baseline_shift != "sub":
                 continue
-            font = font_data(run.italic)
+            font = font_data(run.italic, typography)
             drop = font.subscript_drop / font.upem * size
             depth = max(depth, drop + SHIFTED_SIZE * font.descent / font.upem * size)
     return depth
 
 
-@cache
 def font_bytes(italic: bool = False) -> bytes:
     return font_data(italic).raw
 
@@ -113,6 +240,7 @@ class TextMeasurer:
 
     def __init__(self, typography: TypographyStyle) -> None:
         self.typography = typography
+        self.stack = font_stack(typography)
 
     def measure(
         self,
@@ -145,13 +273,14 @@ class TextMeasurer:
             MeasuredLine(line, sum(self._shape_run(run, weight) for run in line))
             for line in lines
         )
-        font = font_data()
+        font = self.stack.primary()
         size = self.typography.size.points
         ascent = font.ascent / font.upem * size
         descent = font.descent / font.upem * size
         line_height = size * self.typography.line_height
         leading = max(0.0, line_height - ascent - descent)
         baseline = leading / 2.0 + ascent
+        cap = font.cap_height / font.upem * size if font.cap_height else 0.7 * size
         return TextMetrics(
             width=max((line.width for line in measured_lines), default=0.0),
             height=line_height * len(measured_lines),
@@ -160,23 +289,25 @@ class TextMeasurer:
             baseline=baseline,
             line_height=line_height,
             lines=measured_lines,
+            cap_height=cap,
         )
 
     def _shape_run(self, run: TextRun, inherited: int | None = None) -> float:
         if not run.text:
             return 0.0
-        data = font_data(run.italic)
-        font = hb.Font(hb.Face(data.raw))
-        font.scale = (data.upem, data.upem)
-        font.set_variations({"wght": float(drawn_weight(run, inherited))})
-        buffer = hb.Buffer()
-        buffer.add_str(run.text)
-        buffer.guess_segment_properties()
-        hb.shape(font, buffer, {"kern": True, "liga": True})
+        weight = drawn_weight(run, inherited)
+        advance = 0.0
+        for face, text in self.stack.segments(run.text, weight, run.italic):
+            font = hb_font(face, weight)
+            buffer = hb.Buffer()
+            buffer.add_str(text)
+            buffer.guess_segment_properties()
+            hb.shape(font, buffer, {"kern": True, "liga": True})
+            upem = load_face(face).upem
+            advance += sum(position.x_advance for position in buffer.glyph_positions) / upem
         scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
-        return sum(position.x_advance for position in buffer.glyph_positions) / data.upem * (
-            self.typography.size.points * scale
-        )
+        tracking = self.typography.tracking * len(run.text)
+        return (advance + tracking) * self.typography.size.points * scale
 
     def _wrap_line(
         self,
@@ -206,19 +337,21 @@ class TextMeasurer:
         return tuple(wrapped)
 
     def _validate_glyphs(self, runs: tuple[TextRun, ...]) -> None:
-        missing = {
-            character
-            for run in runs
-            for character in run.text
-            if not character.isspace() and ord(character) not in font_data(run.italic).codepoints
-        }
+        missing: set[str] = set()
+        for run in runs:
+            missing |= self.stack.missing(run.text, run.italic)
         if missing:
             rendered = ", ".join(repr(character) for character in sorted(missing))
+            families = ", ".join(faces[0].family for faces in self.stack.families)
             raise FlexoError(
                 Diagnostic(
                     "font.glyph.missing",
-                    f"IBM Plex Sans does not contain: {rendered}.",
-                    hint="Use supported Unicode text or supply an imported math/vector group.",
+                    f"No font in the stack ({families}) contains: {rendered}.",
+                    hint=(
+                        "Add a family that has these glyphs to the typography's "
+                        "fallbacks, use supported Unicode text, or draw the symbol "
+                        "(flexo's op() component draws \u2295 and \u2297 as shapes)."
+                    ),
                 )
             )
 
@@ -255,3 +388,25 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
         else:
             merged.append(run)
     return tuple(merged)
+
+
+def title_runs(runs: tuple[TextRun, ...], typography: TypographyStyle) -> tuple[TextRun, ...]:
+    """A group title's runs as they are set: in capitals when the style says so."""
+
+    if typography.title_transform != "upper":
+        return runs
+    return tuple(
+        TextRun(run.text.upper(), run.weight, run.italic, run.baseline_shift) for run in runs
+    )
+
+
+def title_typography(typography: TypographyStyle) -> TypographyStyle:
+    """The typography a group title is set in: the body's, scaled by ``title_size``."""
+
+    if typography.title_size == 1.0:
+        return typography
+    from dataclasses import replace
+
+    from flexo.units import Length
+
+    return replace(typography, size=Length(typography.size.points * typography.title_size))
