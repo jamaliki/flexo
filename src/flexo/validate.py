@@ -8,7 +8,7 @@ from dataclasses import replace
 from flexo.components import component_names, normalize_node
 from flexo.diagnostics import Diagnostic, FlexoError, Severity, raise_if_errors
 from flexo.fonts import family_faces, require_family
-from flexo.ir.semantic import FigureSpec, layout_connections
+from flexo.ir.semantic import FigureSpec, GroupSpec, layout_connections
 from flexo.themes import (
     DEFAULT_PALETTE_NAME,
     THEMES,
@@ -22,6 +22,118 @@ def normalize_and_validate(figure: FigureSpec) -> FigureSpec:
     normalized = replace(figure, nodes=tuple(normalize_node(node) for node in figure.nodes))
     raise_if_errors(semantic_diagnostics(normalized))
     return normalized
+
+
+def merge_matched_stacks(figure: FigureSpec) -> FigureSpec:
+    """Lay rows wired one-to-one on shared columns (and columns on shared rows).
+
+    Two rows stacked in a column, with the same number of children and child
+    *i* of one wired to child *i* of the other -- inputs over their
+    projections, say -- are one table: each child should sit over its partner.
+    As separate rows each centres its own children, and a row of narrow words
+    over a row of wide boxes leaves every arrow between them jogging sideways.
+    Such rows (and, across a row, such columns) are merged into one grid, so
+    partners share a column. Consecutive matched stacks merge into one grid.
+    The authored figure keeps its rows; only the compiled one is a grid.
+    """
+
+    groups = {group.id: group for group in figure.groups}
+    nodes = {node.id for node in figure.nodes}
+    wired = {
+        frozenset((connection.source.node_id, connection.target.node_id))
+        for connection in layout_connections(figure)
+    }
+    across = {"column": "row", "row": "column"}
+
+    def stack(child_id: str, kind: str) -> GroupSpec | None:
+        child = groups.get(child_id)
+        if (
+            child is None
+            or child.role != "layout"
+            or child.label
+            or child.layout.kind != kind
+            or not child.children
+            or not all(item in nodes for item in child.children)
+        ):
+            return None
+        return child
+
+    def matched(first: GroupSpec, second: GroupSpec) -> bool:
+        """Child *i* wired to child *i*, and to no other child of the pair."""
+
+        if len(first.children) != len(second.children):
+            return False
+        return all(
+            (frozenset((a, b)) in wired) == (i == j)
+            for i, a in enumerate(first.children)
+            for j, b in enumerate(second.children)
+        )
+
+    replaced: dict[str, GroupSpec] = {}
+    removed: set[str] = set()
+    for parent in figure.groups:
+        kind = across.get(parent.layout.kind)
+        if kind is None:
+            continue
+        runs: list[list[GroupSpec]] = []
+        for child_id in parent.children:
+            candidate = stack(child_id, kind)
+            if candidate is not None and runs and runs[-1] and matched(runs[-1][-1], candidate):
+                runs[-1].append(candidate)
+            elif candidate is not None:
+                runs.append([candidate])
+            else:
+                runs.append([])
+        children = list(parent.children)
+        for run in runs:
+            if len(run) < 2:
+                continue
+            first = run[0]
+            size = len(first.children)
+            if parent.layout.kind == "column":
+                cells = tuple(item for row in run for item in row.children)
+                columns = size
+                row_gap = parent.layout.row_gap or parent.layout.gap
+                column_gap = first.layout.column_gap or first.layout.gap
+            else:
+                cells = tuple(
+                    item
+                    for index in range(size)
+                    for column in run
+                    for item in (column.children[index],)
+                )
+                columns = len(run)
+                row_gap = first.layout.row_gap or first.layout.gap
+                column_gap = parent.layout.column_gap or parent.layout.gap
+            grid = replace(
+                first,
+                children=cells,
+                layout=replace(
+                    first.layout,
+                    kind="grid",
+                    columns=columns,
+                    align="center",
+                    justify="center",
+                    row_gap=row_gap,
+                    column_gap=column_gap,
+                    gap=None,
+                    placements=(),
+                ),
+            )
+            replaced[first.id] = grid
+            for other in run[1:]:
+                removed.add(other.id)
+                children.remove(other.id)
+        if len(children) != len(parent.children):
+            replaced[parent.id] = replace(replaced.get(parent.id, parent), children=tuple(children))
+    if not replaced:
+        return figure
+    return replace(
+        figure,
+        groups=tuple(
+            replaced.get(group.id, group) for group in figure.groups if group.id not in removed
+        ),
+    )
 
 
 def resolve_alignment(figure: FigureSpec) -> FigureSpec:
@@ -77,8 +189,7 @@ def resolve_alignment(figure: FigureSpec) -> FigureSpec:
         # parallel branches: they start together, the way a fork reads.
         across = {"row": "column", "column": "row"}.get(group.layout.kind)
         stacks = bool(group.children) and all(
-            child in groups and groups[child].layout.kind == across
-            for child in group.children
+            child in groups and groups[child].layout.kind == across for child in group.children
         )
         layout = replace(
             group.layout, align="ports" if wired else ("start" if stacks else "center")

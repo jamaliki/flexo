@@ -144,6 +144,40 @@ def vision_transformer(theme: str = "paper") -> Figure:
     return figure
 
 
+def attention_panels(theme: str = "paper") -> Figure:
+    """Scaled dot-product and multi-head attention (Vaswani et al. 2017, Figure 2)."""
+
+    with Figure("attention", theme=theme) as figure:
+        with figure.root.row("panels", role="layout") as panels:
+            with panels.group("a", label="Scaled dot-product attention", layout="column") as a:
+                with a.row("inputs", role="layout") as row:
+                    q = row.text("q", "Q")
+                    k = row.text("k", "K")
+                    v = row.text("v", "V")
+                scores = a.block("scores", label="MatMul", inputs=[q, k])
+                scale = a.block("scale", label="Scale", input=scores)
+                mask = a.block("mask", label="Mask (opt.)", input=scale)
+                softmax = a.block("softmax", label="SoftMax", input=mask)
+                a.block("weighted", label="MatMul", inputs=[softmax, v])
+            with panels.group("b", label="Multi-head attention", layout="column") as b:
+                with b.row("inputs", role="layout") as row:
+                    inputs = [row.text(name.lower(), name) for name in ("V", "K", "Q")]
+                with b.row("projections", role="layout") as row:
+                    projections = [
+                        row.block(f"linear-{index}", label="Linear", input=value)
+                        for index, value in enumerate(inputs)
+                    ]
+                heads = b.block(
+                    "heads",
+                    label="Scaled dot-product attention",
+                    tone="attention",
+                    inputs=projections,
+                )
+                concat = b.block("concat", label="Concat", input=heads)
+                b.block("out", label="Linear", input=concat)
+    return figure
+
+
 def gpt_block(theme: str = "paper") -> Figure:
     """A pre-norm decoder block (Radford et al. 2019)."""
 
@@ -413,6 +447,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         squeeze_excitation,
         lstm,
         vision_transformer,
+        attention_panels,
         gpt_block,
         mamba,
         swiglu,

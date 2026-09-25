@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Twenty figures from papers and textbooks, each a short function. They use
+Twenty-one figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -62,7 +62,7 @@ suite checks this).
 
 | | | |
 | --- | --- | --- |
-| [![LeNet-5](build/literature/lenet.preview.png)](build/literature/lenet.preview.png) LeNet-5 | [![LeNet-5, tikz](build/literature/lenet-tikz.preview.png)](build/literature/lenet-tikz.preview.png) LeNet-5 in `tikz` | |
+| [![LeNet-5](build/literature/lenet.preview.png)](build/literature/lenet.preview.png) LeNet-5 | [![LeNet-5, tikz](build/literature/lenet-tikz.preview.png)](build/literature/lenet-tikz.preview.png) LeNet-5 in `tikz` | [![Attention panels](build/literature/attention-panels.preview.png)](build/literature/attention-panels.preview.png) Scaled dot-product and multi-head attention |
 | [![Inception](build/literature/inception.preview.png)](build/literature/inception.preview.png) Inception module | [![LSTM](build/literature/lstm.preview.png)](build/literature/lstm.preview.png) LSTM cell | [![Mamba](build/literature/mamba.preview.png)](build/literature/mamba.preview.png) Mamba block |
 | [![GPT block](build/literature/gpt-block.preview.png)](build/literature/gpt-block.preview.png) Pre-norm Transformer block | [![Vision Transformer](build/literature/vision-transformer.preview.png)](build/literature/vision-transformer.preview.png) Vision Transformer | [![Squeeze-and-excitation](build/literature/squeeze-excitation.preview.png)](build/literature/squeeze-excitation.preview.png) Squeeze-and-excitation |
 | [![Agent-environment loop](build/literature/agent-environment.preview.png)](build/literature/agent-environment.preview.png) Agent–environment loop | [![Seq2seq](build/literature/seq2seq.preview.png)](build/literature/seq2seq.preview.png) Encoder–decoder with attention | [![U-Net](build/literature/unet.preview.png)](build/literature/unet.preview.png) U-Net |
