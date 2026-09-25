@@ -68,7 +68,7 @@ without drawing anything. Every component is a method on the group it goes in:
 | --- | --- |
 | Boxes | `block`, `mlp`, `cnn`, `attention`, `add_norm`, `prediction`, `loss`, `tensor`, `matrix`, `sequence`, `feature_strip`, `concat`, `channels` |
 | Shapes | `circle`, `decision`, `terminal`, `volume`, `op` (and `add`, `multiply`) |
-| Words and art | `text`, `vector`, `image`, `graph`, `inset` |
+| Words and art | `text`, `vector`, `image`, `graph`, `inset`, `legend` |
 
 A label longer than 16 ems wraps into balanced lines, and a component with an
 authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
@@ -279,6 +279,11 @@ tower.attention("mha", tone="neutral")                # take a kind's colour awa
 
 Tones are paint roles (`tone-1-fill`, `tone-1-stroke`, ...), so `flexo retheme`
 recolours a finished SVG without touching its geometry.
+
+`m.legend()` keys the colours: a swatch and a name for every tone the
+components created so far are painted in. Pass `entries={"encoder": "Encoder
+blocks", ...}` to choose the tones and their words, and `layout="column"` to
+stack the entries.
 
 ## Conventions: branches, merges, arrivals, and lines
 

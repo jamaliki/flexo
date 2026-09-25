@@ -58,9 +58,7 @@ type Padding = Length | str | float | Sequence[Length | str | float]
 type Cell = tuple[int, int]
 """A 0-indexed ``(row, column)`` grid address."""
 
-type AttentionVectors = (
-    bool | VectorPreset | str | Mapping[str, VectorPreset | str] | None
-)
+type AttentionVectors = bool | VectorPreset | str | Mapping[str, VectorPreset | str] | None
 """How ``attention`` paints the vector glyphs it grows under its three ports.
 
 ``None`` (or ``False``) grows none, which is the plain attention block. ``True``
@@ -372,8 +370,7 @@ class Figure:
         self,
         *,
         src: NodeHandle | PortRef | str,
-        sinks: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str],
+        sinks: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
         id: str | None = None,
         rail: Side | str | None = None,
         rail_at: float | None = None,
@@ -402,8 +399,7 @@ class Figure:
     def merge(
         self,
         *,
-        sinks: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str],
+        sinks: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
         dst: NodeHandle | PortRef | str,
         id: str | None = None,
         rail: Side | str | None = None,
@@ -691,8 +687,7 @@ class GroupBuilder:
         shadow: bool = False,
         at: Cell | None = None,
         input: NodeHandle | PortRef | str | None = None,
-        inputs: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str] = (),
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         tone: str | int | None = None,
     ) -> NodeHandle:
         """Author one component.
@@ -1120,8 +1115,7 @@ class GroupBuilder:
         self,
         id: str,
         *,
-        inputs: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str],
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
         label: str | tuple[TextRun, ...] = "Concat",
         **options: object,
     ) -> NodeHandle:
@@ -1524,8 +1518,7 @@ class GroupBuilder:
         symbol: str = "+",
         *,
         input: NodeHandle | PortRef | str | None = None,
-        inputs: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str] = (),
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         **options: object,
     ) -> NodeHandle:
         """An operation on values that meet: a small circle with its symbol in it.
@@ -1607,6 +1600,57 @@ class GroupBuilder:
             stack.node("label", "text", label=label, role="caption")
         return box
 
+    def legend(
+        self,
+        id: str = "legend",
+        entries: Mapping[str, str] | Sequence[str] | None = None,
+        *,
+        layout: LayoutKind = "row",
+        at: Cell | None = None,
+    ) -> GroupBuilder:
+        """A key to the figure's colours: a swatch and a name for each tone.
+
+        ``entries`` maps each tone to the words beside its swatch, or lists
+        tones to be named by themselves. Left out, it lists every tone the
+        components created so far are painted in -- authored tones and kinds'
+        alike -- so a legend written last keys the whole figure. Each swatch is
+        a small block in its tone, so it is always the colour it names, in
+        every theme and after ``flexo retheme``.
+        """
+
+        from flexo.components import node_tone
+
+        if entries is None:
+            tones: list[str] = []
+            for node in self.figure._nodes:
+                tone = node_tone(node, by_kind=True)
+                if tone is not None and not tone.isdigit() and tone not in tones:
+                    tones.append(tone)
+            entries = tones
+        named = (
+            dict(entries)
+            if isinstance(entries, Mapping)
+            else {
+                tone: TONE_NAMES.get(tone, tone.replace("-", " ").capitalize()) for tone in entries
+            }
+        )
+        style = resolve_style(self.figure.style, self.figure.font)
+        side = pt(style.typography.size.points)
+        key = self.group(
+            id,
+            layout=layout,
+            gap=pt(2.0 * side.points),
+            padding=0,
+            align="start" if layout == "column" else "center",
+            role="layout",
+            at=at,
+        )
+        for index, (tone, words) in enumerate(named.items()):
+            entry = key.row(f"entry-{index}", gap=pt(side.points / 2.0), padding=0, role="layout")
+            entry.node("swatch", "block", width=side, height=side, tone=tone, motif=False)
+            entry.node("name", "text", label=words, role="caption")
+        return key
+
     def decision(
         self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
     ) -> NodeHandle:
@@ -1630,8 +1674,7 @@ class GroupBuilder:
         id: str,
         *,
         input: NodeHandle | PortRef | str | None = None,
-        inputs: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str] = (),
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         **options: object,
     ) -> NodeHandle:
         """An elementwise sum: ``op(id, "+")``."""
@@ -1643,8 +1686,7 @@ class GroupBuilder:
         id: str,
         *,
         input: NodeHandle | PortRef | str | None = None,
-        inputs: tuple[NodeHandle | PortRef | str, ...]
-        | list[NodeHandle | PortRef | str] = (),
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         **options: object,
     ) -> NodeHandle:
         """An elementwise product: ``op(id, "x")``, drawn as a times sign."""
@@ -1923,7 +1965,7 @@ def _single_input(target: NodeHandle) -> str:
     detail = (
         f"it has {', '.join(candidates)}; name the one you mean"
         if candidates
-        else f'its ports are {", ".join(target.ports) or "none"}'
+        else f"its ports are {', '.join(target.ports) or 'none'}"
     )
     raise ValueError(f'node "{target.id}" has no "input" port to wire into: {detail}')
 
@@ -1969,8 +2011,7 @@ def _paint_parts(paint: Mapping[str, str] | None) -> tuple[tuple[str, str], ...]
     unknown = sorted(set(paint) - set(PAINT_PARTS))
     if unknown:
         raise ValueError(
-            f"unknown paint part(s) {', '.join(unknown)}; "
-            f"valid parts: {', '.join(PAINT_PARTS)}"
+            f"unknown paint part(s) {', '.join(unknown)}; valid parts: {', '.join(PAINT_PARTS)}"
         )
     return tuple(sorted((part, normalize_colour(colour)) for part, colour in paint.items()))
 
@@ -1982,9 +2023,7 @@ def _paint_properties(paint: Mapping[str, str] | None) -> dict[str, Scalar]:
     separately as ``paint-fill``, ``paint-stroke``, and ``paint-label``.
     """
 
-    return {
-        f"{PAINT_PROPERTY_PREFIX}{part}": colour for part, colour in _paint_parts(paint)
-    }
+    return {f"{PAINT_PROPERTY_PREFIX}{part}": colour for part, colour in _paint_parts(paint)}
 
 
 def _padding(value: Padding | None) -> tuple[Length | None, ...]:
@@ -2059,19 +2098,19 @@ def _attention_vectors(value: AttentionVectors) -> dict[str, VectorPreset | str]
     if not isinstance(value, Mapping):
         raise ValueError(
             f"vectors= takes True, one preset or ramp role, or a mapping keyed "
-            f'{", ".join(_QKV_PORTS)}, not {type(value).__name__}'
+            f"{', '.join(_QKV_PORTS)}, not {type(value).__name__}"
         )
     given = {str(key).lower(): item for key, item in value.items()}
     unknown = sorted(set(given) - set(_QKV_PORTS))
     if unknown:
         raise ValueError(
-            f'vectors= does not know the key(s) {", ".join(unknown)}; '
-            f'an attention block reads {", ".join(_QKV_PORTS)}'
+            f"vectors= does not know the key(s) {', '.join(unknown)}; "
+            f"an attention block reads {', '.join(_QKV_PORTS)}"
         )
     missing = [name for name in _QKV_PORTS if name not in given]
     if missing:
         raise ValueError(
-            f'vectors= leaves {", ".join(missing)} unpainted; give every key, or one '
+            f"vectors= leaves {', '.join(missing)} unpainted; give every key, or one "
             "preset for all three"
         )
     return {name: given[name] for name in _QKV_PORTS}
@@ -2094,7 +2133,7 @@ def _attention_offsets(
         missing = [name for name in names if name not in offsets]
         if missing:
             raise ValueError(
-                f'the authored port table declares no {", ".join(missing)} port, so '
+                f"the authored port table declares no {', '.join(missing)} port, so "
                 "vectors= has nothing to hang those glyphs under"
             )
         return {name: offsets[name] for name in names}
@@ -2173,6 +2212,17 @@ def _vector_label_gap(style_name: str) -> Length:
     """
 
     return resolve_style(style_name).vector_label_gap
+
+
+TONE_NAMES = {
+    "attention": "Attention",
+    "norm": "Normalization",
+    "mlp": "MLP",
+    "cnn": "CNN",
+    "data": "Data",
+    "output": "Output",
+}
+"""How a legend names the tones components take from their kind."""
 
 
 def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
