@@ -300,12 +300,13 @@ class EdgeSpec:
     margin. ``via`` is the author saying which margin, in one word, without
     pinning a corridor the way ``lane_hint`` does.
 
-    It is a preference, priced rather than enforced: corridors beyond the region
-    on the *opposite* side cost extra length (``PathCosts.off_side``), so a route
-    still takes them when nothing else exists -- and says so, as a
-    ``routing.via.clamped`` warning naming the side it actually achieved. Where
-    the arriving port's side is a component default, ``via`` also decides it: the
-    ink comes from that side, so the port faces it (see ``flexo.layout.sides``).
+    It is a preference, priced rather than enforced: length beyond the span of
+    the route's pins on the *opposite* side costs extra (``OFF_SIDE_COST`` in
+    ``flexo.routing.router``), so a route still takes it when nothing else
+    exists -- and says so, as a ``routing.via.clamped`` warning naming the side
+    it actually achieved. Where the arriving port's side is a component default,
+    ``via`` also decides it, since the ink comes from that side; the departing
+    port takes it too when the hint lies across the line of travel.
     """
     shape: EdgeShape = "auto"
     """How the line is drawn: ``"orthogonal"`` (routed, right angles only),
@@ -368,20 +369,18 @@ class NetSpec:
     joint: JointStyle = "auto"
     """How a branch meeting this net's trunk is marked.
 
-    ``"auto"`` follows ``style.junction_dots``; ``"dot"`` always draws the
-    junction dot; ``"arrow"`` ends the joining ink in an arrowhead pointing into
-    the trunk, which the trunk itself crosses unbroken.
+    ``"auto"`` follows the figure's conventions (``branch`` for a fan-out,
+    ``merge`` for a merge); ``"dot"`` always draws the junction dot; ``"arrow"``
+    ends the joining ink in an arrowhead pointing into the trunk, which the trunk
+    itself crosses unbroken.
     """
     via: Side | None = None
     """Which side this net's trunk should favour; see ``EdgeSpec.via``.
 
-    A net answers the hint with its rail. The side names the axis the rail runs
-    along -- a west or east hint rails vertically, a north or south one
-    horizontally, exactly as ``rail_hint`` does -- and then the rail is placed as
-    far toward that side as its stems and the obstacles allow. Unlike ``rail``,
-    which pins the rail to the routing boundary, ``via`` is a preference: it
-    yields to clearances, and reports ``routing.net.via.clamped`` when what it
-    got was the other side.
+    Like ``rail_hint``, it prices the far side of the net's span, and it turns
+    every target port whose side is a default toward the hint. Unlike
+    ``rail_hint``, it does not move the trunk within its corridor: the trunk
+    stays centred where it lands.
     """
 
     line: LineStyle = "solid"

@@ -19,12 +19,16 @@ concrete shape. If the measured figure is wider than its page, it measures again
 with gaps and group padding scaled by `COMPACT_SCALES` and keeps the first that
 fits.
 
-Routing feeds back into layout once, and only through padding: when a route or
+Routing feeds back into layout only through padding, for up to `ROOM_ROUNDS`
+rounds: when a route or
 its caption leaves the container it belongs to, or a route runs pressed between
 a box and that container's edge, `routing.room` asks for more room on that side
 (`LayoutSpec.room`, counted as padding by layout but not by the title), and the
-compiler lays the figure out and routes it again (at most `ROOM_ROUNDS` times).
-The authored figure is never changed; only the compiled one is.
+compiler lays the figure out and routes it again. Then, if connectors still
+cross, `_uncrossed` offers a lane of room along the top or bottom of a crossing
+edge's container, where both of the edge's ends sit in that row, and keeps the
+room only if a relayout removes crossings (at most `CROSSING_ROOM_TRIALS`
+tries). The authored figure is never changed; only the compiled one is.
 
 ## Modules by phase
 
@@ -34,7 +38,7 @@ The authored figure is never changed; only the compiled one is.
 | style | `themes` defines each theme (a `LayoutStyle`, a page, and a tone rule) and derives a palette's paint roles; `colour` holds the Oklab arithmetic and the palette catalogue; `conventions` holds how branches, merges, and shared arrivals are drawn; `fonts` finds, matches, and loads font faces |
 | measure | `layout.measure` walks bottom-up for intrinsic sizes; `components` owns per-kind port tables, motif bands, and intrinsic geometry; `text` shapes and measures runs, falling back per cluster through the font stack; `artwork` loads, sanitizes, and sizes an `image` node's file |
 | fit | `layout.fit` places children into containers; `layout.arrange` computes where a group's children sit and how much room they need; `layout.grid` assigns grid cells (shared by measure and fit, so both agree); `layout.gaps` spaces linear groups; `layout.order` reorders small columns to cut crossings; `layout.ports` places adaptive ports once bounds are known; `layout.sides` picks the side a defaulted port faces |
-| route | `routing.router` plans pins, groups connections that share a pin into trees, routes them, and turns the result into `RoutedEdge`s and `RoutedNet`s; `routing.search` is the bend-aware A* over a grid of priced zones; `routing.separate` orders and spaces runs that share a corridor, with `routing.vpsc` as its constraint solver; `routing.room` reports the room a container needs for its routes and captions; `routing.labels` places edge captions after routing; `routing.solve` keeps the forced-route helpers (`lane=`, waypoints) and the previous router as `route_figure_legacy`, with `routing.visibility`, `routing.nets`, and `routing.nudge` |
+| route | `routing.router` plans pins, groups connections that share a pin into trees, routes them, and turns the result into `RoutedEdge`s and `RoutedNet`s; `routing.search` is the bend-aware A* over a grid of priced zones; `routing.separate` orders and spaces runs that share a corridor, with `routing.vpsc` as its constraint solver; `routing.room` reports the room a container needs for its routes and captions, and the crossings room could remove; `routing.labels` places edge captions after routing; `routing.nudge` supplies shaft and caption geometry (`edge_shaft`, `caption_rise`, `rail_label_position`); `routing.solve` supplies `_forced_points` for `lane=` and waypoints and `_via_diagnostics`. The previous router (`route_figure_legacy`, `routing.nets`, most of `routing.visibility`) is kept but unused |
 | emit | `emit` writes the document and its layers; `render`, `render_common`, and `render_scientific` draw component bodies and motifs; `svg` and `svg_resources` are the primitive and font plumbing; `style` and `theme` own paint |
 | after | `export` writes derivatives through Inkscape and provides `build`; `lint` re-checks the result independently; `cli` is the command line |
 | shared | `geometry` and `units` are the value types; `hierarchy` answers which group owns an entity or a relationship; `diagnostics` is the error vocabulary |
@@ -73,15 +77,17 @@ side the author or the component grammar declared, not the one layout chose.
 4. **Rip up and reroute** (`REROUTE_PASSES`), pricing other bundles' ink
    (`_Traffic`): crossings cost `CROSSING_COST` bends, shared corridors a small
    `OVERLAP_COST` per point.
-5. **Uncross** (`_reorder_crossing_pins`). While lines cross after separation,
-   neighbouring pins on the affected sides are swapped and the figure rerouted;
-   a swap that removes crossings is kept (at most `PIN_ORDER_TRIALS` tries).
-6. **Separate** (`separate.separate`). Per axis, runs in one corridor are
+5. **Separate** (`separate.separate`). Per axis, runs in one corridor are
    ordered to cross least and spaced by VPSC.
+6. **Uncross** (`_reorder_crossing_pins`). While lines cross after separation,
+   neighbouring pins on the affected sides are swapped, and the figure rerouted
+   and separated again; a swap that removes crossings is kept (at most
+   `PIN_ORDER_TRIALS` tries).
 7. **Straight edges** (`_straight_edge`) skip steps 1-6: one segment from
    outline to outline, offset a lane apart when two join the same pair.
 8. **Captions** (`labels.place_edge_labels`). Each edge caption takes the first
-   candidate position beside its own line that overlaps nothing.
+   candidate position beside its own line that overlaps nothing, or the
+   least-overlapping one.
 9. **Marks.** Where a bundle's lines join, the conventions (or the net's
    `joint=`) decide between a plain T, an arrowhead into the joined line, and
    a dot (`_arrows_at_joins`, `_dots_at_joins`).
