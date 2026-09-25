@@ -119,11 +119,12 @@ script, blackboard, and fraktur capitals. Spaces are kept as typed. Write `\$` f
 single `$` with no closing partner is also literal. A script cannot contain
 another script.
 
-A character that the figure's font does not have is set in the next font of
-the fallback stack that does; the stack ends in IBM Plex Sans, Liberation Sans,
-and Latin Modern Math, which together cover Greek and mathematical symbols. An accent is kept with its letter: if the
-primary font has the accent but cannot position it on that letter, the letter
-and the accent are both set in a fallback font that can.
+A character that the figure's font does not have is set in the next font of the
+fallback stack that does; the stack ends in IBM Plex Sans, Liberation Sans, and
+Latin Modern Math, which together cover Greek and mathematical symbols. An
+accent is kept with its letter: if the primary font has the accent but cannot
+position it on that letter, the letter and the accent are both set in a
+fallback font that can.
 
 ### Captions on connectors
 
