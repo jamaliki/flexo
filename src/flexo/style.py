@@ -103,6 +103,12 @@ class LayoutStyle:
     route_lane_spacing: Length = _PT_4
     port_spacing: Length = _PT_6
     bend_penalty: float = 14.0
+    label_measure: float = 16.0
+    """The longest a component's label line may run, in ems, before it wraps.
+
+    A component with an authored width wraps its label to fit that width
+    instead. Explicit line breaks (``"\\n"``) are always kept.
+    """
     conventions: Conventions = DEFAULT_CONVENTIONS
     """How branches, merges, and shared arrivals are drawn (``flexo.conventions``)."""
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS

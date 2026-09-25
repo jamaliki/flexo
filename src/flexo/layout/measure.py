@@ -16,6 +16,7 @@ from flexo.layout.order import optimized_child_orders
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
+from flexo.units import CellSpan
 from flexo.validate import merge_matched_stacks, normalize_and_validate, resolve_alignment
 
 __all__ = ["arrangement_size", "measure_figure"]
@@ -176,12 +177,28 @@ def _measure_node(
     measurer: TextMeasurer,
     style: LayoutStyle,
 ) -> MeasuredNode:
-    label = measurer.measure(node.label)
+    label = measurer.measure(node.label, max_width=_label_width(node, style))
     size = intrinsic_node_size(node, label, style)
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
     # cell grid because the caption is a sibling node rather than padding.
     return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0))
+
+
+WRAPPED_KINDS = frozenset(
+    {"block", "mlp", "cnn", "add-norm", "prediction", "loss", "tensor", "terminal", "text"}
+)
+"""Kinds whose box is sized round their label, so a long label wraps instead."""
+
+
+def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
+    """The width a component's label wraps at, or ``None`` for one that never wraps."""
+
+    if node.kind not in WRAPPED_KINDS:
+        return None
+    if node.width is not None and not isinstance(node.width, CellSpan):
+        return max(1.0, style.resolve_extent(node.width).points - 2.0 * style.padding_x.points)
+    return style.label_measure * style.typography.size.points
 
 
 def _group_anchor(

@@ -240,3 +240,18 @@ def test_rows_wired_one_to_one_share_their_columns() -> None:
         "m.projections",
     ], "the authored figure keeps its rows"
     assert not lint_compilation(compiled).diagnostics
+
+
+def test_a_long_label_wraps_into_balanced_lines_and_an_authored_width_holds() -> None:
+    with Figure("wrap") as figure, figure.module("m", layout="column") as m:
+        free = m.block("free", label="Multi-head self-attention with rotary position embeddings")
+        m.block(
+            "fixed", label="Feed-forward network with gated linear units", width="80pt", input=free
+        )
+    compiled = compile_figure(figure.spec)
+    free_node = next(node for node in compiled.measured.nodes if node.spec.id == "m.free")
+    lengths = [line.width for line in free_node.label.lines]
+    assert len(lengths) == 2 and max(lengths) - min(lengths) < 0.4 * max(lengths)
+    assert compiled.fitted.node("m.fixed").bounds.width == pytest.approx(80.0)
+    assert not compiled.measured.diagnostics
+    assert not lint_compilation(compiled).diagnostics
