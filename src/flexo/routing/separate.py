@@ -544,6 +544,12 @@ def _ordered(
                 continue
             if abs(one.coordinate - two.coordinate) < _EPSILON:
                 ties[(first, second)] = _preferred(one, two, wires, spacing, vertical)
+            elif abs(one.coordinate - two.coordinate) < 2.0 * spacing - _EPSILON:
+                # Closer than a lane, so they are about to be pushed apart
+                # anyway: their order is free, and it goes to whichever crosses
+                # less, keeping the order the search found when neither does.
+                before, after = _scores(one, two, wires, spacing, vertical)
+                pairs.append((second, first) if after < before else (first, second))
             else:
                 pairs.append((first, second))
     for (first, second), choice in ties.items():
@@ -551,14 +557,28 @@ def _ordered(
     return _acyclic(pairs, runs)
 
 
+def _scores(
+    one: _Run, two: _Run, wires: list[Wire], spacing: float, vertical: bool
+) -> tuple[int, int]:
+    """Crossings between the two wires with ``one`` before ``two``, and after it."""
+
+    middle = (one.coordinate + two.coordinate) / 2.0
+    scores = []
+    for sign in (-1, 1):
+        first = _shifted(
+            wires[one.wire], one, middle + sign * spacing / 2.0 - one.coordinate, vertical
+        )
+        second = _shifted(
+            wires[two.wire], two, middle - sign * spacing / 2.0 - two.coordinate, vertical
+        )
+        scores.append(_crossings(first, second))
+    return scores[0], scores[1]
+
+
 def _preferred(one: _Run, two: _Run, wires: list[Wire], spacing: float, vertical: bool) -> int:
     """-1 if ``one`` should sit before ``two``, 1 if after: whichever crosses less."""
 
-    scores = []
-    for sign in (-1, 1):
-        first = _shifted(wires[one.wire], one, sign * spacing / 2.0, vertical)
-        second = _shifted(wires[two.wire], two, -sign * spacing / 2.0, vertical)
-        scores.append(_crossings(first, second))
+    scores = _scores(one, two, wires, spacing, vertical)
     if scores[0] != scores[1]:
         return -1 if scores[0] < scores[1] else 1
     # Equal: the run whose wire reaches further toward the low side goes low,
