@@ -198,3 +198,24 @@ def test_a_volume_grows_with_each_dimension_and_carries_its_caption_below() -> N
     edge = compiled.routed.edges[0]
     assert (edge.spec.source.node_id, edge.spec.target.node_id) == ("m.small.box", "m.big.box")
     assert not lint_compilation(compiled).errors
+
+
+def test_a_skip_over_a_row_takes_the_lane_above_rather_than_crossing() -> None:
+    """Retrieval-augmented generation: the query skips to the generator."""
+
+    with Figure("rag") as figure:
+        with figure.module("m", label="Retrieval-augmented generation") as m:
+            query = m.text("q", "Query $x$")
+            encoder = m.block("enc", label="Query encoder", input=query)
+            with m.column("store", role="layout") as store:
+                search = store.block("mips", label="MIPS")
+                index = store.block("index", label="Document index")
+            documents = m.block("docs", label="Top-k documents")
+            generator = m.block("gen", label="Generator")
+        m.connect(encoder, search)
+        m.connect(index, search)
+        m.connect(search, documents)
+        m.connect(documents, generator)
+        m.connect(query, generator)
+    compiled = compile_figure(figure.spec)
+    assert not lint_compilation(compiled).diagnostics
