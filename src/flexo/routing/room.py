@@ -132,6 +132,91 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
     return {owner: sides for owner, sides in needs.items() if sides}
 
 
+def crossings(routed: RoutedFigure) -> list[tuple[str, str]]:
+    """Pairs of connectors whose routed lines cross, as lint counts them."""
+
+    routes: list[tuple[str, str | None, tuple[Point, ...]]] = [
+        (edge.spec.id, edge.bundle, edge.centerline)
+        for edge in routed.edges
+        if not edge.straight
+    ]
+    for net in routed.nets:
+        routes.extend((net.spec.id, net.bundle, piece) for piece in net.pieces or ())
+    result = []
+    seen: set[tuple[str, str]] = set()
+    for index, (first_id, first_bundle, first) in enumerate(routes):
+        for second_id, second_bundle, second in routes[index + 1 :]:
+            if first_id == second_id or (first_bundle and first_bundle == second_bundle):
+                continue
+            key = (first_id, second_id)
+            if key in seen:
+                continue
+            if any(
+                _crosses(a, b, c, d) for a, b in pairwise(first) for c, d in pairwise(second)
+            ):
+                seen.add(key)
+                result.append(key)
+    return result
+
+
+def crossing_room(routed: RoutedFigure, style: LayoutStyle) -> list[dict[str, dict[str, float]]]:
+    """Room worth trying for each crossing: a lane along the top or bottom of its container."""
+
+    figure = routed.fitted.measured.semantic
+    parents = parent_map(figure.groups)
+    lane = 2.0 * style.route_clearance.points + style.port_spacing.points
+    edges = {edge.spec.id: edge for edge in routed.edges}
+    offers: list[dict[str, dict[str, float]]] = []
+    for pair in crossings(routed):
+        for connector in pair:
+            edge = edges.get(connector)
+            if edge is None:
+                continue
+            ends = (edge.spec.source.node_id, edge.spec.target.node_id)
+            owner = bounded_owner(figure, parents, ends)
+            for side in _open_sides(routed, owner, ends, lane):
+                offer = {owner: {side: lane}}
+                if offer not in offers:
+                    offers.append(offer)
+    return offers
+
+
+def _open_sides(
+    routed: RoutedFigure, owner_id: str, ends: tuple[str, str], lane: float
+) -> tuple[str, ...]:
+    """The container edges a route between ``ends`` could run along: top when
+    both ends sit in the top row of the contents, bottom when both sit in the
+    bottom row. Only there would a lane of room open a way round."""
+
+    boxes = [routed.fitted.node(node_id).bounds for node_id in ends]
+    contents = [
+        node.bounds
+        for node in routed.fitted.nodes
+        if routed.fitted.group(owner_id).bounds.contains_rect(node.bounds)
+    ]
+    if not contents:
+        return ()
+    top = min(bounds.top for bounds in contents)
+    bottom = max(bounds.bottom for bounds in contents)
+    sides = []
+    if all(bounds.top <= top + lane for bounds in boxes):
+        sides.append("top")
+    if all(bounds.bottom >= bottom - lane for bounds in boxes):
+        sides.append("bottom")
+    return tuple(sides)
+
+
+def _crosses(a: Point, b: Point, c: Point, d: Point) -> bool:
+    first_horizontal = abs(a.y - b.y) < 1e-9
+    second_horizontal = abs(c.y - d.y) < 1e-9
+    if first_horizontal == second_horizontal:
+        return False
+    (h1, h2), (v1, v2) = ((a, b), (c, d)) if first_horizontal else ((c, d), (a, b))
+    x_low, x_high = sorted((h1.x, h2.x))
+    y_low, y_high = sorted((v1.y, v2.y))
+    return x_low + 1e-7 < v1.x < x_high - 1e-7 and y_low + 1e-7 < h1.y < y_high - 1e-7
+
+
 def with_room(
     figure: FigureSpec,
     needs: dict[str, dict[str, float]],
