@@ -82,6 +82,9 @@ OVERLAP_COST = 0.03
 
 REROUTE_PASSES = 2
 
+SPREAD_PIN_WEIGHT = 0.25
+"""Weight of an evenly spread pin's wish against a partner pin's own centre."""
+
 DOMINANT_GAP = 2.0
 """How many times wider one gap must be than the other to overrule a port's own side."""
 
@@ -1062,6 +1065,13 @@ class _Slot:
     low: float
     high: float
     movable: bool
+    weight: float = 1.0
+    """How much where this pin wants to be counts when a facing pair is aligned.
+
+    A pin spread evenly among several on one side has no position of its own
+    to defend, so it gives way to its partner's: an arrow leaves the middle of
+    a small box and lands wherever that falls on the wide box it feeds.
+    """
 
 
 def _place_on_side(
@@ -1147,6 +1157,7 @@ def _place_on_side(
         ),
     )
     current = [home(key) for key in keys]
+    spread = False
     if len(keys) == 1:
         desired = [current[0] if current[0] is not None else (low + high) / 2.0]
     elif all(value is not None for value in current) and len(set(current)) == len(current):
@@ -1155,6 +1166,7 @@ def _place_on_side(
         desired = values if in_order else sorted(values)
     else:
         desired = [low + (high - low) * (index + 1) / (len(keys) + 1) for index in range(len(keys))]
+        spread = True
     inset = min(style.corner_radius.points + style.connector_width.points, (high - low) / 2.0)
     open_low, open_high = _open_stretch(
         node.bounds, side, low + inset, high - inset, blockers, style.arrival_clearance.points
@@ -1174,6 +1186,7 @@ def _place_on_side(
             open_low if free else value,
             open_high if free else value,
             free,
+            SPREAD_PIN_WEIGHT if spread else 1.0,
         )
     return result
 
@@ -1333,7 +1346,7 @@ def _align(
         for key in keys:
             slot = slots[key]
             position = index[find(key)]
-            weight = 1e6 if not slot.movable else 1.0
+            weight = 1e6 if not slot.movable else slot.weight
             desired[position] += weight * slot.desired
             weights[position] += weight
         desired = [value / weight for value, weight in zip(desired, weights, strict=True)]
