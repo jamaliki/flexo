@@ -255,3 +255,37 @@ def test_a_long_label_wraps_into_balanced_lines_and_an_authored_width_holds() ->
     assert compiled.fitted.node("m.fixed").bounds.width == pytest.approx(80.0)
     assert not compiled.measured.diagnostics
     assert not lint_compilation(compiled).diagnostics
+
+
+def test_string_references_resolve_against_the_nodes_that_exist() -> None:
+    with Figure("refs") as figure, figure.module("m") as m:
+        m.block("b", label="B")
+        m.block("c", label="C")
+        m.connect("b", "c")  # bare names, scoped ids
+        m.connect("m.b", "m.c.input")  # a full id, and a full id with its port
+    first, second = figure.spec.edges
+    assert (first.source.node_id, first.target.node_id) == ("m.b", "m.c")
+    assert (second.source.node_id, second.target.port_name) == ("m.b", "input")
+
+
+def test_an_unknown_reference_names_what_was_typed_and_what_was_meant() -> None:
+    from flexo.diagnostics import FlexoError
+
+    with (
+        pytest.raises(FlexoError, match=r'"m\.bb" does not exist') as raised,
+        Figure("typo") as figure,
+        figure.module("m") as m,
+    ):
+        m.block("b", label="B")
+        m.connect("m.bb", m.block("c", label="C"))
+    assert 'Did you mean "m.b"' in str(raised.value)
+
+
+def test_a_duplicate_id_is_named() -> None:
+    with (
+        pytest.raises(ValueError, match=r"'m\.b' twice"),
+        Figure("twice") as figure,
+        figure.module("m") as m,
+    ):
+        m.block("b", label="B")
+        m.block("b", label="again")

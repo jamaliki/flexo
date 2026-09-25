@@ -319,11 +319,54 @@ class Figure:
                 font=self.font,
                 conventions=self.conventions,
                 nodes=tuple(self._nodes),
-                edges=tuple(self._edges),
-                nets=tuple(self._nets),
+                edges=tuple(
+                    replace(
+                        edge,
+                        source=self._resolved(edge.source, "output"),
+                        target=self._resolved(edge.target, "input"),
+                    )
+                    for edge in self._edges
+                ),
+                nets=tuple(
+                    replace(
+                        net,
+                        sources=tuple(self._resolved(ref, "output") for ref in net.sources),
+                        targets=tuple(self._resolved(ref, "input") for ref in net.targets),
+                    )
+                    for net in self._nets
+                ),
                 groups=groups,
             )
         )
+
+    def _resolved(self, reference: PortRef, default_port: str) -> PortRef:
+        """A reference written as a string, read against the nodes that exist.
+
+        Ids are scoped (``"m.block"``), so ``"m.block"`` could be node ``m``'s
+        port ``block`` or the node ``m.block`` itself; the node that exists
+        decides. A bare name that matches the end of exactly one scoped id --
+        ``"block"`` for ``"m.block"`` -- means that node. Anything else is left
+        for validation to report.
+        """
+
+        ports = {node.id: {port.name for port in node.ports} for node in self._nodes}
+        if reference.node_id in ports and reference.port_name in ports[reference.node_id]:
+            return reference
+        joined = f"{reference.node_id}.{reference.port_name}"
+        if joined in ports:
+            return PortRef(joined, default_port)
+        if reference.node_id not in ports:
+            matches = [node_id for node_id in ports if node_id.endswith(f".{reference.node_id}")]
+            if len(matches) == 1:
+                return PortRef(matches[0], reference.port_name)
+            joined_matches = [node_id for node_id in ports if node_id.endswith(f".{joined}")]
+            if len(joined_matches) == 1:
+                return PortRef(joined_matches[0], default_port)
+            if "." in reference.node_id or reference.port_name != default_port:
+                # Neither reading names a node: report the whole string as the
+                # id that is missing, which is what the author typed.
+                return PortRef(joined, default_port)
+        return reference
 
     def net(
         self,

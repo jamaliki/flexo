@@ -24,6 +24,20 @@ def normalize_and_validate(figure: FigureSpec) -> FigureSpec:
     return normalized
 
 
+def _suggestion(name: str, nodes) -> str | None:
+    """A "did you mean" for an unknown node id, from the ids that exist."""
+
+    from difflib import get_close_matches
+
+    ids = [node_id for node_id in nodes]
+    close = get_close_matches(name, ids, n=3, cutoff=0.6) or [
+        node_id for node_id in ids if node_id.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
+    ][:3]
+    if not close:
+        return "Ids are scoped by their group: a node made in module m as \"x\" is \"m.x\"."
+    return "Did you mean " + " or ".join(f'"{item}"' for item in close) + "?"
+
+
 def merge_matched_stacks(figure: FigureSpec) -> FigureSpec:
     """Lay rows wired one-to-one on shared columns (and columns on shared rows).
 
@@ -314,6 +328,7 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                         f"edge.{label}.unknown-node",
                         f'{label.title()} node "{reference.node_id}" does not exist.',
                         entity_id=edge.id,
+                        hint=_suggestion(reference.node_id, nodes),
                     )
                 )
                 continue
@@ -346,6 +361,7 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                             f"net.{label}.unknown-node",
                             f'{label.title()} node "{reference.node_id}" does not exist.',
                             entity_id=net.id,
+                            hint=_suggestion(reference.node_id, nodes),
                         )
                     )
                     continue
