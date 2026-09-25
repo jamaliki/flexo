@@ -447,6 +447,57 @@ def _declared_auto(figure, key: tuple[str, str]) -> bool:
     return any(port.name == port_name and port.auto_side for port in node.ports)
 
 
+def _split_side_by_side_departures(members: list[_Member], ends: list[_End]) -> None:
+    """Give edges leaving one port for targets side by side an arrow each.
+
+    A box facing several targets across its own width -- an encoder under its
+    outputs, one per position -- sends each its own straight arrow rather than
+    a tree that gathers them into one trunk only to spread them again. Targets
+    stacked one behind another (a skip past the next block) keep the tree: that
+    is one value branching off the main line.
+    """
+
+    groups: dict[tuple[str, str, Side, bool], list[_End]] = defaultdict(list)
+    for end in ends:
+        member = members[end.member].spec
+        if (
+            not end.arriving
+            and isinstance(member, EdgeSpec)
+            and end.node.measured.spec.kind not in POINT_KINDS
+            and end.group is not None
+        ):
+            groups[end.group].append(end)
+    for key, group in groups.items():
+        if len(group) < 2:
+            continue
+        side = key[2]
+        bounds = group[0].node.bounds
+        if not all(_within_span(bounds, end.counterpart, side) for end in group):
+            continue
+        along_x = side in {Side.NORTH, Side.SOUTH}
+        extents = sorted(
+            (end.counterpart.left, end.counterpart.right)
+            if along_x
+            else (end.counterpart.top, end.counterpart.bottom)
+            for end in group
+        )
+        if any(later[0] < earlier[1] for earlier, later in itertools.pairwise(extents)):
+            continue
+        for end in group:
+            name = f"{key[1]}@{members[end.member].spec.id}"  # type: ignore[union-attr]
+            end.group = (key[0], name, key[2], key[3])
+
+
+def _within_span(bounds: Rect, other: Rect, side: Side) -> bool:
+    """Whether ``other`` lies straight out from ``side`` of ``bounds``, within its span."""
+
+    if side in {Side.NORTH, Side.SOUTH}:
+        inside = bounds.left < other.center.x < bounds.right
+        return inside and _faces(bounds, other, side)
+    inside = bounds.top < other.center.y < bounds.bottom
+    return inside and _faces(bounds, other, side)
+
+
 def _authored_side(member: EdgeSpec | NetSpec, end: _End) -> Side | None:
     """The side this edge's own ``depart=``/``arrive=`` names for this end."""
 
@@ -688,6 +739,7 @@ def _pins(
             # a ``merge`` net joins lines before they arrive.
             name = f"{name}@{member.source.node_id}.{member.source.port_name}"
         end.group = (spec.id, name, side, end.arriving)
+    _split_side_by_side_departures(members, ends)
     _common_net_sides(fitted, members, ends, hints)
     _clear_approaches(fitted, ends, hints, style)
     _separate_directions(fitted, ends, members, hints, style)
@@ -771,9 +823,14 @@ def _common_net_sides(
         spread_y = max(point.y for point in centres) - min(point.y for point in centres)
         spread = Rect.union(spoke_nodes.values())
         if spread_x >= spread_y:
-            toward = Side.SOUTH if spread.center.y > hub.center.y else Side.NORTH
+            toward = Side.SOUTH if spread.center.y >= hub.center.y else Side.NORTH
         else:
-            toward = Side.EAST if spread.center.x > hub.center.x else Side.WEST
+            toward = Side.EAST if spread.center.x >= hub.center.x else Side.WEST
+        # Beside the row rather than over it, the hub still feeds a row from
+        # above: the bus runs along the row, each branch dropping in.
+        level = (
+            spread_x >= spread_y and hub.bottom > spread.top and hub.top < spread.bottom
+        ) or (spread_x < spread_y and hub.right > spread.left and hub.left < spread.right)
 
         def movable(end: _End) -> bool:
             spec = end.node.measured.spec
@@ -786,7 +843,7 @@ def _common_net_sides(
 
         changed = False
         for end in spokes:
-            if movable(end) and _faces(hub, end.node.bounds, toward):
+            if movable(end) and (level or _faces(hub, end.node.bounds, toward)):
                 end.group = (end.group[0], end.group[1], toward.opposite, end.group[3])  # type: ignore[index]
                 changed = True
         hub_end = hub_ends[0]

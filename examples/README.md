@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Twenty-one figures from papers and textbooks, each a short function. They use
+Twenty-three figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -69,4 +69,5 @@ suite checks this).
 | [![MLP](build/literature/multilayer-perceptron.preview.png)](build/literature/multilayer-perceptron.preview.png) Multilayer perceptron | [![HMM](build/literature/hidden-markov-model.preview.png)](build/literature/hidden-markov-model.preview.png) Hidden Markov model | [![VAE](build/literature/variational-autoencoder.preview.png)](build/literature/variational-autoencoder.preview.png) VAE as a graphical model |
 | [![CLIP](build/literature/clip.preview.png)](build/literature/clip.preview.png) CLIP | [![GAN](build/literature/gan.preview.png)](build/literature/gan.preview.png) GAN | [![Diffusion](build/literature/diffusion.preview.png)](build/literature/diffusion.preview.png) Diffusion |
 | [![Siamese network](build/literature/siamese.preview.png)](build/literature/siamese.preview.png) Siamese network | [![Transformer block, tikz](build/literature/gpt-block-tikz.preview.png)](build/literature/gpt-block-tikz.preview.png) Transformer block in `tikz` | [![LSTM, tikz](build/literature/lstm-tikz.preview.png)](build/literature/lstm-tikz.preview.png) LSTM in `tikz` |
+| [![AlphaFold 2](build/literature/alphafold.preview.png)](build/literature/alphafold.preview.png) AlphaFold 2 | [![BERT](build/literature/bert.preview.png)](build/literature/bert.preview.png) BERT | |
 | [![Bottleneck](build/literature/bottleneck.preview.png)](build/literature/bottleneck.preview.png) Bottleneck block | [![SwiGLU](build/literature/swiglu.preview.png)](build/literature/swiglu.preview.png) SwiGLU | [![Training loop](build/literature/training-loop.preview.png)](build/literature/training-loop.preview.png) Training-loop flowchart |
