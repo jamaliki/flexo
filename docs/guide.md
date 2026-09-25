@@ -716,8 +716,12 @@ print(result.report.format())
 | `pdf` | vector PDF for submission |
 | `png` | a raster preview at `dpi` |
 
-Everything but `editable` is produced from it by Inkscape, which must be on
-`PATH`, in the standard macOS application location, or named by `FLEXO_INKSCAPE`.
+`portable` and `pdf` are produced from the editable SVG by Inkscape, which must
+be on `PATH`, in the standard macOS application location, or named by
+`FLEXO_INKSCAPE`. `png` is produced by Inkscape when it is found, and by resvg
+(a Python dependency of Flexo) when it is not, so a preview never needs
+Inkscape. Both read the bundled and registered font files, so the raster is set
+in the faces the figure was measured with.
 
 ## Which role paints what
 
