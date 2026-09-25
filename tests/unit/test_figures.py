@@ -219,3 +219,24 @@ def test_a_skip_over_a_row_takes_the_lane_above_rather_than_crossing() -> None:
         m.connect(query, generator)
     compiled = compile_figure(figure.spec)
     assert not lint_compilation(compiled).diagnostics
+
+
+def test_rows_wired_one_to_one_share_their_columns() -> None:
+    with Figure("table") as figure, figure.module("m", layout="column") as m:
+        with m.row("inputs", role="layout") as row:
+            words = [row.text(name, name.upper()) for name in ("v", "k", "q")]
+        with m.row("projections", role="layout") as row:
+            boxes = [
+                row.block(f"p{index}", label="Linear projection", input=word)
+                for index, word in enumerate(words)
+            ]
+    compiled = compile_figure(figure.spec)
+    for word, box in zip(words, boxes, strict=True):
+        above = compiled.fitted.node(word.id).bounds.center.x
+        below = compiled.fitted.node(box.id).bounds.center.x
+        assert above == pytest.approx(below)
+    assert [group.id for group in figure.spec.groups if group.id.startswith("m.")] == [
+        "m.inputs",
+        "m.projections",
+    ], "the authored figure keeps its rows"
+    assert not lint_compilation(compiled).diagnostics
