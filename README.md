@@ -205,10 +205,11 @@ A theme can carry its own conventions (`LayoutStyle.conventions`). A net's
 ### Captions on connectors
 
 `connect(a, b, label="action $A_t$")` puts a caption beside the line. Captions
-are placed after routing: each one takes the first free position beside its
-own line -- above a horizontal run, beside a vertical one, at the middle and
-then further toward either end -- that overlaps no component, title, other
-caption, or line. A caption names the value its edge carries, so a captioned
+are placed after routing. The candidate positions are above and below each
+horizontal run and on either side of each vertical run, at the middle and then
+further toward either end. A caption takes the first candidate that overlaps no
+component, title, other caption, or line, and the least-overlapping one when
+none is free. A caption names the value its edge carries, so a captioned
 edge always gets its own line, even next to another edge between the same two
 ports. If a caption does not fit inside its container, the container is given
 the room.
@@ -282,14 +283,16 @@ between its children and its neighbours is exactly the `gap`. A row of such
 columns side by side, not wired to each other, is read as parallel branches:
 the columns are aligned at the top. If a figure is wider than its page, the
 compiler first tries tighter gaps and group padding (down to half), and only
-then grows the page, with a `layout.width.grown` warning.
+then grows the page, with a `layout.width.grown` warning. (It does not tighten
+a figure compiled with an explicit `style=`, which it keeps exactly.)
 
 ### How connectors are routed
 
 Routing follows the routers that draw connectors well (libavoid, ELK, yFiles).
-It never fails. If a figure is too tight for its connectors, it is laid out
-again with the room they need. A hint that cannot be honoured is reported as
-a warning, not an error.
+It never fails for lack of a path: if a figure is too tight for its
+connectors, it is laid out again with the room they need. A hint that cannot
+be honoured is reported as a warning, not an error. (A `lane=` or waypoint
+that names nothing in the figure is still an error.)
 
 1. **Pins.** Every end of every connection gets its own attachment point
    (a pin), on the side of the box that faces the other end. When one gap
@@ -316,10 +319,13 @@ a warning, not an error.
    crossbar of a Z and the trunk of a tree sit in the middle of the room they
    have.
 5. **Uncross.** If lines still cross, neighbouring pins on the sides those
-   lines attach to are swapped one pair at a time. The figure is rerouted after
-   each swap, and a swap is kept when it removes crossings.
-6. **Room.** A connector that had to leave the container it belongs to asks
-   that container for the missing padding, and the figure is laid out again.
+   lines attach to are swapped one pair at a time. The figure is rerouted and
+   separated after each swap, and a swap is kept when it removes crossings.
+6. **Room.** A connector or caption that had to leave the container it belongs
+   to, or a run pressed between a box and the container's edge, asks that
+   container for more room, and the figure is laid out again (up to three
+   rounds). A crossing whose route could instead run along the container's top
+   or bottom edge is offered a lane there, kept only if it removes the crossing.
 
 ## Authoring tour
 
@@ -497,10 +503,11 @@ with flexo.Figure("residual", width="double-column") as figure:
 
 `input` is what the sublayer computed and `skip` is what went round it; `output`
 carries the sum onward and `branch` is the same value tapped for the *next*
-block's skip. Sending two values into one `input` puts two arrowheads on one point
-— two runs a hair apart, each with a hook where the router pulled it off its twin,
-and a `routing.track.separation` error for the pair. Naming the second arrival is
-the fix, and `add_norm(input=..., skip=...)` says it at the point of creation.
+block's skip. Two values sent into one `input` are drawn as two arrows side by
+side on one side of the box (see `arrivals` under
+[Conventions](#conventions-branches-merges-arrivals-and-lines)); naming the
+second arrival says which is which, and `add_norm(input=..., skip=...)` says it at
+the point of creation.
 `residual()` prefers a `residual` or `skip` port automatically for the same
 reason.
 
@@ -856,9 +863,10 @@ a trunk, and branches off it as plain Ts. `merge` draws several values arriving
 at one place as a tree grown from the destination; in a merge of two, the one
 that joins the other's line ends in an arrowhead pointing into it, and a merge
 of three or more is a bus with its one arrow into the destination. Edges that
-share a port are the same thing and are drawn the same way -- three `connect`
-calls from one output are one tree. Every bend inside a piece of the tree turns
-on the elbow fillet (6 pt in `paper`, square in `tikz`, `swiss` and `archive`);
+leave the same port are drawn the same way -- three `connect` calls from one
+output are one tree. (Edges that *arrive* at one port stay separate arrows by
+default.) Every bend inside a piece of the tree turns on the elbow fillet (6 pt
+in `paper`, square in `tikz`, `swiss`, `archive` and `bauhaus`);
 set `elbow_radius=pt(0)` on a derived `LayoutStyle` for a sharp
 technical-drawing treatment anywhere.
 
@@ -871,10 +879,10 @@ An unhinted rail sits **in the middle of the free corridor** its stems leave it 
 the gap between the hub component's edge and the nearest edge of what it feeds.
 Trunk and stems each get half the run, so the rail reads as a corridor the figure
 meant to leave rather than as a line drawn against the box its branches come out
-of. The exception is a captioned rail in a corridor too narrow to halve: the
-caption is written above the run, so halving it would draw the rail through the
-words, and such a rail stays at the end of the corridor and hands the whole run to
-the caption.
+of. The exception is a net with a caption and no `rail_at`: the caption is
+written above the run, so halving the run would draw the rail through the words.
+Its joint goes to the far end of the corridor instead, and the whole run is the
+caption's.
 
 A trunk that leaves **along** the axis its rail runs on — an encoder's output
 crossing the page into a decoder's cross-attention — draws a Z: a stretch along
@@ -919,8 +927,8 @@ standing across the crossbar takes out of it.
 A **C** — a route whose two arms double back over each other, wrapping a module or
 running up a margin — keeps its corridor. Its arms share no span to be centred in,
 and the corridor it took was chosen against the whole figure rather than between
-two ports. So does any route the author aimed with `lane=`, a waypoint, or `via=`,
-and any pair of parallel jogs a lane apart: balancing never overrides a hint, and
+two ports. So does any route the author aimed with `lane=` or a waypoint, and any
+pair of parallel jogs a lane apart: balancing never overrides a hint, and
 never pulls two crossings onto one coordinate.
 
 #### `via=`: which side a route should keep to
@@ -940,19 +948,18 @@ figure.merge(sinks=[first, second], dst=average, via="south")
 It takes a `Side` or a side name on `connect`, `residual`, `net`, and `merge`, and
 defaults to no hint at all. Three things follow from it:
 
-- **the route pays for the corridor it refused.** Length spent beyond the region
-  its two endpoints span, on the side opposite the hint, costs extra
-  (`PathCosts.off_side`) — enough that the near corridor wins wherever it exists,
-  little enough that the far one is still available when it is the only one.
-  Inside the region nothing is priced: every route has to cross it.
-- **a net answers with its rail.** The side names the axis the rail runs along —
-  west and east rail vertically, north and south horizontally, exactly as `rail=`
-  reads it — and the rail is then placed as far toward that side as its stems and
-  the obstacles allow. Unlike `rail=`, which *pins* the rail to the routing
-  boundary, `via=` is a lean, so it may not be combined with `rail=` or `rail_at=`.
+- **the route pays for the corridor it refused.** Length spent beyond the span
+  of its pins, on the side opposite the hint, costs `OFF_SIDE_COST` per point
+  (`flexo.routing.router`) -- enough that the near corridor wins wherever it
+  exists, little enough that the far one is still available when it is the only
+  one. Inside the span nothing is priced: every route has to cross it.
+- **a net leans the same way.** `rail=` and `via=` on a net both price the far
+  side. `rail=` also moves the trunk to the hinted edge of its corridor; a `via`
+  trunk stays centred in the corridor it gets. The two may not be combined, and
+  `via=` may not be combined with `rail_at=`.
 - **the ends face the hint.** Ink that comes round the west arrives from the
   west, so an auto-sided target port takes that side (an authored `PortSpec` or a
-  `depart`/`arrive` hint still wins). The source takes it too when the hint is
+  `depart`/`arrive` hint still wins, for edges and nets alike). The source takes it too when the hint is
   across the line of travel: an edge to the box above, kept west, leaves west and
   comes back in a C -- the drawing of a feedback loop. When the hint lies along
   the line of travel, the source keeps its own side, because leaving toward the
@@ -960,8 +967,8 @@ defaults to no hint at all. Three things follow from it:
 
 Like `rail_at`, it is a request. Where the geometry leaves no corridor on that
 side the router takes the nearest one and reports it —
-`routing.via.clamped` for an edge, `routing.net.via.clamped` for a net — naming
-the side it actually achieved, rather than failing or silently obeying.
+`routing.via.clamped` for an edge, naming the side it actually achieved, rather
+than failing or silently obeying. (A net's `via` is not checked this way.)
 
 A net's caption -- a formula such as `softmax(QKᵀ)V` -- sits above the
 horizontal run its arrow draws, `caption_clearance` above the run's ink measured
@@ -1075,8 +1082,9 @@ import flexo
 
 with flexo.Figure("artwork", width="double-column") as figure:
     with figure.module("m", label="Ligand") as panel:
-        ligand = panel.image("ligand", "/figures/art/ligand.svg", width="96pt")
-        panel.image("map", "/figures/art/density.png", height="cells:3", label="Density")
+        # Paths to your own files: an SVG stays vector, a PNG is embedded.
+        ligand = panel.image("ligand", "art/ligand.svg", width="96pt")
+        panel.image("map", "art/density.png", height="cells:3", label="Density")
         encoder = panel.mlp("encoder", label="Encoder")
         panel.connect(ligand, encoder)
 ```

@@ -133,10 +133,8 @@ _RESIDUAL_TARGET = (
 
 Such a component sits on *two* wires, not one, and the second is not a copy of
 the first: ``input`` carries what the sublayer computed and ``skip`` carries what
-went round it. One defaulted ``input`` for both is what put two arrowheads on one
-point in the first Transformer figure authored with Flexo -- two runs a hair
-apart, each with a hook where the router pulled it off its twin, and a
-``routing.track.separation`` error for the pair.
+went round it. Naming them tells the reader which arrow is the residual; with
+one defaulted ``input`` for both, the two would arrive as anonymous neighbours.
 
 ``branch`` is the same story read forwards. The value leaving one residual block
 feeds the next sublayer *and* bypasses it, so two runs leave here too;

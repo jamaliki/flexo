@@ -23,9 +23,10 @@ The pipeline follows the routers that draw connectors well (libavoid, ELK):
    a corridor are ordered so they cross least and spread one lane apart; the
    crossbar of a Z and the trunk of a tree are centred in the room they have.
 
-The result is the ``RoutedFigure`` the rest of the compiler reads. A junction dot
-sits exactly where three or more pieces of a tree meet -- a branch point, never a
-bend.
+The result is the ``RoutedFigure`` the rest of the compiler reads. Where three or
+more pieces of a tree meet -- a branch point, never a bend -- the figure's
+conventions (``flexo.conventions``) decide the mark: a plain T, an arrowhead into
+the line joined, or a dot.
 """
 
 from __future__ import annotations
@@ -416,8 +417,9 @@ def _joined(a: Point, b: Point, c: Point, d: Point) -> tuple[Point, Point] | Non
 
 
 def _port_hints(figure) -> dict[tuple[str, str], Side]:
-    """Sides that bind a port for every connection on it: ``depart``/``arrive``
-    and a net's ``via``. An edge's ``via`` binds only that edge's ends (see
+    """Sides that bind a port for every connection on it: ``depart``/``arrive``,
+    and a net's ``via`` on target ports whose side is a default (an authored
+    port side always wins). An edge's ``via`` binds only that edge's ends (see
     ``_via_side``), so it is left out here -- one hinted edge must not drag a
     neighbour arriving on the same port round to its side."""
 
@@ -430,8 +432,18 @@ def _port_hints(figure) -> dict[tuple[str, str], Side]:
         if net.via is None:
             continue
         for reference in net.targets:
-            pins.setdefault((reference.node_id, reference.port_name), net.via)
+            key = (reference.node_id, reference.port_name)
+            if _declared_auto(figure, key):
+                pins.setdefault(key, net.via)
     return pins
+
+
+def _declared_auto(figure, key: tuple[str, str]) -> bool:
+    """Whether the port ``key`` names has a default side a hint may replace."""
+
+    node_id, port_name = key
+    node = figure.node(node_id)
+    return any(port.name == port_name and port.auto_side for port in node.ports)
 
 
 def _authored_side(member: EdgeSpec | NetSpec, end: _End) -> Side | None:

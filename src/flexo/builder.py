@@ -718,7 +718,8 @@ class GroupBuilder:
 
         One source takes the port named ``input``; several take ``input1`` and
         friends when the component offers them, and share ``input`` when it does
-        not -- a fan-in the router draws as one arrival. A component with neither
+        not -- drawn as separate arrows side by side unless the figure's
+        ``arrivals`` convention joins them. A component with neither
         says so by name rather than by ``AttributeError`` from somewhere deeper.
         """
 
