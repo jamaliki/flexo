@@ -34,7 +34,7 @@ def routing_gaps_for_group(
     if boundary_count == 0:
         return ()
     if actual_kind == "grid":
-        return _grid_gaps(figure, group_id, style)
+        return _grid_gaps(figure, group_id, style, edge_labels or {})
     if actual_kind not in {"row", "column", "stack"}:
         return (base,) * boundary_count
 
@@ -147,6 +147,7 @@ def _grid_gaps(
     figure: FigureSpec,
     group_id: str,
     style: LayoutStyle,
+    edge_labels: Mapping[str, TextMetrics],
 ) -> tuple[float, ...]:
     """Column gaps then row gaps of a grid, each widened for the routes crossing it.
 
@@ -199,6 +200,35 @@ def _grid_gaps(
         columns[boundary] = max(columns[boundary], clearance + arrival + (count - 1) * lane)
     for (_, boundary), count in row_runs.items():
         rows[boundary] = max(rows[boundary], clearance + arrival + (count - 1) * lane)
+    # An edge between neighbouring cells -- routed or straight -- also needs
+    # room for its arrow, and for its caption: across a column gap the
+    # caption's width, across a row gap the captions' heights one over another.
+    stacked: dict[int, float] = {}
+    for edge in figure.edges:
+        source = owner.get(edge.source.node_id)
+        target = owner.get(edge.target.node_id)
+        if source is None or target is None or source == target:
+            continue
+        (source_row, source_column), (target_row, target_column) = (
+            plan.cells[source],
+            plan.cells[target],
+        )
+        metrics = edge_labels.get(edge.id)
+        if source_row == target_row and abs(source_column - target_column) == 1:
+            boundary = min(source_column, target_column)
+            need = clearance + arrival
+            if metrics is not None:
+                need = max(need, metrics.width + 2.0 * style.padding_x.points)
+            columns[boundary] = max(columns[boundary], need)
+        elif source_column == target_column and abs(source_row - target_row) == 1:
+            boundary = min(source_row, target_row)
+            rows[boundary] = max(rows[boundary], clearance + arrival)
+            if metrics is not None:
+                stacked[boundary] = stacked.get(boundary, style.padding_y.points) + (
+                    metrics.height + style.padding_y.points
+                )
+    for boundary, height in stacked.items():
+        rows[boundary] = max(rows[boundary], height)
     return tuple(columns) + tuple(rows)
 
 
