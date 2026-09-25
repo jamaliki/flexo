@@ -97,6 +97,7 @@ class LoadedFace:
     codepoints: frozenset[int]
     hb_face: hb.Face
     cap_height: int = 0
+    superscript_rise: int = 0
 
     def has(self, character: str) -> bool:
         return ord(character) in self.codepoints
@@ -437,6 +438,7 @@ def load_face(face: FontFace) -> LoadedFace:
         codepoints=frozenset((font.getBestCmap() or {}).keys()),
         hb_face=hb.Face(raw, face.index),
         cap_height=int(getattr(os2, "sCapHeight", 0) or 0) if os2 is not None else 0,
+        superscript_rise=os2.ySuperscriptYOffset if os2 is not None else 0,
     )
 
 
