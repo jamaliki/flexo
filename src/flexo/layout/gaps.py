@@ -176,6 +176,8 @@ def _grid_gaps(
     lane = max(style.route_lane_spacing.points, style.port_spacing.points)
     column_runs: dict[tuple[int, int], int] = {}
     row_runs: dict[tuple[int, int], int] = {}
+    diagonal_rows: set[int] = set()
+    diagonal_columns: set[int] = set()
     for connection in layout_connections(figure):
         if connection.externally_routed:
             continue
@@ -196,10 +198,21 @@ def _grid_gaps(
             for boundary in range(min(source_row, target_row), max(source_row, target_row)):
                 key = (source_column, boundary)
                 row_runs[key] = row_runs.get(key, 0) + 1
+        else:
+            # Between diagonal cells a route turns once: whichever gap its
+            # final run crosses needs a departure and an arrival clearance.
+            diagonal_rows.update(range(min(source_row, target_row), max(source_row, target_row)))
+            diagonal_columns.update(
+                range(min(source_column, target_column), max(source_column, target_column))
+            )
     for (_, boundary), count in column_runs.items():
         columns[boundary] = max(columns[boundary], clearance + arrival + (count - 1) * lane)
     for (_, boundary), count in row_runs.items():
         rows[boundary] = max(rows[boundary], clearance + arrival + (count - 1) * lane)
+    for boundary in diagonal_rows:
+        rows[boundary] = max(rows[boundary], clearance + arrival)
+    for boundary in diagonal_columns:
+        columns[boundary] = max(columns[boundary], clearance + arrival)
     # An edge between neighbouring cells -- routed or straight -- also needs
     # room for its arrow, and for its caption: across a column gap the
     # caption's width, across a row gap the captions' heights one over another.
