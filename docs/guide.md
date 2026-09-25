@@ -460,7 +460,7 @@ import flexo
 def band(root, id):
     """One band row, always starting with the spine column."""
 
-    return root.row(id, gap="24pt", padding=0, align="start", role="layout")
+    return root.row(id, gap="24pt", padding=0, align="start")
 
 
 layout = flexo.LayoutSpec("column", gap=flexo.pt(20), align="start")
