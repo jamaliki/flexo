@@ -186,7 +186,23 @@ def _measure_node(
 
 
 WRAPPED_KINDS = frozenset(
-    {"block", "mlp", "cnn", "add-norm", "prediction", "loss", "tensor", "terminal", "text"}
+    {
+        "block",
+        "mlp",
+        "cnn",
+        "add-norm",
+        "prediction",
+        "loss",
+        "tensor",
+        "terminal",
+        "text",
+        "attention",
+        "matrix",
+        "graph",
+        "inset",
+        "feature-strip",
+        "sequence",
+    }
 )
 """Kinds whose box is sized round their label, so a long label wraps instead."""
 
