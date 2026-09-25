@@ -68,6 +68,9 @@ without drawing anything. Every component is a method on the group it goes in:
 | Shapes | `circle`, `decision`, `terminal`, `volume`, `op` (and `add`, `multiply`) |
 | Words and art | `text`, `vector`, `image`, `graph`, `inset` |
 
+A label longer than 16 ems wraps into balanced lines, and a component with an
+authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
+
 `input=` connects one upstream component as the new one is created, and
 `inputs=` connects several. `connect(a, b)` draws an edge later,
 `net(src=a, sinks=[b, c])` draws one value going to several places, and

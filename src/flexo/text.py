@@ -257,7 +257,7 @@ class TextMeasurer:
         lines = tuple(
             line
             for hard_line in hard_lines
-            for line in self._wrap_line(hard_line, max_width, weight)
+            for line in self._balanced(hard_line, max_width, weight)
         )
         measured_lines = tuple(
             MeasuredLine(line, sum(self._shape_run(run, weight) for run in line))
@@ -298,6 +298,32 @@ class TextMeasurer:
         scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
         tracking = self.typography.tracking * len(run.text)
         return (advance + tracking) * self.typography.size.points * scale
+
+    def _balanced(
+        self,
+        line: tuple[TextRun, ...],
+        max_width: float | None,
+        weight: int | None,
+    ) -> tuple[tuple[TextRun, ...], ...]:
+        """``line`` wrapped at ``max_width`` into lines of similar length.
+
+        Greedy wrapping fills each line and leaves the last one short -- "Multi-
+        head self-attention with rotary / embeddings". The narrowest width that
+        still needs no more lines than greedy wrapping does spreads the words
+        evenly instead, which is how a label is set by hand.
+        """
+
+        wrapped = self._wrap_line(line, max_width, weight)
+        if len(wrapped) < 2 or max_width is None:
+            return wrapped
+        low, high = 0.0, max_width
+        for _ in range(12):
+            middle = (low + high) / 2.0
+            if len(self._wrap_line(line, middle, weight)) <= len(wrapped):
+                high = middle
+            else:
+                low = middle
+        return self._wrap_line(line, high, weight)
 
     def _wrap_line(
         self,
