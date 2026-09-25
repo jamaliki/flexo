@@ -14,7 +14,7 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
-from flexo.routing.nudge import shorten_end
+from flexo.routing.ink import shorten_end
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
     SVG_NS,

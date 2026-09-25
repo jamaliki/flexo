@@ -55,12 +55,6 @@ class Zone:
     cost: float
 
 
-def heading_of(dx: float, dy: float) -> int:
-    if abs(dx) >= abs(dy):
-        return EAST if dx > 0 else WEST
-    return SOUTH if dy > 0 else NORTH
-
-
 def unit(heading: int) -> tuple[int, int]:
     return _DX[heading], _DY[heading]
 

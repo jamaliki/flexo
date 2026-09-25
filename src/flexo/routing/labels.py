@@ -18,7 +18,7 @@ from dataclasses import replace
 from flexo.geometry import Point, Rect, segment_crosses_rect, segments
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge
-from flexo.routing.nudge import caption_reach, caption_rise
+from flexo.routing.ink import caption_reach, caption_rise
 from flexo.style import LayoutStyle
 
 FRACTIONS = (0.5, 0.35, 0.65, 0.2, 0.8)
