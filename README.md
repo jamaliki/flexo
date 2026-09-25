@@ -147,6 +147,8 @@ inside its container, the container is given the room.
 ### Node-link figures: circles and straight lines
 
 ```python
+import flexo
+
 with flexo.Figure("mlp", conventions={"lines": "straight"}) as figure:
     with figure.module("m", label="Multilayer perceptron") as m:
         with m.column("in", role="layout") as column:
