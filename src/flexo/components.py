@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from itertools import pairwise
+from math import log2
 
 from flexo.artwork import node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
@@ -371,6 +372,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # Flowchart shapes: a decision diamond, with its ports at its four
         # corners, and a start/end pill.
         ComponentDefinition("decision", Size(0.0, 0.0), _OP_PORTS),
+        # A feature map drawn as a box in oblique projection, sized by its shape.
+        ComponentDefinition("volume", Size(0.0, 0.0), _OP_PORTS),
         ComponentDefinition("terminal", Size(44.0, 24.0), _STANDARD),
         ComponentDefinition("graph", Size(70.0, 62.0), _STANDARD, motif_height=GRAPH_INK_HEIGHT),
         ComponentDefinition("inset", Size(82.0, 60.0), _STANDARD, motif_height=INSET_INK.height),
@@ -416,6 +419,38 @@ def node_tone(spec: NodeSpec, by_kind: bool) -> str | None:
         text = str(authored).strip()
         return None if text.lower() in NEUTRAL_TONES else text
     return KIND_TONES.get(spec.kind) if by_kind else None
+
+
+@dataclass(frozen=True, slots=True)
+class VolumeGeometry:
+    """How a ``volume`` is drawn: a front face ``thickness`` wide and ``face``
+    tall, receding ``depth`` up and to the right at 45 degrees."""
+
+    thickness: float
+    face: float
+    depth: float
+
+    @property
+    def size(self) -> Size:
+        return Size(self.thickness + self.depth, self.face + self.depth)
+
+
+def volume_geometry(node: NodeSpec) -> VolumeGeometry:
+    """A feature map's box, from its ``channels``, ``height`` and ``width``.
+
+    Every extent grows with the logarithm of the dimension it shows, so a
+    224-pixel input and a 7-pixel map, or 3 channels and 4096, can share one
+    figure and still read as larger and smaller.
+    """
+
+    channels = max(1.0, float(node.property("channels", 1)))
+    height = max(1.0, float(node.property("height", 1)))
+    width = max(1.0, float(node.property("width", 1)))
+    return VolumeGeometry(
+        thickness=3.0 + 3.0 * log2(channels),
+        face=10.0 + 6.0 * log2(height),
+        depth=(10.0 + 6.0 * log2(width)) * 0.45,
+    )
 
 
 def op_diameter(style: LayoutStyle) -> float:
@@ -628,6 +663,8 @@ def intrinsic_node_size(
     elif node.kind == "op":
         side = op_diameter(style)
         natural = Size(side, side)
+    elif node.kind == "volume":
+        return volume_geometry(node).size
     elif node.kind == "decision":
         # The label's box inscribed in a diamond of the same proportions: each
         # half-diagonal is twice the padded half-extent of the words.

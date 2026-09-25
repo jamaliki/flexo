@@ -1523,6 +1523,41 @@ class GroupBuilder:
             properties["shaded"] = True
         return self.node(id, "circle", label=label, properties=properties, **options)
 
+    def volume(
+        self,
+        id: str,
+        shape: tuple[int, int, int] | tuple[int, int],
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        at: Cell | None = None,
+        **options: Any,
+    ) -> NodeHandle:
+        """A feature map, drawn as a box whose size shows its shape.
+
+        ``shape`` is ``(channels, height, width)`` -- or ``(height, width)`` for
+        one channel -- in the tensor's own units; each is drawn on a log scale,
+        so a whole network fits on a page and bigger still reads as bigger. The
+        ``label`` (``"conv1 96@55x55"``, say) is set under the box as a caption.
+        The handle is the box: wire into and out of it like any component.
+        """
+
+        channels, height, width = (1, *shape) if len(shape) == 2 else shape
+        properties = dict(options.pop("properties", None) or {})
+        properties.update(channels=int(channels), height=int(height), width=int(width))
+        stack = self.column(
+            id,
+            gap=pt(3.0),
+            padding=0,
+            align="center",
+            role="layout",
+            anchor="box",
+            at=at,
+        )
+        box = stack.node("box", "volume", properties=properties, **options)
+        if label:
+            stack.node("label", "text", label=label, role="caption")
+        return box
+
     def decision(
         self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
     ) -> NodeHandle:
