@@ -9,8 +9,14 @@ from flexo.ir.fitted import FittedNode
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import GroupSpec, NodeSpec
 from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette, TypographyStyle
-from flexo.svg import element
-from flexo.text import DEFAULT_RUN_WEIGHT, SHIFTED_SIZE, drawn_weight, font_stack
+from flexo.svg import element, number
+from flexo.text import (
+    DEFAULT_RUN_WEIGHT,
+    SHIFTED_SIZE,
+    drawn_weight,
+    font_stack,
+    script_shift,
+)
 
 
 def paint_override(spec: NodeSpec | GroupSpec, part: str) -> str | None:
@@ -137,7 +143,11 @@ def render_runs(
                 dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
                 font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
                 font__style="italic" if run.italic else None,
-                baseline__shift=run.baseline_shift if shifted else None,
+                baseline__shift=(
+                    number(script_shift(run.baseline_shift, run.italic, typography))
+                    if shifted
+                    else None
+                ),
                 font__size=size * SHIFTED_SIZE if shifted else None,
             )
             pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic)

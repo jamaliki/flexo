@@ -416,7 +416,9 @@ def test_a_group_title_keeps_its_styled_runs() -> None:
     title = _element(_titled_figure(), "m.label")
     spans = list(title)
     assert [span.text for span in spans] == ["QK", "T", "-attention"]
-    assert [span.get("baseline-shift") for span in spans] == [None, "super", None]
+    shifts = [span.get("baseline-shift") for span in spans]
+    assert shifts[0] is None and shifts[2] is None
+    assert float(shifts[1]) > 0, "a superscript rises"
     shifted = STYLES["paper"].typography.size.points * SHIFTED_SIZE
     assert [span.get("font-size") for span in spans] == [None, number(shifted), None]
 

@@ -185,9 +185,14 @@ def test_panel_labels_attention_with_a_shifted_run_above_the_arrow(
         label = by_id[f"{net_id}.label"]
         spans = list(label)
         assert ["".join(span.itertext()) for span in spans] == [text for text, _ in runs]
-        assert [span.get("baseline-shift") for span in spans] == [
-            None if shift == "normal" else shift for _, shift in runs
-        ]
+        # Shifts are lengths, up positive: a superscript rises, a subscript drops.
+        direction = {"normal": None, "super": 1, "sub": -1}
+        assert [
+            None
+            if span.get("baseline-shift") is None
+            else (1 if float(span.get("baseline-shift")) > 0 else -1)
+            for span in spans
+        ] == [direction[shift] for _, shift in runs]
         assert label.get("text-anchor") == "middle"
 
 
