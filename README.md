@@ -43,7 +43,7 @@ stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws nineteen figures from
+[`examples/literature.py`](examples/literature.py) draws twenty figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -234,6 +234,19 @@ side by side. Choose straight lines for a whole figure with
 `conventions={"lines": "straight"}`, or for one edge with
 `connect(a, b, shape="straight")`. `connect_all(sources, targets)` connects
 every source to every target.
+
+### Feature maps
+
+```python
+image = m.volume("input", (3, 224, 224), label="224×224×3")
+conv = m.volume("conv1", (64, 112, 112), label="conv1", input=image, tone="conv")
+```
+
+`volume` draws a feature map as a box in oblique projection: the front face
+is as tall as the map's height, the box as deep as its width, and as thick as
+its channel count, each on a log scale so a whole network fits on a page.
+`shape` is `(channels, height, width)`, or `(height, width)` for one channel.
+The label is set under the box; arrows attach to the box.
 
 ### Line styles and arrowheads
 

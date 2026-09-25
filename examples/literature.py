@@ -75,6 +75,27 @@ def squeeze_excitation(theme: str = "paper") -> Figure:
     return figure
 
 
+def lenet(theme: str = "paper") -> Figure:
+    """LeNet-5 (LeCun et al. 1998, Figure 2), each layer a volume of its shape."""
+
+    layers = (
+        ("input", (1, 32, 32), "Input\n32×32", None),
+        ("c1", (6, 28, 28), "C1\n6@28×28", "conv"),
+        ("s2", (6, 14, 14), "S2\n6@14×14", "pool"),
+        ("c3", (16, 10, 10), "C3\n16@10×10", "conv"),
+        ("s4", (16, 5, 5), "S4\n16@5×5", "pool"),
+        ("f5", (120, 1, 1), "F5\n120", "dense"),
+        ("f6", (84, 1, 1), "F6\n84", "dense"),
+        ("output", (10, 1, 1), "Output\n10", "dense"),
+    )
+    with Figure("lenet", theme=theme) as figure:
+        with figure.module("m", label="LeNet-5") as m:
+            previous = None
+            for name, shape, label, tone in layers:
+                previous = m.volume(name, shape, label=label, tone=tone, input=previous)
+    return figure
+
+
 def lstm(theme: str = "paper") -> Figure:
     """An LSTM cell (Hochreiter and Schmidhuber 1997), drawn after Olah (2015)."""
 
@@ -387,6 +408,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
         inception,
+        lenet,
         bottleneck,
         squeeze_excitation,
         lstm,
