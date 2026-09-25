@@ -16,6 +16,10 @@ type Scalar = str | int | float | bool
 type LayoutKind = Literal["row", "column", "grid", "overlay", "stack"]
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
+type ArrowEnds = Literal["end", "none", "both"]
+ARROW_ENDS = ("end", "none", "both")
+type LineStyle = Literal["solid", "dashed", "dotted"]
+LINE_STYLES = ("solid", "dashed", "dotted")
 type EdgeShape = Literal["auto", "orthogonal", "straight"]
 EDGE_SHAPES = ("auto", "orthogonal", "straight")
 type JointStyle = Literal["dot", "arrow", "auto"]
@@ -313,10 +317,26 @@ class EdgeSpec:
     layer of neurons, a graphical model -- where the diagonal is the drawing.
     """
 
+    line: LineStyle = "solid"
+    """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
+    arrow: ArrowEnds = "end"
+    """Where the arrowheads are: ``"end"`` (the target), ``"none"`` for an
+    undirected link, or ``"both"``."""
+
     def __post_init__(self) -> None:
         _validate_id(self.id, "Edge ID")
+        if self.arrow not in ARROW_ENDS:
+            raise ValueError(
+                f'unknown arrow "{self.arrow}" for edge "{self.id}"; '
+                f"valid values: {', '.join(ARROW_ENDS)}"
+            )
         if self.lane_hint is not None:
             _validate_id(self.lane_hint, "Lane hint")
+        if self.line not in LINE_STYLES:
+            raise ValueError(
+                f'unknown line "{self.line}" for edge "{self.id}"; '
+                f"valid lines: {', '.join(LINE_STYLES)}"
+            )
         if self.shape not in EDGE_SHAPES:
             raise ValueError(
                 f'unknown shape "{self.shape}" for edge "{self.id}"; '
@@ -364,8 +384,16 @@ class NetSpec:
     got was the other side.
     """
 
+    line: LineStyle = "solid"
+    """How the net's lines are stroked; see ``EdgeSpec.line``."""
+
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")
+        if self.line not in LINE_STYLES:
+            raise ValueError(
+                f'unknown line "{self.line}" for net "{self.id}"; '
+                f"valid lines: {', '.join(LINE_STYLES)}"
+            )
         if self.joint not in JOINT_STYLES:
             raise ValueError(
                 f'unknown joint style "{self.joint}" for net "{self.id}"; '

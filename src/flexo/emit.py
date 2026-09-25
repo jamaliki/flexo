@@ -308,13 +308,15 @@ def _render_edge(
         id=edge.spec.id,
         data__flexo__entity="connector",
         data__flexo__role=edge.spec.role,
+        stroke__dasharray=_dash(edge.spec.line, style),
     )
     element(
         group,
         "path",
         id=f"{edge.spec.id}.shaft",
         d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
-        marker__end=f"url(#arrow.{marker_role})",
+        marker__end=f"url(#arrow.{marker_role})" if edge.spec.arrow != "none" else None,
+        marker__start=f"url(#arrow.{marker_role}.start)" if edge.spec.arrow == "both" else None,
         stroke__linecap="round",
         stroke__linejoin="round",
         **paint_attributes(
@@ -360,6 +362,7 @@ def _render_net(
         data__flexo__entity="net",
         data__flexo__kind=net.spec.kind,
         data__flexo__role=net.spec.role,
+        stroke__dasharray=_dash(net.spec.line, style),
     )
     if net.dots is not None:
         _tree_ink(group, net, style, palette, paint_role, marker_role)
@@ -696,6 +699,22 @@ def _along(start: Point, toward: Point, distance: float) -> Point:
         start.x + (toward.x - start.x) * ratio,
         start.y + (toward.y - start.y) * ratio,
     )
+
+
+def _dash(line: str, style: LayoutStyle) -> str | None:
+    """The ``stroke-dasharray`` for a line style, scaled to the connector's width.
+
+    It sits on the connector's group, so every piece of its ink inherits it; an
+    arrowhead is a marker, which inherits nothing from the line, so it stays solid.
+    """
+
+    width = style.connector_width.points
+    if line == "dashed":
+        return f"{number(4.0 * width)} {number(3.0 * width)}"
+    if line == "dotted":
+        # Zero-length dashes with round caps are dots one line-width across.
+        return f"0 {number(2.5 * width)}"
+    return None
 
 
 def _net_path(

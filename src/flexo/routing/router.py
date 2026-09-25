@@ -2136,11 +2136,7 @@ def _routed_edge(
             position for position, point in enumerate(centerline) if _key(point) == _key(joined_at)
         )
         drawn = centerline[: index + 1]
-    shaft = edge_shaft(
-        drawn,
-        arrow_length=style.arrow_length.points,
-        standoff=style.connector_standoff.points,
-    )
+    shaft = _shaft(edge, drawn, style)
     metrics = measurer.measure(edge.label) if edge.label else None
     position = edge_label_position(centerline, metrics, style) if metrics is not None else None
     diagnostics: tuple[Diagnostic, ...] = ()
@@ -2170,6 +2166,26 @@ def _routed_edge(
         bundle=bundle,
         joined_at=joined_at,
     )
+
+
+def _shaft(edge: EdgeSpec, drawn: tuple[Point, ...], style: LayoutStyle) -> tuple[Point, ...]:
+    """The painted line: short of each end by its arrowhead and the standoff.
+
+    An end with no arrowhead meets its component; an end with one stops a
+    head's length plus ``connector_standoff`` short, so the tip lands just clear.
+    """
+
+    head = style.arrow_length.points + style.connector_standoff.points
+    if edge.arrow == "none":
+        return drawn
+    shaft = edge_shaft(
+        drawn,
+        arrow_length=style.arrow_length.points,
+        standoff=style.connector_standoff.points,
+    )
+    if edge.arrow == "both":
+        shaft = shorten_start(shaft, head - style.connector_standoff.points)
+    return shaft
 
 
 def _routed_net(
