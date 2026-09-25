@@ -28,3 +28,16 @@ def test_a_png_preview_needs_no_inkscape(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.outputs.png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     with pytest.raises(flexo.FlexoError, match="Inkscape is required"):
         flexo.build(_figure().spec, tmp_path, formats=("pdf",))
+
+
+def test_the_same_figure_compiles_to_the_same_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Embedded font subsets must not carry the time they were made."""
+
+    import time
+
+    from flexo.compiler import compile_figure
+
+    first = compile_figure(_figure().spec).document.text
+    real_time = time.time
+    monkeypatch.setattr(time, "time", lambda: real_time() + 86_400.0)
+    assert compile_figure(_figure().spec).document.text == first

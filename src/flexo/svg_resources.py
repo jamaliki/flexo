@@ -209,7 +209,9 @@ def _subset(face: object, raw: bytes, codepoints: frozenset[int]) -> bytes:
     options.drop_tables += ["DSIG"]
     from fontTools.ttLib import TTFont
 
-    font = TTFont(BytesIO(raw), fontNumber=getattr(face, "index", 0))
+    # Keep the face's own modified date: fontTools would stamp the save time
+    # into the subset, and the same figure would compile to different bytes.
+    font = TTFont(BytesIO(raw), fontNumber=getattr(face, "index", 0), recalcTimestamp=False)
     subsetter = subset.Subsetter(options)
     subsetter.populate(unicodes=sorted(codepoints))
     subsetter.subset(font)
