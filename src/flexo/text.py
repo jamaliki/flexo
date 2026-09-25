@@ -203,6 +203,27 @@ def drawn_weight(run: TextRun, inherited: int | None) -> int:
     return inherited
 
 
+def script_shift(shift: str, italic: bool, typography: TypographyStyle) -> float:
+    """How far a sub- or superscript run's baseline moves, in points, up positive.
+
+    Read from the primary face's own OS/2 offsets -- the numbers its designer
+    chose -- and emitted as a length, so every renderer lowers a subscript by
+    the same amount instead of interpreting the ``sub`` keyword its own way.
+    """
+
+    if shift == "normal":
+        return 0.0
+    face = font_stack(typography).primary(italic)
+    size = typography.size.points
+    # Clamped to typographic ranges: some faces ship a tool's default instead
+    # of a designed offset (Figtree says 0.075 em), which barely drops a script.
+    if shift == "sub":
+        drop = min(max(face.subscript_drop / face.upem, 0.15), 0.25)
+        return -drop * size
+    rise = min(max(face.superscript_rise / face.upem, 0.3), 0.45)
+    return rise * size
+
+
 def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
     """How far the lowest ink of measured text falls below its last baseline.
 
@@ -220,7 +241,7 @@ def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
             if run.baseline_shift != "sub":
                 continue
             font = font_data(run.italic, typography)
-            drop = font.subscript_drop / font.upem * size
+            drop = -script_shift("sub", run.italic, typography)
             depth = max(depth, drop + SHIFTED_SIZE * font.descent / font.upem * size)
     return depth
 
