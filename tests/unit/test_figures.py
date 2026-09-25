@@ -183,3 +183,19 @@ def test_line_styles_and_arrow_ends_change_only_the_ink() -> None:
     assert shaft.get("marker-end") == "url(#arrow.flow)"
     assert by_id["arrow.flow.start"].get("orient") == "auto-start-reverse"
     assert not lint_compilation(compiled).errors
+
+
+def test_a_volume_grows_with_each_dimension_and_carries_its_caption_below() -> None:
+    with Figure("maps") as figure:
+        with figure.module("m") as m:
+            small = m.volume("small", (8, 16, 16), label="small")
+            m.volume("big", (64, 128, 128), label="big", input=small)
+    compiled = compile_figure(figure.spec)
+    small_box = compiled.fitted.node("m.small.box").bounds
+    big_box = compiled.fitted.node("m.big.box").bounds
+    assert big_box.width > small_box.width and big_box.height > small_box.height
+    caption = compiled.fitted.node("m.big.label").bounds
+    assert caption.top >= big_box.bottom
+    edge = compiled.routed.edges[0]
+    assert (edge.spec.source.node_id, edge.spec.target.node_id) == ("m.small.box", "m.big.box")
+    assert not lint_compilation(compiled).errors

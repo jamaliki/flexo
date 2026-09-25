@@ -13,6 +13,7 @@ from flexo.components import (
     motif_enabled,
     node_tone,
     vector_grid,
+    volume_geometry,
 )
 from flexo.ir.fitted import FittedNode
 from flexo.ir.semantic import NodeSpec
@@ -96,6 +97,8 @@ def _render_kind(
         _circle(parent, node, style, palette)
     elif kind == "decision":
         _decision(parent, node, style, palette)
+    elif kind == "volume":
+        _volume(parent, node, style, palette)
     elif kind == "terminal":
         _terminal(parent, node, style, palette)
     elif kind == "concat":
@@ -253,6 +256,60 @@ def _junction(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
             stroke_width=style.stroke_width.points,
         ),
     )
+
+
+def _volume(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A feature map: a box in oblique projection, lit from above.
+
+    Three faces, back to front: the side, shaded with the stroke colour; the
+    top, the fill lightened toward the page; the front, the plain fill. Each is
+    a closed path in the component's own paint roles, so a tone or a retheme
+    recolours all three together.
+    """
+
+    spec = node.measured.spec
+    bounds = node.bounds
+    geometry = volume_geometry(spec)
+    depth, thickness, face = geometry.depth, geometry.thickness, geometry.face
+    left, top = bounds.x, bounds.y
+    front = (
+        (left, top + depth),
+        (left + thickness, top + depth),
+        (left + thickness, top + depth + face),
+        (left, top + depth + face),
+    )
+    lid = (
+        (left, top + depth),
+        (left + depth, top),
+        (left + depth + thickness, top),
+        (left + thickness, top + depth),
+    )
+    side = (
+        (left + thickness, top + depth),
+        (left + thickness + depth, top),
+        (left + thickness + depth, top + face),
+        (left + thickness, top + depth + face),
+    )
+    stroke = style.stroke_width.points
+    for name, corners, fill_role, opacity in (
+        ("side", side, "block-stroke", 0.35),
+        ("top", lid, "block-fill", 0.55),
+        ("body", front, "block-fill", None),
+    ):
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.{name}",
+            d="M " + " L ".join(f"{number(x)} {number(y)}" for x, y in corners) + " Z",
+            fill__opacity=opacity,
+            stroke__linejoin="round",
+            **paint_attributes(
+                palette=palette,
+                fill_role=fill_role,
+                stroke_role="block-stroke",
+                stroke_width=stroke,
+            ),
+        )
 
 
 def _decision(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
