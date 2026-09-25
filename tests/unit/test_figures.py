@@ -329,3 +329,17 @@ def test_a_loop_back_enters_from_the_side_that_lets_it_go_round() -> None:
         m.connect(ok, deploy, label="yes")
         m.connect(ok, build, label="no", line="dashed")
     assert not lint_compilation(compile_figure(figure.spec)).diagnostics
+
+
+def test_a_concat_can_be_made_before_its_inputs() -> None:
+    with Figure("late") as figure, figure.module("m") as m:
+        joined = m.concat("cat", count=3)
+        for index in range(3):
+            m.connect(m.block(f"b{index}", label=f"B{index}"), joined.port(f"input{index + 1}"))
+    compiled = compile_figure(figure.spec)
+    assert {edge.spec.target.port_name for edge in compiled.routed.edges} == {
+        "input1",
+        "input2",
+        "input3",
+    }
+    assert not lint_compilation(compiled).errors

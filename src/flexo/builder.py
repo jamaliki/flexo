@@ -1115,32 +1115,38 @@ class GroupBuilder:
         self,
         id: str,
         *,
-        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str],
+        inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
+        count: int | None = None,
         label: str | tuple[TextRun, ...] = "Concat",
         **options: object,
     ) -> NodeHandle:
-        """Join two or more values, one west port each, in the order given.
+        """Join two or more values, one west port each (``input1``, ``input2``, ...).
 
-        Two inputs is the minimum: a concat of one is the value itself.
+        ``inputs=`` wires the values in the order given. A concat whose inputs
+        are made later takes ``count=`` ports (two by default) and is wired with
+        ``connect(value, cat.input1)``. Two is the minimum: a concat of one is
+        the value itself.
         """
 
         sources = tuple(inputs)
-        if len(sources) < 2:
-            raise ValueError("concat requires at least two inputs")
+        size = count if count is not None else max(len(sources), 2)
+        if size < 2 or len(sources) > size:
+            raise ValueError(
+                f'concat "{self._scoped(id)}" joins at least two values, and no more than '
+                f"count={size} of them"
+            )
         ports = _authored_ports(options) or (
             *(
-                PortSpec(
-                    f"input{index + 1}",
-                    Side.WEST,
-                    (index + 1) / (len(sources) + 1),
-                    adaptive=True,
-                )
-                for index in range(len(sources))
+                PortSpec(f"input{index + 1}", Side.WEST, (index + 1) / (size + 1), adaptive=True)
+                for index in range(size)
             ),
             PortSpec("output", Side.EAST, adaptive=True),
         )
         result = self.node(id, "concat", label=label, ports=ports, **options)
-        self.wire(result, sources)
+        if sources:
+            names = tuple(f"input{index + 1}" for index in range(len(sources)))
+            for source, name in zip(sources, names, strict=True):
+                self.connect(source, result.port(name))
         return result
 
     def channels(
