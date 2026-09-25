@@ -186,10 +186,9 @@ def test_line_styles_and_arrow_ends_change_only_the_ink() -> None:
 
 
 def test_a_volume_grows_with_each_dimension_and_carries_its_caption_below() -> None:
-    with Figure("maps") as figure:
-        with figure.module("m") as m:
-            small = m.volume("small", (8, 16, 16), label="small")
-            m.volume("big", (64, 128, 128), label="big", input=small)
+    with Figure("maps") as figure, figure.module("m") as m:
+        small = m.volume("small", (8, 16, 16), label="small")
+        m.volume("big", (64, 128, 128), label="big", input=small)
     compiled = compile_figure(figure.spec)
     small_box = compiled.fitted.node("m.small.box").bounds
     big_box = compiled.fitted.node("m.big.box").bounds
