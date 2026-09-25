@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from flexo.components import (
     attachment_lane_tracks,
@@ -14,9 +14,11 @@ from flexo.components import (
     normalize_node,
     vector_stack_width,
 )
+from flexo.conventions import Conventions, parse_conventions
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     TITLE_SIDES,
+    EdgeShape,
     EdgeSpec,
     FigureSpec,
     GroupSpec,
@@ -30,16 +32,17 @@ from flexo.ir.semantic import (
     Scalar,
     TextRun,
 )
+from flexo.markup import parse_label
 from flexo.style import (
     PAINT_PARTS,
     PAINT_PROPERTY_PREFIX,
     RAMP_ROLES,
-    STYLES,
     LayoutStyle,
     Palette,
     VectorPreset,
     normalize_colour,
 )
+from flexo.themes import resolve_style
 from flexo.units import Extent, Length, parse_extent, pt
 from flexo.validate import normalize_and_validate
 
@@ -200,6 +203,16 @@ class Figure:
     ``width`` takes a length or one of the publication presets the style defines
     (``"single-column"``, ``"double-column"``, ``"presentation"``); ``height`` is
     normally left out, so the canvas ends at the content plus its margin.
+
+    ``theme`` picks the whole look -- type, line work, and colour rules -- from
+    ``flexo.THEMES`` (``"paper"``, ``"tikz"``, ``"dark"``, ``"swiss"``, ...).
+    ``palette`` is a named palette (``flexo.palettes()``), a list of hex
+    colours, or ``"default"`` for the theme's own. ``font`` sets the figure in
+    any family Flexo can find -- bundled, installed, or registered with
+    ``flexo.register_font`` -- keeping the theme's sizes and weights.
+    ``conventions`` changes how branches, merges, and shared arrivals are
+    drawn, e.g. ``{"branch": "dot"}``; see ``flexo.Conventions``.
+    ``style`` is the older name for ``theme`` and means the same thing.
     """
 
     def __init__(
@@ -208,15 +221,26 @@ class Figure:
         *,
         width: str | Length = "double-column",
         height: Length | str | float | None = None,
-        style: str = "paper",
-        palette: str = "default",
+        theme: str | None = None,
+        palette: str | Sequence[str] = "default",
+        font: str | None = None,
+        conventions: Conventions | Mapping[str, str] | None = None,
         layout: LayoutSpec | None = None,
+        style: str | None = None,
     ) -> None:
+        if theme is not None and style is not None and theme != style:
+            raise ValueError("theme= and style= name the same thing; pass only one")
         self.id = id
         self.width = width
         self.height = Length.parse(height) if height is not None else None
-        self.style = style
-        self.palette = palette
+        self.style = theme or style or "paper"
+        self.palette = (
+            palette
+            if isinstance(palette, str)
+            else ",".join(normalize_colour(colour) for colour in palette)
+        )
+        self.font = font
+        self.conventions = parse_conventions(conventions)
         root = _GroupDraft(
             "root",
             layout or LayoutSpec("column", align="center", justify="center"),
@@ -245,33 +269,18 @@ class Figure:
         *,
         label: str | tuple[TextRun, ...] = "",
         layout: LayoutKind | LayoutSpec = "row",
-        gap: Length | str | float | None = None,
-        align: str = "center",
         justify: str = "center",
-        width: Length | str | float | None = None,
-        height: Length | str | float | None = None,
         role: str = "module",
-        title_side: str = "left",
-        anchor: str | None = None,
-        shadow: bool = False,
-        paint: Mapping[str, str] | None = None,
+        **options: Any,
     ) -> GroupBuilder:
-        """Open a titled module directly on the root: ``figure.root.group`` in one call."""
+        """Open a titled module directly on the root: ``figure.root.group`` in one call.
+
+        It takes every option ``group`` takes; only the defaults differ (the
+        contents are centred, and the container is a titled module).
+        """
 
         return self.root.group(
-            id,
-            label=label,
-            layout=layout,
-            gap=gap,
-            align=align,
-            justify=justify,
-            width=width,
-            height=height,
-            role=role,
-            title_side=title_side,
-            anchor=anchor,
-            shadow=shadow,
-            paint=paint,
+            id, label=label, layout=layout, justify=justify, role=role, **options
         )
 
     @property
@@ -305,6 +314,8 @@ class Figure:
                 root="root",
                 style=self.style,
                 palette=self.palette,
+                font=self.font,
+                conventions=self.conventions,
                 nodes=tuple(self._nodes),
                 edges=tuple(self._edges),
                 nets=tuple(self._nets),
@@ -473,7 +484,7 @@ class GroupBuilder:
         row_gap: Length | str | float | None = None,
         column_gap: Length | str | float | None = None,
         padding: Padding | None = None,
-        align: str = "center",
+        align: str = "auto",
         justify: str = "start",
         columns: int | None = None,
         column_widths: Mapping[int, Length | str | float] | None = None,
@@ -524,6 +535,10 @@ class GroupBuilder:
                 f'unknown title side "{title_side}" for group "{scoped_id}"; '
                 f"valid sides: {', '.join(TITLE_SIDES)}"
             )
+        if padding is None and role == "layout":
+            # A layout group draws nothing, so padding would only be unexplained
+            # extra gap between its children and their neighbours.
+            padding = 0
         uniform, top, right, bottom, left = _padding(padding)
         layout_spec = (
             layout
@@ -622,6 +637,7 @@ class GroupBuilder:
         input: NodeHandle | PortRef | str | None = None,
         inputs: tuple[NodeHandle | PortRef | str, ...]
         | list[NodeHandle | PortRef | str] = (),
+        tone: str | int | None = None,
     ) -> NodeHandle:
         """Author one component.
 
@@ -641,6 +657,13 @@ class GroupBuilder:
         ``motif=False`` drops the component's decorative motif -- an MLP's three
         dots, a matrix's cell grid -- and changes nothing else.
 
+        ``tone="name"`` colours the component: every component given the same
+        tone shares one colour, and each tone takes the next colour of the
+        theme's palette. Kinds come with a tone already (attention, add-norm,
+        MLP, ...); a plain ``block`` is neutral until it is given one.
+        ``tone=3`` picks the palette's third colour outright, and
+        ``tone="neutral"`` takes a kind's colour away.
+
         ``shadow=True`` gives the component a soft drop shadow. Paint only: a
         shadow moves nothing and reserves no space.
 
@@ -656,6 +679,8 @@ class GroupBuilder:
         resolved.update(_paint_properties(paint))
         if not motif:
             resolved["motif"] = False
+        if tone is not None:
+            resolved["tone"] = str(tone)
         node = normalize_node(
             NodeSpec(
                 self._scoped(id),
@@ -691,6 +716,9 @@ class GroupBuilder:
 
         if not sources:
             return
+        if "input" not in target.ports and {"q", "k", "v"} <= set(target.ports):
+            self._wire_attention(target, sources)
+            return
         numbered = tuple(f"input{index + 1}" for index in range(len(sources)))
         if len(sources) > 1 and all(name in target.ports for name in numbered):
             names = numbered
@@ -698,6 +726,31 @@ class GroupBuilder:
             names = (_single_input(target),) * len(sources)
         for source, name in zip(sources, names, strict=True):
             self.connect(source, target.port(name))
+
+    def _wire_attention(
+        self, target: NodeHandle, sources: tuple[NodeHandle | PortRef | str, ...]
+    ) -> None:
+        """Wire values into attention the way the names say.
+
+        One source is self-attention: it is read as query, key, and value, so
+        it becomes one net into all three. Two are cross-attention: the first
+        is the query and the second is read as key and value. Three are the
+        query, key, and value in that order.
+        """
+
+        if len(sources) == 1:
+            self.net(src=sources[0], sinks=[target.q, target.k, target.v])
+        elif len(sources) == 2:
+            self.connect(sources[0], target.q)
+            self.net(src=sources[1], sinks=[target.k, target.v])
+        elif len(sources) == 3:
+            for source, port in zip(sources, ("q", "k", "v"), strict=True):
+                self.connect(source, target.port(port))
+        else:
+            raise ValueError(
+                f'attention "{target.id}" takes one input (self-attention), two (query, '
+                f"then key and value), or three (query, key, value), not {len(sources)}"
+            )
 
     def block(
         self,
@@ -1225,10 +1278,20 @@ class GroupBuilder:
         attention boxes rather than on the glyphs and captions hanging beneath
         them.
 
+        ``input=x`` is self-attention: ``x`` is read as query, key, and value.
+        ``inputs=[x, memory]`` is cross-attention: ``x`` is the query and
+        ``memory`` the keys and values. Pass either those or ``q=``/``k=``/``v=``.
+
         For attention drawn as a captioned arrow instead of a box, reach for
         ``merge`` with a formula label.
         """
 
+        if (options.get("input") is not None or options.get("inputs")) and any(
+            source is not None for source in (q, k, v)
+        ):
+            raise ValueError(
+                f'attention "{self._scoped(id)}" takes input=/inputs= or q=/k=/v=, not both'
+            )
         if not vectors:
             result = self.node(id, "attention", label=label, **options)
             for source, name in ((q, "q"), (k, "k"), (v, "v")):
@@ -1279,24 +1342,32 @@ class GroupBuilder:
                 "the glyphs are centred under the block's q/k/v ports, which is a "
                 "fraction of a width the block would otherwise take from its label"
             )
-        style = STYLES.get(self.figure.style) or LayoutStyle()
+        style = resolve_style(self.figure.style, self.figure.font)
         block_width = style.resolve_extent(parse_extent(width)).points  # type: ignore[arg-type]
         offsets = _attention_offsets(tuple(options.get("ports") or ()), tuple(presets))
         presets = {name: presets[name] for name in sorted(presets, key=offsets.__getitem__)}
         tracks = attachment_lane_tracks(tuple(offsets[name] for name in presets), block_width)
-        caption = _glyph_caption(
-            tracks[1],
-            max(
-                vector_stack_width(
-                    preset.columns if isinstance(preset, VectorPreset) else 1, style
-                )
-                for preset in presets.values()
-            ),
-            style,
+        from flexo.text import TextMeasurer
+
+        stack = max(
+            vector_stack_width(preset.columns if isinstance(preset, VectorPreset) else 1, style)
+            for preset in presets.values()
         )
+        measurer = TextMeasurer(style.typography)
+        needed = max(measurer.measure((TextRun(name.upper()),)).width for name in presets)
+        # A lane must hold its stack with a caption's worth of air either side.
+        # A width chosen at paper scale can be too narrow for slide type; the
+        # block then widens until its lanes fit, as a box grows for its label.
+        lane = stack + 2.0 * (needed + style.caption_clearance.points)
+        if tracks[1] + 1e-6 < lane:
+            block_width *= lane / tracks[1]
+            width = pt(block_width)
+            tracks = attachment_lane_tracks(tuple(offsets[name] for name in presets), block_width)
+        caption = _glyph_caption(tracks[1], stack, style, needed=needed)
         composite = self.column(
             id,
             padding=0,
+            align="center",
             role="layout",
             anchor="block",
             at=options.pop("at", None),  # type: ignore[arg-type]
@@ -1371,6 +1442,123 @@ class GroupBuilder:
             self.wire(result, (input,))
         return result
 
+    def text(
+        self,
+        id: str,
+        label: str | tuple[TextRun, ...],
+        *,
+        input: NodeHandle | PortRef | str | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """Words an arrow can start or end at, with no box around them.
+
+        "Inputs" under an encoder and "Output probabilities" over a decoder:
+        the ends of a figure are often just named, not drawn.
+        """
+
+        result = self.node(id, "text", label=label, **options)
+        if input is not None:
+            self.wire(result, (input,))
+        return result
+
+    def op(
+        self,
+        id: str,
+        symbol: str = "+",
+        *,
+        input: NodeHandle | PortRef | str | None = None,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str] = (),
+        **options: object,
+    ) -> NodeHandle:
+        """An operation on values that meet: a small circle with its symbol in it.
+
+        ``"+"``, ``"x"`` (or the times sign, or ``"*"``), ``"."``, ``"-"`` and
+        ``"~"`` (a sine, for a positional encoding) are drawn as strokes, so they
+        sit dead centre in any typeface; any other ``symbol`` (a sigma, a double
+        bar) is set as text. Each value arriving gets its own arrow
+        into the circle, on the side facing where it comes from, and the result
+        leaves on the side facing what it feeds -- the drawing of a residual add
+        or a gating multiply in a paper, with no port table.
+        """
+
+        from flexo.components import OP_SYMBOLS
+
+        drawn = symbol.strip().lower() in OP_SYMBOLS or symbol.strip() in OP_SYMBOLS
+        label = "" if drawn else symbol
+        properties = dict(options.pop("properties", None) or {})  # type: ignore[arg-type]
+        properties["symbol"] = symbol
+        result = self.node(id, "op", label=label, properties=properties, **options)
+        sources = ((input,) if input is not None else ()) + tuple(inputs)
+        for source in sources:
+            self.connect(source, result.port("input"))
+        return result
+
+    def circle(
+        self,
+        id: str,
+        label: str | tuple[TextRun, ...] = "",
+        *,
+        shaded: bool = False,
+        **options: Any,
+    ) -> NodeHandle:
+        """A labelled circle: a neuron, a random variable, a node of a graph.
+
+        It is sized to hold its label (``width=`` sets a larger diameter), takes a
+        tone like any component, and ``shaded=True`` fills it grey -- how a
+        graphical model marks an observed variable. Its ports face whatever it
+        is wired to, as an operator's do.
+        """
+
+        properties = dict(options.pop("properties", None) or {})
+        if shaded:
+            properties["shaded"] = True
+        return self.node(id, "circle", label=label, properties=properties, **options)
+
+    def decision(
+        self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
+    ) -> NodeHandle:
+        """A flowchart decision: a diamond sized round its question.
+
+        Its ports sit at the four corners and face what they are wired to, so
+        the "yes" and "no" branches leave from the corners they point toward.
+        """
+
+        return self.node(id, "decision", label=label, **options)
+
+    def terminal(
+        self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
+    ) -> NodeHandle:
+        """A flowchart start or end: a pill-shaped box."""
+
+        return self.node(id, "terminal", label=label, **options)
+
+    def add(
+        self,
+        id: str,
+        *,
+        input: NodeHandle | PortRef | str | None = None,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str] = (),
+        **options: object,
+    ) -> NodeHandle:
+        """An elementwise sum: ``op(id, "+")``."""
+
+        return self.op(id, "+", input=input, inputs=inputs, **options)
+
+    def multiply(
+        self,
+        id: str,
+        *,
+        input: NodeHandle | PortRef | str | None = None,
+        inputs: tuple[NodeHandle | PortRef | str, ...]
+        | list[NodeHandle | PortRef | str] = (),
+        **options: object,
+    ) -> NodeHandle:
+        """An elementwise product: ``op(id, "x")``, drawn as a times sign."""
+
+        return self.op(id, "\u00d7", input=input, inputs=inputs, **options)
+
     def net(
         self,
         *,
@@ -1444,6 +1632,7 @@ class GroupBuilder:
         label: str | tuple[TextRun, ...] = "",
         lane: str | None = None,
         via: Side | str | None = None,
+        shape: EdgeShape = "auto",
     ) -> EdgeSpec:
         """Draw one connector from ``source`` to ``target``.
 
@@ -1458,6 +1647,10 @@ class GroupBuilder:
         side, and the arriving port faces the hinted side when its own side is a
         component default. It is one word for "go round the near side", and it
         reports ``routing.via.clamped`` if the geometry left it no choice.
+
+        ``shape="straight"`` draws one straight segment between the two outlines
+        instead of a routed path; ``"auto"`` follows the figure's ``lines``
+        convention.
         """
 
         source_ref = _reference(source, source_port)
@@ -1471,9 +1664,30 @@ class GroupBuilder:
             _label(label),
             lane,
             via=_side(via, "via side"),
+            shape=shape,
         )
         self.figure._edges.append(edge)
         return edge
+
+    def connect_all(
+        self,
+        sources: Sequence[NodeHandle | PortRef | str],
+        targets: Sequence[NodeHandle | PortRef | str],
+        *,
+        shape: EdgeShape = "auto",
+        role: str = "flow",
+    ) -> list[EdgeSpec]:
+        """Connect every source to every target: a fully connected layer.
+
+        One edge per pair, each drawn per ``shape`` -- pass ``"straight"`` for
+        the familiar lattice of diagonals between two layers of neurons.
+        """
+
+        return [
+            self.connect(source, target, shape=shape, role=role)
+            for source in sources
+            for target in targets
+        ]
 
     def residual(
         self,
@@ -1709,6 +1923,7 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
             Side.WEST,
             (index + 1) / (input_count + 1),
             adaptive=True,
+            auto_side=True,
         )
         for index in range(input_count)
     )
@@ -1719,6 +1934,7 @@ def _processing_ports(input_count: int, outputs: tuple[str, ...]) -> tuple[PortS
             Side.EAST,
             (index + 1) / (len(output_names) + 1),
             adaptive=True,
+            auto_side=True,
         )
         for index, name in enumerate(output_names)
     )
@@ -1794,7 +2010,9 @@ apart, each nearer the other glyph's stack than to its own.
 """
 
 
-def _glyph_caption(lane: float, stack: float, style: LayoutStyle) -> _SideCaption | None:
+def _glyph_caption(
+    lane: float, stack: float, style: LayoutStyle, *, needed: float = 0.0
+) -> _SideCaption | None:
     """The caption box that fits beside a ``stack``-wide glyph in a ``lane``.
 
     A lane is wider than the stack standing in it -- it is as wide as the port
@@ -1806,15 +2024,15 @@ def _glyph_caption(lane: float, stack: float, style: LayoutStyle) -> _SideCaptio
     with the words in the padding, and the whole glyph is precisely as wide as the
     lane it fills.
 
-    ``None`` when that half-lane holds no more than the air itself, which is a
-    lane too narrow for a caption beside it; the composite then keeps the caption
-    under the stack, where it costs the feeds their straightness but is at least
-    legible.
+    ``None`` when that half-lane is narrower than the caption (``needed``, its
+    measured width) -- slide type in a paper-sized block, say; the composite
+    then keeps the caption under the stack, where it costs the feeds their
+    straightness but is at least legible.
     """
 
     gap = style.caption_clearance.points
     reserve = max(0.0, lane / 2.0 - stack / 2.0) - gap
-    if reserve <= 0.0:
+    if reserve <= 0.0 or reserve + 1e-6 < needed:
         return None
     return _SideCaption(_GLYPH_CAPTION_SIDE, pt(reserve), pt(gap))
 
@@ -1840,7 +2058,7 @@ def _glyph_caption_gap(style_name: str) -> Length:
     approach to protect.
     """
 
-    style = STYLES.get(style_name) or LayoutStyle()
+    style = resolve_style(style_name)
     return Length(style.arrival_clearance.points + style.caption_clearance.points)
 
 
@@ -1851,7 +2069,7 @@ def _vector_label_gap(style_name: str) -> Length:
     against the style the figure names; an unknown name is left to validation.
     """
 
-    return (STYLES.get(style_name) or LayoutStyle()).vector_label_gap
+    return resolve_style(style_name).vector_label_gap
 
 
 def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
@@ -1864,7 +2082,7 @@ def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
 
 def _label(value: str | tuple[TextRun, ...]) -> tuple[TextRun, ...]:
     if isinstance(value, str):
-        return (TextRun(value),) if value else ()
+        return parse_label(value)
     return value
 
 

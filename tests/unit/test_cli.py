@@ -24,13 +24,9 @@ def clipped_label_figure() -> FigureSpec:
         "clipped",
         width=pt(120),
         nodes=(
-            NodeSpec(
-                "tiny",
-                "block",
-                (TextRun("A label far too long for this block"),),
-                width=pt(12),
-                height=pt(8),
-            ),
+            # A block grows around its words; an operator circle is its own
+            # size, so a long label in one cannot fit.
+            NodeSpec("tiny", "op", (TextRun("A label far too long for this circle"),)),
         ),
         groups=(GroupSpec("root", ("tiny",), LayoutSpec("row"), role="canvas"),),
     )

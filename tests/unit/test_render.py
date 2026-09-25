@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from collections import Counter
 
 import pytest
 
 from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
 from flexo.components import INSET_INK, motif_area, vector_grid
-from flexo.geometry import Side
+from flexo.conventions import Conventions
+from flexo.geometry import Point, Side
 from flexo.ir.semantic import PortSpec, TextRun
 from flexo.lint import lint_compilation
 from flexo.render_common import SHADOW_LAYERS
@@ -16,9 +18,12 @@ from flexo.style import DEFAULT_PALETTE, GRAYSCALE_PALETTE, STYLES, Palette, Vec
 from flexo.svg import SVG_NS, number
 from flexo.text import SHIFTED_SIZE, TextMeasurer
 from flexo.theme import retheme_svg
+from flexo.themes import resolve_palette
 from flexo.units import pt
 
 _STYLE = STYLES["paper"]
+_PAINT = resolve_palette("paper")
+"""The paint a figure gets when it names no theme or palette."""
 
 
 def _figure(**vector_options: object) -> Figure:
@@ -67,7 +72,7 @@ def test_vector_shades_cells_along_its_ramp_role() -> None:
     for cell in cells:
         assert cell.get("data-flexo-fill") == "ramp-kv"
         assert cell.get("data-flexo-stroke") == "ramp-kv"
-        assert cell.get("fill") == DEFAULT_PALETTE.get("ramp-kv")
+        assert cell.get("fill") == _PAINT.get("ramp-kv")
     opacities = [float(cell.get("fill-opacity", "1")) for cell in cells]
     first_column, second_column = opacities[:3], opacities[3:]
     assert first_column == second_column, "columns of one vector share the ramp"
@@ -207,48 +212,64 @@ def _paths(svg_text: str) -> dict[str, str]:
     }
 
 
-def test_single_stem_rail_terminals_turn_on_a_fillet() -> None:
-    """R22: the rail hands its last two radii to the only stem it meets there."""
+def _net_pieces(net) -> list[tuple[Point, ...]]:
+    return [piece for piece in net.pieces if len(piece) > 1]
+
+
+def test_net_bends_turn_on_a_fillet_inside_their_piece() -> None:
+    """R22: a net is drawn in pieces that end only at ports and junctions.
+
+    So every bend is *inside* a piece, where it turns on the elbow fillet --
+    there is no piece boundary sitting on a corner for the rounding to miss.
+    """
 
     compiled = compile_figure(_merge_figure().spec)
     net = compiled.routed.net("combined")
-    radius = _STYLE.elbow_radius.points
     paths = _paths(compiled.document.text)
-    rail = paths["combined.rail"]
-    top, bottom = sorted(point.y for point in net.rail)
-    assert rail.startswith(f"M {number(net.rail[0].x)} {number(top + 2.0 * radius)}")
-    assert rail.endswith(f"V {number(bottom - 2.0 * radius)}")
-    for stem_id in ("combined.source.1", "combined.source.2"):
-        assert " Q " in paths[stem_id], "the stem owns the rounded corner"
-        # The lead-in restores exactly what the rail gave up, so no ink is lost.
-        assert f"{number(net.rail[0].x)}" in paths[stem_id]
+    bent = [
+        path_id
+        for path_id, data in paths.items()
+        if path_id.startswith("combined.") and ((" H " in data and " V " in data) or " Q " in data)
+    ]
+    assert bent, "the merge turns somewhere"
+    assert all(" Q " in paths[path_id] for path_id in bent)
+    ends = Counter(
+        (round(point.x, 5), round(point.y, 5))
+        for piece in _net_pieces(net)
+        for point in (piece[0], piece[-1])
+    )
+    for piece in _net_pieces(net):
+        for point in piece[1:-1]:
+            assert (round(point.x, 5), round(point.y, 5)) not in ends, "no piece ends mid-bend"
 
 
-def test_junction_dots_stay_on_the_emitted_rail() -> None:
-    """R8/R22: a branch dot marks a fork, so it may never leave the rail path."""
+def test_junction_dots_mark_where_three_pieces_meet() -> None:
+    """R8: a dot, when asked for, marks a fork -- a point three pieces leave from."""
 
-    compiled = compile_figure(_merge_figure().spec)
+    compiled = compile_figure(_merge_figure(joint="dot").spec)
     net = compiled.routed.net("combined")
     root = ET.fromstring(compiled.document.text)
     dots = [
-        item
+        (float(item.get("cx", "0")), float(item.get("cy", "0")))
         for item in root.iter(f"{{{SVG_NS}}}circle")
         if (item.get("id") or "").startswith("combined.junction.")
     ]
-    assert dots, "the arrival forks off the rail"
-    low, high = sorted(point.y for point in net.rail)
-    rail_start = low + 2.0 * _STYLE.elbow_radius.points
-    rail_end = high - 2.0 * _STYLE.elbow_radius.points
-    for dot in dots:
-        assert float(dot.get("cx", "0")) == pytest.approx(net.rail[0].x)
-        assert rail_start <= float(dot.get("cy", "0")) <= rail_end
+    assert dots, "the two arrivals fork off one trunk"
+    ends = Counter(
+        (round(point.x, 3), round(point.y, 3))
+        for piece in _net_pieces(net)
+        for point in (piece[0], piece[-1])
+    )
+    for x, y in dots:
+        assert ends[(round(x, 3), round(y, 3))] >= 3
 
 
 def test_an_arrow_joint_marks_every_approach_and_drops_the_dot() -> None:
-    """R8/R20: the branch points into the trunk; the trunk crosses it unbroken.
+    """R8/R20: each branch points into the through-line; the dot gives way.
 
-    This sink sits between its two sources, so the rail approaches the joint
-    from both sides and each approach earns its own marker.
+    This sink sits between its two sources, so both arrive along the trunk
+    from either side and each earns its own marker, one arrow plus a standoff
+    short of the joint.
     """
 
     compiled = compile_figure(_merge_figure(joint="arrow").spec)
@@ -260,28 +281,25 @@ def test_an_arrow_joint_marks_every_approach_and_drops_the_dot() -> None:
         for item in root.iter(f"{{{SVG_NS}}}circle")
         if (item.get("id") or "").startswith("combined.junction.")
     ], "an arrowhead stands in for the dot it replaces"
-    rails = {
+    approaches = {
         item.get("id", ""): item
         for item in root.iter(f"{{{SVG_NS}}}path")
-        if (item.get("id") or "").startswith("combined.rail")
+        if (item.get("id") or "").startswith("combined.source")
     }
-    assert set(rails) == {"combined.rail.1", "combined.rail.2"}
-    # Every piece is drawn toward the joint, so its marker points into the trunk.
-    assert all(rail.get("marker-end") == "url(#arrow.flow)" for rail in rails.values())
+    assert len(approaches) == 2
+    assert all(path.get("marker-end") == "url(#arrow.flow)" for path in approaches.values())
     reach = _STYLE.arrow_length.points + _STYLE.connector_standoff.points
-    tips = sorted(float(rail.get("d", "").rsplit(" ", 1)[-1]) for rail in rails.values())
-    assert tips == [
-        pytest.approx(joint.y - reach),
-        pytest.approx(joint.y + reach),
-    ], "each approach stops an arrow plus a standoff short of the trunk"
+    for stem in net.source_stems:
+        tip = stem.shaft[-1]
+        assert tip.distance_to(joint) == pytest.approx(reach)
     arrival = _paths(compiled.document.text)["combined.target.1"]
     assert arrival.startswith(f"M {number(joint.x)} {number(joint.y)}")
 
 
-def test_a_dot_joint_marks_the_branch_even_when_the_style_never_dots() -> None:
-    """``joint="dot"`` is an authored mark, so it outranks the style token."""
+def test_a_dot_joint_marks_the_branch_whatever_the_conventions_say() -> None:
+    """``joint="dot"`` is an authored mark, so it outranks the conventions."""
 
-    style = STYLES["paper"].with_updates(junction_dots="never")
+    style = STYLES["paper"].with_updates(conventions=Conventions(merge="plain"))
     quiet = compile_figure(_merge_figure().spec, style=style)
     assert "combined.junction.1" not in quiet.document.text
     forced = compile_figure(_merge_figure(joint="dot").spec, style=style)
@@ -332,8 +350,9 @@ def test_paint_overrides_label_text_only() -> None:
     assert label.get("fill") == "#9fe1cb"
     assert label.get("data-flexo-fill") is None
     body = _element(document, "m.mlp.body")
-    assert body.get("data-flexo-fill") == "block-fill", "only the label was overridden"
-    assert body.get("fill") == DEFAULT_PALETTE.get("block-fill")
+    # The MLP is painted in its kind's tone -- a role, so retheme still reaches it.
+    assert body.get("data-flexo-fill") == "tone-1-fill", "only the label was overridden"
+    assert body.get("fill") == _PAINT.get("tone-1-fill")
     assert _element(document, "m.body.label").get("data-flexo-fill") == "ink"
     assert _element(retheme_svg(document, GRAYSCALE_PALETTE), "m.mlp.label").get(
         "fill"
@@ -445,10 +464,10 @@ def test_a_group_part_left_out_keeps_its_role() -> None:
     container = _element(document, "m.container")
     assert container.get("data-flexo-fill") is None
     assert container.get("data-flexo-stroke") == "container-stroke"
-    assert container.get("stroke") == DEFAULT_PALETTE.get("container-stroke")
+    assert container.get("stroke") == _PAINT.get("container-stroke")
     title = _element(document, "m.label")
     assert title.get("data-flexo-fill") == "ink"
-    assert title.get("fill") == DEFAULT_PALETTE.get("ink")
+    assert title.get("fill") == _PAINT.get("ink")
 
 
 def test_group_paint_is_paint_only() -> None:
@@ -604,7 +623,7 @@ def test_nothing_casts_a_shadow_unless_it_asks_to() -> None:
 
 def test_a_shadow_rethemes_by_role_like_every_other_paint() -> None:
     document = compile_figure(_shadow_figure(shadow=True).spec).document.text
-    assert DEFAULT_PALETTE.get("shadow") in document
+    assert _PAINT.get("shadow") in document
     assert GRAYSCALE_PALETTE.get("shadow") in retheme_svg(document, GRAYSCALE_PALETTE)
 
 
@@ -669,8 +688,9 @@ def test_a_squeezed_inset_shrinks_its_illustration_instead_of_colliding() -> Non
     left, top, right, bottom = _ink_box(compilation.document.text, "m.i.illustration")
     assert bottom - top < INSET_INK.height, "scaled down to the room it has"
     assert right - left < INSET_INK.width, "and scaled, not cropped"
+    # Coordinates are written to five decimals, so the ratio is exact to about that.
     assert (right - left) / (bottom - top) == pytest.approx(
-        INSET_INK.width / INSET_INK.height
+        INSET_INK.width / INSET_INK.height, rel=1e-5
     ), "aspect preserved"
     band = node.bounds.y + _STYLE.padding_y.points + node.measured.label.height
     assert top >= band + _STYLE.motif_label_gap.points - 1e-6, "still under the band"
@@ -758,9 +778,10 @@ def test_a_caption_role_paints_muted_ink_and_still_rethemes() -> None:
         column.attention("mha", label="Attention", width=pt(120.0), vectors=True)
     document = compile_figure(figure.spec).document.text
     caption = _element(document, "m.mha.qkv.q.label.label")
-    assert caption.get("fill") == DEFAULT_PALETTE.get("muted-ink")
+    assert caption.get("fill") == _PAINT.get("muted-ink")
     assert caption.get("data-flexo-fill") == "muted-ink", "a role, so retheme reaches it"
-    assert _element(document, "m.mha.block.label").get("data-flexo-fill") == "ink"
+    # The block's own name paints the ink of its tone: a role, not a literal.
+    assert _element(document, "m.mha.block.label").get("data-flexo-fill") == "tone-1-ink"
     themed = retheme_svg(document, GRAYSCALE_PALETTE)
     assert _element(themed, "m.mha.qkv.q.label.label").get("fill") == GRAYSCALE_PALETTE.get(
         "muted-ink"

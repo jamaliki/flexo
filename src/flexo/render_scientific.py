@@ -83,7 +83,7 @@ def _grid(
                 height=max(0.8, area.height / rows - 0.8),
                 rx=0.4,
                 opacity=fraction,
-                **paint_attributes(palette=palette, fill_role="accent-stroke"),
+                **paint_attributes(palette=palette, fill_role="accent-motif"),
             )
 
 
@@ -99,7 +99,7 @@ _GRAPH_NODE_RADIUS = 2.5
 
 
 def _graph(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
-    base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="container-stroke")
+    base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="inset-stroke")
     if not motif_enabled(node.measured.spec):
         return
     area = _motif_bounds(node, style)
@@ -148,7 +148,7 @@ def _inset(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
     that still reads, where one drawn over its own caption is not.
     """
 
-    base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="container-stroke")
+    base_rect(parent, node, style, palette, fill_role="inset-fill", stroke_role="inset-stroke")
     if not motif_enabled(node.measured.spec):
         return
     area = _motif_bounds(node, style)

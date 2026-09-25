@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from flexo.components import COMPONENTS
+from flexo.conventions import parse_conventions
 from flexo.geometry import Side
 from flexo.ir.semantic import (
     EdgeSpec,
@@ -22,6 +23,7 @@ from flexo.ir.semantic import (
     TextRun,
     Waypoint,
 )
+from flexo.markup import has_markup, parse_label
 from flexo.schema import validate_document
 from flexo.units import CellSpan, Extent, Length, parse_extent
 from flexo.validate import normalize_and_validate
@@ -51,6 +53,8 @@ def parse_figure(document: object) -> FigureSpec:
         root=figure_data["root"],
         style=figure_data.get("style", "paper"),
         palette=figure_data.get("palette", "default"),
+        font=figure_data.get("font"),
+        conventions=parse_conventions(figure_data.get("conventions")),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(_edge(item) for item in document["edges"]),
         nets=tuple(_net(item) for item in document.get("nets", [])),
@@ -102,6 +106,10 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
     }
     if figure.height is not None:
         result["height"] = _length_data(figure.height)
+    if figure.font is not None:
+        result["font"] = figure.font
+    if figure.conventions is not None and figure.conventions.changes():
+        result["conventions"] = figure.conventions.changes()
     return result
 
 
@@ -149,6 +157,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["arrive"] = edge.arrive.value
     if edge.via:
         result["via"] = edge.via.value
+    if edge.shape != "auto":
+        result["shape"] = edge.shape
     if edge.waypoints:
         result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
     return result
@@ -214,7 +224,7 @@ def _layout_data(layout: LayoutSpec) -> dict[str, object]:
         value = getattr(layout, name)
         if value is not None:
             result[name] = _length_data(value)
-    if layout.align != "center":
+    if layout.align != "auto":
         result["align"] = layout.align
     if layout.justify != "start":
         result["justify"] = layout.justify
@@ -259,7 +269,7 @@ def _waypoint_data(waypoint: Waypoint) -> dict[str, object]:
 def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
     if not label:
         return
-    if len(label) == 1 and label[0] == TextRun(label[0].text):
+    if len(label) == 1 and label[0] == TextRun(label[0].text) and not has_markup(label[0].text):
         result["label"] = label[0].text
         return
     result["label"] = [
@@ -284,7 +294,7 @@ def _extent_data(value: Extent) -> str:
 
 def _label(value: object = "") -> tuple[TextRun, ...]:
     if isinstance(value, str):
-        return (TextRun(value),) if value else ()
+        return parse_label(value)
     assert isinstance(value, list)
     return tuple(
         TextRun(
@@ -331,6 +341,7 @@ def _edge(data: dict[str, Any]) -> EdgeSpec:
         depart=Side(data["depart"]) if data.get("depart") else None,
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
         via=Side(data["via"]) if data.get("via") else None,
+        shape=data.get("shape", "auto"),
     )
 
 
@@ -370,7 +381,7 @@ def _group(data: dict[str, Any]) -> GroupSpec:
             kind=layout["kind"],
             gap=_optional_length(layout.get("gap")),
             padding=_optional_length(layout.get("padding")),
-            align=layout.get("align", "center"),
+            align=layout.get("align", "auto"),
             justify=layout.get("justify", "start"),
             columns=layout.get("columns"),
             width=_optional_length(layout.get("width")),

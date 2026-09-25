@@ -96,7 +96,18 @@
         "height": {"$ref": "#/$defs/length"},
         "root": {"$ref": "#/$defs/identifier"},
         "style": {"$ref": "#/$defs/identifier", "default": "paper"},
-        "palette": {"$ref": "#/$defs/identifier", "default": "default"}
+        "palette": {"type": "string", "minLength": 1, "default": "default"},
+        "font": {"type": "string", "minLength": 1},
+        "conventions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "branch": {"enum": ["plain", "dot"]},
+            "merge": {"enum": ["auto", "arrow", "plain", "dot"]},
+            "arrivals": {"enum": ["separate", "joined"]},
+            "lines": {"enum": ["orthogonal", "straight"]}
+          }
+        }
       }
     },
     "port": {
@@ -161,7 +172,8 @@
         "waypoints": {"type": "array", "items": {"$ref": "#/$defs/waypoint"}, "default": []},
         "depart": {"$ref": "#/$defs/side"},
         "arrive": {"$ref": "#/$defs/side"},
-        "via": {"$ref": "#/$defs/side"}
+        "via": {"$ref": "#/$defs/side"},
+        "shape": {"enum": ["auto", "orthogonal", "straight"]}
       }
     },
     "net": {
@@ -233,7 +245,7 @@
         "padding_right": {"$ref": "#/$defs/length"},
         "padding_bottom": {"$ref": "#/$defs/length"},
         "padding_left": {"$ref": "#/$defs/length"},
-        "align": {"enum": ["start", "center", "end", "stretch", "ports"], "default": "center"},
+        "align": {"enum": ["start", "center", "end", "stretch", "ports", "auto"], "default": "auto"},
         "justify": {"enum": ["start", "center", "end", "space-between"], "default": "start"},
         "columns": {"type": "integer", "minimum": 1},
         "width": {"$ref": "#/$defs/length"},

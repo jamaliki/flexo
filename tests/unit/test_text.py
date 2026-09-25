@@ -33,7 +33,7 @@ def test_wrapping_preserves_words(measurer: TextMeasurer) -> None:
 
 
 def test_missing_glyph_is_diagnostic(measurer: TextMeasurer) -> None:
-    with pytest.raises(FlexoError, match="does not contain"):
+    with pytest.raises(FlexoError, match="contains"):
         measurer.measure((TextRun("\U0001f9ec"),))
 
 

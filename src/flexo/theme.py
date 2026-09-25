@@ -10,6 +10,9 @@ from flexo.svg import SVG_NS, xml_document
 
 
 def retheme_svg(svg_text: str, palette: Palette) -> str:
+    from flexo.themes import with_tone_roles
+
+    palette = with_tone_roles(palette)
     root = ET.fromstring(svg_text)
     for item in root.iter():
         fill_role = item.get("data-flexo-fill")

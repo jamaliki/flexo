@@ -10,10 +10,12 @@ from itertools import combinations
 from flexo.compiler import Compilation
 from flexo.components import TRANSPARENT_KINDS
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
-from flexo.geometry import Point, Rect, Segment, segments
+from flexo.geometry import Point, Rect, Segment, Side, segment_crosses_rect, segments
 from flexo.hierarchy import bounded_owner, parent_map
-from flexo.style import STYLES, LayoutStyle
+from flexo.ir.fitted import FittedNode, ResolvedPort
+from flexo.style import LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS, local_name
+from flexo.themes import figure_style
 
 _CONTAINMENT_TOLERANCE = 1e-6
 
@@ -47,7 +49,7 @@ def lint_compilation(
     *,
     style: LayoutStyle | None = None,
 ) -> LintReport:
-    layout_style = style or STYLES[compilation.measured.semantic.style]
+    layout_style = style or figure_style(compilation.measured.semantic)
     diagnostics = [
         *_fitted_diagnostics(compilation),
         *_routing_diagnostics(compilation, layout_style),
@@ -65,7 +67,7 @@ def _fitted_diagnostics(
     compilation: Compilation,
 ) -> tuple[Diagnostic, ...]:
     fitted = compilation.fitted
-    diagnostics: list[Diagnostic] = list(fitted.diagnostics)
+    diagnostics: list[Diagnostic] = [*compilation.measured.diagnostics, *fitted.diagnostics]
     nodes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
     groups = {group.measured.spec.id: group for group in fitted.groups}
     for group in fitted.groups:
@@ -139,8 +141,19 @@ def _routing_diagnostics(
         # exist, say -- is reported here rather than at route time, so one
         # clamped hint never costs the author their figure.
         diagnostics.extend(edge.diagnostics)
-        source = routed.fitted.node(edge.spec.source.node_id).port(edge.spec.source.port_name)
-        target = routed.fitted.node(edge.spec.target.node_id).port(edge.spec.target.port_name)
+        if edge.straight:
+            diagnostics.extend(_straight_edge_diagnostics(edge, routed.fitted, canvas))
+            continue
+        source = _attachment(
+            routed.fitted.node(edge.spec.source.node_id),
+            edge.spec.source.port_name,
+            edge.centerline[0] if edge.centerline else None,
+        )
+        target = _attachment(
+            routed.fitted.node(edge.spec.target.node_id),
+            edge.spec.target.port_name,
+            edge.centerline[-1] if edge.centerline else None,
+        )
         if not edge.centerline or edge.centerline[0] != source.position:
             diagnostics.append(
                 Diagnostic(
@@ -183,7 +196,7 @@ def _routing_diagnostics(
         shaft_length = sum(segment.length for segment in segments(edge.shaft))
         # Arrow length once, standoff twice: the shaft gives up air at both ends.
         reserved = style.arrow_length.points + 2.0 * style.connector_standoff.points
-        if abs(center_length - shaft_length - reserved) > 1e-5:
+        if edge.joined_at is None and abs(center_length - shaft_length - reserved) > 1e-5:
             diagnostics.append(
                 Diagnostic(
                     "routing.marker.clearance",
@@ -193,7 +206,7 @@ def _routing_diagnostics(
             )
         center_segments = segments(edge.centerline)
         shaft_segments = segments(edge.shaft)
-        if center_segments and shaft_segments:
+        if center_segments and shaft_segments and edge.joined_at is None:
             center_final = center_segments[-1]
             shaft_final = shaft_segments[-1]
             if center_final.horizontal != shaft_final.horizontal:
@@ -233,7 +246,7 @@ def _routing_diagnostics(
                         entity_id=edge.spec.id,
                     )
                 )
-            target_clearance = style.arrival_clearance.points
+            target_clearance = style.shortest_arrival.points
             if final.length + 1e-5 < target_clearance:
                 diagnostics.append(
                     Diagnostic(
@@ -266,6 +279,64 @@ def _routing_diagnostics(
     return tuple(diagnostics)
 
 
+def _straight_edge_diagnostics(edge, fitted, canvas: Rect) -> list[Diagnostic]:
+    """A straight edge is one diagonal by design: only what it runs through is a defect."""
+
+    diagnostics = []
+    ends = {edge.spec.source.node_id, edge.spec.target.node_id}
+    start, end = edge.centerline[0], edge.centerline[-1]
+    for node in fitted.nodes:
+        spec = node.measured.spec
+        if spec.id in ends or spec.kind in TRANSPARENT_KINDS:
+            continue
+        if segment_crosses_rect(start, end, node.bounds):
+            diagnostics.append(
+                Diagnostic(
+                    "routing.obstacle.intersection",
+                    f'Straight edge crosses component "{spec.id}".',
+                    entity_id=edge.spec.id,
+                    hint="Move the component off the line, or draw this edge orthogonal.",
+                )
+            )
+    if any(not canvas.contains_point(point) for point in edge.centerline):
+        diagnostics.append(
+            Diagnostic("routing.canvas.clipped", "Route leaves the canvas.", entity_id=edge.spec.id)
+        )
+    return diagnostics
+
+
+def _attachment(node: FittedNode, port_name: str, point: Point | None) -> ResolvedPort:
+    """Where a route actually attaches to ``node`` for ``port_name``.
+
+    The router gives every connection end its own pin, on whichever side of the
+    component faces the other end, so the attachment is read off the route: a
+    point on the component's boundary, on the side it lies on. A point off the
+    boundary falls back to the fitted port, which the mismatch check then
+    reports.
+    """
+
+    port = node.port(port_name)
+    if point is None:
+        return port
+    sides = [side for side in (port.side, *Side) if _on_side(node.bounds, side, point)]
+    return ResolvedPort(port.name, sides[0], point) if sides else port
+
+
+def _on_side(bounds: Rect, side: Side, point: Point) -> bool:
+    tolerance = 1e-6
+    if side in {Side.WEST, Side.EAST}:
+        edge = bounds.left if side is Side.WEST else bounds.right
+        return (
+            abs(point.x - edge) < tolerance
+            and bounds.top - tolerance <= point.y <= bounds.bottom + tolerance
+        )
+    edge = bounds.top if side is Side.NORTH else bounds.bottom
+    return (
+        abs(point.y - edge) < tolerance
+        and bounds.left - tolerance <= point.x <= bounds.right + tolerance
+    )
+
+
 def _net_routing_diagnostics(
     compilation: Compilation,
     style: LayoutStyle,
@@ -273,7 +344,7 @@ def _net_routing_diagnostics(
 ) -> tuple[Diagnostic, ...]:
     diagnostics: list[Diagnostic] = []
     fitted = compilation.routed.fitted
-    target_clearance = style.arrival_clearance.points
+    target_clearance = style.shortest_arrival.points
     for net in compilation.routed.nets:
         # What the router had to overrule -- an unreachable rail_at, say -- is
         # reported here rather than at route time, so one clamped hint never
@@ -282,6 +353,8 @@ def _net_routing_diagnostics(
         routes = (
             net.rail,
             *(stem.centerline for stem in net.source_stems + net.target_stems),
+            *net.trunks,
+            *net.joins,
         )
         for route in routes:
             for segment in segments(route):
@@ -302,7 +375,11 @@ def _net_routing_diagnostics(
                     )
                 )
         for stem in net.source_stems:
-            expected = fitted.node(stem.port.node_id).port(stem.port.port_name).position
+            expected = _attachment(
+                fitted.node(stem.port.node_id),
+                stem.port.port_name,
+                stem.centerline[0] if stem.centerline else None,
+            ).position
             if not stem.centerline or stem.centerline[0] != expected:
                 diagnostics.append(
                     Diagnostic(
@@ -311,7 +388,7 @@ def _net_routing_diagnostics(
                         entity_id=net.spec.id,
                     )
                 )
-            if stem.arrow_end:
+            if stem.arrow_end and net.spec.kind != "merge" and net.spec.joint != "arrow":
                 diagnostics.append(
                     Diagnostic(
                         "routing.net.source.arrow",
@@ -320,7 +397,11 @@ def _net_routing_diagnostics(
                     )
                 )
         for stem in net.target_stems:
-            expected = fitted.node(stem.port.node_id).port(stem.port.port_name).position
+            expected = _attachment(
+                fitted.node(stem.port.node_id),
+                stem.port.port_name,
+                stem.centerline[-1] if stem.centerline else None,
+            ).position
             if not stem.centerline or stem.centerline[-1] != expected:
                 diagnostics.append(
                     Diagnostic(
@@ -359,8 +440,8 @@ def _net_obstacle_diagnostics(
     diagnostics = []
     for route_index, route in enumerate(routes):
         endpoint_id = None
-        if route_index > 0:
-            stems = net.source_stems + net.target_stems
+        stems = net.source_stems + net.target_stems
+        if 0 < route_index <= len(stems):
             endpoint_id = stems[route_index - 1].port.node_id
         for node in compilation.routed.fitted.nodes:
             if node.measured.spec.id == endpoint_id:
@@ -387,13 +468,24 @@ def _track_separation_diagnostics(
 ) -> tuple[Diagnostic, ...]:
     diagnostics = []
     minimum = style.port_spacing.points
-    routes = [(edge.spec.id, edge.centerline) for edge in compilation.routed.edges]
+    # Straight edges cross by design -- a fully connected layer is nothing but
+    # crossings -- so only routed lines are held to crossing and spacing rules.
+    routes = [
+        (edge.spec.id, edge.centerline)
+        for edge in compilation.routed.edges
+        if not edge.straight
+    ]
     for net in compilation.routed.nets:
         routes.append((net.spec.id, net.rail))
+        routes.extend((net.spec.id, trunk) for trunk in (*net.trunks, *net.joins))
         routes.extend((net.spec.id, stem.centerline) for stem in net.source_stems)
         routes.extend((net.spec.id, stem.centerline) for stem in net.target_stems)
+    bundles = {edge.spec.id: edge.bundle for edge in compilation.routed.edges}
+    bundles.update({net.spec.id: net.bundle for net in compilation.routed.nets})
     for (first_id, first_route), (second_id, second_route) in combinations(routes, 2):
         if first_id == second_id:
+            continue
+        if bundles.get(first_id) is not None and bundles.get(first_id) == bundles.get(second_id):
             continue
         crossing = any(
             _segments_cross(first, second)

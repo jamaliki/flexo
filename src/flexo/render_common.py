@@ -10,7 +10,7 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import GroupSpec, NodeSpec
 from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette, TypographyStyle
 from flexo.svg import element
-from flexo.text import DEFAULT_RUN_WEIGHT, SHIFTED_SIZE
+from flexo.text import DEFAULT_RUN_WEIGHT, SHIFTED_SIZE, drawn_weight, font_stack
 
 
 def paint_override(spec: NodeSpec | GroupSpec, part: str) -> str | None:
@@ -50,14 +50,14 @@ def paint_attributes(
         values["fill"] = fill
     elif fill_role:
         values["fill"] = palette.get(fill_role)
-        values["data__flexo__fill"] = fill_role
+        values["data__flexo__fill"] = palette.role(fill_role)
     else:
         values["fill"] = "none"
     if stroke is not None:
         values["stroke"] = stroke
     elif stroke_role:
         values["stroke"] = palette.get(stroke_role)
-        values["data__flexo__stroke"] = stroke_role
+        values["data__flexo__stroke"] = palette.role(stroke_role)
     if stroke_width is not None:
         values["stroke__width"] = stroke_width
     return values
@@ -112,6 +112,8 @@ def render_runs(
 
     if not metrics.lines:
         return None
+    stack = font_stack(typography)
+    primary = stack.families[0][0].family
     size = typography.size.points
     text = element(
         parent,
@@ -138,9 +140,23 @@ def render_runs(
                 baseline__shift=run.baseline_shift if shifted else None,
                 font__size=size * SHIFTED_SIZE if shifted else None,
             )
-            span.text = run.text
-            if run.text != run.text.strip():
-                span.set(_XML_SPACE, "preserve")
+            pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic)
+            if len(pieces) == 1 and pieces[0][0].family == primary:
+                span.text = run.text
+                if run.text != run.text.strip():
+                    span.set(_XML_SPACE, "preserve")
+                continue
+            # A run that needs a fallback face names it: renderers fall back per
+            # character, not per cluster, and would split a letter from its accent.
+            for face, piece in pieces:
+                inner = element(
+                    span,
+                    "tspan",
+                    font__family=face.family if face.family != primary else None,
+                )
+                inner.text = piece
+                if piece != piece.strip():
+                    inner.set(_XML_SPACE, "preserve")
     return text
 
 
@@ -185,6 +201,22 @@ def soft_shadow(
     edge -- true at any corner radius, and still five plain rectangles.
     """
 
+    if style.shadow_style == "hard":
+        # A printed slab: one solid rectangle, offset down and right.
+        offset = style.shadow_offset.points
+        group = element(parent, "g", id=f"{entity_id}.shadow")
+        element(
+            group,
+            "rect",
+            x=bounds.x + offset,
+            y=bounds.y + offset,
+            width=bounds.width,
+            height=bounds.height,
+            rx=radius,
+            opacity=min(1.0, style.shadow_opacity),
+            **paint_attributes(palette=palette, fill_role="shadow"),
+        )
+        return group
     spread = style.shadow_spread.points
     if spread <= 0.0 or style.shadow_opacity <= 0.0:
         return None

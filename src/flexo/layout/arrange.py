@@ -12,6 +12,7 @@ from __future__ import annotations
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.geometry import Point, Rect, Size
 from flexo.ir.semantic import LayoutKind, LayoutSpec
+from flexo.layout.gaps import split_grid_gaps
 from flexo.layout.grid import grid_anchor_lines, grid_plan, grid_tracks
 from flexo.style import LayoutStyle
 
@@ -131,9 +132,16 @@ def arrangement_size(
     # Without names no child can be addressed, so every one of them flows.
     plan = grid_plan(layout, child_ids if child_ids is not None else ("",) * len(values))
     column_widths, row_heights = grid_tracks(plan, values, layout, lines if ports else None)
+    column_gaps, row_gaps = split_grid_gaps(
+        gaps,
+        plan.columns,
+        plan.rows,
+        layout.resolved_column_gap(style.gap),
+        layout.resolved_row_gap(style.gap),
+    )
     return Size(
-        sum(column_widths) + layout.resolved_column_gap(style.gap) * (plan.columns - 1),
-        sum(row_heights) + layout.resolved_row_gap(style.gap) * (plan.rows - 1),
+        sum(column_widths) + sum(column_gaps),
+        sum(row_heights) + sum(row_gaps),
     )
 
 
@@ -220,6 +228,7 @@ def arrange(
         content,
         row_gap=row_gap,
         column_gap=column_gap,
+        gaps=gaps,
         anchors=lines if ports else None,
         group_id=group_id,
     )
@@ -233,14 +242,16 @@ def _arrange_grid(
     *,
     row_gap: float,
     column_gap: float,
+    gaps: tuple[float, ...] | None = None,
     anchors: tuple[Point, ...] | None,
     group_id: str,
 ) -> tuple[Rect, ...]:
     plan = grid_plan(layout, child_ids)
     column_widths, row_heights = grid_tracks(plan, sizes, layout, anchors)
+    column_gaps, row_gaps = split_grid_gaps(gaps, plan.columns, plan.rows, column_gap, row_gap)
     needed = Size(
-        sum(column_widths) + column_gap * (plan.columns - 1),
-        sum(row_heights) + row_gap * (plan.rows - 1),
+        sum(column_widths) + sum(column_gaps),
+        sum(row_heights) + sum(row_gaps),
     )
     if needed.width > content.width + _EPSILON or needed.height > content.height + _EPSILON:
         raise FlexoError(
@@ -251,7 +262,7 @@ def _arrange_grid(
             )
         )
     start_x, actual_x_gap = justification(
-        layout.justify, content.width, needed.width, column_gap, plan.columns
+        layout.justify, content.width, needed.width, 0.0, plan.columns
     )
     start_y = (
         content.y
@@ -259,11 +270,11 @@ def _arrange_grid(
         else cross_position(layout.align, content.y, content.height, needed.height)
     )
     xs = [content.x + start_x]
-    for width in column_widths[:-1]:
-        xs.append(xs[-1] + width + actual_x_gap)
+    for width, gap in zip(column_widths[:-1], column_gaps, strict=True):
+        xs.append(xs[-1] + width + gap + actual_x_gap)
     ys = [start_y]
-    for height in row_heights[:-1]:
-        ys.append(ys[-1] + height + row_gap)
+    for height, gap in zip(row_heights[:-1], row_gaps, strict=True):
+        ys.append(ys[-1] + height + gap)
     if anchors is None:
         return tuple(
             Rect(

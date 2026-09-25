@@ -13,4 +13,7 @@ htmlcov/
 # The examples' own outputs, except the previews examples/README.md links to.
 examples/build/*
 !examples/build/*.preview.png
+!examples/build/literature/
+examples/build/literature/*
+!examples/build/literature/*.preview.png
 tests/artifacts/

@@ -7,12 +7,15 @@ import xml.etree.ElementTree as ET
 from flexo.artwork import node_artwork
 from flexo.components import (
     MOTIF_LABEL_KINDS,
+    OP_SYMBOLS,
     VectorGrid,
     motif_area,
     motif_enabled,
+    node_tone,
     vector_grid,
 )
 from flexo.ir.fitted import FittedNode
+from flexo.ir.semantic import NodeSpec
 from flexo.render_common import (
     base_rect,
     paint_attributes,
@@ -32,6 +35,7 @@ def render_node(
     palette: Palette,
 ) -> ET.Element:
     spec = node.measured.spec
+    palette = toned(palette, spec, style)
     group = element(
         parent,
         "g",
@@ -40,13 +44,35 @@ def render_node(
         data__flexo__kind=spec.kind,
         data__flexo__role=spec.role,
     )
-    if spec.kind not in {"label", "spacer"}:
+    if spec.kind not in {"label", "spacer", "text"}:
         # Behind the body, so the box's own fill hides all but the ring.
         if spec.shadow:
             soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
         _render_kind(group, node, style, palette)
     _render_label(group, node, style, palette)
     return group
+
+
+def toned(palette: Palette, spec: NodeSpec, style: LayoutStyle) -> Palette:
+    """``palette`` as seen by one component: its tone's roles standing in for the body's."""
+
+    tone = node_tone(spec, style.kind_tones)
+    index = palette.tone_index(tone) if tone is not None else None
+    if index is None:
+        return palette
+    aliases = {
+        f"{family}-{part}": f"tone-{index}-{part}"
+        for family in ("block", "accent", "warm")
+        for part in ("fill", "stroke", "motif")
+    }
+    aliases["ink"] = f"tone-{index}-ink"
+    if spec.property("tone") is not None:
+        # An author who tones an illustration means its frame and paper too.
+        aliases["inset-fill"] = f"tone-{index}-fill"
+        aliases["container-stroke"] = f"tone-{index}-stroke"
+        aliases["inset-stroke"] = f"tone-{index}-stroke"
+        aliases["container-fill"] = f"tone-{index}-fill"
+    return palette.with_aliases(aliases)
 
 
 def _render_kind(
@@ -64,6 +90,14 @@ def _render_kind(
         _tensor(parent, node, style, palette)
     elif kind == "junction":
         _junction(parent, node, style, palette)
+    elif kind == "op":
+        _op(parent, node, style, palette)
+    elif kind == "circle":
+        _circle(parent, node, style, palette)
+    elif kind == "decision":
+        _decision(parent, node, style, palette)
+    elif kind == "terminal":
+        _terminal(parent, node, style, palette)
     elif kind == "concat":
         _concat(parent, node, style, palette)
     elif kind == "channels":
@@ -108,7 +142,7 @@ def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
                 cx=bounds.center.x + (index - 1) * 5.0,
                 cy=y,
                 r=radius,
-                **paint_attributes(palette=palette, fill_role="block-stroke"),
+                **paint_attributes(palette=palette, fill_role="block-motif"),
             )
     else:
         element(
@@ -117,7 +151,7 @@ def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
             d=f"M {number(bounds.center.x - 9)} {number(y)} l 4 -3 l 4 3 l 4 -3 l 4 3",
             **paint_attributes(
                 palette=palette,
-                stroke_role="block-stroke",
+                stroke_role="block-motif",
                 stroke_width=style.stroke_width.points,
             ),
         )
@@ -148,7 +182,7 @@ def _feature_strip(
             height=height,
             rx=0.7,
             opacity=0.35 + 0.55 * (index + 1) / cells,
-            **paint_attributes(palette=palette, fill_role="accent-stroke"),
+            **paint_attributes(palette=palette, fill_role="accent-motif"),
         )
 
 
@@ -177,7 +211,7 @@ def _sequence(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
             cy=area.center.y,
             r=min(_TOKEN_RADIUS, area.height / 2.0),
             opacity=0.45 + 0.5 * index / max(1, count - 1),
-            **paint_attributes(palette=palette, fill_role="block-stroke"),
+            **paint_attributes(palette=palette, fill_role="block-motif"),
         )
 
 
@@ -221,6 +255,159 @@ def _junction(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
     )
 
 
+def _decision(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A flowchart decision: a diamond touching the middle of each side of its box."""
+
+    spec = node.measured.spec
+    bounds = node.bounds
+    inset = style.stroke_width.points / 2.0
+    corners = (
+        (bounds.center.x, bounds.top + inset),
+        (bounds.right - inset, bounds.center.y),
+        (bounds.center.x, bounds.bottom - inset),
+        (bounds.left + inset, bounds.center.y),
+    )
+    element(
+        parent,
+        "path",
+        id=f"{spec.id}.body",
+        d="M " + " L ".join(f"{number(x)} {number(y)}" for x, y in corners) + " Z",
+        stroke__linejoin="round",
+        **paint_attributes(
+            palette=palette,
+            fill_role="block-fill",
+            stroke_role="block-stroke",
+            stroke_width=style.stroke_width.points,
+            fill=paint_override(spec, "fill"),
+            stroke=paint_override(spec, "stroke"),
+        ),
+    )
+
+
+def _terminal(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A flowchart start or end: a box whose short sides are half circles."""
+
+    body = base_rect(parent, node, style, palette)
+    body.set("rx", number(node.bounds.height / 2.0))
+
+
+def _circle(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A labelled circle; ``shaded`` fills it grey, as an observed variable is drawn."""
+
+    spec = node.measured.spec
+    centre = node.bounds.center
+    radius = min(node.bounds.width, node.bounds.height) / 2.0
+    stroke = style.stroke_width.points
+    shaded = bool(spec.property("shaded", False))
+    element(
+        parent,
+        "circle",
+        id=f"{spec.id}.body",
+        cx=centre.x,
+        cy=centre.y,
+        r=radius - stroke / 2.0,
+        **paint_attributes(
+            palette=palette,
+            fill_role="container-stroke" if shaded else "block-fill",
+            stroke_role="block-stroke",
+            stroke_width=stroke,
+            fill=paint_override(spec, "fill"),
+            stroke=paint_override(spec, "stroke"),
+        ),
+    )
+
+
+def _op(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """An operator: a circle with its symbol drawn in it as strokes."""
+
+    spec = node.measured.spec
+    centre = node.bounds.center
+    radius = min(node.bounds.width, node.bounds.height) / 2.0
+    stroke = style.stroke_width.points
+    element(
+        parent,
+        "circle",
+        id=f"{spec.id}.body",
+        cx=centre.x,
+        cy=centre.y,
+        r=radius - stroke / 2.0,
+        **paint_attributes(
+            palette=palette,
+            fill_role="block-fill",
+            stroke_role="block-stroke",
+            stroke_width=stroke,
+            fill=paint_override(spec, "fill"),
+            stroke=paint_override(spec, "stroke"),
+        ),
+    )
+    symbol = str(spec.property("symbol", "+"))
+    shape = OP_SYMBOLS.get(symbol.strip().lower(), OP_SYMBOLS.get(symbol.strip()))
+    arm = radius * 0.5
+    ink = paint_override(spec, "stroke")
+    if shape in {"plus", "times", "minus"}:
+        if shape == "times":
+            reach = arm / 2.0**0.5 * 1.1
+            strokes = (
+                (centre.x - reach, centre.y - reach, centre.x + reach, centre.y + reach),
+                (centre.x - reach, centre.y + reach, centre.x + reach, centre.y - reach),
+            )
+        else:
+            strokes = ((centre.x - arm, centre.y, centre.x + arm, centre.y),)
+            if shape == "plus":
+                strokes += ((centre.x, centre.y - arm, centre.x, centre.y + arm),)
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.symbol",
+            d=" ".join(
+                f"M {number(x1)} {number(y1)} L {number(x2)} {number(y2)}"
+                for x1, y1, x2, y2 in strokes
+            ),
+            stroke__linecap="round",
+            **paint_attributes(
+                palette=palette,
+                stroke_role="block-motif",
+                stroke_width=stroke * 1.25,
+                stroke=ink,
+            ),
+        )
+    elif shape == "sine":
+        # One period of a sine, the positional-encoding mark.
+        reach = arm * 1.25
+        rise = arm * 0.8
+        data = (
+            f"M {number(centre.x - reach)} {number(centre.y)} "
+            f"C {number(centre.x - reach * 0.6)} {number(centre.y - rise * 1.6)}, "
+            f"{number(centre.x - reach * 0.2)} {number(centre.y - rise * 1.6)}, "
+            f"{number(centre.x)} {number(centre.y)} "
+            f"S {number(centre.x + reach * 0.6)} {number(centre.y + rise * 1.6)}, "
+            f"{number(centre.x + reach)} {number(centre.y)}"
+        )
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.symbol",
+            d=data,
+            stroke__linecap="round",
+            **paint_attributes(
+                palette=palette,
+                stroke_role="block-motif",
+                stroke_width=stroke * 1.15,
+                stroke=ink,
+            ),
+        )
+    elif shape == "dot":
+        element(
+            parent,
+            "circle",
+            id=f"{spec.id}.symbol",
+            cx=centre.x,
+            cy=centre.y,
+            r=max(0.9, radius * 0.16),
+            **paint_attributes(palette=palette, fill_role="block-motif", fill=ink),
+        )
+
+
 def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     base_rect(
         parent,
@@ -248,7 +435,7 @@ def _concat(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
             height=_CONCAT_BAR,
             rx=0.75,
             opacity=0.45 + index * 0.2,
-            **paint_attributes(palette=palette, fill_role="block-stroke"),
+            **paint_attributes(palette=palette, fill_role="block-motif"),
         )
 
 
@@ -459,7 +646,7 @@ def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
             y=output.position.y - 3.0,
             width=5.0,
             height=6.0,
-            **paint_attributes(palette=palette, fill_role="accent-stroke"),
+            **paint_attributes(palette=palette, fill_role="accent-motif"),
         )
 
 
@@ -478,6 +665,12 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
     spec = node.measured.spec
     if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
+    if metrics.cap_height > 0.0 and metrics.lines:
+        # Centred the way the eye reads it: from the top of the first line's
+        # capitals to the last baseline, not the font's line box -- which in a
+        # face with tall accents (Latin Modern) sits the words visibly low.
+        visual = metrics.cap_height + (len(metrics.lines) - 1) * metrics.line_height
+        return bounds.y + bounds.height / 2.0 - visual / 2.0 + metrics.cap_height
     return bounds.y + bounds.height / 2.0 - metrics.height / 2.0 + metrics.baseline
 
 

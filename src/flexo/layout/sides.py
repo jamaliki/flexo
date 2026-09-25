@@ -99,8 +99,8 @@ def choose_port_sides(
                 continue
             side = _best_side(port.side, claims[port.name])
             chosen[port.name] = side
-            if _conflicted(side, claims[port.name]):
-                diagnostics.append(_conflict_diagnostic(node, port, side))
+            # A port asked to face two ways is no longer a conflict to report:
+            # the router gives each connection its own pin on the side facing it.
         _separate_opposing(chosen, claims, margins.get(node.measured.spec.id))
         if not chosen:
             result.append(node)

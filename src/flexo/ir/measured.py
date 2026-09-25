@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from flexo.diagnostics import Diagnostic
 from flexo.geometry import Point, Size
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, TextRun
 
@@ -25,6 +26,8 @@ class TextMetrics:
     baseline: float
     line_height: float
     lines: tuple[MeasuredLine, ...]
+    cap_height: float = 0.0
+    """Height of a capital above the baseline: what the eye centres a word on."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,8 @@ class MeasuredFigure:
     canvas_size: Size
     edge_labels: tuple[TextMetrics, ...] = ()
     """Label metrics, positionally aligned with ``semantic.edges``."""
+    diagnostics: tuple[Diagnostic, ...] = ()
+    """What measurement had to overrule -- a canvas too narrow for its content."""
 
     def node(self, node_id: str) -> MeasuredNode:
         return next(node for node in self.nodes if node.spec.id == node_id)

@@ -23,7 +23,7 @@ caption is words on the page, and words are not transparent (see
 ``CAPTION_KINDS``).
 """
 
-CAPTION_KINDS = frozenset({"label"})
+CAPTION_KINDS = frozenset({"label", "text"})
 """Kinds that paint text and nothing else.
 
 A caption has no boundary to hug and no fill to hide behind, so it takes a couple
@@ -162,6 +162,47 @@ them one offset puts an arrowhead and a departure on a single point -- two runs
 overlapping for the width of a jog, which is the ``routing.track.separation``
 pair this component's ports exist to avoid.
 """
+_OP_PORTS = (
+    PortSpec("input", Side.WEST, auto_side=True),
+    PortSpec("output", Side.EAST, auto_side=True),
+)
+"""An operator's value in and out, each on whichever side faces its counterpart.
+
+Not adaptive: a circle meets a straight arrow squarely only at its four side
+centres, so a pin slid along the box edge would stop short of the ink.
+"""
+
+OP_SYMBOLS = {
+    "+": "plus",
+    "add": "plus",
+    "sum": "plus",
+    "x": "times",
+    "\u00d7": "times",
+    "*": "times",
+    "multiply": "times",
+    "product": "times",
+    ".": "dot",
+    "·": "dot",
+    "dot": "dot",
+    "-": "minus",
+    "minus": "minus",
+    "~": "sine",
+    "sine": "sine",
+    "wave": "sine",
+}
+"""Operator symbols drawn as strokes rather than set as text.
+
+Drawn, because ⊕ and ⊗ are missing from most text faces and a glyph set in one
+face never sits dead centre in a circle drawn by another. Anything else an author
+writes as ``symbol`` is set as text in the circle.
+"""
+
+_TEXT_PORTS = (
+    PortSpec("input", Side.WEST, auto_side=True),
+    PortSpec("output", Side.EAST, auto_side=True),
+)
+"""Words take an arrow at the middle of whichever side faces it."""
+
 _VECTOR_PORTS = (
     PortSpec("input", Side.WEST),
     PortSpec("output", Side.EAST),
@@ -321,6 +362,16 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ),
         ComponentDefinition("loss", Size(44.0, 32.0), (_INPUT,)),
         ComponentDefinition("junction", Size(8.0, 8.0), _MULTI_OUTPUT),
+        # An operator circle: sized from the type (see intrinsic_node_size), with a
+        # port at each side centre, because the only points of a circle an arrow
+        # can meet squarely are where its bounding box touches it.
+        ComponentDefinition("op", Size(0.0, 0.0), _OP_PORTS),
+        # A labelled circle -- a neuron, a random variable -- sized to its label.
+        ComponentDefinition("circle", Size(0.0, 0.0), _OP_PORTS),
+        # Flowchart shapes: a decision diamond, with its ports at its four
+        # corners, and a start/end pill.
+        ComponentDefinition("decision", Size(0.0, 0.0), _OP_PORTS),
+        ComponentDefinition("terminal", Size(44.0, 24.0), _STANDARD),
         ComponentDefinition("graph", Size(70.0, 62.0), _STANDARD, motif_height=GRAPH_INK_HEIGHT),
         ComponentDefinition("inset", Size(82.0, 60.0), _STANDARD, motif_height=INSET_INK.height),
         # A vector's size is exactly its cell grid, so it comes from the style
@@ -330,9 +381,47 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # author asked; a minimum here would pad a drawing away from its size.
         ComponentDefinition("image", Size(0.0, 0.0), _IMAGE_PORTS),
         ComponentDefinition("label", Size(0.0, 0.0), ()),
+        # Words with ports: "Inputs" under a tower, "Output probabilities" over
+        # it -- a thing an arrow starts or ends at that is not a box.
+        ComponentDefinition("text", Size(0.0, 0.0), _TEXT_PORTS),
         ComponentDefinition("spacer", Size(0.0, 0.0), ()),
     )
 }
+
+
+KIND_TONES = {
+    "attention": "attention",
+    "matrix": "attention",
+    "add-norm": "norm",
+    "mlp": "mlp",
+    "cnn": "cnn",
+    "feature-strip": "data",
+    "sequence": "data",
+    "prediction": "output",
+    "loss": "output",
+}
+"""The colour family each kind of component belongs to, when a theme colours by kind.
+
+A plain ``block`` has none: it is neutral until its author names a ``tone``.
+"""
+
+NEUTRAL_TONES = frozenset({"neutral", "none", ""})
+
+
+def node_tone(spec: NodeSpec, by_kind: bool) -> str | None:
+    """The tone a component is painted in: its author's, or its kind's."""
+
+    authored = spec.property("tone")
+    if authored is not None:
+        text = str(authored).strip()
+        return None if text.lower() in NEUTRAL_TONES else text
+    return KIND_TONES.get(spec.kind) if by_kind else None
+
+
+def op_diameter(style: LayoutStyle) -> float:
+    """How big an operator circle is: a little taller than a capital of the type."""
+
+    return max(10.0, 1.55 * style.typography.size.points)
 
 
 def component_names() -> tuple[str, ...]:
@@ -528,12 +617,31 @@ def intrinsic_node_size(
     definition = COMPONENTS[node.kind]
     if node.kind == "label":
         natural = Size(label.width, label.height)
+    elif node.kind == "text":
+        natural = Size(label.width + style.padding_y.points, label.height + style.padding_y.points)
     elif node.kind == "spacer":
         natural = Size(0.0, 0.0)
     elif node.kind == "vector":
         # Exactly the cell grid: a vector carries no inline label, so nothing
         # here may pad it. Its label is a sibling node (see GroupBuilder.vector).
         natural = vector_grid(node, style).size
+    elif node.kind == "op":
+        side = op_diameter(style)
+        natural = Size(side, side)
+    elif node.kind == "decision":
+        # The label's box inscribed in a diamond of the same proportions: each
+        # half-diagonal is twice the padded half-extent of the words.
+        half_width = label.width / 2.0 + style.padding_x.points
+        half_height = label.height / 2.0 + style.padding_y.points
+        return Size(4.0 * half_width, 4.0 * half_height)
+    elif node.kind == "circle":
+        # The label's box inscribed in the circle, with the type's padding round it.
+        inscribed = (label.width**2 + label.height**2) ** 0.5 + style.padding_y.points
+        side = max(1.6 * op_diameter(style), inscribed)
+        width = style.resolve_extent(node.width).points if node.width is not None else side
+        height = style.resolve_extent(node.height).points if node.height is not None else side
+        side = max(width, height)
+        return Size(side, side)
     elif node.kind == "image":
         # Artwork has a size of its own, and one authored extent implies the
         # other, so image sizing answers on its own rather than through the
@@ -559,4 +667,16 @@ def intrinsic_node_size(
         )
     width = style.resolve_extent(node.width).points if node.width is not None else natural.width
     height = style.resolve_extent(node.height).points if node.height is not None else natural.height
+    if label.lines and node.kind not in GROWN_NEVER:
+        # An authored size is a design, not a clip: when the words no longer fit
+        # it -- the same figure set in a larger theme -- the box grows around
+        # them rather than printing them over its edge (measurement says so).
+        if label.width + 2.0 > width:
+            width = max(width, min(natural.width, label.width + 2.0 * style.padding_x.points))
+        if label.height > height:
+            height = max(height, min(natural.height, label.height + style.padding_y.points))
     return Size(width, height)
+
+
+GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
+"""Kinds whose size is their content's own, never grown around a label."""

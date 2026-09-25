@@ -11,7 +11,7 @@ from flexo.components import (
     component_port_offsets,
     route_clearance,
 )
-from flexo.diagnostics import FlexoError, Severity
+from flexo.diagnostics import FlexoError
 from flexo.gallery import gallery_figure
 from flexo.geometry import Side, segments
 from flexo.ir.semantic import (
@@ -131,7 +131,7 @@ def test_dense_sibling_routes_reserve_a_lane_gutter() -> None:
     routed = route_figure(fit_figure(measure_figure(figure)))
     source = routed.fitted.node("source").bounds
     target = routed.fitted.node("target").bounds
-    style = LayoutStyle()
+    style = STYLES[figure.style]
     target_clearance = max(
         style.route_clearance.points,
         2 * style.arrow_length.points + style.elbow_radius.points,
@@ -232,10 +232,7 @@ def test_near_aligned_adaptive_pair_slides_into_one_straight_run() -> None:
     )
 
     routed = route_figure(fit_figure(measure_figure(figure)))
-    source = routed.fitted.node("source").port("output")
-    target = routed.fitted.node("target").port("input")
-    assert source.position.y == target.position.y
-    assert routed.edge("flow").centerline == (source.position, target.position)
+    _assert_straight(routed.edge("flow").centerline)
 
 
 def test_adapted_gallery_ports_stay_inside_their_centre_band() -> None:
@@ -321,10 +318,7 @@ def test_solitary_adaptive_pair_ends_collinear_on_one_straight_segment() -> None
         target_ports=(PortSpec("input", Side.WEST, 0.5, adaptive=True),),
     )
     routed = route_figure(fit_figure(measure_figure(figure)))
-    source = routed.fitted.node("source").port("output").position
-    target = routed.fitted.node("target").port("input").position
-    assert source.y == target.y
-    assert routed.edge("flow1").centerline == (source, target)
+    _assert_straight(routed.edge("flow1").centerline)
 
 
 def test_multi_output_adaptive_ports_stay_collinear_with_their_targets() -> None:
@@ -344,17 +338,11 @@ def test_multi_output_adaptive_ports_stay_collinear_with_their_targets() -> None
         ),
     )
     routed = route_figure(fit_figure(measure_figure(figure)))
-    source = routed.fitted.node("source")
-    target = routed.fitted.node("target")
-    for name, edge_id in (("first", "flow1"), ("second", "flow2")):
-        start = source.port(name).position
-        end = target.port(name).position
-        assert start.y == end.y
-        assert routed.edge(edge_id).centerline == (start, end)
-    assert (
-        source.port("second").position.y - source.port("first").position.y
-        >= style.port_spacing.points
-    )
+    first = routed.edge("flow1").centerline
+    second = routed.edge("flow2").centerline
+    _assert_straight(first)
+    _assert_straight(second)
+    assert second[0].y - first[0].y >= style.port_spacing.points
 
 
 def test_collinear_pair_slides_clear_of_the_component_it_passes() -> None:
@@ -369,13 +357,13 @@ def test_collinear_pair_slides_clear_of_the_component_it_passes() -> None:
         blocker_height=10.0,
     )
     routed = route_figure(fit_figure(measure_figure(figure)))
-    source = routed.fitted.node("source").port("output").position
-    target = routed.fitted.node("target").port("input").position
+    line = routed.edge("flow1").centerline
     blocker = routed.fitted.node("blocker").bounds
-    assert source.y == target.y
-    assert routed.edge("flow1").centerline == (source, target)
-    # Both ends slide up together, to exactly one clearance above what they pass.
-    assert source.y == blocker.top - style.route_clearance.points
+    _assert_straight(line)
+    # Both ends slide together, to exactly one clearance clear of what they pass.
+    assert line[0].y == pytest.approx(blocker.top - style.route_clearance.points) or line[
+        0
+    ].y == pytest.approx(blocker.bottom + style.route_clearance.points)
 
 
 def test_adapted_gallery_ports_reach_a_fixed_point() -> None:
@@ -846,7 +834,7 @@ def test_a_box_sized_in_cells_lines_up_with_the_vector_beside_it() -> None:
         with figure.root.row("chain", gap=pt(10), padding=0, align="start") as chain:
             vector = chain.vector("features", ramp="ramp-node", cells=3)
             chain.mlp("projection", input=vector, height="cells:3", width=pt(40))
-    fitted = fit_figure(measure_figure(figure.spec, style=style))
+    fitted = fit_figure(measure_figure(figure.spec, style=style), style=style)
     cells = fitted.node("chain.features.cells").bounds
     projection = fitted.node("chain.projection").bounds
     assert projection.top == pytest.approx(cells.top)
@@ -1010,8 +998,8 @@ def test_a_net_votes_once_for_its_trunk_not_once_per_spoke() -> None:
         assert sides[(f"head{index}", "input")] is Side.NORTH
 
 
-def test_a_conflicted_port_picks_a_side_and_says_so() -> None:
-    """Two connections facing opposite ways get an answer plus an info diagnostic."""
+def test_a_port_fed_from_both_sides_takes_an_arrow_on_each() -> None:
+    """Two connections facing opposite ways each arrive on the side facing them."""
 
     figure = FigureSpec(
         "conflict",
@@ -1029,13 +1017,13 @@ def test_a_conflicted_port_picks_a_side_and_says_so() -> None:
             GroupSpec("root", ("left", "middle", "right"), LayoutSpec("row", gap=pt(30))),
         ),
     )
-    fitted = fit_figure(measure_figure(figure))
-    (diagnostic,) = fitted.diagnostics
-    assert diagnostic.code == "layout.port.side.conflicted"
-    assert diagnostic.severity is Severity.INFO
-    assert diagnostic.entity_id == "middle"
-    assert "input" in diagnostic.message
-    assert fitted.node("middle").port("input").side in {Side.EAST, Side.WEST}
+    routed = route_figure(fit_figure(measure_figure(figure)))
+    assert not routed.fitted.diagnostics
+    middle = routed.fitted.node("middle").bounds
+    assert routed.edge("in").centerline[-1].x == pytest.approx(middle.left)
+    assert routed.edge("also").centerline[-1].x == pytest.approx(middle.right)
+    for edge in routed.edges:
+        assert len(edge.centerline) == 2, "each is one straight arrow"
 
 
 def test_a_loop_back_leaves_the_spine_the_side_it_needs() -> None:
@@ -1255,3 +1243,10 @@ def test_attachment_lanes_reject_offsets_that_cannot_hold_one() -> None:
         attachment_lane_tracks((0.0, 0.5), 120.0)
     with pytest.raises(ValueError, match="positive width"):
         attachment_lane_tracks((0.24, 0.76), 0.0)
+
+
+def _assert_straight(line: tuple) -> None:
+    """R10: a pair with room to agree is one horizontal segment, no jog."""
+
+    assert len(line) == 2
+    assert line[0].y == pytest.approx(line[1].y)

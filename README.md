@@ -12,37 +12,289 @@ semantic figure -> measured figure -> fitted figure -> routed figure -> SVG
 No coordinates, and no post-hoc nudging: the figure you author is the figure
 that compiles, and it compiles the same way every time.
 
+![The Transformer, written in thirty lines](examples/build/transformer.preview.png)
+
 ## Quick start
 
 ```bash
 uv sync --all-groups
 ```
 
-The smallest figure worth drawing, and the one call that builds it:
-
 ```python
 import flexo
 
-with flexo.Figure("hello", width="single-column") as figure:
-    with figure.module("encoder", label="Encoder") as module:
-        features = module.feature_strip("features", label="Node features")
-        module.mlp("head", input=features)
+with flexo.Figure("block", width="single-column") as figure:
+    with figure.module("residual", label="Residual block", layout="column") as m:
+        x = m.block("x", label="x")
+        conv = m.block("conv", label="3x3 conv", input=x)
+        norm = m.block("bn", label="BatchNorm", input=conv)
+        total = m.add("sum", inputs=[norm, x])
+        m.block("out", label="ReLU", input=total)
 
-result = flexo.build(figure, "build", stem="hello", formats=("editable",))
+result = flexo.build(figure, "build", formats=("editable", "pdf", "png"))
 print(result.summary())
 ```
 
-`flexo.build` compiles, writes the formats you asked for, and lints — the three
-calls a figure script used to make by hand. It returns the `Compilation`, the
-paths it wrote, and the `LintReport`; outputs are written even when the report
-has errors, so a flawed figure stays inspectable. `figure.render(...)` is the
-same call spelled as a method.
+That is the whole figure: no coordinates, no port tables, no colours, no
+routing hints. `flexo.build` compiles, writes the formats you asked for, and
+lints; outputs are written even when the report has errors, so a flawed figure
+stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
+`editable` never does.
 
-Everything an author needs is re-exported from `flexo`, so one import line is
-enough. Derived formats (`portable`, `pdf`, `png`) need Inkscape; `editable`
-never does.
+## Figures from the literature
 
-Fuller examples live in [`examples/`](examples/README.md).
+[`examples/literature.py`](examples/literature.py) draws eighteen figures from
+papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
+agent–environment loop, a multilayer perceptron, graphical models, and more --
+each in about fifteen lines, with no coordinates, colours, or port tables. See
+the [gallery](examples/README.md#literaturepy).
+
+| | | |
+| --- | --- | --- |
+| ![Inception module](examples/build/literature/inception.preview.png) | ![LSTM cell](examples/build/literature/lstm.preview.png) | ![Mamba block](examples/build/literature/mamba.preview.png) |
+| ![Agent-environment loop](examples/build/literature/agent-environment.preview.png) | ![Multilayer perceptron](examples/build/literature/multilayer-perceptron.preview.png) | ![LSTM cell in the tikz theme](examples/build/literature/lstm-tikz.preview.png) |
+
+## Themes, palettes, and fonts
+
+A **theme** is one name for a whole look -- typeface, line weights, corners,
+arrowheads, how a module draws its boundary, and the rules that turn colours
+into paint. A **palette** is the colours. They compose: every theme takes every
+palette.
+
+```python
+flexo.Figure("f", theme="paper")                               # the default
+flexo.Figure("f", theme="tikz")                                # a LaTeX/TikZ figure
+flexo.Figure("f", theme="dark", palette="Cobalt Citrus")       # slides on navy
+flexo.Figure("f", theme="swiss", font="Helvetica")             # any installed font
+flexo.Figure("f", palette=["#2a6f97", "#e76f51", "#2a9d8f"])   # your own colours
+```
+
+| Theme | Look |
+| --- | --- |
+| `paper` | Journal default: Figtree, pastel boxes with same-hue outlines, Stealth arrows |
+| `tikz` | A TikZ figure in a LaTeX paper: Latin Modern, hairlines, 10% tints, dashed module boxes |
+| `slides`, `dark` | Projection scale: 12 pt type, heavier lines, 16:9 widths; `dark` on navy |
+| `archive` | A 1970s technical report: cream page, Helvetica, hairlines, one accent, greys |
+| `print` | Bertin: ink only, kinds told apart by lightness, never by hue |
+| `swiss` | International Typographic Style: red and black, section rules instead of boxes |
+| `bauhaus` | Primary colours as solid fills, heavy outlines, capitals |
+| `midcentury` | Brick, teal and mustard on warm paper, hard offset shadows |
+| `rams`, `economist` | Quiet greys and one signal colour; a news graphic with red section bands |
+| `classic` | Flexo's original look, kept exactly |
+
+The themes follow the modes of [labviz](https://github.com/jamaliki/labviz), and
+the palettes are design-corner's, the same ones labviz plots with, so a diagram
+and the plots beside it read as one figure. `flexo themes` lists them all;
+`flexo build figure.yaml --theme tikz --palette "Deep Sea Harvest"` overrides a
+figure's own choice from the command line.
+
+**Fonts** resolve by family name, and whatever Flexo measures with is what the
+SVG, the PDF and the PNG are drawn in. IBM Plex Sans, Figtree, Liberation Sans
+(metric-compatible with Arial and Helvetica) and Latin Modern Roman ship with
+Flexo and work everywhere; any installed family works by name, and
+`flexo.register_font("path/to/Face.ttf")` (or `FLEXO_FONT_PATH`) adds a file.
+Characters a family lacks -- Greek in Figtree, say -- fall back to the next
+family that has them, measured in the face that will draw them. Bundled faces
+are embedded in the SVG, cut down to the characters the figure uses, so an
+editable SVG is tens of kilobytes rather than a megabyte and a half, and export
+hands Inkscape the same files, so the PDF never falls back to a substitute
+face.
+
+### Colour by kind
+
+Each kind of component takes a colour of its own -- the next palette colour for
+each kind a figure uses -- so every attention block is one colour, every
+add-norm another, and they match wherever they appear. A plain `block` is
+neutral until you give it a tone:
+
+```python
+tower.block("ff", label="Feed Forward", tone="ffn")   # every "ffn" block matches
+tower.block("lin", label="Linear", tone=3)            # the palette's third colour
+tower.attention("mha", tone="neutral")                # take a kind's colour away
+```
+
+Tones are paint roles (`tone-1-fill`, `tone-1-stroke`, ...), so `flexo retheme`
+recolours a finished SVG without touching its geometry.
+
+### Operators and words
+
+```python
+m.add("sum", inputs=[a, b])              # a circle with a plus in it
+m.multiply("gate", inputs=[value, gate]) # a circle with a times sign
+m.op("pe", "~")                          # a sine: a positional encoding
+m.op("z", "Σ", inputs=[mu, sigma])      # any other symbol, set as text
+m.text("in", "Inputs")                   # words an arrow can start or end at
+```
+
+Each value arriving at an operator gets its own arrow into the circle, on the
+side that faces where the value comes from. The symbols `+`, `x`, `-`, `.` and
+`~` are drawn as strokes, so they sit exactly in the centre in any typeface.
+
+A value that enters an operator from the side -- a position embedding added to
+a stream of tokens -- goes in a row with the operator. The row is aligned on
+the operator, so the stream stays straight:
+
+```python
+with m.row("pe", role="layout") as row:
+    pos = row.text("pos", "Position embedding")
+    total = row.add("sum", inputs=[projection, pos])
+```
+
+### Math in labels
+
+Text between dollar signs is math, in a small subset of TeX:
+
+```python
+m.text("c", "$c_{t-1}$")               # subscript: one character, or {a group}
+m.block("attn", label="softmax($QK^T$)V")
+m.text("eps", r"$\epsilon \sim N(0, I)$")
+m.text("out", r"$\hat{x}$")            # \hat, \bar, \tilde, \dot, \vec
+m.block("w", label=r"$W_{\text{out}}$")  # \text{} and \mathrm{} are upright
+```
+
+Latin letters in math are italic and digits are upright, as in TeX. `-` is a
+minus sign. `\alpha` to `\omega`, `\Gamma` to `\Omega`, and common operators
+(`\times`, `\cdot`, `\sim`, `\to`, `\le`, `\sum`, ...) become their
+symbols. Spaces are kept as typed. Write `\$` for a literal dollar sign; a
+single `$` with no closing partner is also literal. A script cannot contain
+another script.
+
+A character that the figure's font does not have is set in the next font of
+the fallback stack that does. An accent is kept with its letter: if the
+primary font has the accent but cannot position it on that letter, the letter
+and the accent are both set in a fallback font that can.
+
+### Conventions: branches, merges, arrivals, and lines
+
+Lines meet in three ways, and papers draw each of them differently. The
+defaults are:
+
+- **Branch.** A value read by several components is drawn as one tree that
+  forks with a plain T. There is no dot.
+- **Merge.** Where two lines join into one (`merge(...)`), the joining line
+  ends in an arrowhead that points into the line it joins. A merge of three or
+  more lines is a bus: the lines meet it with plain Ts, and the only arrowhead
+  is the one into the destination.
+- **Arrivals.** Several connectors that end at the same port each get their
+  own arrow, spread along the side of the box. They are not joined.
+
+If the lines combine by an operation, author the operation with `add`,
+`multiply` or `op`. It is then drawn as a circle, and the arrows point into
+it.
+
+Change a convention for a whole figure with `conventions=`, or in YAML with a
+`conventions:` mapping on the figure:
+
+```python
+flexo.Figure("f", conventions={"branch": "dot"})     # a dot on every fork
+flexo.Figure("f", conventions={"merge": "plain"})    # no arrowheads at joins
+flexo.Figure("f", conventions={"arrivals": "joined"})  # join before the port
+flexo.Figure("f", conventions={"lines": "straight"})     # diagonals, not routes
+```
+
+| Convention | Values (default first) |
+| --- | --- |
+| `branch` | `"plain"`, `"dot"` |
+| `merge` | `"auto"`, `"arrow"`, `"plain"`, `"dot"` |
+| `arrivals` | `"separate"`, `"joined"` |
+| `lines` | `"orthogonal"`, `"straight"` |
+
+A theme can carry its own conventions (`LayoutStyle.conventions`). A net's
+`joint="arrow"` or `joint="dot"` overrides the conventions for that one net.
+
+### Captions on connectors
+
+`connect(a, b, label="action $A_t$")` puts a caption beside the line. Captions
+are placed after routing: each one takes the first free position beside its
+own line -- above a horizontal run, beside a vertical one, at the middle and
+then further toward either end -- that overlaps no component, title, other
+caption, or line. A caption names the value its edge carries, so a captioned
+edge always gets its own line, even next to another edge between the same two
+ports. If a caption does not fit inside its container, the container is given
+the room.
+
+### Node-link figures: circles and straight lines
+
+```python
+with flexo.Figure("mlp", conventions={"lines": "straight"}) as figure:
+    with figure.module("m", label="Multilayer perceptron") as m:
+        with m.column("in", role="layout") as column:
+            inputs = [column.circle(f"x{i}", f"$x_{i}$", tone="input") for i in (1, 2, 3)]
+        with m.column("hidden", role="layout") as column:
+            hidden = [column.circle(f"h{i}", f"$h_{i}$", tone="hidden") for i in (1, 2, 3, 4)]
+        m.connect_all(inputs, hidden)
+```
+
+`circle` is a labelled circle sized to its label; `shaded=True` fills it grey,
+the graphical-model mark for an observed variable. A straight edge is one
+segment from outline to outline on the line between the two centres. It is not
+routed, so it goes through anything in its way, and lint reports that as
+`routing.obstacle.intersection`. Two straight edges between the same pair run
+side by side. Choose straight lines for a whole figure with
+`conventions={"lines": "straight"}`, or for one edge with
+`connect(a, b, shape="straight")`. `connect_all(sources, targets)` connects
+every source to every target.
+
+### Flowcharts
+
+```python
+start = m.terminal("start", label="Start")          # a pill: start or end
+step = m.block("step", label="Update weights", input=start)
+done = m.decision("done", label="Converged?", input=step)  # a diamond
+m.connect(done, start, label="no")
+```
+
+A line meets a circle or a diamond only at the middle of a side of its box,
+which for a diamond is a corner. Each line gets a corner of its own while
+corners last, and the arriving lines choose first. So the "no" of a loop leaves
+by a side corner, not by the top corner its input came in by.
+
+### Layout groups
+
+A group with `role="layout"` (the `row` and `column` you nest to arrange
+things) draws nothing, and has no padding unless you give it one: the space
+between its children and its neighbours is exactly the `gap`. A row of such
+columns side by side, not wired to each other, is read as parallel branches:
+the columns are aligned at the top. If a figure is wider than its page, the
+compiler first tries tighter gaps and group padding (down to half), and only
+then grows the page, with a `layout.width.grown` warning.
+
+### How connectors are routed
+
+Routing follows the routers that draw connectors well (libavoid, ELK, yFiles).
+It never fails. If a figure is too tight for its connectors, it is laid out
+again with the room they need. A hint that cannot be honoured is reported as
+a warning, not an error.
+
+1. **Pins.** Every end of every connection gets its own attachment point
+   (a pin), on the side of the box that faces the other end. When one gap
+   is at least twice the other, the wider gap decides the side; otherwise the
+   component's own default side wins. The branches of one net attach on one
+   common side: branches spread left to right are entered from above or
+   below, and branches stacked top to bottom from the left or right. Pins on
+   one side are ordered by where their lines go; ties put the farthest
+   counterpart first, so skip connections nest. Two pins that face each other
+   across a gap move to one coordinate, so the arrow between them is straight.
+   The pin of a net's shared end stays at the middle of its side.
+2. **Search.** Each connection is routed on its own with a bend-aware A* search
+   over a grid of the figure's lines. Components, their clearance rings,
+   group titles, and containers that the connection does not belong to are
+   *priced*, not forbidden, so a route always exists. Connections that share a
+   pin are routed together as one tree grown from that pin. An arrow normally
+   ends on a straight run of `arrival_clearance`; it may end on as little as
+   its head plus one elbow when the longer run would force a jog.
+3. **Rip up and reroute.** Every connection is routed again with the others
+   in view. Crossing another connector is expensive; sharing its corridor is
+   cheap, because the next step spaces shared corridors apart.
+4. **Separate.** Lines that share a corridor are ordered so that they cross
+   least, and spaced one lane apart by a constraint solver (VPSC). The
+   crossbar of a Z and the trunk of a tree sit in the middle of the room they
+   have.
+5. **Uncross.** If lines still cross, neighbouring pins on the sides those
+   lines attach to are swapped one pair at a time. The figure is rerouted after
+   each swap, and a swap is kept when it removes crossings.
+6. **Room.** A connector that had to leave the container it belongs to asks
+   that container for the missing padding, and the figure is laid out again.
 
 ## Authoring tour
 
@@ -68,10 +320,13 @@ with flexo.Figure("attention-flow", width="double-column") as figure:
 Every component factory takes the same wiring keywords, so connecting a node
 never depends on which one you reached for. `input=` takes one upstream value and
 `inputs=` takes several; both work on `node` itself and on all of `block`,
-`image`, `inset`, `graph`, `matrix`, `sequence`, `tensor`, `feature_strip`,
-`vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`, and `loss`. One
-source lands on the component's `input` port; several land on `input1`, `input2`,
-… where the component has them and share `input` where it does not. `ports=`
+`circle`, `image`, `inset`, `graph`, `matrix`, `sequence`, `tensor`,
+`feature_strip`, `vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`,
+and `loss`. One source lands on the component's `input` port; several land on
+`input1`, `input2`, … where the component has them and share `input` where it
+does not. `attention` reads its inputs by name: `input=x` is self-attention
+(`x` feeds the query, key, and value), and `inputs=[x, memory]` is
+cross-attention (`x` is the query; `memory` the keys and values). `ports=`
 composes with the factories that compute ports of their own — give `mlp` a port
 table and yours is used whole, and the sources you passed are wired to the input
 ports it declares.
@@ -232,50 +487,43 @@ neighbour's up the left, so a reader who had learnt "the residual is the wire on
 the right" had to learn it again per tower. Both stay adaptive — each slides
 along the east edge to meet its counterpart — and they take two lanes there,
 `skip` low and `branch` high, because a bypass arrives from below the block it
-rejoins and leaves for the one above. The consequence to plan for is room: a
-pinned bypass routes *outside* the block, so a content-hugging container needs
-side padding (the reference Transformer's towers carry `34pt`) or routing has
-nowhere to put the corridor. An author who wants a left-handed figure writes
+rejoins and leaves for the one above. A pinned bypass routes *outside* the
+block, so a content-hugging container needs side padding for its corridor; the
+router asks the layout for exactly that much when it is missing (see *How
+connectors are routed*). An author who wants a left-handed figure writes
 `ports=` and gets it, exactly as an explicit port table has always worked.
 
 #### Ports pick the side they face
 
 A component's default ports carry a side because geometry needs one, and the
 grammar can only guess the common case: values enter west and leave east. Figures
-are not all read that way, so **a defaulted port chooses its side after layout,
-before routing** — the side whose outward normal points at whatever the port is
-wired to. A column of blocks comes out with south and north ports, a readout row
-hanging under a trunk is entered from above, and neither costs a line of port
-authoring.
+are not all read that way, so **every end of every connection is attached on the
+side that faces the thing at its other end** -- per connection, not per port. A
+column of blocks comes out with south and north attachments, a readout row
+hanging under a trunk is entered from above, and a value that goes both down and
+sideways leaves from two sides. None of it costs a line of port authoring.
 
 The rules, in full:
 
 - **an authored `PortSpec` is pinned.** Writing the side down is the choice, and
-  nothing overrules it — neither for that port nor for the offset and adaptivity
-  beside it. So is a port named by an edge carrying a `depart`/`arrive` hint.
+  nothing overrules it. So is a port named by an edge carrying a
+  `depart`/`arrive` hint, and the arrival of a `via` route (ink that comes round
+  the west arrives from the west).
 - **a port whose side *is* the convention is pinned by the grammar.** `add_norm`'s
-  `skip` and `branch` are the case in the box: a residual that changed hands from
-  tower to tower would make the reader re-learn the figure, so those two are born
-  east and stay east while the spine beside them auto-sides.
-- **a net votes once, for its trunk.** A stem runs to the shared rail, not to the
-  far port, so a wide fan-out does not drag its source port sideways toward
-  whichever head happens to sit furthest out.
-- **an edge routed through an authored corridor casts no vote.** Its ink goes
-  where `lane=` sent it, not where its counterpart sits.
-- **`via=` decides the side it arrives on.** Ink that comes round the west arrives
-  from the west, so a `via` hint settles the *entry* side of an auto-sided target
-  port — see *`via=`: which side a route should keep to*. The departure keeps its
-  own vote.
-- **a near-diagonal relationship names no side.** Below a decisive margin the
-  grammar's own side stands, because a port that flipped on a few points of
-  layout drift would be a worse surprise than one that never moved.
-- **a loop-back does not share a side with the spine it leaves.** Where the onward
-  hop and the return both face the same way, the short one keeps the straight run
-  and the long one takes the wider margin beside the node — which is the lane its
-  rail was going to travel anyway.
-- **a port asked to face two ways at once** picks the side of least mismatch and
-  says so, as a `layout.port.side.conflicted` lint note naming the node and
-  suggesting explicit ports.
+  `skip` and `branch` are born east and stay east, so a residual reads the same
+  way in every tower.
+- **ends of one port that leave the same side share one pin** and are drawn as a
+  tree from it; pins on one side are ordered by where their lines go, so lines
+  leaving one box never cross each other on the way out.
+- **an arrival and a departure of different values do not share a side** when
+  one of them can face its counterpart from another side too.
+- **a side whose straight approach would run into another box is skipped** for
+  the next side that faces the counterpart: an arrow needs its approach clear.
+- **an operator's inputs each take a side of their own**, so values meeting at
+  a `+` arrive from different directions.
+- **two pins facing each other across a gap slide to one coordinate** when both
+  boxes allow it and the straight line between them is clear, so the arrow is
+  exactly straight and still meets each box square.
 
 Ports no edge or net mentions keep the side they were born with; they are
 invisible either way. And the choice is the compiler's, not the document's: the
@@ -578,13 +826,16 @@ with flexo.Figure("nets", width="double-column") as figure:
     figure.merge(sinks=[first, second, third], dst=average, rail="east", label="Average")
 ```
 
-`net` emits one trunk with branches after the source; `merge` emits one rail and
-combines before the destination. Only destination stems receive arrowheads, and
-junction dots mark forks and merges only. Where a rail terminal serves a single
-stem there is no fork, so rail and stem share one rounded corner instead of
-meeting at a sharp one. The paper style turns every corner on a 6 pt elbow
-fillet; set `elbow_radius=pt(0)` on a derived `LayoutStyle` for a sharp
-technical-drawing treatment.
+`net` draws one value going to several places as a tree grown from the source:
+a trunk, and branches off it as plain Ts. `merge` draws several values arriving
+at one place as a tree grown from the destination; in a merge of two, the one
+that joins the other's line ends in an arrowhead pointing into it, and a merge
+of three or more is a bus with its one arrow into the destination. Edges that
+share a port are the same thing and are drawn the same way -- three `connect`
+calls from one output are one tree. Every bend inside a piece of the tree turns
+on the elbow fillet (6 pt in `paper`, square in `tikz`, `swiss` and `archive`);
+set `elbow_radius=pt(0)` on a derived `LayoutStyle` for a sharp
+technical-drawing treatment anywhere.
 
 `net` and `merge` are figure-level calls, and also methods on every group builder:
 `root.net(...)` works wherever `root.connect(...)` does, with the same arguments
@@ -601,13 +852,12 @@ words, and such a rail stays at the end of the corridor and hands the whole run 
 the caption.
 
 A trunk that leaves **along** the axis its rail runs on — an encoder's output
-crossing the page into a decoder's cross-attention — halves its own run the same
-way. Such a trunk draws a Z: a stretch along the port axis, a crossbar over to the
-rail, and the rail carrying on the same way. The crossbar defaults to the middle of
-the run between the hub's escape and the first stem it passes, so the two arms are
-arms of one step instead of a stub, a long crossbar drawn against the box the
-trunk just left, and the whole run beyond it. `rail`, `rail_at` and `via` place
-the net themselves, and switch the default off.
+crossing the page into a decoder's cross-attention — draws a Z: a stretch along
+the port axis, a crossbar over to the rail, and the rail carrying on the same
+way. The crossbar sits in the middle of the free span between the hub's escape
+and the first thing in its way, so the two arms are arms of one step rather than
+a stub against the box the trunk just left. `rail`, `rail_at` and `via` place the
+net themselves, and switch the default off.
 
 Two hints place and mark that joint:
 
@@ -622,15 +872,13 @@ with flexo.Figure("joint", width="double-column") as figure:
         module.merge(sinks=[q, kv], dst=attended, rail_at=0.55, joint="arrow")
 ```
 
-`rail_at=0.55` asks for the shared rail partway along the trunk run — the fraction
-is measured from the trunk's start toward the destination, so a merge that would
-otherwise join just before its sink can join mid-run instead. It is a request:
-where clearances forbid it the router moves to the nearest rail that fits and
-reports `routing.net.rail-at.clamped` as a lint warning rather than silently
-obeying or failing. `joint="arrow"` then ends the joining ink in an arrowhead one
-standoff short of the run it points into, leaving the trunk unbroken and dropping
-the dot that would otherwise mark the branch; `joint="dot"` insists on the dot
-even under `junction_dots="never"`.
+`rail_at=0.55` asks for the joint partway along the run -- the fraction is
+measured from the source port toward the destination port. It is a request:
+where clearances forbid it the router takes the nearest position that fits and
+reports `routing.net.rail-at.clamped`, naming the fraction it got, as a lint
+warning rather than silently obeying or failing. `joint="arrow"` puts an
+arrowhead on every joining branch, even in a bus; `joint="dot"` marks the joints
+with dots instead, whatever the figure's conventions say.
 
 #### Single-jog routes cross in the middle
 
@@ -677,26 +925,25 @@ defaults to no hint at all. Three things follow from it:
   reads it — and the rail is then placed as far toward that side as its stems and
   the obstacles allow. Unlike `rail=`, which *pins* the rail to the routing
   boundary, `via=` is a lean, so it may not be combined with `rail=` or `rail_at=`.
-- **the arrival faces the hint.** Ink that comes round the west arrives from the
+- **the ends face the hint.** Ink that comes round the west arrives from the
   west, so an auto-sided target port takes that side (an authored `PortSpec` or a
-  `depart`/`arrive` hint still wins). The departure keeps its own vote: a route may
-  perfectly well leave east and still be asked to stay west of the tower it is
-  crossing to.
+  `depart`/`arrive` hint still wins). The source takes it too when the hint is
+  across the line of travel: an edge to the box above, kept west, leaves west and
+  comes back in a C -- the drawing of a feedback loop. When the hint lies along
+  the line of travel, the source keeps its own side, because leaving toward the
+  hint would mean leaving backwards.
 
 Like `rail_at`, it is a request. Where the geometry leaves no corridor on that
 side the router takes the nearest one and reports it —
 `routing.via.clamped` for an edge, `routing.net.via.clamped` for a net — naming
 the side it actually achieved, rather than failing or silently obeying.
 
-A connector's own caption — a net's formula, an edge's `ESM-1b` — is route
-geometry rather than a node, so no obstacle rule reaches it and it has to place
-itself clear. It does, with `caption_clearance` measured from the other side: the
-words sit that far above the run's ink, counting from the bottom of their own
-descender box, which a subscript makes deeper than the font's descender. They also
-keep clear *sideways*. A riser out of the middle of the run cuts it in two, and
-the caption takes the wider stretch that is left rather than the midpoint of a run
-it would be sitting across — which is how `softmax(QKᵀ)V` ends up left of the K,V
-riser in panel b instead of flush against it.
+A net's caption -- a formula such as `softmax(QKᵀ)V` -- sits above the
+horizontal run its arrow draws, `caption_clearance` above the run's ink measured
+from the bottom of the caption's own descender box (a subscript makes that box
+deeper than the font's descender). A riser out of the middle of the run cuts it
+in two, and the caption takes the wider stretch that is left. An edge's caption
+is placed as described in [Captions on connectors](#captions-on-connectors).
 
 Attention then reads as a formula rather than as a matrix: the merge carries its
 caption in styled runs (`TextRun("T", baseline_shift="super")`) and Flexo anchors
@@ -704,36 +951,34 @@ it above the horizontal run the arrow draws.
 
 ### Paint: palettes, overrides, and retheming
 
-Palette roles are how a figure stays rethemeable. A whole theme is a set of
-overrides on an existing palette, and it moves no geometry:
+A theme (see *Themes, palettes, and fonts*) is the usual way to change a whole
+look. Underneath, every shape is painted by **role** -- `ink`, `container-fill`,
+`tone-2-stroke` -- so a palette can also be adjusted role by role, and it moves
+no geometry:
 
 ```python
 import flexo
 
-dark = flexo.DEFAULT_PALETTE.with_overrides(
-    {
-        "container-fill": "#444441",
-        "container-stroke": "#444441",
-        "block-fill": "#085041",
-        "block-stroke": "#56bb9a",
-        "ink": "#eceae4",
-        "muted-ink": "#c3c2b7",
-        "connector": "#898781",
-    }
+paint = flexo.resolve_palette("paper").with_overrides(
+    {"container-fill": "#fbfaf7", "connector": "#5b5b5b"}
 )
-with flexo.Figure("dark", width="double-column") as figure:
+with flexo.Figure("adjusted", width="double-column") as figure:
     with figure.module("m", label="Attention") as module:
         module.mlp("q-mlp", label="MLP")
 
-document = figure.compile(palette=dark).document
+document = figure.compile(palette=paint).document
 ```
 
 An unknown role is a diagnostic listing the valid ones, so a typo cannot silently
-paint nothing. Three palettes ship: `default`, `color-vision-safe` (Okabe–Ito
-hues), and `grayscale` (ramps separated by lightness, so they stay tellable apart
-without hue). `flexo retheme` re-paints a *finished* SVG by role, with no
-recompile — which is what the `data-flexo-fill` and `data-flexo-stroke`
-attributes on every emitted shape are for.
+paint nothing. The pre-theme palette objects (`DEFAULT_PALETTE`,
+`COLOR_VISION_SAFE_PALETTE`, `GRAYSCALE_PALETTE`) still work, and their names read
+as colour sets under any theme. `flexo retheme` re-paints a *finished* SVG by
+role, with no recompile -- which is what the `data-flexo-fill` and
+`data-flexo-stroke` attributes on every emitted shape are for:
+
+```bash
+uv run flexo retheme build/fig.editable.svg "Okabe-Ito" --theme paper -o build/fig.cvd.svg
+```
 
 When exactly one component or module must differ — a caption that has to clear its
 own dark body, say — `paint` overrides the role for that one entity:
@@ -911,41 +1156,43 @@ Everything but `editable` is produced from it by Inkscape, which must be on
 ## Which role paints what
 
 An author overriding a palette needs to know which role reaches which ink before
-writing the override, not after grepping the renderer. An `mlp` paints `block-*`,
-not `accent-*`; a caption under an arrow paints `muted-ink` while a caption inside
-a box paints `ink`.
+writing the override, not after grepping the renderer.
 
 | Role | Paints |
 | --- | --- |
 | `canvas` | the page background; the ring around a `junction` dot |
 | `ink` | component labels, group titles, `channels` captions |
-| `muted-ink` | connector and net captions — and nothing else |
-| `container-fill` / `container-stroke` | a group's container rect; `sequence` body; `concat` body fill; the border of `graph` and `inset` |
-| `block-fill` / `block-stroke` | `block`, `mlp`, `cnn`, `add-norm`, `tensor` bodies; `concat` body stroke. `block-stroke` also draws their motifs: MLP dots, CNN zigzag, sequence tokens, concat bars |
-| `accent-fill` / `accent-stroke` | `matrix`, `attention`, `feature-strip` bodies. `accent-stroke` also draws matrix and attention cell grids, feature-strip cells, `graph` nodes and edges, `inset` spokes, `channels` bars |
-| `warm-fill` / `warm-stroke` | `prediction` and `loss` bodies; `warm-stroke` also the `inset` centre dot |
-| `inset-fill` | `graph` and `inset` bodies, bordered in `container-stroke` |
-| `connector` | edge shafts, net rails and stems, flow arrowheads, junction dots, the `junction` component's body, the `channels` split path |
+| `muted-ink` | connector and net captions, glyph captions |
+| `container-fill` / `container-stroke` | a group's container (or its rule or band, by theme); `sequence` body; `concat` body fill |
+| `tone-N-fill` / `tone-N-stroke` / `tone-N-ink` / `tone-N-motif` | a component in tone `N`: body, outline, label, and motif ink (dots, zigzags, cell grids). Kinds take tones in the order the figure uses them (attention, add-norm, MLP, CNN, data strips, outputs), and `tone=` gives any component one |
+| `block-fill` / `block-stroke` / `block-motif` | an untoned `block`, `tensor`, `concat`, `op` |
+| `accent-*`, `warm-*` | the first two tones, under their pre-theme names |
+| `inset-fill` / `inset-stroke` | `graph` and `inset` bodies and borders |
+| `connector` | edge shafts, net pieces, flow arrowheads, junction dots, the `junction` component's body, the `channels` split path |
 | `residual` | the same ink for anything authored `role="residual"`, arrowheads included |
-| `ramp-node`, `ramp-embedding`, `ramp-q`, `ramp-kv`, `ramp-attended`, `ramp-output` | `vector` cells — one role per glyph, fill and stroke, graded by `fill-opacity` |
-| `shadow` | the nested rectangles of a `shadow=True` drop shadow |
+| `ramp-node`, `ramp-embedding`, `ramp-q`, `ramp-kv`, `ramp-attended`, `ramp-output` | `vector` cells -- one role per glyph, fill and stroke, graded by `fill-opacity` |
+| `shadow` | a `shadow=True` drop shadow (soft layers, or one slab in `midcentury`) |
 | `grid` | defined by every palette, painted by nothing today |
 
 ## Command line
 
 ```bash
 uv run flexo build examples/vertical_slice.yaml --output examples/build
+uv run flexo build examples/vertical_slice.yaml --theme tikz --palette "Okabe-Ito"
+uv run flexo build examples/vertical_slice.yaml --font "Helvetica"
 uv run flexo check examples/vertical_slice.yaml
 uv run flexo inspect examples/vertical_slice.yaml
 uv run flexo gallery --output examples/build
-uv run flexo retheme build/slice.editable.svg grayscale -o build/slice.gray.svg
+uv run flexo themes                      # themes, palettes, and bundled fonts
+uv run flexo retheme build/slice.editable.svg "Deep Sea Harvest" -o build/slice.recoloured.svg
 uv run flexo schema
 ```
 
 The builder lowers to the same validated, versioned schema that YAML and JSON
-parse into, so a figure is one thing written two ways — see
+parse into, so a figure is one thing written two ways -- see
 [`examples/vertical_slice.py`](examples/vertical_slice.py) and its
-[YAML equivalent](examples/vertical_slice.yaml).
+[YAML equivalent](examples/vertical_slice.yaml). A figure's `style` (its theme),
+`palette` and `font` are fields of that document too.
 
 `build` and `gallery` always write their outputs so a flawed figure stays
 inspectable: lint diagnostics go to stderr and the command exits `1` when any of
@@ -969,9 +1216,14 @@ and [the improvement beam](docs/improvement-beam.md).
 - immutable, deterministic compiler passes;
 - physical publication dimensions and measured typography;
 - stable semantic IDs, named ports, and localized diagnostics;
-- first-class fan-out nets and authored merge rails;
+- connectors routed as a whole, never failing: pins on the facing side, trees for
+  shared values, crossings priced, lanes solved, and room asked of the layout;
+- first-class fan-out nets and merges: branches are plain Ts, a merge of two ends
+  in an arrow, and an operation is an operator node;
 - defaults that read the figure they are in, and authored values that always win;
 - orthogonal routing with a theme-controlled local elbow radius;
+- themes that change the whole look -- type, line work, colour rules -- and move
+  nothing a reader relies on;
 - connector ink painted after the components it joins, so no run is interrupted
   by a container fill;
 - native SVG primitives, live text, and named Inkscape layers;

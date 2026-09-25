@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from flexo.conventions import Conventions
 from flexo.geometry import Insets, Side
 from flexo.style import PAINT_PARTS
 from flexo.units import Extent, Length
@@ -15,6 +16,8 @@ type Scalar = str | int | float | bool
 type LayoutKind = Literal["row", "column", "grid", "overlay", "stack"]
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
+type EdgeShape = Literal["auto", "orthogonal", "straight"]
+EDGE_SHAPES = ("auto", "orthogonal", "straight")
 type JointStyle = Literal["dot", "arrow", "auto"]
 JOINT_STYLES = ("dot", "arrow", "auto")
 """How a branch is marked where it meets the trunk of its net."""
@@ -107,8 +110,12 @@ class LayoutSpec:
     kind: LayoutKind = "row"
     gap: Length | None = None
     padding: Length | None = None
-    align: Literal["start", "center", "end", "stretch", "ports"] = "center"
+    align: Literal["start", "center", "end", "stretch", "ports", "auto"] = "auto"
     """How children sit across the axis they are not laid out along.
+
+    ``auto``, the default, is ``ports`` for a group whose children are wired to
+    one another and ``center`` for one whose children are not: arrows between
+    siblings run on a shared line, and a shelf of unconnected panels centres.
 
     ``start``/``center``/``end``/``stretch`` all align *boxes*. ``ports`` aligns
     the line each child's side ports live on instead, the way type sits on a
@@ -132,6 +139,13 @@ class LayoutSpec:
 
     A panel usually wants more air above and below its content than beside it,
     and a single ``padding`` can only buy that by widening the panel too.
+    """
+    room: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    """Padding the compiler added for connectors, in points: top, right, bottom, left.
+
+    Never authored and never serialized: routing asks for it (``routing.room``)
+    when a connector or its caption would otherwise leave this group. Layout
+    counts it as padding; the title stays where the authored padding puts it.
     """
     placements: tuple[tuple[str, int, int], ...] = ()
     """``(child id, row, column)`` for grid children placed by address.
@@ -210,6 +224,20 @@ class LayoutSpec:
         return self.resolved_gap(default)
 
     def resolved_padding(self, default: Length) -> Insets:
+        """The padding layout reserves: the authored padding plus any added room."""
+
+        authored = self.authored_padding(default)
+        top, right, bottom, left = self.room
+        return Insets(
+            authored.top + top,
+            authored.right + right,
+            authored.bottom + bottom,
+            authored.left + left,
+        )
+
+    def authored_padding(self, default: Length) -> Insets:
+        """The padding the author asked for (or the style's), without added room."""
+
         base = (self.padding or default).points
         return Insets(
             self.padding_top.points if self.padding_top is not None else base,
@@ -275,11 +303,25 @@ class EdgeSpec:
     the arriving port's side is a component default, ``via`` also decides it: the
     ink comes from that side, so the port faces it (see ``flexo.layout.sides``).
     """
+    shape: EdgeShape = "auto"
+    """How the line is drawn: ``"orthogonal"`` (routed, right angles only),
+    ``"straight"`` (one segment, centre to centre, clipped to both outlines), or
+    ``"auto"`` to follow the figure's ``lines`` convention.
+
+    A straight edge is not routed: it goes through whatever lies between its
+    ends, which lint reports. It suits node-link figures -- a fully connected
+    layer of neurons, a graphical model -- where the diagonal is the drawing.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Edge ID")
         if self.lane_hint is not None:
             _validate_id(self.lane_hint, "Lane hint")
+        if self.shape not in EDGE_SHAPES:
+            raise ValueError(
+                f'unknown shape "{self.shape}" for edge "{self.id}"; '
+                f"valid shapes: {', '.join(EDGE_SHAPES)}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,6 +410,8 @@ class LayoutConnection:
     source: PortRef
     target: PortRef
     externally_routed: bool = False
+    """True when the pair needs no corridor from layout: a lane-routed edge,
+    whose corridor is authored, or a straight edge, which is not routed at all."""
     from_net: bool = False
     """True when the pair is one leg of a net rather than a point-to-point edge.
 
@@ -450,12 +494,22 @@ class FigureSpec:
     height: Length | None = None
     root: str = "root"
     style: str = "paper"
+    """The theme: one name for the type, line work, and colour rules."""
     palette: str = "default"
+    """A named palette, ``"#rrggbb,#rrggbb,..."``, or ``"default"`` for the theme's own."""
     nodes: tuple[NodeSpec, ...] = ()
     edges: tuple[EdgeSpec, ...] = ()
     nets: tuple[NetSpec, ...] = ()
     groups: tuple[GroupSpec, ...] = ()
     schema_version: int = 1
+    font: str | None = None
+    """A family that replaces the theme's own, sizes and weights kept."""
+    conventions: Conventions | None = None
+    """Drawing conventions laid over the theme's own; see ``flexo.conventions``.
+
+    Only the fields that differ from ``Conventions()`` take effect, so
+    ``Conventions(branch="dot")`` changes the branch marks and nothing else.
+    """
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")
@@ -472,7 +526,9 @@ def layout_connections(figure: FigureSpec) -> tuple[LayoutConnection, ...]:
     """Project authored connections for geometry-aware layout, not routing."""
 
     edge_connections = tuple(
-        LayoutConnection(edge.source, edge.target, edge.lane_hint is not None)
+        LayoutConnection(
+            edge.source, edge.target, edge.lane_hint is not None or edge.shape == "straight"
+        )
         for edge in figure.edges
     )
     net_connections = tuple(

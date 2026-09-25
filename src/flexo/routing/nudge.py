@@ -175,11 +175,18 @@ def rail_label_position(
             for segment in runs[coordinate]
             for value in (segment.start.x, segment.end.x)
         )
+        # Only a riser that climbs *above* the run reaches the caption written
+        # over it; one arriving from below stops at the run.
+        above = [
+            riser
+            for riser in risers
+            if min(riser.start.y, riser.end.y) < coordinate - _EPSILON
+        ]
         centre = _captioned_centre(
             min(bounds),
             max(bounds),
             coordinate,
-            risers,
+            above,
             metrics.width,
             caption_reach(metrics, style),
         )
