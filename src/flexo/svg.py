@@ -66,8 +66,16 @@ def polyline_path(points: tuple[object, ...]) -> str:
     return " ".join(commands)
 
 
-def rounded_polyline_path(points: tuple[object, ...], radius: float) -> str:
-    """Fillet through-corners while preserving endpoints and orthogonal rails."""
+def rounded_polyline_path(
+    points: tuple[object, ...],
+    radius: float,
+    sharp: tuple[object, ...] = (),
+) -> str:
+    """Fillet through-corners while preserving endpoints and orthogonal rails.
+
+    Corners listed in ``sharp`` are drawn square: a junction another piece of ink
+    runs straight through.
+    """
 
     if radius <= 0.0 or len(points) < 3:
         return polyline_path(points)
@@ -79,7 +87,10 @@ def rounded_polyline_path(points: tuple[object, ...], radius: float) -> str:
         cross = (corner.x - previous.x) * (following.y - corner.y) - (
             corner.y - previous.y
         ) * (following.x - corner.x)
-        if incoming == 0.0 or outgoing == 0.0 or abs(cross) < 1e-9:
+        square = any(
+            abs(corner.x - point.x) < 1e-6 and abs(corner.y - point.y) < 1e-6 for point in sharp
+        )
+        if incoming == 0.0 or outgoing == 0.0 or abs(cross) < 1e-9 or square:
             if (cursor_x, cursor_y) != (corner.x, corner.y):
                 commands.append(f"L {number(corner.x)} {number(corner.y)}")
             cursor_x, cursor_y = corner.x, corner.y
@@ -124,5 +135,15 @@ def xml_document(root: ET.Element) -> str:
     """One indented XML document with the declaration Flexo always writes."""
 
     ET.indent(root, space="  ")
+    # Inside a text object whitespace is content: a newline between two tspans
+    # draws as a space. Take back what indenting put there.
+    for text in root.iter():
+        if local_name(text.tag) != "text":
+            continue
+        for item in text.iter():
+            if item is not text and item.tail is not None and not item.tail.strip():
+                item.tail = None
+            if len(item) and item.text is not None and not item.text.strip():
+                item.text = None
     xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
     return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'

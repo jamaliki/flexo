@@ -1,0 +1,149 @@
+{
+  "Pink-Lilac-Blue": [
+    "#FF499E",
+    "#D264B6",
+    "#A480CF",
+    "#779BE7",
+    "#49B6FF"
+  ],
+  "Cotton Candy Aurora": [
+    "#F7AEF8",
+    "#B388EB",
+    "#8093F1",
+    "#72DDF7",
+    "#F4F4ED"
+  ],
+  "Deep Sea Harvest": [
+    "#222E50",
+    "#007991",
+    "#439A86",
+    "#BCD8C1",
+    "#E9D985"
+  ],
+  "Cobalt Citrus": [
+    "#909CC2",
+    "#084887",
+    "#F58A07",
+    "#F9AB55",
+    "#F7F5FB"
+  ],
+  "Golden Terracotta": [
+    "#2274A5",
+    "#E7EB90",
+    "#FADF63",
+    "#E6AF2E",
+    "#632B30"
+  ],
+  "Tropical Rose": [
+    "#048A81",
+    "#21295C",
+    "#FBC3BC",
+    "#8A89C0",
+    "#F87666"
+  ],
+  "Royal Violet": [
+    "#DABFFF",
+    "#B59DEB",
+    "#907AD6",
+    "#6265A7",
+    "#4E4983"
+  ],
+  "Coastal Harvest": [
+    "#A799B7",
+    "#47A8BD",
+    "#DE9151",
+    "#D4E6B5",
+    "#033F63"
+  ],
+  "Smoky Aubergine": [
+    "#A799B7",
+    "#9888A5",
+    "#776472",
+    "#445552",
+    "#294D4A"
+  ],
+  "Midnight Fjord": [
+    "#3E92CC",
+    "#2A628F",
+    "#18435A",
+    "#16324F",
+    "#13293D"
+  ],
+  "Forest Dusk": [
+    "#083F72",
+    "#19381F",
+    "#D6D8EA",
+    "#748E54",
+    "#B75D69"
+  ],
+  "Meadow Orchid": [
+    "#44AF69",
+    "#DAB6FC",
+    "#FCAB10",
+    "#2B9EB3",
+    "#70566D"
+  ],
+  "Sage and Clay": [
+    "#DBD56E",
+    "#88AB75",
+    "#2D93AD",
+    "#7D7C84",
+    "#DE8F6E"
+  ],
+  "Dusty Ember": [
+    "#DAD6D6",
+    "#92BFB1",
+    "#F4AC45",
+    "#694A38",
+    "#A61C3C"
+  ],
+  "Deep Teal Moss": [
+    "#095256",
+    "#087F8C",
+    "#5AAA95",
+    "#86A873",
+    "#BB9F06"
+  ],
+  "Pastel Orchard": [
+    "#A3D9FF",
+    "#FFD2FC",
+    "#96E6B3",
+    "#BE6E46",
+    "#F2E94E"
+  ],
+  "Skybound Pastels": [
+    "#56CBF9",
+    "#7FBEEB",
+    "#AFBED1",
+    "#EAC5D8",
+    "#DBD8F0"
+  ],
+  "Candy Breeze": [
+    "#89DAFB",
+    "#FFD166",
+    "#FFB5C2",
+    "#86FEE4",
+    "#B7B9F6"
+  ],
+  "Ocean Candy": [
+    "#05668D",
+    "#FFD166",
+    "#FFB5C2",
+    "#02C39A",
+    "#BBBDF6"
+  ],
+  "Muted Sage": [
+    "#E5C1BD",
+    "#D2D0BA",
+    "#B6BE9C",
+    "#7B9E87",
+    "#5E747F"
+  ],
+  "Citrus Charcoal": [
+    "#E9D758",
+    "#297373",
+    "#FF8552",
+    "#E6E6E6",
+    "#39393A"
+  ]
+}

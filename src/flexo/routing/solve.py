@@ -30,8 +30,9 @@ from flexo.routing.nudge import (
     simplify_polyline,
 )
 from flexo.routing.visibility import PathCosts, SideBias, shortest_orthogonal_path
-from flexo.style import STYLES, LayoutStyle
+from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer
+from flexo.themes import figure_style
 
 
 def route_figure(
@@ -40,7 +41,22 @@ def route_figure(
     style: LayoutStyle | None = None,
     measurer: TextMeasurer | None = None,
 ) -> RoutedFigure:
-    layout_style = style or STYLES[fitted.measured.semantic.style]
+    """Route every connector (see ``flexo.routing.router``)."""
+
+    from flexo.routing.router import route_figure as route
+
+    return route(fitted, style=style, measurer=measurer)
+
+
+def route_figure_legacy(
+    fitted: FittedFigure,
+    *,
+    style: LayoutStyle | None = None,
+    measurer: TextMeasurer | None = None,
+) -> RoutedFigure:
+    """The greedy, one-route-at-a-time router the new one replaced."""
+
+    layout_style = style or figure_style(fitted.measured.semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     semantic = fitted.measured.semantic
     occupied: tuple[Segment, ...] = ()
@@ -307,7 +323,9 @@ def _via_diagnostics(
             refused += segment.length
         elif mirror.rejected(coordinate, _VIA_TOLERANCE):
             favoured += segment.length
-    if refused <= _VIA_TOLERANCE or favoured > _VIA_TOLERANCE:
+    # Clamped when the detour went mostly the way the author refused: a route
+    # that crosses back to arrive on the hinted side still took the far corridor.
+    if refused <= _VIA_TOLERANCE or favoured >= refused:
         return ()
     achieved = _OPPOSITE[edge.via]
     return (

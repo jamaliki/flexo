@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Literal
 
+from flexo.conventions import DEFAULT_CONVENTIONS, Conventions
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.units import CellSpan, Extent, Length, mm, pt
 
@@ -34,12 +35,34 @@ _PUBLICATION_WIDTHS = (
 
 @dataclass(frozen=True, slots=True)
 class TypographyStyle:
+    """The type a figure is set in. Measurement and paint both read it.
+
+    ``family`` is any family Flexo can resolve -- bundled, registered with
+    ``flexo.register_font``, or installed (see ``flexo.fonts``). ``fallbacks``
+    are tried, in order, for glyphs the family lacks, before the bundled
+    IBM Plex Sans and Liberation Sans that end every stack.
+    """
+
     family: str = "IBM Plex Sans"
     size: Length = _PT_8
     minimum_size: Length = _PT_7
     line_height: float = 1.22
     label_weight: int = 500
     title_weight: int = 600
+    fallbacks: tuple[str, ...] = ()
+    generic: str = "sans-serif"
+    """The CSS generic family a renderer falls back to last (``serif`` for a serif face)."""
+    tracking: float = 0.0
+    """Extra space after every character, in em. Measured, so it moves layout."""
+    title_transform: Literal["none", "upper"] = "none"
+    """``"upper"`` sets group titles in capitals, as the archive and Bauhaus themes do."""
+    title_size: float = 1.0
+    """Group-title size as a multiple of ``size``."""
+
+    def with_family(self, family: str, *fallbacks: str) -> TypographyStyle:
+        """This typography set in ``family``, keeping every size and weight."""
+
+        return replace(self, family=family, fallbacks=tuple(fallbacks) or self.fallbacks)
 
 
 _DEFAULT_TYPOGRAPHY = TypographyStyle()
@@ -80,7 +103,8 @@ class LayoutStyle:
     route_lane_spacing: Length = _PT_4
     port_spacing: Length = _PT_6
     bend_penalty: float = 14.0
-    junction_dots: Literal["auto", "always", "never"] = "auto"
+    conventions: Conventions = DEFAULT_CONVENTIONS
+    """How branches, merges, and shared arrivals are drawn (``flexo.conventions``)."""
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
     vector_cell: Length = _PT_8_5
     """Side of one square cell in a vector glyph (R19)."""
@@ -122,6 +146,38 @@ class LayoutStyle:
     Subtle on purpose. A shadow's job is to lift a container off the page by a
     hair; anything a reader notices as a shadow is already too strong for print.
     """
+    shadow_style: Literal["soft", "hard"] = "soft"
+    """``"soft"`` grades the shadow out; ``"hard"`` is one solid offset slab, the
+    printed look of the mid-century theme."""
+    arrow_shape: Literal["triangle", "stealth", "latex", "open"] = "triangle"
+    """The arrowhead every connector ends in.
+
+    ``stealth`` and ``latex`` are TikZ's ``Stealth`` and ``Latex`` tips: a
+    notched dart and a curved-sided one. ``open`` is two strokes, no fill.
+    """
+    container_style: Literal["filled", "outline", "dashed", "rule", "band", "none"] = "filled"
+    """How a titled group draws its boundary.
+
+    ``filled`` is a tinted rounded panel; ``outline`` and ``dashed`` draw only
+    the edge (dashed is the TikZ ``fit`` box); ``rule`` is a single rule along
+    the top edge, as Swiss layouts separate sections; ``band`` is a thick
+    coloured bar along the top edge; ``none`` draws nothing but the title.
+    Paint only: every style reserves the same room.
+    """
+    container_radius: Length | None = None
+    """Corner radius of a group's panel; ``None`` is 1.5 x ``corner_radius``."""
+    container_stroke_width: Length | None = None
+    """Stroke width of a group's boundary; ``None`` is ``stroke_width``."""
+    motif_stroke_width: Length | None = None
+    """Stroke width of motif line work; ``None`` is ``stroke_width``."""
+    kind_tones: bool = False
+    """Whether each kind of component takes a colour of its own from the palette.
+
+    On, an attention block, an add-norm and an MLP are three colours wherever
+    they appear -- the next palette colour for each kind a figure uses, in
+    contrast order. Off, every block shares the neutral block paint (the look
+    Flexo had before themes).
+    """
 
     @property
     def arrival_clearance(self) -> Length:
@@ -137,6 +193,21 @@ class LayoutStyle:
             max(
                 self.route_clearance.points,
                 2.0 * self.arrow_length.points + self.elbow_radius.points,
+            )
+        )
+
+    @property
+    def shortest_arrival(self) -> Length:
+        """The least straight run an arrow may end on: its head and one elbow.
+
+        Routes aim for ``arrival_clearance``; one that would have to jog out and
+        back to get it may come in on this much instead, and lint accepts it.
+        """
+
+        return Length(
+            min(
+                self.arrival_clearance.points,
+                self.arrow_length.points + self.elbow_radius.points + 2.0,
             )
         )
 
@@ -177,12 +248,40 @@ class Palette:
 
     name: str
     paints: Mapping[str, str]
+    tones: tuple[tuple[str, int], ...] = ()
+    """Which ``tone-N`` roles a figure's tone names were given (see ``tone_roles``).
+
+    Filled in per figure at emit time, in first-appearance order, so the first
+    tone a figure uses takes the palette's most distinct colour. Paint only.
+    """
+
+    aliases: tuple[tuple[str, str], ...] = ()
+    """Roles this palette answers under another role's name, for one component.
+
+    A toned component is drawn by the same code as any other, asking for
+    ``block-fill``; the alias sends that to ``tone-2-fill``, and the SVG records
+    the role it really painted, so ``flexo retheme`` still reaches it.
+    """
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "paints", MappingProxyType(dict(self.paints)))
 
+    def role(self, role: str) -> str:
+        """The role actually painted when ``role`` is asked for."""
+
+        return dict(self.aliases).get(role, role)
+
     def get(self, role: str, fallback: str = "#000000") -> str:
-        return self.paints.get(role, fallback)
+        return self.paints.get(self.role(role), fallback)
+
+    def tone_index(self, tone: str) -> int | None:
+        return dict(self.tones).get(tone)
+
+    def with_tones(self, tones: Mapping[str, int]) -> Palette:
+        return Palette(self.name, self.paints, tuple(sorted(tones.items())), self.aliases)
+
+    def with_aliases(self, aliases: Mapping[str, str]) -> Palette:
+        return Palette(self.name, self.paints, self.tones, tuple(sorted(aliases.items())))
 
     def with_overrides(self, overrides: Mapping[str, str]) -> Palette:
         unknown = sorted(set(overrides) - set(self.paints))
@@ -194,7 +293,7 @@ class Palette:
                     hint=f"Valid roles: {', '.join(sorted(self.paints))}.",
                 )
             )
-        return Palette(self.name, {**self.paints, **overrides})
+        return Palette(self.name, {**self.paints, **overrides}, self.tones, self.aliases)
 
 
 RAMP_ROLES = (
@@ -229,6 +328,10 @@ DEFAULT_PALETTE = Palette(
         "accent-stroke": "#237f84",
         "warm-fill": "#f8e5d7",
         "warm-stroke": "#a96133",
+        "block-motif": "#665477",
+        "accent-motif": "#237f84",
+        "warm-motif": "#a96133",
+        "inset-stroke": "#c9c2d3",
         "connector": "#4e4856",
         "residual": "#6d4ba0",
         "grid": "#80758b",
@@ -253,6 +356,9 @@ COLOR_VISION_SAFE_PALETTE = Palette(
         "accent-stroke": "#29845a",
         "warm-fill": "#fff0ce",
         "warm-stroke": "#9b6b00",
+        "block-motif": "#3f6c9e",
+        "accent-motif": "#29845a",
+        "warm-motif": "#9b6b00",
         "residual": "#8c4b78",
         # Okabe-Ito hues: the pairs an author is most likely to place side by
         # side (q / kv / attended) sit at opposite ends of the set.
@@ -279,6 +385,10 @@ GRAYSCALE_PALETTE = Palette(
         "accent-stroke": "#3d3d3d",
         "warm-fill": "#eeeeee",
         "warm-stroke": "#707070",
+        "block-motif": "#555555",
+        "accent-motif": "#3d3d3d",
+        "warm-motif": "#707070",
+        "inset-stroke": "#b8b8b8",
         "connector": "#444444",
         "residual": "#1f1f1f",
         "grid": "#777777",

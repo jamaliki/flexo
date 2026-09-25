@@ -25,6 +25,25 @@ class RoutedEdge:
     the geometry could not honour is a warning about the figure, not a reason to
     refuse to draw it.
     """
+    dots: tuple[Point, ...] = ()
+    """Branch points to mark, when this edge shares its ink with others (a bundle)."""
+    joints: tuple[Point, ...] = ()
+    """Every branch point of this edge's bundle: corners there are drawn sharp.
+
+    Two edges of one bundle share ink up to a junction and part there. Drawn
+    with a fillet, the one that turns would round the corner of the T the other
+    draws straight through, which reads as a smudge at the joint.
+    """
+    straight: bool = False
+    """Whether this edge is one straight segment rather than a routed path."""
+    joined_at: Point | None = None
+    """Where this edge merges into another of its bundle and its ink stops, arrow first."""
+    bundle: str | None = None
+    """The tree this edge was routed in with others: one value, several ends.
+
+    Edges of one bundle share ink on purpose, so lint does not read their common
+    trunk as two routes too close together.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +64,29 @@ class RoutedNet:
     label_position: Point | None = None
     diagnostics: tuple[Diagnostic, ...] = ()
     """What the router had to overrule while placing this net, for the lint report."""
+    trunks: tuple[tuple[Point, ...], ...] = ()
+    """Pieces of the net's tree between junctions, beyond ``rail`` (the longest)."""
+    bundle: str | None = None
+    """The tree this net was routed in, when it shares it with edges."""
+    joins: tuple[tuple[Point, ...], ...] = ()
+    """Pieces between junctions that end in an arrowhead where they merge (drawn shafts)."""
+    dots: tuple[Point, ...] | None = None
+    """Where three or more pieces of the tree meet: its branch points.
+
+    ``None`` means the router did not decide, and emission falls back to working
+    them out from the rail.
+    """
+
+    @property
+    def pieces(self) -> tuple[tuple[Point, ...], ...]:
+        """Every polyline of the net: rail, trunks, and stems."""
+
+        return (
+            self.rail,
+            *self.trunks,
+            *self.joins,
+            *(stem.centerline for stem in self.source_stems + self.target_stems),
+        )
 
     @property
     def junctions(self) -> tuple[Point, ...]:

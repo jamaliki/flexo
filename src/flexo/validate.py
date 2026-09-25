@@ -3,29 +3,88 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 
 from flexo.components import component_names, normalize_node
 from flexo.diagnostics import Diagnostic, FlexoError, Severity, raise_if_errors
-from flexo.ir.semantic import FigureSpec
-from flexo.style import PALETTES, STYLES
+from flexo.fonts import family_faces, require_family
+from flexo.ir.semantic import FigureSpec, layout_connections
+from flexo.themes import (
+    DEFAULT_PALETTE_NAME,
+    THEMES,
+    parse_palette,
+    unknown_palette,
+    unknown_theme,
+)
 
 
 def normalize_and_validate(figure: FigureSpec) -> FigureSpec:
-    normalized = FigureSpec(
-        id=figure.id,
-        width=figure.width,
-        height=figure.height,
-        root=figure.root,
-        style=figure.style,
-        palette=figure.palette,
-        nodes=tuple(normalize_node(node) for node in figure.nodes),
-        edges=figure.edges,
-        nets=figure.nets,
-        groups=figure.groups,
-        schema_version=figure.schema_version,
-    )
+    normalized = replace(figure, nodes=tuple(normalize_node(node) for node in figure.nodes))
     raise_if_errors(semantic_diagnostics(normalized))
     return normalized
+
+
+def resolve_alignment(figure: FigureSpec) -> FigureSpec:
+    """Turn every ``align="auto"`` into the alignment its group actually needs.
+
+    Arrows between siblings should run on one line, so a group whose children
+    are wired to each other aligns their *port lines* (``ports``) -- which for a
+    plain box is its centre, and for a captioned glyph is the glyph, not glyph
+    plus caption. A group whose children are not connected to one another is a
+    shelf: a shelf of stacks (columns in a row, rows in a column) is a set of
+    parallel branches and aligns them at the start, so they begin level; any
+    other shelf centres its children. Resolved once here, so every later pass and the
+    serialized figure agree on one concrete value.
+    """
+
+    if not any(group.layout.align == "auto" for group in figure.groups):
+        return figure
+    groups = {group.id: group for group in figure.groups}
+    node_ids = {node.id for node in figure.nodes}
+    memo: dict[str, frozenset[str]] = {}
+
+    def descendants(entity_id: str) -> frozenset[str]:
+        if entity_id not in memo:
+            if entity_id in node_ids:
+                memo[entity_id] = frozenset((entity_id,))
+            elif entity_id in groups:
+                memo[entity_id] = frozenset().union(
+                    *(descendants(child) for child in groups[entity_id].children)
+                )
+            else:
+                memo[entity_id] = frozenset()
+        return memo[entity_id]
+
+    pairs = tuple(
+        (connection.source.node_id, connection.target.node_id)
+        for connection in layout_connections(figure)
+    )
+    resolved = []
+    for group in figure.groups:
+        if group.layout.align != "auto":
+            resolved.append(group)
+            continue
+        owner = {
+            node_id: index
+            for index, child in enumerate(group.children)
+            for node_id in descendants(child)
+        }
+        wired = any(
+            source in owner and target in owner and owner[source] != owner[target]
+            for source, target in pairs
+        )
+        # A shelf of stacks -- columns side by side, rows one over another -- is
+        # parallel branches: they start together, the way a fork reads.
+        across = {"row": "column", "column": "row"}.get(group.layout.kind)
+        stacks = bool(group.children) and all(
+            child in groups and groups[child].layout.kind == across
+            for child in group.children
+        )
+        layout = replace(
+            group.layout, align="ports" if wired else ("start" if stacks else "center")
+        )
+        resolved.append(replace(group, layout=layout))
+    return replace(figure, groups=tuple(resolved))
 
 
 def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
@@ -73,24 +132,17 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                 entity_id=figure.id,
             )
         )
-    if figure.style not in STYLES:
-        diagnostics.append(
-            Diagnostic(
-                "style.unknown",
-                f'Unknown layout style "{figure.style}".',
-                entity_id=figure.id,
-                hint=f"Valid styles: {', '.join(STYLES)}.",
+    if figure.style not in THEMES:
+        diagnostics.append(replace(unknown_theme(figure.style), entity_id=figure.id))
+    elif figure.palette != DEFAULT_PALETTE_NAME and parse_palette(figure.palette) is None:
+        diagnostics.append(replace(unknown_palette(figure.palette), entity_id=figure.id))
+    if figure.font is not None and not family_faces(figure.font):
+        try:
+            require_family(figure.font)
+        except FlexoError as error:
+            diagnostics.extend(
+                replace(diagnostic, entity_id=figure.id) for diagnostic in error.diagnostics
             )
-        )
-    if figure.palette not in PALETTES:
-        diagnostics.append(
-            Diagnostic(
-                "palette.unknown",
-                f'Unknown palette "{figure.palette}".',
-                entity_id=figure.id,
-                hint=f"Valid palettes: {', '.join(PALETTES)}.",
-            )
-        )
 
     child_counts: Counter[str] = Counter()
     known_children = set(nodes) | set(groups)

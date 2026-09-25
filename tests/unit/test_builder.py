@@ -11,7 +11,7 @@ from flexo.compiler import Compilation, compile_figure
 from flexo.components import attachment_lane_tracks
 from flexo.diagnostics import FlexoError
 from flexo.gallery import modelangelo_gnn, vertical_slice
-from flexo.geometry import Side
+from flexo.geometry import Side, segments
 from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, PortSpec, TextRun
 from flexo.lint import lint_compilation
 from flexo.serialization import dump_figure, parse_figure
@@ -143,13 +143,19 @@ def test_panel_heads_rail_lands_between_the_last_addln_and_the_heads(
     """R12: the reserved corridor is where the fan-out rail goes."""
 
     fan_out = panel.routed.net("heads.fan-out")
-    start, end = fan_out.rail
-    assert start.y == end.y, "one horizontal rail"
+    levels = {
+        round(run.start.y, 6)
+        for piece in fan_out.pieces
+        for run in segments(piece)
+        if run.horizontal and run.length > 1e-6
+    }
+    assert len(levels) == 1, "one horizontal rail"
+    (rail_y,) = levels
     addln = panel.fitted.node("strip3.addln3").bounds
     heads = [panel.fitted.node(stem.port.node_id).bounds for stem in fan_out.target_stems]
-    assert addln.bottom < start.y < min(head.top for head in heads)
+    assert addln.bottom < rail_y < min(head.top for head in heads)
     for stem in fan_out.target_stems:
-        assert {point.x for point in stem.centerline} == {stem.centerline[0].x}
+        assert segments(stem.centerline)[-1].vertical, "each head takes a plain drop"
 
 
 def test_panel_labels_attention_with_a_shifted_run_above_the_arrow(
@@ -178,7 +184,7 @@ def test_panel_labels_attention_with_a_shifted_run_above_the_arrow(
         assert tuple((run.text, run.baseline_shift) for run in net.spec.label) == runs
         label = by_id[f"{net_id}.label"]
         spans = list(label)
-        assert [span.text for span in spans] == [text for text, _ in runs]
+        assert ["".join(span.itertext()) for span in spans] == [text for text, _ in runs]
         assert [span.get("baseline-shift") for span in spans] == [
             None if shift == "normal" else shift for _, shift in runs
         ]
@@ -631,8 +637,10 @@ def test_wiring_a_component_with_no_input_port_says_which_ports_it_has() -> None
     figure = Figure("bad", width=pt(240))
     with figure.module("m") as module:
         source = module.block("source", label="Source")
-        with pytest.raises(ValueError, match="no \"input\" port"):
+        with pytest.raises(ValueError, match="not both"):
             module.attention("attn", q=source, k=source, v=source, input=source)
+        with pytest.raises(ValueError, match="no \"input\" port"):
+            module.node("odd", ports=(PortSpec("side", Side.WEST),), input=source)
 
 
 def test_authored_ports_win_over_the_ones_a_factory_would_compute() -> None:
@@ -724,13 +732,9 @@ def test_build_writes_its_outputs_even_when_the_figure_lints_with_errors(tmp_pat
         "clipped",
         width=pt(120),
         nodes=(
-            NodeSpec(
-                "tiny",
-                "block",
-                (TextRun("A label far too long for this block"),),
-                width=pt(12),
-                height=pt(8),
-            ),
+            # A block grows around its words; an operator circle is its own
+            # size, so a long label in one cannot fit.
+            NodeSpec("tiny", "op", (TextRun("A label far too long for this circle"),)),
         ),
         groups=(GroupSpec("root", ("tiny",), LayoutSpec("row"), role="canvas"),),
     )
@@ -1185,21 +1189,18 @@ def test_attention_vector_captions_leave_the_stacks_where_they_were() -> None:
         assert glyph.height == pytest.approx(cells.height), "the caption adds no band"
 
 
-def test_a_lane_too_narrow_for_a_side_caption_keeps_it_underneath() -> None:
-    """The degrade is the old arrangement, not a caption jammed into 3pt of lane."""
+def test_a_block_too_narrow_for_side_captions_widens_to_hold_them() -> None:
+    """A width chosen at one type size must not jam captions into 3pt of lane."""
 
     style = STYLES["paper"]
-    below = compile_figure(_attention_figure(vectors=True, width=pt(50.0)).spec)
-    assert below.measured.semantic.group("m.mha.qkv.q").children == (
-        "m.mha.qkv.q.cells",
-        "m.mha.qkv.q.label",
-    )
-    cells = below.fitted.node("m.mha.qkv.q.cells").bounds
-    caption = below.fitted.node("m.mha.qkv.q.label").bounds
-    assert caption.top - cells.bottom == pytest.approx(
-        style.arrival_clearance.points + style.caption_clearance.points
-    )
-    assert cells.center.x == pytest.approx(below.fitted.node("m.mha.block").port("q").position.x)
+    grown = compile_figure(_attention_figure(vectors=True, width=pt(50.0)).spec)
+    block = grown.fitted.node("m.mha.block").bounds
+    assert block.width > 50.0
+    cells = grown.fitted.node("m.mha.qkv.q.cells").bounds
+    caption = grown.fitted.node("m.mha.qkv.q.label").bounds
+    assert caption.right <= cells.left - style.caption_clearance.points + 1e-6
+    assert cells.center.x == pytest.approx(grown.fitted.node("m.mha.block").port("q").position.x)
+    assert not lint_compilation(grown).errors
 
 
 def test_attention_vector_feeds_arrive_as_plain_verticals() -> None:
@@ -1212,9 +1213,13 @@ def test_attention_vector_feeds_arrive_as_plain_verticals() -> None:
         figure.net(src=source, sinks=[grown.q, grown.k, grown.v], id="qkv")
     compiled = compile_figure(figure.spec)
     net = compiled.routed.net("qkv")
+    rail_levels = set()
     for stem in net.target_stems:
-        assert len(stem.centerline) == 2, f"{stem.port} hooks around something"
-        start, end = stem.centerline
-        assert start.x == pytest.approx(end.x)
-        assert start.y > end.y, "the feed arrives from below"
+        runs = segments(stem.centerline)
+        drop = runs[-1]
+        assert drop.vertical, f"{stem.port} is entered by a plain vertical"
+        assert drop.start.y > drop.end.y, "the feed arrives from below"
+        assert all(run.horizontal for run in runs[:-1]), f"{stem.port} hooks around something"
+        rail_levels.update(round(run.start.y, 6) for run in runs[:-1])
+    assert len(rail_levels) <= 1, "every glyph drops from one rail"
     assert not lint_compilation(compiled).errors
