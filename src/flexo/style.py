@@ -185,7 +185,7 @@ class LayoutStyle:
 
         An arrowhead and the elbow that turns into it need more room than a
         plain approach, so a run that turns later than this cannot draw its
-        arrow. The layout reserves it, the router escapes to it, the nudger
+        arrow. The layout reserves it, the router escapes to it, separation
         protects it, and lint checks it -- all from this one number.
         """
 

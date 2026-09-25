@@ -43,14 +43,15 @@ from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
-from flexo.routing.labels import label_box, place_edge_labels
-from flexo.routing.nudge import (
+from flexo.routing.hints import SideBias, forced_points, via_diagnostics
+from flexo.routing.ink import (
     edge_label_position,
     edge_shaft,
     rail_label_position,
     shorten_end,
     shorten_start,
 )
+from flexo.routing.labels import label_box, place_edge_labels
 from flexo.routing.search import EAST, NORTH, SOUTH, WEST, Grid, Zone, simplify
 from flexo.routing.separate import Terminal, Wire, _perpendicular_cross, separate
 from flexo.routing.vpsc import solve
@@ -1667,9 +1668,8 @@ class _Scene:
         return wire
 
     def _forced_route(self, edge: EdgeSpec, source: _Pin, target: _Pin, bend: float) -> Wire:
-        from flexo.routing.solve import _forced_points
 
-        forced = _forced_points(
+        forced = forced_points(
             self.fitted,
             edge,
             source.escape,
@@ -2153,8 +2153,6 @@ def _routed_edge(
     position = edge_label_position(centerline, metrics, style) if metrics is not None else None
     diagnostics: tuple[Diagnostic, ...] = ()
     if edge.via is not None and len(centerline) >= 2:
-        from flexo.routing.solve import _via_diagnostics
-        from flexo.routing.visibility import SideBias
 
         region = Rect.union(
             (
@@ -2165,7 +2163,7 @@ def _routed_edge(
                 ),
             )
         )
-        diagnostics = _via_diagnostics(edge, centerline, SideBias.of(edge.via, region))
+        diagnostics = via_diagnostics(edge, centerline, SideBias.of(edge.via, region))
     return RoutedEdge(
         edge,
         centerline,
