@@ -130,9 +130,11 @@ def route_figure(
     members, ends = connections(fitted, straight)
     scene = _Scene(fitted, layout_style, text_measurer)
 
-    def attempt(overrides: dict[tuple[str, Side], list]) -> tuple:
+    def attempt(
+        overrides: dict[tuple[str, Side], list], sides: dict[int, Side] | None = None
+    ) -> tuple:
         orders: dict[tuple[str, Side], list] = {}
-        pins = plan_pins(fitted, members, ends, layout_style, overrides, orders)
+        pins = plan_pins(fitted, members, ends, layout_style, overrides, orders, sides)
         bundles = plan_bundles(members, ends)
         wires = [scene.grow(bundle, members, ends, pins) for bundle in bundles]
         # Rip up and reroute: every bundle again, now able to see the others.
@@ -159,7 +161,15 @@ def route_figure(
 
     pins, bundles, wires, orders = attempt({})
     pins, bundles, wires = _reorder_crossing_pins(
-        attempt, separated, pins, bundles, wires, orders, members, ends
+        attempt,
+        separated,
+        pins,
+        bundles,
+        wires,
+        orders,
+        members,
+        ends,
+        layout_style.port_spacing.points,
     )
     wires = separated(wires)
     routed_edges: dict[str, RoutedEdge] = {}
@@ -255,11 +265,16 @@ def route_figure(
     return RoutedFigure(fitted, tuple(edges), tuple(nets))
 
 
+SIDE_TRIALS = 8
+"""Most end sides tried, per figure, to take a crossing out."""
+
 PIN_ORDER_TRIALS = 12
 """Most pin orders tried, per figure, to take a crossing out."""
 
 
-def _reorder_crossing_pins(attempt, separated, pins, bundles, wires, orders, members, ends):
+def _reorder_crossing_pins(
+    attempt, separated, pins, bundles, wires, orders, members, ends, spacing
+):
     """Swap neighbouring pins on the sides crossing routes attach to, while it helps.
 
     Pins are ordered along a side by where their counterparts sit, which cannot
@@ -269,7 +284,7 @@ def _reorder_crossing_pins(attempt, separated, pins, bundles, wires, orders, mem
     figure rerouted, and the order kept when the figure crosses less.
     """
 
-    best = _crossing_pairs(separated(wires))
+    best = _defects(separated(wires), spacing)
     trials = 0
     tried: set[tuple] = set()
     overrides: dict[tuple[str, Side], list] = {}
@@ -296,29 +311,117 @@ def _reorder_crossing_pins(attempt, separated, pins, bundles, wires, orders, mem
                 tried.add(signature)
                 trials += 1
                 trial = attempt({**overrides, side_key: swapped})
-                crossings = _crossing_pairs(separated(trial[2]))
-                if len(crossings) < len(best):
+                defects = _defects(separated(trial[2]), spacing)
+                if len(defects) < len(best):
                     overrides[side_key] = swapped
                     pins, bundles, wires, orders = trial
-                    best = crossings
+                    best = defects
                     improved = True
                     break
             if improved:
                 break
         if not improved:
             break
+    return _turn_crossing_ends(
+        attempt,
+        separated,
+        pins,
+        bundles,
+        wires,
+        overrides,
+        best,
+        members,
+        ends,
+        spacing,
+    )
+
+
+def _turn_crossing_ends(
+    attempt, separated, pins, bundles, wires, overrides, best, members, ends, spacing
+):
+    """Try the other sides of a crossing edge's ends, while that helps.
+
+    A pin's side is chosen before any route exists, from where the other end
+    is. A line that has to come back round -- a loop from a decision back to
+    the step it repeats -- then arrives on the side facing its source and cuts
+    through everything between. Entering from above or below instead, it can
+    go round. So each end of a crossing edge whose side is a default is tried
+    on the two sides across from its own, and kept where the figure crosses less.
+    """
+
+    sides: dict[int, Side] = {}
+    trials = 0
+    tried: set[tuple[int, Side]] = set()
+    while best and trials < SIDE_TRIALS:
+        involved = {index for pair in best for index in pair}
+        candidates = [
+            end_index
+            for index in sorted(involved)
+            for member in bundles[index].members
+            if isinstance(members[member].spec, EdgeSpec)
+            for end_index in members[member].ends
+            if not ends[end_index].fixed and end_index not in sides
+        ]
+        improved = False
+        for end_index in candidates:
+            current = ends[end_index].group[2]
+            for side in (turn for turn in Side if turn.horizontal != current.horizontal):
+                if (end_index, side) in tried or trials >= SIDE_TRIALS:
+                    continue
+                tried.add((end_index, side))
+                trials += 1
+                trial = attempt(overrides, {**sides, end_index: side})
+                defects = _defects(separated(trial[2]), spacing)
+                if len(defects) < len(best):
+                    sides[end_index] = side
+                    pins, bundles, wires, _ = trial
+                    best = defects
+                    improved = True
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+    if trials:
+        # Every trial re-plans the ends in place; plan once more with the sides
+        # that were kept, so the ends agree with the pins returned.
+        pins, bundles, wires, _ = attempt(overrides, sides)
     return pins, bundles, wires
 
 
-def _crossing_pairs(wires: list[Wire]) -> list[tuple[int, int]]:
-    """Pairs of wires whose lines cross at a right angle somewhere."""
+def _defects(wires: list[Wire], spacing: float) -> list[tuple[int, int]]:
+    """What a trial is judged by: pairs of wires that cross, or run too close.
+
+    Counting only crossings, a trial could trade one for two lines drawn a
+    hair apart, which is worse; a pair that does either counts once.
+    """
 
     runs = [_straight_runs(wire) for wire in wires]
     pairs = []
     for first, second in itertools.combinations(range(len(wires)), 2):
-        if any(_perpendicular_cross(a, b, c, d) for a, b in runs[first] for c, d in runs[second]):
+        if any(
+            _perpendicular_cross(a, b, c, d) or _too_close(a, b, c, d, spacing)
+            for a, b in runs[first]
+            for c, d in runs[second]
+        ):
             pairs.append((first, second))
     return pairs
+
+
+def _too_close(a: Point, b: Point, c: Point, d: Point, spacing: float) -> bool:
+    """Parallel runs that overlap along their length closer than ``spacing``."""
+
+    if abs(a.y - b.y) < 1e-9 and abs(c.y - d.y) < 1e-9:
+        low, high = sorted((a.x, b.x))
+        other_low, other_high = sorted((c.x, d.x))
+        overlap = min(high, other_high) - max(low, other_low)
+        return overlap > 1e-6 and abs(a.y - c.y) + 1e-6 < spacing
+    if abs(a.x - b.x) < 1e-9 and abs(c.x - d.x) < 1e-9:
+        low, high = sorted((a.y, b.y))
+        other_low, other_high = sorted((c.y, d.y))
+        overlap = min(high, other_high) - max(low, other_low)
+        return overlap > 1e-6 and abs(a.x - c.x) + 1e-6 < spacing
+    return False
 
 
 def _straight_runs(wire: Wire) -> list[tuple[Point, Point]]:

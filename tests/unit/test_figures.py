@@ -312,3 +312,20 @@ def test_a_legend_keys_every_tone_in_the_colour_it_names() -> None:
     }
     assert fills["m.legend.entry-0.swatch.body"] == fills["m.embed.body"]
     assert fills["m.legend.entry-1.swatch.body"] == fills["m.mlp.body"]
+
+
+def test_a_loop_back_enters_from_the_side_that_lets_it_go_round() -> None:
+    """A decision's "no" back to an earlier step, with a fan-out in between."""
+
+    with Figure("ci") as figure:
+        with figure.module("m", label="Continuous integration") as m:
+            build = m.block("build", label="Build", input=m.terminal("push", label="Push"))
+            with m.column("checks", role="layout") as column:
+                checks = [column.block(name, label=name.title()) for name in ("unit", "lint")]
+            ok = m.decision("ok", label="All green?")
+            deploy = m.terminal("deploy", label="Deploy")
+        figure.net(src=build, sinks=checks)
+        figure.merge(sinks=checks, dst=ok)
+        m.connect(ok, deploy, label="yes")
+        m.connect(ok, build, label="no", line="dashed")
+    assert not lint_compilation(compile_figure(figure.spec)).diagnostics

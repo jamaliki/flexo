@@ -302,16 +302,18 @@ def plan_pins(
     style: LayoutStyle,
     overrides: dict[tuple[str, Side], list] | None = None,
     chosen: dict[tuple[str, Side], list] | None = None,
+    sides: dict[int, Side] | None = None,
 ) -> dict[tuple[str, str, Side, bool], Pin]:
     """Give every end a pin: a side, then a place on it.
 
-    ``overrides`` fixes the order of the pins on a ``(node, side)``, and
-    ``chosen``, when given, receives the order every side ended up with.
+    ``overrides`` fixes the order of the pins on a ``(node, side)``;
+    ``chosen``, when given, receives the order every side ended up with; and
+    ``sides`` fixes the side of an end, by its index in ``ends``.
     """
 
     hints = _port_hints(fitted.measured.semantic)
     flow = _flow_defaults(fitted, members, ends)
-    for end in ends:
+    for index, end in enumerate(ends):
         spec = end.node.measured.spec
         port_spec = _authored_port(fitted, spec.id, end.reference.port_name)
         fitted_port = end.node.port(end.reference.port_name)
@@ -333,6 +335,9 @@ def plan_pins(
             side = pinned
         elif port_spec.auto_side and not steered:
             side = _facing(end.node.bounds, end.counterpart, flow.get(id(end), port_spec.side))
+        if sides and index in sides:
+            side = sides[index]
+            end.fixed = True
         name = _SAME_VALUE.get(spec.kind, {}).get(end.reference.port_name, end.reference.port_name)
         separate = style.conventions.arrivals == "separate"
         span = end.node.bounds.width if side in {Side.NORTH, Side.SOUTH} else end.node.bounds.height
