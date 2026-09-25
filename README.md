@@ -43,7 +43,7 @@ stays inspectable. Derived formats (`portable`, `pdf`, `png`) need Inkscape;
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws twenty figures from
+[`examples/literature.py`](examples/literature.py) draws twenty-one figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -281,7 +281,10 @@ A group with `role="layout"` (the `row` and `column` you nest to arrange
 things) draws nothing, and has no padding unless you give it one: the space
 between its children and its neighbours is exactly the `gap`. A row of such
 columns side by side, not wired to each other, is read as parallel branches:
-the columns are aligned at the top. If a figure is wider than its page, the
+the columns are aligned at the top. Two rows stacked in a column, with the same
+number of children and child *i* of one wired to child *i* of the other (and to
+nothing else in the pair), are laid out as one grid, so each child sits over its
+partner; the same holds for two columns side by side. If a figure is wider than its page, the
 compiler first tries tighter gaps and group padding (down to half), and only
 then grows the page, with a `layout.width.grown` warning. (It does not tighten
 a figure compiled with an explicit `style=`, which it keeps exactly.)

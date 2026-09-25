@@ -16,7 +16,7 @@ from flexo.layout.order import optimized_child_orders
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
-from flexo.validate import normalize_and_validate, resolve_alignment
+from flexo.validate import merge_matched_stacks, normalize_and_validate, resolve_alignment
 
 __all__ = ["arrangement_size", "measure_figure"]
 
@@ -28,7 +28,7 @@ def measure_figure(
     measurer: TextMeasurer | None = None,
 ) -> MeasuredFigure:
     # Layout reads concrete alignments; the authored figure keeps its "auto".
-    semantic = resolve_alignment(normalize_and_validate(figure))
+    semantic = resolve_alignment(merge_matched_stacks(normalize_and_validate(figure)))
     layout_style = style or figure_style(semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     title_measurer = (
