@@ -1,8 +1,8 @@
 # Authoring guide
 
-This guide walks through Flexo's components, layout, nets, paint, and export
-in detail. The [README](../README.md) covers the essentials; how connectors are
-routed is in [routing.md](routing.md), and how the compiler is built is in
+This guide covers Flexo's components, layout, paint, artwork, and export in
+detail. The [README](../README.md) covers the essentials. Connector routing is
+described in [routing.md](routing.md), and the compiler's structure in
 [architecture.md](architecture.md).
 
 ## Components and wiring
@@ -24,29 +24,35 @@ with flexo.Figure("attention-flow", width="double-column") as figure:
         module.residual(features, prediction, lane="encoder-bottom")
 ```
 
-Every component factory takes the same wiring keywords, so connecting a node
-never depends on which one you reached for. `input=` takes one upstream value and
-`inputs=` takes several; both work on `node` itself and on all of `block`,
-`circle`, `image`, `inset`, `graph`, `matrix`, `sequence`, `tensor`,
-`feature_strip`, `vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`,
-and `loss`. One source lands on the component's `input` port; several land on
-`input1`, `input2`, … where the component has them and share `input` where it
-does not. `attention` reads its inputs by name: `input=x` is self-attention
-(`x` feeds the query, key, and value), and `inputs=[x, memory]` is
-cross-attention (`x` is the query; `memory` the keys and values). `ports=`
-composes with the factories that compute ports of their own — give `mlp` a port
-table and yours is used whole, and the sources you passed are wired to the input
-ports it declares.
+Component factories share two wiring keywords: `input=` takes one upstream
+value and `inputs=` takes several. They work on `node` and on `block`, `circle`,
+`image`, `inset`, `graph`, `matrix`, `sequence`, `tensor`, `feature_strip`,
+`vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`, and `loss`.
 
-Ids are scoped by the group that owns them, so `module.mlp("head")` inside
-`encoder` is `encoder.head`; that is what lets the same component name appear in
-every module of a figure.
+- One source connects to the component's `input` port.
+- Several sources connect to `input1`, `input2`, ... when the component has
+  those ports. Otherwise they all connect to `input`.
+- `concat` requires `inputs=` with at least two sources and gives each its own
+  west port.
+- `attention` maps sources by name. `input=x` is self-attention: `x` feeds `q`,
+  `k`, and `v`. `inputs=[x, memory]` is cross-attention: `x` feeds `q` and
+  `memory` feeds `k` and `v`. Three sources feed `q`, `k`, and `v` in order.
+  `q=`, `k=`, and `v=` connect each port directly; passing them together with
+  `input=`/`inputs=` raises `ValueError`.
+
+`mlp`, `cnn`, `concat`, and `channels` build their own port tables from their
+arguments. If you pass `ports=`, your table replaces the computed one, and the
+sources are wired to the `input` or `input1`, `input2`, ... ports it declares.
+
+Ids are scoped by the group that owns them: `module.mlp("head")` inside
+`encoder` has the id `encoder.head`. The same component name can therefore
+appear in every module of a figure.
 
 ### Components you can create before their inputs exist
 
-Wiring at creation is a convenience, never a requirement. **No component needs a
-source to be created**, `attention` included: `q`, `k`, and `v` wire straight into
-its three ports when they are given, and the ports are there either way.
+Wiring at creation is optional. Every factory except `concat` creates its
+component without sources. An `attention` block has its `q`, `k`, and `v` ports
+whether or not sources were given, so a later `connect` or `net` can reach them:
 
 ```python
 import flexo
@@ -59,16 +65,15 @@ with flexo.Figure("transformer", width="double-column") as figure:
     figure.net(src=top, sinks=[cross.k, cross.v], id="cross-kv")
 ```
 
-A figure is not always written in flow order. A decoder's cross-attention reads
-keys and values from an encoder that appears *later* in the source, and a
-component that could not exist before its inputs would force the whole tower to be
-authored inside out.
+This lets you write a figure out of flow order. Here the decoder's
+cross-attention is created before the encoder that supplies its keys and
+values.
 
 ### Attention that grows its own Q, K, V
 
-`vectors=` draws the three values an attention block reads as vector glyphs
-underneath it, the way the Transformer paper does — one cell stack per port, each
-**centred exactly under the port it feeds**, captioned to one side:
+`vectors=` draws an attention block's three inputs as vector glyphs below it:
+one cell stack per port, each centred under the port it feeds, with a caption
+beside it.
 
 ```python
 import flexo
@@ -88,81 +93,83 @@ with flexo.Figure("grown", width="double-column") as figure:
     figure.root.connect(mha, norm)
 ```
 
-`vectors=True` takes the palette's own `ramp-q` and `ramp-kv` roles (keys and
-values share one, because they are read together). One `VectorPreset` or one ramp
-role name paints all three alike, and a `{"q": ..., "k": ..., "v": ...}` mapping
-paints each its own way — keyed case-insensitively, so the mapping you named `Q`,
-`K`, `V` after the captions goes straight in. `vectors=None`, the default, is the
-plain block: nothing about a figure that never asks for glyphs changes.
+`vectors=` accepts:
 
-**The engine does the arithmetic.** Centring a glyph under a port at 0.24 of a
-120pt block is the sort of sum that ends up as a magic inter-glyph gap in the
-figure that needs it — and then silently wrong the next time the component's port
-table moves. Here the block's own port offsets become the reserved column widths
-of a one-row grid exactly as wide as the block: a pad, then a lane per port, then
-a pad. A glyph centred in its lane *is* centred under its port, so the connector
-between them comes out a plain two-point vertical with nothing to route around,
-and the corridor above the glyphs is the ordinary edge-aware sibling gap rather
-than a number anybody wrote down. The composite needs a `width` for that reason,
-and says so if it does not get one.
+- `True`: the palette's `ramp-q` role for Q and `ramp-kv` for both K and V.
+- One `VectorPreset` or one ramp role name: all three glyphs painted alike.
+- A mapping with the keys `q`, `k`, and `v`: each glyph painted its own way.
+  Keys are case-insensitive, so `Q`, `K`, `V` also work. All three keys are
+  required.
+- `None` (the default) or `False`: the plain attention block, with no glyphs.
 
-The handle still speaks for the block — `output` is the attention output — but
-`q`, `k` and `v` now answer from the **glyphs**, because that is where a value
-entering this attention arrives:
+The composite requires `width=`; without it `attention` raises `ValueError`.
+The builder divides that width into a one-row grid: a pad, then a lane and a
+pad for each port. Every lane has the same width and is centred on its port's
+offset. A glyph centred in its lane is therefore centred under its port, and
+the connector between them is a straight vertical. If the lanes are too narrow
+to hold a stack with its caption, the builder widens the block until they fit.
+
+The returned handle still names the block, so `output` is the attention
+output. Its `q`, `k`, and `v` resolve to the glyphs' `input` ports, so a value
+wired to `mha.k` enters the K glyph:
 
 ```python
-figure.net(src=embedding, sinks=[mha.q, mha.k, mha.v], id="qkv")   # into the glyphs
-figure.root.connect(mha, norm)                                     # out of the block
+import flexo
+
+with flexo.Figure("grown-wired", width="double-column") as figure:
+    with figure.module("encoder", layout="column", gap="14pt") as tower:
+        norm = tower.add_norm("an", label="Add & Norm", width="120pt")
+        mha = tower.attention(
+            "mha", label="Multi-Head\nAttention", width="120pt", vectors=True
+        )
+        embedding = tower.block("embedding", label="Embedding", width="120pt")
+    figure.net(src=embedding, sinks=[mha.q, mha.k, mha.v], id="qkv")  # into the glyphs
+    figure.root.connect(mha, norm)                                    # out of the block
 ```
 
-Both of a glyph's ports are pinned, and that is the point: north is the drop into
-the attention port above it, south is the feed. A value computed off to one side
-travels to below its glyph and comes up, rather than entering between two glyphs
-— a lane is only as wide as the port spacing it was cut from, so two runs
-entering sideways would have to thread the same gap at the same height.
+A glyph's two ports are pinned: `input` on its south side and `output` on its
+north side, which feeds the attention port above. A value that comes from one
+side routes to below its glyph and enters from underneath.
 
-**The caption stands beside its stack**, not under it, and that follows from the
-same sentence: the corridor under a glyph is the only approach its feed has, so a
-caption parked in it makes every arriving arrow hook around the words. Beside, the
-feeds are dead-straight verticals. The room is the lane's own surplus — a lane is
-wider than the stack in it — so the caption takes the half-lane it stands in less
-one `caption_clearance` of air, the glyph reserves that same room on the stack's
-other side as padding, and the whole glyph comes out exactly one lane wide and
-symmetric about its cells. The stack therefore keeps the port's x whichever side
-the words take, and it is one side for all three: three captions leaning the same
-way read as a convention, a mirrored pair around a middle glyph reads as an
-accident. A lane too narrow to hold a caption beside the stack (an attention
-pinned under about 56pt) puts it back underneath, `arrival_clearance +
-caption_clearance` down, so the approach is at least still open.
+Each caption stands to the left of its stack, one `caption_clearance` from the
+cells. The glyph reserves the same width as padding on the right of the stack,
+so the stack stays centred in its lane and the space below it stays clear for
+the incoming connector. A standalone `vector()` keeps its caption below the
+stack.
 
-A standalone `vector()` keeps its caption below, as it always has: it is wired
-from the side and has no approach from underneath to protect.
-
-Lanes are filled in **port-offset order**, not in q/k/v order, so an authored
-`ports=` that reads the value on the left puts that glyph on the left too — which
-is how the paper draws a cross-attention, with the encoder's V and K nearest the
-line that feeds them and the decoder's own Q clear of it on the right:
+Lanes are assigned in port-offset order, not in q/k/v order. A `ports=` table
+that puts `v` on the left therefore puts the V glyph on the left. This is how
+the Transformer paper draws cross-attention:
 
 ```python
+import flexo
+
 CROSS_PORTS = (
     flexo.PortSpec("v", flexo.Side.SOUTH, 0.24, adaptive=True, auto_side=True),
     flexo.PortSpec("k", flexo.Side.SOUTH, 0.5, adaptive=True, auto_side=True),
     flexo.PortSpec("q", flexo.Side.SOUTH, 0.76, adaptive=True, auto_side=True),
     flexo.PortSpec("output", flexo.Side.NORTH, 0.5, adaptive=True, auto_side=True),
 )
+
+with flexo.Figure("cross", width="double-column") as figure:
+    with figure.module("decoder", layout="column") as decoder:
+        cross = decoder.attention(
+            "xmha",
+            label="Multi-Head\nAttention",
+            width="120pt",
+            vectors=True,
+            ports=CROSS_PORTS,
+        )
 ```
 
-In a ports-aligned parent the composite answers with the **block**, so a row of
-towers lines up on the attention boxes rather than on the glyph row hanging
-beneath them — the same principle as a `vector()` answering with its cell stack
-rather than with its caption. See
-[`examples/transformer.py`](../examples/transformer.py) for all three attention
-blocks of a Transformer authored this way.
+In a ports-aligned parent the composite aligns on the attention block, not on
+the glyph row below it. A row of towers therefore lines up on the attention
+boxes. [`examples/transformer.py`](../examples/transformer.py) builds all three
+attention blocks of a Transformer this way.
 
 ### Residual blocks name both of their wires
 
-`add_norm` is a residual join, so it has a port for each wire rather than one
-`input` doing double duty:
+`add_norm` is a residual join. It has a separate port for each incoming wire:
 
 ```python
 import flexo
@@ -177,72 +184,63 @@ with flexo.Figure("residual", width="double-column") as figure:
         module.connect(fork.branch, norm, target_port="skip")     # -> an.skip
 ```
 
-`input` is what the sublayer computed and `skip` is what went round it; `output`
-carries the sum onward and `branch` is the same value tapped for the *next*
-block's skip. Two values sent into one `input` are drawn as two arrows side by
-side on one side of the box (see `arrivals` under
-[Conventions](../README.md#conventions-branches-merges-arrivals-and-lines)); naming the
-second arrival says which is which, and `add_norm(input=..., skip=...)` says it at
-the point of creation.
-`residual()` prefers a `residual` or `skip` port automatically for the same
-reason.
+Its four ports are:
 
-`input` and `output` are auto-sided, so a tower that reads upward gets its spine
-on the edges its ink actually uses with no port table written down. `skip` and
-`branch` are **pinned east** instead: a residual is a convention, not a per-node
-optimisation, and auto-siding sent one tower's bypass up the right margin and its
-neighbour's up the left, so a reader who had learnt "the residual is the wire on
-the right" had to learn it again per tower. Both stay adaptive — each slides
-along the east edge to meet its counterpart — and they take two lanes there,
-`skip` low and `branch` high, because a bypass arrives from below the block it
-rejoins and leaves for the one above. A pinned bypass routes *outside* the
-block, so a content-hugging container needs side padding for its corridor; the
-router asks the layout for exactly that much when it is missing (see *How
-connectors are routed*). An author who wants a left-handed figure writes
-`ports=` and gets it, exactly as an explicit port table has always worked.
+| Port | Carries | Side |
+| --- | --- | --- |
+| `input` | the sublayer's output | auto-sided |
+| `skip` | the value that bypassed the sublayer | east, lower (offset 0.8) |
+| `output` | the sum, to the next sublayer | auto-sided |
+| `branch` | the sum, to the next block's `skip` | east, upper (offset 0.2) |
+
+`add_norm(input=..., skip=...)` wires both at creation, and `residual()` uses a
+`residual` or `skip` port when the target has one. Two values sent to the same
+`input` port are drawn as two arrows side by side (see `arrivals` under
+[Conventions](../README.md#conventions-branches-merges-arrivals-and-lines)).
+
+`skip` and `branch` are pinned to the east side, so every residual in a figure
+runs on the same side. Both are adaptive and slide along the east edge toward
+their counterparts. Because the bypass runs outside the block, the enclosing
+container needs side padding for it; the router adds that padding when it is
+missing (see [How connectors are routed](../README.md#how-connectors-are-routed)).
+For residuals on the west, pass a `ports=` table.
 
 ### Ports pick the side they face
 
-A component's default ports carry a side because geometry needs one, and the
-grammar can only guess the common case: values enter west and leave east. Figures
-are not all read that way, so **every end of every connection is attached on the
-side that faces the thing at its other end** -- per connection, not per port. A
-column of blocks comes out with south and north attachments, a readout row
-hanging under a trunk is entered from above, and a value that goes both down and
-sideways leaves from two sides. None of it costs a line of port authoring.
+Each component's default ports declare a side: inputs west and outputs east.
+Ports marked `auto_side` (most component defaults) can move. Flexo attaches
+each end of each connection on the side of the box that faces the other end.
+The choice is made per connection, not per port: a value that goes both down
+and sideways leaves from two sides.
 
-The rules, in full:
+The rules:
 
-- **an authored `PortSpec` is pinned.** Writing the side down is the choice, and
-  nothing overrules it. So is a port named by an edge carrying a
-  `depart`/`arrive` hint, and the arrival of a `via` route (ink that comes round
-  the west arrives from the west).
-- **a port whose side *is* the convention is pinned by the grammar.** `add_norm`'s
-  `skip` and `branch` are born east and stay east, so a residual reads the same
-  way in every tower.
-- **ends of one port that leave the same side share one pin** and are drawn as a
-  tree from it; pins on one side are ordered by where their lines go, so lines
-  leaving one box never cross each other on the way out.
-- **an arrival and a departure of different values do not share a side** when
-  one of them can face its counterpart from another side too.
-- **a side whose straight approach would run into another box is skipped** for
-  the next side that faces the counterpart: an arrow needs its approach clear.
-- **an operator's inputs each take a side of their own**, so values meeting at
-  a `+` arrive from different directions.
-- **two pins facing each other across a gap slide to one coordinate** when both
-  boxes allow it and the straight line between them is clear, so the arrow is
-  exactly straight and still meets each box square.
+- **An authored `PortSpec` is pinned.** So is a port named by an edge's
+  `depart`/`arrive` hint (fields of `EdgeSpec`), and the arriving end of an
+  edge with `via=` (a route that comes round the west arrives from the west).
+- **A default port without `auto_side` is pinned.** Examples: `add_norm`'s
+  `skip` and `branch`, and the four ports of `vector` and `image`.
+- **Ends of one port that leave on the same side share one pin** and are drawn
+  as a tree from it. Pins on one side are ordered by where their lines go, so
+  lines leaving one box do not cross each other.
+- **An arrival and a departure of different values do not share a side** when
+  one of them can face its counterpart from another side.
+- **A side whose straight approach would hit another box is skipped** in
+  favour of the next side that faces the counterpart.
+- **Each input of an operator takes its own side**, so values meeting at a `+`
+  arrive from different directions.
+- **Two pins facing each other across a gap are aligned** when both boxes allow
+  it and the straight line between them is clear, so the arrow is straight.
 
-Ports no edge or net mentions keep the side they were born with; they are
-invisible either way. And the choice is the compiler's, not the document's: the
-figure serializes with the sides it was written with, and re-compiles to the same
-picture.
+Ports with no connection keep their declared side. Side selection happens at
+compile time: the figure serializes with the sides it was written with, and
+re-compiles to the same picture.
 
 ## Feature values as vector glyphs
 
-A feature value is not a box. `vector()` composes a vertical stack of rounded
-cells with its caption below, and returns the cells so arrows attach to the glyph
-itself:
+`vector()` draws a feature value as a vertical stack of rounded cells with its
+caption below. It returns the handle of the cells, so connectors attach to the
+glyph:
 
 ```python
 import flexo
@@ -257,19 +255,20 @@ with flexo.Figure("vectors", width="double-column") as figure:
         module.merge(sinks=[q, kv], dst=attended, label="softmax(QKᵀ)V")
 ```
 
-A vector's four ports are its four side centres — west and east on the *middle
-cell* — so a run into a vector comes out straight. The caption is a real node, so
-routes keep clear of it; the one thing to know is that it sits directly under the
-glyph's *south* port, so a route leaving south has to be given room (panel b
-sends its prediction path out of `attended.north` for exactly that reason).
+A vector has four pinned ports at its side centres: `input` (west), `output`
+(east), `north`, and `south`. A connector into a side port meets the middle of
+the stack. The caption is a separate node placed directly below the `south`
+port, and routes avoid it. A route that leaves through `south` needs room
+between the stack and the caption; use `north` when the route can go up
+instead.
 
-The `ramp` is paint only: `ramp-node`, `ramp-embedding`, `ramp-q`, `ramp-kv`,
-`ramp-attended`, and `ramp-output` are defined by every palette, so `flexo
-retheme` re-colours a figure without moving a coordinate.
+`ramp` selects a paint role only: `ramp-node`, `ramp-embedding`, `ramp-q`,
+`ramp-kv`, `ramp-attended`, or `ramp-output`. Every palette defines all six, so
+`flexo retheme` recolours a figure without moving anything.
 
-When a panel needs its own colours instead, a `VectorPreset` carries one base
-colour and a topology written columns-first, and derives the opaque shades of
-each column for you:
+For colours outside the palette, a `VectorPreset` takes one base colour and a
+topology written columns first (`"1x3"` is one column of three cells). It
+derives the shades of each column from the base colour:
 
 ```python
 import flexo
@@ -284,10 +283,9 @@ with flexo.Figure("presets", width="double-column") as figure:
         )
 ```
 
-A ramp says *ordered*, which is a claim about the data. Real activations are not
-ordered, so a preset **shuffles by default**: `order="shuffled"` permutes each
-column's shades and the glyph reads as a feature vector. The gradient is the
-special case, and it is asked for by name:
+A preset shuffles its shades by default (`order="shuffled"`), so the glyph
+reads as a feature vector rather than an ordered ramp. Pass `order="ramp"` for
+a light-to-dark gradient:
 
 ```python
 import flexo
@@ -299,29 +297,24 @@ with flexo.Figure("ordered", width="double-column") as figure:
         module.vector("scale", label="Scale", preset=ramped)
 ```
 
-The permutation is deterministic: it is drawn from `seed` (default `0`), so one
-preset always yields one figure and a rebuild is byte-for-byte the same. Each
-column seeds separately, so the columns of one glyph differ from each other
-rather than repeating a pattern sideways. A shuffle that came back in ramp order
-would silently lie about what it depicts, so it is rejected and redrawn — a
-`"shuffled"` glyph of two or more cells never reads as a ramp.
+The shuffle is deterministic. It is seeded from `seed` (default `0`), so the
+same preset always produces the same figure. Each column is shuffled with its
+own stream. A shuffle that returns the shades in ramp order is discarded and
+redrawn, so a `"shuffled"` column of two or more distinct shades never appears
+in ramp order.
 
-`tint` and `shade` set how far each column's light and dark ends travel from its
-base colour — at least `0.0`, below `1.0` (`1.0` would end at pure white or
-black, which is no longer a shade of anything). The defaults, `0.6` and `0.35`,
-mix the light end further because a tint stays legible against a white canvas
-long after an equal shade has gone to mud. On a *dark* panel that is backwards:
-around `tint=0.35` keeps the pale cells saturated instead of washing them toward
-the page. `shade_ramp(base, count, tint=..., shade=...)` takes the same two.
+`tint` and `shade` set how far each column's light and dark ends move from the
+base colour. Both must be at least `0.0` and below `1.0`; the defaults are
+`tint=0.6` and `shade=0.35`. On a dark background, a lower `tint` (around
+`0.35`) keeps the light cells saturated. `shade_ramp(base, count, tint=...,
+shade=...)` takes the same two parameters.
 
 ## Grids, spacing, and alignment
 
-A module whose chains should line up is a `grid`: rows are the chains, and columns
-line them up. Cells are addressed, not counted. A child names its cell with
-`at=(row, column)`, 0-indexed from the top left; the children that do not name
-one keep author order and flow row-major into whatever cells are left. Nothing has
-to fill the holes — a short last row, an empty column, or a gap in the middle of a
-row costs no nodes at all:
+A `grid` lines up rows and columns. A child names its cell with
+`at=(row, column)`, counted from 0 at the top left. Children without `at=` keep
+author order and fill the remaining cells row by row. Cells can stay empty: a
+short last row, an empty column, or a gap in a row needs no placeholder node.
 
 ```python
 import flexo
@@ -336,59 +329,61 @@ with flexo.Figure("grid", width="double-column") as figure:
             grid.vector("embedding", label="Embedding", ramp="ramp-embedding", at=(1, 0))
 ```
 
-Column 3 above holds no child in either row: it is the corridor the attention
-arrow runs down, and its formula has to fit above it. `column_widths={index:
-length}` reserves a minimum width for a column even when every cell in it is
-empty, so the lane needs no width-carrying `spacer` node to prop it open. Row 1
-is one cell long and the six cells beside it simply do not exist.
+Here `nodes`, `q-mlp`, and `q` fill cells (0, 0) to (0, 2). Column 3 holds no
+child in either row. `column_widths={index: length}` reserves a minimum width
+for a column even when it is empty, so it can serve as a corridor for a
+connector without a `spacer` node. Row 1 contains one cell.
 
-Mixed mode is deterministic: addressed children claim their cells first, then the
-unaddressed ones flow into the remainder. A child addressed at (0, 4) pushes no
-sibling sideways — the flow steps over that cell when it reaches it. Two children
-addressed to the same cell, or a column outside the grid, is an error where it is
-written rather than a puzzle in the rendered figure.
+Placement is deterministic: children with `at=` claim their cells first, and
+the others fill the remaining cells in order, skipping claimed ones. The number
+of rows grows to include the highest row any child addresses. Two children
+addressed to the same cell, a negative index, or a column outside the grid
+raises `ValueError` at the call that places the child.
 
 ### Spacing that is not square
 
-`gap` spaces siblings on both axes at once, which is the wrong knob whenever a
-panel wants vertical air: buying it out of a seven-column grid's gap spreads the
-panel six times as far sideways. `row_gap` and `column_gap` override `gap` on one
-axis each — a row reads `column_gap`, a column or stack reads `row_gap`, and a
-grid reads both. `padding` is one length for all four sides, an `(x, y)` pair, or
-a `(top, right, bottom, left)` 4-tuple:
+`gap` sets the space between siblings on both axes. `row_gap` and `column_gap`
+override it on one axis: a row reads `column_gap`, a column reads `row_gap`,
+and a grid reads both. `padding` takes one length for all four sides, an
+`(x, y)` pair, or a `(top, right, bottom, left)` tuple:
 
 ```python
 import flexo
 
 with flexo.Figure("spacing", width="double-column") as figure:
-    figure.root.group(
+    with figure.root.group(
         "attention",
+        label="Attention",
         layout="grid",
         columns=7,
         row_gap=flexo.pt(19),
         column_gap=flexo.pt(19),
         padding=(flexo.pt(11.5), flexo.pt(11.5), flexo.pt(32.5), flexo.pt(11.5)),
-    )
+    ) as grid:
+        grid.vector("q", label="Q", ramp="ramp-q")
+        grid.vector("kv", label="K, V", ramp="ramp-kv")
 ```
 
-The four sides are what let a panel's sides sit tighter than its top and bottom,
-which is usually what a figure wants: captions hang below the bottom row, so the
-floor needs more air than the flanks. Every one of these falls back to the value
-it refines — `row_gap` to `gap` to the style token, each padding side to
-`padding` — so a figure that asks for none of them keeps exactly the geometry it
-had.
+The example gives the bottom more padding than the sides, which leaves room
+for captions below the last row. Each value falls back to the one it refines:
+`row_gap` and `column_gap` to `gap`, then to the style's gap; each padding side
+to `padding`, then to the style's group padding.
 
 ### Aligning by port line instead of by box
 
-`align` normally lines up *boxes*: `start`, `center`, `end`, and `stretch` all
-ask where a child's rectangle sits across the axis it is not laid out along. That
-is the wrong question for a figure made of arrows. A vector's caption is a
-sibling node under its cell stack, so the composite's box is half again as tall
-as the glyph and its middle is somewhere in the caption; align two of those by
-box and their arrows run uphill.
+`align` sets where children sit across the axis they are not laid out along.
+It accepts `start`, `center`, `end`, `stretch`, `ports`, and `auto`.
 
-`align="ports"` aligns the line the side ports live on, exactly the way type sits
-on a baseline:
+- `start`, `center`, `end`, and `stretch` align the children's boxes.
+- `ports` aligns the line the children's side ports sit on, as text aligns on
+  a baseline.
+- `auto`, the default for groups, resolves per group: `ports` when the group's
+  children are connected to one another, `start` for a row of columns or a
+  column of rows, and `center` otherwise.
+
+Box alignment is wrong for a vector: its caption is part of the composite's
+box, so the box centre falls below the cells and connectors between aligned
+boxes slope. `align="ports"` fixes this:
 
 ```python
 import flexo
@@ -401,23 +396,25 @@ with flexo.Figure("ports", width="double-column") as figure:
             grid.vector("kv", label="K, V", ramp="ramp-kv", input=edge_cnn)
 ```
 
-In a **row** each child is placed so its horizontal anchor — the y of its west
-and east ports — lands on the row's shared line; in a **column**, so its vertical
-anchor — the x of its north and south ports — lands on the column's shared x. A
-grid does both, per row and per column. The line is measured like a line of type:
-the row's **ascent** is the furthest any child reaches above it, its **descent**
-the furthest below, and the row reserves both — so a ports-aligned row can be
-*taller* than its tallest child, because two children may hang off the line in
-opposite directions.
+In a **row**, each child is placed so the y of its west and east ports lies on
+the row's shared line. In a **column**, the x of each child's north and south
+ports lies on the column's shared line. A grid does both, per row and per
+column. The row reserves its **ascent** (the furthest any child reaches above
+the line) and its **descent** (the furthest below). A ports-aligned row can
+therefore be taller than its tallest child.
 
-An anchor propagates up. A plain component answers with its own centre, which is
-where the grammar puts a side-centre port. A group answers with its **anchor
-child's** line, carried into the group's coordinates: the child named by
-`anchor="<child>"`, or failing that the first child that is neither a label nor a
-spacer. That default is what makes a captioned vector answer with its cell stack
-rather than with cells-plus-caption, so the caption hangs below the shared line
-instead of dragging it down. Name one explicitly when the first real child is not
-the one the arrows use:
+A plain component's port line passes through its centre. A group's port line
+is that of its **anchor child**, translated into the group's coordinates. The
+anchor child is:
+
+1. the child named by `anchor="<child>"`, if given;
+2. otherwise, among children that are not `label` or `spacer` nodes, the one
+   with the most connections leaving the group (if several tie with at least
+   one connection, the group uses its own centre);
+3. otherwise, the first child that is not a `label` or `spacer`.
+
+This makes a captioned vector align on its cells, not on cells plus caption.
+Name the anchor explicitly when the default picks the wrong child:
 
 ```python
 import flexo
@@ -429,16 +426,11 @@ with flexo.Figure("anchor", width="double-column") as figure:
             panel.mlp("body", label="Encoder")
 ```
 
-Bounding-box alignment remains the default, and nothing about `center` has
-changed — reach for `ports` when a figure is chains of components joined by
-arrows, and leave it alone when a group is a shelf of unconnected panels.
-
 ### Heights that match a vector stack
 
-A box that should be exactly as tall as a vector's cell stack says so with
-`"cells:N"`. For merely lining the *ports* up, reach for `align="ports"` above;
-this is for when the matching height is itself the design.
-`vector_stack_height(style, cells)` is the same arithmetic in Python:
+To make a box exactly as tall as an N-cell vector stack, set its height to
+`"cells:N"`. (To line up ports without matching heights, use `align="ports"`.)
+`vector_stack_height(style, cells)` computes the same length in Python:
 
 ```python
 import flexo
@@ -450,17 +442,16 @@ with flexo.Figure("heights", width="double-column") as figure:
         module.mlp("k-mlp", height=flexo.vector_stack_height(flexo.STYLES["paper"], 3))
 ```
 
-Prefer the string. It resolves against the style the figure is *compiled* with,
-so a panel drawn at a larger `vector_cell` keeps its boxes and its vectors in
-step; a length computed up front does not.
+Prefer the string. It resolves against the style the figure is compiled with,
+so it follows changes to `vector_cell`. A length computed in advance does not.
 
 ## Band rows and strip bands
 
-Cross-container alignment is authored, not hoped for. When a residual spine runs
-beside a stack of modules, make the root a column of **bands**: every band is a
-row that starts with the same fixed-width spine cell, and *module bands alternate
-with thin strip bands*. A module band carries the module; the strip band between
-two modules carries the single spine block that joins them.
+To align a residual spine with a stack of modules, make the root a column of
+**bands**. Each band is a row that starts with a spine cell of the same fixed
+width. Module bands alternate with thin strip bands: a module band holds a
+module, and the strip band after it holds the spine block that joins it to the
+next module.
 
 ```python
 import flexo
@@ -481,45 +472,42 @@ with flexo.Figure("gnn", width="presentation", layout=layout) as figure:
         strip.add_norm("addln1", label="Add LN", width="72pt", input=previous)
 ```
 
-No port table appears in that sketch. The spine reads downward, so the spine
-blocks' `input` and `output` face north and south on their own (see *Ports pick
-the side they face*); the one port that has to be named is the `feedback` port a
-residual rail arrives on, because that rail is routed through an authored lane and
-so has no counterpart to face. A spine block whose bypass arrives from an
-authored lane rather than from the block below names its arrival too — the
-gallery's `add-norm` puts `skip` on the north, which is a port table overruling
-the east-pinned default on purpose.
+The sketch declares no port table. The spine reads downward, so each spine
+block's auto-sided `input` faces north and its `output` faces south (see
+*Ports pick the side they face*). An edge routed with `lane=` does not
+influence port sides, so a port that such an edge arrives on must be declared.
+The gallery's `add-norm` blocks declare `skip` on the north, a `feedback` port
+on the east for the residual rail that arrives through a lane, and `output` on
+the south.
 
-Why the alternation matters: a spine block level with the *top* of the module it
-feeds has no reachable east side, so its feedback rail is forced up and over the
-module. Give it its own strip and the same rail reads correctly — east out of the
-module's update MLP, south past the module, west along the strip, into the east
-feedback port, always below the module. The strip is also where a fan-out net from
-the last spine block lands its rail, between that block and the row it feeds
-instead of below it.
+Put each spine block in its own strip, not beside the top of its module. A
+spine block level with the top of the module it follows has no reachable east
+side, so its feedback rail must go up and over the module. In a strip, the rail
+leaves the module's east side, runs south past the module, then west along the
+strip into the east `feedback` port. A fan-out net from the last spine block
+also places its rail in the strip, between the block and the row it feeds.
 
-Three uses of the zero-size `spacer` component hold that grid open without
-padding anything:
+The zero-size `spacer` component holds the grid open without padding:
 
-- a `width`-only spacer in the spine cell of a module band, so every band's
-  spine column shares one x;
-- a zero-size spacer *after* the module, which carries the band's right edge one
-  gutter past it — `lane="<band>-right"` then names an empty column where a
-  residual rail can drop south. Inside the module the container fill would paint
-  over it.
-- a `height`-only spacer row above a row of heads, reserving the fan-out
-  corridor in one direction only. A single `padding` would reserve it on all four
-  sides and leave a dead strip at the canvas edge.
+- A `width`-only spacer in the spine cell of a module band keeps every band's
+  spine column at the same x.
+- A zero-size spacer *after* the module extends the band's right edge one gap
+  past the module. `lane="<band>-right"` then names an empty column outside
+  the module where a residual rail can run south. Inside the module, the
+  container fill would cover it.
+- A `height`-only spacer above a row of heads reserves the fan-out corridor in
+  one direction. `padding` would add the same space on all four sides.
 
-[`flexo/gallery.py`](../src/flexo/gallery.py)'s `modelangelo_gnn` is authored this
-way; its canvas ends at the content plus the ordinary margin on every side.
+`modelangelo_gnn` in [`flexo/gallery.py`](../src/flexo/gallery.py) is built
+this way; its canvas ends at the content plus the standard margin on every
+side.
 
 ## Paint: palettes, overrides, and retheming
 
-A theme (see *Themes, palettes, and fonts*) is the usual way to change a whole
-look. Underneath, every shape is painted by **role** -- `ink`, `container-fill`,
-`tone-2-stroke` -- so a palette can also be adjusted role by role, and it moves
-no geometry:
+A theme (see [Themes, palettes, and
+fonts](../README.md#themes-palettes-and-fonts)) changes the whole look. Every
+shape is painted by **role** -- `ink`, `container-fill`, `tone-2-stroke` -- so a
+palette can also be adjusted role by role. Paint never changes geometry.
 
 ```python
 import flexo
@@ -534,19 +522,20 @@ with flexo.Figure("adjusted", width="double-column") as figure:
 document = figure.compile(palette=paint).document
 ```
 
-An unknown role is a diagnostic listing the valid ones, so a typo cannot silently
-paint nothing. The pre-theme palette objects (`DEFAULT_PALETTE`,
-`COLOR_VISION_SAFE_PALETTE`, `GRAYSCALE_PALETTE`) still work, and their names read
-as colour sets under any theme. `flexo retheme` re-paints a *finished* SVG by
-role, with no recompile -- which is what the `data-flexo-fill` and
-`data-flexo-stroke` attributes on every emitted shape are for:
+An unknown role raises `FlexoError` (`palette.role.unknown`) that lists the
+valid roles. The legacy palette names `default`, `color-vision-safe`, and
+`grayscale` (`DEFAULT_PALETTE`, `COLOR_VISION_SAFE_PALETTE`,
+`GRAYSCALE_PALETTE`) keep their exact paint under the `classic` theme; other
+themes read them as colour sets.
+
+`flexo retheme` repaints a finished SVG by role without recompiling. It reads
+the `data-flexo-fill` and `data-flexo-stroke` attributes on each emitted shape:
 
 ```bash
 uv run flexo retheme build/fig.editable.svg "Okabe-Ito" --theme paper -o build/fig.cvd.svg
 ```
 
-When exactly one component or module must differ — a caption that has to clear its
-own dark body, say — `paint` overrides the role for that one entity:
+To change one component or group only, pass `paint`:
 
 ```python
 import flexo
@@ -557,21 +546,21 @@ with flexo.Figure("painted", width="double-column") as figure:
         module.block("panel", label="Panel", paint={"fill": "#085041", "stroke": "#56bb9a"})
 ```
 
-The three parts are `fill` and `stroke` (the component or container body) and
-`label` (its text or title); any other key is an error where it is written, as is
-a colour that is not `#rgb` or `#rrggbb`. Parts left out keep their role and
-retheme normally. `paint` is paint: it moves nothing, on a group or a node.
+`paint` accepts three keys: `fill` and `stroke` (the component or container
+body) and `label` (its text or title). Any other key, or a colour that is not
+`#rgb` or `#rrggbb`, raises `ValueError` at the call. Parts you leave out keep
+their role and retheme normally. `paint` changes no geometry.
 
-Three kinds of ink are **literal colour rather than a role**, and `flexo retheme`
-walks straight past all three: `VectorPreset` cells, any `paint=` override, and an
-`image`'s embedded artwork. Reach for a preset or an override when one panel has
-to differ; change the palette when every component of a kind does.
+Three kinds of paint are literal colours, not roles, and `flexo retheme` leaves
+them unchanged: `VectorPreset` cells, `paint=` overrides, and `image` artwork.
+Use a preset or an override when one element must differ; change the palette
+when every component of a kind should.
 
 ### Titles and motifs
 
-A group's title sits at the left of its top edge unless it asks otherwise, and
-component motifs — the MLP's three dots, the CNN's zigzag, a matrix's cell grid —
-are ornament that `motif=False` drops:
+A group's title sits at the left of its top edge by default. A component's
+motif -- the MLP's three dots, the CNN's zigzag, a matrix's cell grid -- is
+decoration that `motif=False` removes:
 
 ```python
 import flexo
@@ -581,89 +570,89 @@ with flexo.Figure("ornament", width="double-column") as figure:
         module.mlp("q-mlp", label="MLP", motif=False)
 ```
 
-`title_side="right"` anchors the title to the right end instead. The title band is
-the same height either way, so nothing in the figure moves. A title takes styled
-runs like any other label — `label=(TextRun("QK"), TextRun("T",
-baseline_shift="super"))` — and is set at the style's `title_weight`, which a run
-inherits unless it asks for a weight of its own; and `motif=False`
-changes nothing else either — same size, same body, same ports, same label. Reach
-for it when a panel repeats a component often enough that its ornament becomes
-noise.
+`title_side="right"` places the title at the right end of the top edge. The
+title band has the same height either way, so nothing else moves. A title
+accepts styled runs like any label, for example
+`label=(TextRun("QK"), TextRun("T", baseline_shift="super"))`. Titles are set
+at the style's `title_weight`; a run with a weight other than the default 400
+keeps its own weight. `motif=False` changes only the motif: size, body, ports,
+and label stay the same.
 
-A motif that sits *below* the words rather than behind them — `inset`, `graph`,
-`matrix`, `attention`, `sequence`, `concat`, `feature-strip` — stacks the two: the
-label takes a band at the top, `motif_label_gap` of air comes off after it, and
-the motif gets the rest of the interior. One band model, so a component's
-intrinsic height, its label's baseline, and the area its motif paints in are the
-same three numbers everywhere; a two-line caption makes the box taller instead of
-being drawn over the drawing it names. An authored `height` still wins, and when
-it leaves less room than the illustration wants, an `inset` scales its molecule
-down to fit rather than colliding with the words.
+For `attention`, `channels`, `concat`, `feature-strip`, `graph`, `image`,
+`inset`, `matrix`, and `sequence`, the motif sits below the label. The label
+takes a band at the top, `motif_label_gap` separates it from the motif, and the
+motif fills the rest of the interior. A two-line label makes the box taller
+rather than overlapping the motif. An authored `height` still takes precedence;
+if it leaves too little room, an `inset` scales its molecule down to fit.
 
-An add-norm carries no motif: the words are the component. A circled plus before
-`Add LN` says a second time what the label already says, and in a figure with an
-Add/LN on every band it reads as clutter.
+An `add_norm` block has no motif; its label is the whole component.
 
 ## Artwork you drew yourself
 
-Some ink is not the compiler's to invent — a molecule, a density-map view, the one
-panel that has to be the real thing. Draw it as an `.svg` (or render it to a
-`.png`) and hand Flexo the file:
+For content Flexo does not draw -- a molecule, a density map -- draw it as an
+`.svg` (or render it to a `.png`) and pass the file to `image`. The example
+writes a small SVG so it runs as-is; replace `art` with the path to your own
+file.
 
 ```python
+import pathlib
+
 import flexo
+
+art = pathlib.Path("ligand.svg").resolve()
+art.write_text(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 30">'
+    '<circle cx="20" cy="15" r="12" fill="#4f9b8f"/></svg>'
+)
 
 with flexo.Figure("artwork", width="double-column") as figure:
     with figure.module("m", label="Ligand") as panel:
-        # Paths to your own files: an SVG stays vector, a PNG is embedded.
-        ligand = panel.image("ligand", "art/ligand.svg", width="96pt")
-        panel.image("map", "art/density.png", height="cells:3", label="Density")
+        ligand = panel.image("ligand", art, width="96pt")
+        panel.image("map", art, height="cells:3", label="Density")
         encoder = panel.mlp("encoder", label="Encoder")
         panel.connect(ligand, encoder)
 ```
 
-An `image` is an ordinary component with the four side-centre ports, so it wires,
-lays out, and blocks routes exactly as a block does. An SVG source stays vector
-the whole way: Flexo nests the file's own content at the node's bounds with its
-viewBox intact, so the drawing is crisp at any zoom, still made of objects an
-editor can select, and comes out as vector art in the PDF too. Artwork is
-**embedded, not linked** — the editable SVG, the portable SVG, and the PDF each
-carry it, with no companion file to lose.
+An `image` is a component with four pinned ports at its side centres (`input`,
+`output`, `north`, `south`). It wires, lays out, and blocks routes like a
+block. An SVG source stays vector: Flexo nests the file's content at the
+node's bounds with its viewBox intact, so it remains selectable in an editor
+and stays vector in the PDF. A PNG is embedded as a data URI. Artwork is
+**embedded, not linked**: the editable SVG, portable SVG, and PDF each contain
+it.
 
-Size follows the file. Its intrinsic size comes from its `width` and `height`, or
-from its viewBox read as CSS pixels; a PNG's comes from its pixel size at 96 dpi.
-Give `width` or `height` alone and the other follows the artwork's aspect ratio;
-give both and the drawing letterboxes inside those bounds rather than distorting.
-Both take any length or `"cells:N"`, so a row of icons can be exactly as tall as
-the vector stack beside it. A file that declares no size at all has to be given
-one. The path resolves against the working directory the figure is *compiled* in,
-so absolute paths are the reliable choice; a missing file, an unreadable one, or a
-suffix that is neither `.svg` nor `.png` is a diagnostic naming the node and the
-path.
+**Size.** An SVG's intrinsic size comes from its `width` and `height`
+attributes, or else from its viewBox read as CSS pixels. A PNG's comes from its
+pixel size at 96 dpi. Give only `width` or only `height` and the other follows
+the artwork's aspect ratio. Give both and the artwork is letterboxed inside
+those bounds. Both accept any length or `"cells:N"`. A file with no size of its
+own needs an explicit size.
 
-Artwork is checked before it is inlined, because inlining is what would make it
-dangerous. A file carrying a `<script>` element, an `on*` event handler, or a
-reference to anything outside itself — an `href` to `https://…` or to a
-neighbouring file, a `url(…)` that is not a `#fragment`, a stylesheet `@import` —
-is **rejected with a diagnostic**, not quietly stripped: a drawing that would not
-survive embedding intact is one you want to hear about while you can still
-re-export it. The XML declaration, the DOCTYPE, and comments never travel. Every
-id in the artwork is rewritten under the node's id, so the same file may be
-embedded twice in one figure without the two copies sharing a gradient.
+**Paths.** A relative path resolves against the working directory at compile
+time, so absolute paths are more reliable. A missing or unreadable file, or a
+suffix other than `.svg` or `.png`, raises `FlexoError` with a diagnostic that
+names the node and the path.
 
-A `label` **takes a band off the top and the artwork takes the rest**, exactly as
-it does on an `inset` or a `matrix`: the words name the drawing, so they are never
-printed across it. An authored extent is the box, which means `height="40pt"` on a
-captioned image shrinks the *drawing* — the caption's line is the one size in
-there the author did not choose. An image with no label reserves nothing and comes
-out exactly as large as the file it carries. For a caption that hangs *under* the
-drawing instead, put the image and a `label` node in a column, the way `vector`
-captions its stack.
+**Safety checks.** Artwork is checked before it is inlined. A file is rejected
+with a diagnostic, not silently cleaned, if it contains a `<script>` element,
+an `on*` event handler, an `href` or `src` that is not a `#fragment` or a
+`data:image/` URI, a `url(...)` that is not a `#fragment` or `data:image/` URI,
+or a stylesheet `@import`. The XML declaration, DOCTYPE, and comments are
+dropped. Every id in the artwork is prefixed with the node's id, so the same
+file can be embedded twice without the copies sharing definitions such as
+gradients.
+
+**Labels.** A `label` takes a band at the top of the box and the artwork gets
+the rest, as on an `inset` or a `matrix`. An authored extent sets the size of
+the whole box, so `height="40pt"` on a labelled image shrinks the artwork, not
+the label. An image without a label reserves no band and is exactly the size of
+its artwork. For a caption below the artwork, put the image and a `label` node
+in a column, as `vector` does.
 
 ## Shadows
 
-`shadow=True` gives a group or a node a soft drop shadow, and it is off everywhere
-until asked for:
+`shadow=True` adds a drop shadow to a group or a node. Shadows are off by
+default.
 
 ```python
 import flexo
@@ -673,25 +662,19 @@ with flexo.Figure("shadowed", width="double-column") as figure:
         module.mlp("q-mlp", label="MLP", shadow=True)
 ```
 
-It is built from nested rounded rectangles, not from an SVG filter, and that is
-not an implementation detail to be tidied away later: Flexo's figures leave as
-editable SVG and arrive as PDF through Inkscape, which does not know
-`feDropShadow` at all and turns any `feGaussianBlur` subtree into a 96 dpi bitmap.
-Either would put a raster patch behind every shadowed box in an otherwise fully
-vector figure. Five equally faint rectangles, each reaching a fifth less far than
-the last and all offset together down and to the right of the box, grade to
-`shadow_opacity` where they overlap and stay selectable objects all the way to
-print.
+The shadow is built from rounded rectangles, not an SVG filter, because
+Inkscape rasterizes filtered regions when it exports PDF. A soft shadow is five
+equally faint rectangles offset down and to the right of the box. Each reaches
+a fifth less far than the previous one, and together they reach
+`shadow_opacity` where all five overlap.
 
-The figure is lit from the top left, so a shadow shows along the **bottom and
-right** edges and nowhere else — a shadow that rings all four is a halo, not
-light. That is geometry rather than clipping: with `shadow_offset` at least
-`shadow_spread`, the widest layer's top-left corner lands on the box's own
-top-left corner and every tighter layer starts further in, so no layer can put ink
-above the top edge or left of the left edge at any corner radius. A smaller offset
-is raised to the spread rather than drawn. `shadow_offset`, `shadow_spread`, and
-`shadow_opacity` tune it; the `shadow` palette role paints it, so `flexo retheme`
-moves it with everything else.
+The shadow shows only along the bottom and right edges. The offset is at least
+`shadow_spread` (a smaller `shadow_offset` is raised to it), so no layer
+extends above the top edge or left of the left edge. `shadow_offset`,
+`shadow_spread`, and `shadow_opacity` tune it, and the `shadow` palette role
+paints it. The `midcentury` theme draws a single solid offset slab instead. A
+group's shadow is drawn only in themes whose containers are filled, outlined,
+or dashed.
 
 ## Export formats
 
@@ -709,37 +692,42 @@ result = flexo.build(
 print(result.report.format())
 ```
 
-| Format | What it is |
-| --- | --- |
-| `editable` | the SVG master: live text, named Inkscape layers, paint roles on every shape. Always written |
-| `portable` | the same figure as plain SVG, for viewers that do not know Inkscape's namespace |
-| `pdf` | vector PDF for submission |
-| `png` | a raster preview at `dpi` |
+`flexo.build` accepts a `Figure` or a `FigureSpec`. It compiles the figure,
+writes the requested formats, and lints the result. Files are written even
+when lint reports errors; check `result.ok` or `result.report`.
 
-`portable` and `pdf` are produced from the editable SVG by Inkscape, which must
-be on `PATH`, in the standard macOS application location, or named by
-`FLEXO_INKSCAPE`. `png` is produced by Inkscape when it is found, and by resvg
-(a Python dependency of Flexo) when it is not, so a preview never needs
-Inkscape. Both read the bundled and registered font files, so the raster is set
-in the faces the figure was measured with.
+| Format | File | What it is |
+| --- | --- | --- |
+| `editable` | `<stem>.editable.svg` | the SVG master: live text, named Inkscape layers, paint roles on every shape. Always written |
+| `portable` | `<stem>.portable.svg` | the same figure as plain SVG, for viewers that do not know Inkscape's namespace |
+| `pdf` | `<stem>.pdf` | vector PDF for submission |
+| `png` | `<stem>.preview.png` | a raster preview at `dpi` (default 192) |
+
+`portable` and `pdf` are produced from the editable SVG by Inkscape. Flexo
+uses the executable named by `FLEXO_INKSCAPE` if that variable is set;
+otherwise `inkscape` on `PATH`; otherwise
+`/Applications/Inkscape.app/Contents/MacOS/inkscape`. Without Inkscape these
+formats raise `FlexoError`. `png` uses Inkscape when it is found and resvg (a
+Python dependency of Flexo) when it is not. Both read the bundled and
+registered font files, so the raster uses the fonts the figure was measured
+with.
 
 ## Which role paints what
 
-An author overriding a palette needs to know which role reaches which ink before
-writing the override, not after grepping the renderer.
+Use this table to find the role to override before writing a palette override.
 
 | Role | Paints |
 | --- | --- |
 | `canvas` | the page background; the ring around a `junction` dot |
-| `ink` | component labels, group titles, `channels` captions |
-| `muted-ink` | connector and net captions, glyph captions |
+| `ink` | component labels (including `vector` captions), group titles, `channels` captions |
+| `muted-ink` | connector and net captions; labels of nodes with `role="caption"`, such as the Q/K/V captions of `attention(vectors=...)` |
 | `container-fill` / `container-stroke` | a group's container (or its rule or band, by theme); `sequence` body; `concat` body fill |
-| `tone-N-fill` / `tone-N-stroke` / `tone-N-ink` / `tone-N-motif` | a component in tone `N`: body, outline, label, and motif ink (dots, zigzags, cell grids). Kinds take tones in the order the figure uses them (attention, add-norm, MLP, CNN, data strips, outputs), and `tone=` gives any component one |
+| `tone-N-fill` / `tone-N-stroke` / `tone-N-ink` / `tone-N-motif` | a component in tone `N`: body, outline, label, and motif ink (dots, zigzags, cell grids). Tones are numbered in the order they first appear in the figure. Attention, matrix, add-norm, MLP, CNN, feature-strip, sequence, prediction, and loss components carry a tone by kind in every theme except `classic`, and `tone=` gives any component one |
 | `block-fill` / `block-stroke` / `block-motif` | an untoned `block`, `tensor`, `concat`, `op` |
-| `accent-*`, `warm-*` | the first two tones, under their pre-theme names |
+| `accent-*`, `warm-*` | legacy names; in every theme except `classic` they equal `tone-1-*` and `tone-2-*` |
 | `inset-fill` / `inset-stroke` | `graph` and `inset` bodies and borders |
 | `connector` | edge shafts, net pieces, flow arrowheads, junction dots, the `junction` component's body, the `channels` split path |
-| `residual` | the same ink for anything authored `role="residual"`, arrowheads included |
+| `residual` | connectors authored with `role="residual"`, arrowheads included |
 | `ramp-node`, `ramp-embedding`, `ramp-q`, `ramp-kv`, `ramp-attended`, `ramp-output` | `vector` cells -- one role per glyph, fill and stroke, graded by `fill-opacity` |
 | `shadow` | a `shadow=True` drop shadow (soft layers, or one slab in `midcentury`) |
-| `grid` | defined by every palette, painted by nothing today |
+| `grid` | defined by every palette; no renderer uses it |
