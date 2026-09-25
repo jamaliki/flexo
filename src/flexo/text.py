@@ -13,7 +13,6 @@ from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.fonts import (
     FontFace,
     LoadedFace,
-    css_family_list,
     family_faces,
     hb_font,
     load_face,
@@ -86,13 +85,6 @@ class FontStack:
                 seen.add(faces[0].family.casefold())
                 families.append(faces)
         self.families = tuple(families)
-
-    @property
-    def css(self) -> str:
-        """The ``font-family`` value that draws what this stack measures."""
-
-        names = [self.typography.family] + [faces[0].family for faces in self.families]
-        return css_family_list(names, self.typography.generic)
 
     def face(self, weight: int, italic: bool, family: int = 0) -> FontFace:
         return select_face(self.families[family], weight, italic)
@@ -229,10 +221,6 @@ def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
             drop = font.subscript_drop / font.upem * size
             depth = max(depth, drop + SHIFTED_SIZE * font.descent / font.upem * size)
     return depth
-
-
-def font_bytes(italic: bool = False) -> bytes:
-    return font_data(italic).raw
 
 
 class TextMeasurer:

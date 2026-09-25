@@ -21,11 +21,11 @@ from dataclasses import dataclass, replace
 from math import hypot
 
 from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES
-from flexo.diagnostics import Diagnostic, Severity
+from flexo.diagnostics import Diagnostic
 from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import ancestors, parent_map
 from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
-from flexo.ir.semantic import FigureSpec, PortRef, PortSpec
+from flexo.ir.semantic import FigureSpec, PortRef
 
 _SIDES = (Side.NORTH, Side.EAST, Side.SOUTH, Side.WEST)
 
@@ -408,28 +408,6 @@ def _dominant_axis_side(tied: tuple[Side, ...], votes: tuple[_Vote, ...]) -> Sid
         else (Side.SOUTH if total.y >= 0.0 else Side.NORTH)
     )
     return preferred if preferred in tied else tied[0]
-
-
-def _conflicted(side: Side, votes: tuple[_Vote, ...]) -> bool:
-    """True when one port is asked to face two ways at once."""
-
-    normal = _NORMALS[side]
-    return len(votes) > 1 and any(
-        vote.direction.x * normal.x + vote.direction.y * normal.y < -_EPSILON for vote in votes
-    )
-
-def _conflict_diagnostic(node: FittedNode, port: PortSpec, side: Side) -> Diagnostic:
-    return Diagnostic(
-        "layout.port.side.conflicted",
-        f'Port "{port.name}" serves connections on opposite sides; '
-        f"defaulted to {side.value}.",
-        Severity.INFO,
-        entity_id=node.measured.spec.id,
-        hint=(
-            f'Give "{node.measured.spec.id}" explicit ports, or split the traffic '
-            "across two ports, to say which side each connection uses."
-        ),
-    )
 
 
 def _resided(node: FittedNode, chosen: dict[str, Side]) -> FittedNode:

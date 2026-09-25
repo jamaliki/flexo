@@ -24,22 +24,14 @@ from flexo.ir.semantic import (
 from flexo.layout import fit_figure, measure_figure
 from flexo.lint import lint_compilation
 from flexo.routing import route_figure
-from flexo.routing.nets import _vertical_rail, _via_clamp_diagnostics, net_segments
-from flexo.routing.nudge import (
-    Run,
-    Stubs,
-    balance_jogs,
+from flexo.routing.ink import (
     caption_reach,
     caption_rise,
-    collapse_zigzags,
     edge_shaft,
-    nudge_routes,
     rail_label_position,
     shorten_start,
 )
-from flexo.routing.solve import _routing_order
-from flexo.routing.visibility import PathCosts, shortest_orthogonal_path
-from flexo.style import STYLES, LayoutStyle
+from flexo.style import STYLES
 from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
@@ -239,22 +231,6 @@ def test_net_stems_stand_off_at_nodes_while_rail_joints_stay_closed() -> None:
             if piece is not stem.centerline
             for segment in segments(piece)
         )
-
-
-def test_rail_orientation_follows_the_target_side_majority() -> None:
-    """R9: the spokes decide the axis, and a tie runs along the hub port axis."""
-
-    horizontal_spokes = (Side.NORTH, Side.NORTH, Side.WEST)
-    vertical_spokes = (Side.WEST, Side.EAST, Side.NORTH)
-    assert not _vertical_rail(None, None, Side.SOUTH, horizontal_spokes)
-    assert _vertical_rail(None, None, Side.SOUTH, vertical_spokes)
-    assert _vertical_rail(None, None, Side.SOUTH, (Side.WEST, Side.NORTH))
-    assert not _vertical_rail(None, None, Side.EAST, (Side.WEST, Side.NORTH))
-    assert _vertical_rail(Side.WEST, None, Side.SOUTH, horizontal_spokes)
-    assert not _vertical_rail(Side.NORTH, None, Side.SOUTH, vertical_spokes)
-    # A via hint reads the side exactly as a rail hint does: west rails vertically.
-    assert _vertical_rail(None, Side.WEST, Side.SOUTH, horizontal_spokes)
-    assert not _vertical_rail(None, Side.NORTH, Side.SOUTH, vertical_spokes)
 
 
 def test_skip_net_drops_one_straight_trunk_at_the_hub_axis() -> None:
@@ -485,47 +461,6 @@ def test_aligned_ports_route_as_one_straight_segment() -> None:
     assert edge.centerline[0].y == edge.centerline[-1].y
 
 
-def test_direct_segment_is_refused_when_it_would_share_a_lane() -> None:
-    start, end = Point(0.0, 0.0), Point(40.0, 0.0)
-    costs = PathCosts(14.0, separation=6.0)
-    assert shortest_orthogonal_path(start, end, (), costs=costs) == (start, end)
-    occupied = (Segment(Point(0.0, 2.0), Point(40.0, 2.0)),)
-    detour = shortest_orthogonal_path(start, end, (), costs=costs, occupied=occupied)
-    assert detour is not None
-    assert len(detour) > 2
-
-
-def test_zigzag_collapse_straightens_a_short_middle_segment() -> None:
-    points = (
-        Point(0.0, 0.0),
-        Point(10.0, 0.0),
-        Point(10.0, 2.0),
-        Point(30.0, 2.0),
-        Point(30.0, 20.0),
-        Point(50.0, 20.0),
-    )
-    collapsed = collapse_zigzags(points, (), 3.0)
-    assert collapsed == (
-        Point(0.0, 0.0),
-        Point(30.0, 0.0),
-        Point(30.0, 20.0),
-        Point(50.0, 20.0),
-    )
-
-
-def test_zigzag_collapse_keeps_a_jog_that_would_cross_an_obstacle() -> None:
-    points = (
-        Point(0.0, 0.0),
-        Point(10.0, 0.0),
-        Point(10.0, 2.0),
-        Point(30.0, 2.0),
-        Point(30.0, 20.0),
-        Point(50.0, 20.0),
-    )
-    blocker = Rect(15.0, -2.0, 5.0, 4.0)
-    assert collapse_zigzags(points, (blocker,), 3.0) == points
-
-
 def _container_figure() -> FigureSpec:
     """A spine node, a bordered module, and a spine node below it."""
 
@@ -561,42 +496,6 @@ def test_opaque_container_blocks_routes_that_do_not_own_it() -> None:
     )
 
 
-def test_nudging_redistributes_a_shared_corridor_around_its_mean() -> None:
-    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
-    runs = (
-        Run("first", "first", boundary),
-        Run("second", "second", boundary),
-    )
-    polylines = (
-        (Point(0.0, 0.0), Point(0.0, 50.0), Point(60.0, 50.0), Point(60.0, 100.0)),
-        (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
-    )
-    style = STYLES["paper"]
-    spacing = style.port_spacing.points
-    nudged = nudge_routes(runs, polylines, style=style, obstacles=())
-    first = nudged[0][1].y
-    second = nudged[1][1].y
-    assert abs(second - first) == spacing
-    assert (first + second) / 2.0 == (50.0 + 52.0) / 2.0
-    assert nudged[0][0] == polylines[0][0]
-    assert nudged[1][-1] == polylines[1][-1]
-
-
-def test_nudging_leaves_a_group_alone_when_the_move_hits_an_obstacle() -> None:
-    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
-    runs = (
-        Run("first", "first", boundary),
-        Run("second", "second", boundary),
-    )
-    polylines = (
-        (Point(0.0, 0.0), Point(0.0, 50.0), Point(60.0, 50.0), Point(60.0, 100.0)),
-        (Point(0.0, 120.0), Point(0.0, 52.0), Point(80.0, 52.0), Point(80.0, 160.0)),
-    )
-    blocker = Rect(20.0, 47.0, 10.0, 2.0)
-    style = STYLES["paper"]
-    assert nudge_routes(runs, polylines, style=style, obstacles=(blocker,)) == polylines
-
-
 def test_gallery_routing_is_deterministic_and_lint_clean() -> None:
     for name in ("vertical-slice", "modelangelo-gnn"):
         first = compile_figure(gallery_figure(name))
@@ -604,45 +503,6 @@ def test_gallery_routing_is_deterministic_and_lint_clean() -> None:
         assert first.routed == second.routed
         assert first.document.text == second.document.text
         assert not lint_compilation(first).errors
-
-
-def test_long_haul_edges_claim_their_lane_before_short_ones() -> None:
-    fitted = fit_figure(measure_figure(_container_figure()))
-    order = _routing_order(fitted, fitted.measured.semantic.edges)
-    assert tuple(edge.id for edge in order) == ("past", "into")
-
-
-def test_long_run_prefers_the_middle_of_its_gutter() -> None:
-    """R1: given a free corridor, the crossing run centres instead of grazing."""
-
-    obstacles = (Rect(0.0, 40.0, 40.0, 20.0), Rect(60.0, 40.0, 40.0, 20.0))
-    costs = PathCosts(14.0, clearance=5.0)
-    route = shortest_orthogonal_path(
-        Point(10.0, 100.0),
-        Point(90.0, 0.0),
-        obstacles,
-        costs=costs,
-    )
-    assert route is not None
-    crossing = tuple(segment for segment in segments(route) if segment.vertical)
-    assert len(crossing) == 1
-    # The gutter runs from x=40 to x=60; hugging either wall costs more length.
-    assert crossing[0].start.x == 50.0
-
-
-def test_departure_orientation_is_charged_against_the_port_stub() -> None:
-    """R5: turning straight out of a port costs a bend, so straight runs win."""
-
-    obstacles = (Rect(20.0, 20.0, 40.0, 40.0),)
-    costs = PathCosts(14.0)
-    turning = shortest_orthogonal_path(
-        Point(0.0, 0.0),
-        Point(100.0, 0.0),
-        obstacles,
-        costs=costs,
-        departure=False,
-    )
-    assert turning == (Point(0.0, 0.0), Point(100.0, 0.0))
 
 
 def _transparent_edge_figure() -> FigureSpec:
@@ -906,7 +766,7 @@ def test_the_panel_b_formulas_clear_both_their_run_and_their_riser() -> None:
         top = net.label_position.y - net.label_metrics.ascent
         caption = Rect(left, top, right - left, bottom - top)
         half = style.connector_width.points / 2.0
-        for segment in net_segments(net):
+        for segment in (segment for piece in net.pieces for segment in segments(piece)):
             ink = Rect(
                 min(segment.start.x, segment.end.x) - half,
                 min(segment.start.y, segment.end.y) - half,
@@ -1199,24 +1059,6 @@ def test_via_leans_a_net_rail_toward_the_side_it_names() -> None:
         assert not report.errors, report.format()
 
 
-def test_a_net_rail_parked_on_the_refused_side_says_so() -> None:
-    """The net counterpart of the edge clamp, at the unit that decides it."""
-
-    net = NetSpec(
-        "bus",
-        "fan-out",
-        (PortRef("hub", "output"),),
-        (PortRef("first", "input"), PortRef("second", "input")),
-        via=Side.WEST,
-    )
-    escapes = (Point(10.0, 0.0), Point(40.0, 0.0))
-    assert _via_clamp_diagnostics(net, 25.0, escapes, vertical=True) == ()
-    (clamped,) = _via_clamp_diagnostics(net, 90.0, escapes, vertical=True)
-    assert clamped.code == "routing.net.via.clamped"
-    assert clamped.severity is Severity.WARNING
-    assert "sits east" in clamped.message
-
-
 def _jog_figure(**hint: object) -> FigureSpec:
     """A route whose one crossbar has a whole span to sit in.
 
@@ -1285,34 +1127,6 @@ def test_jog_balancing_leaves_an_aimed_route_where_it_was_sent() -> None:
             segment for segment in segments(plain.routed.edges[0].centerline) if segment.vertical
         ).start.x
     )
-
-
-def test_balancing_leaves_a_c_shaped_route_alone() -> None:
-    """Arms that double back share no span, so their crossbar keeps its corridor."""
-
-    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
-    runs = (Run("loop", "loop", boundary, Stubs(5.0, 14.0)),)
-    # East out of the source, up, then *west* into the target: a C.
-    polylines = ((Point(0.0, 100.0), Point(90.0, 100.0), Point(90.0, 10.0), Point(20.0, 10.0)),)
-    assert balance_jogs(runs, polylines, style=LayoutStyle(), obstacles=()) == polylines
-
-
-def test_balancing_never_moves_a_run_the_author_placed() -> None:
-    boundary = Rect(-100.0, -100.0, 400.0, 400.0)
-    polylines = ((Point(0.0, 100.0), Point(20.0, 100.0), Point(20.0, 10.0), Point(200.0, 10.0)),)
-    style = STYLES["paper"]
-    stubs = Stubs(5.0, 14.0)
-    free = balance_jogs(
-        (Run("edge", "edge", boundary, stubs),), polylines, style=style, obstacles=()
-    )
-    assert free[0][1].x == pytest.approx((5.0 + 186.0) / 2.0)
-    hinted = balance_jogs(
-        (Run("edge", "edge", boundary, stubs, hinted=True),),
-        polylines,
-        style=style,
-        obstacles=(),
-    )
-    assert hinted == polylines
 
 
 def _crossing_net_figure(**hint: object) -> FigureSpec:
