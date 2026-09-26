@@ -27,7 +27,7 @@ the straighter of two equally cheap routes.
 from __future__ import annotations
 
 import heapq
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from itertools import count
 
@@ -108,29 +108,31 @@ class Grid:
     def point(self, ix: int, iy: int) -> Point:
         return Point(self.xs[ix], self.ys[iy])
 
+    def _sweep(self) -> None:
+        """Every row's and column's zones in one pass: each zone joins only the
+        lines it strictly spans (found by bisection), in zone order."""
+
+        rows: dict[int, list[tuple[float, float, float]]] = {i: [] for i in range(len(self.ys))}
+        columns: dict[int, list[tuple[float, float, float]]] = {i: [] for i in range(len(self.xs))}
+        for zone in self.zones:
+            rect = zone.rect
+            first = bisect_right(self.ys, rect.top + 1e-6)
+            for iy in range(first, bisect_left(self.ys, rect.bottom - 1e-6)):
+                rows[iy].append((rect.left, rect.right, zone.cost))
+            first = bisect_right(self.xs, rect.left + 1e-6)
+            for ix in range(first, bisect_left(self.xs, rect.right - 1e-6)):
+                columns[ix].append((rect.top, rect.bottom, zone.cost))
+        self._row_zones, self._column_zones = rows, columns
+
     def _row(self, iy: int) -> list[tuple[float, float, float]]:
-        cached = self._row_zones.get(iy)
-        if cached is None:
-            y = self.ys[iy]
-            cached = [
-                (zone.rect.left, zone.rect.right, zone.cost)
-                for zone in self.zones
-                if zone.rect.top + 1e-6 < y < zone.rect.bottom - 1e-6
-            ]
-            self._row_zones[iy] = cached
-        return cached
+        if not self._row_zones:
+            self._sweep()
+        return self._row_zones[iy]
 
     def _column(self, ix: int) -> list[tuple[float, float, float]]:
-        cached = self._column_zones.get(ix)
-        if cached is None:
-            x = self.xs[ix]
-            cached = [
-                (zone.rect.top, zone.rect.bottom, zone.cost)
-                for zone in self.zones
-                if zone.rect.left + 1e-6 < x < zone.rect.right - 1e-6
-            ]
-            self._column_zones[ix] = cached
-        return cached
+        if not self._column_zones:
+            self._sweep()
+        return self._column_zones[ix]
 
     def step_cost(self, ix: int, iy: int, heading: int) -> float:
         """The price of one grid step from ``(ix, iy)`` along ``heading``."""
