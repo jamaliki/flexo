@@ -1335,6 +1335,209 @@ def dqn(theme: str = "paper") -> Figure:
     return figure
 
 
+def lda(theme: str = "paper") -> Figure:
+    """Latent Dirichlet allocation in plate notation (Blei, Ng and Jordan 2003, Figure 1)."""
+
+    with Figure(
+        "lda", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.root.row("model") as model:
+            alpha = model.circle("alpha", r"$\alpha$")
+            with model.plate("documents", "$M$") as documents:
+                theta = documents.circle("theta", r"$\theta$", input=alpha)
+                with documents.plate("words", "$N$") as words:
+                    z = words.circle("z", "$z$", input=theta)
+                    w = words.circle("w", "$w$", shaded=True, input=z)
+            beta = model.circle("beta", r"$\beta$")
+        figure.connect(beta, w)
+    return figure
+
+
+def bidirectional_rnn(theme: str = "paper") -> Figure:
+    """A bidirectional recurrent network (Schuster and Paliwal 1997; Graves 2013)."""
+
+    with Figure("bidirectional-rnn", theme=theme) as figure:
+        with figure.root.grid("time", columns=4) as grid:
+            forward, backward = [], []
+            for t in range(4):
+                y = grid.text(f"y{t}", f"$y_{t}$", at=(0, t))
+                back = grid.block(
+                    f"b{t}", label=r"$\overleftarrow{h}$", tone="backward", at=(1, t)
+                )
+                ahead = grid.block(
+                    f"f{t}", label=r"$\overrightarrow{h}$", tone="forward", at=(2, t)
+                )
+                x = grid.text(f"x{t}", f"$x_{t}$", at=(3, t))
+                figure.connect(x, ahead)
+                figure.connect(x, back)
+                figure.connect(ahead, y)
+                figure.connect(back, y)
+                forward.append(ahead)
+                backward.append(back)
+        for before, after in itertools.pairwise(forward):
+            figure.connect(before, after)
+        for before, after in itertools.pairwise(backward):
+            figure.connect(after, before)
+    return figure
+
+
+def bahdanau_attention(theme: str = "paper") -> Figure:
+    """Sequence-to-sequence with additive attention (Bahdanau et al. 2015, Figure 1)."""
+
+    with Figure("bahdanau-attention", theme=theme) as figure:
+        with figure.root.column("model") as model:
+            with model.row("decoder") as decoder:
+                previous = decoder.block("s1", label="$s_{t-1}$", tone="decoder")
+                state = decoder.block("s", label="$s_t$", tone="decoder", input=previous)
+                decoder.text("y", "$y_t$", input=state)
+            context = model.add("context")
+            with model.row("encoder") as encoder:
+                annotations = [
+                    encoder.block(f"h{j}", label=f"$h_{j}$", tone="encoder") for j in range(1, 5)
+                ]
+            with model.row("inputs") as inputs:
+                for j, h in enumerate(annotations, start=1):
+                    inputs.text(f"x{j}", f"$x_{j}$")
+                    figure.connect(f"model.inputs.x{j}", h)
+        for j, h in enumerate(annotations, start=1):
+            figure.connect(h, context, label=rf"$\alpha_{{t,{j}}}$")
+        figure.connect(context, state, label="$c_t$")
+        for before, after in itertools.pairwise(annotations):
+            figure.connect(before, after)
+    return figure
+
+
+def cyclegan(theme: str = "paper") -> Figure:
+    """CycleGAN: two mappings and their cycle consistency (Zhu et al. 2017, Figure 3)."""
+
+    with Figure("cyclegan", theme=theme, conventions={"lines": "straight"}) as figure:
+        with figure.root.row("domains", gap="60pt") as row:
+            with row.column("x-side") as left:
+                dx = left.block("dx", label="$D_X$", tone="discriminator")
+                x = left.circle("x", "$X$")
+            with row.column("y-side") as right:
+                dy = right.block("dy", label="$D_Y$", tone="discriminator")
+                y = right.circle("y", "$Y$")
+        figure.connect(x, y, label="$G$")
+        figure.connect(y, x, label="$F$")
+        figure.connect(x, dx)
+        figure.connect(y, dy)
+    return figure
+
+
+def kubernetes(theme: str = "paper") -> Figure:
+    """A Kubernetes cluster: the control plane and two worker nodes."""
+
+    with Figure("kubernetes", theme=theme) as figure:
+        with figure.root.row("cluster") as cluster:
+            user = cluster.text("kubectl", "kubectl")
+            with cluster.module("control", label="Control plane", layout="column") as control:
+                api = control.block("api", label="API server", tone="control", input=user)
+                with control.row("services") as services:
+                    etcd = services.block("etcd", label="etcd", tone="store")
+                    scheduler = services.block("scheduler", label="Scheduler")
+                    manager = services.block("manager", label="Controller manager")
+            with cluster.column("workers") as workers:
+                nodes = []
+                for k in (1, 2):
+                    with workers.module(f"node{k}", label=f"Node {k}", layout="row") as node:
+                        kubelet = node.block("kubelet", label="kubelet", tone="agent")
+                        node.block("pods", label="Pods", tone="pod", input=kubelet)
+                        node.block("proxy", label="kube-proxy")
+                    nodes.append(kubelet)
+        figure.connect(api, etcd)
+        figure.connect(scheduler, api)
+        figure.connect(manager, api)
+        for kubelet in nodes:
+            figure.connect(api, kubelet)
+    return figure
+
+
+def perceptron(theme: str = "paper") -> Figure:
+    """Rosenblatt's perceptron: weighted inputs, a sum, and a step."""
+
+    with Figure(
+        "perceptron", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.root.row("unit", gap="40pt") as unit:
+            with unit.column("inputs") as inputs:
+                xs = [inputs.circle(f"x{i}", f"$x_{i}$") for i in (1, 2, 3)]
+                bias = inputs.circle("one", "$1$")
+            total = unit.op("sum", "Σ")
+            step = unit.block("step", label="step")
+            unit.text("y", "$y$", input=step)
+        for i, x in enumerate(xs, start=1):
+            figure.connect(x, total, label=f"$w_{i}$")
+        figure.connect(bias, total, label="$b$")
+        figure.connect(total, step)
+    return figure
+
+
+def central_dogma(theme: str = "paper") -> Figure:
+    """The central dogma of molecular biology (Crick 1970)."""
+
+    with Figure("central-dogma", theme=theme) as figure:
+        with figure.root.row("flow", gap="36pt") as flow:
+            dna = flow.block("dna", label="DNA", tone="dna")
+            rna = flow.block("rna", label="RNA", tone="rna")
+            protein = flow.block("protein", label="Protein", tone="protein")
+        figure.connect(dna, dna, label="replication")
+        figure.connect(dna, rna, label="transcription")
+        figure.connect(rna, protein, label="translation")
+        figure.connect(rna, dna, label="reverse transcription", line="dashed")
+    return figure
+
+
+def pcr(theme: str = "paper") -> Figure:
+    """The polymerase chain reaction: one cycle, repeated about thirty times."""
+
+    with Figure("pcr", width="single-column", theme=theme) as figure:
+        with figure.root.column("protocol") as protocol:
+            template = protocol.text("template", "DNA template")
+            with protocol.group("cycle", label="×30", layout="cycle") as cycle:
+                denature = cycle.block(
+                    "denature", label="Denature\n95 °C", tone="hot", input=template
+                )
+                anneal = cycle.block("anneal", label="Anneal\n55 °C", tone="cool", input=denature)
+                extend = cycle.block("extend", label="Extend\n72 °C", tone="warm", input=anneal)
+                cycle.connect(extend, denature)
+            protocol.text("copies", "2³⁰ copies", input=extend)
+    return figure
+
+
+def git_branching(theme: str = "paper") -> Figure:
+    """A feature branch and its merge, as a commit graph."""
+
+    with Figure("git-branching", theme=theme) as figure:
+        with figure.root.grid("history", columns=6) as grid:
+            main = [grid.circle(f"m{i}", f"$c_{i}$", at=(0, i)) for i in (0, 1, 2, 5)]
+            feature = [
+                grid.circle(f"f{i}", f"$f_{i}$", tone="feature", at=(1, i)) for i in (2, 3, 4)
+            ]
+        for before, after in itertools.pairwise(main):
+            figure.connect(before, after)
+        figure.connect(main[1], feature[0])
+        for before, after in itertools.pairwise(feature):
+            figure.connect(before, after)
+        figure.connect(feature[-1], main[-1])
+    return figure
+
+
+def graph_attention(theme: str = "paper") -> Figure:
+    """A node attending over its neighbours (Velickovic et al. 2018, Figure 1, right)."""
+
+    with Figure(
+        "graph-attention", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.root.grid("graph", columns=3) as grid:
+            centre = grid.circle("h1", r"$\vec{h}_1$", tone="focus", at=(1, 1))
+            spots = [(0, 0), (0, 2), (1, 0), (2, 0), (2, 2), (1, 2)]
+            for k, spot in enumerate(spots, start=2):
+                neighbour = grid.circle(f"h{k}", rf"$\vec{{h}}_{k}$", at=spot)
+                figure.connect(neighbour, centre, label=rf"$\alpha_{{1{k}}}$")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1407,14 +1610,42 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         alphazero,
         knowledge_graph,
         dqn,
+        lda,
+        bidirectional_rnn,
+        bahdanau_attention,
+        cyclegan,
+        kubernetes,
+        perceptron,
+        central_dogma,
+        pcr,
+        git_branching,
+        graph_attention,
     )
 }
 """Every figure here, by name."""
 
 
+SKETCHED = (
+    "gpt-block",
+    "lstm",
+    "unet",
+    "lda",
+    "bahdanau-attention",
+    "perceptron",
+    "graph-attention",
+    "central-dogma",
+    "pcr",
+    "code-review",
+    "citric-acid-cycle",
+    "vision-transformer",
+)
+"""The figures also built in the ``sketch`` theme, for the gallery."""
+
+
 def main() -> None:
     for name, make in FIGURES.items():
-        for theme in ("paper", "tikz"):
+        themes = ("paper", "tikz", "sketch") if name in SKETCHED else ("paper", "tikz")
+        for theme in themes:
             result = build(
                 make(theme),
                 HERE / "build" / "literature",

@@ -131,8 +131,11 @@ SYMBOLS = {
 }
 """Commands that stand for one symbol."""
 
-ACCENTS = {"hat": "̂", "bar": "̄", "tilde": "̃", "dot": "̇", "vec": "⃗"}
+ACCENTS = {"hat": "̂", "bar": "̄", "tilde": "̃", "dot": "̇"}
 """Commands that put a combining accent on their argument."""
+
+OVER = {"vec": "→", "overrightarrow": "→", "overleftarrow": "←"}
+"""Commands that set a mark over their whole argument, drawn by Flexo itself."""
 
 UPRIGHT = {"text", "mathrm", "operatorname"}
 
@@ -274,6 +277,17 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                     )  # type: ignore[arg-type]
                 runs.extend(accented)
                 continue
+            if name in OVER:
+                argument, index = _argument(source, index)
+                marked: list[TextRun] = []
+                _read(argument, marked, shift=shift, mode=mode, weight=weight)
+                if marked:
+                    text = "".join(run.text for run in marked)
+                    first = marked[0]
+                    runs.append(
+                        TextRun(text, first.weight, first.italic, first.baseline_shift, OVER[name])  # type: ignore[arg-type]
+                    )
+                continue
             if name in ALPHABETS:
                 argument, index = _argument(source, index)
                 start, exceptions = ALPHABETS[name]
@@ -398,7 +412,7 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
     for run in runs:
         if not run.text:
             continue
-        if result and (
+        if result and not run.accent and not result[-1].accent and (
             result[-1].weight,
             result[-1].italic,
             result[-1].baseline_shift,

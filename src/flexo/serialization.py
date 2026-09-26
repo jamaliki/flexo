@@ -288,6 +288,7 @@ def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
             "weight": run.weight,
             "italic": run.italic,
             "baseline_shift": run.baseline_shift,
+            **({"accent": run.accent} if run.accent else {}),
         }
         for run in label
     ]
@@ -312,6 +313,7 @@ def _label(value: object = "") -> tuple[TextRun, ...]:
             weight=item.get("weight", 400),
             italic=item.get("italic", False),
             baseline_shift=item.get("baseline_shift", "normal"),
+            accent=item.get("accent", ""),
         )
         for item in value
     )

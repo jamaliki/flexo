@@ -616,6 +616,24 @@ class GroupBuilder:
     def __exit__(self, exception_type: object, exception: object, traceback: object) -> None:
         return None
 
+    def module(
+        self,
+        id: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        layout: LayoutKind | LayoutSpec = "row",
+        justify: str = "center",
+        role: str = "module",
+        **options: Any,
+    ) -> GroupBuilder:
+        """A titled module inside this group: ``group`` with a module's defaults.
+
+        The same call as ``Figure.module``, so a module nests in a module (a
+        worker node inside a cluster) the way it sits on the figure.
+        """
+
+        return self.group(id, label=label, layout=layout, justify=justify, role=role, **options)
+
     def group(
         self,
         id: str,
@@ -668,8 +686,8 @@ class GroupBuilder:
         widths in this group's own grid.
 
         ``title_side="right"`` anchors the group's title to the right end of its
-        top edge instead of the left. The title band is the same height either
-        way, so nothing else in the figure moves.
+        top edge instead of the left; ``"bottom-left"`` and ``"bottom-right"``
+        set it under the contents, as plate notation writes its count.
 
         ``reverse=True`` places the children last-first, so a column written in
         the order its values flow -- image, encoder, projection -- reads from the
@@ -731,6 +749,25 @@ class GroupBuilder:
         self._place(scoped_id, at)
         self.figure._groups.append(draft)
         return GroupBuilder(self.figure, draft)
+
+    def plate(
+        self,
+        id: str,
+        label: str | tuple[TextRun, ...] = "",
+        *,
+        layout: LayoutKind | LayoutSpec = "row",
+        **options: Any,
+    ) -> GroupBuilder:
+        """A plate, as graphical models draw repetition: a bare frame, its count in a corner.
+
+        ``label`` is the count (``"$N$"``), set in the bottom-right corner;
+        plates nest, so a plate over words sits inside a plate over documents.
+        The frame is drawn plainly in every theme.
+        """
+
+        return self.group(
+            id, label=label, layout=layout, role="plate", title_side="bottom-right", **options
+        )
 
     def row(self, id: str, **options: object) -> GroupBuilder:
         """Open a group whose children run left to right; see ``group``.
@@ -1646,6 +1683,12 @@ class GroupBuilder:
 
         from flexo.components import OP_SYMBOLS
 
+        if "label" in options:
+            raise TypeError(
+                "an operator is labelled by its symbol: write op(id, \"Σ\") for a sum "
+                "drawn as a sigma, and caption the connection out of it to name its "
+                "result (connect(op, target, label=\"$c_t$\"))"
+            )
         drawn = symbol.strip().lower() in OP_SYMBOLS or symbol.strip() in OP_SYMBOLS
         label = "" if drawn else symbol
         properties = dict(options.pop("properties", None) or {})  # type: ignore[arg-type]

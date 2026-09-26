@@ -277,6 +277,9 @@ class _Hierarchy:
         )
         bounds = group.bounds
         kind = style.container_style
+        if spec.role == "plate":
+            # A plate is a bare frame in every theme: it counts, it does not group.
+            kind, radius = "outline", min(radius, style.corner_radius.points)
         if spec.shadow and kind in {"filled", "outline", "dashed"}:
             soft_shadow(parent, spec.id, bounds, radius, style, palette)
         fill = paint_override(spec, "fill")
@@ -287,7 +290,11 @@ class _Hierarchy:
             attributes = paint_attributes(
                 palette=palette,
                 fill_role="container-fill" if kind == "filled" or fill else None,
-                stroke_role="container-stroke" if stroke_width > 0.0 else None,
+                stroke_role=(
+                    ("block-stroke" if spec.role == "plate" else "container-stroke")
+                    if stroke_width > 0.0
+                    else None
+                ),
                 stroke_width=stroke_width if stroke_width > 0.0 else None,
                 fill=fill,
                 stroke=stroke,
@@ -829,21 +836,29 @@ def _render_group_label(
     # The title hangs off whichever end of the top edge it is anchored to, so
     # the anchor moves with it; the band it sits in is the same height either
     # way, which is why title_side is paint rather than layout.
-    right = spec.title_side == "right"
+    right = spec.title_right
+    label = group.measured.label
+    top = (
+        group.bounds.bottom - authored.bottom - label.height
+        if spec.title_below
+        else group.bounds.y + authored.top
+    )
     render_runs(
         parent,
         f"{spec.id}.label",
-        group.measured.label,
+        label,
         x=(
             group.bounds.right - authored.right
             if right
             else group.bounds.x + authored.left
         ),
-        y=group.bounds.y + authored.top + group.measured.label.baseline,
+        y=top + label.baseline,
         typography=title_typography(style.typography),
         palette=palette,
         fill_role="ink",
         fill=paint_override(spec, "label"),
         anchor="end" if right else None,
-        weight=style.typography.title_weight,
+        weight=style.typography.label_weight
+        if spec.role == "plate"
+        else style.typography.title_weight,
     )

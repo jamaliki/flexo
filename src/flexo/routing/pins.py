@@ -722,7 +722,7 @@ def _spill_crowded_sides(
         along_x = side in {Side.NORTH, Side.SOUTH}
         span = node.bounds.width if along_x else node.bounds.height
         # Pins keep off the rounded corners (see ``_place_on_side``).
-        inset = min(style.corner_radius.points + style.connector_width.points, span / 2.0)
+        inset = min(_corner_inset(node, style), span / 2.0)
         fit = int((span - 2.0 * inset) / spacing) + 1  # pins exactly a lane apart
         capacity = max(min(fit, 2), fit - 2)
         if len(groups) <= capacity:
@@ -1107,14 +1107,20 @@ def _place_on_side(
         desired = [
             value if value is not None else even for value, even in zip(fixed, evenly, strict=True)
         ]
-    inset = min(style.corner_radius.points + style.connector_width.points, (high - low) / 2.0)
+    inset = min(_corner_inset(node, style), (high - low) / 2.0)
     # No pin on a corner's curve: a spread that reaches it stops at its end.
     desired = [
         min(max(value, low + inset), high - inset) if movable(key) else value
         for key, value in zip(keys, desired, strict=True)
     ]
     open_low, open_high = _open_stretch(
-        node.bounds, side, low + inset, high - inset, blockers, style.arrival_clearance.points
+        node.bounds,
+        side,
+        low + inset,
+        high - inset,
+        blockers,
+        style.arrival_clearance.points,
+        need=(len(keys) - 1) * style.port_spacing.points + 2.0,
     )
     squeeze = any(not open_low - 1e-9 <= value <= open_high + 1e-9 for value in desired)
     result = {}
@@ -1139,6 +1145,17 @@ def _place_on_side(
     return result
 
 
+def _corner_inset(node: FittedNode, style: LayoutStyle) -> float:
+    """How far from each end of a side its pins keep: clear of the corner's curve.
+
+    A word set on its own (``text``) has no outline, so no corner to keep off.
+    """
+
+    if node.measured.spec.kind == "text":
+        return style.connector_width.points
+    return style.corner_radius.points + style.connector_width.points
+
+
 def _open_stretch(
     bounds: Rect,
     side: Side,
@@ -1146,8 +1163,12 @@ def _open_stretch(
     high: float,
     blockers: tuple[Rect, ...],
     depth: float,
+    need: float = 8.0,
 ) -> tuple[float, float]:
     """The longest stretch of a side with nothing in the band just in front of it.
+
+    A stretch shorter than ``need`` (what the side's pins take, a lane apart)
+    is no use, and the whole side is returned instead.
 
     A stub leaves a side straight out for a clearance or so; a group title or
     another box standing in that band would be run through. Titles are the
@@ -1180,7 +1201,7 @@ def _open_stretch(
     if not stretches:
         return low, high
     start, end = max(stretches, key=lambda piece: piece[1] - piece[0])
-    if end - start < min(8.0, high - low):
+    if end - start < min(need, high - low):
         return low, high
     return start, end
 
@@ -1499,8 +1520,12 @@ def title_rect(group, style: LayoutStyle) -> Rect | None:
         return None
     spec = group.measured.spec
     padding = spec.layout.authored_padding(style.group_padding)
-    top = group.bounds.y + padding.top
-    if spec.title_side == "right":
+    top = (
+        group.bounds.bottom - padding.bottom - label.height
+        if spec.title_below
+        else group.bounds.y + padding.top
+    )
+    if spec.title_right:
         left = group.bounds.right - padding.right - label.width
     else:
         left = group.bounds.x + padding.left

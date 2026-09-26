@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 
 import uharfbuzz as hb
@@ -28,6 +28,30 @@ from flexo.style import TypographyStyle
 _TOKEN_PATTERN = re.compile(r"\S+|\s+")
 
 SHIFTED_SIZE = 0.72
+ACCENT_SIZE = 0.78
+"""An accent mark's size, as a fraction of the text it sits over."""
+
+_TALL = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789bdfhklt"
+    "\u0394\u0398\u039b\u03a3\u03a6\u03a8\u03a9\u03b2\u03b4\u03b6\u03b8\u03bb\u03be"
+)
+"""Letters that reach the ascender, so a mark over them sits higher."""
+
+
+def accent_rise(run: TextRun, typography: TypographyStyle) -> float:
+    """How far up an accent mark's baseline sits over ``run``, in points.
+
+    A mark over a letter with an ascender (``h``, ``A``) clears the ascender;
+    over one without (``x``, ``a``) it clears the x-height; over a script it
+    rides the script's own shift.
+    """
+
+    size = typography.size.points
+    scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
+    tall = any(character in _TALL for character in run.text)
+    return script_shift(run.baseline_shift, run.italic, typography) + (
+        0.62 if tall else 0.42
+    ) * size * scale
 """Font-size factor of a superscript or subscript run.
 
 One number shared by shaping, component labels, and connector captions, so the
@@ -356,6 +380,11 @@ class TextMeasurer:
             cap_height=cap,
         )
 
+    def mark_width(self, mark: str, italic: bool = False) -> float:
+        """How wide an accent mark (``TextRun.accent``) is drawn, at ``ACCENT_SIZE``."""
+
+        return self._shape_run(TextRun(mark, 400, italic)) * ACCENT_SIZE
+
     def run_widths(self, line: tuple[TextRun, ...], weight: int | None = None) -> list[float]:
         """The advance of each run of ``line``, as it would be set on its own."""
 
@@ -426,7 +455,7 @@ class TextMeasurer:
         current_width = 0.0
         for run in line:
             for token in _TOKEN_PATTERN.findall(run.text):
-                token_run = TextRun(token, run.weight, run.italic, run.baseline_shift)
+                token_run = replace(run, text=token)
                 token_width = self._shape_run(token_run, weight)
                 is_space = token.isspace()
                 if current and not is_space and current_width + token_width > max_width:
@@ -470,7 +499,7 @@ def _split_hard_lines(runs: tuple[TextRun, ...]) -> tuple[tuple[TextRun, ...], .
         parts = run.text.split("\n")
         for index, part in enumerate(parts):
             if part:
-                lines[-1].append(TextRun(part, run.weight, run.italic, run.baseline_shift))
+                lines[-1].append(replace(run, text=part))
             if index < len(parts) - 1:
                 lines.append([])
     return tuple(_trim_and_merge(line) for line in lines)
@@ -481,7 +510,7 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
         runs.pop()
     merged: list[TextRun] = []
     for run in runs:
-        if merged and (
+        if merged and not run.accent and not merged[-1].accent and (
             merged[-1].weight,
             merged[-1].italic,
             merged[-1].baseline_shift,
@@ -504,7 +533,7 @@ def title_runs(runs: tuple[TextRun, ...], typography: TypographyStyle) -> tuple[
     if typography.title_transform != "upper":
         return runs
     return tuple(
-        TextRun(run.text.upper(), run.weight, run.italic, run.baseline_shift) for run in runs
+        replace(run, text=run.text.upper()) for run in runs
     )
 
 

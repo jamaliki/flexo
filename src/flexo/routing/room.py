@@ -119,6 +119,23 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
         if not runs:
             upright = [(start, end) for start, end in pairwise(line) if start.x == end.x]
             if not upright:
+                # A straight line at an angle (a graph's edge): the gap it
+                # spans grows along its longer axis, which spreads the lines
+                # that converge on one node and opens room between them.
+                # Only a caption drawn over another line asks: one merely near
+                # a line where lines converge is the placer's to move.
+                if not any(
+                    segment_crosses_rect(a, b, inner)
+                    for line_id, other in lines
+                    if line_id != edge_id
+                    for a, b in pairwise(other)
+                ):
+                    return
+                start, end = line[0], line[-1]
+                across_x = abs(end.x - start.x) >= abs(end.y - start.y)
+                middle = Point((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
+                size = (box.width if across_x else box.height) + clearance
+                widen(middle, across_x, size, reach=size)
                 return
             start, end = max(upright, key=lambda run: abs(run[1].y - run[0].y))
             # From the line out to the caption's far edge, it runs into the
@@ -168,7 +185,8 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
         """
 
         group = routed.fitted.group(owner_id)
-        if not group.measured.label.lines or group.measured.spec.role == "canvas":
+        spec = group.measured.spec
+        if not group.measured.label.lines or spec.role == "canvas" or spec.title_below:
             return
         top = _contents_top(owner_id)
         if top is None:

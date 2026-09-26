@@ -7,13 +7,16 @@ import xml.etree.ElementTree as ET
 from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
 from flexo.ir.measured import TextMetrics
-from flexo.ir.semantic import GroupSpec, NodeSpec
+from flexo.ir.semantic import GroupSpec, NodeSpec, TextRun
 from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette, TypographyStyle
 from flexo.svg import element, number
 from flexo.text import (
+    ACCENT_SIZE,
     DEFAULT_RUN_WEIGHT,
     SHIFTED_SIZE,
+    FontStack,
     TextMeasurer,
+    accent_rise,
     drawn_weight,
     font_stack,
     script_shift,
@@ -141,6 +144,19 @@ def render_runs(
         # stepped back over it, so the pen ends past both.
         order = list(range(len(line.runs)))
         back: dict[int, float] = {}
+        # An accented run is followed by its mark, stepped back to centre over
+        # it; the run after steps forward again to where the pen belongs.
+        restore: dict[int, float] = {}
+        marks: dict[int, tuple[float, float]] = {}
+        if any(run.accent for run in line.runs):
+            measurer = measurer or TextMeasurer(typography)
+            widths = measurer.run_widths(line.runs, weight)
+            for index, run in enumerate(line.runs):
+                if run.accent:
+                    mark = measurer.mark_width(run.accent, run.italic)
+                    skew = 0.06 * size if run.italic else 0.0
+                    marks[index] = (-(widths[index] + mark) / 2.0 + skew, mark)
+                    restore[index + 1] = (widths[index] - mark) / 2.0 - skew
         stacked = stacked_scripts(line.runs)
         if stacked:
             measurer = measurer or TextMeasurer(typography)
@@ -154,11 +170,12 @@ def render_runs(
         for position, run_index in enumerate(order):
             run = line.runs[run_index]
             shifted = run.baseline_shift != "normal"
+            step = -back.get(run_index, 0.0) + restore.get(run_index, 0.0)
             span = element(
                 text,
                 "tspan",
                 x=x if position == 0 else None,
-                dx=number(-back[run_index]) if run_index in back else None,
+                dx=number(step) if run_index in back or run_index in restore else None,
                 dy=metrics.line_height if line_index > 0 and position == 0 else None,
                 font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
                 font__style="italic" if run.italic else None,
@@ -169,6 +186,8 @@ def render_runs(
                 ),
                 font__size=size * SHIFTED_SIZE if shifted else None,
             )
+            if run_index in marks:
+                _mark(text, run, marks[run_index][0], typography, stack, primary)
             pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic)
             if len(pieces) == 1 and pieces[0][0].family == primary:
                 span.text = run.text
@@ -187,6 +206,29 @@ def render_runs(
                 if piece != piece.strip():
                     inner.set(_XML_SPACE, "preserve")
     return text
+
+
+def _mark(
+    text: ET.Element,
+    run: TextRun,
+    dx: float,
+    typography: TypographyStyle,
+    stack: FontStack,
+    primary: str,
+) -> None:
+    """The accent over ``run``: a small upright mark, centred over it, raised."""
+
+    (face, _), *_ = stack.segments(run.accent, DEFAULT_RUN_WEIGHT, False)
+    mark = element(
+        text,
+        "tspan",
+        dx=number(dx),
+        baseline__shift=number(accent_rise(run, typography)),
+        font__size=typography.size.points * ACCENT_SIZE,
+        font__family=face.family if face.family != primary else None,
+        font__style="normal" if run.italic else None,
+    )
+    mark.text = run.accent
 
 
 SHADOW_LAYERS = 5

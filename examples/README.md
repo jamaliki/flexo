@@ -56,13 +56,15 @@ the addition it is (`op("~")` into `add`). Built in the `paper`, `tikz` and
 
 ## [`literature.py`](literature.py)
 
-Sixty-nine figures from papers and textbooks, each a short function. They use
+Seventy-nine figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in `paper` and `tikz` (the test suite
-checks this) and in all thirteen themes, except that the skip-gram is a little
-too wide for a single column in `midcentury`'s and `sketch`'s larger type and
-says so.
+checks this) and in all thirteen themes, with two exceptions it reports
+itself: the skip-gram is a little too wide for a single column in
+`midcentury`'s and `sketch`'s larger type, and the bidirectional RNN crosses
+six times, the fewest its graph allows (each input feeds both chains, so every
+line that passes a chain crosses one of its arrows).
 
 | | | |
 | --- | --- | --- |
@@ -95,3 +97,19 @@ says so.
 | [![Citric acid cycle](build/literature/citric-acid-cycle.preview.png)](build/literature/citric-acid-cycle.preview.png) Citric acid cycle | [![Citric acid cycle in `tikz`](build/literature/citric-acid-cycle-tikz.preview.png)](build/literature/citric-acid-cycle-tikz.preview.png) Citric acid cycle in `tikz` |  |
 | [![AlphaZero training loop](build/literature/alphazero.preview.png)](build/literature/alphazero.preview.png) AlphaZero training loop | [![Knowledge graph](build/literature/knowledge-graph.preview.png)](build/literature/knowledge-graph.preview.png) Knowledge graph |  |
 | [![Deep Q-learning](build/literature/dqn.preview.png)](build/literature/dqn.preview.png) Deep Q-learning | [![Deep Q-learning in `tikz`](build/literature/dqn-tikz.preview.png)](build/literature/dqn-tikz.preview.png) Deep Q-learning in `tikz` |  |
+| [![Latent Dirichlet allocation, in plate notation](build/literature/lda.preview.png)](build/literature/lda.preview.png) Latent Dirichlet allocation, in plate notation | [![Sequence to sequence with additive attention](build/literature/bahdanau-attention.preview.png)](build/literature/bahdanau-attention.preview.png) Sequence to sequence with additive attention | [![Bidirectional RNN](build/literature/bidirectional-rnn.preview.png)](build/literature/bidirectional-rnn.preview.png) Bidirectional RNN |
+| [![CycleGAN](build/literature/cyclegan.preview.png)](build/literature/cyclegan.preview.png) CycleGAN | [![Kubernetes cluster](build/literature/kubernetes.preview.png)](build/literature/kubernetes.preview.png) Kubernetes cluster | [![Perceptron](build/literature/perceptron.preview.png)](build/literature/perceptron.preview.png) Perceptron |
+| [![Central dogma of molecular biology](build/literature/central-dogma.preview.png)](build/literature/central-dogma.preview.png) Central dogma of molecular biology | [![Polymerase chain reaction](build/literature/pcr.preview.png)](build/literature/pcr.preview.png) Polymerase chain reaction | [![A feature branch and its merge](build/literature/git-branching.preview.png)](build/literature/git-branching.preview.png) A feature branch and its merge |
+| [![Graph attention](build/literature/graph-attention.preview.png)](build/literature/graph-attention.preview.png) Graph attention | [![LDA in `tikz`](build/literature/lda-tikz.preview.png)](build/literature/lda-tikz.preview.png) LDA in `tikz` | [![Additive attention in `tikz`](build/literature/bahdanau-attention-tikz.preview.png)](build/literature/bahdanau-attention-tikz.preview.png) Additive attention in `tikz` |
+
+### Drawn by hand
+
+A dozen of the figures are also built in the `sketch` theme -- the same code,
+`theme="sketch"`:
+
+| | | |
+| --- | --- | --- |
+| [![Transformer block, drawn by hand](build/literature/gpt-block-sketch.preview.png)](build/literature/gpt-block-sketch.preview.png) Transformer block | [![LSTM cell, drawn by hand](build/literature/lstm-sketch.preview.png)](build/literature/lstm-sketch.preview.png) LSTM cell | [![U-Net, drawn by hand](build/literature/unet-sketch.preview.png)](build/literature/unet-sketch.preview.png) U-Net |
+| [![LDA, drawn by hand](build/literature/lda-sketch.preview.png)](build/literature/lda-sketch.preview.png) LDA | [![Additive attention, drawn by hand](build/literature/bahdanau-attention-sketch.preview.png)](build/literature/bahdanau-attention-sketch.preview.png) Additive attention | [![Perceptron, drawn by hand](build/literature/perceptron-sketch.preview.png)](build/literature/perceptron-sketch.preview.png) Perceptron |
+| [![Graph attention, drawn by hand](build/literature/graph-attention-sketch.preview.png)](build/literature/graph-attention-sketch.preview.png) Graph attention | [![Central dogma, drawn by hand](build/literature/central-dogma-sketch.preview.png)](build/literature/central-dogma-sketch.preview.png) Central dogma | [![PCR, drawn by hand](build/literature/pcr-sketch.preview.png)](build/literature/pcr-sketch.preview.png) PCR |
+| [![Code-review flowchart, drawn by hand](build/literature/code-review-sketch.preview.png)](build/literature/code-review-sketch.preview.png) Code-review flowchart | [![Citric acid cycle, drawn by hand](build/literature/citric-acid-cycle-sketch.preview.png)](build/literature/citric-acid-cycle-sketch.preview.png) Citric acid cycle | [![Vision Transformer, drawn by hand](build/literature/vision-transformer-sketch.preview.png)](build/literature/vision-transformer-sketch.preview.png) Vision Transformer |
