@@ -16,7 +16,8 @@ A string label is plain text, except for what sits between a pair of ``$``:
   blackboard, and fraktur capitals.
 - ``\\hat{x}``, ``\\bar{x}``, ``\\tilde{x}`` and ``\\dot{x}`` put the accent on
   the character. ``\\sqrt{d}`` is a radical sign before its argument, with no
-  bar over it.
+  bar over it, and ``\\frac{a}{b}`` is set inline as ``a/b`` (a sum or
+  difference in parentheses: ``(a+b)/c``).
 
 Spacing follows TeX. A binary operator (``+``, ``-``, ``\\times``, ``\\cdot``,
 ...) or a relation (``=``, ``<``, ``\\in``, ``\\sim``, ``\\to``, ...) gets one
@@ -290,6 +291,22 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                     # operand, but not from ``(`` or a script.
                     runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
                 continue
+            if name in {"frac", "tfrac", "dfrac"}:
+                # Set inline, as a solidus: ``\frac{n_k}{n}`` is ``n_k/n``.
+                # A numerator or denominator of more than one atom keeps its
+                # grouping in parentheses.
+                numerator, index = _argument(source, index)
+                denominator, index = _argument(source, index)
+                for part, last in ((numerator, False), (denominator, True)):
+                    grouped = _compound(part)
+                    if grouped:
+                        runs.append(TextRun("(", weight, False, shift))  # type: ignore[arg-type]
+                    _read(part, runs, shift=shift, mode=mode, weight=weight)
+                    if grouped:
+                        runs.append(TextRun(")", weight, False, shift))  # type: ignore[arg-type]
+                    if not last:
+                        runs.append(TextRun("/", weight, False, shift))  # type: ignore[arg-type]
+                continue
             if name == "sqrt":
                 runs.append(TextRun("√", weight, False, shift))  # type: ignore[arg-type]
                 argument, index = _argument(source, index)
@@ -335,6 +352,20 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 continue
         italic = mode == "math" and character.isascii() and character.isalpha()
         runs.append(TextRun(character, weight, italic, shift))  # type: ignore[arg-type]
+
+
+def _compound(part: str) -> bool:
+    """Whether ``part`` holds an operator at its own level: ``a+b``, not ``a_{i+1}``."""
+
+    depth = 0
+    for position, character in enumerate(part):
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+        elif depth == 0 and position > 0 and character in "+-" and part[position - 1] not in "_^":
+            return True
+    return False
 
 
 def _argument(source: str, index: int) -> tuple[str, int]:
