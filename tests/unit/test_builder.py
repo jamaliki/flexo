@@ -1228,3 +1228,11 @@ def test_attention_vector_feeds_arrive_as_plain_verticals() -> None:
         rail_levels.update(round(run.start.y, 6) for run in runs[:-1])
     assert len(rail_levels) <= 1, "every glyph drops from one rail"
     assert not lint_compilation(compiled).errors
+
+
+def test_a_figure_builds_on_its_root_directly() -> None:
+    with Figure("direct") as figure:
+        with figure.plate("n", "$N$") as plate:
+            z = plate.circle("z", "$z$")
+        figure.block("b", label="B", input=z)
+    assert {node.id for node in figure.spec.nodes} == {"n.z", "b"}

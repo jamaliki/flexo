@@ -120,6 +120,57 @@ SYMBOLS = {
     "cdots": "⋯",
     "langle": "⟨",
     "rangle": "⟩",
+    "ll": "≪",
+    "gg": "≫",
+    "simeq": "≃",
+    "equiv": "≡",
+    "cong": "≅",
+    "int": "∫",
+    "oint": "∮",
+    "subseteq": "⊆",
+    "supset": "⊃",
+    "supseteq": "⊇",
+    "emptyset": "∅",
+    "varnothing": "∅",
+    "Rightarrow": "⇒",
+    "Leftarrow": "⇐",
+    "Leftrightarrow": "⇔",
+    "iff": "⟺",
+    "implies": "⟹",
+    "leftrightarrow": "↔",
+    "mapsto": "↦",
+    "uparrow": "↑",
+    "downarrow": "↓",
+    "mp": "∓",
+    "div": "÷",
+    "star": "⋆",
+    "ast": "∗",
+    "dagger": "†",
+    "parallel": "∥",
+    "Vert": "‖",
+    "lVert": "‖",
+    "rVert": "‖",
+    "lvert": "|",
+    "rvert": "|",
+    "lfloor": "⌊",
+    "rfloor": "⌋",
+    "lceil": "⌈",
+    "rceil": "⌉",
+    "hbar": "ℏ",
+    "Re": "ℜ",
+    "Im": "ℑ",
+    "aleph": "ℵ",
+    "neg": "¬",
+    "lnot": "¬",
+    "land": "∧",
+    "lor": "∨",
+    "wedge": "∧",
+    "vee": "∨",
+    "setminus": "∖",
+    "vartheta": "ϑ",
+    "intercal": "⊺",
+    "square": "□",
+    "checkmark": "✓",
     "|": "‖",
     ",": " ",
     " ": " ",
@@ -140,7 +191,10 @@ OVER = {"vec": "→", "overrightarrow": "→", "overleftarrow": "←"}
 UPRIGHT = {"text", "mathrm", "operatorname"}
 
 OPERATORS = frozenset(
-    {"log", "exp", "max", "min", "sin", "cos", "tanh", "arg", "det", "lim", "sup", "inf"}
+    {
+        "log", "exp", "max", "min", "sin", "cos", "tan", "tanh", "arg", "det", "lim", "sup",
+        "inf", "argmax", "argmin", "ln", "Pr", "tr", "diag", "softmax", "KL",
+    }
 )
 """Named functions TeX sets upright: ``\\log x``, ``\\max_i``."""
 
@@ -157,9 +211,9 @@ Unicode placed early in its Letterlike Symbols block instead."""
 BOLD = {"mathbf", "boldsymbol"}
 
 _REPLACEMENTS = {"-": "−", "*": "∗", "'": "′"}
-BINARY = frozenset("+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆")
+BINARY = frozenset("+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆∖")
 """Symbols TeX spaces as binary operators: ``a + b``, but ``-a`` for a sign."""
-RELATIONS = frozenset("=<>≤≥≠≈≡∼≃∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔↦∣")
+RELATIONS = frozenset("=<>≤≥≠≈≡∼≃≅∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔⟺⟹↦∣≪≫∥")
 """Symbols TeX spaces as relations: always ``a = b``."""
 _OPENING = frozenset("([{⟨,;")
 _UPRIGHT_GREEK = frozenset("ΓΔΘΛΞΠΣΥΦΨΩ")
@@ -299,7 +353,8 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 runs.append(TextRun(letters, weight, False, shift))  # type: ignore[arg-type]
                 continue
             if name in OPERATORS:
-                runs.append(TextRun(name, weight, False, shift))  # type: ignore[arg-type]
+                shown = {"argmax": "arg max", "argmin": "arg min"}.get(name, name)
+                runs.append(TextRun(shown, weight, False, shift))  # type: ignore[arg-type]
                 following = source[index : index + 1]
                 if following.isalnum() or following == "\\":
                     # ``\log x``: a named function is set apart from its
