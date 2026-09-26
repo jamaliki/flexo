@@ -71,6 +71,8 @@ class TextRun:
     """
     code: bool = False
     """Set in the typography's monospace family (``\\texttt{...}``, a slide's backticks)."""
+    link: str = ""
+    """A URL the run links to (``[words](https://...)``): clickable in SVG, PDF, and PowerPoint."""
 
 
 @dataclass(frozen=True, slots=True)

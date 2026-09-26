@@ -223,13 +223,17 @@ _UPRIGHT_GREEK = frozenset("ΓΔΘΛΞΠΣΥΦΨΩ")
 _COMMAND = re.compile(r"\\([A-Za-z]+|.)")
 
 
+_LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?|mailto|file):[^)\s]+)\)")
+"""``[words](url)``: words that link somewhere."""
+
+
 def parse_label(text: str) -> tuple[TextRun, ...]:
     """The runs a string label stands for: plain text, with math between ``$``
     and code between backticks (set in the monospace family)."""
 
     if not text:
         return ()
-    if "$" not in text and "`" not in text:
+    if "$" not in text and "`" not in text and "](" not in text:
         return (TextRun(text),)
     runs: list[TextRun] = []
     plain: list[str] = []
@@ -243,6 +247,13 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
         if character == "\\" and text[index + 1 : index + 2] == "`":
             plain.append("`")
             index += 2
+            continue
+        if character == "[" and (link := _LINK.match(text, index)):
+            if plain:
+                runs.append(TextRun("".join(plain)))
+                plain = []
+            runs.extend(replace(run, link=link.group(2)) for run in parse_label(link.group(1)))
+            index = link.end()
             continue
         if character == "`":
             end = text.find("`", index + 1)
@@ -495,7 +506,8 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
             result[-1].italic,
             result[-1].baseline_shift,
             result[-1].code,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code):
+            result[-1].link,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link):
             result[-1] = replace(result[-1], text=result[-1].text + run.text)
             continue
         result.append(run)

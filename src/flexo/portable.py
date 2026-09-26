@@ -192,6 +192,7 @@ def _text(parent: ET.Element, text: Text) -> None:
             outline = run_outline(run)
             if not outline:
                 continue
-            path = ET.SubElement(group, svg_tag("path"), {"d": path_data(outline)})
+            holder = ET.SubElement(group, svg_tag("a"), {"href": run.link}) if run.link else group
+            path = ET.SubElement(holder, svg_tag("path"), {"d": path_data(outline)})
             if run.fill != text.fill:
                 path.set("fill", run.fill)
