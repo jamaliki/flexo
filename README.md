@@ -391,6 +391,8 @@ lab.yaml` writes out every setting a theme has, as a file to start from.
 Palettes can be registered on their own: `flexo.register_palette("Lab",
 ["#..", ...])`, or a file of `palettes:`. A setting a theme does not have is
 refused with the nearest one it does (`extends:` → `base:`), never ignored.
+`[words](https://...)` in a label is a link -- clickable in the SVG, the PDF, and
+flexo-talk's PowerPoint -- set in the accent colour.
 Code between backticks in a label (`` `fit()` ``) is set in `type: {mono_family: ...}`,
 or the first installed of JetBrains Mono, Menlo, Consolas, DejaVu Sans Mono, ....
 `type: {math_family: Latin Modern Math}` sets maths symbols and italic Greek

@@ -158,3 +158,17 @@ def test_pdf_rasterises_svg_artwork_sized_in_points(tmp_path: Path) -> None:
         figure.root.image("art", source)
     data = pdf_bytes(compile_figure(figure.spec).document.text)
     assert b"/Subtype /Image" in data
+
+
+def test_links_are_clickable_in_every_format(tmp_path: Path) -> None:
+    from flexo.markup import parse_label
+
+    runs = parse_label("See [the paper](https://arxiv.org/abs/1706.03762) now")
+    assert [run.link for run in runs] == ["", "https://arxiv.org/abs/1706.03762", ""]
+    with Figure("linked") as figure:
+        figure.block("b", label="See [the paper](https://arxiv.org/abs/1706.03762)")
+    outputs = flexo.build(figure, tmp_path, formats=("editable", "portable", "pdf")).outputs
+    assert '<a href="https://arxiv.org/abs/1706.03762">' in outputs.editable_svg.read_text()
+    assert 'href="https://arxiv.org/abs/1706.03762"' in outputs.portable_svg.read_text()  # type: ignore[union-attr]
+    pdf = outputs.pdf.read_bytes()  # type: ignore[union-attr]
+    assert b"/Subtype /Link" in pdf and b"/URI (https://arxiv.org/abs/1706.03762)" in pdf

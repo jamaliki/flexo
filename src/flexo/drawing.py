@@ -117,6 +117,8 @@ class Run:
     """The family the SVG names for the run."""
     shift: float = 0.0
     """How far the run's baseline is raised from its line's (a superscript)."""
+    link: str = ""
+    """The URL the run links to, if it is a link."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1331,6 +1333,7 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
                     role,
                     family_name,
                     shift,
+                    attributes.get("-flexo-link", ""),
                 )
             )
             pen += width
@@ -1344,13 +1347,7 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
         placed.append(
             Line(
                 runs[0].baseline + runs[0].shift,
-                tuple(
-                    Run(
-                        run.text, run.x + offset, run.baseline, run.width, run.size, run.weight,
-                        run.italic, run.face, run.fill, run.fill_role, run.family, run.shift,
-                    )
-                    for run in runs
-                ),
+                tuple(replace(run, x=run.x + offset) for run in runs),
             )
         )
     if not placed:
@@ -1370,6 +1367,10 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
     )
 
 
+def _style_of(run: Run) -> tuple:
+    return (run.face, run.size, run.weight, run.italic, run.fill, run.baseline, run.link)
+
+
 def _joined(runs: list[Run]) -> list[Run]:
     """Neighbouring runs that continue one another in one style, as one run."""
 
@@ -1378,8 +1379,7 @@ def _joined(runs: list[Run]) -> list[Run]:
         last = joined[-1] if joined else None
         if (
             last is not None
-            and (last.face, last.size, last.weight, last.italic, last.fill, last.baseline)
-            == (run.face, run.size, run.weight, run.italic, run.fill, run.baseline)
+            and _style_of(last) == _style_of(run)
             and abs(run.x - (last.x + last.width)) < 0.15 * run.size
         ):
             joined[-1] = replace(last, text=last.text + run.text, width=run.x + run.width - last.x)
@@ -1412,7 +1412,16 @@ def _pieces(element: ET.Element, context: dict[str, str]):
             yield {**attributes, **own}, node.text
             own = {}
         for child in node:
-            if local_name(child.tag) != "tspan":
+            tag = local_name(child.tag)
+            if tag == "a":
+                # A link: the words inside it carry its URL.
+                href = child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or ""
+                yield from walk(child, {**attributes, "-flexo-link": href}, own)
+                own = {}
+                if child.tail and child.tail.strip():
+                    yield attributes, child.tail
+                continue
+            if tag != "tspan":
                 continue
             yield from walk(child, attributes, own)
             own = {}
