@@ -9,7 +9,13 @@ uv run python examples/transformer.py
 uv run python examples/vertical_slice.py
 uv run python examples/attention_module.py
 uv run python examples/modelangelo_gnn.py
+uv run python examples/tutorial.py
 ```
+
+## [`tutorial.py`](tutorial.py)
+
+Builds the pictures of the [tutorial](../docs/tutorial.md) from the tutorial's
+own code blocks, so what a reader copies is what drew the picture.
 
 ## [`vertical_slice.py`](vertical_slice.py)
 

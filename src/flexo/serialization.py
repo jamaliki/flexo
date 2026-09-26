@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,25 +44,64 @@ def load_figure(source_file: str | Path) -> FigureSpec:
 
 
 def parse_figure(document: object) -> FigureSpec:
+    """A figure from its document (parsed YAML or JSON), validated.
+
+    A hand-written file may leave out what Python would not make you write:
+    ``schema_version``, ``width`` (double-column), ``root``, a node's
+    ``kind`` (a block), an edge's ``id`` (numbered as the builder numbers them),
+    and ``groups`` (the nodes are stacked in a column, as on a new ``Figure``).
+    An edge end may name a node alone -- ``from: encoder`` -- for its usual port,
+    ``output`` where a value leaves and ``input`` where it arrives; ``theme`` is
+    the same as ``style``.
+    """
+
     validate_document(document)
     assert isinstance(document, dict)
     figure_data = document["figure"]
     assert isinstance(figure_data, dict)
+    root = figure_data.get("root", "root")
+    node_ids = {item["id"] for item in document["nodes"]}
+
+    def reference(value: str, port: str) -> PortRef:
+        return PortRef(value, port) if value in node_ids else PortRef.parse(value)
+
+    edges = []
+    for index, item in enumerate(document.get("edges", []), start=1):
+        source, target = reference(item["from"], "output"), reference(item["to"], "input")
+        edge_id = item.get("id") or f"edge.{index}.{source.node_id}-to-{target.node_id}"
+        edges.append(_edge(item, edge_id, source, target))
+    groups = [_group(item) for item in document.get("groups", [])]
+    if not any(group.id == root for group in groups):
+        # No root written: everything no group holds is stacked on the canvas.
+        held = {child for group in groups for child in group.children}
+        top = tuple(
+            item_id
+            for item_id in [*(group.id for group in groups), *(n["id"] for n in document["nodes"])]
+            if item_id not in held
+        )
+        groups.append(
+            GroupSpec(
+                id=root,
+                children=top,
+                layout=LayoutSpec("column", align="auto", justify="center"),
+                role="canvas",
+            )
+        )
     figure = FigureSpec(
         id=figure_data["id"],
-        width=_length_or_preset(figure_data["width"]),
+        width=_length_or_preset(figure_data.get("width", "double-column")),
         height=_optional_length(figure_data.get("height")),
-        root=figure_data["root"],
-        style=figure_data.get("style", "paper"),
+        root=root,
+        style=figure_data.get("theme", figure_data.get("style", "paper")),
         palette=figure_data.get("palette", "default"),
         font=figure_data.get("font"),
         conventions=parse_conventions(figure_data.get("conventions")),
         sketch=parse_sketch(figure_data.get("sketch")),
         nodes=tuple(_node(item) for item in document["nodes"]),
-        edges=tuple(_edge(item) for item in document["edges"]),
-        nets=tuple(_net(item) for item in document.get("nets", [])),
-        groups=tuple(_group(item) for item in document["groups"]),
-        schema_version=document["schema_version"],
+        edges=tuple(edges),
+        nets=tuple(_net(item, reference) for item in document.get("nets", [])),
+        groups=tuple(groups),
+        schema_version=document.get("schema_version", 1),
     )
     return normalize_and_validate(figure)
 
@@ -322,7 +362,7 @@ def _label(value: object = "") -> tuple[TextRun, ...]:
 def _node(data: dict[str, Any]) -> NodeSpec:
     return NodeSpec(
         id=data["id"],
-        kind=data["kind"],
+        kind=data.get("kind", "block"),
         label=_label(data.get("label", "")),
         role=data.get("role", "block"),
         ports=tuple(
@@ -341,11 +381,11 @@ def _node(data: dict[str, Any]) -> NodeSpec:
     )
 
 
-def _edge(data: dict[str, Any]) -> EdgeSpec:
+def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) -> EdgeSpec:
     return EdgeSpec(
-        id=data["id"],
-        source=PortRef.parse(data["from"]),
-        target=PortRef.parse(data["to"]),
+        id=edge_id,
+        source=source,
+        target=target,
         role=data.get("role", "flow"),
         label=_label(data.get("label", "")),
         lane_hint=data.get("lane"),
@@ -359,12 +399,12 @@ def _edge(data: dict[str, Any]) -> EdgeSpec:
     )
 
 
-def _net(data: dict[str, Any]) -> NetSpec:
+def _net(data: dict[str, Any], reference: Callable[[str, str], PortRef]) -> NetSpec:
     return NetSpec(
         id=data["id"],
         kind=data["kind"],
-        sources=tuple(PortRef.parse(value) for value in data["sources"]),
-        targets=tuple(PortRef.parse(value) for value in data["targets"]),
+        sources=tuple(reference(value, "output") for value in data["sources"]),
+        targets=tuple(reference(value, "input") for value in data["targets"]),
         role=data.get("role", "flow"),
         label=_label(data.get("label", "")),
         rail_hint=Side(data["rail"]) if data.get("rail") else None,

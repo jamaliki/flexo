@@ -5,7 +5,7 @@
   "description": "Versioned semantic interchange format for Flexo figures.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "figure", "nodes", "edges", "groups"],
+  "required": ["figure", "nodes"],
   "properties": {
     "schema_version": {"const": 1},
     "figure": {"$ref": "#/$defs/figure"},
@@ -85,9 +85,10 @@
     "figure": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "width", "root"],
+      "required": ["id"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
+        "theme": {"$ref": "#/$defs/identifier"},
         "width": {
           "oneOf": [
             {"enum": ["single-column", "double-column", "presentation"]},
@@ -142,10 +143,10 @@
     "node": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind"],
+      "required": ["id"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
-        "kind": {"$ref": "#/$defs/identifier"},
+        "kind": {"$ref": "#/$defs/identifier", "default": "block"},
         "label": {"$ref": "#/$defs/label", "default": ""},
         "role": {"$ref": "#/$defs/identifier", "default": "block"},
         "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "default": []},
@@ -179,11 +180,11 @@
     "edge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "from", "to"],
+      "required": ["from", "to"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
-        "from": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"},
-        "to": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"},
+        "from": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"},
+        "to": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"},
         "role": {"$ref": "#/$defs/identifier", "default": "flow"},
         "label": {"$ref": "#/$defs/label", "default": ""},
         "lane": {"$ref": "#/$defs/identifier"},
@@ -207,13 +208,13 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"}
         },
         "targets": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*\\.[A-Za-z][A-Za-z0-9._-]*$"}
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"}
         },
         "role": {"$ref": "#/$defs/identifier", "default": "flow"},
         "label": {"$ref": "#/$defs/label", "default": ""},

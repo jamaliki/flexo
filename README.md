@@ -12,7 +12,13 @@ semantic figure -> measured figure -> fitted figure -> routed figure -> SVG
 No coordinates, and no post-hoc nudging: the figure you author is the figure
 that compiles, and it compiles the same way every time.
 
-![The Transformer (examples/transformer.py)](examples/build/transformer.preview.png)
+| `theme="paper"` | `theme="sketch"` |
+| --- | --- |
+| ![The Transformer (examples/transformer.py)](examples/build/transformer.preview.png) | ![The same code, drawn by hand](examples/build/transformer-sketch.preview.png) |
+
+New to Flexo? The [tutorial](docs/tutorial.md) builds figures step by step,
+from a first box to a themed, hand-drawn panel, with every picture made from
+the code beside it.
 
 ## Quick start
 
@@ -456,6 +462,8 @@ described in [docs/routing.md](docs/routing.md).
 
 ## Documentation
 
+- [Tutorial](docs/tutorial.md): figures step by step, from a first box to a
+  themed, hand-drawn panel, and a table of where each choice lives.
 - [Authoring guide](docs/guide.md): every component, grids and alignment,
   vector glyphs, band rows, paint and retheming, artwork, shadows, export
   formats, and which palette role paints what.
@@ -480,8 +488,12 @@ uv run flexo schema
 The builder lowers to the same validated, versioned schema that YAML and JSON
 parse into, so a figure is one thing written two ways -- see
 [`examples/vertical_slice.py`](examples/vertical_slice.py) and its
-[YAML equivalent](examples/vertical_slice.yaml). A figure's `style` (its theme),
-`palette` and `font` are fields of that document too.
+[YAML equivalent](examples/vertical_slice.yaml). A figure's `style` (or
+`theme`), `palette`, `font`, `conventions` and `sketch` are fields of that
+document too. A hand-written file may be short: nodes are blocks unless they
+say otherwise, `from: encoder` means the node's output (and `to:` its input),
+edges are numbered for you, and a file with no `groups` stacks its nodes in a
+column (see [the tutorial](docs/tutorial.md#12-the-same-figure-as-a-file)).
 
 `build` and `gallery` always write their outputs so a flawed figure stays
 inspectable: lint diagnostics go to stderr and the command exits `1` when any of
