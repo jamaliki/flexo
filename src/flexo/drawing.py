@@ -32,7 +32,7 @@ import uharfbuzz as hb
 
 from flexo.bidi import base_level, has_rtl, visual_order
 from flexo.bidi import levels as bidi_levels
-from flexo.fonts import FontFace, family_faces, hb_font, load_face, select_face
+from flexo.fonts import FontFace, family_covering, family_faces, hb_font, load_face, select_face
 from flexo.svg import local_name
 from flexo.text import DEFAULT_FALLBACKS
 
@@ -1515,6 +1515,17 @@ def _faces_for(
     faces = [(face, name) for face, name in faces if face is not None]
     if not faces:
         return []
+    missing = {
+        ch for ch in text
+        if not ch.isspace() and not any(load_face(face).has(ch) for face, _ in faces)
+    }
+    if missing:
+        # Characters none of these faces has (a plot's Persian labels): an installed
+        # family that has them, as flexo's own text finds one.
+        covering = family_covering(missing)
+        found = _face(covering, weight, italic) if covering else None
+        if found is not None:
+            faces.append((found, covering))
     first = faces[0][0]
     if all(load_face(first).has(character) or character.isspace() for character in text):
         return [(first, text, faces[0][1])]
