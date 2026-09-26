@@ -92,6 +92,13 @@ rejected.
 """
 
 
+MONO_FAMILIES = (
+    "JetBrains Mono", "Fira Code", "IBM Plex Mono", "SF Mono", "Menlo", "Consolas",
+    "DejaVu Sans Mono", "Liberation Mono", "Courier New",
+)
+"""Monospace families tried, in order, for code when a typography names none."""
+
+
 class FontStack:
     """The families one typography draws with, in fallback order.
 
@@ -137,7 +144,34 @@ class FontStack:
     def primary(self, italic: bool = False, weight: int = 400) -> LoadedFace:
         return load_face(self.face(weight, italic))
 
-    def segments(self, text: str, weight: int, italic: bool) -> list[tuple[FontFace, str]]:
+    def mono(self) -> tuple[FontFace, ...] | None:
+        """The faces code is set in: the typography's monospace family, or the first
+        installed of ``MONO_FAMILIES``."""
+
+        names = (self.typography.mono_family,) if self.typography.mono_family else MONO_FAMILIES
+        return next((faces for name in names if (faces := family_faces(name))), None)
+
+    def segments(
+        self, text: str, weight: int, italic: bool, *, code: bool = False
+    ) -> list[tuple[FontFace, str]]:
+        if code and (mono := self.mono()) is not None:
+            # Code in the monospace face wherever it has the character, and in
+            # the stack's faces where it does not.
+            face = select_face(mono, weight, italic)
+            loaded = load_face(face)
+            pieces: list[tuple[FontFace, str]] = []
+            for character in text:
+                if loaded.has(character) or character.isspace():
+                    if pieces and pieces[-1][0] == face:
+                        pieces[-1] = (face, pieces[-1][1] + character)
+                    else:
+                        pieces.append((face, character))
+                else:
+                    pieces.extend(self.segments(character, weight, italic))
+            return pieces
+        return self._segments(text, weight, italic)
+
+    def _segments(self, text: str, weight: int, italic: bool) -> list[tuple[FontFace, str]]:
         """``text`` split into runs of one face each.
 
         Each cluster -- a character and the combining marks after it -- is set
@@ -456,7 +490,7 @@ class TextMeasurer:
             return 0.0
         weight = drawn_weight(run, inherited)
         advance = 0.0
-        for face, text in self.stack.segments(run.text, weight, run.italic):
+        for face, text in self.stack.segments(run.text, weight, run.italic, code=run.code):
             font = hb_font(face, weight)
             buffer = hb.Buffer()
             buffer.add_str(text)
@@ -566,14 +600,9 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
             merged[-1].weight,
             merged[-1].italic,
             merged[-1].baseline_shift,
-        ) == (run.weight, run.italic, run.baseline_shift):
-            previous = merged[-1]
-            merged[-1] = TextRun(
-                previous.text + run.text,
-                previous.weight,
-                previous.italic,
-                previous.baseline_shift,
-            )
+            merged[-1].code,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code):
+            merged[-1] = replace(merged[-1], text=merged[-1].text + run.text)
         else:
             merged.append(run)
     return tuple(merged)

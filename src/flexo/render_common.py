@@ -189,7 +189,7 @@ def render_runs(
             )
             if run_index in marks:
                 _mark(text, run, marks[run_index][0], typography, stack, primary)
-            pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic)
+            pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic, code=run.code)
             if len(pieces) == 1 and pieces[0][0].family == primary:
                 span.text = run.text
                 if run.text != run.text.strip():
