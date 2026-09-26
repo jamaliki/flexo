@@ -496,12 +496,21 @@ def _clear_approaches(
         side = end.group[2]
         if _approach_clear(end.node.bounds, side, reach, boxes):
             continue
-        for candidate in _facing_sides(end.node.bounds, end.counterpart, side)[1:]:
-            if _faces(end.node.bounds, end.counterpart, candidate) and _approach_clear(
-                end.node.bounds, candidate, reach, boxes
-            ):
-                end.group = (end.group[0], end.group[1], candidate, end.group[3])
-                break
+        ranked = _facing_sides(end.node.bounds, end.counterpart, side)[1:]
+        # A side facing the counterpart first; failing that, any clear side --
+        # a route that comes round beats one drawn through the component
+        # standing in front of the only facing side.
+        clear = [
+            candidate
+            for candidate in ranked
+            if _approach_clear(end.node.bounds, candidate, reach, boxes)
+        ]
+        facing = [
+            candidate for candidate in clear if _faces(end.node.bounds, end.counterpart, candidate)
+        ]
+        choice = facing or [candidate for candidate in clear if candidate is not side.opposite]
+        if choice:
+            end.group = (end.group[0], end.group[1], choice[0], end.group[3])
 
 
 def _approach_clear(bounds: Rect, side: Side, reach: float, boxes: list[Rect]) -> bool:
@@ -633,7 +642,13 @@ def _one_end_per_corner(ends: list[End]) -> None:
                 end.group = (end.group[0], end.group[1], claimed[end.group], end.group[3])
                 continue
             original = end.group
-            ranked = _facing_sides(end.node.bounds, end.counterpart, end.group[2])
+            # The side the end already has comes first: it may have been moved off
+            # a facing side whose approach another component blocks.
+            ranked = [end.group[2]] + [
+                side
+                for side in _facing_sides(end.node.bounds, end.counterpart, end.group[2])
+                if side is not end.group[2]
+            ]
             free = [side for side in ranked if side not in taken]
             side = free[0] if free else end.group[2]
             taken.add(side)
