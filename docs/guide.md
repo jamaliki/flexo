@@ -379,9 +379,11 @@ It accepts `start`, `center`, `end`, `stretch`, `ports`, and `auto`.
 - `start`, `center`, `end`, and `stretch` align the children's boxes.
 - `ports` aligns the line the children's side ports sit on, as text aligns on
   a baseline.
-- `auto`, the default for groups, resolves per group: `ports` when the group's
-  children are connected to one another, `start` for a row of columns or a
-  column of rows, and `center` otherwise.
+- `auto`, the default for groups and for the figure's root, resolves per
+  group: `ports` when the group's children are connected to one another,
+  `start` for two or more columns in a row or rows in a column, and `center`
+  otherwise. The root never takes `start`: a figure with nothing wired across
+  its top level is centred.
 
 Box alignment is wrong for a vector: its caption is part of the composite's
 box, so the box centre falls below the cells and connectors between aligned

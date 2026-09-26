@@ -13,9 +13,11 @@ from flexo.svg import element, number
 from flexo.text import (
     DEFAULT_RUN_WEIGHT,
     SHIFTED_SIZE,
+    TextMeasurer,
     drawn_weight,
     font_stack,
     script_shift,
+    stacked_scripts,
 )
 
 
@@ -133,14 +135,31 @@ def render_runs(
         font__weight=weight,
         **paint_attributes(palette=palette, fill_role=fill_role, fill=fill),
     )
+    measurer: TextMeasurer | None = None
     for line_index, line in enumerate(metrics.lines):
-        for run_index, run in enumerate(line.runs):
+        # A stacked pair of scripts is drawn narrower first, then the wider one
+        # stepped back over it, so the pen ends past both.
+        order = list(range(len(line.runs)))
+        back: dict[int, float] = {}
+        stacked = stacked_scripts(line.runs)
+        if stacked:
+            measurer = measurer or TextMeasurer(typography)
+            widths = measurer.run_widths(line.runs, weight)
+            for first, second in stacked:
+                one = sum(widths[i] for i in first)
+                two = sum(widths[i] for i in second)
+                narrow, wide = (second, first) if one > two else (first, second)
+                order[first.start : second.stop] = [*narrow, *wide]
+                back[wide.start] = min(one, two)
+        for position, run_index in enumerate(order):
+            run = line.runs[run_index]
             shifted = run.baseline_shift != "normal"
             span = element(
                 text,
                 "tspan",
-                x=x if run_index == 0 else None,
-                dy=metrics.line_height if line_index > 0 and run_index == 0 else None,
+                x=x if position == 0 else None,
+                dx=number(-back[run_index]) if run_index in back else None,
+                dy=metrics.line_height if line_index > 0 and position == 0 else None,
                 font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
                 font__style="italic" if run.italic else None,
                 baseline__shift=(

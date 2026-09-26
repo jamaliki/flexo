@@ -243,7 +243,7 @@ class Figure:
         self.conventions = parse_conventions(conventions)
         root = _GroupDraft(
             "root",
-            layout or LayoutSpec("column", align="center", justify="center"),
+            layout or LayoutSpec("column", align="auto", justify="center"),
             "disjoint",
             (),
             "canvas",
