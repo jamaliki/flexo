@@ -7,7 +7,8 @@ the wiring between them instead, the way a layered graph drawing does:
 1. **Layers.** Each child goes one layer after the latest of the children that
    feed it, so every arrow points down the flow. An arrow that closes a loop
    (found by walking the children in authoring order) is left out of this, so
-   a cycle still has a first step.
+   a cycle still has a first step, and so is a link with no arrowhead. A child
+   that nothing feeds goes one layer before the first child it feeds.
 2. **Order.** Within a layer, children are sorted by the mean position of their
    neighbours in the layers around them, a few sweeps down and up, which takes
    out most crossings; ties keep authoring order.
@@ -24,7 +25,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import replace
 
-from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, layout_connections
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec
 from flexo.units import Length
 
 FLOW_KINDS = {"flow": ("column", "row"), "flow-right": ("row", "column")}
@@ -41,9 +42,22 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
         return figure
     groups = {group.id: group for group in figure.groups}
     taken = set(groups) | {node.id for node in figure.nodes}
+    # An undirected link -- shared weights between twins -- says nothing about
+    # which comes first: it only pulls its ends together within a layer.
     connections = [
-        (connection.source.node_id, connection.target.node_id)
-        for connection in layout_connections(figure)
+        (edge.source.node_id, edge.target.node_id)
+        for edge in figure.edges
+        if edge.arrow != "none"
+    ] + [
+        (source.node_id, target.node_id)
+        for net in figure.nets
+        for source in net.sources
+        for target in net.targets
+    ]
+    links = [
+        (edge.source.node_id, edge.target.node_id)
+        for edge in figure.edges
+        if edge.arrow == "none"
     ]
     result: list[GroupSpec] = []
     for group in figure.groups:
@@ -51,7 +65,7 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
             result.append(group)
             continue
         outer, inner = FLOW_KINDS[group.layout.kind]
-        layers = _layers(group, groups, connections)
+        layers = _layers(group, groups, connections, links)
         children: list[str] = []
         for index, layer in enumerate(layers):
             if len(layer) == 1:
@@ -85,6 +99,7 @@ def _layers(
     group: GroupSpec,
     groups: dict[str, GroupSpec],
     connections: list[tuple[str, str]],
+    links: list[tuple[str, str]],
 ) -> list[list[str]]:
     """The group's children in layers, each layer in crossing-reducing order."""
 
@@ -130,6 +145,13 @@ def _layers(
                 if rank[successor] < rank[child] + 1:
                     rank[successor] = rank[child] + 1
                     changed = True
+    # A value that nothing feeds -- real data beside a generator, noise beside
+    # the mean and variance it perturbs -- enters one layer before the first
+    # step that reads it, not at the very top.
+    fed = {successor for successors in forward.values() for successor in successors}
+    for child in group.children:
+        if child not in fed and forward[child]:
+            rank[child] = max(0, min(rank[successor] for successor in forward[child]) - 1)
     depth = max(rank.values()) + 1
     layers = [
         [child for child in group.children if rank[child] == level] for level in range(depth)
@@ -141,6 +163,11 @@ def _layers(
         for successor in successors:
             neighbours[child].add(successor)
             neighbours[successor].add(child)
+    for first, second in links:
+        one, two = owner.get(first), owner.get(second)
+        if one is not None and two is not None and one != two:
+            neighbours[one].add(two)
+            neighbours[two].add(one)
 
     def place() -> dict[str, float]:
         return {

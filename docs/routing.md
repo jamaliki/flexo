@@ -38,8 +38,8 @@ that names nothing in the figure is still an error.)
      one side and comes back by the next, round the corner between the two
      emptiest neighbours. A loop is never drawn straight.
    - A circle, diamond, or operator takes one line per corner while corners
-     last. The line to the nearest neighbour chooses first, so the flow
-     through a decision keeps its corners and a loop back from far away takes
+     last. A line in line with the circle chooses first, then the line to the
+     nearest neighbour, so the flow through a decision keeps its corners and a loop back from far away takes
      what is left; at an operator, the step just above a sum keeps the top and
      a skip from further up comes in by a side. Three or more arrivals at an
      operator from one direction share that side instead, as a bus.

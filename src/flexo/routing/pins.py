@@ -833,11 +833,12 @@ POINT_KINDS = CORNER_KINDS | {"op"}
 def _one_end_per_corner(ends: list[End]) -> None:
     """Give each end at a circle or a diamond a side of its own, while sides last.
 
-    The end whose other end is nearest chooses first, arrivals before
-    departures, so a decision keeps its question's input where the flow brings
-    it and its branches leave by the other corners -- the "no" of a loop back
-    out of the side, not out of the top the input came in by -- and a line
-    looping back from far down the flow comes in by whatever corner is left.
+    An end in line with its other end chooses first, then the one whose other
+    end is nearest, arrivals before departures. So a decision keeps its
+    question's input where the flow brings it and its branches leave by the
+    other corners -- the "no" of a loop back out of the side, not out of the
+    top the input came in by -- and a line looping back from far down the flow
+    comes in by whatever corner is left.
     """
 
     by_node: dict[str, list[End]] = defaultdict(list)
@@ -847,15 +848,15 @@ def _one_end_per_corner(ends: list[End]) -> None:
     for node_ends in by_node.values():
         taken: set[Side] = set()
         claimed: dict[tuple[str, str, Side, bool], Side] = {}
-        # The line to the nearest neighbour chooses first -- the flow through a
-        # decision keeps its corners, and a loop back from far away takes
-        # what is left -- then arrivals before departures.
+        # A line in line with the circle chooses first, then the one to the
+        # nearest neighbour -- the flow through a decision keeps its corners,
+        # and a loop back from far away takes what is left -- then arrivals.
         ordered = sorted(
             node_ends,
             key=lambda end: (
+                _alignment_first(end),
                 round(_gap(end.node.bounds, end.counterpart), 3),
                 not end.arriving,
-                _alignment_first(end),
             ),
         )
         for end in ordered:
