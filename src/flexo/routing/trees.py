@@ -293,12 +293,13 @@ def routed_edge(
     joints: tuple[Point, ...] = (),
     bundle: str | None = None,
     joined_at: Point | None = None,
+    join_arrow: bool = True,
 ) -> RoutedEdge:
     drawn = centerline
     if joined_at is not None:
-        # Merges into another edge of its bundle: the ink stops at the joint
-        # and points into the line that carries on; that line is drawn by the
-        # edge it merges into.
+        # Merges into another edge of its bundle: the ink stops at the joint,
+        # pointing into the line that carries on unless the join is plain;
+        # that line is drawn by the edge it merges into.
         index = next(
             position
             for position, point in enumerate(centerline)
@@ -306,6 +307,14 @@ def routed_edge(
         )
         drawn = centerline[: index + 1]
     shaft = _shaft(edge, drawn, style)
+    if joined_at is not None and not join_arrow:
+        # A plain join: the start as usual, the end right at the joint.
+        start = {
+            "none": 0.0,
+            "end": style.connector_standoff.points,
+            "both": style.arrow_length.points + style.connector_standoff.points,
+        }[edge.arrow]
+        shaft = shorten_start(drawn, start)
     metrics = measurer.measure(edge.label) if edge.label else None
     position = edge_label_position(centerline, metrics, style) if metrics is not None else None
     diagnostics: tuple[Diagnostic, ...] = ()
@@ -331,6 +340,7 @@ def routed_edge(
         joints=joints,
         bundle=bundle,
         joined_at=joined_at,
+        join_arrow=join_arrow,
     )
 
 

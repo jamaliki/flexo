@@ -315,7 +315,9 @@ def _render_edge(
         "path",
         id=f"{edge.spec.id}.shaft",
         d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
-        marker__end=f"url(#arrow.{marker_role})" if edge.spec.arrow != "none" else None,
+        marker__end=f"url(#arrow.{marker_role})"
+        if edge.spec.arrow != "none" and (edge.joined_at is None or edge.join_arrow)
+        else None,
         marker__start=f"url(#arrow.{marker_role}.start)" if edge.spec.arrow == "both" else None,
         stroke__linecap="round",
         stroke__linejoin="round",

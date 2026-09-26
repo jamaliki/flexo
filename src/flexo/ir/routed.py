@@ -37,7 +37,13 @@ class RoutedEdge:
     straight: bool = False
     """Whether this edge is one straight segment rather than a routed path."""
     joined_at: Point | None = None
-    """Where this edge merges into another of its bundle and its ink stops, arrow first."""
+    """Where this edge merges into another of its bundle and its ink stops."""
+    join_arrow: bool = True
+    """Whether the ink ends at ``joined_at`` in an arrowhead into the line it joins.
+
+    False where branches meet a bus plainly: the ink runs to the joint and
+    stops, and the only arrowhead is the one into the destination.
+    """
     bundle: str | None = None
     """The tree this edge was routed in with others: one value, several ends.
 

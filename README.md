@@ -94,7 +94,8 @@ m.text("in", "Inputs")                   # words an arrow can start or end at
 ```
 
 Each value arriving at an operator gets its own arrow into the circle, on the
-side that faces where the value comes from. The symbols `+`, `x`, `-`, `.` and
+side that faces where the value comes from. Three or more values from one
+direction join on a bus and enter as one arrow. The symbols `+`, `x`, `-`, `.` and
 `~` are drawn as strokes, so they sit exactly in the centre in any typeface.
 
 A value that enters an operator from the side -- a position embedding added to

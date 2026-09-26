@@ -187,11 +187,10 @@ def route_figure(
         shared = len(bundle.members) > 1
         dots_given = False
         hub = pins[bundle.hub]
-        joins = (
-            graph.joins(hub.point)
-            if arrows_at_joins(bundle, members, pins, layout_style)
-            else set()
-        )
+        # Where branches merge, each stops at the line it joins -- with an
+        # arrowhead into it, or plainly at a bus -- and one draws on.
+        arrowed = arrows_at_joins(bundle, members, pins, layout_style)
+        joins = graph.joins(hub.point) if hub.arriving else set()
         marked = dots_at_joins(bundle, members, pins, layout_style)
         cut = edge_cuts(bundle, members, ends, pins, graph, joins)
         for member_index in bundle.members:
@@ -210,6 +209,7 @@ def route_figure(
                     joints=graph.dots() if shared else (),
                     bundle=bundle.key if shared else None,
                     joined_at=cut.get(member_index),
+                    join_arrow=arrowed,
                 )
             else:
                 assert isinstance(member.spec, NetSpec)
@@ -223,7 +223,7 @@ def route_figure(
                     bundle=bundle.key if shared else None,
                     all_dots=not dots_given,
                     draw_dots=marked,
-                    joins=joins,
+                    joins=joins if arrowed else set(),
                 )
                 dots_given = True
     pairs: dict[frozenset[str], list[EdgeSpec]] = defaultdict(list)
