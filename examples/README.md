@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Fifty-nine figures from papers and textbooks, each a short function. They use
+Sixty-four figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -85,3 +85,5 @@ suite checks this).
 | [![Recurrent network with its loop](build/literature/recurrent-network.preview.png)](build/literature/recurrent-network.preview.png) Recurrent network with its loop | [![Recurrent network, unrolled](build/literature/unrolled-recurrent-network.preview.png)](build/literature/unrolled-recurrent-network.preview.png) Recurrent network, unrolled | [![Markov chain](build/literature/markov-chain.preview.png)](build/literature/markov-chain.preview.png) Markov chain |
 | [![IMPALA](build/literature/impala.preview.png)](build/literature/impala.preview.png) IMPALA | [![Class hierarchy](build/literature/class-hierarchy.preview.png)](build/literature/class-hierarchy.preview.png) Class hierarchy | [![Decision tree](build/literature/decision-tree.preview.png)](build/literature/decision-tree.preview.png) Decision tree |
 | [![Neural Turing Machine](build/literature/neural-turing-machine.preview.png)](build/literature/neural-turing-machine.preview.png) Neural Turing Machine | [![Markov chain in `tikz`](build/literature/markov-chain-tikz.preview.png)](build/literature/markov-chain-tikz.preview.png) Markov chain in `tikz` | [![IMPALA in `tikz`](build/literature/impala-tikz.preview.png)](build/literature/impala-tikz.preview.png) IMPALA in `tikz` |
+| [![ReAct agent loop](build/literature/react-agent.preview.png)](build/literature/react-agent.preview.png) ReAct agent loop | [![LLaVA](build/literature/llava.preview.png)](build/literature/llava.preview.png) LLaVA | [![Code-review flowchart](build/literature/code-review.preview.png)](build/literature/code-review.preview.png) Code-review flowchart |
+| [![DiT block](build/literature/dit-block.preview.png)](build/literature/dit-block.preview.png) DiT block | [![Speculative decoding](build/literature/speculative-decoding.preview.png)](build/literature/speculative-decoding.preview.png) Speculative decoding | [![DiT block in `tikz`](build/literature/dit-block-tikz.preview.png)](build/literature/dit-block-tikz.preview.png) DiT block in `tikz` |

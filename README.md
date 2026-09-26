@@ -45,7 +45,7 @@ figure displays itself: end a cell with `figure`.
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws fifty-nine figures from
+[`examples/literature.py`](examples/literature.py) draws sixty-four figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See

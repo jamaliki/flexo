@@ -1154,6 +1154,99 @@ def neural_turing_machine(theme: str = "paper") -> Figure:
     return figure
 
 
+def react_agent(theme: str = "paper") -> Figure:
+    """The ReAct loop of reasoning and acting (Yao et al. 2023)."""
+
+    with Figure("react-agent", width="single-column", theme=theme) as figure:
+        with figure.root.grid("loop", columns=2) as grid:
+            model = grid.block("llm", label="Language model", tone="model", at=(0, 0))
+            thought = grid.block("thought", label="Thought", at=(0, 1))
+            action = grid.block("action", label="Action", at=(1, 1))
+            observation = grid.block("observation", label="Observation", tone="data", at=(1, 0))
+        figure.connect(model, thought)
+        figure.connect(thought, action)
+        figure.connect(action, observation, label="tool call")
+        figure.connect(observation, model)
+    return figure
+
+
+def llava(theme: str = "paper") -> Figure:
+    """LLaVA (Liu et al. 2023, Figure 1): an image and an instruction into one model."""
+
+    with Figure("llava", theme=theme) as figure:
+        with figure.root.column("model") as column:
+            response = column.text("response", "Language response")
+            language = column.block(
+                "llm", label=r"Language model $f_\phi$", tone="model", width="220pt"
+            )
+            with column.row("inputs") as inputs:
+                with inputs.column("vision") as vision:
+                    projection = vision.block("projection", label="Projection $W$")
+                    encoder = vision.block("encoder", label="Vision encoder", tone="frozen")
+                    image = vision.text("image", "Image $X_v$")
+                instruction = inputs.text("instruction", "Instruction $X_q$")
+        figure.connect(image, encoder)
+        figure.connect(encoder, projection)
+        figure.connect(projection, language, label="$H_v$")
+        figure.connect(instruction, language, label="$H_q$")
+        figure.connect(language, response)
+    return figure
+
+
+def code_review(theme: str = "paper") -> Figure:
+    """A code-review flowchart with its loop back for fixes."""
+
+    with Figure("code-review", width="single-column", theme=theme) as figure:
+        with figure.module("review", label="Code review", layout="column") as m:
+            opened = m.terminal("open", label="Open pull request")
+            checks = m.decision("ci", label="CI passes?", input=opened)
+            approved = m.decision("approved", label="Approved?")
+            merged = m.terminal("merge", label="Merge")
+            fix = m.block("fix", label="Push a fix")
+        m.connect(checks, approved, label="yes")
+        m.connect(approved, merged, label="yes")
+        m.connect(checks, fix, label="no")
+        m.connect(approved, fix, label="no")
+        m.connect(fix, checks)
+    return figure
+
+
+def dit_block(theme: str = "paper") -> Figure:
+    """A DiT block with adaLN-Zero conditioning (Peebles and Xie 2023, Figure 3)."""
+
+    with Figure("dit-block", width="single-column", theme=theme) as figure:
+        with figure.root.row("block") as block:
+            with block.column("main") as main:
+                x = main.text("x", "Input tokens")
+                norm = main.block("norm", label="Layer norm", input=x)
+                scaled = main.op("scale", "x", input=norm)
+                attention = main.block("attention", label="Self-attention", input=scaled)
+                gated = main.op("gate", "x", input=attention)
+                total = main.add("sum", input=gated)
+                main.text("y", "Output", input=total)
+            with block.column("conditioning") as conditioning:
+                c = conditioning.text("c", "Conditioning $c$")
+                mlp = conditioning.block("mlp", label="MLP", input=c)
+        figure.net(src=mlp, sinks=[scaled, gated], label=r"$\gamma, \alpha$")
+        figure.residual(x, total)
+    return figure
+
+
+def speculative_decoding(theme: str = "paper") -> Figure:
+    """Speculative decoding (Leviathan et al. 2023)."""
+
+    with Figure("speculative-decoding", theme=theme) as figure:
+        with figure.root.row("decoding") as row:
+            prefix = row.text("prefix", "prefix")
+            draft = row.block("draft", label="Draft model", tone="model", input=prefix)
+            target = row.block("target", label="Target model", tone="model")
+            verdict = row.decision("accept", label="accept?", input=target)
+            row.text("tokens", "tokens", input=verdict)
+        figure.connect(draft, target, label="$k$ guesses")
+        figure.connect(verdict, draft, label="first rejection")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1216,6 +1309,11 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         class_hierarchy,
         decision_tree,
         neural_turing_machine,
+        react_agent,
+        llava,
+        code_review,
+        dit_block,
+        speculative_decoding,
     )
 }
 """Every figure here, by name."""
