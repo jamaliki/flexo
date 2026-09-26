@@ -360,6 +360,24 @@ BROAD_FAMILIES = (
 _COVERING: dict[frozenset[str], str | None] = {}
 
 
+SCRIPT_FAMILIES: tuple[tuple[tuple[int, int], tuple[str, ...]], ...] = (
+    # Arabic, Persian, Urdu: clear sans faces first, as slides want them.
+    (
+        (0x0600, 0x08FF),
+        ("Vazirmatn", "Noto Sans Arabic", "Geeza Pro", "Segoe UI", "Tahoma", "Arial"),
+    ),
+    ((0x0590, 0x05FF), ("Noto Sans Hebrew", "Arial Hebrew", "Segoe UI", "Arial")),
+    ((0x0900, 0x097F), ("Noto Sans Devanagari", "Kohinoor Devanagari", "Nirmala UI")),
+    ((0x0E00, 0x0E7F), ("Noto Sans Thai", "Thonburi", "Leelawadee UI")),
+)
+"""Families tried first for text in a script the bundled faces lack, so every
+label in that script is set in one well-chosen face wherever it is found."""
+
+
+def _in_script(characters: frozenset[str], block: tuple[int, int]) -> bool:
+    return any(block[0] <= ord(ch) <= block[1] for ch in characters)
+
+
 def family_covering(characters: Iterable[str]) -> str | None:
     """An installed family that has every one of ``characters``, if there is one.
 
@@ -375,7 +393,10 @@ def family_covering(characters: Iterable[str]) -> str | None:
     if wanted in _COVERING:
         return _COVERING[wanted]
     found: str | None = None
-    names = list(BROAD_FAMILIES) + [
+    preferred = [
+        name for block, names in SCRIPT_FAMILIES if _in_script(wanted, block) for name in names
+    ]
+    names = preferred + list(BROAD_FAMILIES) + [
         name for name in available_families() if name not in BROAD_FAMILIES
     ]
     for name in names:
