@@ -369,6 +369,8 @@ lab.yaml` writes out every setting a theme has, as a file to start from.
 Palettes can be registered on their own: `flexo.register_palette("Lab",
 ["#..", ...])`, or a file of `palettes:`. A setting a theme does not have is
 refused with the nearest one it does (`extends:` → `base:`), never ignored.
+Code between backticks in a label (`` `fit()` ``) is set in `type: {mono_family: ...}`,
+or the first installed of JetBrains Mono, Menlo, Consolas, DejaVu Sans Mono, ....
 `type: {math_family: Latin Modern Math}` sets maths symbols and italic Greek
 in a maths font, as TeX does (the `tikz` theme does this). The
 [tutorial](docs/tutorial.md#12-your-own-theme-and-palette) lists every key.

@@ -59,6 +59,9 @@ class TypographyStyle:
     """``"upper"`` sets group titles in capitals, as the archive and Bauhaus themes do."""
     title_size: float = 1.0
     """Group-title size as a multiple of ``size``."""
+    mono_family: str | None = None
+    """The monospace family code is set in; the first installed of
+    ``flexo.text.MONO_FAMILIES`` when unset."""
     math_family: str | None = None
     """A mathematics family (``Latin Modern Math``) for the symbols ``family``
     lacks, tried before ``fallbacks``; italic Greek is set in its mathematical

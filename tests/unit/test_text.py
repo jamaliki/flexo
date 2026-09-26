@@ -111,3 +111,19 @@ def test_a_maths_family_sets_italic_greek_as_tex_does() -> None:
     assert pieces[-1][1] == "\U0001d6fc"  # mathematical italic small alpha
     # Upright text keeps its Greek as written.
     assert stack.segments("\u03b1", 400, False)[0][1] == "\u03b1"
+
+
+def test_code_is_set_in_a_monospace_face_even_when_wrapped() -> None:
+    from flexo.markup import parse_label
+    from flexo.style import TypographyStyle
+    from flexo.text import TextMeasurer, font_stack
+
+    runs = parse_label("Call `fit_in_box(figure)` to fit a figure to its box")
+    assert [run.code for run in runs] == [False, True, False]
+    metrics = TextMeasurer(TypographyStyle()).measure(runs, max_width=60.0)
+    code = [run for line in metrics.lines for run in line.runs if run.code]
+    assert code and "fit_in_box" in "".join(run.text for run in code)
+    stack = font_stack(TypographyStyle())
+    if stack.mono() is not None:
+        face, _ = stack.segments("fit", 400, False, code=True)[0]
+        assert face.family != stack.families[0][0].family

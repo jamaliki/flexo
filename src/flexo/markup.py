@@ -36,6 +36,7 @@ operand that follows it (``\\log x``). Every other space is kept as typed.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from flexo.ir.semantic import TextRun
 
@@ -189,6 +190,8 @@ OVER = {"vec": "→", "overrightarrow": "→", "overleftarrow": "←"}
 """Commands that set a mark over their whole argument, drawn by Flexo itself."""
 
 UPRIGHT = {"text", "mathrm", "operatorname"}
+CODE = {"texttt", "mathtt", "code"}
+"""Commands whose argument is set as code, in the monospace family."""
 
 OPERATORS = frozenset(
     {
@@ -221,11 +224,12 @@ _COMMAND = re.compile(r"\\([A-Za-z]+|.)")
 
 
 def parse_label(text: str) -> tuple[TextRun, ...]:
-    """The runs a string label stands for: plain text, with math between ``$``."""
+    """The runs a string label stands for: plain text, with math between ``$``
+    and code between backticks (set in the monospace family)."""
 
     if not text:
         return ()
-    if "$" not in text:
+    if "$" not in text and "`" not in text:
         return (TextRun(text),)
     runs: list[TextRun] = []
     plain: list[str] = []
@@ -236,6 +240,19 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
             plain.append("$")
             index += 2
             continue
+        if character == "\\" and text[index + 1 : index + 2] == "`":
+            plain.append("`")
+            index += 2
+            continue
+        if character == "`":
+            end = text.find("`", index + 1)
+            if end > index:
+                if plain:
+                    runs.append(TextRun("".join(plain)))
+                    plain = []
+                runs.append(TextRun(text[index + 1 : end], code=True))
+                index = end + 1
+                continue
         if character == "$":
             end = _closing_dollar(text, index + 1)
             if end is not None:
@@ -382,6 +399,12 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 argument, index = _argument(source, index)
                 _read(argument, runs, shift=shift, mode=mode, weight=weight)
                 continue
+            if name in CODE:
+                argument, index = _argument(source, index)
+                start = len(runs)
+                _read(argument, runs, shift=shift, mode="text", weight=weight)
+                runs[start:] = [replace(run, code=True, italic=False) for run in runs[start:]]
+                continue
             if name in UPRIGHT or name in BOLD:
                 argument, index = _argument(source, index)
                 _read(
@@ -471,11 +494,9 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
             result[-1].weight,
             result[-1].italic,
             result[-1].baseline_shift,
-        ) == (run.weight, run.italic, run.baseline_shift):
-            last = result[-1]
-            result[-1] = TextRun(
-                last.text + run.text, last.weight, last.italic, last.baseline_shift
-            )
+            result[-1].code,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code):
+            result[-1] = replace(result[-1], text=result[-1].text + run.text)
             continue
         result.append(run)
     return tuple(result)
