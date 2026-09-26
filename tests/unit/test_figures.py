@@ -369,3 +369,13 @@ def test_a_reversed_column_reads_from_the_bottom_up() -> None:
     second_box = compiled.fitted.node("stack.second").bounds
     assert second_box.bottom < first_box.top
     assert not lint_compilation(compiled).diagnostics
+
+
+def test_wired_content_on_the_root_is_centred_on_the_canvas() -> None:
+    with Figure("centred") as figure:
+        x = figure.root.text("x", "input")
+        figure.root.block("a", label="Encoder", input=x)
+    compiled = compile_figure(figure.spec)
+    box = compiled.fitted.node("a").bounds
+    canvas = compiled.fitted.canvas_size.width
+    assert box.center.x == pytest.approx(canvas / 2.0)
