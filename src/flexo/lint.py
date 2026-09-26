@@ -535,15 +535,23 @@ def _segments_cross(first: Segment, second: Segment) -> bool:
     )
 
 
+SPACING_TOLERANCE = 1e-3
+"""Points by which two tracks may fall short of the minimum spacing unflagged.
+
+The solver that spaces tracks leaves rounding error of about 1e-7; a
+thousandth of a point is far below anything a press or a screen resolves.
+"""
+
+
 def _parallel_tracks_too_close(first: Segment, second: Segment, minimum: float) -> bool:
     if first.horizontal and second.horizontal:
         distance = abs(first.start.y - second.start.y)
         overlap = _interval_overlap(first.start.x, first.end.x, second.start.x, second.end.x)
-        return overlap > 1e-7 and distance + 1e-7 < minimum
+        return overlap > 1e-7 and distance + SPACING_TOLERANCE < minimum
     if first.vertical and second.vertical:
         distance = abs(first.start.x - second.start.x)
         overlap = _interval_overlap(first.start.y, first.end.y, second.start.y, second.end.y)
-        return overlap > 1e-7 and distance + 1e-7 < minimum
+        return overlap > 1e-7 and distance + SPACING_TOLERANCE < minimum
     return False
 
 
