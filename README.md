@@ -367,7 +367,10 @@ makes it `theme="lab"`, and a directory named by `FLEXO_THEME_PATH` makes every
 theme and palette in it available everywhere. `uv run flexo theme paper -o
 lab.yaml` writes out every setting a theme has, as a file to start from.
 Palettes can be registered on their own: `flexo.register_palette("Lab",
-["#..", ...])`, or a file of `palettes:`. The
+["#..", ...])`, or a file of `palettes:`. A setting a theme does not have is
+refused with the nearest one it does (`extends:` → `base:`), never ignored.
+`type: {math_family: Latin Modern Math}` sets maths symbols and italic Greek
+in a maths font, as TeX does (the `tikz` theme does this). The
 [tutorial](docs/tutorial.md#12-your-own-theme-and-palette) lists every key.
 
 ### Drawing by hand
