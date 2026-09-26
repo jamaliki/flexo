@@ -238,6 +238,50 @@ _INHERITED = (
 )
 
 
+def ink_bounds(drawing: Drawing) -> tuple[float, float, float, float]:
+    """``left, top, right, bottom`` of everything ``drawing`` paints (not its page)."""
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for item in drawing.walk():
+        if isinstance(item, Shape):
+            if item.paint.fill is None and item.paint.stroke is None:
+                continue
+            reach = item.paint.stroke_width / 2.0 if item.paint.stroke else 0.0
+            xs += [item.x - reach, item.x + item.width + reach]
+            ys += [item.y - reach, item.y + item.height + reach]
+            for head in item.arrowheads:
+                xs += [x for segment in head.outline for x, _ in segment.points]
+                ys += [y for segment in head.outline for _, y in segment.points]
+        elif isinstance(item, Text):
+            corners = [
+                corner
+                for line in item.lines
+                for corner in (
+                    (line.left, line.baseline - item.size * 0.8),
+                    (line.right, line.baseline + item.size * 0.25),
+                    (line.left, line.baseline + item.size * 0.25),
+                    (line.right, line.baseline - item.size * 0.8),
+                )
+            ]
+            if item.angle:
+                turn = math.radians(item.angle)
+                cos, sin = math.cos(turn), math.sin(turn)
+                px, py = item.pivot
+                corners = [
+                    (px + cos * (x - px) - sin * (y - py), py + sin * (x - px) + cos * (y - py))
+                    for x, y in corners
+                ]
+            xs += [x for x, _ in corners]
+            ys += [y for _, y in corners]
+        elif isinstance(item, Image):
+            xs += [item.x, item.x + item.width]
+            ys += [item.y, item.y + item.height]
+    if not xs:
+        return 0.0, 0.0, drawing.width, drawing.height
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def read_drawing(svg_text: str) -> Drawing:
     """The drawing an SVG makes (see the module docs).
 

@@ -6,6 +6,7 @@ style and palette tokens, and the one-call ``build`` that compiles, writes, and
 lints.
 """
 
+from flexo.boxfit import BoxFit, fit_in_box
 from flexo.builder import Figure, GroupBuilder, NodeHandle
 from flexo.colour import design_palettes as palettes
 from flexo.compiler import Compilation, compile_figure
@@ -28,6 +29,7 @@ from flexo.ir.semantic import (
     TextRun,
 )
 from flexo.lint import LintReport, lint_compilation, lint_svg
+from flexo.orient import turned
 from flexo.serialization import dump_figure, load_figure, save_figure
 from flexo.sketch import Sketch
 from flexo.style import (
@@ -58,6 +60,7 @@ __all__ = [
     "RAMP_ROLES",
     "STYLES",
     "THEMES",
+    "BoxFit",
     "Build",
     "CellSpan",
     "Compilation",
@@ -102,6 +105,7 @@ __all__ = [
     "dump_figure",
     "dump_theme",
     "export_outputs",
+    "fit_in_box",
     "inch",
     "lint_compilation",
     "lint_svg",
@@ -118,6 +122,7 @@ __all__ = [
     "retheme_svg",
     "save_figure",
     "shade_ramp",
+    "turned",
     "vector_stack_height",
 ]
 
