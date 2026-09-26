@@ -6,7 +6,8 @@ is where a family name becomes that file:
 
 - **bundled families** ship with Flexo and always resolve, on every machine:
   IBM Plex Sans, Figtree, Liberation Sans (metric-compatible with Arial and
-  Helvetica), and Latin Modern Roman (the TeX/TikZ look). Their licences
+  Helvetica), Latin Modern Roman (the TeX/TikZ look), and the handwriting
+  faces Kalam and Caveat (their Latin subsets; the ``sketch`` theme's type). Their licences
   (SIL OFL 1.1 and the GUST Font License) allow embedding and redistribution,
   so they are also the families Flexo embeds in the SVG and hands to Inkscape
   for export.

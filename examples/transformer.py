@@ -117,7 +117,7 @@ def transformer(theme: str = "paper") -> Figure:
 
 
 def main() -> None:
-    for theme in ("paper", "tikz"):
+    for theme in ("paper", "tikz", "sketch"):
         result = build(
             transformer(theme),
             HERE / "build",

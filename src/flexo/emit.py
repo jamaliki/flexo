@@ -15,6 +15,7 @@ from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
 from flexo.routing.ink import shorten_end
+from flexo.sketch import sketch_svg
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
     SVG_NS,
@@ -112,6 +113,8 @@ def emit_svg(
     )
     hierarchy = _Hierarchy(routed)
     hierarchy.render(root, layout_style, paint_palette)
+    if layout_style.sketch is not None:
+        sketch_svg(root, layout_style.sketch, canvas=paint_palette.get("canvas"))
     embed_fonts(fonts, root, layout_style)
     _unique_ids(root)
     return SVGDocument(xml_document(root), width_mm, height_mm)

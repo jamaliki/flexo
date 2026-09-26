@@ -8,6 +8,7 @@ from typing import Literal
 
 from flexo.conventions import Conventions
 from flexo.geometry import Insets, Side
+from flexo.sketch import Sketch
 from flexo.style import PAINT_PARTS
 from flexo.units import Extent, Length
 
@@ -574,6 +575,8 @@ class FigureSpec:
     Only the fields that differ from ``Conventions()`` take effect, so
     ``Conventions(branch="dot")`` changes the branch marks and nothing else.
     """
+    sketch: Sketch | None = None
+    """Draw by hand, laid over the theme's own hand; see ``flexo.sketch``."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")
