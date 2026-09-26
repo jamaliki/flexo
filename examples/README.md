@@ -57,8 +57,9 @@ themes.
 Sixty-nine figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
-one compiles with no lint diagnostics in every theme it is built in (the test
-suite checks this).
+one compiles with no lint diagnostics in `paper` and `tikz` (the test suite
+checks this) and in all twelve themes, except that the skip-gram is a little
+too wide for a single column in `midcentury`'s large type and says so.
 
 | | | |
 | --- | --- | --- |
