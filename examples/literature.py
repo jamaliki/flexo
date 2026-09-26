@@ -753,6 +753,33 @@ def mapreduce(theme: str = "paper") -> Figure:
     return figure
 
 
+def compiler(theme: str = "paper") -> Figure:
+    """The phases of a compiler and the symbol table they share (Aho et al., Figure 1.6)."""
+
+    with Figure("compiler", theme=theme) as figure:
+        with figure.root.row("main") as main:
+            with main.column("phases") as column:
+                source = column.text("source", "character stream")
+                phases = []
+                for index, name in enumerate(
+                    (
+                        "Lexical analyzer",
+                        "Syntax analyzer",
+                        "Semantic analyzer",
+                        "Intermediate code generator",
+                        "Code optimizer",
+                        "Code generator",
+                    )
+                ):
+                    source = column.block(f"phase{index}", label=name, input=source)
+                    phases.append(source)
+                column.text("target", "target machine code", input=source)
+            table = main.block("table", label="Symbol table", tone="data")
+        for phase in phases:
+            figure.connect(phase, table, arrow="none", line="dotted")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -792,6 +819,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         latent_diffusion,
         actor_critic,
         mapreduce,
+        compiler,
     )
 }
 """Every figure here, by name."""

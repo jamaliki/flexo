@@ -26,6 +26,9 @@ that names nothing in the figure is still an error.)
      if the same value already leaves there, so a feedback loop taps the
      output line. Arrows in both directions between the same two boxes stay
      side by side.
+   - A side holds two pins fewer than fit exactly a lane apart, so its lines
+     have room to spread, but at least two where two fit. The pins past that, outermost first, move round the corner
+     to the neighbouring side, keeping their order.
    - A circle, diamond, or operator takes one line per corner while corners
      last, arrivals first. Three or more arrivals at an operator from one
      direction share that side instead, as a bus.

@@ -254,6 +254,7 @@ class Figure:
         self._nets: list[NetSpec] = []
         self._edge_counter = 0
         self._net_counter = 0
+        self._ids = {"root"}
         self.root = GroupBuilder(self, root)
 
     def __enter__(self) -> Self:
@@ -702,6 +703,7 @@ class GroupBuilder:
             shadow,
             _paint_parts(paint),
         )
+        self._claim(scoped_id)
         self._draft.children.append(scoped_id)
         self._place(scoped_id, at)
         self.figure._groups.append(draft)
@@ -825,6 +827,7 @@ class GroupBuilder:
                 shadow,
             )
         )
+        self._claim(node.id)
         self.figure._nodes.append(node)
         self._draft.children.append(node.id)
         self._place(node.id, at)
@@ -1954,6 +1957,16 @@ class GroupBuilder:
             lane=lane,
             via=via,
         )
+
+    def _claim(self, scoped_id: str) -> None:
+        """Reserve an id for a new component or group, or raise where it was written."""
+
+        if scoped_id in self.figure._ids:
+            raise ValueError(
+                f'"{scoped_id}" is already used in this figure: '
+                "every component and group needs an id of its own"
+            )
+        self.figure._ids.add(scoped_id)
 
     def _scoped(self, id: str) -> str:
         if self.id == "root" or id.startswith(f"{self.id}."):

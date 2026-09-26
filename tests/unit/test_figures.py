@@ -281,14 +281,12 @@ def test_an_unknown_reference_names_what_was_typed_and_what_was_meant() -> None:
     assert 'Did you mean "m.b"' in str(raised.value)
 
 
-def test_a_duplicate_id_is_named() -> None:
-    with (
-        pytest.raises(ValueError, match=r"'m\.b' twice"),
-        Figure("twice") as figure,
-        figure.module("m") as m,
-    ):
+def test_a_duplicate_id_is_named_where_it_is_written() -> None:
+    with Figure("twice") as figure, figure.module("m") as m:
         m.block("b", label="B")
-        m.block("b", label="again")
+        with pytest.raises(ValueError, match=r'"m\.b" is already used'):
+            m.block("b", label="again")
+        m.block("c", label="C")
 
 
 def test_a_legend_keys_every_tone_in_the_colour_it_names() -> None:
