@@ -29,6 +29,14 @@ one net.
     ``"straight"`` draws one segment between the two outlines, the way a
     fully connected layer or a graphical model is drawn.
 
+``pin_spread``
+    Where arrows meet a side of a box. One arrow meets it at its middle;
+    two or more are spaced evenly across the central ``pin_spread`` of the
+    side, the outermost at its ends. The default ``0.8`` leaves a tenth of
+    the side clear at each end; ``0`` would put them all at the middle and
+    ``1`` spreads them corner to corner. An arrow still moves off its place
+    to run straight to the box it faces.
+
 An operation on the values that meet -- a sum, a product -- is not a
 convention: author it with ``add``, ``multiply`` or ``op`` and it is drawn as a
 circle with the arrows pointing into it.
@@ -61,6 +69,7 @@ class Conventions:
     merge: MergeMark = "auto"
     arrivals: Arrivals = "separate"
     lines: Lines = "orthogonal"
+    pin_spread: float = 0.8
 
     def __post_init__(self) -> None:
         for name, allowed in CHOICES.items():
@@ -69,23 +78,30 @@ class Conventions:
                 raise ValueError(
                     f'unknown {name} convention "{value}"; valid values: {", ".join(allowed)}'
                 )
+        if isinstance(self.pin_spread, bool) or not isinstance(self.pin_spread, int | float):
+            raise ValueError(f"pin_spread must be a number from 0 to 1, not {self.pin_spread!r}")
+        if not 0.0 <= self.pin_spread <= 1.0:
+            raise ValueError(f"pin_spread must be from 0 to 1, not {self.pin_spread}")
 
-    def with_updates(self, updates: Mapping[str, str] | Conventions | None) -> Conventions:
+    def with_updates(
+        self, updates: Mapping[str, str | float] | Conventions | None
+    ) -> Conventions:
         """These conventions with ``updates`` laid over them."""
 
         if updates is None:
             return self
         if isinstance(updates, Conventions):
             updates = updates.changes()
-        unknown = set(updates) - set(CHOICES)
+        names = [field.name for field in fields(self)]
+        unknown = set(updates) - set(names)
         if unknown:
             raise ValueError(
                 f"unknown convention {', '.join(sorted(unknown))}; "
-                f"conventions are {', '.join(CHOICES)}"
+                f"conventions are {', '.join(names)}"
             )
         return replace(self, **dict(updates))
 
-    def changes(self) -> dict[str, str]:
+    def changes(self) -> dict[str, str | float]:
         """The fields that differ from the defaults, as a plain mapping."""
 
         default = Conventions()
@@ -99,7 +115,9 @@ class Conventions:
 DEFAULT_CONVENTIONS = Conventions()
 
 
-def parse_conventions(value: Mapping[str, str] | Conventions | None) -> Conventions | None:
+def parse_conventions(
+    value: Mapping[str, str | float] | Conventions | None,
+) -> Conventions | None:
     """``value`` as ``Conventions``, validated; ``None`` stays ``None``."""
 
     if value is None or isinstance(value, Conventions):

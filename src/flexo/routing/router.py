@@ -295,6 +295,13 @@ LOOP_TRIALS = 4
 PIN_ORDER_TRIALS = 12
 """Most pin orders tried, per figure, to take a crossing out."""
 
+SPACING_TOLERANCE = 1e-3
+"""Points by which two runs may fall short of a lane and not count as crowded.
+
+The same as lint's: the spacing solver leaves rounding error, and a trial must
+not trade a crossing for two lines exactly a lane apart.
+"""
+
 
 def _reorder_crossing_pins(
     attempt, separated, pins, bundles, wires, orders, members, ends, spacing
@@ -569,12 +576,12 @@ def _too_close(a: Point, b: Point, c: Point, d: Point, spacing: float) -> bool:
         low, high = sorted((a.x, b.x))
         other_low, other_high = sorted((c.x, d.x))
         overlap = min(high, other_high) - max(low, other_low)
-        return overlap > 1e-6 and abs(a.y - c.y) + 1e-6 < spacing
+        return overlap > 1e-6 and abs(a.y - c.y) + SPACING_TOLERANCE < spacing
     if abs(a.x - b.x) < 1e-9 and abs(c.x - d.x) < 1e-9:
         low, high = sorted((a.y, b.y))
         other_low, other_high = sorted((c.y, d.y))
         overlap = min(high, other_high) - max(low, other_low)
-        return overlap > 1e-6 and abs(a.x - c.x) + 1e-6 < spacing
+        return overlap > 1e-6 and abs(a.x - c.x) + SPACING_TOLERANCE < spacing
     return False
 
 

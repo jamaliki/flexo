@@ -174,11 +174,15 @@ def _nudge_axis(
         else:  # pragma: no cover - the last attempt has zero spacing and always fits
             positions = [run.coordinate for run in runs]
     for run, position in zip(runs, positions, strict=True):
-        if run.fixed or abs(position - run.coordinate) < 1e-9:
-            continue
+        # A unified run's members still sit on the two coordinates it merged,
+        # so each is moved, even when the run as a whole stays put.
+        if run.fixed:
+            position = run.coordinate
         wire = wires[run.wire]
         for path_index, vertex_index in run.members:
             point = wire.paths[path_index][vertex_index]
+            if abs((point.x if vertical else point.y) - position) < 1e-9:
+                continue
             wire.paths[path_index][vertex_index] = (
                 Point(position, point.y) if vertical else Point(point.x, position)
             )
@@ -333,6 +337,8 @@ def _reach(
                 if not inside:
                     continue
                 for point, far in ends:
+                    if any(_same(point, wire.paths[p][v]) for p, v in members):
+                        continue  # the trunk's end is on this run too, and moves with it
                     margin = wire.margin(point)
                     if far < (here.x if vertical else here.y):
                         sides.add(-1)

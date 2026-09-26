@@ -477,3 +477,78 @@ def test_a_caption_with_no_room_between_two_children_widens_their_gap() -> None:
     assert any(extra > 0.0 for extra in grown.layout.gap_room), "a gap was widened"
     assert not lint_compilation(compiled).diagnostics
     assert "gap_room" not in str(dump_figure(figure.spec))
+
+
+def test_a_lone_arrow_meets_its_side_at_the_middle() -> None:
+    """The Transformer's residual: one arrow on a side lands at the side's centre."""
+
+    with Figure("lone") as figure, figure.module("m", layout="column", reverse=True) as m:
+        x = m.text("x", "input")
+        sublayer = m.block("ff", label="Feed Forward", input=x)
+        norm = m.add_norm("an", label="Add & Norm", input=sublayer)
+        figure.residual(x, norm)
+    compiled = compile_figure(figure.spec)
+    box = compiled.fitted.node("m.an").bounds
+    skip = next(edge for edge in compiled.routed.edges if edge.spec.source.node_id == "m.x"
+                and edge.spec.target.node_id == "m.an")
+    end = skip.centerline[-1]
+    assert end.x == pytest.approx(box.right)
+    assert end.y == pytest.approx(box.center.y)
+    assert not lint_compilation(compiled).diagnostics
+
+
+def test_arrows_on_one_side_spread_across_its_central_part() -> None:
+    """Two arrows between a pair of boxes sit a tenth of the side in from each end."""
+
+    def ends(**conventions: float) -> list[float]:
+        with Figure("pair", conventions=conventions) as figure, figure.root.row("r") as row:
+            # Tall enough that a tenth of the side is more than the corner's curve.
+            predict = row.block("predict", label="Predict\nthe\nnext\nstate")
+            update = row.block("update", label="Update\nfrom\nthe\nmeasurement", input=predict)
+            figure.connect(update, predict)
+        compiled = compile_figure(figure.spec)
+        assert not lint_compilation(compiled).diagnostics
+        box = compiled.fitted.node("r.update").bounds
+        return sorted(
+            (edge.centerline[-1 if edge.spec.target.node_id == "r.update" else 0].y - box.top)
+            / box.height
+            for edge in compiled.routed.edges
+        )
+
+    assert ends() == pytest.approx([0.1, 0.9])
+    assert ends(pin_spread=0.5) == pytest.approx([0.25, 0.75])
+    with pytest.raises(ValueError, match="pin_spread"):
+        Figure("bad", conventions={"pin_spread": 1.5})
+
+
+def test_branches_into_side_by_side_ports_leave_one_level_rail() -> None:
+    """The encoder's output to the decoder's K and V: no step where V's branch leaves."""
+
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "examples" / "transformer.py"
+    spec = importlib.util.spec_from_file_location("transformer_example", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    compiled = compile_figure(module.transformer().spec)
+    (net,) = [
+        net
+        for net in compiled.routed.nets
+        if {stem.port.port_name for stem in net.target_stems} == {"input"}
+        and any("xmha" in stem.port.node_id for stem in net.target_stems)
+    ]
+    bottoms = {round(stem.centerline[0].y, 6) for stem in net.target_stems}
+    assert len(bottoms) == 1, bottoms
+    (source,) = net.source_stems
+    assert round(source.centerline[-1].y, 6) in bottoms
+
+
+@pytest.mark.parametrize("theme", ["slides", "dark"])
+def test_a_caption_between_two_arrows_finds_room_below_its_own(theme: str) -> None:
+    """DQN's gradient: its caption goes under its arrow, and the gap below grows to fit."""
+
+    compiled = compile_figure(_literature()["dqn"](theme).spec)
+    report = lint_compilation(compiled)
+    assert not report.diagnostics, report.format()

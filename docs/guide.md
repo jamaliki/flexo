@@ -189,14 +189,18 @@ Its four ports are:
 | Port | Carries | Side |
 | --- | --- | --- |
 | `input` | the sublayer's output | auto-sided |
-| `skip` | the value that bypassed the sublayer | east, lower (offset 0.8) |
+| `skip` | the value that bypassed the sublayer | east |
 | `output` | the sum, to the next sublayer | auto-sided |
-| `branch` | the sum, to the next block's `skip` | east, upper (offset 0.2) |
+| `branch` | the sum, to the next block's `skip` | east |
+
+A port's declared offset only orders it among its neighbours. Where an arrow
+meets the side is set when routing: one arrow at the middle, several spread
+evenly (see [How connectors are routed](routing.md)).
 
 `add_norm(input=..., skip=...)` wires both at creation, and `residual()` uses a
 `residual` or `skip` port when the target has one. Two values sent to the same
 `input` port are drawn as two arrows side by side (see `arrivals` under
-[Conventions](../README.md#conventions-branches-merges-arrivals-and-lines)).
+[Conventions](../README.md#conventions-branches-merges-arrivals-lines-and-pins)).
 
 `skip` and `branch` are pinned to the east side, so every residual in a figure
 runs on the same side. Both are adaptive and slide along the east edge toward
