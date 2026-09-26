@@ -660,11 +660,16 @@ def lora(theme: str = "paper") -> Figure:
             x = m.text("x", "$x$")
             with m.row("paths") as paths:
                 frozen = paths.block(
-                    "w", label=r"Pretrained weights $W \in \mathbb{R}^{d\times d}$", tone="frozen"
+                    "w",
+                    label=r"Pretrained weights $W \in \mathbb{R}^{d\times d}$",
+                    tone="frozen",
+                    badge="frozen",
                 )
                 with paths.column("adapter") as adapter:
-                    down = adapter.block("a", label=r"$A = \mathcal{N}(0, \sigma^2)$")
-                    up = adapter.block("b", label="$B = 0$", input=down)
+                    down = adapter.block(
+                        "a", label=r"$A = \mathcal{N}(0, \sigma^2)$", badge="trained"
+                    )
+                    up = adapter.block("b", label="$B = 0$", input=down, badge="trained")
             total = m.add("sum", inputs=[frozen, up])
             m.text("h", "$h$", input=total)
         figure.net(src=x, sinks=[frozen, down])
@@ -1175,15 +1180,21 @@ def llava(theme: str = "paper") -> Figure:
         with figure.root.column("model") as column:
             response = column.text("response", "Language response")
             language = column.block(
-                "llm", label=r"Language model $f_\phi$", tone="model", width="220pt"
+                "llm", label=r"Language model $f_\phi$", tone="model", width="220pt", badge="tuned"
             )
             with column.row("inputs") as inputs:
                 with inputs.column("vision", reverse=True) as vision:  # flows upward
                     image = vision.text("image", "Image $X_v$")
                     encoder = vision.block(
-                        "encoder", label="Vision encoder", tone="frozen", input=image
+                        "encoder",
+                        label="Vision encoder",
+                        tone="frozen",
+                        input=image,
+                        badge="frozen",
                     )
-                    projection = vision.block("projection", label="Projection $W$", input=encoder)
+                    projection = vision.block(
+                        "projection", label="Projection $W$", input=encoder, badge="trained"
+                    )
                 instruction = inputs.text("instruction", "Instruction $X_q$")
         figure.connect(projection, language, label="$H_v$")
         figure.connect(instruction, language, label="$H_q$")
