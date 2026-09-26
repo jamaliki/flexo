@@ -141,3 +141,20 @@ def test_a_figure_is_transparent_unless_it_asks_for_a_page() -> None:
     with Figure("page", background=True) as figure:
         figure.root.block("a", label="A")
     assert parse_figure(yaml.safe_load(dump_figure(figure.spec))).background is True
+
+
+def test_pdf_rasterises_svg_artwork_sized_in_points(tmp_path: Path) -> None:
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    source = tmp_path / "art.svg"
+    source.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="60pt" height="40pt" viewBox="0 0 60 40">'
+        '<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/>'
+        '<stop offset="1" stop-color="#fff"/></linearGradient></defs>'
+        '<rect width="60" height="40" fill="url(#g)"/></svg>'
+    )
+    with Figure("art") as figure:
+        figure.root.image("art", source)
+    data = pdf_bytes(compile_figure(figure.spec).document.text)
+    assert b"/Subtype /Image" in data
