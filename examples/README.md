@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Forty-four figures from papers and textbooks, each a short function. They use
+Fifty-two figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -79,3 +79,6 @@ suite checks this).
 | [![Compiler phases and symbol table](build/literature/compiler.preview.png)](build/literature/compiler.preview.png) Compiler phases and symbol table | [![Pipelined CPU with forwarding](build/literature/cpu-pipeline.preview.png)](build/literature/cpu-pipeline.preview.png) Pipelined CPU with forwarding | [![Kalman filter](build/literature/kalman-filter.preview.png)](build/literature/kalman-filter.preview.png) Kalman filter |
 | [![Sprinkler Bayesian network](build/literature/sprinkler.preview.png)](build/literature/sprinkler.preview.png) Sprinkler Bayesian network | [![CBOW](build/literature/cbow.preview.png)](build/literature/cbow.preview.png) CBOW | [![Knowledge distillation](build/literature/distillation.preview.png)](build/literature/distillation.preview.png) Knowledge distillation |
 | [![Model–view–controller](build/literature/model-view-controller.preview.png)](build/literature/model-view-controller.preview.png) Model–view–controller | [![Load-balanced service](build/literature/load-balancer.preview.png)](build/literature/load-balancer.preview.png) Load-balanced service | [![Pipelined CPU in `tikz`](build/literature/cpu-pipeline-tikz.preview.png)](build/literature/cpu-pipeline-tikz.preview.png) Pipelined CPU in `tikz` |
+| [![Federated averaging](build/literature/federated-averaging.preview.png)](build/literature/federated-averaging.preview.png) Federated averaging | [![Two-tower retrieval](build/literature/two-tower.preview.png)](build/literature/two-tower.preview.png) Two-tower retrieval | [![Network stack between two hosts](build/literature/network-stack.preview.png)](build/literature/network-stack.preview.png) Network stack between two hosts |
+| [![Batch normalisation](build/literature/batch-normalization.preview.png)](build/literature/batch-normalization.preview.png) Batch normalisation | [![Skip-gram](build/literature/skip-gram.preview.png)](build/literature/skip-gram.preview.png) Skip-gram | [![Extract, transform, load](build/literature/extract-transform-load.preview.png)](build/literature/extract-transform-load.preview.png) Extract, transform, load |
+| [![Autoencoder](build/literature/autoencoder.preview.png)](build/literature/autoencoder.preview.png) Autoencoder | [![Message passing](build/literature/message-passing.preview.png)](build/literature/message-passing.preview.png) Message passing | [![Network stack in `tikz`](build/literature/network-stack-tikz.preview.png)](build/literature/network-stack-tikz.preview.png) Network stack in `tikz` |
