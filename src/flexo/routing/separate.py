@@ -10,7 +10,8 @@ turns that into a drawing, one axis at a time (after libavoid's nudging):
 2. **Order.** Runs of different wires that coincide are put in the order that
    crosses least, tried both ways on the actual geometry.
 3. **Space.** Every run becomes a variable. Runs that would sit closer than a
-   lane apart get a separation constraint in that order; everything a run must
+   lane apart get a separation constraint in that order -- a caption's height
+   instead of a lane above the run a caption sits on; everything a run must
    keep clear of -- components, container walls, the ports at the far end of the
    pieces attached to it -- bounds it. The crossbar of a Z and the trunk of a
    net *want* the middle of the alley they have; any other run wants to stay
@@ -67,6 +68,13 @@ class Wire:
     """Where the flow of a net ends: ``rail_at`` is a fraction of the way there."""
     rail_clamped: float | None = None
     """The fraction the trunk actually got, when ``rail_at`` could not be honoured."""
+    caption: tuple[float, float] | None = None
+    """``(room, width)`` a caption needs above the wire's longest horizontal run.
+
+    A connector's caption sits above the middle of that run, so the run above
+    it keeps ``room`` away, not just a lane, wherever it passes over the
+    caption's ``width``.
+    """
 
     def terminal_clearance(self, point: Point) -> float | None:
         for terminal in self.terminals:
@@ -141,14 +149,18 @@ def _nudge_axis(
     for run in runs:
         _bound(run, wires, obstacles, walls, boundary, vertical)
     runs = _unify(runs, wires, obstacles, walls, boundary, vertical)
-    order = _ordered(runs, wires, spacing, vertical)
-    for attempt in range(11):
-        gap = spacing * (1.0 - attempt / 10.0)
-        positions = _solve(runs, order, gap)
-        if positions is not None:
-            break
-    else:  # pragma: no cover - the last attempt has zero spacing and always fits
-        positions = [run.coordinate for run in runs]
+    rooms = {} if vertical else _caption_rooms(runs, wires)
+    order = _ordered(runs, wires, spacing, vertical, rooms)
+    # Room for captions first; where it does not fit, lanes alone, shrinking.
+    positions = _solve(runs, order, spacing, rooms) if rooms else None
+    if positions is None:
+        for attempt in range(11):
+            gap = spacing * (1.0 - attempt / 10.0)
+            positions = _solve(runs, order, gap)
+            if positions is not None:
+                break
+        else:  # pragma: no cover - the last attempt has zero spacing and always fits
+            positions = [run.coordinate for run in runs]
     for run, position in zip(runs, positions, strict=True):
         if run.fixed or abs(position - run.coordinate) < 1e-9:
             continue
@@ -521,13 +533,43 @@ def _overlap(first: _Run, second: _Run) -> float:
     return min(first.high, second.high) - max(first.low, second.low)
 
 
+def _caption_rooms(runs: list[_Run], wires: list[Wire]) -> dict[tuple[int, int], float]:
+    """``{(above, below): room}`` for each horizontal run over a captioned run's caption."""
+
+    carriers: dict[int, int] = {}
+    for index, run in enumerate(runs):
+        if wires[run.wire].caption is None:
+            continue
+        best = carriers.get(run.wire)
+        if best is None or run.high - run.low > runs[best].high - runs[best].low + _EPSILON:
+            carriers[run.wire] = index
+    rooms: dict[tuple[int, int], float] = {}
+    for below in carriers.values():
+        carrier = runs[below]
+        room, width = wires[carrier.wire].caption  # type: ignore[misc]
+        middle = (carrier.low + carrier.high) / 2.0
+        low, high = middle - width / 2.0, middle + width / 2.0
+        for above, run in enumerate(runs):
+            if run.wire == carrier.wire or run.coordinate > carrier.coordinate + _EPSILON:
+                continue
+            if carrier.coordinate - run.coordinate >= room or (run.fixed and carrier.fixed):
+                continue
+            if min(run.high, high) - max(run.low, low) > _EPSILON:
+                rooms[(above, below)] = room
+    return rooms
+
+
 def _ordered(
     runs: list[_Run],
     wires: list[Wire],
     spacing: float,
     vertical: bool,
+    rooms: dict[tuple[int, int], float] | None = None,
 ) -> list[tuple[int, int]]:
-    """Pairs ``(left, right)`` of runs that must keep a lane between them, in order."""
+    """Pairs ``(left, right)`` of runs that must keep a lane between them, in order.
+
+    A pair in ``rooms`` is kept in the order it has -- the caption goes between.
+    """
 
     by_position = sorted(range(len(runs)), key=lambda index: (runs[index].coordinate, index))
     pairs: list[tuple[int, int]] = []
@@ -535,6 +577,9 @@ def _ordered(
     for position, first in enumerate(by_position):
         for second in by_position[position + 1 :]:
             one, two = runs[first], runs[second]
+            if rooms and (first, second) in rooms:
+                pairs.append((first, second))
+                continue
             # Runs that cannot come within a lane of each other need no constraint.
             if two.lower >= one.upper + spacing:
                 continue
@@ -680,12 +725,20 @@ def _reaches(successors: dict[int, set[int]], start: int, goal: int) -> bool:
 # -- solving -------------------------------------------------------------------------
 
 
-def _solve(runs: list[_Run], order: list[tuple[int, int]], gap: float) -> list[float] | None:
-    """Positions for every run at lane ``gap``, or ``None`` if the bounds cannot hold."""
+def _solve(
+    runs: list[_Run],
+    order: list[tuple[int, int]],
+    gap: float,
+    rooms: dict[tuple[int, int], float] | None = None,
+) -> list[float] | None:
+    """Positions for every run at lane ``gap`` -- or the room a caption between
+    two runs needs -- or ``None`` if the bounds cannot hold."""
 
     desired = [run.desired for run in runs]
     weights = [run.weight for run in runs]
-    constraints: list[tuple[int, int, float]] = [(left, right, gap) for left, right in order]
+    constraints: list[tuple[int, int, float]] = [
+        (left, right, max(gap, (rooms or {}).get((left, right), 0.0))) for left, right in order
+    ]
     bounds: list[tuple[int, float, bool]] = []
     for index, run in enumerate(runs):
         if run.fixed:
