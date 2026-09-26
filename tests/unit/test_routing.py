@@ -857,16 +857,23 @@ def _joint(net) -> Point:
 def test_a_captioned_rail_leaves_its_caption_the_run() -> None:
     """A corridor too narrow to halve keeps the rail at its end, not in the words.
 
-    The caption is written above the run the net reads along, so a rail parked in
-    the middle of the corridor would be drawn straight through it.
+    The caption would be written above the run the net reads along, so a rail
+    parked in the middle of the corridor would be drawn straight through it.
+    This run is narrower than the caption, so the caption goes beside the riser
+    instead, clear of both boxes.
     """
+
+    from flexo.routing.labels import label_box
 
     labelled = compile_figure(_riser_merge_figure(label=(TextRun("softmax(QK"),)))
     net = labelled.routed.net("combined")
     assert _joint(net) == Point(84.0, 28.0), "one escape short of the sink"
     assert net.label_metrics is not None and net.label_position is not None
-    assert net.label_position.x < _joint(net).x, "and the caption owns the whole run"
-    assert lint_compilation(labelled).ok
+    caption = label_box(net.label_position, net.label_metrics)
+    assert not any(
+        node.bounds.intersects(caption, strict=True) for node in labelled.routed.fitted.nodes
+    )
+    assert not lint_compilation(labelled).diagnostics
 
 
 def test_rail_at_slides_the_rail_along_the_trunk_run() -> None:

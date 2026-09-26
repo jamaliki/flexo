@@ -1,7 +1,8 @@
 """Where connector captions go: beside their own line, clear of everything else.
 
 A caption is placed after every line is routed, because only then is it known
-what it could collide with. Each labelled edge, in authoring order, tries a
+what it could collide with. Each labelled edge -- the one with the fewest clear
+places first, then in authoring order -- tries a
 fixed list of positions -- above and below each horizontal run, right and left
 of each vertical run, at the middle and then further toward either end -- and
 takes the cheapest. A position pays for every component, title, or earlier
@@ -19,7 +20,7 @@ from dataclasses import replace
 
 from flexo.geometry import Point, Rect, segment_crosses_rect, segments
 from flexo.ir.measured import TextMetrics
-from flexo.ir.routed import RoutedEdge
+from flexo.ir.routed import RoutedEdge, RoutedNet
 from flexo.routing.ink import caption_reach, caption_rise
 from flexo.style import LayoutStyle
 
@@ -52,58 +53,141 @@ def label_box(position: Point, metrics: TextMetrics) -> Rect:
     return Rect(position.x - metrics.width / 2.0, top, metrics.width, metrics.height)
 
 
-def place_edge_labels(
+def place_captions(
     edges: Sequence[RoutedEdge],
+    nets: Sequence[RoutedNet],
     *,
     solids: Iterable[Rect],
-    fixed_labels: Iterable[Rect],
     lines: Sequence[tuple[str, tuple[Point, ...]]],
     canvas: Rect,
     style: LayoutStyle,
-) -> list[RoutedEdge]:
-    """``edges`` with each caption moved to its cheapest clear position."""
+) -> tuple[list[RoutedEdge], list[RoutedNet]]:
+    """``edges`` and ``nets`` with each caption moved to its cheapest clear position.
 
+    A net's caption first tries the place its tree reads along (see
+    ``rail_label_position``), then the same places an edge's caption would.
+    """
+
+    items: list[RoutedEdge | RoutedNet] = [*edges, *nets]
     solid = list(solids)
-    placed = list(fixed_labels)
-    result = []
-    for edge in edges:
-        if edge.label_metrics is None or edge.label_position is None:
-            result.append(edge)
-            continue
-        # A caption keeps off every line, its own included: beside a run it
-        # clears it by construction, but beside a diagonal it would not.
-        others = [line for _, line in lines]
-        # Other connectors, that is: a container outline is a closed line.
-        foreign = [
-            line for key, line in lines if key != edge.spec.id and line[0] != line[-1]
+    fixed: list[Rect] = []
+    # A caption keeps off every line, its own included: beside a run it
+    # clears it by construction, but beside a diagonal it would not.
+    others = [line for _, line in lines]
+    near = style.port_spacing.points
+    labelled = [
+        index
+        for index, item in enumerate(items)
+        if item.label_metrics is not None and item.label_position is not None
+    ]
+    candidates: dict[int, list[Point]] = {}
+    for index in labelled:
+        item = items[index]
+        assert item.label_metrics is not None and item.label_position is not None
+        if isinstance(item, RoutedEdge):
+            candidates[index] = _candidates((item.centerline,), item.label_metrics, style)
+        else:
+            candidates[index] = [
+                item.label_position,
+                *_candidates(item.pieces, item.label_metrics, style),
+            ]
+    # Close beside another connector costs a little; a container outline (a
+    # closed line) is not a connector.
+    foreign = {
+        index: [
+            line
+            for key, line in lines
+            if key != items[index].spec.id and line[0] != line[-1]
         ]
-        near = style.port_spacing.points
+        for index in labelled
+    }
+    chosen: dict[int, Point] = {}
+
+    def box_of(index: int, position: Point) -> Rect:
+        return label_box(position, items[index].label_metrics)  # type: ignore[arg-type]
+
+    def price(index: int, position: Point, captions: Iterable[Rect]) -> float:
+        box = box_of(index, position)
+        return _price(box, solid, [*fixed, *captions], others, canvas) + NEAR_LINE * sum(
+            1
+            for line in foreign[index]
+            if any(_crosses(box.inflated(near), a, b) for a, b in itertools.pairwise(line))
+        )
+
+    def placed_except(*skipped: int) -> list[Rect]:
+        return [box_of(other, at) for other, at in chosen.items() if other not in skipped]
+
+    def best_place(index: int, captions: list[Rect]) -> tuple[float, Point] | None:
         best: tuple[float, Point] | None = None
-        for rank, position in enumerate(_candidates(edge.centerline, edge.label_metrics, style)):
-            box = label_box(position, edge.label_metrics)
-            cost = rank * 0.01 + _price(box, solid, placed, others, canvas)
-            cost += NEAR_LINE * sum(
-                1
-                for line in foreign
-                if any(_crosses(box.inflated(near), a, b) for a, b in itertools.pairwise(line))
-            )
+        for rank, position in enumerate(candidates[index]):
+            cost = rank * 0.01 + price(index, position, captions)
             if best is None or cost < best[0] - 1e-9:
                 best = (cost, position)
             if cost < 1.0:
                 break
-        if best is None:
-            # No run to sit beside (the connector has no length): keep the
-            # position the edge was given.
-            best = (0.0, edge.label_position)
-        placed.append(label_box(best[1], edge.label_metrics))
-        result.append(replace(edge, label_position=best[1]))
-    return result
+        return best
+
+    # The caption with the fewest clear places chooses first, so one that fits
+    # in only one gap is not crowded out by one that would fit anywhere.
+    order = sorted(
+        labelled,
+        key=lambda index: (
+            sum(price(index, position, ()) < 1.0 for position in candidates[index]),
+            index,
+        ),
+    )
+    for index in order:
+        best = best_place(index, placed_except())
+        # No run to sit beside (the connector has no length): keep the
+        # position it was given.
+        chosen[index] = best[1] if best is not None else items[index].label_position  # type: ignore[assignment]
+    # Repair: a caption left with no clear place takes one that a single other
+    # caption blocks, when that caption has a clear place of its own elsewhere.
+    for index in order:
+        if price(index, chosen[index], placed_except(index)) < 1.0:
+            continue
+        for position in candidates[index]:
+            if price(index, position, placed_except(index)) < 1.0:
+                chosen[index] = position  # freed by an earlier repair
+                break
+            if price(index, position, ()) >= 1.0:
+                continue
+            box = box_of(index, position)
+            blockers = [
+                other
+                for other, at in chosen.items()
+                if other != index and box_of(other, at).intersects(box, strict=True)
+            ]
+            if len(blockers) != 1:
+                continue
+            blocker = blockers[0]
+            captions = [*placed_except(index, blocker), box]
+            moved = next(
+                (
+                    elsewhere
+                    for elsewhere in candidates[blocker]
+                    if price(blocker, elsewhere, captions) < 1.0
+                ),
+                None,
+            )
+            if moved is not None:
+                chosen[index], chosen[blocker] = position, moved
+                break
+    result = list(items)
+    for index, position in chosen.items():
+        result[index] = replace(items[index], label_position=position)
+    return result[: len(edges)], result[len(edges) :]  # type: ignore[return-value]
 
 
 def _candidates(
-    points: tuple[Point, ...], metrics: TextMetrics, style: LayoutStyle
+    polylines: Iterable[tuple[Point, ...]], metrics: TextMetrics, style: LayoutStyle
 ) -> list[Point]:
-    runs = [segment for segment in segments(points) if segment.length > 1e-6]
+    runs = [
+        segment
+        for points in polylines
+        for segment in segments(points)
+        if segment.length > 1e-6
+    ]
     horizontal = sorted(
         (segment for segment in runs if segment.horizontal), key=lambda s: -s.length
     )

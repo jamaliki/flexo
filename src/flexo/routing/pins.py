@@ -569,6 +569,8 @@ def _separate_directions(
     side -- an output facing backwards, inputs pulled round to the output's
     side -- moves to the next side that still faces its counterpart; an end on
     the side the grammar gave it stays, because that is where a reader looks.
+    With no other facing side, a departure joins the same value leaving by its
+    own side, and an arrival comes in over the top or under the bottom.
     """
 
     boxes = [
@@ -624,6 +626,27 @@ def _separate_directions(
                 # tapped from a plant's output -- instead of leaving backwards.
                 # A pair of arrows each way between two boxes stays as it is.
                 end.group = (end.group[0], end.group[1], port_spec.side, end.group[3])
+            elif end.arriving and not any(
+                not other.arriving and other.counterpart == end.counterpart
+                for other in members_on_side
+            ) and any(
+                not other.arriving
+                and _gap(end.node.bounds, other.counterpart)
+                < _gap(end.node.bounds, end.counterpart) - 1e-6
+                for other in members_on_side
+            ):
+                # Nothing else faces where it comes from, and what leaves by
+                # this side goes somewhere nearer: the arrival turns in over the
+                # top or under the bottom -- an action fed back into an
+                # environment that also feeds the buffer beside it.
+                across = [
+                    candidate
+                    for candidate in ranked[1:]
+                    if candidate not in {side, side.opposite}
+                    and _approach_clear(end.node.bounds, candidate, reach, boxes)
+                ]
+                if across:
+                    end.group = (end.group[0], end.group[1], across[0], end.group[3])
 
 
 def _spill_crowded_sides(
