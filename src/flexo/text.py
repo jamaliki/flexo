@@ -13,6 +13,7 @@ from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.fonts import (
     FontFace,
     LoadedFace,
+    family_covering,
     family_faces,
     hb_font,
     load_face,
@@ -88,6 +89,22 @@ class FontStack:
                 families.append(faces)
         self.families = tuple(families)
 
+    def adopt(self, characters: set[str]) -> bool:
+        """Add an installed family that has ``characters`` to the end of the stack.
+
+        Used when no family in the stack has a glyph a label needs; the family
+        found is then named on the ``tspan`` that uses it, like any fallback.
+        """
+
+        family = family_covering(characters)
+        if family is None:
+            return False
+        faces = family_faces(family)
+        if not faces or any(existing[0].family == faces[0].family for existing in self.families):
+            return False
+        self.families = (*self.families, faces)
+        return True
+
     def face(self, weight: int, italic: bool, family: int = 0) -> FontFace:
         return select_face(self.families[family], weight, italic)
 
@@ -100,7 +117,9 @@ class FontStack:
         Each cluster -- a character and the combining marks after it -- is set
         in the first face that has all of its characters and, when it carries a
         mark, places that mark on the letter (a face with the glyphs but no
-        anchor for that letter would draw the accent beside it).
+        anchor for that letter would draw the accent beside it). A cluster the
+        primary face lacks stays in the fallback face of the cluster before it
+        when that face has it.
         """
 
         faces = [self.face(weight, italic, index) for index in range(len(self.families))]
@@ -122,6 +141,12 @@ class FontStack:
                     (index for index in covering if _places_marks(faces[index], cluster)),
                     covering[0] if covering else 0,
                 )
+                previous = faces.index(pieces[-1][0]) if pieces else 0
+                if choice > 0 and previous > 0 and previous in covering:
+                    # Outside the primary face, stay in the fallback already in
+                    # use: a word in another script is set in one font, not a
+                    # mixture of every font that happens to have each glyph.
+                    choice = previous
             face = faces[choice]
             if pieces and pieces[-1][0] == face:
                 pieces[-1] = (face, pieces[-1][1] + cluster)
@@ -377,6 +402,10 @@ class TextMeasurer:
         missing: set[str] = set()
         for run in runs:
             missing |= self.stack.missing(run.text, run.italic)
+        if missing and self.stack.adopt(missing):
+            missing = set()
+            for run in runs:
+                missing |= self.stack.missing(run.text, run.italic)
         if missing:
             rendered = ", ".join(repr(character) for character in sorted(missing))
             families = ", ".join(faces[0].family for faces in self.stack.families)
@@ -385,8 +414,8 @@ class TextMeasurer:
                     "font.glyph.missing",
                     f"No font in the stack ({families}) contains: {rendered}.",
                     hint=(
-                        "Add a family that has these glyphs to the typography's "
-                        "fallbacks, use supported Unicode text, or draw the symbol "
+                        "No installed font has them either. Install or register "
+                        "(flexo.register_font) a font that does, or draw the symbol "
                         "(flexo's op() component draws \u2295 and \u2297 as shapes)."
                     ),
                 )

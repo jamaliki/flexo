@@ -98,6 +98,8 @@ class LoadedFace:
     hb_face: hb.Face
     cap_height: int = 0
     superscript_rise: int = 0
+    outlines: bool = True
+    """Whether the glyphs are plain outlines, not bitmaps or colour layers (emoji)."""
 
     def has(self, character: str) -> bool:
         return ord(character) in self.codepoints
@@ -341,6 +343,57 @@ def font_directories() -> tuple[Path, ...]:
     return _REGISTRY.directories()
 
 
+BROAD_FAMILIES = (
+    "Noto Sans",
+    "Noto Sans CJK SC",
+    "PingFang SC",
+    "Hiragino Sans",
+    "Apple SD Gothic Neo",
+    "Microsoft YaHei",
+    "Arial Unicode MS",
+    "DejaVu Sans",
+    "Segoe UI",
+)
+"""Installed families that cover many scripts, tried first for a missing glyph."""
+
+_COVERING: dict[frozenset[str], str | None] = {}
+
+
+def family_covering(characters: Iterable[str]) -> str | None:
+    """An installed family that has every one of ``characters``, if there is one.
+
+    Families known for broad coverage are tried first, then every family
+    installed here, so a label in a script the bundled faces lack -- Chinese,
+    Japanese, Korean -- is set in a font that has it, the way a browser would.
+    Hidden system families (named with a leading dot) and bitmap faces such as
+    colour emoji are never chosen: a figure is drawn from outlines. The answer
+    is cached per set of characters.
+    """
+
+    wanted = frozenset(characters)
+    if wanted in _COVERING:
+        return _COVERING[wanted]
+    found: str | None = None
+    names = list(BROAD_FAMILIES) + [
+        name for name in available_families() if name not in BROAD_FAMILIES
+    ]
+    for name in names:
+        if name.startswith("."):
+            continue
+        faces = family_faces(name)
+        if not faces:
+            continue
+        try:
+            loaded = load_face(select_face(faces, 400, False))
+        except Exception:
+            continue
+        if loaded.outlines and all(loaded.has(character) for character in wanted):
+            found = faces[0].family
+            break
+    _COVERING[wanted] = found
+    return found
+
+
 def family_faces(family: str) -> tuple[FontFace, ...]:
     """Every face of ``family``, or an empty tuple when nothing resolves.
 
@@ -439,6 +492,8 @@ def load_face(face: FontFace) -> LoadedFace:
         hb_face=hb.Face(raw, face.index),
         cap_height=int(getattr(os2, "sCapHeight", 0) or 0) if os2 is not None else 0,
         superscript_rise=os2.ySuperscriptYOffset if os2 is not None else 0,
+        outlines=any(tag in font for tag in ("glyf", "CFF ", "CFF2"))
+        and not any(tag in font for tag in ("sbix", "CBDT", "COLR", "SVG ")),
     )
 
 

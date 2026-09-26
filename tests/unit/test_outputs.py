@@ -41,3 +41,26 @@ def test_the_same_figure_compiles_to_the_same_bytes(monkeypatch: pytest.MonkeyPa
     real_time = time.time
     monkeypatch.setattr(time, "time", lambda: real_time() + 86_400.0)
     assert compile_figure(_figure().spec).document.text == first
+
+
+def test_a_script_no_bundled_font_has_is_set_in_one_installed_font() -> None:
+    """Characters outside every bundled font come from an installed font that has them all."""
+
+    import re
+
+    from flexo.compiler import compile_figure
+    from flexo.fonts import family_covering
+
+    word = "编码器"
+    if family_covering(word) is None:
+        pytest.skip("no installed font covers CJK")
+    with Figure("cjk") as figure, figure.module("m", label=word) as m:
+        m.block("b", label="注意力")
+    compilation = compile_figure(figure.spec)
+    families = {
+        text: family
+        for family, text in re.findall(
+            r'<tspan font-family="([^"]+)">([^<]*)<', compilation.document.text
+        )
+    }
+    assert word in families and "注意力" in families
