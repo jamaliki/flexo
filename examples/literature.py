@@ -795,6 +795,105 @@ def sprinkler(theme: str = "paper") -> Figure:
     return figure
 
 
+def kalman_filter(theme: str = "paper") -> Figure:
+    """The Kalman filter's predict-update cycle."""
+
+    with Figure("kalman-filter", theme=theme) as figure:
+        with figure.root.row("cycle") as cycle:
+            prior = cycle.text("prior", r"$\hat{x}_0, P_0$")
+            predict = cycle.block(
+                "predict", label="Predict\n$\\hat{x}^-_k = A\\hat{x}_{k-1}$", input=prior
+            )
+            update = cycle.block(
+                "update",
+                label="Update\n$\\hat{x}_k = \\hat{x}^-_k + K_k(z_k - H\\hat{x}^-_k)$",
+                input=predict,
+            )
+        figure.connect(update, predict, label=r"$k \to k+1$")
+        measurement = figure.root.text("z", "measurement $z_k$")
+        figure.connect(measurement, update)
+    return figure
+
+
+def cbow(theme: str = "paper") -> Figure:
+    """Continuous bag of words (Mikolov et al. 2013, Figure 1)."""
+
+    with Figure("cbow", width="single-column", theme=theme) as figure:
+        with figure.root.row("model") as model:
+            with model.column("context", label="Input") as context:
+                words = [context.block(f"w{i}", label=f"$w(t{i:+d})$") for i in (-2, -1, 1, 2)]
+            total = model.add("sum", inputs=words)
+            with model.column("output", label="Output") as output:
+                output.block("wt", label="$w(t)$", input=total)
+    return figure
+
+
+def distillation(theme: str = "paper") -> Figure:
+    """Knowledge distillation (Hinton et al. 2015)."""
+
+    with Figure("distillation", theme=theme) as figure:
+        with figure.root.row("main") as main:
+            x = main.text("x", "Input $x$")
+            with main.column("models") as models:
+                teacher = models.block("teacher", label="Teacher (large, frozen)", tone="frozen")
+                student = models.block("student", label="Student (small)", tone="model")
+            with main.column("outputs") as outputs:
+                soft = outputs.block(
+                    "soft", label=r"Soft targets $\sigma(z_t / T)$", input=teacher
+                )
+                predictions = outputs.block(
+                    "predictions", label=r"Soft predictions $\sigma(z_s / T)$", input=student
+                )
+            main.block("loss", label="Distillation loss", inputs=[soft, predictions])
+        figure.net(src=x, sinks=[teacher, student])
+    return figure
+
+
+def cpu_pipeline(theme: str = "paper") -> Figure:
+    """The five-stage RISC pipeline with forwarding (Hennessy and Patterson)."""
+
+    with Figure("cpu-pipeline", theme=theme) as figure:
+        with figure.root.row("stages") as stages:
+            fetch = stages.block("if", label="IF")
+            decode = stages.block("id", label="ID", input=fetch)
+            execute = stages.block("ex", label="EX", input=decode)
+            memory = stages.block("mem", label="MEM", input=execute)
+            write = stages.block("wb", label="WB", input=memory)
+        figure.connect(memory, execute, label="forward")
+        figure.connect(write, execute, label="forward")
+        figure.connect(write, decode, label="write back")
+    return figure
+
+
+def model_view_controller(theme: str = "paper") -> Figure:
+    """Model-view-controller."""
+
+    with Figure("mvc", width="single-column", theme=theme) as figure:
+        with figure.root.column("parts") as parts:
+            model = parts.block("model", label="Model")
+            with parts.row("front") as front:
+                view = front.block("view", label="View")
+                controller = front.block("controller", label="Controller")
+        figure.connect(model, view, label="updates")
+        figure.connect(view, controller, label="user actions")
+        figure.connect(controller, model, label="manipulates")
+    return figure
+
+
+def load_balancer(theme: str = "paper") -> Figure:
+    """A load-balanced web service."""
+
+    with Figure("load-balancer", theme=theme) as figure:
+        with figure.root.row("tiers") as tiers:
+            clients = tiers.block("clients", label="Clients", tone="human")
+            balancer = tiers.block("balancer", label="Load balancer", input=clients)
+            with tiers.column("servers", label="App servers") as column:
+                servers = [column.block(f"s{i}", label=f"server {i}") for i in range(1, 4)]
+            tiers.block("database", label="Database", tone="data", inputs=servers)
+        figure.net(src=balancer, sinks=servers)
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -836,6 +935,12 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         mapreduce,
         compiler,
         sprinkler,
+        kalman_filter,
+        cbow,
+        distillation,
+        cpu_pipeline,
+        model_view_controller,
+        load_balancer,
     )
 }
 """Every figure here, by name."""
