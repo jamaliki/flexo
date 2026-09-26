@@ -26,6 +26,7 @@ from flexo.ir.semantic import TextRun
 from flexo.style import TypographyStyle
 
 _TOKEN_PATTERN = re.compile(r"\S+|\s+")
+_BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
 
 SHIFTED_SIZE = 0.72
 ACCENT_SIZE = 0.78
@@ -415,12 +416,15 @@ class TextMeasurer:
         max_width: float | None = None,
         weight: int | None = None,
         balance: bool = True,
+        break_words: bool = False,
     ) -> TextMetrics:
         """Shape ``runs`` at the weights they will actually be drawn at.
 
         Wrapped lines are balanced to similar lengths, as a label is set by
         hand; ``balance=False`` fills each line in turn instead, as a word
-        processor or slide program wraps a paragraph.
+        processor or slide program wraps a paragraph. ``break_words=True`` breaks
+        a word wider than the line (a URL) after a ``/``, ``-``, ``_``, or ``.``,
+        or between letters if it must, instead of letting it overrun.
 
         ``weight`` is what the text object these runs will sit in declares, and a
         run that named no weight of its own is measured at it -- because that is
@@ -439,9 +443,9 @@ class TextMeasurer:
             line
             for hard_line in hard_lines
             for line in (
-                self._balanced(hard_line, max_width, weight)
+                self._balanced(hard_line, max_width, weight, break_words)
                 if balance
-                else self._wrap_line(hard_line, max_width, weight)
+                else self._wrap_line(hard_line, max_width, weight, break_words)
             )
         )
         measured_lines = tuple(
@@ -507,6 +511,7 @@ class TextMeasurer:
         line: tuple[TextRun, ...],
         max_width: float | None,
         weight: int | None,
+        break_words: bool = False,
     ) -> tuple[tuple[TextRun, ...], ...]:
         """``line`` wrapped at ``max_width`` into lines of similar length.
 
@@ -516,23 +521,24 @@ class TextMeasurer:
         evenly instead, which is how a label is set by hand.
         """
 
-        wrapped = self._wrap_line(line, max_width, weight)
+        wrapped = self._wrap_line(line, max_width, weight, break_words)
         if len(wrapped) < 2 or max_width is None:
             return wrapped
         low, high = 0.0, max_width
         for _ in range(12):
             middle = (low + high) / 2.0
-            if len(self._wrap_line(line, middle, weight)) <= len(wrapped):
+            if len(self._wrap_line(line, middle, weight, break_words)) <= len(wrapped):
                 high = middle
             else:
                 low = middle
-        return self._wrap_line(line, high, weight)
+        return self._wrap_line(line, high, weight, break_words)
 
     def _wrap_line(
         self,
         line: tuple[TextRun, ...],
         max_width: float | None,
         weight: int | None = None,
+        break_words: bool = False,
     ) -> tuple[tuple[TextRun, ...], ...]:
         if max_width is None or max_width <= 0.0:
             return (line,)
@@ -540,7 +546,14 @@ class TextMeasurer:
         current: list[TextRun] = []
         current_width = 0.0
         for run in line:
-            for token in _TOKEN_PATTERN.findall(run.text):
+            tokens = _TOKEN_PATTERN.findall(run.text)
+            if break_words:
+                tokens = [
+                    piece
+                    for token in tokens
+                    for piece in self._pieces(replace(run, text=token), max_width, weight)
+                ]
+            for token in tokens:
                 token_run = replace(run, text=token)
                 token_width = self._shape_run(token_run, weight)
                 is_space = token.isspace()
@@ -554,6 +567,27 @@ class TextMeasurer:
                 current_width += token_width
         wrapped.append(_trim_and_merge(current))
         return tuple(wrapped)
+
+    def _pieces(self, run: TextRun, max_width: float, weight: int | None) -> list[str]:
+        """A word, as pieces no wider than a line: split after URL punctuation, then letters."""
+
+        if run.text.isspace() or self._shape_run(run, weight) <= max_width:
+            return [run.text]
+        pieces: list[str] = []
+        for part in _BREAK_AFTER.findall(run.text):
+            if self._shape_run(replace(run, text=part), weight) <= max_width:
+                pieces.append(part)
+                continue
+            current = ""
+            for character in part:
+                longer = replace(run, text=current + character)
+                if current and self._shape_run(longer, weight) > max_width:
+                    pieces.append(current)
+                    current = ""
+                current += character
+            if current:
+                pieces.append(current)
+        return pieces
 
     def _validate_glyphs(self, runs: tuple[TextRun, ...]) -> None:
         missing: set[str] = set()
