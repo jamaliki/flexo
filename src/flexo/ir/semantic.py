@@ -73,6 +73,9 @@ class TextRun:
     """Set in the typography's monospace family (``\\texttt{...}``, a slide's backticks)."""
     link: str = ""
     """A URL the run links to (``[words](https://...)``): clickable in SVG, PDF, and PowerPoint."""
+    color: str = ""
+    """A colour for these words (``[words]{accent}``): a palette role, a friendly name
+    (``accent``, ``accent2``..., ``muted``), or ``#rrggbb``. Empty: the text's own."""
 
 
 @dataclass(frozen=True, slots=True)

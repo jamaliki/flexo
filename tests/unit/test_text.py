@@ -141,3 +141,18 @@ def test_a_word_wider_than_the_line_breaks_only_when_asked() -> None:
     broken = measurer.measure(url, max_width=100, balance=False, break_words=True)
     assert len(broken.lines) > 1 and broken.width <= 100
     assert "".join(run.text for line in broken.lines for run in line.runs) == url[0].text
+
+
+def test_coloured_words_are_painted_in_their_colour() -> None:
+    from flexo.builder import Figure
+    from flexo.compiler import compile_figure
+    from flexo.markup import parse_label
+
+    runs = parse_label("Thanks to [Ada]{accent} and [Bob]{#c0392b}")
+    assert [(run.text, run.color) for run in runs] == [
+        ("Thanks to ", ""), ("Ada", "accent"), (" and ", ""), ("Bob", "#c0392b"),
+    ]
+    with Figure("coloured") as figure:
+        figure.block("b", label="Thanks to [Ada]{accent} and [Bob]{#c0392b}")
+    svg = compile_figure(figure.spec).document.text
+    assert 'fill="#c0392b"' in svg and 'data-flexo-fill="tone-1-stroke"' in svg

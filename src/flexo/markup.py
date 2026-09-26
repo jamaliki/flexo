@@ -223,6 +223,8 @@ _UPRIGHT_GREEK = frozenset("ΓΔΘΛΞΠΣΥΦΨΩ")
 _COMMAND = re.compile(r"\\([A-Za-z]+|.)")
 
 
+_COLOURED = re.compile(r"\[([^\]\n]+)\]\{(#[0-9a-fA-F]{3,6}|[a-z][a-z0-9-]*)\}")
+"""``[words]{accent}``: words in a colour -- a palette role, a friendly name, or a hex."""
 _LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?|mailto|file):[^)\s]+)\)")
 """``[words](url)``: words that link somewhere."""
 
@@ -233,7 +235,7 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
 
     if not text:
         return ()
-    if "$" not in text and "`" not in text and "](" not in text:
+    if "$" not in text and "`" not in text and "](" not in text and "]{" not in text:
         return (TextRun(text),)
     runs: list[TextRun] = []
     plain: list[str] = []
@@ -247,6 +249,14 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
         if character == "\\" and text[index + 1 : index + 2] == "`":
             plain.append("`")
             index += 2
+            continue
+        if character == "[" and (coloured := _COLOURED.match(text, index)):
+            if plain:
+                runs.append(TextRun("".join(plain)))
+                plain = []
+            colour = coloured.group(2)
+            runs.extend(replace(run, color=colour) for run in parse_label(coloured.group(1)))
+            index = coloured.end()
             continue
         if character == "[" and (link := _LINK.match(text, index)):
             if plain:
@@ -507,7 +517,8 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
             result[-1].baseline_shift,
             result[-1].code,
             result[-1].link,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link):
+            result[-1].color,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
             result[-1] = replace(result[-1], text=result[-1].text + run.text)
             continue
         result.append(run)
