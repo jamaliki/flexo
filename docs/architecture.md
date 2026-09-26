@@ -121,7 +121,9 @@ side the author or the component grammar declared, not the one layout chose.
 ## Other formats read the SVG back
 
 The SVG is the master. `flexo.drawing.read_drawing` reads Flexo's own SVG
-dialect back into typed primitives for writers of other formats -- the
+dialect (and the plain SVG plotting libraries such as matplotlib write: CSS
+`style`, `<use>`, turned text, rectangular clip paths, nested viewports, fonts
+that are not installed) back into typed primitives for writers of other formats -- the
 portable SVG (`portable`), the PDF (`pdf`), and PowerPoint in
 [flexo-talk](https://github.com/jamaliki/flexo-talk):
 rectangles, ellipses and paths of absolute moves, lines and cubics, with paint
