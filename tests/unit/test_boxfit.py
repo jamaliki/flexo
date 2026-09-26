@@ -53,3 +53,18 @@ def test_turning_attention_lays_its_vectors_down() -> None:
         values = dict(node.properties)
         assert values["cells"] == 1 and values["columns"] == 3
     compile_figure(spec)
+
+
+def test_a_long_row_folds_onto_two_lines() -> None:
+    from flexo.orient import wrapped
+
+    with Figure("chain") as figure, figure.row("steps") as steps:
+        previous = steps.text("x", "$x$")
+        for index in range(7):
+            previous = steps.block(f"s{index}", label=f"Step {index}", input=previous)
+    spec = wrapped(figure.spec)
+    group = next(group for group in spec.groups if group.id == "steps")
+    assert group.layout.kind == "grid" and group.layout.columns == 4
+    cells = group.layout.placement_map()
+    assert cells["steps.s2"] == (0, 3) and cells["steps.s3"] == (1, 0)
+    compile_figure(spec)
