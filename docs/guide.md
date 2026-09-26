@@ -228,7 +228,9 @@ The rules:
 - **A side whose straight approach would hit another box is skipped** in
   favour of the next side that faces the counterpart.
 - **Each input of an operator takes its own side**, so values meeting at a `+`
-  arrive from different directions.
+  arrive from different directions. Three or more inputs from one direction
+  (the experts of a mixture, summed below them) join on a bus and enter as one
+  arrow.
 - **Two pins facing each other across a gap are aligned** when both boxes allow
   it and the straight line between them is clear, so the arrow is straight.
 

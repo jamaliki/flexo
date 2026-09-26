@@ -631,7 +631,10 @@ def _spread_operator_inputs(ends: list[End]) -> None:
     Several arrows into one point of a circle read as one arrow; an addition
     reads as values arriving from different directions. Each arrival takes the
     best facing side nobody else uses -- the output's side included -- and only
-    when the four sides run out do arrivals share one (and so merge).
+    when the four sides run out do arrivals share one (and so merge). Three or
+    more values arriving from the same direction -- the experts of a mixture
+    summed below them -- join on that side as one arrow instead of wrapping
+    round the circle to reach the other sides.
     """
 
     by_node: dict[str, list[End]] = defaultdict(list)
@@ -641,6 +644,17 @@ def _spread_operator_inputs(ends: list[End]) -> None:
     for node_ends in by_node.values():
         taken = {end.group[2] for end in node_ends if not end.arriving}  # type: ignore[index]
         arriving = [end for end in node_ends if end.arriving]
+        from_side: dict[Side, list[End]] = defaultdict(list)
+        for end in arriving:
+            assert end.group is not None
+            from_side[_facing_sides(end.node.bounds, end.counterpart, end.group[2])[0]].append(end)
+        for side, joined in from_side.items():
+            if len(joined) >= 3 and side not in taken and not any(end.fixed for end in joined):
+                for end in joined:
+                    assert end.group is not None
+                    end.group = (end.group[0], f"{end.group[1]}#joined", side, end.group[3])
+                taken.add(side)
+                arriving = [end for end in arriving if end not in joined]
         for end in sorted(arriving, key=_alignment_first):
             assert end.group is not None
             ranked = _facing_sides(end.node.bounds, end.counterpart, end.group[2])
