@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import math
 import re
 import struct
 import zlib
@@ -200,10 +201,19 @@ class _Content:
             self.paint(head.paint, head.outline)
 
     def text(self, item: Text) -> None:
+        if item.angle:
+            # Turned about its pivot, as SVG's rotate(angle, x, y) turns it.
+            turn = math.radians(item.angle)
+            cos, sin = math.cos(turn), math.sin(turn)
+            x, y = item.pivot
+            matrix = (cos, sin, -sin, cos, x - cos * x + sin * y, y - sin * x - cos * y)
+            self.ops.append("q " + " ".join(_n(value) for value in matrix) + " cm")
         for line in item.lines:
             for run in line.runs:
                 if run.face is not None and run.text.strip():
                     self.run(run)
+        if item.angle:
+            self.ops.append("Q")
 
     def run(self, run: Run) -> None:
         colour = _colour(run.fill) or "#000000"

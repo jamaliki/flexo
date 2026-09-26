@@ -177,6 +177,9 @@ def _text(parent: ET.Element, text: Text) -> None:
     words = "\n".join("".join(run.text for run in line.runs) for line in text.lines)
     group.set("aria-label", words)
     group.set("fill", text.fill)
+    if text.angle:
+        pivot = f"{number(text.pivot[0])} {number(text.pivot[1])}"
+        group.set("transform", f"rotate({number(text.angle)} {pivot})")
     for line in text.lines:
         for run in line.runs:
             if run.face is None or not run.text.strip():
