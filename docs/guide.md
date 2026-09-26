@@ -692,7 +692,7 @@ An `image` is a component with four pinned ports at its side centres (`input`,
 `output`, `north`, `south`). It wires, lays out, and blocks routes like a
 block. An SVG source stays vector: Flexo nests the file's content at the
 node's bounds with its viewBox intact, so it remains selectable in an editor
-and stays vector in the PDF. A PNG is embedded as a data URI. Artwork is
+and stays vector in the PDF. A PNG or JPEG is embedded as a data URI. Artwork is
 **embedded, not linked**: the editable SVG, portable SVG, and PDF each contain
 it.
 
