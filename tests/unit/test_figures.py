@@ -379,3 +379,24 @@ def test_wired_content_on_the_root_is_centred_on_the_canvas() -> None:
     box = compiled.fitted.node("a").bounds
     canvas = compiled.fitted.canvas_size.width
     assert box.center.x == pytest.approx(canvas / 2.0)
+
+
+def test_a_flow_group_lays_its_children_out_in_layers_by_their_wiring() -> None:
+    import yaml
+
+    from flexo.serialization import dump_figure, parse_figure
+
+    for kind, axis in (("flow", "y"), ("flow-right", "x")):
+        with Figure("flow") as figure, figure.module("m", layout=kind) as m:
+            x = m.text("x", "input")
+            a = m.block("a", label="A", input=x)
+            b = m.block("b", label="B", input=x)
+            fused = m.block("fused", label="Fuse", inputs=[a, b])
+            m.connect(fused, a, label="loop")
+        compiled = compile_figure(figure.spec)
+        box = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+        along = (lambda rect: rect.center.y) if axis == "y" else (lambda rect: rect.center.x)
+        assert along(box["m.x"]) < along(box["m.a"]) == pytest.approx(along(box["m.b"]))
+        assert along(box["m.a"]) < along(box["m.fused"]), "the loop does not reorder layers"
+        assert not lint_compilation(compiled).diagnostics
+        assert parse_figure(yaml.safe_load(dump_figure(figure.spec))) == figure.spec

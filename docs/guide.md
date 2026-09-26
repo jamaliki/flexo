@@ -342,6 +342,30 @@ of rows grows to include the highest row any child addresses. Two children
 addressed to the same cell, a negative index, or a column outside the grid
 raises `ValueError` at the call that places the child.
 
+### Layout from the wiring
+
+`layout="flow"` arranges a group's children from how they are wired instead of
+from the order they were written, top to bottom (`"flow-right"`: left to
+right). The children can be written flat:
+
+```python
+import flexo
+
+with flexo.Figure("heads", width="single-column") as figure:
+    with figure.module("m", label="Multi-task learning", layout="flow") as m:
+        shared = m.block("shared", label="Shared encoder", input=m.text("x", "x"))
+        heads = [m.block(name, label=name, input=shared) for name in ("depth", "normals")]
+        m.add("total", inputs=heads)
+```
+
+Each child goes one layer after the latest child that feeds it, so every arrow
+points down the flow; an arrow that closes a loop is left out when layers are
+counted, so a cycle still has a first step. Within a layer, children are
+sorted by the mean position of the neighbours they are wired to, which removes
+most crossings; ties keep author order. The layers are centred on one another
+unless the group names an `align`. The compiled figure has an unlabelled row
+(or column) per layer; the authored figure keeps its flow group.
+
 ### Spacing that is not square
 
 `gap` sets the space between siblings on both axes. `row_gap` and `column_gap`
