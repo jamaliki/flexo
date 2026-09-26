@@ -312,7 +312,7 @@ palette.
 ```python
 flexo.Figure("f", theme="paper")                               # the default
 flexo.Figure("f", theme="tikz")                                # a LaTeX/TikZ figure
-flexo.Figure("f", theme="dark", palette="Cobalt Citrus")       # slides on navy
+flexo.Figure("f", theme="dark", background=True)               # slides, on navy
 flexo.Figure("f", theme="swiss", font="Helvetica")             # any installed font
 flexo.Figure("f", palette=["#2a6f97", "#e76f51", "#2a9d8f"])   # your own colours
 ```
