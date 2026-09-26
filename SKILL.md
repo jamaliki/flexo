@@ -96,6 +96,13 @@ breaks a line; long labels wrap on their own.
   edit, then `Figure(theme="lab.yaml")` (or `FLEXO_THEME_PATH`). Palettes:
   `flexo.register_palette("Lab", [...])` or a `palettes:` file.
 
+## Another shape: slides and posters
+
+`flexo.fit_in_box(figure, width, height, words=13)` lays a figure out for a box
+(as written, turned so a tall stack reads left to right, or spaced closer --
+whichever sets its words largest); `flexo.turned(spec)` gives the turned figure
+itself. Write the figure once, as the paper needs it.
+
 ## Outputs and files
 
 `flexo.build(figure, dir, formats=("editable", "portable", "pdf", "png"))`:
