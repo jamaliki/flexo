@@ -118,6 +118,19 @@ side the author or the component grammar declared, not the one layout chose.
 - Linting reads a finished `Compilation` and never feeds back into it, so a lint
   rule can never change the figure it judges.
 
+## Other formats read the SVG back
+
+The SVG is the master. `flexo.drawing.read_drawing` reads Flexo's own SVG
+dialect back into typed primitives for writers of other formats (PowerPoint in
+[flexo-talk](https://github.com/jamaliki/flexo-talk), and a native PDF later):
+rectangles, ellipses and paths of absolute moves, lines and cubics, with paint
+resolved through groups; arrowheads resolved from their markers into a tip, a
+direction, a shape and an outline; and text as lines of runs, each with its
+absolute pen position, baseline, size, and the font file it is set in,
+measured with the shaping the layout used. Groups keep their ids, and a group
+`transform` of translation and uniform scale is applied, so a figure placed in
+a larger page reads back in place. A writer never parses SVG or measures text.
+
 ## Initial dependency policy
 
 The runtime uses only four focused dependencies: fontTools and HarfBuzz for
