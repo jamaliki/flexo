@@ -393,6 +393,10 @@ lab.yaml` writes out every setting a theme has, as a file to start from.
 Palettes can be registered on their own: `flexo.register_palette("Lab",
 ["#..", ...])`, or a file of `palettes:`. A setting a theme does not have is
 refused with the nearest one it does (`extends:` → `base:`), never ignored.
+Right-to-left text (Persian, Arabic, Hebrew) is ordered by Unicode's bidirectional
+algorithm (`flexo.bidi`), English words and formulae inside it included, and set
+in one face per script (Vazirmatn, Noto Sans Arabic, or Geeza Pro, whichever is
+installed first).
 `[words](https://...)` in a label is a link -- clickable in the SVG, the PDF, and
 flexo-talk's PowerPoint -- set in the accent colour.
 Code between backticks in a label (`` `fit()` ``) is set in `type: {mono_family: ...}`,

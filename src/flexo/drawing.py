@@ -30,6 +30,8 @@ from typing import Literal
 
 import uharfbuzz as hb
 
+from flexo.bidi import base_level, has_rtl, visual_order
+from flexo.bidi import levels as bidi_levels
 from flexo.fonts import FontFace, family_faces, hb_font, load_face, select_face
 from flexo.svg import local_name
 from flexo.text import DEFAULT_FALLBACKS
@@ -119,12 +121,18 @@ class Run:
     """How far the run's baseline is raised from its line's (a superscript)."""
     link: str = ""
     """The URL the run links to, if it is a link."""
+    rtl: bool = False
+    """Whether the run is shaped right to left (a piece of Persian, Arabic, Hebrew)."""
 
 
 @dataclass(frozen=True, slots=True)
 class Line:
     baseline: float
     runs: tuple[Run, ...]
+    """The line as it is seen: pieces of one direction each, left to right on the page."""
+    logical: tuple[Run, ...] = ()
+    """The line as it is read, when that differs (right-to-left text): for writers
+    whose reader orders text itself, such as a slide program. Empty otherwise."""
 
     @property
     def left(self) -> float:
@@ -1338,16 +1346,23 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
             )
             pen += width
     placed = []
+    everything = "".join(run.text for runs in lines for run in runs)
+    paragraph = base_level(everything) if has_rtl(everything) else None
     for runs in lines:
         if not runs:
             continue
         runs = _joined(runs)
+        logical: tuple[Run, ...] = ()
+        if paragraph is not None and simple:
+            logical = tuple(runs)
+            runs = _visual(runs, paragraph)
         width = max(run.x + run.width for run in runs) - min(run.x for run in runs)
         offset = {"start": 0.0, "middle": -width / 2.0, "end": -width}.get(anchor, 0.0)
         placed.append(
             Line(
                 runs[0].baseline + runs[0].shift,
                 tuple(replace(run, x=run.x + offset) for run in runs),
+                tuple(replace(run, x=run.x + offset) for run in logical),
             )
         )
     if not placed:
@@ -1365,6 +1380,34 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
         line_height,
         simple,
     )
+
+
+def _visual(runs: list[Run], paragraph: int) -> list[Run]:
+    """A line's runs cut into pieces of one direction and set in the order they are
+    seen, left to right from where the line starts (see ``flexo.bidi``)."""
+
+    text = "".join(run.text for run in runs)
+    level_of = bidi_levels(text, paragraph)
+    pieces: list[tuple[Run, str, int]] = []
+    at = 0
+    for run in runs:
+        start = at
+        for index, character in enumerate(run.text):
+            level = level_of[start + index]
+            if pieces and pieces[-1][0] is run and pieces[-1][2] == level:
+                pieces[-1] = (run, pieces[-1][1] + character, level)
+            else:
+                pieces.append((run, character, level))
+        at += len(run.text)
+    order = visual_order([level for _, _, level in pieces])
+    pen = runs[0].x
+    result = []
+    for index in order:
+        run, part, level = pieces[index]
+        width = _advance(run.face, run.weight, part) * run.size if run.face else 0.0
+        result.append(replace(run, text=part, x=pen, width=width, rtl=level % 2 == 1))
+        pen += width
+    return result
 
 
 def _style_of(run: Run) -> tuple:
