@@ -126,7 +126,11 @@ literal. A script cannot contain another script.
 
 A character that the figure's font does not have is set in the next font of the
 fallback stack that does; the stack ends in IBM Plex Sans, Liberation Sans, and
-Latin Modern Math, which together cover Greek and mathematical symbols. An
+Latin Modern Math, which together cover Greek and mathematical symbols. A
+character no bundled font has (Chinese, Japanese, Arabic, ...) is taken from an
+installed font that has it, and a run of such characters stays in that one
+font. Colour emoji fonts are never used, because a figure is drawn from
+outlines. A character that no usable font has is an error that names it. An
 accent is kept with its letter: if the primary font has the accent but cannot
 position it on that letter, the letter and the accent are both set in a
 fallback font that can.
