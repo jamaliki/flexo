@@ -49,6 +49,23 @@ class Terminal:
     """Where the stub out of the port ends: a run may come right up to it."""
 
 
+@dataclass(frozen=True, slots=True)
+class CaptionRoom:
+    """The room a connector's caption needs beside the run it is written on.
+
+    A caption sits above the middle of the connector's longest horizontal run,
+    so the run above keeps ``above`` away, not just a lane, wherever it passes
+    over the caption's ``width``. A connector with no horizontal run has its
+    caption right of its longest vertical run: the run to the right keeps
+    ``beside`` away wherever it passes the caption's ``height``.
+    """
+
+    above: float
+    width: float
+    beside: float
+    height: float
+
+
 @dataclass(slots=True)
 class Wire:
     """One connector's ink: polylines sharing vertices, plus the ports it ends at."""
@@ -68,13 +85,8 @@ class Wire:
     """Where the flow of a net ends: ``rail_at`` is a fraction of the way there."""
     rail_clamped: float | None = None
     """The fraction the trunk actually got, when ``rail_at`` could not be honoured."""
-    caption: tuple[float, float] | None = None
-    """``(room, width)`` a caption needs above the wire's longest horizontal run.
-
-    A connector's caption sits above the middle of that run, so the run above
-    it keeps ``room`` away, not just a lane, wherever it passes over the
-    caption's ``width``.
-    """
+    caption: CaptionRoom | None = None
+    """The room this connector's caption needs beside the run it sits on."""
 
     def terminal_clearance(self, point: Point) -> float | None:
         for terminal in self.terminals:
@@ -149,7 +161,7 @@ def _nudge_axis(
     for run in runs:
         _bound(run, wires, obstacles, walls, boundary, vertical)
     runs = _unify(runs, wires, obstacles, walls, boundary, vertical)
-    rooms = {} if vertical else _caption_rooms(runs, wires)
+    rooms = _caption_rooms(runs, wires, vertical)
     order = _ordered(runs, wires, spacing, vertical, rooms)
     # Room for captions first; where it does not fit, lanes alone, shrinking.
     positions = _solve(runs, order, spacing, rooms) if rooms else None
@@ -533,30 +545,53 @@ def _overlap(first: _Run, second: _Run) -> float:
     return min(first.high, second.high) - max(first.low, second.low)
 
 
-def _caption_rooms(runs: list[_Run], wires: list[Wire]) -> dict[tuple[int, int], float]:
-    """``{(above, below): room}`` for each horizontal run over a captioned run's caption."""
+def _caption_rooms(
+    runs: list[_Run], wires: list[Wire], vertical: bool
+) -> dict[tuple[int, int], float]:
+    """``{(first, second): room}`` for runs that must leave a caption room between them.
+
+    Along y, a run over the caption above a captioned wire's longest horizontal
+    run; along x, a run right of the caption beside a captioned wire's longest
+    vertical run, when the wire has no horizontal run to carry it.
+    """
 
     carriers: dict[int, int] = {}
     for index, run in enumerate(runs):
-        if wires[run.wire].caption is None:
+        wire = wires[run.wire]
+        if wire.caption is None or vertical == _has_horizontal(wire):
             continue
         best = carriers.get(run.wire)
         if best is None or run.high - run.low > runs[best].high - runs[best].low + _EPSILON:
             carriers[run.wire] = index
     rooms: dict[tuple[int, int], float] = {}
-    for below in carriers.values():
-        carrier = runs[below]
-        room, width = wires[carrier.wire].caption  # type: ignore[misc]
+    for index in carriers.values():
+        carrier = runs[index]
+        caption = wires[carrier.wire].caption
+        assert caption is not None
+        room, extent = (caption.beside, caption.height) if vertical else (
+            caption.above,
+            caption.width,
+        )
         middle = (carrier.low + carrier.high) / 2.0
-        low, high = middle - width / 2.0, middle + width / 2.0
-        for above, run in enumerate(runs):
-            if run.wire == carrier.wire or run.coordinate > carrier.coordinate + _EPSILON:
+        low, high = middle - extent / 2.0, middle + extent / 2.0
+        for other, run in enumerate(runs):
+            if run.wire == carrier.wire or (run.fixed and carrier.fixed):
                 continue
-            if carrier.coordinate - run.coordinate >= room or (run.fixed and carrier.fixed):
+            # Along y the caption is above (a smaller y); along x, to the right.
+            gap = (run.coordinate - carrier.coordinate) * (1.0 if vertical else -1.0)
+            if gap < -_EPSILON or gap >= room:
                 continue
             if min(run.high, high) - max(run.low, low) > _EPSILON:
-                rooms[(above, below)] = room
+                rooms[(index, other) if vertical else (other, index)] = room
     return rooms
+
+
+def _has_horizontal(wire: Wire) -> bool:
+    return any(
+        abs(start.y - end.y) < _EPSILON and abs(start.x - end.x) > _EPSILON
+        for path in wire.paths
+        for start, end in itertools.pairwise(path)
+    )
 
 
 def _ordered(
