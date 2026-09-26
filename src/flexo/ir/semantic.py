@@ -69,6 +69,8 @@ class TextRun:
     anchor for it, and none of the bundled text faces has a combining arrow;
     Flexo draws these marks itself, above the run, adding nothing to its width.
     """
+    code: bool = False
+    """Set in the typography's monospace family (``\\texttt{...}``, a slide's backticks)."""
 
 
 @dataclass(frozen=True, slots=True)
