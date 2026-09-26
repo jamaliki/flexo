@@ -654,6 +654,105 @@ def mixture_of_experts(theme: str = "paper") -> Figure:
     return figure
 
 
+def lora(theme: str = "paper") -> Figure:
+    """Low-rank adaptation (Hu et al. 2021, Figure 1)."""
+
+    with Figure("lora", width="single-column", theme=theme) as figure:
+        with figure.module("lora", label="LoRA", layout="column") as m:
+            x = m.text("x", "$x$")
+            with m.row("paths") as paths:
+                frozen = paths.block(
+                    "w", label=r"Pretrained weights $W \in \mathbb{R}^{d\times d}$", tone="frozen"
+                )
+                with paths.column("adapter") as adapter:
+                    down = adapter.block("a", label=r"$A = \mathcal{N}(0, \sigma^2)$")
+                    up = adapter.block("b", label="$B = 0$", input=down)
+            total = m.add("sum", inputs=[frozen, up])
+            m.text("h", "$h$", input=total)
+        figure.net(src=x, sinks=[frozen, down])
+    return figure
+
+
+def retrieval_augmented_generation(theme: str = "paper") -> Figure:
+    """Retrieval-augmented generation (Lewis et al. 2020, Figure 1)."""
+
+    with Figure("rag", theme=theme) as figure:
+        with figure.root.row("flow") as flow:
+            query = flow.text("query", "Query $x$")
+            encoder = flow.block("encoder", label="Query encoder $q(x)$", input=query)
+            with flow.column("retriever", label="Retriever") as retriever:
+                search = retriever.block("mips", label="MIPS", input=encoder)
+                index = retriever.block("index", label="Document index $d(z)$", tone="data")
+            generator = flow.block("generator", label=r"Generator $p_\theta$", tone="model")
+            flow.text("answer", "Answer $y$", input=generator)
+        figure.connect(index, search)
+        figure.connect(search, generator, label="top-$k$ documents")
+        figure.connect(query, generator)
+    return figure
+
+
+def latent_diffusion(theme: str = "paper") -> Figure:
+    """Latent diffusion (Rombach et al. 2022, Figure 3)."""
+
+    with Figure("latent-diffusion", theme=theme) as figure:
+        with figure.root.row("spaces") as spaces:
+            with spaces.column("pixel", label="Pixel space") as pixel:
+                x = pixel.text("x", "$x$")
+                encoder = pixel.block("encoder", label=r"$\mathcal{E}$", input=x)
+                decoder = pixel.block("decoder", label=r"$\mathcal{D}$")
+                pixel.text("reconstruction", r"$\tilde{x}$", input=decoder)
+            with spaces.column("latent", label="Latent space") as latent:
+                noising = latent.block("diffusion", label="Diffusion process", input=encoder)
+                denoiser = latent.block(
+                    "unet", label=r"Denoising U-Net $\epsilon_\theta$", input=noising
+                )
+            with spaces.column("conditioning", label="Conditioning") as conditioning:
+                text = conditioning.text("text", "Text")
+                condition = conditioning.block("tau", label=r"$\tau_\theta$", input=text)
+        figure.connect(denoiser, decoder)
+        figure.connect(condition, denoiser, label="cross-attention")
+    return figure
+
+
+def actor_critic(theme: str = "paper") -> Figure:
+    """Actor-critic (Sutton and Barto 2018, Figure 6.15 of the first edition)."""
+
+    with Figure("actor-critic", theme=theme) as figure:
+        with figure.root.column("loop") as loop:
+            with loop.group("agent", label="Agent", layout="row") as agent:
+                actor = agent.block("actor", label="Actor (policy)")
+                critic = agent.block("critic", label="Critic (value)")
+            environment = loop.block("environment", label="Environment", tone="data")
+        figure.connect(actor, environment, label="action")
+        figure.connect(environment, critic, label="state, reward")
+        figure.connect(environment, actor, label="state")
+        figure.connect(critic, actor, label="TD error")
+    return figure
+
+
+def mapreduce(theme: str = "paper") -> Figure:
+    """MapReduce execution (Dean and Ghemawat 2004, Figure 1)."""
+
+    with Figure("mapreduce", theme=theme) as figure:
+        with figure.root.row("stages") as stages:
+            with stages.column("inputs", label="Input files") as inputs:
+                splits = [
+                    inputs.block(f"split{k}", label=f"split {k}", tone="data") for k in range(3)
+                ]
+            with stages.column("map", label="Map phase") as map_phase:
+                mappers = [
+                    map_phase.block(f"m{k}", label="worker", input=split)
+                    for k, split in enumerate(splits)
+                ]
+            with stages.column("reduce", label="Reduce phase") as reduce_phase:
+                reducers = [reduce_phase.block(f"r{k}", label="worker") for k in range(2)]
+            with stages.column("outputs", label="Output files") as outputs:
+                for k, reducer in enumerate(reducers):
+                    outputs.block(f"out{k}", label=f"output {k}", tone="data", input=reducer)
+        figure.connect_all(mappers, reducers, shape="straight")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -688,6 +787,11 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         feedback_control,
         faster_rcnn,
         mixture_of_experts,
+        lora,
+        retrieval_augmented_generation,
+        latent_diffusion,
+        actor_critic,
+        mapreduce,
     )
 }
 """Every figure here, by name."""
