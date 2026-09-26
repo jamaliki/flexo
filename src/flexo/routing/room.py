@@ -76,39 +76,39 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
                             amount = clearance - to_box + lane
                             needs[owner_id][side] = max(needs[owner_id].get(side, 0.0), amount)
 
+    above: dict[str, int] = defaultdict(int)
+
     def over_contents(owner_id: str, lines: tuple[tuple[Point, ...], ...]) -> None:
-        """A run between a group's title and its contents asks for a corridor there.
+        """Count a connector that runs between a group's title and its contents.
 
         With too little air under the title, a route that has to pass over the
         contents goes round the title instead -- through the band that belongs
-        to the words. The room this asks for opens the corridor it wanted.
+        to the words -- or squeezes against another. Each such connector asks
+        for a lane there (see below).
         """
 
         group = routed.fitted.group(owner_id)
         if not group.measured.label.lines or group.measured.spec.role == "canvas":
             return
+        top = _contents_top(owner_id)
+        if top is None:
+            return
+        if any(
+            abs(start.y - end.y) < 1e-6 and start.y < top - 1e-6
+            for line in lines
+            for start, end in pairwise(line)
+        ):
+            above[owner_id] += 1
+
+    def _contents_top(owner_id: str) -> float | None:
+        group = routed.fitted.group(owner_id)
         children = [
             routed.fitted.group(child).bounds
             if child in groups
             else routed.fitted.node(child).bounds
             for child in group.measured.spec.children
         ]
-        if not children:
-            return
-        contents_top = min(bounds.top for bounds in children)
-        for line in lines:
-            for start, end in pairwise(line):
-                if abs(start.y - end.y) < 1e-6 and start.y < contents_top - 1e-6:
-                    title_bottom = (
-                        group.bounds.top
-                        + group.measured.spec.layout.authored_padding(style.group_padding).top
-                        + group.measured.label.height
-                    )
-                    gap = contents_top - title_bottom
-                    amount = 2.0 * clearance + lane - gap
-                    if amount > 1e-6:
-                        needs[owner_id]["top"] = max(needs[owner_id].get("top", 0.0), amount)
-                    return
+        return min((bounds.top for bounds in children), default=None)
 
     groups = {group.measured.spec.id for group in routed.fitted.groups}
     for edge in routed.edges:
@@ -127,8 +127,21 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
     for net in routed.nets:
         ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
         owner = bounded_owner(figure, parents, ids)
+        over_contents(owner, net.pieces)
         check(owner, tuple(point for piece in net.pieces for point in piece))
         squeezed(owner, set(ids), net.pieces)
+    for owner_id, count in above.items():
+        # A lane per connector over the contents, with clearance either side.
+        group = routed.fitted.group(owner_id)
+        title_bottom = (
+            group.bounds.top
+            + group.measured.spec.layout.authored_padding(style.group_padding).top
+            + group.measured.label.height
+        )
+        gap = (_contents_top(owner_id) or title_bottom) - title_bottom
+        amount = 2.0 * clearance + count * lane - gap
+        if amount > 1e-6:
+            needs[owner_id]["top"] = max(needs[owner_id].get("top", 0.0), amount)
     return {owner: sides for owner, sides in needs.items() if sides}
 
 
