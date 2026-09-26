@@ -15,7 +15,9 @@ that names nothing in the figure is still an error.)
      horizontal if they share a row.
    - The branches of one net attach on one common side: branches spread left
      to right are entered from above or below, branches stacked top to bottom
-     from the left or right.
+     from the left or right. When the source stands in line with the
+     branches, the nearest one is entered straight on and the others branch
+     off that stem.
    - A side whose approach another component blocks is exchanged for a facing
      side with a clear approach, or failing that any clear side.
    - A side does not take one value in and send a different one out. The end
