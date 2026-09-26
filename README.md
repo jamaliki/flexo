@@ -320,6 +320,8 @@ its ink, and tries it as written, **turned** (`flexo.turned(spec)`: rows become
 columns, a stack that reads upward reads left to right, grids transpose, ports
 and hints turn with it, vector glyphs lie down), and with tighter spacing --
 keeping the most natural layout whose words come within 12% of the largest.
+When none sets the words at three quarters of their size, long rows and columns
+are **folded** onto two lines (`flexo.orient.wrapped`) as a last resort.
 Measured sizes rank the candidates, so only layouts that could win are routed.
 [flexo-talk](https://github.com/jamaliki/flexo-talk) lays every slide figure out
 this way.

@@ -200,4 +200,38 @@ def _reads_upward(figure: FigureSpec, under: dict[str, set[str]]) -> bool:
     return score > 0
 
 
-__all__ = ["turned"]
+def wrapped(figure: FigureSpec, *, longest: int = 5) -> FigureSpec:
+    """``figure`` with each long row or column folded onto two lines.
+
+    A row of ``longest`` or more parts becomes a grid of two rows, read left to
+    right and then on to the next row, as a long pipeline is set across a page;
+    a column becomes two columns, read down and then on. The parts and their
+    wiring are unchanged; only where they sit.
+    """
+
+    import math
+
+    groups = []
+    for group in figure.groups:
+        kind, count = group.layout.kind, len(group.children)
+        if kind in {"row", "column"} and count >= longest:
+            half = math.ceil(count / 2)
+            children = enumerate(group.children)
+            if kind == "row":
+                placements = tuple((child, n // half, n % half) for n, child in children)
+                columns = half
+            else:
+                placements = tuple((child, n % half, n // half) for n, child in children)
+                columns = 2
+            group = replace(
+                group,
+                layout=replace(
+                    group.layout, kind="grid", columns=columns, placements=placements,
+                    width=None, height=None, reflow=None,
+                ),
+            )
+        groups.append(group)
+    return replace(figure, groups=tuple(groups))
+
+
+__all__ = ["turned", "wrapped"]
