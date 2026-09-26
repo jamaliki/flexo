@@ -64,6 +64,11 @@ def parser() -> argparse.ArgumentParser:
     retheme.add_argument("--output", "-o", type=Path, required=True)
 
     subcommands.add_parser("themes", help="List themes, palettes, and bundled fonts.")
+    theme = subcommands.add_parser(
+        "theme", help="Print a theme as a file to start your own from (see docs/tutorial.md)."
+    )
+    theme.add_argument("name", help="A theme name, or a theme file.")
+    theme.add_argument("--output", "-o", type=Path, help="Write the file here instead.")
     return result
 
 
@@ -97,6 +102,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _retheme(arguments)
         if arguments.command == "themes":
             return _themes()
+        if arguments.command == "theme":
+            return _theme(arguments)
         parser().print_help()
         return 0
     except (FlexoError, OSError, ValueError) as error:
@@ -192,7 +199,24 @@ def _retheme(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _theme(arguments: argparse.Namespace) -> int:
+    from flexo.theme_files import dump_theme
+    from flexo.themes import theme
+
+    name = theme(arguments.name).name
+    text = dump_theme(name)
+    if arguments.output is None:
+        print(text, end="")
+    else:
+        arguments.output.write_text(text, encoding="utf-8")
+        print(f"wrote {arguments.output}")
+    return 0
+
+
 def _themes() -> int:
+    from flexo.theme_files import CUSTOM_PALETTES, _load_environment
+
+    _load_environment()
     width = max(len(name) for name in THEMES)
     print("Themes (Figure(theme=...)):")
     for name, entry in THEMES.items():
@@ -200,6 +224,8 @@ def _themes() -> int:
     print("\nPalettes (Figure(palette=...), or a list of hex colours):")
     for name, colours in design_palettes().items():
         print(f"  {name:<24} {' '.join(colours)}")
+    for name, colours in CUSTOM_PALETTES.items():
+        print(f"  {name:<24} {' '.join(colours)}  (registered)")
     print("\nBundled fonts (Figure(font=...); any installed font works too):")
     for family in bundled_families():
         print(f"  {family}")

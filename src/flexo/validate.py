@@ -11,10 +11,9 @@ from flexo.fonts import family_faces, require_family
 from flexo.ir.semantic import FigureSpec, GroupSpec, layout_connections
 from flexo.themes import (
     DEFAULT_PALETTE_NAME,
-    THEMES,
     parse_palette,
+    theme,
     unknown_palette,
-    unknown_theme,
 )
 
 
@@ -263,10 +262,19 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                 entity_id=figure.id,
             )
         )
-    if figure.style not in THEMES:
-        diagnostics.append(replace(unknown_theme(figure.style), entity_id=figure.id))
-    elif figure.palette != DEFAULT_PALETTE_NAME and parse_palette(figure.palette) is None:
-        diagnostics.append(replace(unknown_palette(figure.palette), entity_id=figure.id))
+    try:
+        # A theme file is read here, so a mistake in it is reported with the figure.
+        theme(figure.style)
+    except FlexoError as error:
+        diagnostics.extend(replace(item, entity_id=figure.id) for item in error.diagnostics)
+    else:
+        try:
+            known = figure.palette == DEFAULT_PALETTE_NAME or parse_palette(figure.palette)
+        except FlexoError as error:
+            diagnostics.extend(replace(item, entity_id=figure.id) for item in error.diagnostics)
+        else:
+            if not known:
+                diagnostics.append(replace(unknown_palette(figure.palette), entity_id=figure.id))
     if figure.font is not None and not family_faces(figure.font):
         try:
             require_family(figure.font)

@@ -133,6 +133,11 @@ def parse_palette(value: str) -> tuple[str, ...] | None:
     if text.startswith("#"):
         colours = tuple(part.strip().lower() for part in text.split(",") if part.strip())
         return colours or None
+    from flexo.theme_files import custom_palette
+
+    registered = custom_palette(text)
+    if registered is not None:
+        return registered
     named = palette_colours(text)
     if named is not None:
         return named
@@ -206,6 +211,13 @@ def tinted(
             result.append((fill, stroke, page.ink))
         return result
 
+    rule.settings = {  # type: ignore[attr-defined]
+        "rule": "tinted",
+        "fill_lightness": fill_lightness,
+        "fill_chroma": fill_chroma,
+        "stroke_lightness": stroke_lightness,
+        "stroke_chroma": stroke_chroma,
+    }
     return rule
 
 
@@ -221,6 +233,7 @@ def solid(stroke: str | None = None) -> ToneRule:
             result.append((fill, stroke or page.ink, label))
         return result
 
+    rule.settings = {"rule": "solid", **({"stroke": stroke} if stroke else {})}  # type: ignore[attr-defined]
     return rule
 
 
@@ -236,6 +249,7 @@ def accent_then_grey(fill_mix: float = 0.82) -> ToneRule:
             result.append((mix(page.ink, page.canvas, amount), page.neutral_stroke, page.ink))
         return result
 
+    rule.settings = {"rule": "accent-then-grey", "fill_mix": fill_mix}  # type: ignore[attr-defined]
     return rule
 
 
@@ -246,7 +260,44 @@ def greys() -> ToneRule:
         steps = (0.9, 0.72, 0.97, 0.82, 0.62, 0.94, 0.78, 0.86)
         return [(mix(page.ink, page.canvas, amount), page.ink, page.ink) for amount in steps]
 
+    rule.settings = {"rule": "greys"}  # type: ignore[attr-defined]
     return rule
+
+
+TONE_RULES: dict[str, Callable[..., ToneRule]] = {}
+"""How tones are painted, by the name a theme file gives: see ``tone_rule``."""
+
+
+def tone_rule(settings: dict[str, object]) -> ToneRule:
+    """A tone rule from a theme file's ``tones:``: ``rule`` names it, the rest tune it.
+
+    ``tinted`` (pale fills, same-hue outlines: ``fill_lightness``, ``fill_chroma``,
+    ``stroke_lightness``, ``stroke_chroma``), ``solid`` (the colour itself as
+    the fill: ``stroke``), ``accent-then-grey`` (one colour, then greys:
+    ``fill_mix``), or ``greys`` (lightness only).
+    """
+
+    options = dict(settings)
+    name = str(options.pop("rule", "tinted"))
+    if name not in TONE_RULES:
+        raise FlexoError(
+            Diagnostic(
+                "theme.tones.unknown",
+                f'Unknown tone rule "{name}".',
+                hint=f"Use one of: {', '.join(TONE_RULES)}.",
+            )
+        )
+    try:
+        return TONE_RULES[name](**options)
+    except TypeError as error:
+        raise FlexoError(
+            Diagnostic("theme.tones.invalid", f'Tone rule "{name}": {error}.')
+        ) from None
+
+
+TONE_RULES.update(
+    {"tinted": tinted, "solid": solid, "accent-then-grey": accent_then_grey, "greys": greys}
+)
 
 
 # -- palette derivation --------------------------------------------------------------
@@ -823,6 +874,11 @@ def theme(name: str) -> Theme:
     """The theme named ``name``, or a diagnostic listing the ones there are."""
 
     found = THEMES.get(name)
+    if found is None:
+        from flexo.theme_files import resolve_theme
+
+        resolved = resolve_theme(name)
+        found = THEMES.get(resolved) if resolved else THEMES.get(name)
     if found is None:
         raise FlexoError(unknown_theme(name))
     return found
