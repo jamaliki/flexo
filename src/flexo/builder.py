@@ -218,6 +218,9 @@ class Figure:
     ``sketch`` draws the figure by hand: ``True`` for the default hand, or
     settings such as ``{"roughness": 0.3, "fill": "hatch"}``; see
     ``flexo.Sketch``. The ``sketch`` theme is already drawn by hand.
+    ``background`` paints the page: left out, the SVG is transparent (unless
+    the theme says otherwise); ``True`` paints the theme's page colour, and a
+    colour paints that.
     ``layout`` arranges what is placed directly on the figure: a column by
     default, or ``"flow"`` to lay it out from its wiring (see ``group``).
     ``style`` is the older name for ``theme`` and means the same thing.
@@ -234,6 +237,7 @@ class Figure:
         font: str | None = None,
         conventions: Conventions | Mapping[str, str] | None = None,
         sketch: Sketch | Mapping[str, object] | bool | None = None,
+        background: bool | str | None = None,
         layout: LayoutKind | LayoutSpec | None = None,
         style: str | None = None,
     ) -> None:
@@ -251,6 +255,7 @@ class Figure:
         self.font = font
         self.conventions = parse_conventions(conventions)
         self.sketch = parse_sketch(sketch)
+        self.background = background
         if layout is None or isinstance(layout, str):
             layout = LayoutSpec(layout or "column", align="auto", justify="center")  # type: ignore[arg-type]
         root = _GroupDraft(
@@ -330,6 +335,7 @@ class Figure:
                 font=self.font,
                 conventions=self.conventions,
                 sketch=self.sketch,
+                background=self.background,
                 nodes=tuple(self._nodes),
                 edges=tuple(
                     replace(

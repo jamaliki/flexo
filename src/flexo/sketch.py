@@ -577,7 +577,8 @@ def sketch_svg(root: ET.Element, sketch: Sketch, *, canvas: str = "#ffffff") -> 
         context = paint_of(parent)
         key = element.get("id") or f"{local_name(element.tag)}{shapes.index(element)}"
         if element.get("id") == "canvas.background":
-            if sketch.paper:
+            # Stains are marks on paper: a transparent page has none.
+            if sketch.paper and element.get("fill", "none") != "none":
                 _stain_paper(parent, element, sketch, canvas, dark)
             continue
         _sketch_shape(parent, element, context, key, sketch, canvas, dark)

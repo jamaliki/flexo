@@ -594,6 +594,8 @@ class FigureSpec:
     """
     sketch: Sketch | None = None
     """Draw by hand, laid over the theme's own hand; see ``flexo.sketch``."""
+    background: bool | str | None = None
+    """Paint the page (``True``, or a colour) or not (``False``); ``None`` is the theme's."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")

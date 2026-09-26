@@ -97,6 +97,7 @@ def parse_figure(document: object) -> FigureSpec:
         font=figure_data.get("font"),
         conventions=parse_conventions(figure_data.get("conventions")),
         sketch=parse_sketch(figure_data.get("sketch")),
+        background=figure_data.get("background"),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(edges),
         nets=tuple(_net(item, reference) for item in document.get("nets", [])),
@@ -154,6 +155,8 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
         result["conventions"] = figure.conventions.changes()
     if figure.sketch is not None:
         result["sketch"] = figure.sketch.changes() or True
+    if figure.background is not None:
+        result["background"] = figure.background
     return result
 
 

@@ -331,6 +331,12 @@ flexo.Figure("f", palette=["#2a6f97", "#e76f51", "#2a9d8f"])   # your own colour
 | `rams`, `economist` | Quiet greys and one signal colour; a news graphic with red section bands |
 | `classic` | Flexo's original look, kept exactly |
 
+Every figure's SVG is **transparent**: the theme's page colour is used to
+choose fills and contrast, but the page itself is left unpainted, so the figure
+sits on whatever it is placed on. `Figure(background=True)` paints the theme's
+page colour (the cream of `archive` or `sketch`, the navy of `dark`), and
+`background="#ffffff"` paints any colour.
+
 The themes follow the modes of [labviz](https://github.com/jamaliki/labviz), and
 the palettes are design-corner's, the same ones labviz plots with, so a diagram
 and the plots beside it read as one figure. `flexo themes` lists them all;

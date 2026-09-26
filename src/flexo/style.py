@@ -113,6 +113,10 @@ class LayoutStyle:
     conventions: Conventions = DEFAULT_CONVENTIONS
     sketch: Sketch | None = None
     """Draw the figure by hand (see ``flexo.sketch``); ``None`` draws it ruled."""
+    background: bool | str = False
+    """Whether the page is painted: ``False`` leaves it transparent, so a figure
+    sits on whatever it is placed on; ``True`` paints the theme's page colour;
+    a colour (``"#ffffff"``) paints that."""
     """How branches, merges, and shared arrivals are drawn (``flexo.conventions``)."""
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
     vector_cell: Length = _PT_8_5
