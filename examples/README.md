@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Fifty-two figures from papers and textbooks, each a short function. They use
+Fifty-nine figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -82,3 +82,6 @@ suite checks this).
 | [![Federated averaging](build/literature/federated-averaging.preview.png)](build/literature/federated-averaging.preview.png) Federated averaging | [![Two-tower retrieval](build/literature/two-tower.preview.png)](build/literature/two-tower.preview.png) Two-tower retrieval | [![Network stack between two hosts](build/literature/network-stack.preview.png)](build/literature/network-stack.preview.png) Network stack between two hosts |
 | [![Batch normalisation](build/literature/batch-normalization.preview.png)](build/literature/batch-normalization.preview.png) Batch normalisation | [![Skip-gram](build/literature/skip-gram.preview.png)](build/literature/skip-gram.preview.png) Skip-gram | [![Extract, transform, load](build/literature/extract-transform-load.preview.png)](build/literature/extract-transform-load.preview.png) Extract, transform, load |
 | [![Autoencoder](build/literature/autoencoder.preview.png)](build/literature/autoencoder.preview.png) Autoencoder | [![Message passing](build/literature/message-passing.preview.png)](build/literature/message-passing.preview.png) Message passing | [![Network stack in `tikz`](build/literature/network-stack-tikz.preview.png)](build/literature/network-stack-tikz.preview.png) Network stack in `tikz` |
+| [![Recurrent network with its loop](build/literature/recurrent-network.preview.png)](build/literature/recurrent-network.preview.png) Recurrent network with its loop | [![Recurrent network, unrolled](build/literature/unrolled-recurrent-network.preview.png)](build/literature/unrolled-recurrent-network.preview.png) Recurrent network, unrolled | [![Markov chain](build/literature/markov-chain.preview.png)](build/literature/markov-chain.preview.png) Markov chain |
+| [![IMPALA](build/literature/impala.preview.png)](build/literature/impala.preview.png) IMPALA | [![Class hierarchy](build/literature/class-hierarchy.preview.png)](build/literature/class-hierarchy.preview.png) Class hierarchy | [![Decision tree](build/literature/decision-tree.preview.png)](build/literature/decision-tree.preview.png) Decision tree |
+| [![Neural Turing Machine](build/literature/neural-turing-machine.preview.png)](build/literature/neural-turing-machine.preview.png) Neural Turing Machine | [![Markov chain in `tikz`](build/literature/markov-chain-tikz.preview.png)](build/literature/markov-chain-tikz.preview.png) Markov chain in `tikz` | [![IMPALA in `tikz`](build/literature/impala-tikz.preview.png)](build/literature/impala-tikz.preview.png) IMPALA in `tikz` |
