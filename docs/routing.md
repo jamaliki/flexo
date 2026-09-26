@@ -89,7 +89,9 @@ that names nothing in the figure is still an error.)
 6. **Room.** A connector or caption that had to leave the container it belongs
    to, a caption that found no clear place over or under the contents, or a
    run pressed between a box and the container's edge, asks that container for
-   more room, and the figure is laid out again (up to three
+   more room. A caption with no clear place between two children of a row or
+   column, or two lines laid closer than a lane in the gap between them, asks
+   for that gap to widen, and the figure is laid out again (up to three
    rounds). A crossing whose route could instead run along the container's top
    or bottom edge is offered a lane there, kept only if it removes the crossing.
 

@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Sixty-eight figures from papers and textbooks, each a short function. They use
+Sixty-nine figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -90,3 +90,4 @@ suite checks this).
 | [![Multi-task learning, written flat](build/literature/multi-task-learning.preview.png)](build/literature/multi-task-learning.preview.png) Multi-task learning, written flat | [![Multi-task learning in `tikz`](build/literature/multi-task-learning-tikz.preview.png)](build/literature/multi-task-learning-tikz.preview.png) Multi-task learning in `tikz` |  |
 | [![Citric acid cycle](build/literature/citric-acid-cycle.preview.png)](build/literature/citric-acid-cycle.preview.png) Citric acid cycle | [![Citric acid cycle in `tikz`](build/literature/citric-acid-cycle-tikz.preview.png)](build/literature/citric-acid-cycle-tikz.preview.png) Citric acid cycle in `tikz` |  |
 | [![AlphaZero training loop](build/literature/alphazero.preview.png)](build/literature/alphazero.preview.png) AlphaZero training loop | [![Knowledge graph](build/literature/knowledge-graph.preview.png)](build/literature/knowledge-graph.preview.png) Knowledge graph |  |
+| [![Deep Q-learning](build/literature/dqn.preview.png)](build/literature/dqn.preview.png) Deep Q-learning | [![Deep Q-learning in `tikz`](build/literature/dqn-tikz.preview.png)](build/literature/dqn-tikz.preview.png) Deep Q-learning in `tikz` |  |

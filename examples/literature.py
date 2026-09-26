@@ -1315,6 +1315,26 @@ def knowledge_graph(theme: str = "paper") -> Figure:
     return figure
 
 
+def dqn(theme: str = "paper") -> Figure:
+    """Deep Q-learning with experience replay and a target network (Mnih et al. 2015)."""
+
+    with Figure("dqn", theme=theme) as figure:
+        with figure.root.row("agent") as row:
+            environment = row.block("env", label="Environment", tone="data")
+            replay = row.block("buffer", label="Replay buffer", tone="data", input=environment)
+            with row.column("networks") as networks:
+                online = networks.block("q", label=r"Q-network $Q(s, a; \theta)$", tone="model")
+                target = networks.block(
+                    "target", label=r"Target network $Q(s, a; \theta^-)$", tone="frozen"
+                )
+            loss = row.block("loss", label="TD loss", inputs=[online, target])
+        figure.net(src=replay, sinks=[online, target], label="minibatch")
+        figure.connect(online, environment, label=r"$\epsilon$-greedy action")
+        figure.connect(online, target, label="copy every $C$ steps", line="dashed")
+        figure.connect(loss, online, label=r"$\nabla_\theta$", line="dashed")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1386,6 +1406,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         citric_acid_cycle,
         alphazero,
         knowledge_graph,
+        dqn,
     )
 }
 """Every figure here, by name."""

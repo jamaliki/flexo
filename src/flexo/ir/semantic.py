@@ -168,6 +168,14 @@ class LayoutSpec:
     when a connector or its caption would otherwise leave this group. Layout
     counts it as padding; the title stays where the authored padding puts it.
     """
+    gap_room: tuple[float, ...] = ()
+    """Extra space the compiler added to each gap between children, in points.
+
+    Indexed like the gaps layout computes (a grid's column gaps, then its row
+    gaps). Never authored and never serialized: routing asks for it
+    (``routing.room``) when lines or a caption have no room between two
+    children.
+    """
     placements: tuple[tuple[str, int, int], ...] = ()
     """``(child id, row, column)`` for grid children placed by address.
 

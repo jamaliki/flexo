@@ -25,12 +25,14 @@ one-to-one become grids, and every `align="auto"` becomes a concrete alignment.
 The authored figure keeps what was written; only the measured figure sees the
 lowered form.
 
-Routing feeds back into layout only through padding, for up to `ROOM_ROUNDS`
-rounds: when a route or its caption leaves the container it belongs to, a
-caption over or under its container's contents finds no clear place, or a
-route runs pressed between a box and that container's edge, `routing.room` asks for more room on that side
-(`LayoutSpec.room`, counted as padding by layout but not by the title), and the
-compiler lays the figure out and routes it again. Then, if connectors still
+Routing feeds back into layout only through padding and gaps, for up to
+`ROOM_ROUNDS` rounds: when a route or its caption leaves the container it
+belongs to, a caption finds no clear place, two routes squeeze into one gap, or
+a route runs pressed between a box and that container's edge, `routing.room`
+asks for more room on that side of the container (`LayoutSpec.room`, counted as
+padding by layout but not by the title) or in that gap between two children
+(`LayoutSpec.gap_room`), and the compiler lays the figure out and routes it
+again. Then, if connectors still
 cross, `_uncrossed` offers a lane of room along the top or bottom of a crossing
 edge's container, where both of the edge's ends sit in that row, and keeps the
 room only if a relayout removes crossings (at most `CROSSING_ROOM_TRIALS`
