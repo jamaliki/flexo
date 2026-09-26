@@ -1096,16 +1096,14 @@ def _place_on_side(
         in_order = all(a <= b + 1e-9 for a, b in itertools.pairwise(values))
         desired = values if in_order else sorted(values)
     else:
-        # One pin at the middle of its side; several spaced evenly across the
-        # central ``pin_spread`` of it, the outermost at its ends. A declared
-        # offset only says which side a movable port starts on.
+        # The central ``pin_spread`` of the side, cut into one equal share per
+        # pin, each pin at the middle of its share: one pin at the middle of
+        # the side, two at 30% and 70% of it. A declared offset only says
+        # which side a movable port starts on.
         margin = (high - low) * (1.0 - style.conventions.pin_spread) / 2.0
         first, last = low + margin, high - margin
         count = len(keys)
-        evenly = [
-            first + (last - first) * index / (count - 1) if count > 1 else (low + high) / 2.0
-            for index in range(count)
-        ]
+        evenly = [first + (last - first) * (index + 0.5) / count for index in range(count)]
         desired = [
             value if value is not None else even for value, even in zip(fixed, evenly, strict=True)
         ]

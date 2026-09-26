@@ -498,7 +498,7 @@ def test_a_lone_arrow_meets_its_side_at_the_middle() -> None:
 
 
 def test_arrows_on_one_side_spread_across_its_central_part() -> None:
-    """Two arrows between a pair of boxes sit a tenth of the side in from each end."""
+    """Two arrows between a pair of boxes meet each side at 30% and 70% of it."""
 
     def ends(**conventions: float) -> list[float]:
         with Figure("pair", conventions=conventions) as figure, figure.root.row("r") as row:
@@ -515,8 +515,8 @@ def test_arrows_on_one_side_spread_across_its_central_part() -> None:
             for edge in compiled.routed.edges
         )
 
-    assert ends() == pytest.approx([0.1, 0.9])
-    assert ends(pin_spread=0.5) == pytest.approx([0.25, 0.75])
+    assert ends() == pytest.approx([0.3, 0.7])
+    assert ends(pin_spread=0.5) == pytest.approx([0.375, 0.625])
     with pytest.raises(ValueError, match="pin_spread"):
         Figure("bad", conventions={"pin_spread": 1.5})
 
