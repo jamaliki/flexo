@@ -214,11 +214,21 @@ class Grid:
             endings.setdefault(self.index(point), surcharge)
         targets = [(self.xs[ex], self.ys[ey], charge) for (ex, ey), charge in endings.items()]
 
+        # The estimate depends only on the state's cell and heading, and a state is
+        # pushed each time its cost improves: remember it rather than recompute it
+        # against every goal (a long pin edge is many goals).
+        estimates: dict[tuple[float, float, int], float] = {}
+
         def estimate_from(px: float, py: float, heading: int) -> float:
-            return min(
-                charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
-                for tx, ty, charge in targets
-            )
+            key = (px, py, heading)
+            known = estimates.get(key)
+            if known is None:
+                known = min(
+                    charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
+                    for tx, ty, charge in targets
+                )
+                estimates[key] = known
+            return known
         # A state is (x, y, heading, turned): ``turned`` says the last move was a
         # turn in place, and a second one there would reverse the route on itself.
         frontier: list[tuple[float, float, int, int, int, int, int]] = []
