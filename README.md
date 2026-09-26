@@ -77,11 +77,10 @@ authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
 `inputs=` connects several. `connect(a, b)` draws an edge later,
 `net(src=a, sinks=[b, c])` draws one value going to several places, and
 `merge(sinks=[a, b], dst=c)` draws several values joining before one place.
-`connect`, `net`, and `merge` belong to the figure, not to a group:
-`figure.connect(a, b)` and
-`m.connect(a, b)` are the same edge, so an edge between groups is written
-wherever both ends are in hand. The
-[authoring guide](docs/guide.md) covers each component and option.
+Edges and nets belong to the figure, not to a group: `figure.connect(a, b)`
+and `m.connect(a, b)` are the same edge, so an edge between groups is written
+wherever both ends are in hand. The [authoring guide](docs/guide.md) covers
+each component and option.
 
 ### Operators and words
 
@@ -95,8 +94,9 @@ m.text("in", "Inputs")                   # words an arrow can start or end at
 
 Each value arriving at an operator gets its own arrow into the circle, on the
 side that faces where the value comes from. Three or more values from one
-direction join on a bus and enter as one arrow. The symbols `+`, `x`, `-`, `.` and
-`~` are drawn as strokes, so they sit exactly in the centre in any typeface.
+direction join on a bus and enter as one arrow. The symbols `+`, `x`, `-`, `.`
+and `~` are drawn as strokes, so they sit exactly in the centre in any
+typeface.
 
 A value that enters an operator from the side -- a position embedding added to
 a stream of tokens -- goes in a row with the operator. The row is aligned on
