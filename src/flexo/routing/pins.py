@@ -578,6 +578,26 @@ def _separate_directions(
             ]
             if alternatives:
                 end.group = (end.group[0], end.group[1], alternatives[0], end.group[3])
+            elif (
+                not end.arriving
+                and not any(
+                    other.arriving and other.counterpart == end.counterpart
+                    for other in members_on_side
+                )
+                and any(
+                    other.group is not None
+                    and not other.group[3]
+                    and other.group[0] == end.group[0]
+                    and other.group[2] is port_spec.side
+                    and other.reference.port_name == end.reference.port_name
+                    for other in ends
+                )
+            ):
+                # Nothing else faces the target, but the same value already
+                # leaves by its own side: branch off that line -- the feedback
+                # tapped from a plant's output -- instead of leaving backwards.
+                # A pair of arrows each way between two boxes stays as it is.
+                end.group = (end.group[0], end.group[1], port_spec.side, end.group[3])
 
 
 def _spread_operator_inputs(ends: list[End]) -> None:

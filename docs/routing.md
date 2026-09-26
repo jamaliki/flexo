@@ -18,6 +18,12 @@ that names nothing in the figure is still an error.)
      from the left or right.
    - A side whose approach another component blocks is exchanged for a facing
      side with a clear approach, or failing that any clear side.
+   - A side does not take one value in and send a different one out. The end
+     that is off its port's usual side moves to another side that faces its
+     other end. A departure with no such side leaves by its port's usual side
+     if the same value already leaves there, so a feedback loop taps the
+     output line. Arrows in both directions between the same two boxes stay
+     side by side.
    - A circle, diamond, or operator takes one line per corner while corners
      last, arrivals first.
 
