@@ -154,8 +154,14 @@ fallback font that can.
 are placed after routing. The candidate positions are above and below each
 horizontal run and on either side of each vertical run, at the middle and then
 further toward either end. A caption takes the first candidate that overlaps no
-component, title, other caption, or line, and the least-overlapping one when
-none is free. A caption names the value its edge carries, so a captioned
+component, title, other caption, or line. When none is free it takes the
+cheapest: leaving the canvas (which then grows), before covering a line,
+before covering a box. Room for captions is made before they are placed: a
+line running over a captioned edge keeps a caption's height away from it, not
+just a lane, and a grid leaves a caption's height in the row gap between
+diagonal neighbours joined by a captioned edge. Lint warns about any caption
+that still overlaps a component, another caption, or a line
+(`routing.caption.overlap`, `routing.caption.covers-line`). A caption names the value its edge carries, so a captioned
 edge gets pins of its own and is drawn as its own line, even next to another
 edge between the same two ports; only where it leaves a side too short for a
 pin each does it share a stem with its neighbours. If a caption does not fit

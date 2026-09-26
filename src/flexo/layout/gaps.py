@@ -215,7 +215,8 @@ def _grid_gaps(
         columns[boundary] = max(columns[boundary], clearance + arrival)
     # An edge between neighbouring cells -- routed or straight -- also needs
     # room for its arrow, and for its caption: across a column gap the
-    # caption's width, across a row gap the captions' heights one over another.
+    # caption's width, across a row gap the captions' heights one over another,
+    # and between diagonal neighbours one caption's height in the row gap.
     stacked: dict[int, float] = {}
     for edge in figure.edges:
         source = owner.get(edge.source.node_id)
@@ -240,6 +241,16 @@ def _grid_gaps(
                 stacked[boundary] = stacked.get(boundary, style.padding_y.points) + (
                     metrics.height + style.padding_y.points
                 )
+        elif metrics is not None and abs(source_row - target_row) == 1 == abs(
+            source_column - target_column
+        ):
+            # Between diagonal neighbours the route crosses the row gap on one
+            # horizontal run, and its caption sits over that run: the gap
+            # holds the caption with its padding, then the arrival below.
+            boundary = min(source_row, target_row)
+            rows[boundary] = max(
+                rows[boundary], metrics.height + 2.0 * style.padding_y.points + arrival
+            )
     for boundary, height in stacked.items():
         rows[boundary] = max(rows[boundary], height)
     return tuple(columns) + tuple(rows)
