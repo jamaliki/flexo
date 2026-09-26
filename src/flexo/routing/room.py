@@ -20,6 +20,7 @@ from flexo.geometry import Point, Rect, segment_crosses_rect
 from flexo.hierarchy import bounded_owner, parent_map
 from flexo.ir.routed import RoutedFigure
 from flexo.ir.semantic import FigureSpec, GroupSpec
+from flexo.layout.grid import grid_plan
 from flexo.routing.labels import label_box
 from flexo.style import LayoutStyle
 
@@ -348,7 +349,7 @@ def _gutter(
     best: tuple[float, float, str, int] | None = None
     for group in fitted.groups:
         spec = group.measured.spec
-        if spec.layout.kind != wanted or not group.bounds.contains_point(spot):
+        if spec.layout.kind not in {wanted, "grid"} or not group.bounds.contains_point(spot):
             continue
         rects = []
         for child in spec.children:
@@ -356,8 +357,7 @@ def _gutter(
                 rects.append(fitted.node(child).bounds)
             except StopIteration:
                 rects.append(fitted.group(child).bounds)
-        for index, (first, second) in enumerate(pairwise(rects)):
-            low, high = (first.right, second.left) if across_x else (first.bottom, second.top)
+        for index, low, high in _gaps_of(spec, rects, across_x):
             if high + 1e-6 < at or low - 1e-6 > at + reach:
                 continue
             area = group.bounds.width * group.bounds.height
@@ -365,6 +365,35 @@ def _gutter(
             if best is None or candidate[:2] < best[:2]:
                 best = candidate
     return None if best is None else (best[2], best[3])
+
+
+def _gaps_of(
+    spec: GroupSpec, rects: list[Rect], across_x: bool
+) -> list[tuple[int, float, float]]:
+    """``(gap index, start, end)`` of each gap between a group's children along x
+    (``across_x``) or y, indexed the way layout indexes them."""
+
+    if spec.layout.kind != "grid":
+        return [
+            (index, first.right, second.left) if across_x else (index, first.bottom, second.top)
+            for index, (first, second) in enumerate(pairwise(rects))
+        ]
+    plan = grid_plan(spec.layout, spec.children)
+    tracks: dict[int, list[Rect]] = defaultdict(list)
+    for (row, column), rect in zip(plan.cells, rects, strict=True):
+        tracks[column if across_x else row].append(rect)
+    count = plan.columns if across_x else plan.rows
+    result = []
+    for track in range(count - 1):
+        before, after = tracks.get(track), tracks.get(track + 1)
+        if not before or not after:
+            continue
+        low = max(rect.right if across_x else rect.bottom for rect in before)
+        high = min(rect.left if across_x else rect.top for rect in after)
+        # A grid lists its column gaps, then its row gaps.
+        index = track if across_x else max(0, plan.columns - 1) + track
+        result.append((index, low, high))
+    return result
 
 
 def _crowded(routed: RoutedFigure, lane: float) -> list[tuple[Point, bool]]:
