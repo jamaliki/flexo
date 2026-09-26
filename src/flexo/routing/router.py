@@ -363,7 +363,8 @@ def _turn_crossing_ends(
     the step it repeats -- then arrives on the side facing its source and cuts
     through everything between. Entering from above or below instead, it can
     go round. So each end of a crossing edge whose side is a default is tried
-    on the two sides across from its own, and kept where the figure crosses less.
+    on the two sides across from its own -- and, at an operator or a circle,
+    first on the opposite one -- and kept where the figure crosses less.
     """
 
     sides: dict[int, Side] = {}
@@ -375,9 +376,10 @@ def _turn_crossing_ends(
         index
         for index, end in enumerate(ends)
         if not end.fixed
-        # Operators, circles and diamonds take their sides from their own rules
-        # (one corner each, arrivals first), which a turned end would contradict.
-        and end.node.measured.spec.kind not in POINT_KINDS
+        # What leaves an operator, circle or diamond keeps the side its own
+        # rules gave it; what arrives may turn -- a skip into a sum from the
+        # far side.
+        and (end.arriving or end.node.measured.spec.kind not in POINT_KINDS)
         and any(
             port.name == end.reference.port_name and port.auto_side
             for port in end.node.measured.spec.ports
@@ -405,7 +407,12 @@ def _turn_crossing_ends(
         for key in candidates:
             group = pins_of[key]
             current = key[2]
-            for side in (turn for turn in Side if turn.horizontal != current.horizontal):
+            turns = [turn for turn in Side if turn.horizontal != current.horizontal]
+            if ends[group[0]].node.measured.spec.kind in POINT_KINDS:
+                # A circle's opposite side is as near as any: a skip into a sum
+                # from the left is as natural as from the right.
+                turns.insert(0, current.opposite)
+            for side in turns:
                 if (key, side) in tried or trials >= SIDE_TRIALS:
                     continue
                 tried.add((key, side))
