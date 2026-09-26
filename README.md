@@ -317,6 +317,7 @@ flexo.Figure("f", palette=["#2a6f97", "#e76f51", "#2a9d8f"])   # your own colour
 | `swiss` | International Typographic Style: red and black, section rules instead of boxes |
 | `bauhaus` | Primary colours as solid fills, heavy outlines, capitals |
 | `midcentury` | Brick, teal and mustard on warm paper, hard offset shadows |
+| `sketch` | Drawn by hand: wandering ink lines, watercolour washes on cream paper, Kalam lettering |
 | `rams`, `economist` | Quiet greys and one signal colour; a news graphic with red section bands |
 | `classic` | Flexo's original look, kept exactly |
 
@@ -326,10 +327,42 @@ and the plots beside it read as one figure. `flexo themes` lists them all;
 `flexo build figure.yaml --theme tikz --palette "Deep Sea Harvest"` overrides a
 figure's own choice from the command line.
 
+### Drawing by hand
+
+`theme="sketch"` draws a figure the way an illustrator would, after
+[mol-sketch](https://github.com/jamaliki/mol-sketch): every line in two
+wandering strokes, every box coloured in with a watercolour wash, on cream paper,
+lettered in Kalam. Any other theme can be drawn by hand too, keeping its own
+type and colours:
+
+```python
+flexo.Figure("f", theme="sketch")                                  # the illustrated look
+flexo.Figure("f", theme="paper", sketch=True)                      # paper, drawn by hand
+flexo.Figure("f", theme="sketch", sketch={"fill": "hatch"})        # pencil hatching
+flexo.Figure("f", theme="sketch", sketch={"roughness": 0.2})       # a careful hand
+```
+
+The drawing is done after layout, so a sketched figure has exactly the clean
+figure's geometry: boxes stay where they were, arrows still end on them, text
+stays live and editable. Each line is seeded from its element's id, so a figure
+draws the same way every time. The settings (`flexo.Sketch`) are:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `roughness` | `0.5` | How loose the hand is: 0 is a ruled line, 1 a quick sketch |
+| `passes` | `2` | Strokes per line: the line, then lighter strokes going back over it |
+| `fill` | `"wash"` | `"wash"` (watercolour), `"hatch"` (pencil lines), `"solid"`, or `"none"` |
+| `paper` | `true` | A few faint stains over the page, as on worked paper |
+| `seed` | `0` | Another number draws the same figure with a different hand |
+
+In YAML the same settings go under `sketch:` on the figure (`sketch: true`
+for the default hand).
+
 **Fonts** resolve by family name, and whatever Flexo measures with is what the
 SVG, the PDF and the PNG are drawn in. IBM Plex Sans, Figtree, Liberation Sans
-(metric-compatible with Arial and Helvetica), Latin Modern Roman and Latin
-Modern Math ship with Flexo and work everywhere; any installed family works by
+(metric-compatible with Arial and Helvetica), Latin Modern Roman, Latin
+Modern Math, and the handwriting faces Kalam and Caveat (Latin only) ship with
+Flexo and work everywhere; any installed family works by
 name, and `flexo.register_font("path/to/Face.ttf")` (or `FLEXO_FONT_PATH`) adds
 a file. Characters a family lacks -- Greek in Figtree, say -- fall back to the
 next family that has them, measured in the face that will draw them. Bundled

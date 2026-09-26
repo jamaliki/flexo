@@ -29,6 +29,7 @@ from flexo.ir.semantic import (
 )
 from flexo.lint import LintReport, lint_compilation, lint_svg
 from flexo.serialization import dump_figure, load_figure, save_figure
+from flexo.sketch import Sketch
 from flexo.style import (
     COLOR_VISION_SAFE_PALETTE,
     DEFAULT_PALETTE,
@@ -87,6 +88,7 @@ __all__ = [
     "Severity",
     "Side",
     "Size",
+    "Sketch",
     "TextRun",
     "Theme",
     "TypographyStyle",

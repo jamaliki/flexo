@@ -93,7 +93,6 @@ def _arrow_marker(
             "path",
             id=f"arrow.{role}.shape",
             d=f"M 0 {number(-half)} L {number(length)} 0 L 0 {number(half)}",
-            fill="none",
             stroke__linecap="round",
             stroke__linejoin="round",
             **paint_attributes(palette=palette, stroke_role=paint_role, stroke_width=width),
