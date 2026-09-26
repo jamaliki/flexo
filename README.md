@@ -163,28 +163,30 @@ fallback font that can.
 
 ### Captions on connectors
 
-`connect(a, b, label="action $A_t$")` puts a caption beside the line (and
-`net(..., label=...)` beside a net). A branch out of a decision keeps its
-"yes" or "no" beside the decision rather than midway along the line. Captions are placed after routing, the one
-with the fewest clear places first; a caption left with none takes the place
-of one that can move elsewhere. The candidate positions are above and below each
-horizontal run and on either side of each vertical run, at the middle and then
-further toward either end. A caption takes the first candidate that overlaps no
-component, title, other caption, or line, and does not sit within a lane of
-another connector, where it would read as that connector's caption. When none
-is free it takes the cheapest: close beside another line, then leaving the
-canvas (which then grows), then covering a line, then covering a box. A caption
-over or under a container's contents that found no clear place asks for its
-height of room on that side, and the figure is laid out again. Room for captions is made before they are placed: a
-line running over a captioned edge keeps a caption's height away from it, not
-just a lane, and a grid leaves a caption's height in the row gap between
-diagonal neighbours joined by a captioned edge. Lint warns about any caption
-that still overlaps a component, another caption, or a line
-(`routing.caption.overlap`, `routing.caption.covers-line`). A caption names the value its edge carries, so a captioned
-edge gets pins of its own and is drawn as its own line, even next to another
-edge between the same two ports; only where it leaves a side too short for a
-pin each does it share a stem with its neighbours. If a caption does not fit
-inside its container, the container is given the room.
+`connect(a, b, label="action $A_t$")` puts a caption beside the line, and
+`net(..., label=...)` beside a net. A caption names the value its edge carries,
+so a captioned edge gets pins of its own and is drawn as its own line, even
+next to another edge between the same two ports (unless the side is too short
+for a pin each, when the edges share a stem).
+
+Captions are placed after routing. The candidate places are above and below
+each horizontal run and on either side of each vertical run, at the middle and
+then toward either end; a branch out of a decision tries the places nearest the
+decision first, so "yes" and "no" sit by the question. The caption with the
+fewest clear places chooses first. A place is clear when it overlaps no
+component, title, other caption, or line, and is not within a lane of another
+connector, where it would read as that connector's caption. When no place is
+clear the cheapest is taken: close beside another line, then outside the
+canvas (which then grows), then over a line, then over a box. A caption left
+with no clear place takes one from a caption that can move elsewhere.
+
+Room for captions is made before they are placed: a line running over a
+captioned edge keeps a caption's height from it, not just a lane, and a grid
+leaves a caption's height in the row gap between diagonal neighbours joined by
+a captioned edge. A caption that still finds no clear place above or below its
+container's contents asks for that much room on that side, and the figure is
+laid out again. Lint warns about any caption that overlaps a component, another
+caption, or a line (`routing.caption.overlap`, `routing.caption.covers-line`).
 
 ### Node-link figures: circles and straight lines
 
@@ -236,8 +238,10 @@ m.connect(done, start, label="no")
 
 A line meets a circle or a diamond only at the middle of a side of its box,
 which for a diamond is a corner. Each line gets a corner of its own while
-corners last, and the arriving lines choose first. So the "no" of a loop leaves
-by a side corner, not by the top corner its input came in by.
+corners last. A line in line with the diamond chooses first, then the line to
+the nearest neighbour, so the flow keeps its corners: the "no" of a loop leaves
+by a side corner, not by the top corner its input came in by, and a loop back
+from far down the chart comes in by a corner the flow does not use.
 
 ### Line styles and arrowheads
 
