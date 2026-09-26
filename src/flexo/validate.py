@@ -157,9 +157,9 @@ def resolve_alignment(figure: FigureSpec) -> FigureSpec:
     are wired to each other aligns their *port lines* (``ports``) -- which for a
     plain box is its centre, and for a captioned glyph is the glyph, not glyph
     plus caption. A group whose children are not connected to one another is a
-    shelf: a shelf of stacks (columns in a row, rows in a column) is a set of
-    parallel branches and aligns them at the start, so they begin level; any
-    other shelf centres its children. Resolved once here, so every later pass and the
+    shelf: a shelf of two or more stacks (columns in a row, rows in a column)
+    is a set of parallel branches and aligns them at the start, so they begin
+    level; any other shelf -- and the canvas -- centres its children. Resolved once here, so every later pass and the
     serialized figure agree on one concrete value.
     """
 
@@ -202,8 +202,13 @@ def resolve_alignment(figure: FigureSpec) -> FigureSpec:
         # A shelf of stacks -- columns side by side, rows one over another -- is
         # parallel branches: they start together, the way a fork reads.
         across = {"row": "column", "column": "row"}.get(group.layout.kind)
-        stacks = bool(group.children) and all(
-            child in groups and groups[child].layout.kind == across for child in group.children
+        stacks = (
+            len(group.children) > 1
+            and group.role != "canvas"
+            and all(
+                child in groups and groups[child].layout.kind == across
+                for child in group.children
+            )
         )
         layout = replace(
             group.layout, align="ports" if wired else ("start" if stacks else "center")

@@ -4,7 +4,8 @@
 A string label is plain text, except for what sits between a pair of ``$``:
 
 - ``x_t`` and ``x_{t-1}`` are subscripts; ``x^2`` and ``Q K^{T}`` superscripts.
-  A script is one character, or everything inside ``{...}``.
+  A script is one character, or everything inside ``{...}``. A superscript and
+  a subscript on one letter (``\\sigma^2_B``) are stacked, as in TeX.
 - Latin letters are italic, as in TeX; digits, punctuation, and Greek capitals
   are upright. ``\\text{out}`` and ``\\mathrm{out}`` set words upright, and
   ``\\mathbf{x}`` sets them bold.

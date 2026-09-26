@@ -125,7 +125,8 @@ minus sign. `\alpha` to `\omega`, `\Gamma` to `\Omega`, and common operators
 and relations (`\times`, `\cdot`, `\sim`, `\in`, `\nabla`, `\to`, `\le`,
 `\sum`, ...) become their symbols; `\log`, `\exp`, `\max` and the other named
 functions are upright; `\mathcal{L}`, `\mathbb{E}` and `\mathfrak{g}` give
-script, blackboard, and fraktur capitals; `\sqrt{d}` is `√d`, and
+script, blackboard, and fraktur capitals. A superscript and a subscript on one
+letter (`$\sigma^2_B$`) are stacked, as in TeX. `\sqrt{d}` is `√d`, and
 `\frac{a}{b}` is set inline as `a/b`.
 
 Spacing follows TeX. A binary operator or a relation gets one space on each

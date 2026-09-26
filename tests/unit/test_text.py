@@ -79,3 +79,15 @@ def test_a_run_keeps_a_space_it_begins_with(measurer: TextMeasurer) -> None:
     assert styled.width > measurer.measure(
         (TextRun("QK", weight=700), TextRun("module"))
     ).width
+
+
+def test_a_superscript_and_subscript_on_one_letter_stack(measurer: TextMeasurer) -> None:
+    """``x^2_B`` sets both scripts at one place, as wide as the wider of them."""
+
+    from flexo.markup import parse_label
+
+    stacked = measurer.measure(parse_label("$x^2_B$")).width
+    letter = measurer.measure(parse_label("$x$")).width
+    two = measurer.measure(parse_label("$x^2$")).width - letter
+    b = measurer.measure(parse_label("$x_B$")).width - letter
+    assert stacked == pytest.approx(letter + max(two, b))
