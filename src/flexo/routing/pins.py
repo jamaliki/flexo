@@ -383,6 +383,7 @@ def plan_pins(
     _spill_crowded_sides(fitted, ends, hints, style)
     _spread_operator_inputs(ends)
     _one_end_per_corner(ends)
+    _self_loops(fitted, members, ends)
     by_side: dict[tuple[str, Side], dict[tuple[str, str, Side, bool], list[End]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -444,7 +445,7 @@ def _common_net_sides(
     beyond the hub on that side keeps the side it had.
     """
 
-    for member in members:
+    for member_index, member in enumerate(members):
         net = member.spec
         if not isinstance(net, NetSpec) or net.rail_hint is not None:
             continue
@@ -488,6 +489,27 @@ def _common_net_sides(
             ]
             if ahead:
                 straight = min(ahead, key=lambda end: _gap(hub, end.node.bounds))
+        # The side the spokes would share already sends the other way -- actors
+        # each feeding a queue on the side a learner's parameters would come
+        # back in by: the spokes take the far side, and the rail goes round.
+        side = toward.opposite
+        clashing = [
+            end
+            for end in spokes
+            if any(
+                other.node is end.node
+                and other.member != member_index
+                and other.arriving != end.arriving
+                and other.group is not None
+                and other.group[2] is side
+                for other in ends
+            )
+        ]
+        if spokes and len(clashing) == len(spokes) and all(movable(end) for end in spokes):
+            for end in spokes:
+                end.group = (end.group[0], end.group[1], side.opposite, end.group[3])  # type: ignore[index]
+                end.fixed = True
+            continue
         changed = False
         for end in spokes:
             if end is straight:
@@ -834,6 +856,53 @@ def _one_end_per_corner(ends: list[End]) -> None:
             taken.add(side)
             claimed[original] = side
             end.group = (end.group[0], end.group[1], side, end.group[3])
+
+
+LOOP_SIDES = (Side.EAST, Side.NORTH, Side.WEST, Side.SOUTH)
+"""The sides a loop tries, in order of preference among equally free ones."""
+
+
+def _self_loops(fitted: FittedFigure, members: list[Member], ends: list[End]) -> None:
+    """Put an edge from a component back to itself on the side nothing else uses.
+
+    A box's loop leaves and re-enters one side -- the emptiest -- as a C. A
+    circle or a diamond meets lines only at the middle of each side, so its
+    loop leaves one side and comes back in by the next one round, over the
+    corner between the two emptiest neighbours.
+    """
+
+    for member in members:
+        edge = member.spec
+        if not isinstance(edge, EdgeSpec) or edge.source.node_id != edge.target.node_id:
+            continue
+        mine = [ends[index] for index in member.ends]
+        node = mine[0].node
+        used: Counter[Side] = Counter(
+            end.group[2]  # type: ignore[index]
+            for end in ends
+            if end.node is node and end not in mine and end.group is not None
+        )
+        # Straight edges are not routed, but leave by the side facing their
+        # other end all the same.
+        routed = {member.spec.id for member in members}
+        node_id = node.measured.spec.id
+        for other in fitted.measured.semantic.edges:
+            if other.id in routed or other.source.node_id == other.target.node_id:
+                continue
+            ids = (other.source.node_id, other.target.node_id)
+            if node_id in ids:
+                far = fitted.node(ids[1] if ids[0] == node_id else ids[0]).bounds
+                used[_facing(node.bounds, far, Side.EAST)] += 1
+        departure, arrival = sorted(mine, key=lambda end: end.arriving)
+        if node.measured.spec.kind in POINT_KINDS:
+            pairs = list(itertools.pairwise((*LOOP_SIDES, LOOP_SIDES[0])))
+            leave, enter = min(pairs, key=lambda pair: used[pair[0]] + used[pair[1]])
+        else:
+            leave = enter = min(LOOP_SIDES, key=lambda side: used[side])
+        for end, side in ((departure, leave), (arrival, enter)):
+            assert end.group is not None
+            end.group = (end.group[0], f"{end.group[1]}@{edge.id}", side, end.group[3])
+            end.fixed = True
 
 
 def _alignment_first(end: End) -> float:

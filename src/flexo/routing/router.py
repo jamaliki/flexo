@@ -590,6 +590,8 @@ def _outline(bounds: Rect) -> tuple[Point, ...]:
 
 
 def _is_straight(edge: EdgeSpec, style: LayoutStyle) -> bool:
+    if edge.source.node_id == edge.target.node_id:
+        return False  # a loop has no line between two outlines to draw
     if edge.shape == "auto":
         return style.conventions.lines == "straight"
     return edge.shape == "straight"

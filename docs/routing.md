@@ -17,7 +17,8 @@ that names nothing in the figure is still an error.)
      to right are entered from above or below, branches stacked top to bottom
      from the left or right. When the source stands in line with the
      branches, the nearest one is entered straight on and the others branch
-     off that stem.
+     off that stem. When every branch already sends something the other way
+     by that side, the branches take the opposite side and the rail goes round.
    - A side whose approach another component blocks is exchanged for a facing
      side with a clear approach, or failing that any clear side.
    - A side does not take one value in and send a different one out. The end
@@ -32,6 +33,10 @@ that names nothing in the figure is still an error.)
    - A side holds two pins fewer than fit exactly a lane apart, so its lines
      have room to spread, but at least two where two fit. The pins past that, outermost first, move round the corner
      to the neighbouring side, keeping their order.
+   - A loop -- an edge from a component to itself -- leaves and re-enters
+     the emptiest side of a box, as a C. On a circle or a diamond it leaves
+     one side and comes back by the next, round the corner between the two
+     emptiest neighbours. A loop is never drawn straight.
    - A circle, diamond, or operator takes one line per corner while corners
      last, arrivals first. Three or more arrivals at an operator from one
      direction share that side instead, as a bus.

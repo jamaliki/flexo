@@ -159,8 +159,9 @@ def resolve_alignment(figure: FigureSpec) -> FigureSpec:
     plus caption. A group whose children are not connected to one another is a
     shelf: a shelf of two or more stacks (columns in a row, rows in a column)
     is a set of parallel branches and aligns them at the start, so they begin
-    level; any other shelf -- and the canvas -- centres its children. Resolved once here, so every later pass and the
-    serialized figure agree on one concrete value.
+    level; any other shelf -- and the canvas -- centres its children. Resolved
+    once here, so every later pass and the serialized figure agree on one
+    concrete value.
     """
 
     if not any(group.layout.align == "auto" for group in figure.groups):

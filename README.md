@@ -239,6 +239,9 @@ m.connect(a, b, arrow="both")
 `"end"` (the default, at the target), `"none"` for an undirected link, which
 then meets both components, or `"both"`. Nets take `line=` too.
 
+`connect(a, a)` draws a loop: a recurrent cell's state fed back to itself, a
+state that can stay where it is. It goes on the component's emptiest side.
+
 ### Layout groups
 
 A `row`, `column`, or `grid` without a label is a layout group
