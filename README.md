@@ -56,7 +56,7 @@ with flexo.Figure("heads", layout="flow") as figure:
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws sixty-five figures from
+[`examples/literature.py`](examples/literature.py) draws sixty-six figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -273,6 +273,9 @@ own:
   each layer is ordered to avoid crossings. A loop back, or a link with no
   arrowhead, does not reorder the layers. `Figure(..., layout="flow")` does
   the same for what sits directly on the figure.
+- `layout="cycle"` places a group's children clockwise, in the order written,
+  round the border of the squarest grid that holds them: the steps of a
+  lifecycle or a metabolic cycle, each beside the next.
 - `reverse=True` places a row's or column's children last-first. A stream that
   flows upward is written in the order its values flow -- image, encoder,
   projection -- and drawn from the bottom up.
