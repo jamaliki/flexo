@@ -56,7 +56,7 @@ with flexo.Figure("heads", layout="flow") as figure:
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws sixty-six figures from
+[`examples/literature.py`](examples/literature.py) draws sixty-eight figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
