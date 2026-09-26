@@ -48,6 +48,7 @@ from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.routing.hints import forced_points
 from flexo.routing.labels import label_box, place_edge_labels
 from flexo.routing.pins import (
+    POINT_KINDS,
     Bundle,
     End,
     Member,
@@ -150,6 +151,7 @@ def route_figure(
         return pins, bundles, wires, orders
 
     def separated(wires: list[Wire]) -> list[Wire]:
+        routed = wires
         wires = copy.deepcopy(wires)
         separate(
             wires,
@@ -157,7 +159,13 @@ def route_figure(
             scene.walls(),
             spacing=layout_style.port_spacing.points,
         )
-        return wires
+        # Separation only slides runs along their normal. A wire it bent off
+        # the axis anyway keeps the geometry the search gave it: a crowded line
+        # is a flaw lint reports, a diagonal in an orthogonal figure is a break.
+        return [
+            spaced if _orthogonal(spaced) else copy.deepcopy(original)
+            for spaced, original in zip(wires, routed, strict=True)
+        ]
 
     pins, bundles, wires, orders = attempt({})
     pins, bundles, wires = _reorder_crossing_pins(
@@ -268,6 +276,9 @@ def route_figure(
 SIDE_TRIALS = 8
 """Most end sides tried, per figure, to take a crossing out."""
 
+CROWDING_WEIGHT = 3
+"""How many crossings one pair of lines drawn too close counts as, in a trial."""
+
 LOOP_TRIALS = 4
 """Most two-ended loop trials, per figure, after the single-end ones."""
 
@@ -361,6 +372,9 @@ def _turn_crossing_ends(
         index
         for index, end in enumerate(ends)
         if not end.fixed
+        # Operators, circles and diamonds take their sides from their own rules
+        # (one corner each, arrivals first), which a turned end would contradict.
+        and end.node.measured.spec.kind not in POINT_KINDS
         and any(
             port.name == end.reference.port_name and port.auto_side
             for port in end.node.measured.spec.ports
@@ -368,26 +382,36 @@ def _turn_crossing_ends(
     }
     while best and trials < SIDE_TRIALS:
         involved = {index for pair in best for index in pair}
-        candidates = [
-            end_index
-            for index in sorted(involved)
-            for member in bundles[index].members
-            if isinstance(members[member].spec, EdgeSpec)
-            for end_index in members[member].ends
-            if end_index in free and end_index not in sides
-        ]
-        improved = False
-        for end_index in candidates:
-            current = ends[end_index].group[2]
-            for side in (turn for turn in Side if turn.horizontal != current.horizontal):
-                if (end_index, side) in tried or trials >= SIDE_TRIALS:
+        # A pin is one candidate: the ends that share it move together, or
+        # the tree they form would be split. Pins of lone edges go first --
+        # turning a whole tree is the bigger change, and rarely the one needed.
+        pins_of: dict[tuple, list[int]] = {}
+        size_of: dict[tuple, int] = {}
+        for index in sorted(involved):
+            for member in bundles[index].members:
+                if not isinstance(members[member].spec, EdgeSpec):
                     continue
-                tried.add((end_index, side))
+                for end_index in members[member].ends:
+                    if end_index not in free or end_index in sides:
+                        continue
+                    key = ends[end_index].group
+                    pins_of.setdefault(key, []).append(end_index)
+                    size_of[key] = len(bundles[index].members)
+        candidates = sorted(pins_of, key=lambda key: (size_of[key], str(key)))
+        improved = False
+        for key in candidates:
+            group = pins_of[key]
+            current = key[2]
+            for side in (turn for turn in Side if turn.horizontal != current.horizontal):
+                if (key, side) in tried or trials >= SIDE_TRIALS:
+                    continue
+                tried.add((key, side))
                 trials += 1
-                trial = attempt(overrides, {**sides, end_index: side})
+                chosen = {**sides, **dict.fromkeys(group, side)}
+                trial = attempt(overrides, chosen)
                 defects = _defects(separated(trial[2]), spacing)
                 if len(defects) < len(best):
-                    sides[end_index] = side
+                    sides = chosen
                     pins, bundles, wires, _ = trial
                     best = defects
                     improved = True
@@ -456,21 +480,36 @@ def _try_loops(
     return None, trials
 
 
-def _defects(wires: list[Wire], spacing: float) -> list[tuple[int, int]]:
-    """What a trial is judged by: pairs of wires that cross, or run too close.
+def _orthogonal(wire: Wire) -> bool:
+    """Whether every piece of ``wire`` runs horizontally or vertically."""
 
-    Counting only crossings, a trial could trade one for two lines drawn a
-    hair apart, which is worse; a pair that does either counts once.
+    return all(
+        abs(start.x - end.x) < 1e-6 or abs(start.y - end.y) < 1e-6
+        for path in wire.paths
+        for start, end in itertools.pairwise(path)
+    )
+
+
+def _defects(wires: list[Wire], spacing: float) -> list[tuple[int, int]]:
+    """What a trial is judged by: pairs of wires that cross or run too close.
+
+    A pair drawn closer than a lane is listed ``CROWDING_WEIGHT`` times: lint
+    calls it an error and a crossing a warning, so no trial may trade one
+    crossing for a pair of lines a hair apart.
     """
 
     runs = [_straight_runs(wire) for wire in wires]
     pairs = []
     for first, second in itertools.combinations(range(len(wires)), 2):
-        if any(
-            _perpendicular_cross(a, b, c, d) or _too_close(a, b, c, d, spacing)
-            for a, b in runs[first]
-            for c, d in runs[second]
-        ):
+        crowded = any(
+            _too_close(a, b, c, d, spacing) for a, b in runs[first] for c, d in runs[second]
+        )
+        crossed = crowded or any(
+            _perpendicular_cross(a, b, c, d) for a, b in runs[first] for c, d in runs[second]
+        )
+        if crowded:
+            pairs.extend([(first, second)] * CROWDING_WEIGHT)
+        elif crossed:
             pairs.append((first, second))
     return pairs
 

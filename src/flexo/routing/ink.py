@@ -101,6 +101,10 @@ def edge_label_position(
     style: LayoutStyle,
 ) -> Point:
     candidates = segments(points)
+    if not candidates:
+        # A connector with no length -- its two components touch -- has no run
+        # to sit beside; the caption goes just above where it is.
+        return points[0].translated(dy=-caption_rise(metrics, style))
     horizontal = tuple(segment for segment in candidates if segment.horizontal)
     longest = max(horizontal or candidates, key=lambda segment: segment.length)
     midpoint = Point(
