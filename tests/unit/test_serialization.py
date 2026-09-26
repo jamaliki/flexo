@@ -295,3 +295,44 @@ def test_a_via_side_cannot_be_written_beside_a_rail_or_a_fraction() -> None:
         value["nets"][0].update({"via": "west", **placement})  # type: ignore[index]
         with pytest.raises(FlexoError, match="schema"):
             parse_figure(value)
+
+
+def test_a_hand_written_file_may_leave_out_what_python_would_not_ask_for() -> None:
+    """Node kinds, edge ids and ports, groups, and the root all have defaults."""
+
+    from flexo.serialization import parse_figure
+
+    spec = parse_figure(
+        {
+            "figure": {"id": "short", "theme": "sketch"},
+            "nodes": [
+                {"id": "x", "kind": "text", "label": "x"},
+                {"id": "encoder", "label": "Encoder"},
+                {"id": "head", "label": "Head"},
+            ],
+            "edges": [{"from": "x", "to": "encoder"}, {"from": "encoder.output", "to": "head"}],
+        }
+    )
+    assert spec.style == "sketch" and spec.schema_version == 1
+    assert spec.node("encoder").kind == "block"
+    assert [edge.id for edge in spec.edges] == ["edge.1.x-to-encoder", "edge.2.encoder-to-head"]
+    assert (spec.edges[0].source.port_name, spec.edges[0].target.port_name) == ("output", "input")
+    root = spec.group("root")
+    assert root.children == ("x", "encoder", "head") and root.role == "canvas"
+
+
+def test_a_file_with_groups_but_no_root_stacks_what_no_group_holds() -> None:
+    from flexo.serialization import parse_figure
+
+    spec = parse_figure(
+        {
+            "figure": {"id": "grouped"},
+            "nodes": [{"id": "m.a", "label": "A"}, {"id": "b", "label": "B"}],
+            "edges": [{"from": "m.a", "to": "b"}],
+            "groups": [
+                {"id": "m", "children": ["m.a"], "layout": {"kind": "row"}, "role": "module"}
+            ],
+        }
+    )
+    assert spec.group("root").children == ("m", "b")
+    assert spec.edges[0].source.node_id == "m.a"
