@@ -35,7 +35,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 
 - `Figure(id, width=, theme=, palette=, font=, conventions=, sketch=, background=, layout=)`;
   `width` is `"single-column"`, `"double-column"` (default), `"presentation"`, or a length.
-- Components go on `figure.root` or a group; each returns a handle. `input=h`
+- Components go on the figure (`figure.block(...)`, the same as `figure.root.block(...)`)
+  or a group; each returns a handle. `input=h`
   (one) / `inputs=[a, b]` (several) draw the arrows in; `figure.connect(a, b)`
   draws any other arrow (`label=`, `line="dashed"|"dotted"`, `via="west"`,
   `arrow="none"|"both"`, `role="residual"`).

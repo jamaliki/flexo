@@ -289,6 +289,14 @@ class Figure:
         if exception_type is None:
             _ = self.spec
 
+    def __getattr__(self, name: str) -> Any:
+        """Anything a group builds is built on the root: ``figure.block(...)`` is
+        ``figure.root.block(...)``, and so for ``plate``, ``row``, ``text``, ...."""
+
+        if name.startswith("_") or "root" not in self.__dict__:
+            raise AttributeError(name)
+        return getattr(self.__dict__["root"], name)
+
     def module(
         self,
         id: str,

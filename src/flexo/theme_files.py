@@ -179,6 +179,7 @@ def register_theme(source: str | Path | Mapping[str, Any]) -> str:
             "A theme needs a name.",
             hint='Write "theme: {name: my-theme, base: paper, ...}".',
         )
+    _check_settings(settings)
     name = str(settings["name"])
     base = theme(str(settings.get("base", "paper")))
     style = base.style
@@ -311,6 +312,48 @@ def _load_environment() -> None:
 
 
 # -- palettes -------------------------------------------------------------------------
+
+
+_SETTINGS = (
+    "name", "description", "base", "font", "type", "style", "palette", "page", "tones",
+    "conventions", "sketch", "background", "fixed_palette",
+)
+_ALIASES = {
+    "extends": "base", "inherits": "base", "parent": "base", "from": "base",
+    "typography": "type", "text": "type", "fonts": "type", "family": "font",
+    "colors": "palette", "colours": "palette", "layout": "style",
+}
+
+
+def _check_settings(settings: Mapping[str, Any]) -> None:
+    """Refuse a setting a theme does not have, rather than ignore it silently."""
+
+    import difflib
+
+    from flexo.style import TypographyStyle as Type
+
+    for key in settings:
+        if key in _SETTINGS:
+            continue
+        guess = _ALIASES.get(str(key)) or next(
+            iter(difflib.get_close_matches(str(key), _SETTINGS, n=1)), None
+        )
+        hint = f'Did you mean "{guess}"? ' if guess else ""
+        raise _fail(
+            "theme.setting.unknown",
+            f'A theme has no setting "{key}".',
+            hint + f"Settings: {', '.join(_SETTINGS)}.",
+        )
+    known = {field.name for field in fields(Type)}
+    for key in settings.get("type") or {}:
+        if key not in known:
+            guess = next(iter(difflib.get_close_matches(str(key), known, n=1)), None)
+            raise _fail(
+                "theme.setting.unknown",
+                f'"type" has no setting "{key}".',
+                (f'Did you mean "{guess}"? ' if guess else "")
+                + f"Settings: {', '.join(sorted(known))}.",
+            )
 
 
 def _palette_colours(value: object) -> tuple[str, ...]:
