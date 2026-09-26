@@ -24,9 +24,28 @@ def routing_gaps_for_group(
     ``edge_labels`` carries measured label metrics keyed by edge ID. A boundary
     crossed by a labeled connection is widened to hold the label plus one
     padding on either side, so the label never overlaps the components it sits
-    between.
+    between. Room routing asked for (``LayoutSpec.gap_room``) is added last.
     """
 
+    gaps = _authored_gaps(figure, group_id, style, kind=kind, edge_labels=edge_labels)
+    extra = figure_group(figure, group_id).layout.gap_room
+    return tuple(
+        gap + (extra[index] if index < len(extra) else 0.0) for index, gap in enumerate(gaps)
+    )
+
+
+def figure_group(figure: FigureSpec, group_id: str) -> GroupSpec:
+    return next(group for group in figure.groups if group.id == group_id)
+
+
+def _authored_gaps(
+    figure: FigureSpec,
+    group_id: str,
+    style: LayoutStyle,
+    *,
+    kind: LayoutKind | None = None,
+    edge_labels: Mapping[str, TextMetrics] | None = None,
+) -> tuple[float, ...]:
     groups = {group.id: group for group in figure.groups}
     group = groups[group_id]
     boundary_count = max(0, len(group.children) - 1)

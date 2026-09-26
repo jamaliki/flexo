@@ -458,3 +458,22 @@ def test_a_straight_figure_routes_a_line_that_would_cross_a_component() -> None:
     assert not edges["edge.2.stack.top-to-stack.bottom"].straight
     assert edges["edge.1.stack.top-to-stack.middle"].straight
     assert not lint_compilation(compiled).errors
+
+
+def test_a_caption_with_no_room_between_two_children_widens_their_gap() -> None:
+    """A caption beside a line between two stacked boxes, hemmed in on both sides."""
+
+    from flexo.serialization import dump_figure
+
+    with Figure("gap") as figure, figure.root.row("row", gap="4pt") as row:
+        row.block("left", label="Left")
+        with row.column("stack") as stack:
+            top = stack.block("top", label="Top")
+            bottom = stack.block("bottom", label="Bottom")
+        row.block("right", label="Right")
+        figure.connect(top, bottom, label="a long caption here")
+    compiled = compile_figure(figure.spec)
+    grown = next(group for group in compiled.measured.semantic.groups if group.id == "row")
+    assert any(extra > 0.0 for extra in grown.layout.gap_room), "a gap was widened"
+    assert not lint_compilation(compiled).diagnostics
+    assert "gap_room" not in str(dump_figure(figure.spec))

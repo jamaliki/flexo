@@ -56,7 +56,7 @@ with flexo.Figure("heads", layout="flow") as figure:
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws sixty-eight figures from
+[`examples/literature.py`](examples/literature.py) draws sixty-nine figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -183,9 +183,9 @@ with no clear place takes one from a caption that can move elsewhere.
 Room for captions is made before they are placed: a line running over a
 captioned edge keeps a caption's height from it, not just a lane, and a grid
 leaves a caption's height in the row gap between diagonal neighbours joined by
-a captioned edge. A caption that still finds no clear place above or below its
-container's contents asks for that much room on that side, and the figure is
-laid out again. Lint warns about any caption that overlaps a component, another
+a captioned edge. A caption that still finds no clear place asks for room --
+on the side of its container's contents it sits above or below, or in the gap
+between the two children it sits between -- and the figure is laid out again. Lint warns about any caption that overlaps a component, another
 caption, or a line (`routing.caption.overlap`, `routing.caption.covers-line`).
 
 ### Node-link figures: circles and straight lines

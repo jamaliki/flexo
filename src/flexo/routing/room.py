@@ -111,16 +111,41 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
         ]
         if not contents:
             return
-        # Where the caption wants to be: over the edge's longest horizontal run.
+        # Where the caption wants to be: over the edge's longest horizontal run,
+        # or right of its longest vertical one when it has no horizontal run.
         runs = [(start, end) for start, end in pairwise(line) if abs(start.y - end.y) < 1e-6]
+        clearance = style.caption_clearance.points
         if not runs:
+            upright = [(start, end) for start, end in pairwise(line) if start.x == end.x]
+            if not upright:
+                return
+            start, end = max(upright, key=lambda run: abs(run[1].y - run[0].y))
+            # From the line out to the caption's far edge, it runs into the
+            # next child: the gap it runs across grows.
+            spot = Point(start.x, (start.y + end.y) / 2.0)
+            widen(spot, True, box.width + clearance, reach=box.width + clearance)
             return
-        level = max(runs, key=lambda run: abs(run[1].x - run[0].x))[0].y
-        amount = box.height + style.caption_clearance.points
+        start, end = max(runs, key=lambda run: abs(run[1].x - run[0].x))
+        level = start.y
+        amount = box.height + clearance
         if level < min(bounds.top for bounds in contents):
             needs[owner_id]["top"] = max(needs[owner_id].get("top", 0.0), amount)
         elif level > max(bounds.bottom for bounds in contents):
             needs[owner_id]["bottom"] = max(needs[owner_id].get("bottom", 0.0), amount)
+        else:
+            # Between two rows of the contents: the gap it spans grows. A
+            # caption sits above its line, so the span runs from its top down.
+            top = Point((start.x + end.x) / 2.0, level - amount)
+            widen(top, False, amount, reach=amount)
+
+    def widen(spot: Point, across_x: bool, amount: float, reach: float = 0.0) -> None:
+        """Ask the gap at ``spot`` (or within ``reach`` past it) to grow by ``amount``."""
+
+        found = _gutter(routed, spot, across_x, reach)
+        if found is not None:
+            group_id, boundary = found
+            key = f"gap:{boundary}"
+            needs[group_id][key] = max(needs[group_id].get(key, 0.0), amount)
 
     above: dict[str, int] = defaultdict(int)
 
@@ -177,6 +202,10 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
         over_contents(owner, net.pieces)
         check(owner, tuple(point for piece in net.pieces for point in piece))
         squeezed(owner, set(ids), net.pieces)
+    # Two lines laid closer than a lane in the gap between two neighbours had
+    # no room to spread: that gap grows by a lane.
+    for spot, across_x in _crowded(routed, style.port_spacing.points):
+        widen(spot, across_x, style.port_spacing.points)
     for owner_id, count in above.items():
         # A lane per connector over the contents, with clearance either side.
         group = routed.fitted.group(owner_id)
@@ -282,7 +311,7 @@ def with_room(
     needs: dict[str, dict[str, float]],
     style: LayoutStyle,
 ) -> FigureSpec:
-    """``figure`` with the padding ``needs`` asks for added to its containers."""
+    """``figure`` with the padding and gaps ``needs`` asks for added to its groups."""
 
     groups: list[GroupSpec] = []
     for group in figure.groups:
@@ -294,9 +323,88 @@ def with_room(
             current + extra.get(side, 0.0)
             for current, side in zip(group.layout.room, _SIDES, strict=True)
         )
-        layout = replace(group.layout, room=room)
+        gaps = list(group.layout.gap_room)
+        for key, amount in extra.items():
+            if key.startswith("gap:"):
+                index = int(key[4:])
+                gaps.extend([0.0] * (index + 1 - len(gaps)))
+                gaps[index] += amount
+        layout = replace(group.layout, room=room, gap_room=tuple(gaps))
         groups.append(replace(group, layout=layout))
     return replace(figure, groups=tuple(groups))
+
+
+def _gutter(
+    routed: RoutedFigure, spot: Point, across_x: bool, reach: float = 0.0
+) -> tuple[str, int] | None:
+    """The innermost row (``across_x``) or column holding ``spot`` with a gap
+    between two neighbouring children within ``reach`` past it: its id and the
+    gap's index. ``spot`` is where the squeezed thing starts, ``reach`` how far
+    it extends along the axis."""
+
+    fitted = routed.fitted
+    wanted = "row" if across_x else "column"
+    at = spot.x if across_x else spot.y
+    best: tuple[float, float, str, int] | None = None
+    for group in fitted.groups:
+        spec = group.measured.spec
+        if spec.layout.kind != wanted or not group.bounds.contains_point(spot):
+            continue
+        rects = []
+        for child in spec.children:
+            try:
+                rects.append(fitted.node(child).bounds)
+            except StopIteration:
+                rects.append(fitted.group(child).bounds)
+        for index, (first, second) in enumerate(pairwise(rects)):
+            low, high = (first.right, second.left) if across_x else (first.bottom, second.top)
+            if high + 1e-6 < at or low - 1e-6 > at + reach:
+                continue
+            area = group.bounds.width * group.bounds.height
+            candidate = (area, max(0.0, low - at), spec.id, index)
+            if best is None or candidate[:2] < best[:2]:
+                best = candidate
+    return None if best is None else (best[2], best[3])
+
+
+def _crowded(routed: RoutedFigure, lane: float) -> list[tuple[Point, bool]]:
+    """Where two different lines run parallel closer than a lane: the middle of
+    the stretch they share, and whether they are apart along x."""
+
+    routes: list[tuple[str, str | None, tuple[Point, ...]]] = [
+        (edge.spec.id, edge.bundle, edge.centerline) for edge in routed.edges if not edge.straight
+    ]
+    routes.extend((net.spec.id, net.bundle, piece) for net in routed.nets for piece in net.pieces)
+    runs = [
+        (route_id, bundle, start, end)
+        for route_id, bundle, line in routes
+        for start, end in pairwise(line)
+        if (start.x == end.x) != (start.y == end.y)
+    ]
+    spots: list[tuple[Point, bool]] = []
+    for index, (first_id, first_bundle, a, b) in enumerate(runs):
+        upright = a.x == b.x
+        for second_id, second_bundle, c, d in runs[index + 1 :]:
+            if second_id == first_id or (first_bundle and first_bundle == second_bundle):
+                continue
+            if (c.x == d.x) != upright:
+                continue
+            if upright:
+                apart = abs(a.x - c.x)
+                low = max(min(a.y, b.y), min(c.y, d.y))
+                high = min(max(a.y, b.y), max(c.y, d.y))
+            else:
+                apart = abs(a.y - c.y)
+                low = max(min(a.x, b.x), min(c.x, d.x))
+                high = min(max(a.x, b.x), max(c.x, d.x))
+            if apart >= lane - 1e-3 or high - low <= lane:
+                continue
+            middle = (low + high) / 2.0
+            if upright:
+                spots.append((Point((a.x + c.x) / 2.0, middle), True))
+            else:
+                spots.append((Point(middle, (a.y + c.y) / 2.0), False))
+    return spots
 
 
 def _nearness(
