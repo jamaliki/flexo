@@ -428,3 +428,19 @@ def test_a_misspelt_layout_or_width_is_named_with_a_guess() -> None:
 def test_an_empty_figure_or_flow_compiles_clean() -> None:
     for figure in (Figure("empty"), Figure("empty-flow", layout="flow")):
         assert not lint_compilation(compile_figure(figure.spec)).diagnostics
+
+
+def test_a_cycle_goes_clockwise_round_a_grid_and_ids_stay_unique() -> None:
+    names = ("Collect", "Label", "Train", "Evaluate", "Deploy", "Monitor")
+    with Figure("lifecycle") as figure:
+        with figure.module("m", label="Lifecycle", layout="cycle") as m:
+            steps = [m.block(name.lower(), label=name) for name in names]
+        for before, after in zip(steps, steps[1:] + steps[:1], strict=True):
+            figure.connect(before, after)
+    compiled = compile_figure(figure.spec)
+    box = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    assert box["m.collect"].center.y == pytest.approx(box["m.train"].center.y)
+    assert box["m.evaluate"].center.y == pytest.approx(box["m.monitor"].center.y)
+    assert box["m.evaluate"].center.y > box["m.train"].center.y
+    assert box["m.monitor"].center.x < box["m.evaluate"].center.x, "clockwise"
+    assert not lint_compilation(compiled).diagnostics, "a step called label keeps its id"

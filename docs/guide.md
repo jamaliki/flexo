@@ -371,6 +371,12 @@ of wider layers becomes one grid, in which each child takes the column nearest
 the ones feeding it, so a branch runs straight down its column. The compiled
 figure has those rows and grids; the authored figure keeps its flow group.
 
+`layout="cycle"` is for a loop of steps: its children go clockwise from the top
+left, in the order written, round the border of the grid that holds them with
+the fewest cells to spare (two rows by three columns for six, three by three
+for eight), so each step sits beside the next and the arrow that closes the
+loop is as short as the others.
+
 ### Spacing that is not square
 
 `gap` sets the space between siblings on both axes. `row_gap` and `column_gap`

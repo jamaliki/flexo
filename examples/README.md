@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Sixty-five figures from papers and textbooks, each a short function. They use
+Sixty-six figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -88,3 +88,4 @@ suite checks this).
 | [![ReAct agent loop](build/literature/react-agent.preview.png)](build/literature/react-agent.preview.png) ReAct agent loop | [![LLaVA](build/literature/llava.preview.png)](build/literature/llava.preview.png) LLaVA | [![Code-review flowchart](build/literature/code-review.preview.png)](build/literature/code-review.preview.png) Code-review flowchart |
 | [![DiT block](build/literature/dit-block.preview.png)](build/literature/dit-block.preview.png) DiT block | [![Speculative decoding](build/literature/speculative-decoding.preview.png)](build/literature/speculative-decoding.preview.png) Speculative decoding | [![DiT block in `tikz`](build/literature/dit-block-tikz.preview.png)](build/literature/dit-block-tikz.preview.png) DiT block in `tikz` |
 | [![Multi-task learning, written flat](build/literature/multi-task-learning.preview.png)](build/literature/multi-task-learning.preview.png) Multi-task learning, written flat | [![Multi-task learning in `tikz`](build/literature/multi-task-learning-tikz.preview.png)](build/literature/multi-task-learning-tikz.preview.png) Multi-task learning in `tikz` |  |
+| [![Citric acid cycle](build/literature/citric-acid-cycle.preview.png)](build/literature/citric-acid-cycle.preview.png) Citric acid cycle | [![Citric acid cycle in `tikz`](build/literature/citric-acid-cycle-tikz.preview.png)](build/literature/citric-acid-cycle-tikz.preview.png) Citric acid cycle in `tikz` |  |

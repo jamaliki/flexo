@@ -44,9 +44,72 @@ _PASSING = "\0"
 """Marks the place an arrow holds in a layer it passes through."""
 
 
+def lower_cycles(figure: FigureSpec) -> FigureSpec:
+    """``figure`` with every cycle group laid round the border of a grid.
+
+    A cycle's children go clockwise from the top left in the order they were
+    written, round the border of the squarest grid that holds them, so each
+    sits beside the next and the arrow closing the cycle is as short as the
+    others. Two children are a row; three take three corners of a square.
+    """
+
+    if not any(group.layout.kind == "cycle" for group in figure.groups):
+        return figure
+    groups = []
+    for group in figure.groups:
+        if group.layout.kind != "cycle":
+            groups.append(group)
+            continue
+        count = len(group.children)
+        if count <= 2:
+            groups.append(replace(group, layout=replace(group.layout, kind="row")))
+            continue
+        rows, columns = _ring(count)
+        cells = _perimeter(rows, columns)[:count]
+        groups.append(
+            replace(
+                group,
+                layout=replace(
+                    group.layout,
+                    kind="grid",
+                    columns=columns,
+                    placements=tuple(
+                        (child, row, column)
+                        for child, (row, column) in zip(group.children, cells, strict=True)
+                    ),
+                ),
+            )
+        )
+    return replace(figure, groups=tuple(groups))
+
+
+def _ring(count: int) -> tuple[int, int]:
+    """The ``(rows, columns)`` whose border holds ``count`` cells with fewest to
+    spare, and of those the squarest; never taller than wide."""
+
+    fits = [
+        (rows, columns)
+        for rows in range(2, count + 1)
+        for columns in range(rows, count + 1)
+        if 2 * (rows + columns) - 4 >= count
+    ]
+    return min(fits, key=lambda size: (2 * (size[0] + size[1]) - 4 - count, size[1] - size[0]))
+
+
+def _perimeter(rows: int, columns: int) -> list[tuple[int, int]]:
+    """The border cells of a grid, clockwise from the top left."""
+
+    top = [(0, column) for column in range(columns)]
+    right = [(row, columns - 1) for row in range(1, rows)]
+    bottom = [(rows - 1, column) for column in range(columns - 2, -1, -1)]
+    left = [(row, 0) for row in range(rows - 2, 0, -1)]
+    return top + right + bottom + left
+
+
 def lower_flows(figure: FigureSpec) -> FigureSpec:
     """``figure`` with every flow group replaced by a stack of rows and grids."""
 
+    figure = lower_cycles(figure)
     if not any(group.layout.kind in FLOW_KINDS for group in figure.groups):
         return figure
     groups = {group.id: group for group in figure.groups}
