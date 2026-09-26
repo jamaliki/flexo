@@ -148,6 +148,7 @@
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
         "kind": {"$ref": "#/$defs/identifier", "default": "block"},
+        "badge": {"enum": ["frozen", "trained", "trainable", "tuned", "fine-tuned", "snowflake", "flame", "fire", "bolt", "lightning"]},
         "label": {"$ref": "#/$defs/label", "default": ""},
         "role": {"$ref": "#/$defs/identifier", "default": "block"},
         "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "default": []},

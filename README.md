@@ -403,6 +403,19 @@ tower.attention("mha", tone="neutral")                # take a kind's colour awa
 Tones are paint roles (`tone-1-fill`, `tone-1-stroke`, ...), so `flexo retheme`
 recolours a finished SVG without touching its geometry.
 
+**Badges** mark what is frozen, trained, or fine-tuned, as papers do: a small
+snowflake, flame, or lightning bolt drawn on the box's top-right corner.
+
+```python
+m.block("encoder", label="Vision encoder", badge="frozen")    # a snowflake
+m.block("projection", label="Projection", badge="trained")    # a flame
+m.block("llm", label="Language model", badge="tuned")         # a lightning bolt
+m.legend(badges={"frozen": "frozen", "trained": "trained", "tuned": "fine-tuned"})
+```
+
+The marks are vector paths, not emoji, so they look the same in every
+renderer, in print, and drawn by hand in the `sketch` theme.
+
 `m.legend()` keys the colours: a swatch and a name for every tone the
 components created so far are painted in. Pass `entries={"encoder": "Encoder
 blocks", ...}` to choose the tones and their words, and `layout="column"` to

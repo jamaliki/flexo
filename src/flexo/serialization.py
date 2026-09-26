@@ -379,7 +379,14 @@ def _node(data: dict[str, Any]) -> NodeSpec:
         ),
         width=_optional_extent(data.get("width")),
         height=_optional_extent(data.get("height")),
-        properties=tuple(sorted(data.get("properties", {}).items())),
+        properties=tuple(
+            sorted(
+                {
+                    **data.get("properties", {}),
+                    **({"badge": data["badge"]} if data.get("badge") else {}),
+                }.items()
+            )
+        ),
         shadow=data.get("shadow", False),
     )
 

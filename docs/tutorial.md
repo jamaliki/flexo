@@ -15,7 +15,7 @@ every one compiles with no lint diagnostics.)
 - [7. Graphs: circles, straight lines, plates](#7-graphs-circles-straight-lines-plates)
 - [8. The look: themes, palettes, fonts](#8-the-look-themes-palettes-fonts)
 - [9. Drawing by hand](#9-drawing-by-hand)
-- [10. Your own colours](#10-your-own-colours)
+- [10. Your own colours, and badges](#10-your-own-colours-and-badges)
 - [11. Conventions](#11-conventions)
 - [12. The same figure as a file](#12-the-same-figure-as-a-file)
 - [13. Building, checking, and editing](#13-building-checking-and-editing)
@@ -287,7 +287,7 @@ one's geometry, and its text stays live in the SVG. The settings are
 `roughness` (0 ruled to 1 loose), `passes`, `fill` (`"wash"`, `"hatch"`,
 `"solid"`, `"none"`), `paper`, and `seed`.
 
-## 10. Your own colours
+## 10. Your own colours, and badges
 
 Three levels, from broadest to most local:
 
@@ -298,21 +298,27 @@ Three levels, from broadest to most local:
 - `paint={"fill": "#fde68a", "stroke": "#92400e"}` on one component paints it
   exactly, and nothing else.
 
+A **badge** marks what state a part is in, the way papers mark what they train
+and what they freeze: `badge="frozen"` is a snowflake on the box's corner,
+`"trained"` a flame, and `"tuned"` a lightning bolt. They are drawn as vector
+marks, so they print and edit like everything else.
+
 ```python
 # step: colours
 import flexo
 
-with flexo.Figure("paint", width="single-column", palette=["#2a6f97", "#e76f51"]) as figure:
+with flexo.Figure("paint", palette=["#2a6f97", "#e76f51"]) as figure:
     with figure.root.row("row") as row:
-        a = row.block("a", label="Encoder", tone="encoder")
-        b = row.block("b", label="Decoder", tone="decoder", input=a)
-        row.block("c", label="Frozen", input=b, paint={"fill": "#fde68a", "stroke": "#92400e"})
-    figure.root.legend(entries={"encoder": "trained", "decoder": "fine-tuned"})
+        a = row.block("a", label="Image encoder", tone="encoder", badge="frozen")
+        b = row.block("b", label="Adapter", tone="adapter", input=a, badge="trained")
+        c = row.block("c", label="Language model", input=b, badge="tuned",
+                      paint={"fill": "#fde68a", "stroke": "#92400e"})
+    figure.root.legend(badges={"frozen": "frozen", "trained": "trained", "tuned": "fine-tuned"})
 ```
 
-![Colours](../examples/build/tutorial/colours.preview.png)
+![Colours and badges](../examples/build/tutorial/colours.preview.png)
 
-`legend()` keys the colours; `flexo retheme figure.svg --palette "Tropical
+`legend()` keys the colours (`entries=`), the badges (`badges=`), or both; `flexo retheme figure.svg --palette "Tropical
 Rose"` recolours a finished SVG without touching its geometry, because every
 paint in it carries its role.
 

@@ -837,6 +837,7 @@ class GroupBuilder:
         input: NodeHandle | PortRef | str | None = None,
         inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
         tone: str | int | None = None,
+        badge: str | None = None,
     ) -> NodeHandle:
         """Author one component.
 
@@ -866,6 +867,11 @@ class GroupBuilder:
         ``shadow=True`` gives the component a soft drop shadow. Paint only: a
         shadow moves nothing and reserves no space.
 
+        ``badge="frozen"`` sets a snowflake on the component's top-right corner,
+        ``"trained"`` a flame, and ``"tuned"`` a lightning bolt -- the marks
+        papers use for what is frozen, trained, and fine-tuned (see
+        ``flexo.badges``). Paint only, like a shadow.
+
         ``input=`` connects one upstream value into this component after it is
         created, and ``inputs=`` connects several. Every component factory takes
         both, with the same meaning, so wiring never depends on which one you
@@ -880,6 +886,11 @@ class GroupBuilder:
             resolved["motif"] = False
         if tone is not None:
             resolved["tone"] = str(tone)
+        if badge is not None:
+            from flexo.badges import badge_icon
+
+            badge_icon(badge)  # a name that draws nothing is an error here, not at build
+            resolved["badge"] = badge.strip().lower()
         node = normalize_node(
             NodeSpec(
                 self._scoped(id),
@@ -1768,8 +1779,13 @@ class GroupBuilder:
         *,
         layout: LayoutKind = "row",
         at: Cell | None = None,
+        badges: Mapping[str, str] | None = None,
     ) -> GroupBuilder:
         """A key to the figure's colours: a swatch and a name for each tone.
+
+        ``badges={"frozen": "frozen weights", "trained": "trained"}`` adds a key
+        to the badges too: each mark, and the words beside it. With ``badges``
+        and no ``entries``, the legend keys only the badges.
 
         ``entries`` maps each tone to the words beside its swatch, or lists
         tones to be named by themselves. Left out, it lists every tone the
@@ -1781,6 +1797,8 @@ class GroupBuilder:
 
         from flexo.components import node_tone
 
+        if entries is None and badges:
+            entries = {}
         if entries is None:
             tones: list[str] = []
             for node in self.figure._nodes:
@@ -1809,6 +1827,11 @@ class GroupBuilder:
         for index, (tone, words) in enumerate(named.items()):
             entry = key.row(f"entry-{index}", gap=pt(side.points / 2.0), padding=0, role="layout")
             entry.node("swatch", "block", width=side, height=side, tone=tone, motif=False)
+            entry.node("name", "text", label=words, role="caption")
+        for index, (badge, words) in enumerate((badges or {}).items(), start=len(named)):
+            entry = key.row(f"entry-{index}", gap=pt(side.points / 2.0), padding=0, role="layout")
+            mark = pt(side.points * 1.3)
+            entry.node("mark", "icon", width=mark, height=mark, badge=badge)
             entry.node("name", "text", label=words, role="caption")
         return key
 

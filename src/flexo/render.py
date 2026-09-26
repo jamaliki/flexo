@@ -5,6 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 from flexo.artwork import node_artwork
+from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     MOTIF_LABEL_KINDS,
     OP_SYMBOLS,
@@ -45,12 +46,30 @@ def render_node(
         data__flexo__kind=spec.kind,
         data__flexo__role=spec.role,
     )
+    if spec.kind == "icon":
+        bounds = node.bounds
+        radius = min(bounds.width, bounds.height) / 2.0
+        centre = bounds.center
+        icon = badge_icon(str(spec.property("badge")))
+        draw_icon(group, spec.id, icon, centre.x, centre.y, radius)
+        return group
     if spec.kind not in {"label", "spacer", "text"}:
         # Behind the body, so the box's own fill hides all but the ring.
         if spec.shadow:
             soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
         _render_kind(group, node, style, palette)
     _render_label(group, node, style, palette)
+    badge = spec.property("badge")
+    if badge:
+        draw_badge(
+            group,
+            spec.id,
+            badge_icon(str(badge)),
+            node.bounds,
+            size=style.typography.size.points,
+            page=palette.get("canvas"),
+            outline=None if spec.kind in {"text", "label"} else palette.get("block-stroke"),
+        )
     return group
 
 

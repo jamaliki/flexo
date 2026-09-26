@@ -623,3 +623,22 @@ def test_an_arrow_accent_is_drawn_over_its_letter_without_widening_the_label() -
         figure.root.circle("h", r"$\overleftarrow{h}_1$")
     svg = compile_figure(figure.spec).document.text
     assert "←" in svg and "\\overleftarrow" not in svg
+
+
+def test_badges_mark_frozen_trained_and_tuned_parts_and_a_legend_keys_them() -> None:
+    """A snowflake, a flame, and a bolt, drawn as paths on each box's corner."""
+
+    with Figure("badges", width="single-column") as figure:
+        with figure.root.column("c") as c:
+            encoder = c.block("encoder", label="Vision encoder", badge="frozen")
+            projection = c.block("projection", label="Projection", input=encoder, badge="fire")
+            c.block("llm", label="Language model", input=projection, badge="tuned")
+        figure.root.legend(badges={"frozen": "frozen", "trained": "trained"})
+    compiled = compile_figure(figure.spec)
+    assert not lint_compilation(compiled).diagnostics
+    svg = compiled.document.text
+    for part in ("c.encoder.badge", "c.projection.badge.icon-core", "c.llm.badge.icon"):
+        assert f'id="{part}"' in svg
+    assert 'id="legend.entry-0.mark.icon"' in svg and 'id="legend.entry-1.mark.icon-core"' in svg
+    with pytest.raises(ValueError, match="unknown badge"):
+        figure.root.block("x", label="X", badge="melting")

@@ -386,6 +386,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # it -- a thing an arrow starts or ends at that is not a box.
         ComponentDefinition("text", Size(0.0, 0.0), _TEXT_PORTS),
         ComponentDefinition("spacer", Size(0.0, 0.0), ()),
+        # A badge's mark on its own, as large as the author asks (a legend key).
+        ComponentDefinition("icon", Size(0.0, 0.0), ()),
     )
 }
 
@@ -652,7 +654,7 @@ def intrinsic_node_size(
         natural = Size(label.width, label.height)
     elif node.kind == "text":
         natural = Size(label.width + style.padding_y.points, label.height + style.padding_y.points)
-    elif node.kind == "spacer":
+    elif node.kind in {"spacer", "icon"}:
         natural = Size(0.0, 0.0)
     elif node.kind == "vector":
         # Exactly the cell grid: a vector carries no inline label, so nothing
