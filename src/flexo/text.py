@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -249,6 +250,34 @@ def script_shift(shift: str, italic: bool, typography: TypographyStyle) -> float
     return rise * size
 
 
+def stacked_scripts(line: tuple[TextRun, ...]) -> list[tuple[range, range]]:
+    """Pairs of script groups set one over the other, as ``(first, second)`` run ranges.
+
+    ``x^2_B`` is a superscript and a subscript on one letter; TeX stacks them
+    at the same place, the pair as wide as the wider, rather than setting the
+    subscript after the superscript. A group is a run of consecutive runs at
+    one shift -- ``^{(i)}`` may be three runs -- and a group stacks on the group
+    of the other kind just before it, unless that one already stacks.
+    """
+
+    groups: list[range] = []
+    start = 0
+    for index in range(1, len(line) + 1):
+        if index == len(line) or line[index].baseline_shift != line[start].baseline_shift:
+            if line[start].baseline_shift != "normal":
+                groups.append(range(start, index))
+            start = index
+    pairs: list[tuple[range, range]] = []
+    for first, second in itertools.pairwise(groups):
+        if (
+            first.stop == second.start
+            and line[first.start].baseline_shift != line[second.start].baseline_shift
+            and not (pairs and pairs[-1][1] == first)
+        ):
+            pairs.append((first, second))
+    return pairs
+
+
 def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
     """How far the lowest ink of measured text falls below its last baseline.
 
@@ -306,8 +335,7 @@ class TextMeasurer:
             for line in self._balanced(hard_line, max_width, weight)
         )
         measured_lines = tuple(
-            MeasuredLine(line, sum(self._shape_run(run, weight) for run in line))
-            for line in lines
+            MeasuredLine(line, self.line_width(line, weight)) for line in lines
         )
         font = self.stack.primary()
         size = self.typography.size.points
@@ -327,6 +355,20 @@ class TextMeasurer:
             lines=measured_lines,
             cap_height=cap,
         )
+
+    def run_widths(self, line: tuple[TextRun, ...], weight: int | None = None) -> list[float]:
+        """The advance of each run of ``line``, as it would be set on its own."""
+
+        return [self._shape_run(run, weight) for run in line]
+
+    def line_width(self, line: tuple[TextRun, ...], weight: int | None = None) -> float:
+        """How wide ``line`` is set: a stacked pair of scripts is as wide as the wider."""
+
+        widths = self.run_widths(line, weight)
+        width = sum(widths)
+        for first, second in stacked_scripts(line):
+            width -= min(sum(widths[i] for i in first), sum(widths[i] for i in second))
+        return width
 
     def _shape_run(self, run: TextRun, inherited: int | None = None) -> float:
         if not run.text:
