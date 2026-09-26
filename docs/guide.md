@@ -224,13 +224,21 @@ The rules:
   as a tree from it. Pins on one side are ordered by where their lines go, so
   lines leaving one box do not cross each other.
 - **An arrival and a departure of different values do not share a side** when
-  one of them can face its counterpart from another side.
+  one of them can move. A departure with nowhere else to face leaves by its
+  port's own side, next to the same value leaving there (a feedback loop taps
+  the output); an arrival comes in over the top or under the bottom.
 - **A side whose straight approach would hit another box is skipped** in
   favour of the next side that faces the counterpart.
+- **A side holds only as many pins as have room**; the rest go round the corner
+  to the next side that faces their lines.
 - **Each input of an operator takes its own side**, so values meeting at a `+`
-  arrive from different directions. Three or more inputs from one direction
-  (the experts of a mixture, summed below them) join on a bus and enter as one
-  arrow.
+  arrive from different directions: the step in line with it keeps the top,
+  and values from off to one side come in by the side facing them. Three or
+  more inputs from one direction (the experts of a mixture, summed below them)
+  join on a bus and enter as one arrow.
+- **A circle or a diamond takes one line per corner**, the line in line with it
+  first, then the nearest.
+- **A loop (`connect(a, a)`) goes on the emptiest side.**
 - **Two pins facing each other across a gap are aligned** when both boxes allow
   it and the straight line between them is clear, so the arrow is straight.
 
