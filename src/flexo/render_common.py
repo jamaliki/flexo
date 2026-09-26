@@ -19,6 +19,7 @@ from flexo.text import (
     accent_rise,
     drawn_weight,
     font_stack,
+    is_math_italic,
     script_shift,
     stacked_scripts,
 )
@@ -197,10 +198,13 @@ def render_runs(
             # A run that needs a fallback face names it: renderers fall back per
             # character, not per cluster, and would split a letter from its accent.
             for face, piece in pieces:
+                upright = run.italic and any(is_math_italic(ch) for ch in piece)
                 inner = element(
                     span,
                     "tspan",
                     font__family=face.family if face.family != primary else None,
+                    # A mathematical italic letter is drawn slanted already.
+                    font__style="normal" if upright else None,
                 )
                 inner.text = piece
                 if piece != piece.strip():
