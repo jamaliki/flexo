@@ -5,13 +5,15 @@ what it could collide with. Each labelled edge, in authoring order, tries a
 fixed list of positions -- above and below each horizontal run, right and left
 of each vertical run, at the middle and then further toward either end -- and
 takes the cheapest. A position pays for every component, title, or earlier
-caption it overlaps, for every other line it covers, and for leaving the
-canvas; ties go to the earlier candidate, so an uncrowded caption keeps the
+caption it overlaps, for every other line it covers, for leaving the canvas,
+and a little for sitting within reach of another connector, which a reader
+would take it to name; ties go to the earlier candidate, so an uncrowded caption keeps the
 classic place: centred above the longest horizontal run.
 """
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 
@@ -29,6 +31,12 @@ OVERLAP = 1000.0
 
 COVERS_LINE = 200.0
 """Price of a caption drawn over another connector's line."""
+
+NEAR_LINE = 50.0
+"""Price of a caption within a lane of another connector's line.
+
+A reader takes a caption to name the line nearest it, so one that sits a lane
+from someone else's arrow reads as that arrow's."""
 
 OUTSIDE = 100.0
 """Price of a caption leaving the canvas.
@@ -65,10 +73,20 @@ def place_edge_labels(
         # A caption keeps off every line, its own included: beside a run it
         # clears it by construction, but beside a diagonal it would not.
         others = [line for _, line in lines]
+        # Other connectors, that is: a container outline is a closed line.
+        foreign = [
+            line for key, line in lines if key != edge.spec.id and line[0] != line[-1]
+        ]
+        near = style.port_spacing.points
         best: tuple[float, Point] | None = None
         for rank, position in enumerate(_candidates(edge.centerline, edge.label_metrics, style)):
             box = label_box(position, edge.label_metrics)
             cost = rank * 0.01 + _price(box, solid, placed, others, canvas)
+            cost += NEAR_LINE * sum(
+                1
+                for line in foreign
+                if any(_crosses(box.inflated(near), a, b) for a, b in itertools.pairwise(line))
+            )
             if best is None or cost < best[0] - 1e-9:
                 best = (cost, position)
             if cost < 1.0:
