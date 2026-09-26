@@ -56,11 +56,11 @@ that names nothing in the figure is still an error.)
    Values arriving at one port get a pin each (the `arrivals` convention), and
    a captioned edge always has pins of its own. Pins on one side are ordered by where
    their lines go; ties put the farthest counterpart first, so skip
-   connections nest. A pin alone on its side sits at the middle of the side.
-   Two or more are spaced evenly across its central `pin_spread` (a
+   connections nest. The central `pin_spread` of the side (a
    [convention](../README.md#conventions-branches-merges-arrivals-lines-and-pins),
-   0.8 by default, so a tenth of the side stays clear at each end), and never
-   closer to a corner than the corner's radius. A port
+   0.8 by default) is cut into equal shares, one per pin, and each pin sits at
+   the middle of its share: a pin alone at the middle of the side, two at 30%
+   and 70% of it. No pin sits on a corner's curve. A port
    the author fixed keeps its place. Two pins that face each other across a
    gap then move to one coordinate, so the arrow between them is straight; a
    pin spread among several gives way to a partner alone on its side, so the
