@@ -90,7 +90,7 @@ with flexo.Figure("grown", width="double-column") as figure:
         mha = tower.attention(
             "mha", label="Multi-Head\nAttention", width="120pt", vectors=QKV
         )
-    figure.root.connect(mha, norm)
+    figure.connect(mha, norm)
 ```
 
 `vectors=` accepts:
@@ -124,7 +124,7 @@ with flexo.Figure("grown-wired", width="double-column") as figure:
         )
         embedding = tower.block("embedding", label="Embedding", width="120pt")
     figure.net(src=embedding, sinks=[mha.q, mha.k, mha.v], id="qkv")  # into the glyphs
-    figure.root.connect(mha, norm)                                    # out of the block
+    figure.connect(mha, norm)                                         # out of the block
 ```
 
 A glyph's two ports are pinned: `input` on its south side and `output` on its
