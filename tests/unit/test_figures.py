@@ -423,3 +423,8 @@ def test_a_misspelt_layout_or_width_is_named_with_a_guess() -> None:
         figure.root.block("b", label="B")
     with pytest.raises(flexo.FlexoError, match="single-column"):
         compile_figure(figure.spec)
+
+
+def test_an_empty_figure_or_flow_compiles_clean() -> None:
+    for figure in (Figure("empty"), Figure("empty-flow", layout="flow")):
+        assert not lint_compilation(compile_figure(figure.spec)).diagnostics
