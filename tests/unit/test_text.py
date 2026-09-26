@@ -127,3 +127,17 @@ def test_code_is_set_in_a_monospace_face_even_when_wrapped() -> None:
     if stack.mono() is not None:
         face, _ = stack.segments("fit", 400, False, code=True)[0]
         assert face.family != stack.families[0][0].family
+
+
+def test_a_word_wider_than_the_line_breaks_only_when_asked() -> None:
+    from flexo.ir.semantic import TextRun
+    from flexo.style import TypographyStyle
+    from flexo.text import TextMeasurer
+
+    measurer = TextMeasurer(TypographyStyle())
+    url = (TextRun("https://github.com/jamaliki/flexo-talk/blob/main/src/compose.py"),)
+    kept = measurer.measure(url, max_width=100)
+    assert len(kept.lines) == 1 and kept.width > 100
+    broken = measurer.measure(url, max_width=100, balance=False, break_words=True)
+    assert len(broken.lines) > 1 and broken.width <= 100
+    assert "".join(run.text for line in broken.lines for run in line.runs) == url[0].text
