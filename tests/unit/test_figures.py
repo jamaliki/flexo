@@ -400,3 +400,16 @@ def test_a_flow_group_lays_its_children_out_in_layers_by_their_wiring() -> None:
         assert along(box["m.a"]) < along(box["m.fused"]), "the loop does not reorder layers"
         assert not lint_compilation(compiled).diagnostics
         assert parse_figure(yaml.safe_load(dump_figure(figure.spec))) == figure.spec
+
+
+def test_a_flow_places_inputs_late_and_ignores_undirected_links_for_layers() -> None:
+    with Figure("gan") as figure, figure.module("m", layout="flow") as m:
+        generator = m.block("g", label="Generator", input=m.text("z", "noise"))
+        judge = m.block("d", label="Discriminator", inputs=[generator, m.text("x", "real")])
+        twin = m.block("twin", label="Twin", input=m.text("y", "other"))
+        m.connect(generator, twin, arrow="none", line="dashed")
+        m.text("verdict", "real or fake?", input=judge)
+    compiled = compile_figure(figure.spec)
+    top = {node.measured.spec.id: node.bounds.center.y for node in compiled.fitted.nodes}
+    assert top["m.x"] == pytest.approx(top["m.g"]), "real data enters beside the generator"
+    assert top["m.twin"] == pytest.approx(top["m.g"]), "an undirected link orders no layers"
