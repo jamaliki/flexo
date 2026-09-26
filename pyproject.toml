@@ -30,6 +30,7 @@ flexo = "flexo.cli:main"
 [dependency-groups]
 dev = [
   "hypothesis>=6.138",
+  "pypdfium2>=5.13.0",
   "pytest>=8.4",
   "pytest-cov>=6.2",
   "ruff>=0.12",

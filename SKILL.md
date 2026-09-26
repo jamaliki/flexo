@@ -98,8 +98,8 @@ breaks a line; long labels wrap on their own.
 ## Outputs and files
 
 `flexo.build(figure, dir, formats=("editable", "portable", "pdf", "png"))`:
-the editable SVG (live text, named layers) and PNG need nothing else; portable
-SVG and PDF use Inkscape. YAML figures (`flexo.load_figure`, `flexo build fig.yaml`)
+all pure Python: the editable SVG (live text, named layers), portable SVG (words
+as outlines), PDF (selectable text, embedded fonts), and PNG. YAML figures (`flexo.load_figure`, `flexo build fig.yaml`)
 may be short: nodes default to blocks, `from: a` / `to: b` name ports for you,
 no `groups` stacks nodes. `flexo.dump_figure(figure.spec)` writes any figure as YAML.
 
