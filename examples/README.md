@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Twenty-eight figures from papers and textbooks, each a short function. They use
+Thirty-six figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -73,3 +73,6 @@ suite checks this).
 | [![AlphaFold 2](build/literature/alphafold.preview.png)](build/literature/alphafold.preview.png) AlphaFold 2 | [![BERT](build/literature/bert.preview.png)](build/literature/bert.preview.png) BERT | [![SimCLR](build/literature/simclr.preview.png)](build/literature/simclr.preview.png) SimCLR |
 | [![Feature pyramid network](build/literature/feature-pyramid.preview.png)](build/literature/feature-pyramid.preview.png) Feature pyramid network | [![CI pipeline](build/literature/ci-pipeline.preview.png)](build/literature/ci-pipeline.preview.png) Continuous-integration flowchart | [![State machine](build/literature/state-machine.preview.png)](build/literature/state-machine.preview.png) State machine |
 | [![Bottleneck](build/literature/bottleneck.preview.png)](build/literature/bottleneck.preview.png) Bottleneck block | [![SwiGLU](build/literature/swiglu.preview.png)](build/literature/swiglu.preview.png) SwiGLU | [![Training loop](build/literature/training-loop.preview.png)](build/literature/training-loop.preview.png) Training-loop flowchart |
+| [![Feedback control loop](build/literature/feedback-control.preview.png)](build/literature/feedback-control.preview.png) Feedback control loop | [![Mixture of experts](build/literature/mixture-of-experts.preview.png)](build/literature/mixture-of-experts.preview.png) Mixture of experts | [![Faster R-CNN](build/literature/faster-rcnn.preview.png)](build/literature/faster-rcnn.preview.png) Faster R-CNN |
+| [![LoRA](build/literature/lora.preview.png)](build/literature/lora.preview.png) LoRA | [![Retrieval-augmented generation](build/literature/retrieval-augmented-generation.preview.png)](build/literature/retrieval-augmented-generation.preview.png) Retrieval-augmented generation | [![Latent diffusion](build/literature/latent-diffusion.preview.png)](build/literature/latent-diffusion.preview.png) Latent diffusion |
+| [![Actor–critic](build/literature/actor-critic.preview.png)](build/literature/actor-critic.preview.png) Actor–critic | [![MapReduce](build/literature/mapreduce.preview.png)](build/literature/mapreduce.preview.png) MapReduce | [![LoRA in `tikz`](build/literature/lora-tikz.preview.png)](build/literature/lora-tikz.preview.png) LoRA in `tikz` |
