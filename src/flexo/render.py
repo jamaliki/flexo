@@ -648,7 +648,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         else node.bounds
     )
     artwork = node_artwork(spec)
-    if artwork.format == "png":
+    if artwork.format in {"png", "jpeg"}:
         element(
             parent,
             "image",
