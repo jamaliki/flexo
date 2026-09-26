@@ -30,12 +30,13 @@ one net.
     fully connected layer or a graphical model is drawn.
 
 ``pin_spread``
-    Where arrows meet a side of a box. One arrow meets it at its middle;
-    two or more are spaced evenly across the central ``pin_spread`` of the
-    side, the outermost at its ends. The default ``0.8`` leaves a tenth of
-    the side clear at each end; ``0`` would put them all at the middle and
-    ``1`` spreads them corner to corner. An arrow still moves off its place
-    to run straight to the box it faces.
+    Where arrows meet a side of a box. The central ``pin_spread`` of the
+    side is cut into equal shares, one per arrow, and each arrow meets the
+    side at the middle of its share: one arrow at the middle of the side,
+    two at 30% and 70% of it with the default ``0.8``, three at 23%, 50%
+    and 77%. ``0`` puts every arrow at the middle; ``1`` shares out the
+    whole side. An arrow still moves off its place to run straight to the
+    box it faces.
 
 An operation on the values that meet -- a sum, a product -- is not a
 convention: author it with ``add``, ``multiply`` or ``op`` and it is drawn as a

@@ -377,10 +377,11 @@ If the lines combine by an operation, author the operation with `add`,
 `multiply` or `op`. It is then drawn as a circle, and the arrows point into
 it. A fourth convention, `lines`, chooses between routed right-angled lines
 (the default) and straight ones. A fifth, `pin_spread`, sets where arrows meet
-a side: one arrow meets it at its middle, and two or more are spaced evenly
-across the central `pin_spread` of the side (0.8 by default, so a tenth of the
-side stays clear at each end). An arrow still moves off its place when that
-lets it run straight to the box it faces.
+a side: the central `pin_spread` of the side (0.8 by default) is cut into
+equal shares, one per arrow, and each arrow meets the side at the middle of its
+share. One arrow meets the middle of the side; two meet it at 30% and 70%. An
+arrow still moves off its place when that lets it run straight to the box it
+faces.
 
 Change a convention for a whole figure with `conventions=`, or in YAML with a
 `conventions:` mapping on the figure:
