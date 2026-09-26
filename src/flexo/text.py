@@ -103,7 +103,8 @@ class FontStack:
 
     def __init__(self, typography: TypographyStyle) -> None:
         self.typography = typography
-        names =(typography.family, *typography.fallbacks, *DEFAULT_FALLBACKS)
+        maths = (typography.math_family,) if typography.math_family else ()
+        names = (typography.family, *maths, *typography.fallbacks, *DEFAULT_FALLBACKS)
         primary = require_family(typography.family)
         families: list[tuple[FontFace, ...]] = [primary]
         seen = {primary[0].family.casefold()}
@@ -150,6 +151,15 @@ class FontStack:
         faces = [self.face(weight, italic, index) for index in range(len(self.families))]
         loaded = [load_face(face) for face in faces]
         pieces: list[tuple[FontFace, str]] = []
+        maths = self.maths_index()
+        if maths is not None and italic:
+            # TeX's italic Greek is the mathematical italic alphabet of the maths font.
+            text = "".join(
+                _MATH_ITALIC.get(ch, ch)
+                if not loaded[0].has(ch) and loaded[maths].has(_MATH_ITALIC.get(ch, ch))
+                else ch
+                for ch in text
+            )
         for cluster in _clusters(text):
             if cluster.isspace():
                 if pieces:
@@ -179,6 +189,21 @@ class FontStack:
                 pieces.append((face, cluster))
         return pieces
 
+    def maths_index(self) -> int | None:
+        """Where the typography's maths family sits in the stack, if it has one."""
+
+        name = self.typography.math_family
+        if not name:
+            return None
+        return next(
+            (
+                index
+                for index, faces in enumerate(self.families)
+                if faces[0].family.casefold() == name.casefold()
+            ),
+            None,
+        )
+
     def missing(self, text: str, italic: bool) -> set[str]:
         loaded = [load_face(self.face(400, italic, index)) for index in range(len(self.families))]
         return {
@@ -186,6 +211,24 @@ class FontStack:
             for character in text
             if not character.isspace() and not any(item.has(character) for item in loaded)
         }
+
+
+_MATH_ITALIC = {
+    # alpha to omega, final sigma included, then the variant forms and the partial.
+    **{chr(0x03B1 + index): chr(0x1D6FC + index) for index in range(25)},
+    **{
+        chr(code): chr(0x1D716 + index)
+        for index, code in enumerate((0x3F5, 0x3D1, 0x3F0, 0x3D5, 0x3F1, 0x3D6))
+    },
+    "\u2202": "\U0001D715",
+}
+"""Greek letters and their mathematical italic forms (U+1D6FC on)."""
+
+
+def is_math_italic(character: str) -> bool:
+    """Whether ``character`` is a mathematical italic Greek letter (already slanted)."""
+
+    return 0x1D6FC <= ord(character[:1] or "\0") <= 0x1D71B
 
 
 def _clusters(text: str) -> list[str]:
