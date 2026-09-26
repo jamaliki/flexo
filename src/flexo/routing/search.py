@@ -255,6 +255,7 @@ class Grid:
         finished_cost: dict[tuple[int, int, int, int], float] = {}
         while frontier:
             _, cost, _, ix, iy, heading, turned = heapq.heappop(frontier)
+            _WORK[0] += 1
             if turned == _DONE:
                 final, final_cost = (ix, iy, heading, 0), cost
                 final = finished[final]
@@ -302,6 +303,15 @@ class Grid:
 
 
 type StepPrice = "callable[[Grid, int, int, int], float]"
+
+_WORK = [0]
+"""Search steps taken in this process: a machine-independent measure of effort."""
+
+
+def search_work() -> int:
+    """How many search steps have been taken so far (see ``router.REPAIR_WORK``)."""
+
+    return _WORK[0]
 
 
 def _heuristic(

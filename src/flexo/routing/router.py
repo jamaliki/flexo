@@ -59,7 +59,7 @@ from flexo.routing.pins import (
     plan_pins,
     title_rect,
 )
-from flexo.routing.search import EAST, NORTH, SOUTH, WEST, Grid, Zone, simplify
+from flexo.routing.search import EAST, NORTH, SOUTH, WEST, Grid, Zone, search_work, simplify
 from flexo.routing.separate import (
     CaptionRoom,
     Terminal,
@@ -177,6 +177,7 @@ def route_figure(
         ]
 
     pins, bundles, wires, orders = attempt({})
+    _REPAIR_LIMIT[0] = search_work() + REPAIR_WORK
     pins, bundles, wires = _reorder_crossing_pins(
         attempt,
         separated,
@@ -293,6 +294,20 @@ LOOP_TRIALS = 4
 """Most two-ended loop trials, per figure, after the single-end ones."""
 
 PIN_ORDER_TRIALS = 12
+
+REPAIR_WORK = 2_000_000
+"""How much route search (steps of the A* frontier) the crossing repairs may spend
+on one figure, beyond its first routing.
+
+The trials above are capped in number, but each reroutes the whole figure, so a
+large figure that keeps crossing could spend minutes on them. Counted in search
+steps, not seconds, so a figure routes the same on every machine; the densest
+figure in the literature set spends under a million on its whole routing."""
+_REPAIR_LIMIT = [0]
+
+
+def _within_budget() -> bool:
+    return search_work() < _REPAIR_LIMIT[0]
 """Most pin orders tried, per figure, to take a crossing out."""
 
 SPACING_TOLERANCE = 1e-3
@@ -319,7 +334,7 @@ def _reorder_crossing_pins(
     trials = 0
     tried: set[tuple] = set()
     overrides: dict[tuple[str, Side], list] = {}
-    while best and trials < PIN_ORDER_TRIALS:
+    while best and trials < PIN_ORDER_TRIALS and _within_budget():
         involved = {index for pair in best for index in pair}
         keys = {
             ends[end].group
@@ -337,7 +352,7 @@ def _reorder_crossing_pins(
                 swapped = list(order)
                 swapped[position], swapped[position + 1] = swapped[position + 1], swapped[position]
                 signature = (side_key, tuple(swapped))
-                if signature in tried or trials >= PIN_ORDER_TRIALS:
+                if signature in tried or trials >= PIN_ORDER_TRIALS or not _within_budget():
                     continue
                 tried.add(signature)
                 trials += 1
@@ -399,7 +414,7 @@ def _turn_crossing_ends(
             for port in end.node.measured.spec.ports
         )
     }
-    while best and trials < SIDE_TRIALS:
+    while best and trials < SIDE_TRIALS and _within_budget():
         involved = {index for pair in best for index in pair}
         # A pin is one candidate: the ends that share it move together, or
         # the tree they form would be split. Pins of lone edges go first --
@@ -427,7 +442,7 @@ def _turn_crossing_ends(
                 # from the left is as natural as from the right.
                 turns.insert(0, current.opposite)
             for side in turns:
-                if (key, side) in tried or trials >= SIDE_TRIALS:
+                if (key, side) in tried or trials >= SIDE_TRIALS or not _within_budget():
                     continue
                 tried.add((key, side))
                 trials += 1
@@ -492,7 +507,7 @@ def _try_loops(
             across = abs(there.x - here.x) >= abs(there.y - here.y)
             for side in (Side.NORTH, Side.SOUTH) if across else (Side.WEST, Side.EAST):
                 key = (first, second, side)
-                if key in tried or trials >= SIDE_TRIALS + LOOP_TRIALS:
+                if key in tried or trials >= SIDE_TRIALS + LOOP_TRIALS or not _within_budget():
                     continue
                 tried.add(key)
                 trials += 1
