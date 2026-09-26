@@ -76,7 +76,11 @@ authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
 `input=` connects one upstream component as the new one is created, and
 `inputs=` connects several. `connect(a, b)` draws an edge later,
 `net(src=a, sinks=[b, c])` draws one value going to several places, and
-`merge(sinks=[a, b], dst=c)` draws several values joining before one place. The
+`merge(sinks=[a, b], dst=c)` draws several values joining before one place.
+`connect`, `net`, and `merge` belong to the figure, not to a group:
+`figure.connect(a, b)` and
+`m.connect(a, b)` are the same edge, so an edge between groups is written
+wherever both ends are in hand. The
 [authoring guide](docs/guide.md) covers each component and option.
 
 ### Operators and words
@@ -120,7 +124,15 @@ minus sign. `\alpha` to `\omega`, `\Gamma` to `\Omega`, and common operators
 and relations (`\times`, `\cdot`, `\sim`, `\in`, `\nabla`, `\to`, `\le`,
 `\sum`, ...) become their symbols; `\log`, `\exp`, `\max` and the other named
 functions are upright; `\mathcal{L}`, `\mathbb{E}` and `\mathfrak{g}` give
-script, blackboard, and fraktur capitals. Spaces are kept as typed. Write `\$`
+script, blackboard, and fraktur capitals; `\sqrt{d}` is `√d`.
+
+Spacing follows TeX. A binary operator or a relation gets one space on each
+side, whatever was typed: `$B=0$` and `$B = 0$` both give *B* = 0, and
+`$d\times d$` gives *d* × *d*. There is no such space inside a sub- or
+superscript (`$\mathbb{R}^{d\times d}$`), or around a sign that opens a formula
+or follows `(`, `,` or another operator (`$-y$`). The space that ends a command
+name is dropped (`$\alpha x$` is *αx*), and a named function is set apart from
+its operand (`$\log p$`). Every other space is kept as typed. Write `\$`
 for a literal dollar sign; a single `$` with no closing partner is also
 literal. A script cannot contain another script.
 

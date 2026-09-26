@@ -426,6 +426,82 @@ class Figure:
             line=line,
         )
 
+    def connect(
+        self,
+        source: NodeHandle | PortRef | str,
+        target: NodeHandle | PortRef | str,
+        *,
+        id: str | None = None,
+        source_port: str = "output",
+        target_port: str = "input",
+        role: str = "flow",
+        label: str | tuple[TextRun, ...] = "",
+        lane: str | None = None,
+        via: Side | str | None = None,
+        shape: EdgeShape = "auto",
+        line: LineStyle = "solid",
+        arrow: ArrowEnds = "end",
+    ) -> EdgeSpec:
+        """Draw one connector from ``source`` to ``target``; see ``GroupBuilder.connect``.
+
+        A connector belongs to the figure, not to a group, so it can be written
+        here once both ends exist, whichever groups they sit in.
+        """
+
+        return self.root.connect(
+            source,
+            target,
+            id=id,
+            source_port=source_port,
+            target_port=target_port,
+            role=role,
+            label=label,
+            lane=lane,
+            via=via,
+            shape=shape,
+            line=line,
+            arrow=arrow,
+        )
+
+    def connect_all(
+        self,
+        sources: Sequence[NodeHandle | PortRef | str],
+        targets: Sequence[NodeHandle | PortRef | str],
+        *,
+        shape: EdgeShape = "auto",
+        role: str = "flow",
+        line: LineStyle = "solid",
+        arrow: ArrowEnds = "end",
+    ) -> list[EdgeSpec]:
+        """Connect every source to every target; see ``GroupBuilder.connect_all``."""
+
+        return self.root.connect_all(
+            sources, targets, shape=shape, role=role, line=line, arrow=arrow
+        )
+
+    def residual(
+        self,
+        source: NodeHandle | PortRef | str,
+        target: NodeHandle | PortRef | str,
+        *,
+        id: str | None = None,
+        lane: str | None = None,
+        via: Side | str | None = None,
+        source_port: str | None = None,
+        target_port: str | None = None,
+    ) -> EdgeSpec:
+        """A skip connection; see ``GroupBuilder.residual``."""
+
+        return self.root.residual(
+            source,
+            target,
+            id=id,
+            lane=lane,
+            via=via,
+            source_port=source_port,
+            target_port=target_port,
+        )
+
     def _add_net(
         self,
         kind: str,
