@@ -636,7 +636,8 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
             merged[-1].baseline_shift,
             merged[-1].code,
             merged[-1].link,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link):
+            merged[-1].color,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
             merged[-1] = replace(merged[-1], text=merged[-1].text + run.text)
         else:
             merged.append(run)
