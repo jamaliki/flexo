@@ -45,6 +45,7 @@ from flexo.style import (
     vector_stack_height,
 )
 from flexo.theme import retheme_svg
+from flexo.theme_files import dump_theme, register_palette, register_theme
 from flexo.themes import THEMES, Theme, resolve_palette, resolve_style
 from flexo.units import CellSpan, Extent, Length, cm, inch, mm, pt, px
 
@@ -99,6 +100,7 @@ __all__ = [
     "cm",
     "compile_figure",
     "dump_figure",
+    "dump_theme",
     "export_outputs",
     "find_inkscape",
     "inch",
@@ -110,6 +112,8 @@ __all__ = [
     "pt",
     "px",
     "register_font",
+    "register_palette",
+    "register_theme",
     "resolve_palette",
     "resolve_style",
     "retheme_svg",
