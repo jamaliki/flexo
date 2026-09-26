@@ -12,6 +12,7 @@ from flexo.geometry import Point, Rect, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, layout_connections
 from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, declared_size
+from flexo.layout.flow import lower_flows
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.style import LayoutStyle
@@ -30,7 +31,9 @@ def measure_figure(
     measurer: TextMeasurer | None = None,
 ) -> MeasuredFigure:
     # Layout reads concrete alignments; the authored figure keeps its "auto".
-    semantic = resolve_alignment(merge_matched_stacks(normalize_and_validate(figure)))
+    semantic = resolve_alignment(
+        merge_matched_stacks(lower_flows(normalize_and_validate(figure)))
+    )
     layout_style = style or figure_style(semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     title_measurer = (

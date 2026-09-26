@@ -1247,6 +1247,21 @@ def speculative_decoding(theme: str = "paper") -> Figure:
     return figure
 
 
+def multi_task_learning(theme: str = "paper") -> Figure:
+    """Multi-task learning with a shared encoder, written flat: ``flow`` lays it out."""
+
+    with Figure("multi-task-learning", width="single-column", theme=theme) as figure:
+        with figure.module("model", label="Multi-task learning", layout="flow") as m:
+            x = m.text("x", "Input $x$")
+            shared = m.block("shared", label="Shared encoder", tone="model", input=x)
+            losses = []
+            for index, task in enumerate(("Segmentation", "Depth", "Normals"), 1):
+                head = m.block(task.lower(), label=task, input=shared)
+                losses.append(m.loss(f"loss{index}", label=rf"$\mathcal{{L}}_{index}$", input=head))
+            m.add("total", inputs=losses)
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1314,6 +1329,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         code_review,
         dit_block,
         speculative_decoding,
+        multi_task_learning,
     )
 }
 """Every figure here, by name."""

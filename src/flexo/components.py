@@ -359,7 +359,7 @@ COMPONENTS: dict[str, ComponentDefinition] = {
             Size(58.0, 34.0),
             (_INPUT, _default_port("residual", Side.SOUTH), _OUTPUT),
         ),
-        ComponentDefinition("loss", Size(44.0, 32.0), (_INPUT,)),
+        ComponentDefinition("loss", Size(44.0, 32.0), (_INPUT, _OUTPUT)),  # losses sum
         ComponentDefinition("junction", Size(8.0, 8.0), _MULTI_OUTPUT),
         # An operator circle: sized from the type (see intrinsic_node_size), with a
         # port at each side centre, because the only points of a circle an arrow

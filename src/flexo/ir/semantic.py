@@ -13,7 +13,7 @@ from flexo.units import Extent, Length
 
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
-type LayoutKind = Literal["row", "column", "grid", "overlay", "stack"]
+type LayoutKind = Literal["row", "column", "grid", "overlay", "stack", "flow", "flow-right"]
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
 type ArrowEnds = Literal["end", "none", "both"]

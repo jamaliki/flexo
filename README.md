@@ -45,7 +45,7 @@ figure displays itself: end a cell with `figure`.
 
 ## Figures from the literature
 
-[`examples/literature.py`](examples/literature.py) draws sixty-four figures from
+[`examples/literature.py`](examples/literature.py) draws sixty-five figures from
 papers and textbooks -- Inception, LSTM, Mamba, ViT, U-Net, a GPT block, the
 agent–environment loop, a multilayer perceptron, graphical models, and more --
 each in about fifteen lines, with no coordinates, colours, or port tables. See
@@ -251,6 +251,11 @@ own:
 
 - A layout group has no padding unless you give it one, so the space between
   its children and its neighbours is exactly its `gap`.
+- `layout="flow"` (top to bottom) or `layout="flow-right"` (left to right)
+  arranges a group's children from their wiring, so they can be written flat,
+  with no rows or columns: each goes one layer after whatever feeds it, and
+  each layer is ordered to avoid crossings. A loop back does not reorder the
+  layers.
 - `reverse=True` places a row's or column's children last-first. A stream that
   flows upward is written in the order its values flow -- image, encoder,
   projection -- and drawn from the bottom up.
