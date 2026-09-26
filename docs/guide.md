@@ -360,7 +360,10 @@ with flexo.Figure("heads", width="single-column") as figure:
 
 Each child goes one layer after the latest child that feeds it, so every arrow
 points down the flow; an arrow that closes a loop is left out when layers are
-counted, so a cycle still has a first step. Within a layer, children are
+counted, so a cycle still has a first step. A child that nothing feeds -- real
+data beside a generator -- goes one layer before the first child it feeds, and
+a link with no arrowhead (`arrow="none"`) does not order layers at all, so
+twins joined by "shared weights" stay side by side. Within a layer, children are
 sorted by the mean position of the neighbours they are wired to, which removes
 most crossings; ties keep author order. The layers are centred on one another
 unless the group names an `align`. The compiled figure has an unlabelled row
