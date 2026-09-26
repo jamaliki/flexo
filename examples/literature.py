@@ -1180,13 +1180,13 @@ def llava(theme: str = "paper") -> Figure:
                 "llm", label=r"Language model $f_\phi$", tone="model", width="220pt"
             )
             with column.row("inputs") as inputs:
-                with inputs.column("vision") as vision:
-                    projection = vision.block("projection", label="Projection $W$")
-                    encoder = vision.block("encoder", label="Vision encoder", tone="frozen")
+                with inputs.column("vision", reverse=True) as vision:  # flows upward
                     image = vision.text("image", "Image $X_v$")
+                    encoder = vision.block(
+                        "encoder", label="Vision encoder", tone="frozen", input=image
+                    )
+                    projection = vision.block("projection", label="Projection $W$", input=encoder)
                 instruction = inputs.text("instruction", "Instruction $X_q$")
-        figure.connect(image, encoder)
-        figure.connect(encoder, projection)
         figure.connect(projection, language, label="$H_v$")
         figure.connect(instruction, language, label="$H_q$")
         figure.connect(language, response)

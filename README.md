@@ -251,6 +251,9 @@ own:
 
 - A layout group has no padding unless you give it one, so the space between
   its children and its neighbours is exactly its `gap`.
+- `reverse=True` places a row's or column's children last-first. A stream that
+  flows upward is written in the order its values flow -- image, encoder,
+  projection -- and drawn from the bottom up.
 - Columns side by side that are not wired to each other are parallel branches,
   and are aligned at the top.
 - Two rows stacked in a column, with the same number of children and child *i*

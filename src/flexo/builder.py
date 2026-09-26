@@ -191,6 +191,8 @@ class _GroupDraft:
     children: list[str] = field(default_factory=list)
     placements: dict[str, Cell] = field(default_factory=dict)
     """Grid cells claimed by ``at=``, collected as children are authored."""
+    reverse: bool = False
+    """Place the children last-first: a column read bottom to top."""
 
 
 class Figure:
@@ -295,7 +297,7 @@ class Figure:
         groups = tuple(
             GroupSpec(
                 draft.id,
-                tuple(draft.children),
+                tuple(reversed(draft.children) if draft.reverse else draft.children),
                 _with_placements(draft),
                 draft.collision_policy,  # type: ignore[arg-type]
                 draft.label,
@@ -628,6 +630,7 @@ class GroupBuilder:
         shadow: bool = False,
         paint: Mapping[str, str] | None = None,
         at: Cell | None = None,
+        reverse: bool = False,
     ) -> GroupBuilder:
         """Open a nested layout group.
 
@@ -656,9 +659,17 @@ class GroupBuilder:
         ``title_side="right"`` anchors the group's title to the right end of its
         top edge instead of the left. The title band is the same height either
         way, so nothing else in the figure moves.
+
+        ``reverse=True`` places the children last-first, so a column written in
+        the order its values flow -- image, encoder, projection -- reads from the
+        bottom up, and a row from right to left.
         """
 
         scoped_id = self._scoped(id)
+        if reverse and (
+            (isinstance(layout, LayoutSpec) and layout.kind == "grid") or layout == "grid"
+        ):
+            raise ValueError(f'group "{scoped_id}" is a grid; place its cells with at=')
         if title_side not in TITLE_SIDES:
             raise ValueError(
                 f'unknown title side "{title_side}" for group "{scoped_id}"; '
@@ -702,6 +713,7 @@ class GroupBuilder:
             anchor,
             shadow,
             _paint_parts(paint),
+            reverse=reverse,
         )
         self._claim(scoped_id)
         self._draft.children.append(scoped_id)

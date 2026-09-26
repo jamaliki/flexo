@@ -358,3 +358,14 @@ def test_equal_size_children_share_a_width_and_a_centre_line() -> None:
     a, b = compiled.fitted.node("m.a").bounds, compiled.fitted.node("m.b").bounds
     assert a.width == pytest.approx(b.width)
     assert a.center.x == pytest.approx(b.center.x)
+
+
+def test_a_reversed_column_reads_from_the_bottom_up() -> None:
+    with Figure("up") as figure, figure.root.column("stack", reverse=True) as column:
+        first = column.block("first", label="First")
+        column.block("second", label="Second", input=first)
+    compiled = compile_figure(figure.spec)
+    first_box = compiled.fitted.node("stack.first").bounds
+    second_box = compiled.fitted.node("stack.second").bounds
+    assert second_box.bottom < first_box.top
+    assert not lint_compilation(compiled).diagnostics
