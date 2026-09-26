@@ -894,6 +894,150 @@ def load_balancer(theme: str = "paper") -> Figure:
     return figure
 
 
+def federated_averaging(theme: str = "paper") -> Figure:
+    """Federated averaging (McMahan et al. 2017)."""
+
+    with Figure("federated-averaging", theme=theme) as figure:
+        with figure.root.column("system") as system:
+            server = system.block(
+                "server", label=r"Server: $w \leftarrow \sum_k \frac{n_k}{n} w_k$", tone="model"
+            )
+            with system.row("clients") as row:
+                clients = [row.block(f"c{k}", label=f"Client {k}", tone="data") for k in (1, 2, 3)]
+        for client in clients:
+            figure.connect(server, client)
+            figure.connect(client, server, line="dashed")
+    return figure
+
+
+def two_tower(theme: str = "paper") -> Figure:
+    """A two-tower retrieval model (Yi et al. 2019)."""
+
+    with Figure("two-tower", width="single-column", theme=theme) as figure:
+        with figure.root.column("model") as model:
+            with model.row("towers") as towers:
+                with towers.column("query", label="Query tower") as query:
+                    user = query.block(
+                        "mlp", label="MLP", input=query.text("features", "user features")
+                    )
+                with towers.column("candidate", label="Candidate tower") as candidate:
+                    item = candidate.block(
+                        "mlp", label="MLP", input=candidate.text("features", "item features")
+                    )
+            score = model.op("dot", ".", inputs=[user, item])
+            model.text("score", "score $s(u, v)$", input=score)
+    return figure
+
+
+def network_stack(theme: str = "paper") -> Figure:
+    """Two hosts talking through the network stack."""
+
+    layers = ("Application", "Transport", "Network", "Link", "Physical")
+    with Figure("network-stack", theme=theme) as figure:
+        with figure.root.row("hosts", gap="60pt") as hosts:
+            stacks = []
+            for host in ("A", "B"):
+                with hosts.column(host, label=f"Host {host}", equal_size=True) as column:
+                    stacks.append([column.block(name.lower(), label=name) for name in layers])
+        sender, receiver = stacks
+        for upper, lower in itertools.pairwise(sender):
+            figure.connect(upper, lower)
+        for lower, upper in itertools.pairwise(reversed(receiver)):
+            figure.connect(lower, upper)
+        for mine, theirs in zip(sender[:-1], receiver[:-1], strict=True):
+            figure.connect(mine, theirs, line="dashed", arrow="both")
+        figure.connect(sender[-1], receiver[-1], label="medium")
+    return figure
+
+
+def batch_normalization(theme: str = "paper") -> Figure:
+    """Batch normalisation as a computation graph (Ioffe and Szegedy 2015)."""
+
+    with Figure("batch-normalization", theme=theme) as figure:
+        with figure.root.row("graph") as graph:
+            x = graph.text("x", "$x$")
+            with graph.column("statistics") as statistics:
+                mean = statistics.block("mean", label=r"$\mu_B$")
+                variance = statistics.block("variance", label=r"$\sigma^2_B$")
+            centred = graph.op("centre", "-", inputs=[x, mean])
+            scaled = graph.op("scale", "/", inputs=[centred, variance])
+            stretched = graph.op("gamma", "x", input=scaled)
+            shifted = graph.add("beta", input=stretched)
+            graph.text("y", "$y$", input=shifted)
+        figure.net(src=x, sinks=[mean, variance])
+    return figure
+
+
+def skip_gram(theme: str = "paper") -> Figure:
+    """Skip-gram (Mikolov et al. 2013, Figure 1)."""
+
+    with Figure("skip-gram", width="single-column", theme=theme) as figure:
+        with figure.root.row("model") as model:
+            with model.column("input", label="Input") as column:
+                word = column.block("wt", label="$w(t)$")
+            projection = model.block("projection", label="Projection", input=word)
+            with model.column("output", label="Output") as column:
+                for i in (-2, -1, 1, 2):
+                    column.block(f"w{i}", label=f"$w(t{i:+d})$", input=projection)
+    return figure
+
+
+def extract_transform_load(theme: str = "paper") -> Figure:
+    """An extract-transform-load pipeline into a warehouse."""
+
+    with Figure("etl", theme=theme) as figure:
+        with figure.root.row("flow") as flow:
+            with flow.column("sources", label="Sources") as column:
+                sources = [
+                    column.block(name.lower().replace(" ", "-"), label=name, tone="data")
+                    for name in ("CRM", "Orders", "Web logs", "Payments")
+                ]
+            extract = flow.block("extract", label="Extract", inputs=sources)
+            transform = flow.block("transform", label="Transform", input=extract)
+            load = flow.block("load", label="Load", input=transform)
+            warehouse = flow.block("warehouse", label="Warehouse", tone="data", input=load)
+            with flow.column("consumers", label="Consumers") as column:
+                for name in ("Dashboards", "ML features", "Reports"):
+                    column.block(name.lower().replace(" ", "-"), label=name, input=warehouse)
+    return figure
+
+
+def autoencoder(theme: str = "paper") -> Figure:
+    """An undercomplete autoencoder."""
+
+    with Figure("autoencoder", theme=theme) as figure:
+        with figure.root.row("network") as network:
+            x = network.text("x", "$x$")
+            with network.group("encoder", label="Encoder", layout="row") as encoder:
+                wide = encoder.block("h1", label="512", height="80pt", input=x)
+                narrow = encoder.block("h2", label="128", height="50pt", input=wide)
+            code = network.block("z", label="$z$", height="24pt", tone="model", input=narrow)
+            with network.group("decoder", label="Decoder", layout="row") as decoder:
+                narrow = decoder.block("g1", label="128", height="50pt", input=code)
+                wide = decoder.block("g2", label="512", height="80pt", input=narrow)
+            network.text("reconstruction", r"$\hat{x}$", input=wide)
+    return figure
+
+
+def message_passing(theme: str = "paper") -> Figure:
+    """One round of message passing on a small graph (Gilmer et al. 2017)."""
+
+    with Figure(
+        "message-passing", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.module("graph", label="Message passing", layout="grid", columns=3) as graph:
+            centre = graph.circle("v", "$h_v$", shaded=True, at=(1, 1))
+            corners = [
+                graph.circle(f"u{i}", f"$h_{i}$", at=cell)
+                for i, cell in enumerate(((0, 0), (0, 2), (2, 0), (2, 2)), 1)
+            ]
+        for neighbour in corners:
+            figure.connect(neighbour, centre)
+        figure.connect(corners[0], corners[1], arrow="none")
+        figure.connect(corners[2], corners[3], arrow="none")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -941,6 +1085,14 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         cpu_pipeline,
         model_view_controller,
         load_balancer,
+        federated_averaging,
+        two_tower,
+        network_stack,
+        batch_normalization,
+        skip_gram,
+        extract_transform_load,
+        autoencoder,
+        message_passing,
     )
 }
 """Every figure here, by name."""
