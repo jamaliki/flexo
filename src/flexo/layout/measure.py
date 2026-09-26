@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Callable
+from dataclasses import replace
 
 from flexo.components import intrinsic_node_size
 from flexo.diagnostics import Diagnostic, Severity
@@ -37,8 +38,8 @@ def measure_figure(
         if layout_style.typography.title_size == 1.0
         else TextMeasurer(title_typography(layout_style.typography))
     )
-    measured_nodes = tuple(
-        _measure_node(node, text_measurer, layout_style) for node in semantic.nodes
+    measured_nodes = _one_circle_size(
+        tuple(_measure_node(node, text_measurer, layout_style) for node in semantic.nodes)
     )
     measured_edge_labels = tuple(text_measurer.measure(edge.label) for edge in semantic.edges)
     edge_labels = {
@@ -183,6 +184,31 @@ def _measure_node(
     # both port lines cross -- including a vector's, whose bounds are exactly its
     # cell grid because the caption is a sibling node rather than padding.
     return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0))
+
+
+def _one_circle_size(nodes: tuple[MeasuredNode, ...]) -> tuple[MeasuredNode, ...]:
+    """Every circle without an authored size, drawn at the size of the largest.
+
+    The nodes of a graphical model or the states of a state machine are one
+    kind of thing, and a reader compares circles by size: "Wet grass" should
+    not look more important than "Rain" because its name is longer.
+    """
+
+    free = [
+        node
+        for node in nodes
+        if node.spec.kind == "circle" and node.spec.width is None and node.spec.height is None
+    ]
+    if len(free) < 2:
+        return nodes
+    side = max(node.intrinsic_size.width for node in free)
+    ids = {node.spec.id for node in free}
+    return tuple(
+        replace(node, intrinsic_size=Size(side, side), anchor=Point(side / 2.0, side / 2.0))
+        if node.spec.id in ids
+        else node
+        for node in nodes
+    )
 
 
 WRAPPED_KINDS = frozenset(

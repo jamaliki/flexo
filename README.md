@@ -186,7 +186,9 @@ with flexo.Figure("mlp", conventions={"lines": "straight"}) as figure:
         m.connect_all(inputs, hidden)
 ```
 
-`circle` is a labelled circle sized to its label; `shaded=True` fills it grey,
+`circle` is a labelled circle. All circles in a figure without an authored
+`width=` share one size, the size the longest label needs, so a reader does not
+compare variables by the length of their names. `shaded=True` fills it grey,
 the graphical-model mark for an observed variable. A straight edge is one
 segment from outline to outline on the line between the two centres. It is not
 routed, so it goes through anything in its way, and lint reports that as

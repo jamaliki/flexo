@@ -12,15 +12,22 @@ from flexo.lint import lint_compilation
 from flexo.routing.labels import label_box
 
 
-def test_a_circle_is_sized_to_its_label_and_shaded_on_request() -> None:
+def test_circles_share_the_size_their_longest_label_needs() -> None:
     with Figure("circles") as figure, figure.module("m") as m:
         small = m.circle("a", "$x$")
-        m.circle("b", "$x_{long}$", shaded=True, input=small)
+        long = m.circle("b", "$x_{long}$", shaded=True, input=small)
+        m.circle("c", "$y$", width="40pt", input=long)
     compiled = compile_figure(figure.spec)
     a = compiled.fitted.node("m.a").bounds
     b = compiled.fitted.node("m.b").bounds
+    c = compiled.fitted.node("m.c").bounds
     assert a.width == pytest.approx(a.height)
-    assert b.width > a.width
+    assert a.width == pytest.approx(b.width), "one size for every circle"
+    with Figure("alone") as figure, figure.module("m") as m:
+        m.circle("a", "$x$")
+    alone = compile_figure(figure.spec).fitted.node("m.a").bounds
+    assert b.width > alone.width, "the size the longest label needs"
+    assert c.width == pytest.approx(40.0), "an authored size is kept"
     assert 'id="m.b.body"' in compiled.document.text
     assert not lint_compilation(compiled).errors
 
