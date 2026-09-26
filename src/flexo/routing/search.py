@@ -220,21 +220,35 @@ class Grid:
         # pushed each time its cost improves: remember it rather than recompute it
         # against every goal (a long pin edge is many goals).
         estimates: dict[tuple[float, float, int], float] = {}
+        single = targets[0] if len(targets) == 1 else None
 
         def estimate_from(px: float, py: float, heading: int) -> float:
             key = (px, py, heading)
             known = estimates.get(key)
             if known is None:
-                known = min(
-                    charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
-                    for tx, ty, charge in targets
-                )
+                if single is not None:
+                    tx, ty, charge = single
+                    known = charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
+                else:
+                    known = min(
+                        charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
+                        for tx, ty, charge in targets
+                    )
                 estimates[key] = known
             return known
+
+        # A traffic price depends only on the step: remember it for the search.
+        priced: dict[tuple[int, int, int], float] = {}
+        xs, ys = self.xs, self.ys
+        columns, rows = len(xs), len(ys)
+        step_cost = self.step_cost
+        push, pop = heapq.heappush, heapq.heappop
+        inf = float("inf")
         # A state is (x, y, heading, turned): ``turned`` says the last move was a
         # turn in place, and a second one there would reverse the route on itself.
         frontier: list[tuple[float, float, int, int, int, int, int]] = []
         best: dict[tuple[int, int, int, int], float] = {}
+        best_of = best.get
         previous: dict[tuple[int, int, int, int], tuple[int, int, int, int] | None] = {}
         serial = count()
         for point, heading, initial in sources:
@@ -242,54 +256,62 @@ class Grid:
             headings = (heading,) if heading is not None else (EAST, WEST, SOUTH, NORTH)
             for current in headings:
                 state = (ix, iy, current, 0)
-                if initial < best.get(state, float("inf")):
+                if initial < best_of(state, inf):
                     best[state] = initial
                     previous[state] = None
-                    estimate = initial + estimate_from(self.xs[ix], self.ys[iy], current)
-                    heapq.heappush(
-                        frontier, (estimate, initial, next(serial), ix, iy, current, 0)
-                    )
+                    estimate = initial + estimate_from(xs[ix], ys[iy], current)
+                    push(frontier, (estimate, initial, next(serial), ix, iy, current, 0))
         final: tuple[int, int, int, int] | None = None
-        final_cost = float("inf")
+        final_cost = inf
         finished: dict[tuple[int, int, int, int], tuple[int, int, int, int]] = {}
         finished_cost: dict[tuple[int, int, int, int], float] = {}
+        work = 0
         while frontier:
-            _, cost, _, ix, iy, heading, turned = heapq.heappop(frontier)
-            _WORK[0] += 1
+            _, cost, _, ix, iy, heading, turned = pop(frontier)
+            work += 1
             if turned == _DONE:
                 final, final_cost = (ix, iy, heading, 0), cost
                 final = finished[final]
                 break
             state = (ix, iy, heading, turned)
-            if cost > best.get(state, float("inf")) + 1e-9:
+            if cost > best_of(state, inf) + 1e-9:
                 continue
             surcharge = endings.get((ix, iy))
             if surcharge is not None and (arrive is None or heading == arrive):
                 # Finishing is one more move, priced by where it finishes.
                 done = (ix, iy, heading, 0)
                 total = cost + surcharge
-                if total < finished_cost.get(done, float("inf")):
+                if total < finished_cost.get(done, inf):
                     finished_cost[done] = total
                     finished[done] = state
-                    heapq.heappush(frontier, (total, total, next(serial), ix, iy, heading, _DONE))
-            moves: list[tuple[int, int, int, int, float]] = []
+                    push(frontier, (total, total, next(serial), ix, iy, heading, _DONE))
             nx, ny = ix + _DX[heading], iy + _DY[heading]
-            if 0 <= nx < len(self.xs) and 0 <= ny < len(self.ys):
-                price = self.step_cost(ix, iy, heading)
+            if 0 <= nx < columns and 0 <= ny < rows:
+                price = step_cost(ix, iy, heading)
                 if extra is not None:
-                    price += extra(self, ix, iy, heading)
-                moves.append((nx, ny, heading, 0, price))
-            if not turned:
-                for turn in _PERPENDICULAR[heading]:
-                    moves.append((ix, iy, turn, 1, bend))
-            for mx, my, mh, mt, price in moves:
-                following = (mx, my, mh, mt)
+                    step = (ix, iy, heading)
+                    charge = priced.get(step)
+                    if charge is None:
+                        charge = extra(self, ix, iy, heading)
+                        priced[step] = charge
+                    price += charge
+                following = (nx, ny, heading, 0)
                 total = cost + price
-                if total + 1e-9 < best.get(following, float("inf")):
+                if total + 1e-9 < best_of(following, inf):
                     best[following] = total
                     previous[following] = state
-                    estimate = total + estimate_from(self.xs[mx], self.ys[my], mh)
-                    heapq.heappush(frontier, (estimate, total, next(serial), mx, my, mh, mt))
+                    estimate = total + estimate_from(xs[nx], ys[ny], heading)
+                    push(frontier, (estimate, total, next(serial), nx, ny, heading, 0))
+            if not turned:
+                total = cost + bend
+                for turn in _PERPENDICULAR[heading]:
+                    following = (ix, iy, turn, 1)
+                    if total + 1e-9 < best_of(following, inf):
+                        best[following] = total
+                        previous[following] = state
+                        estimate = total + estimate_from(xs[ix], ys[iy], turn)
+                        push(frontier, (estimate, total, next(serial), ix, iy, turn, 1))
+        _WORK[0] += work
         if final is None:
             raise RuntimeError("routing grid is disconnected")
         cells: list[tuple[int, int]] = []
