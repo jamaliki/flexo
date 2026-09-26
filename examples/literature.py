@@ -401,15 +401,13 @@ def siamese(theme: str = "paper") -> Figure:
     """A Siamese network: two encoders sharing weights (Bromley et al. 1993)."""
 
     with Figure("siamese", width="single-column", theme=theme) as figure:
-        with figure.module("m", label="Siamese network", layout="grid", columns=3) as m:
-            first = m.text("x1", "$x_1$", at=(0, 0))
-            second = m.text("x2", "$x_2$", at=(1, 0))
-            top = m.block("top", label="Encoder", tone="encoder", input=first, at=(0, 1))
-            bottom = m.block("bottom", label="Encoder", tone="encoder", input=second, at=(1, 1))
-            distance = m.op("distance", "$d$", at=(0, 2))
-        m.connect(top, distance)
-        m.connect(bottom, distance)
-        m.connect(top, bottom, line="dashed", arrow="none", label="shared weights")
+        with figure.module("m", label="Siamese network", layout="flow-right") as m:
+            first = m.block("top", label="Encoder", tone="encoder", input=m.text("x1", "$x_1$"))
+            second = m.block(
+                "bottom", label="Encoder", tone="encoder", input=m.text("x2", "$x_2$")
+            )
+            m.op("distance", "$d$", inputs=[first, second])
+            m.connect(first, second, line="dashed", arrow="none", label="shared weights")
     return figure
 
 
@@ -483,13 +481,13 @@ def gan(theme: str = "paper") -> Figure:
 
     with Figure("gan", theme=theme) as figure:
         with figure.module(
-            "m", label="Generative adversarial network", layout="grid", columns=4
+            "m", label="Generative adversarial network", layout="flow-right"
         ) as m:
-            noise = m.text("noise", "Noise $z$", at=(0, 0))
-            generator = m.mlp("generator", label="Generator", input=noise, at=(0, 1))
-            fake = m.block("fake", label="Fake samples", input=generator, at=(0, 2))
-            real = m.block("real", label="Real samples", at=(1, 2))
-            m.mlp("discriminator", label="Discriminator", inputs=[fake, real], at=(0, 3))
+            noise = m.text("noise", "Noise $z$")
+            generator = m.mlp("generator", label="Generator", input=noise)
+            fake = m.block("fake", label="Fake samples", input=generator)
+            real = m.block("real", label="Real samples")
+            m.mlp("discriminator", label="Discriminator", inputs=[fake, real])
     return figure
 
 
