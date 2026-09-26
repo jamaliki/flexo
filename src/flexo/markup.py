@@ -15,9 +15,18 @@ A string label is plain text, except for what sits between a pair of ``$``:
   upright. ``\\mathcal{L}``, ``\\mathbb{E}`` and ``\\mathfrak{g}`` give script,
   blackboard, and fraktur capitals.
 - ``\\hat{x}``, ``\\bar{x}``, ``\\tilde{x}`` and ``\\dot{x}`` put the accent on
-  the character.
+  the character. ``\\sqrt{d}`` is a radical sign before its argument, with no
+  bar over it.
 
-Spaces are kept as typed. ``\\$`` is a literal dollar sign anywhere, and a lone
+Spacing follows TeX. A binary operator (``+``, ``-``, ``\\times``, ``\\cdot``,
+...) or a relation (``=``, ``<``, ``\\in``, ``\\sim``, ``\\to``, ...) gets one
+space on each side, whatever was typed around it -- except in a sub- or
+superscript, and except a sign that opens a formula or follows ``(``, ``,`` or
+another operator, which get none. The space that ends a command name
+(``\\alpha x``) is dropped, and a named function is set apart from an
+operand that follows it (``\\log x``). Every other space is kept as typed.
+
+``\\$`` is a literal dollar sign anywhere, and a lone
 ``$`` with no partner is literal too. Scripts do not nest: ``x_{a_b}`` sets
 ``a`` and ``b`` at the same subscript level.
 """
@@ -79,7 +88,7 @@ SYMBOLS = {
     "top": "⊤",
     "perp": "⊥",
     "propto": "∝",
-    "mid": "|",
+    "mid": "∣",
     "times": "×",
     "cdot": "·",
     "sim": "∼",
@@ -143,6 +152,11 @@ Unicode placed early in its Letterlike Symbols block instead."""
 BOLD = {"mathbf", "boldsymbol"}
 
 _REPLACEMENTS = {"-": "−", "*": "∗", "'": "′"}
+BINARY = frozenset("+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆")
+"""Symbols TeX spaces as binary operators: ``a + b``, but ``-a`` for a sign."""
+RELATIONS = frozenset("=<>≤≥≠≈≡∼≃∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔↦∣")
+"""Symbols TeX spaces as relations: always ``a = b``."""
+_OPENING = frozenset("([{⟨,;")
 _UPRIGHT_GREEK = frozenset("ΓΔΘΛΞΠΣΥΦΨΩ")
 _COMMAND = re.compile(r"\\([A-Za-z]+|.)")
 
@@ -200,7 +214,34 @@ def _closing_dollar(text: str, start: int) -> int | None:
 def _math(source: str) -> list[TextRun]:
     runs: list[TextRun] = []
     _read(source, runs, shift="normal", mode="math", weight=400)
+    while runs and runs[-1].text == " ":
+        runs.pop()
     return runs
+
+
+def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None:
+    """Append a binary operator or relation, spaced the way TeX spaces it."""
+
+    atoms = [run for run in runs if run.text != " "]
+    previous = atoms[-1].text[-1:] if atoms else ""
+    sign = symbol in BINARY and (not previous or previous in BINARY | RELATIONS | _OPENING)
+    if sign:
+        runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]
+        return
+    while runs and runs[-1].text == " ":
+        runs.pop()
+    spaced = shift == "normal" and bool(previous)
+    if spaced:
+        runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
+    runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]
+    if spaced:
+        runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
+
+
+def _skip_spaces(source: str, index: int) -> int:
+    while index < len(source) and source[index] == " ":
+        index += 1
+    return index
 
 
 def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: int) -> None:
@@ -218,6 +259,8 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
             match = _COMMAND.match(source, index)
             name = match.group(1) if match else ""
             index = match.end() if match else index + 1
+            if name.isalpha():
+                index = _skip_spaces(source, index)  # the space ends the name
             if name in ACCENTS:
                 argument, index = _argument(source, index)
                 accented: list[TextRun] = []
@@ -241,6 +284,16 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 continue
             if name in OPERATORS:
                 runs.append(TextRun(name, weight, False, shift))  # type: ignore[arg-type]
+                following = source[index : index + 1]
+                if following.isalnum() or following == "\\":
+                    # ``\log x``: a named function is set apart from its
+                    # operand, but not from ``(`` or a script.
+                    runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
+                continue
+            if name == "sqrt":
+                runs.append(TextRun("√", weight, False, shift))  # type: ignore[arg-type]
+                argument, index = _argument(source, index)
+                _read(argument, runs, shift=shift, mode=mode, weight=weight)
                 continue
             if name in UPRIGHT or name in BOLD:
                 argument, index = _argument(source, index)
@@ -253,6 +306,10 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 )
                 continue
             symbol = SYMBOLS.get(name, "\\" + name)
+            if mode == "math" and symbol in BINARY | RELATIONS:
+                _operator(runs, symbol, weight, shift)
+                index = _skip_spaces(source, index)
+                continue
             italic = (
                 mode == "math"
                 and name in SYMBOLS
@@ -272,6 +329,10 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
         index += 1
         if mode == "math":
             character = _REPLACEMENTS.get(character, character)
+            if character in BINARY | RELATIONS:
+                _operator(runs, character, weight, shift)
+                index = _skip_spaces(source, index)
+                continue
         italic = mode == "math" and character.isascii() and character.isalpha()
         runs.append(TextRun(character, weight, italic, shift))  # type: ignore[arg-type]
 
