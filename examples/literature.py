@@ -639,6 +639,21 @@ def faster_rcnn(theme: str = "paper") -> Figure:
     return figure
 
 
+def mixture_of_experts(theme: str = "paper") -> Figure:
+    """A sparse mixture-of-experts layer (Fedus et al. 2022, Figure 2)."""
+
+    with Figure("mixture-of-experts", theme=theme) as figure:
+        with figure.module("switch", label="Switch layer", layout="column") as m:
+            x = m.text("x", "$x$")
+            router = m.block("router", label="Router", input=x)
+            with m.row("experts") as row:
+                experts = [row.block(f"e{i}", label=f"FFN {i}") for i in range(1, 5)]
+            total = m.add("sum", inputs=experts)
+            m.text("y", "$y$", input=total)
+        figure.net(src=router, sinks=experts, label="$p_i(x)$")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -672,6 +687,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         state_machine,
         feedback_control,
         faster_rcnn,
+        mixture_of_experts,
     )
 }
 """Every figure here, by name."""

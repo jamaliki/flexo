@@ -27,7 +27,8 @@ that names nothing in the figure is still an error.)
      output line. Arrows in both directions between the same two boxes stay
      side by side.
    - A circle, diamond, or operator takes one line per corner while corners
-     last, arrivals first.
+     last, arrivals first. Three or more arrivals at an operator from one
+     direction share that side instead, as a bus.
 
    Ends then share a pin or get their own. Edges leaving one port share its
    pin and are drawn as a tree, unless their targets stand side by side
@@ -89,7 +90,9 @@ with flexo.Figure("nets", width="double-column") as figure:
 a trunk, and branches off it as plain Ts. `merge` draws several values arriving
 at one place as a tree grown from the destination; in a merge of two, the one
 that joins the other's line ends in an arrowhead pointing into it, and a merge
-of three or more is a bus with its one arrow into the destination. Edges that
+of three or more is a bus with its one arrow into the destination. Each piece
+of a tree is drawn once: a branch stops where it meets the line that carries
+on, so no two paths lie on top of each other in the SVG. Edges that
 leave the same port are drawn the same way -- three `connect` calls from one
 output are one tree. (Edges that *arrive* at one port stay separate arrows by
 default.) Every bend inside a piece of the tree turns on the elbow fillet (6 pt
