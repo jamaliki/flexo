@@ -11,6 +11,7 @@ variable font is drawn at the run's own weight.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -18,6 +19,12 @@ import uharfbuzz as hb
 
 from flexo.drawing import Point, Run, Segment
 from flexo.fonts import FontFace, hb_font, load_face
+
+
+def has_rtl_letters(text: str) -> bool:
+    """Whether ``text`` holds a right-to-left letter."""
+
+    return any(unicodedata.bidirectional(ch) in {"R", "AL"} for ch in text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,12 @@ def shape(run: Run) -> list[Glyph]:
     buffer = hb.Buffer()
     buffer.add_str(run.text)
     buffer.guess_segment_properties()
+    if run.rtl:
+        # A right-to-left piece of a mixed line: its glyphs come out left to right on
+        # the page, as HarfBuzz orders a right-to-left buffer.
+        buffer.direction = "rtl"
+    elif any(ch.isdigit() for ch in run.text) and not has_rtl_letters(run.text):
+        buffer.direction = "ltr"
     hb.shape(font, buffer, {"kern": True, "liga": True})
     infos, positions = buffer.glyph_infos, buffer.glyph_positions
     # uharfbuzz fills the buffer with code points, so clusters index the string.
