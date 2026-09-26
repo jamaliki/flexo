@@ -294,7 +294,11 @@ class _Content:
         down = f"0 {_n(h)}" if item.flip_y else f"0 {_n(-h)}"
         left = x + w if item.flip_x else x
         top = y if item.flip_y else y + h
-        self.ops.append(f"q {across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
+        # A picture filling its box by slicing is clipped to the box.
+        clip = ""
+        if w > item.width + 0.01 or h > item.height + 0.01:
+            clip = f"{_n(item.x)} {_n(item.y)} {_n(item.width)} {_n(item.height)} re W n "
+        self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 
 def _path(segments: Sequence[Segment]) -> str:
