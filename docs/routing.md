@@ -31,28 +31,30 @@ that names nothing in the figure is still an error.)
      the side. Arrows in both directions between the same two boxes stay side
      by side.
    - A side holds two pins fewer than fit exactly a lane apart, so its lines
-     have room to spread, but at least two where two fit. The pins past that, outermost first, move round the corner
-     to the neighbouring side, keeping their order.
+     have room to spread, but at least two where two fit. The pins past that,
+     outermost first, move round the corner to the neighbouring side, keeping
+     their order.
    - A loop -- an edge from a component to itself -- leaves and re-enters
      the emptiest side of a box, as a C. On a circle or a diamond it leaves
      one side and comes back by the next, round the corner between the two
      emptiest neighbours. A loop is never drawn straight.
-   - A circle, diamond, or operator takes one line per corner while corners
-     last. A line in line with the circle chooses first, then the line to the
-     nearest neighbour, so the flow through a decision keeps its corners and a loop back from far away takes
-     what is left; at an operator, the step just above a sum keeps the top and
-     a skip from further up comes in by a side, and a value from off to one
-     side comes in by the side facing it, so two branches meet their sum from
-     left and right. Three or more arrivals at an
-     operator from one direction share that side instead, as a bus.
+   - A circle or a diamond takes one line per corner while corners last. A
+     line in line with it chooses first, then the line to the nearest
+     neighbour, so the flow through a decision keeps its corners and a loop
+     back from far away takes what is left.
+   - An operator gives each arriving value its own side, in the same order:
+     the step just above a sum keeps the top, a skip from further up comes in
+     by a side, and a value from off to one side comes in by the side facing
+     it, so two branches meet their sum from left and right. Three or more
+     arrivals from one direction share that side instead, as a bus.
 
    Ends then share a pin or get their own. Edges leaving one port share its
    pin and are drawn as a tree, unless their targets stand side by side
    within the component's span, when each gets its own arrow. An edge to a
    component that sends an edge back also gets its own arrow, so each pair
-   of arrows runs side by side (a server and the clients reporting to it). Values arriving
-   at one port get a pin each (the `arrivals` convention), and a captioned
-   edge always has pins of its own. Pins on one side are ordered by where
+   of arrows runs side by side (a server and the clients reporting to it).
+   Values arriving at one port get a pin each (the `arrivals` convention), and
+   a captioned edge always has pins of its own. Pins on one side are ordered by where
    their lines go; ties put the farthest counterpart first, so skip
    connections nest. Two pins that face each other across a gap move to one
    coordinate, so the arrow between them is straight; the pin of a net's
@@ -72,20 +74,22 @@ that names nothing in the figure is still an error.)
    running over the middle of a captioned edge's longest horizontal run keeps
    the caption's height from it instead, so the caption fits between; for an
    edge with no horizontal run, a line to the right of its vertical run keeps
-   the caption's width from it. When that cannot be met, plain lanes are used. The
-   crossbar of a Z and the trunk of a tree sit in the middle of the room they
-   have.
+   the caption's width from it. When that cannot be met, plain lanes are
+   used. The crossbar of a Z and the trunk of a tree sit in the middle of the
+   room they have.
 5. **Uncross.** If lines still cross, or run closer than a lane, neighbouring
    pins on the sides those lines attach to are swapped one pair at a time;
    then each end of such a line whose side is a default is tried on the two
    sides across from its own (a line arriving at an operator or a circle is
-   tried on the opposite side first; what leaves one keeps its side). The figure is rerouted and separated after each
-   trial, and a trial is kept when fewer pairs of lines cross or crowd. This is
+   tried on the opposite side first; what leaves one keeps its side). The
+   figure is rerouted and separated after each trial, and a trial is kept
+   when fewer pairs of lines cross or crowd. This is
    what sends a loop back to an earlier step over the top instead of through
    everything between.
 6. **Room.** A connector or caption that had to leave the container it belongs
-   to, or a run pressed between a box and the container's edge, asks that
-   container for more room, and the figure is laid out again (up to three
+   to, a caption that found no clear place over or under the contents, or a
+   run pressed between a box and the container's edge, asks that container for
+   more room, and the figure is laid out again (up to three
    rounds). A crossing whose route could instead run along the container's top
    or bottom edge is offered a lane there, kept only if it removes the crossing.
 
