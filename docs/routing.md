@@ -24,8 +24,11 @@ that names nothing in the figure is still an error.)
      that is off its port's usual side moves to another side that faces its
      other end. A departure with no such side leaves by its port's usual side
      if the same value already leaves there, so a feedback loop taps the
-     output line. Arrows in both directions between the same two boxes stay
-     side by side.
+     output line. An arrival with no such side, sharing its side with
+     something that leaves for a nearer box, comes in over the top or under
+     the bottom instead -- the loop back into a flowchart step enters it from
+     the side. Arrows in both directions between the same two boxes stay side
+     by side.
    - A side holds two pins fewer than fit exactly a lane apart, so its lines
      have room to spread, but at least two where two fit. The pins past that, outermost first, move round the corner
      to the neighbouring side, keeping their order.
@@ -210,8 +213,11 @@ A net's caption -- a formula such as `softmax(QKᵀ)V` -- sits above the
 horizontal run its arrow draws, `caption_clearance` above the run's ink measured
 from the bottom of the caption's own descender box (a subscript makes that box
 deeper than the font's descender). A riser out of the middle of the run cuts it
-in two, and the caption takes the wider stretch that is left. An edge's caption
-is placed as described in [Captions on connectors](../README.md#captions-on-connectors).
+in two, and the caption takes the wider stretch that is left. That is the
+caption's first choice; if it is not clear, the caption tries the same places
+an edge's caption would, along every piece of the net. Edge and net captions
+are placed together as described in
+[Captions on connectors](../README.md#captions-on-connectors).
 
 Attention then reads as a formula rather than as a matrix: the merge carries its
 caption in styled runs (`TextRun("T", baseline_shift="super")`) and Flexo anchors

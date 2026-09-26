@@ -150,8 +150,10 @@ fallback font that can.
 
 ### Captions on connectors
 
-`connect(a, b, label="action $A_t$")` puts a caption beside the line. Captions
-are placed after routing. The candidate positions are above and below each
+`connect(a, b, label="action $A_t$")` puts a caption beside the line (and
+`net(..., label=...)` beside a net). Captions are placed after routing, the one
+with the fewest clear places first; a caption left with none takes the place
+of one that can move elsewhere. The candidate positions are above and below each
 horizontal run and on either side of each vertical run, at the middle and then
 further toward either end. A caption takes the first candidate that overlaps no
 component, title, other caption, or line, and does not sit within a lane of

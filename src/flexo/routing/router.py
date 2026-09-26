@@ -47,7 +47,7 @@ from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet
 from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.routing.hints import forced_points
 from flexo.routing.ink import caption_rise
-from flexo.routing.labels import label_box, place_edge_labels
+from flexo.routing.labels import place_captions
 from flexo.routing.pins import (
     POINT_KINDS,
     Bundle,
@@ -241,8 +241,9 @@ def route_figure(
             )
     edges = [routed_edges[edge.id] for edge in semantic.edges]
     nets = [routed_nets[net.id] for net in semantic.nets]
-    edges = place_edge_labels(
+    edges, nets = place_captions(
         edges,
+        nets,
         solids=(
             *(node.bounds for node in fitted.nodes),
             *(
@@ -252,11 +253,6 @@ def route_figure(
                 for rect in (title_rect(group, layout_style),)
                 if rect is not None
             ),
-        ),
-        fixed_labels=(
-            label_box(net.label_position, net.label_metrics)
-            for net in nets
-            if net.label_position is not None and net.label_metrics is not None
         ),
         lines=(
             *((edge.spec.id, edge.centerline) for edge in edges),
