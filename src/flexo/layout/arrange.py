@@ -171,7 +171,12 @@ def arrange(
         total = sum(size.width for size in sizes) + sum(gaps)
         start, actual_gaps = linear_justification(layout.justify, content.width, total, gaps)
         x = content.x + start
-        ascent = cross_extent(sizes, lines, vertical=True)[0] if ports else 0.0
+        ascent = 0.0
+        if ports:
+            # The aligned line sits in the middle of any room to spare, as a
+            # centred row would: the canvas is wider than what it holds.
+            ascent, descent = cross_extent(sizes, lines, vertical=True)
+            ascent += max(0.0, content.height - ascent - descent) / 2.0
         result = []
         for index, size in enumerate(sizes):
             height = content.height if layout.align == "stretch" else size.height
@@ -188,7 +193,10 @@ def arrange(
         total = sum(size.height for size in sizes) + sum(gaps)
         start, actual_gaps = linear_justification(layout.justify, content.height, total, gaps)
         y = content.y + start
-        line = cross_extent(sizes, lines, vertical=False)[0] if ports else 0.0
+        line = 0.0
+        if ports:
+            line, reach = cross_extent(sizes, lines, vertical=False)
+            line += max(0.0, content.width - line - reach) / 2.0
         result = []
         for index, size in enumerate(sizes):
             width = content.width if layout.align == "stretch" else size.width
