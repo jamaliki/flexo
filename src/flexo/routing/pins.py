@@ -813,10 +813,26 @@ def _spread_operator_inputs(ends: list[End]) -> None:
         for end in sorted(arriving, key=rank):
             assert end.group is not None
             ranked = _facing_sides(end.node.bounds, end.counterpart, end.group[2])
+            beside = _beside(end.node.bounds, end.counterpart)
+            if beside is not None and _alignment_first(end) > 0.0:
+                # From off to one side, a value comes down and turns once into
+                # the side facing it; into the top it would have to jog. Two
+                # branches summed below them meet the sum from left and right.
+                ranked = [beside] + [side for side in ranked if side is not beside]
             free = [side for side in ranked if side not in taken]
             side = free[0] if free else end.group[2]
             taken.add(side)
             end.group = (end.group[0], f"{end.group[1]}#{side.value}", side, end.group[3])
+
+
+def _beside(node: Rect, other: Rect) -> Side | None:
+    """East or west, when ``other`` lies wholly off that side of ``node``."""
+
+    if other.left >= node.right:
+        return Side.EAST
+    if other.right <= node.left:
+        return Side.WEST
+    return None
 
 
 CORNER_KINDS = frozenset({"circle", "decision"})

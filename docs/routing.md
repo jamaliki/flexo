@@ -41,7 +41,9 @@ that names nothing in the figure is still an error.)
      last. A line in line with the circle chooses first, then the line to the
      nearest neighbour, so the flow through a decision keeps its corners and a loop back from far away takes
      what is left; at an operator, the step just above a sum keeps the top and
-     a skip from further up comes in by a side. Three or more arrivals at an
+     a skip from further up comes in by a side, and a value from off to one
+     side comes in by the side facing it, so two branches meet their sum from
+     left and right. Three or more arrivals at an
      operator from one direction share that side instead, as a bus.
 
    Ends then share a pin or get their own. Edges leaving one port share its
