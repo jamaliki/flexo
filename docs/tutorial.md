@@ -233,7 +233,7 @@ def pipeline(**look):
 figures = {
     "paper": pipeline(),
     "tikz": pipeline(theme="tikz"),
-    "dark": pipeline(theme="dark", palette="Cobalt Citrus"),
+    "dark": pipeline(theme="dark", palette="Cobalt Citrus", background=True),
     "sketch": pipeline(theme="sketch"),
 }
 ```
@@ -241,10 +241,13 @@ figures = {
 | `paper` (the default) | `tikz` |
 | --- | --- |
 | ![paper](../examples/build/tutorial/themes-paper.preview.png) | ![tikz](../examples/build/tutorial/themes-tikz.preview.png) |
-| **`dark`, palette "Cobalt Citrus"** | **`sketch`** |
+| **`dark`, palette "Cobalt Citrus", `background=True`** | **`sketch`** |
 | ![dark](../examples/build/tutorial/themes-dark.preview.png) | ![sketch](../examples/build/tutorial/themes-sketch.preview.png) |
 
-`flexo themes` lists every theme, palette, and bundled font. `font="Helvetica"`
+Every SVG is transparent, so a figure sits on whatever page it is placed on;
+`background=True` paints the theme's own page (the navy above), and
+`background="#ffffff"` any colour. `flexo themes` lists every theme, palette,
+and bundled font. `font="Helvetica"`
 (or any installed family) sets the figure in that face at the theme's sizes.
 
 ## 9. Drawing by hand
