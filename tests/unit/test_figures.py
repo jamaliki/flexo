@@ -136,6 +136,15 @@ def _literature() -> dict:
     return module.FIGURES
 
 
+CROSSINGS = {"bidirectional-rnn": 6}
+"""Figures whose graphs cannot be drawn in their layout without lines crossing.
+
+Each input of a bidirectional network feeds both chains, and each chain feeds
+every output, so each line that passes a chain crosses one of its arrows; the
+two at the ends pass on the outside. Six is the fewest there are.
+"""
+
+
 @pytest.mark.parametrize("theme", ["paper", "tikz"])
 @pytest.mark.parametrize("name", sorted(_literature()))
 def test_every_literature_figure_compiles_without_a_diagnostic(name: str, theme: str) -> None:
@@ -143,7 +152,10 @@ def test_every_literature_figure_compiles_without_a_diagnostic(name: str, theme:
 
     compiled = compile_figure(_literature()[name](theme).spec)
     report = lint_compilation(compiled)
-    assert not report.diagnostics, report.format()
+    crossings = [d for d in report.diagnostics if d.code == "routing.connector.crossing"]
+    others = [d for d in report.diagnostics if d.code != "routing.connector.crossing"]
+    assert not others, report.format()
+    assert len(crossings) == CROSSINGS.get(name, 0), report.format()
     assert not compiled.measured.diagnostics
 
 
@@ -552,3 +564,62 @@ def test_a_caption_between_two_arrows_finds_room_below_its_own(theme: str) -> No
     compiled = compile_figure(_literature()["dqn"](theme).spec)
     report = lint_compilation(compiled)
     assert not report.diagnostics, report.format()
+
+
+def test_a_plate_writes_its_count_under_its_contents_in_the_corner() -> None:
+    """LDA's plates: bare frames nested, each count in the bottom-right corner."""
+
+    with (
+        Figure("plates", conventions={"lines": "straight"}) as figure,
+        figure.root.row("model") as model,
+    ):
+        alpha = model.circle("alpha", r"$\alpha$")
+        with model.plate("documents", "$M$") as documents:
+            theta = documents.circle("theta", r"$\theta$", input=alpha)
+            with documents.plate("words", "$N$") as words:
+                words.circle("w", "$w$", shaded=True, input=theta)
+    compiled = compile_figure(figure.spec)
+    assert not lint_compilation(compiled).diagnostics
+    for plate, inner in (
+        ("model.documents", "model.documents.theta"),
+        ("model.documents.words", "model.documents.words.w"),
+    ):
+        group = compiled.fitted.group(plate)
+        content = compiled.fitted.node(inner).bounds
+        # The count has a band of its own under the contents.
+        assert content.bottom + group.measured.label.height <= group.bounds.bottom
+    svg = compiled.document.text
+    assert 'id="model.documents.container"' in svg and 'data-flexo-stroke="block-stroke"' in svg
+
+
+def test_a_module_nests_inside_a_group() -> None:
+    with (
+        Figure("nested") as figure,
+        figure.root.row("cluster") as cluster,
+        cluster.module("node", label="Node 1") as node,
+    ):
+        node.block("kubelet", label="kubelet")
+    group = figure.spec.group("cluster.node")
+    assert group.role == "module" and group.label[0].text == "Node 1"
+
+
+def test_an_operator_names_its_label_error_plainly() -> None:
+    with Figure("op") as figure, pytest.raises(TypeError, match="labelled by its symbol"):
+        figure.root.add("sum", label="$c_t$")
+
+
+def test_an_arrow_accent_is_drawn_over_its_letter_without_widening_the_label() -> None:
+    from flexo.markup import parse_label
+    from flexo.text import TextMeasurer
+    from flexo.themes import resolve_style
+
+    (run,) = parse_label(r"$\vec{h}$")
+    assert run.text == "h" and run.accent == "→"
+    measurer = TextMeasurer(resolve_style("paper").typography)
+    assert measurer.line_width(parse_label(r"$\vec{h}$")) == pytest.approx(
+        measurer.line_width(parse_label("$h$"))
+    )
+    with Figure("vec") as figure:
+        figure.root.circle("h", r"$\overleftarrow{h}_1$")
+    svg = compile_figure(figure.spec).document.text
+    assert "←" in svg and "\\overleftarrow" not in svg
