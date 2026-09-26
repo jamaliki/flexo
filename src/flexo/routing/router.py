@@ -295,7 +295,7 @@ LOOP_TRIALS = 4
 
 PIN_ORDER_TRIALS = 12
 
-REPAIR_WORK = 2_000_000
+REPAIR_WORK = 1_000_000
 """How much route search (steps of the A* frontier) the crossing repairs may spend
 on one figure, beyond its first routing.
 
