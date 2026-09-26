@@ -16,7 +16,7 @@ from dataclasses import replace
 from itertools import pairwise
 
 from flexo.components import TRANSPARENT_KINDS
-from flexo.geometry import Point, Rect
+from flexo.geometry import Point, Rect, segment_crosses_rect
 from flexo.hierarchy import bounded_owner, parent_map
 from flexo.ir.routed import RoutedFigure
 from flexo.ir.semantic import FigureSpec, GroupSpec
@@ -76,6 +76,52 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
                             amount = clearance - to_box + lane
                             needs[owner_id][side] = max(needs[owner_id].get(side, 0.0), amount)
 
+    lines = [(edge.spec.id, edge.centerline) for edge in routed.edges] + [
+        (net.spec.id, piece) for net in routed.nets for piece in net.pieces
+    ]
+
+    def cramped(owner_id: str, edge_id: str, line: tuple[Point, ...], box: Rect) -> None:
+        """A caption that found no clear place over or under the contents asks for its height.
+
+        Clear means off every component and every other line, and not so close
+        beside another line that it reads as that line's caption.
+
+        Lines running over a row of boxes are packed a lane apart, which leaves
+        no room for a caption between them; more room on that side lets them,
+        and the caption, spread out.
+        """
+
+        inner = box.inflated(-0.5)
+        reach = box.inflated(style.port_spacing.points)
+        blocked = any(
+            node.bounds.intersects(inner, strict=True) for node in solid
+        ) or any(
+            # Crossed, or close enough to read as that line's caption.
+            segment_crosses_rect(start, end, reach)
+            for line_id, line in lines
+            if line_id != edge_id
+            for start, end in pairwise(line)
+        )
+        if not blocked:
+            return
+        contents = [
+            node.bounds
+            for node in solid
+            if routed.fitted.group(owner_id).bounds.contains_rect(node.bounds)
+        ]
+        if not contents:
+            return
+        # Where the caption wants to be: over the edge's longest horizontal run.
+        runs = [(start, end) for start, end in pairwise(line) if abs(start.y - end.y) < 1e-6]
+        if not runs:
+            return
+        level = max(runs, key=lambda run: abs(run[1].x - run[0].x))[0].y
+        amount = box.height + style.caption_clearance.points
+        if level < min(bounds.top for bounds in contents):
+            needs[owner_id]["top"] = max(needs[owner_id].get("top", 0.0), amount)
+        elif level > max(bounds.bottom for bounds in contents):
+            needs[owner_id]["bottom"] = max(needs[owner_id].get("bottom", 0.0), amount)
+
     above: dict[str, int] = defaultdict(int)
 
     def over_contents(owner_id: str, lines: tuple[tuple[Point, ...], ...]) -> None:
@@ -124,6 +170,7 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
                 owner,
                 (Point(box.left, box.top), Point(box.right, box.bottom)),
             )
+            cramped(owner, edge.spec.id, edge.centerline, box)
     for net in routed.nets:
         ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
         owner = bounded_owner(figure, parents, ids)
