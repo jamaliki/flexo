@@ -255,7 +255,8 @@ own:
   arranges a group's children from their wiring, so they can be written flat,
   with no rows or columns: each goes one layer after whatever feeds it, and
   each layer is ordered to avoid crossings. A loop back, or a link with no
-  arrowhead, does not reorder the layers.
+  arrowhead, does not reorder the layers. `Figure(..., layout="flow")` does
+  the same for what sits directly on the figure.
 - `reverse=True` places a row's or column's children last-first. A stream that
   flows upward is written in the order its values flow -- image, encoder,
   projection -- and drawn from the bottom up.
