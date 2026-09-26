@@ -780,6 +780,21 @@ def compiler(theme: str = "paper") -> Figure:
     return figure
 
 
+def sprinkler(theme: str = "paper") -> Figure:
+    """The sprinkler Bayesian network (Pearl 1988; Russell and Norvig, Figure 14.12)."""
+
+    with Figure(
+        "sprinkler", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.root.column("network") as network:
+            cloudy = network.circle("cloudy", label="Cloudy")
+            with network.row("causes") as causes:
+                sprinkler = causes.circle("sprinkler", label="Sprinkler", input=cloudy)
+                rain = causes.circle("rain", label="Rain", input=cloudy)
+            network.circle("wet", label="Wet grass", inputs=[sprinkler, rain])
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -820,6 +835,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         actor_critic,
         mapreduce,
         compiler,
+        sprinkler,
     )
 }
 """Every figure here, by name."""
