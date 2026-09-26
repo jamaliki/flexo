@@ -484,8 +484,9 @@ print(result.summary())      # "ok: no diagnostics", or what is wrong and where
 
 - **editable SVG**: live text, one object per box and line, Inkscape layers,
   every element named after its id, fonts embedded. Open it and move things.
-- **PDF** and **portable SVG** (text as outlines) are made by Inkscape.
-- **PNG** previews are made by Inkscape if you have it, otherwise by resvg.
+- **PDF**: vectors and real, selectable text in embedded fonts.
+- **portable SVG**: the same drawing with the words as outlines, for any viewer.
+- **PNG**: a preview, drawn from the portable SVG. All four are pure Python.
 
 The check (`flexo.lint_compilation`) reports what a careful reader would: lines
 that cross, lines closer than a lane, a caption over a line, a figure that grew

@@ -44,10 +44,10 @@ print(result.summary())
 That is the whole figure: no coordinates, no port tables, no colours, no
 routing hints. `flexo.build` compiles, writes the formats you asked for, and
 lints; outputs are written even when the report has errors, so a flawed figure
-stays inspectable. The editable SVG and the PNG preview need nothing else; the
-portable SVG and the PDF are made by Inkscape. (With Inkscape installed, the
-PNG is made by Inkscape too; without it, by resvg.) In a Jupyter notebook, a
-figure displays itself: end a cell with `figure`.
+stays inspectable. Every format is written in Python, with nothing else to
+install: the editable SVG (live text), a portable SVG (words as outlines), a PDF
+(real, selectable text in embedded fonts), and a PNG preview. In a Jupyter
+notebook, a figure displays itself: end a cell with `figure`.
 
 Components can also be written flat, in any order, and laid out from their
 wiring alone:
@@ -410,9 +410,9 @@ name, and `flexo.register_font("path/to/Face.ttf")` (or `FLEXO_FONT_PATH`) adds
 a file. Characters a family lacks -- Greek in Figtree, say -- fall back to the
 next family that has them, measured in the face that will draw them. Bundled
 faces are embedded in the SVG, cut down to the characters the figure uses, so
-an editable SVG is tens of kilobytes rather than a megabyte and a half, and
-export hands Inkscape the same files, so the PDF never falls back to a
-substitute face.
+an editable SVG is tens of kilobytes rather than a megabyte and a half; the PDF
+embeds its own subsets and the portable SVG and PNG draw the glyphs' outlines,
+so no output ever falls back to a substitute face.
 
 ### Colour by kind
 

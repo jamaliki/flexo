@@ -11,7 +11,7 @@ from flexo.colour import design_palettes as palettes
 from flexo.compiler import Compilation, compile_figure
 from flexo.conventions import Conventions
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
-from flexo.export import FORMATS, Build, OutputFiles, build, export_outputs, find_inkscape
+from flexo.export import FORMATS, Build, OutputFiles, build, export_outputs
 from flexo.fonts import available_families, bundled_families, register_font
 from flexo.geometry import Point, Rect, Segment, Side, Size
 from flexo.ir.semantic import (
@@ -102,7 +102,6 @@ __all__ = [
     "dump_figure",
     "dump_theme",
     "export_outputs",
-    "find_inkscape",
     "inch",
     "lint_compilation",
     "lint_svg",

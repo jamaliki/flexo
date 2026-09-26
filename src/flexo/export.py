@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
-import os
-import shutil
-import subprocess
-import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from xml.sax.saxutils import escape
 
 from flexo.compiler import Compilation, compile_figure
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.drawing import read_drawing
 from flexo.fonts import font_directories
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import LintReport, lint_compilation
+from flexo.pdf import write_pdf
+from flexo.portable import portable_svg
 from flexo.style import LayoutStyle, Palette
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only the type checker sees
@@ -43,17 +41,6 @@ class OutputFiles:
         )
 
 
-def find_inkscape() -> Path | None:
-    configured = os.environ.get("FLEXO_INKSCAPE")
-    if configured:
-        candidate = Path(configured).expanduser()
-        return candidate if candidate.is_file() else None
-    executable = shutil.which("inkscape")
-    if executable:
-        return Path(executable)
-    return _MACOS_INKSCAPE if _MACOS_INKSCAPE.is_file() else None
-
-
 def export_outputs(
     compilation: Compilation,
     output_directory: str | Path,
@@ -64,8 +51,11 @@ def export_outputs(
 ) -> OutputFiles:
     """Write the editable SVG master and whichever derivatives ``formats`` names.
 
-    The editable SVG is always written, because every derivative is produced from
-    it by Inkscape.
+    Every derivative is written in Python from the master, read back as a
+    ``flexo.drawing``: the portable SVG with its words as outlines
+    (``flexo.portable``), the PDF with real text in embedded fonts
+    (``flexo.pdf``), and the PNG rasterised from the portable SVG by resvg, so
+    it shows exactly the glyphs Flexo measured. No external program is needed.
     """
 
     unknown = sorted(set(formats) - set(FORMATS))
@@ -84,57 +74,34 @@ def export_outputs(
     portable = destination / f"{base}.portable.svg" if "portable" in formats else None
     pdf = destination / f"{base}.pdf" if "pdf" in formats else None
     png = destination / f"{base}.preview.png" if "png" in formats else None
-    derived = (portable, pdf, png)
-    if any(target_file is not None for target_file in derived):
-        inkscape = find_inkscape()
-        if inkscape is None:
-            if portable is not None or pdf is not None:
-                raise FlexoError(
-                    Diagnostic(
-                        "export.inkscape.missing",
-                        "Inkscape is required for portable SVG and PDF outputs.",
-                        hint="Install Inkscape or set FLEXO_INKSCAPE to its executable; "
-                        "editable SVG and PNG need no Inkscape.",
-                    )
-                )
-            if png is not None:
-                _resvg_png(compilation, png, dpi)
-            return OutputFiles(editable, portable, pdf, png)
+    if portable is None and pdf is None and png is None:
+        return OutputFiles(editable)
+    text = compilation.document.text
+    drawing = read_drawing(text)
+    if portable is not None or png is not None:
+        root = ET.fromstring(text)
+        outlined = portable_svg(drawing, width=root.get("width"), height=root.get("height"))
         if portable is not None:
-            _run(
-                inkscape,
-                editable,
-                "--export-plain-svg",
-                f"--export-filename={portable}",
-            )
-        if pdf is not None:
-            _run(inkscape, editable, "--export-type=pdf", f"--export-filename={pdf}")
+            portable.write_text(outlined, encoding="utf-8")
         if png is not None:
-            _run(
-                inkscape,
-                editable,
-                "--export-type=png",
-                f"--export-filename={png}",
-                f"--export-dpi={dpi:g}",
-            )
+            png.write_bytes(rasterise(outlined, dpi))
+    if pdf is not None:
+        write_pdf(drawing, pdf, title=compilation.measured.semantic.id)
     return OutputFiles(editable, portable, pdf, png)
 
 
-def _resvg_png(compilation: Compilation, target: Path, dpi: float) -> None:
-    """Rasterise the figure with resvg, for machines without Inkscape.
-
-    resvg reads the bundled and registered font files directly, so the preview
-    is set in the faces the figure was measured with.
-    """
+def rasterise(svg_text: str, dpi: float = 192.0) -> bytes:
+    """PNG bytes of an SVG, drawn by resvg; text is best given as outlines."""
 
     import resvg_py
 
-    data = resvg_py.svg_to_bytes(
-        svg_string=compilation.document.text,
-        font_dirs=[str(directory) for directory in font_directories()],
-        dpi=dpi,
+    return bytes(
+        resvg_py.svg_to_bytes(
+            svg_string=svg_text,
+            font_dirs=[str(directory) for directory in font_directories()],
+            dpi=dpi,
+        )
     )
-    target.write_bytes(bytes(data))
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,85 +152,3 @@ def build(
         dpi=dpi,
     )
     return Build(compilation, outputs, lint_compilation(compilation, style=style))
-
-
-def query_bounds(source_file: str | Path) -> dict[str, tuple[float, float, float, float]]:
-    inkscape = find_inkscape()
-    if inkscape is None:
-        raise FlexoError(Diagnostic("export.inkscape.missing", "Inkscape is not installed."))
-    completed = _run(inkscape, Path(source_file), "--query-all")
-    result = {}
-    for line in completed.stdout.splitlines():
-        parts = line.rsplit(",", 4)
-        if len(parts) != 5:
-            continue
-        entity_id, x, y, width, height = parts
-        result[entity_id] = (float(x), float(y), float(width), float(height))
-    return result
-
-
-def _fontconfig_file(executable: Path) -> Path:
-    """A fontconfig file that adds Flexo's fonts to whatever Inkscape already sees.
-
-    Flexo measures text in its bundled (and registered) faces, so the PDF and PNG
-    have to be drawn in them too -- on a machine where they are not installed,
-    Inkscape would otherwise substitute a fallback and every label would be set
-    wider or narrower than the box that was sized for it. The generated file
-    includes the configuration Inkscape would have used and adds our
-    directories, so installed fonts keep working.
-    """
-
-    candidates = [
-        os.environ.get("FONTCONFIG_FILE"),
-        str(executable.resolve().parent.parent / "Resources/etc/fonts/fonts.conf"),
-        "/etc/fonts/fonts.conf",
-        "/usr/local/etc/fonts/fonts.conf",
-        "/opt/homebrew/etc/fonts/fonts.conf",
-    ]
-    base = next((item for item in candidates if item and Path(item).is_file()), None)
-    directories = "".join(
-        f"  <dir>{escape(str(directory))}</dir>\n" for directory in font_directories()
-    )
-    include = f'  <include ignore_missing="yes">{escape(base)}</include>\n' if base else ""
-    cache = Path(tempfile.gettempdir()) / "flexo-fontconfig-cache"
-    text = (
-        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n'
-        f"{include}{directories}  <cachedir>{escape(str(cache))}</cachedir>\n</fontconfig>\n"
-    )
-    digest = hashlib.sha256(text.encode()).hexdigest()[:16]
-    target = Path(tempfile.gettempdir()) / f"flexo-fonts-{digest}.conf"
-    if not target.is_file():
-        target.write_text(text, encoding="utf-8")
-    return target
-
-
-def _run(
-    executable: Path,
-    source_file: Path,
-    *arguments: str,
-) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
-    environment["FONTCONFIG_FILE"] = str(_fontconfig_file(executable))
-    completed = subprocess.run(
-        [str(executable), str(source_file), *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-    if completed.returncode:
-        stderr = _compact_subprocess_message(completed.stderr)
-        raise FlexoError(
-            Diagnostic(
-                "export.inkscape.failed",
-                f"Inkscape exited with status {completed.returncode}: {stderr}",
-                entity_id=source_file.name,
-            )
-        )
-    return completed
-
-
-def _compact_subprocess_message(message: str) -> str:
-    lines = [line.strip() for line in message.splitlines() if line.strip()]
-    rendered = " ".join(lines[:3])
-    return rendered[:500] or "no error message"

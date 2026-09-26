@@ -48,7 +48,7 @@ tries). The authored figure is never changed; only the compiled one is.
 | fit | `layout.fit` places children into containers; `layout.arrange` computes where a group's children sit and how much room they need; `layout.grid` assigns grid cells (shared by measure and fit, so both agree); `layout.gaps` spaces linear groups; `layout.order` reorders small columns to cut crossings; `layout.ports` places adaptive ports once bounds are known; `layout.sides` picks the side a defaulted port faces |
 | route | `routing.router` orchestrates: it routes each bundle as a tree over the grid, reroutes with the others in view, and swaps pins to take crossings out; `routing.pins` chooses each connection end's side, places pins on sides, and groups connections that share a pin into bundles; `routing.trees` turns each routed tree (and each straight edge) into `RoutedEdge`s and `RoutedNet`s with their join marks; `routing.search` is the bend-aware A* over a grid of priced zones; `routing.separate` orders and spaces runs that share a corridor, with `routing.vpsc` as its constraint solver; `routing.room` reports the room a container needs for its routes and captions, and the crossings room could remove; `routing.labels` places edge captions after routing; `routing.ink` supplies shaft and caption geometry (`edge_shaft`, `caption_rise`, `rail_label_position`); `routing.hints` reads `lane=`, waypoints, and `via=` (`forced_points`, `via_diagnostics`) |
 | emit | `emit` writes the document and its layers; `render`, `render_common`, and `render_scientific` draw component bodies and motifs; `svg` and `svg_resources` are the primitive and font plumbing; `style` and `theme` own paint |
-| after | `export` writes derivatives through Inkscape and provides `build`; `lint` re-checks the result independently; `cli` is the command line |
+| after | `export` writes the derivatives (`portable`, `pdf`, a resvg PNG) and provides `build`; `lint` re-checks the result independently; `cli` is the command line |
 | shared | `geometry` and `units` are the value types; `hierarchy` answers which group owns an entity or a relationship; `diagnostics` is the error vocabulary |
 
 `hierarchy` exists because emission, routing, and lint all have to agree on who
@@ -121,15 +121,20 @@ side the author or the component grammar declared, not the one layout chose.
 ## Other formats read the SVG back
 
 The SVG is the master. `flexo.drawing.read_drawing` reads Flexo's own SVG
-dialect back into typed primitives for writers of other formats (PowerPoint in
-[flexo-talk](https://github.com/jamaliki/flexo-talk), and a native PDF later):
+dialect back into typed primitives for writers of other formats -- the
+portable SVG (`portable`), the PDF (`pdf`), and PowerPoint in
+[flexo-talk](https://github.com/jamaliki/flexo-talk):
 rectangles, ellipses and paths of absolute moves, lines and cubics, with paint
 resolved through groups; arrowheads resolved from their markers into a tip, a
 direction, a shape and an outline; and text as lines of runs, each with its
 absolute pen position, baseline, size, and the font file it is set in,
 measured with the shaping the layout used. Groups keep their ids, and a group
 `transform` of translation and uniform scale is applied, so a figure placed in
-a larger page reads back in place. A writer never parses SVG or measures text.
+a larger page reads back in place. A writer never parses SVG or measures text:
+`outline.shape` gives a run's glyphs where the layout put them, and
+`outline.glyph_outline` their outlines, drawn by HarfBuzz at the run's weight.
+The PDF embeds each face as a TrueType subset built from those same outlines,
+so variable, CFF, and TrueType faces all embed one way.
 
 ## Initial dependency policy
 
