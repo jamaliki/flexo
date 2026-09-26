@@ -108,3 +108,11 @@ def test_themes_on_the_theme_path_load_themselves(
     monkeypatch.setattr(theme_files, "_ENVIRONMENT_LOADED", False)
     THEMES.pop("lab-from-path", None)
     assert theme("lab-from-path").description == "A test lab."
+
+
+def test_a_setting_a_theme_does_not_have_is_refused_with_a_suggestion() -> None:
+    with pytest.raises(flexo.FlexoError, match='no setting "extends"') as caught:
+        flexo.register_theme({"name": "wrong", "extends": "tikz"})
+    assert 'Did you mean "base"' in str(caught.value.diagnostics[0].hint)
+    with pytest.raises(flexo.FlexoError, match='"type" has no setting "sise"'):
+        flexo.register_theme({"name": "wrong", "type": {"sise": "9pt"}})

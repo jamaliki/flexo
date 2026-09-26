@@ -91,3 +91,11 @@ def test_a_superscript_and_subscript_on_one_letter_stack(measurer: TextMeasurer)
     two = measurer.measure(parse_label("$x^2$")).width - letter
     b = measurer.measure(parse_label("$x_B$")).width - letter
     assert stacked == pytest.approx(letter + max(two, b))
+
+
+def test_common_tex_symbols_are_known() -> None:
+    from flexo.markup import parse_label
+
+    label = r"$r \ll d \Rightarrow \argmax_i \lVert x \rVert \equiv \int$"
+    text = "".join(run.text for run in parse_label(label))
+    assert "\\" not in text and "≪" in text and "⇒" in text and "arg max" in text
