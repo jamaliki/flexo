@@ -153,7 +153,8 @@ fallback font that can.
 ### Captions on connectors
 
 `connect(a, b, label="action $A_t$")` puts a caption beside the line (and
-`net(..., label=...)` beside a net). Captions are placed after routing, the one
+`net(..., label=...)` beside a net). A branch out of a decision keeps its
+"yes" or "no" beside the decision rather than midway along the line. Captions are placed after routing, the one
 with the fewest clear places first; a caption left with none takes the place
 of one that can move elsewhere. The candidate positions are above and below each
 horizontal run and on either side of each vertical run, at the middle and then

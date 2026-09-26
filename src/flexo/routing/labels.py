@@ -61,11 +61,14 @@ def place_captions(
     lines: Sequence[tuple[str, tuple[Point, ...]]],
     canvas: Rect,
     style: LayoutStyle,
+    from_start: frozenset[str] = frozenset(),
 ) -> tuple[list[RoutedEdge], list[RoutedNet]]:
     """``edges`` and ``nets`` with each caption moved to its cheapest clear position.
 
     A net's caption first tries the place its tree reads along (see
     ``rail_label_position``), then the same places an edge's caption would.
+    An edge in ``from_start`` -- a branch out of a decision -- tries the places
+    nearest where it starts first, so "yes" and "no" sit by the question.
     """
 
     items: list[RoutedEdge | RoutedNet] = [*edges, *nets]
@@ -85,7 +88,12 @@ def place_captions(
         item = items[index]
         assert item.label_metrics is not None and item.label_position is not None
         if isinstance(item, RoutedEdge):
-            candidates[index] = _candidates((item.centerline,), item.label_metrics, style)
+            candidates[index] = _candidates(
+                (item.centerline,),
+                item.label_metrics,
+                style,
+                from_start=item.spec.id in from_start,
+            )
         else:
             candidates[index] = [
                 item.label_position,
@@ -180,53 +188,75 @@ def place_captions(
 
 
 def _candidates(
-    polylines: Iterable[tuple[Point, ...]], metrics: TextMetrics, style: LayoutStyle
+    polylines: Iterable[tuple[Point, ...]],
+    metrics: TextMetrics,
+    style: LayoutStyle,
+    *,
+    from_start: bool = False,
 ) -> list[Point]:
+    """Places for a caption beside ``polylines``, most preferred first.
+
+    By default the longest horizontal runs come first, at their middles; with
+    ``from_start`` the runs are taken in the order the line draws them, each
+    from the end nearest its start -- a decision's "yes" beside the decision.
+    """
+
     runs = [
         segment
         for points in polylines
         for segment in segments(points)
         if segment.length > 1e-6
     ]
-    horizontal = sorted(
-        (segment for segment in runs if segment.horizontal), key=lambda s: -s.length
-    )
-    vertical = sorted(
-        (segment for segment in runs if not segment.horizontal), key=lambda s: -s.length
-    )  # vertical runs, and the diagonals of straight edges
+    if from_start:
+        order = [
+            (fraction, segment)
+            for segment in runs
+            for fraction in sorted(FRACTIONS)
+        ]
+    else:
+        horizontal = sorted(
+            (segment for segment in runs if segment.horizontal), key=lambda s: -s.length
+        )
+        vertical = sorted(
+            (segment for segment in runs if not segment.horizontal), key=lambda s: -s.length
+        )  # vertical runs, and the diagonals of straight edges
+        order = [
+            (fraction, segment)
+            for fraction in FRACTIONS
+            for segment in (*horizontal, *vertical)
+        ]
     rise = caption_rise(metrics, style)
     reach = caption_reach(metrics, style)
     candidates: list[Point] = []
-    for fraction in FRACTIONS:
-        for segment in (*horizontal, *vertical):
-            at = Point(
-                segment.start.x + (segment.end.x - segment.start.x) * fraction,
-                segment.start.y + (segment.end.y - segment.start.y) * fraction,
-            )
-            if segment.horizontal:
-                if segment.length < metrics.width * 0.6 and fraction != 0.5:
-                    continue
-                candidates.append(at.translated(dy=-rise))
-                candidates.append(Point(at.x, at.y + reach + metrics.baseline))
-            elif abs(segment.start.x - segment.end.x) < 1e-9:
-                if segment.length < metrics.height * 1.2 and fraction != 0.5:
-                    continue
-                baseline = at.y - metrics.height / 2.0 + metrics.baseline
-                candidates.append(Point(at.x + reach + metrics.width / 2.0, baseline))
-                candidates.append(Point(at.x - reach - metrics.width / 2.0, baseline))
-            else:
-                # A diagonal (a straight edge): step out along its normal far
-                # enough that the caption's nearest corner clears the line.
-                dx = segment.end.x - segment.start.x
-                dy = segment.end.y - segment.start.y
-                nx, ny = -dy / segment.length, dx / segment.length
-                half = abs(nx) * metrics.width / 2.0 + abs(ny) * metrics.height / 2.0
-                for sign in (1.0, -1.0):
-                    centre_x = at.x + sign * nx * (reach + half)
-                    centre_y = at.y + sign * ny * (reach + half)
-                    candidates.append(
-                        Point(centre_x, centre_y - metrics.height / 2.0 + metrics.baseline)
-                    )
+    for fraction, segment in order:
+        at = Point(
+            segment.start.x + (segment.end.x - segment.start.x) * fraction,
+            segment.start.y + (segment.end.y - segment.start.y) * fraction,
+        )
+        if segment.horizontal:
+            if segment.length < metrics.width * 0.6 and fraction != 0.5:
+                continue
+            candidates.append(at.translated(dy=-rise))
+            candidates.append(Point(at.x, at.y + reach + metrics.baseline))
+        elif abs(segment.start.x - segment.end.x) < 1e-9:
+            if segment.length < metrics.height * 1.2 and fraction != 0.5:
+                continue
+            baseline = at.y - metrics.height / 2.0 + metrics.baseline
+            candidates.append(Point(at.x + reach + metrics.width / 2.0, baseline))
+            candidates.append(Point(at.x - reach - metrics.width / 2.0, baseline))
+        else:
+            # A diagonal (a straight edge): step out along its normal far
+            # enough that the caption's nearest corner clears the line.
+            dx = segment.end.x - segment.start.x
+            dy = segment.end.y - segment.start.y
+            nx, ny = -dy / segment.length, dx / segment.length
+            half = abs(nx) * metrics.width / 2.0 + abs(ny) * metrics.height / 2.0
+            for sign in (1.0, -1.0):
+                centre_x = at.x + sign * nx * (reach + half)
+                centre_y = at.y + sign * ny * (reach + half)
+                candidates.append(
+                    Point(centre_x, centre_y - metrics.height / 2.0 + metrics.baseline)
+                )
     return candidates
 
 
