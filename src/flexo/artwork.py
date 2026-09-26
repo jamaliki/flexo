@@ -32,6 +32,7 @@ from flexo.units import NUMBER_PATTERN, POINTS_PER_UNIT
 
 SVG_SUFFIXES = frozenset({".svg"})
 PNG_SUFFIXES = frozenset({".png"})
+JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -59,7 +60,7 @@ class Artwork:
     node_id: str
     path: Path
     format: str
-    """``"svg"`` or ``"png"``."""
+    """``"svg"``, ``"png"``, or ``"jpeg"``."""
     width: float | None
     """Intrinsic width in points, or ``None`` when the file declares none."""
     height: float | None
@@ -103,13 +104,13 @@ def load_artwork(node_id: str, source: str) -> Artwork:
 
     path = Path(source).expanduser()
     suffix = path.suffix.lower()
-    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES:
+    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES:
         raise _error(
             "image.source.unsupported",
             node_id,
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
-            hint="Embed an .svg file for vector artwork or a .png file for a render.",
+            hint="Embed an .svg file for vector artwork, or a .png or .jpg file for a render.",
         )
     try:
         stat = path.stat()
@@ -139,6 +140,8 @@ def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
         ) from exc
     if path.suffix.lower() in PNG_SUFFIXES:
         return _png_artwork(node_id, path, data)
+    if path.suffix.lower() in JPEG_SUFFIXES:
+        return _jpeg_artwork(node_id, path, data)
     return _svg_artwork(node_id, path, data)
 
 
@@ -163,6 +166,35 @@ def _png_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
         float(pixel_width) * scale,
         float(pixel_height) * scale,
         data_uri=f"data:image/png;base64,{encoded}",
+    )
+
+
+def _jpeg_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
+    """A JPEG travels as its own bytes, like a PNG; its size is read from its frame header."""
+
+    index = 2
+    size: tuple[int, int] | None = None
+    while data.startswith(b"\xff\xd8") and index + 9 < len(data):
+        if data[index] != 0xFF:
+            break
+        marker = data[index + 1]
+        length = struct.unpack(">H", data[index + 2 : index + 4])[0]
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height, width = struct.unpack(">HH", data[index + 5 : index + 9])
+            size = (width, height)
+            break
+        index += 2 + length
+    if size is None:
+        raise _error("image.jpeg.invalid", node_id, path, "The file is not a readable JPEG.")
+    scale = POINTS_PER_UNIT["px"]
+    encoded = base64.b64encode(data).decode("ascii")
+    return Artwork(
+        node_id,
+        path,
+        "jpeg",
+        float(size[0]) * scale,
+        float(size[1]) * scale,
+        data_uri=f"data:image/jpeg;base64,{encoded}",
     )
 
 

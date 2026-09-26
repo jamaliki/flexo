@@ -409,3 +409,16 @@ def test_an_unlabelled_image_reserves_no_band_at_all(tmp_path: Path) -> None:
         float(artwork.get("width", "")),
         float(artwork.get("height", "")),
     ) == pytest.approx((bounds.width, bounds.height))
+
+
+def test_a_jpeg_is_embedded_as_its_own_bytes(tmp_path: Path) -> None:
+    import base64
+
+    # A minimal baseline JPEG header: SOI, then a frame header of 12 x 8 pixels.
+    frame = b"\xff\xc0\x00\x11\x08\x00\x08\x00\x0c\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    source = tmp_path / "photo.jpg"
+    source.write_bytes(b"\xff\xd8" + frame + b"\xff\xd9")
+    element = artwork_element(compiled(source))
+    href = element.get("href") or ""
+    assert href.startswith("data:image/jpeg;base64,")
+    assert base64.b64decode(href.split(",", 1)[1]).startswith(b"\xff\xd8")
