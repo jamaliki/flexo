@@ -457,14 +457,39 @@ def _common_net_sides(
                 not end.fixed and port.auto_side and (spec.id, end.reference.port_name) not in hints
             )
 
+        # In line with the hub, the nearest spoke is entered straight on, and
+        # the bus to the rest branches off that stem.
+        straight: End | None = None
+        if level:
+            ahead = [
+                end
+                for end in spokes
+                if any(_faces(hub, end.node.bounds, side) for side in _along(spread_x >= spread_y))
+            ]
+            if ahead:
+                straight = min(ahead, key=lambda end: _gap(hub, end.node.bounds))
         changed = False
         for end in spokes:
+            if end is straight:
+                continue
             if movable(end) and (level or _faces(hub, end.node.bounds, toward)):
                 end.group = (end.group[0], end.group[1], toward.opposite, end.group[3])  # type: ignore[index]
                 changed = True
         hub_end = hub_ends[0]
         if changed and movable(hub_end) and _faces(hub, spread, toward):
             hub_end.group = (hub_end.group[0], hub_end.group[1], toward, hub_end.group[3])  # type: ignore[index]
+
+
+def _along(horizontal: bool) -> tuple[Side, Side]:
+    """The two sides that face along a row (east, west) or a column (south, north)."""
+
+    return (Side.EAST, Side.WEST) if horizontal else (Side.SOUTH, Side.NORTH)
+
+
+def _gap(a: Rect, b: Rect) -> float:
+    """The larger of the horizontal and vertical gaps between two boxes."""
+
+    return max(b.left - a.right, a.left - b.right, b.top - a.bottom, a.top - b.bottom, 0.0)
 
 
 def _clear_approaches(

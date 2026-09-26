@@ -623,6 +623,22 @@ def feedback_control(theme: str = "paper") -> Figure:
     return figure
 
 
+def faster_rcnn(theme: str = "paper") -> Figure:
+    """Faster R-CNN (Ren et al. 2015, Figure 2)."""
+
+    with Figure("faster-rcnn", width="single-column", theme=theme) as figure:
+        with figure.module("detector", label="Faster R-CNN", layout="column") as m:
+            image = m.text("image", "image")
+            convolutions = m.block("conv", label="conv layers", input=image)
+            maps = m.block("maps", label="feature maps", tone="data", input=convolutions)
+            proposals = m.block("rpn", label="Region Proposal Network")
+            pooling = m.block("roi", label="RoI pooling")
+            m.block("classifier", label="classifier", input=pooling)
+        figure.net(src=maps, sinks=[proposals, pooling])
+        figure.connect(proposals, pooling, label="proposals")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -655,6 +671,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         ci_pipeline,
         state_machine,
         feedback_control,
+        faster_rcnn,
     )
 }
 """Every figure here, by name."""
