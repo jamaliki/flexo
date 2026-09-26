@@ -841,6 +841,7 @@ def resolve_style(
     font: str | None = None,
     conventions: Conventions | None = None,
     sketch: Sketch | None = None,
+    background: bool | str | None = None,
 ) -> LayoutStyle:
     """The layout style of theme ``name``, in ``font``, under ``conventions``, drawn by ``sketch``.
 
@@ -856,6 +857,8 @@ def resolve_style(
         style = replace(style, conventions=style.conventions.with_updates(conventions))
     if sketch is not None:
         style = replace(style, sketch=(style.sketch or Sketch()).with_updates(sketch.changes()))
+    if background is not None:
+        style = replace(style, background=background)
     return style
 
 
@@ -878,7 +881,9 @@ def resolve_palette(style_name: str, palette: str | Sequence[str] | None = None)
 def figure_style(figure: FigureSpec) -> LayoutStyle:
     """The layout style a figure compiles under: its theme, in its font and conventions."""
 
-    return resolve_style(figure.style, figure.font, figure.conventions, figure.sketch)
+    return resolve_style(
+        figure.style, figure.font, figure.conventions, figure.sketch, figure.background
+    )
 
 
 def figure_palette(figure: FigureSpec) -> Palette:

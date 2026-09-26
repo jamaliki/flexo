@@ -101,6 +101,9 @@ def emit_svg(
     paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(semantic, layout_style))
     fonts = add_definitions(root, layout_style, paint_palette)
     background = layer(root, "layer.background", "Background")
+    # The page is transparent unless asked for: the rectangle stays, unpainted,
+    # so an editor can still fill it.
+    page = layout_style.background
     element(
         background,
         "rect",
@@ -109,7 +112,11 @@ def emit_svg(
         y=0.0,
         width=size.width,
         height=size.height,
-        **paint_attributes(palette=paint_palette, fill_role="canvas"),
+        **(
+            paint_attributes(palette=paint_palette, fill_role="canvas")
+            if page is True
+            else {"fill": page if isinstance(page, str) else "none"}
+        ),
     )
     hierarchy = _Hierarchy(routed)
     hierarchy.render(root, layout_style, paint_palette)
