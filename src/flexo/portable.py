@@ -99,6 +99,11 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
             )
             if item.id:
                 image.set("id", item.id)
+            if item.flip_x or item.flip_y:
+                sx, sy = (-1 if item.flip_x else 1), (-1 if item.flip_y else 1)
+                ex = 2 * item.x + item.width if item.flip_x else 0.0
+                ey = 2 * item.y + item.height if item.flip_y else 0.0
+                image.set("transform", f"matrix({sx} 0 0 {sy} {number(ex)} {number(ey)})")
 
 
 def _paint(element: ET.Element, paint: Paint) -> None:

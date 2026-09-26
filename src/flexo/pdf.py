@@ -264,8 +264,13 @@ class _Content:
         if number is None:
             return
         self.writer.images.append((name, number))
-        # An image fills the unit square with its first row at the top: flip it back.
-        self.ops.append(f"q {_n(w)} 0 0 {_n(-h)} {_n(x)} {_n(y + h)} cm /{name} Do Q")
+        # An image fills the unit square with its first row at the top: flip it back
+        # (unless it is to be drawn mirrored).
+        across = f"{_n(-w)} 0" if item.flip_x else f"{_n(w)} 0"
+        down = f"0 {_n(h)}" if item.flip_y else f"0 {_n(-h)}"
+        left = x + w if item.flip_x else x
+        top = y if item.flip_y else y + h
+        self.ops.append(f"q {across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 
 def _path(segments: Sequence[Segment]) -> str:

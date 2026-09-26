@@ -166,6 +166,9 @@ class Image:
     """A ``data:`` URI: a PNG, a JPEG, or an SVG (nested artwork, kept as vectors)."""
     fit: str = "none"
     """SVG's ``preserveAspectRatio``: how the picture sits in the box."""
+    flip_x: bool = False
+    flip_y: bool = False
+    """Whether the picture is drawn mirrored (a plot's image is often stored upside down)."""
 
     def placed(self, width: float, height: float) -> tuple[float, float, float, float]:
         """Where a picture of ``width`` by ``height`` is drawn: ``x, y, w, h``."""
@@ -385,7 +388,7 @@ def _scale_of(matrix: Matrix) -> float:
 
 def _uniform(matrix: Matrix) -> bool:
     a, b, c, d, _, _ = matrix
-    return abs(b) < 1e-9 and abs(c) < 1e-9 and abs(abs(a) - abs(d)) < 1e-9
+    return abs(b) < 1e-9 and abs(c) < 1e-9 and abs(a - d) < 1e-9 and a > 0
 
 
 def _transformed(item, matrix: Matrix):
@@ -513,6 +516,7 @@ def _turned(item, matrix: Matrix):
         return replace(
             item, x=min(p[0] for p in corners), y=min(p[1] for p in corners),
             width=abs(corners[1][0] - corners[0][0]), height=abs(corners[1][1] - corners[0][1]),
+            flip_x=item.flip_x != (a < 0), flip_y=item.flip_y != (d < 0),
         )
     return item
 
@@ -1249,14 +1253,13 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
             if "y" in attributes:
                 line_baseline = run_baseline
         elif "x" in attributes:
-            # A piece placed absolutely on the same line (a plotting library's maths).
+            # A piece placed absolutely on the same line (a plotting library's maths,
+            # often a character at a time): only a real step back breaks the flow.
             step = float(attributes["x"])
-            if step < pen - 1e-6:
+            if step < pen - 0.15 * float(attributes.get("font-size", size)):
                 simple = False
             pen = step
             run_baseline = float(attributes["y"])
-            if abs(run_baseline - line_baseline) > 1e-6:
-                simple = False
         if "dx" in attributes:
             step = float(attributes["dx"])
             if step < -1e-6:
@@ -1291,6 +1294,7 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
     for runs in lines:
         if not runs:
             continue
+        runs = _joined(runs)
         width = max(run.x + run.width for run in runs) - min(run.x for run in runs)
         offset = {"start": 0.0, "middle": -width / 2.0, "end": -width}.get(anchor, 0.0)
         placed.append(
@@ -1320,6 +1324,24 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
         line_height,
         simple,
     )
+
+
+def _joined(runs: list[Run]) -> list[Run]:
+    """Neighbouring runs that continue one another in one style, as one run."""
+
+    joined: list[Run] = []
+    for run in runs:
+        last = joined[-1] if joined else None
+        if (
+            last is not None
+            and (last.face, last.size, last.weight, last.italic, last.fill, last.baseline)
+            == (run.face, run.size, run.weight, run.italic, run.fill, run.baseline)
+            and abs(run.x - (last.x + last.width)) < 0.15 * run.size
+        ):
+            joined[-1] = replace(last, text=last.text + run.text, width=run.x + run.width - last.x)
+        else:
+            joined.append(run)
+    return joined
 
 
 def _pieces(element: ET.Element, context: dict[str, str]):
