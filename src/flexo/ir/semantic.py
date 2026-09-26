@@ -14,6 +14,21 @@ from flexo.units import Extent, Length
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
 type LayoutKind = Literal["row", "column", "grid", "overlay", "stack", "flow", "flow-right"]
+
+LAYOUT_KINDS = ("row", "column", "grid", "overlay", "stack", "flow", "flow-right")
+ALIGNMENTS = ("start", "center", "end", "stretch", "ports", "auto")
+JUSTIFICATIONS = ("start", "center", "end", "space-between")
+
+
+def _unknown(what: str, value: object, valid: tuple[str, ...]) -> str:
+    """``unknown layout "flwo" (did you mean "flow"?); valid: ...`` for a bad option."""
+
+    from difflib import get_close_matches
+
+    close = get_close_matches(str(value), valid, n=1, cutoff=0.6)
+    guess = f' (did you mean "{close[0]}"?)' if close else ""
+    return f'unknown {what} "{value}"{guess}; valid: {", ".join(valid)}'
+
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
 type ArrowEnds = Literal["end", "none", "both"]
@@ -161,6 +176,13 @@ class LayoutSpec:
     """``(column index, minimum width)`` reserved even when the column is empty."""
 
     def __post_init__(self) -> None:
+        for field_name, value, valid in (
+            ("layout", self.kind, LAYOUT_KINDS),
+            ("align", self.align, ALIGNMENTS),
+            ("justify", self.justify, JUSTIFICATIONS),
+        ):
+            if value not in valid:
+                raise ValueError(_unknown(field_name, value, valid))
         if self.kind == "grid" and (self.columns is None or self.columns < 1):
             raise ValueError("grid layout requires a positive column count")
         if self.columns is not None and self.columns < 1:

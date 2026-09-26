@@ -6,6 +6,7 @@ from itertools import combinations
 
 import pytest
 
+import flexo
 from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.lint import lint_compilation
@@ -413,3 +414,12 @@ def test_a_flow_places_inputs_late_and_ignores_undirected_links_for_layers() -> 
     top = {node.measured.spec.id: node.bounds.center.y for node in compiled.fitted.nodes}
     assert top["m.x"] == pytest.approx(top["m.g"]), "real data enters beside the generator"
     assert top["m.twin"] == pytest.approx(top["m.g"]), "an undirected link orders no layers"
+
+
+def test_a_misspelt_layout_or_width_is_named_with_a_guess() -> None:
+    with pytest.raises(ValueError, match=r'unknown layout "flwo" \(did you mean "flow"\?\)'):
+        Figure("typo").module("m", layout="flwo")
+    with Figure("wide", width="one-column") as figure:
+        figure.root.block("b", label="B")
+    with pytest.raises(flexo.FlexoError, match="single-column"):
+        compile_figure(figure.spec)
