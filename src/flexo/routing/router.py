@@ -172,7 +172,7 @@ def route_figure(
         # the axis anyway keeps the geometry the search gave it: a crowded line
         # is a flaw lint reports, a diagonal in an orthogonal figure is a break.
         return [
-            spaced if _orthogonal(spaced) else copy.deepcopy(original)
+            _squared(spaced) if _orthogonal(spaced) else copy.deepcopy(original)
             for spaced, original in zip(wires, routed, strict=True)
         ]
 
@@ -495,6 +495,37 @@ def _try_loops(
                 if len(defects) < len(best):
                     return (chosen, trial[:3], defects), trials
     return None, trials
+
+
+def _squared(wire: Wire) -> Wire:
+    """``wire`` with coordinates that differ by rounding alone made equal.
+
+    Two runs meant to line up can come out a rounding error apart, which is a
+    diagonal hair in the drawing. Each point takes the coordinate of the one
+    before it where they agree to within ``_HAIR``; the last point of a path is
+    a pin and stays put, so the point before it takes the pin's instead.
+    """
+
+    for path in wire.paths:
+        for index in range(1, len(path)):
+            before, point = path[index - 1], path[index]
+            last = index == len(path) - 1
+            if abs(before.x - point.x) < _HAIR and before.x != point.x:
+                if last:
+                    path[index - 1] = Point(point.x, before.y)
+                else:
+                    path[index] = Point(before.x, point.y)
+            before, point = path[index - 1], path[index]
+            if abs(before.y - point.y) < _HAIR and before.y != point.y:
+                if last:
+                    path[index - 1] = Point(before.x, point.y)
+                else:
+                    path[index] = Point(point.x, before.y)
+    return wire
+
+
+_HAIR = 1e-6
+"""Coordinates closer than this, in points, are one coordinate."""
 
 
 def _orthogonal(wire: Wire) -> bool:
