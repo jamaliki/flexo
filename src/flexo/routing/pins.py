@@ -21,8 +21,12 @@ from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
 from flexo.routing.vpsc import solve
 from flexo.style import LayoutStyle
 
-SPREAD_PIN_WEIGHT = 0.25
-"""Weight of an evenly spread pin's wish against a partner pin's own centre."""
+SPREAD_PIN_WEIGHT = 1e-3
+"""Weight of an evenly spread pin's wish against a partner pin's own centre.
+
+A pin spread among several on a side has no place of its own to defend, so a
+straight line to a pin alone on its side runs through that pin's centre.
+"""
 
 DOMINANT_GAP = 2.0
 """How many times wider one gap must be than the other to overrule a port's own side."""
@@ -1085,26 +1089,43 @@ def _place_on_side(
             key[1],
         ),
     )
-    current = [home(key) for key in keys]
-    spread = False
-    if len(keys) == 1:
-        desired = [current[0] if current[0] is not None else (low + high) / 2.0]
-    elif all(value is not None for value in current) and len(set(current)) == len(current):
-        values = [value for value in current if value is not None]
+    fixed = [None if movable(key) else home(key) for key in keys]
+    spread = len(keys) > 1
+    if all(value is not None for value in fixed):
+        values = [value for value in fixed if value is not None]
         in_order = all(a <= b + 1e-9 for a, b in itertools.pairwise(values))
         desired = values if in_order else sorted(values)
     else:
-        desired = [low + (high - low) * (index + 1) / (len(keys) + 1) for index in range(len(keys))]
-        spread = True
+        # One pin at the middle of its side; several spaced evenly across the
+        # central ``pin_spread`` of it, the outermost at its ends. A declared
+        # offset only says which side a movable port starts on.
+        margin = (high - low) * (1.0 - style.conventions.pin_spread) / 2.0
+        first, last = low + margin, high - margin
+        count = len(keys)
+        evenly = [
+            first + (last - first) * index / (count - 1) if count > 1 else (low + high) / 2.0
+            for index in range(count)
+        ]
+        desired = [
+            value if value is not None else even for value, even in zip(fixed, evenly, strict=True)
+        ]
     inset = min(style.corner_radius.points + style.connector_width.points, (high - low) / 2.0)
+    # No pin on a corner's curve: a spread that reaches it stops at its end.
+    desired = [
+        min(max(value, low + inset), high - inset) if movable(key) else value
+        for key, value in zip(keys, desired, strict=True)
+    ]
     open_low, open_high = _open_stretch(
         node.bounds, side, low + inset, high - inset, blockers, style.arrival_clearance.points
     )
+    squeeze = any(not open_low - 1e-9 <= value <= open_high + 1e-9 for value in desired)
     result = {}
     for key, value in zip(keys, desired, strict=True):
         free = movable(key)
-        if free and (open_low, open_high) != (low + inset, high - inset):
-            # Squeeze the pins onto the stretch of side nothing stands in front of.
+        if free and squeeze:
+            # Squeeze the pins onto the stretch of side nothing stands in front
+            # of -- only when one of them falls outside it, so a pin already
+            # clear keeps its place at the middle.
             fraction = (value - low) / (high - low) if high > low else 0.5
             value = open_low + (open_high - open_low) * fraction
         result[key] = _Slot(

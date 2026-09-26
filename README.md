@@ -359,7 +359,7 @@ components created so far are painted in. Pass `entries={"encoder": "Encoder
 blocks", ...}` to choose the tones and their words, and `layout="column"` to
 stack the entries.
 
-## Conventions: branches, merges, arrivals, and lines
+## Conventions: branches, merges, arrivals, lines, and pins
 
 Papers draw lines by different conventions, and Flexo lets a figure choose.
 Lines meet in three ways; the defaults are:
@@ -376,7 +376,11 @@ Lines meet in three ways; the defaults are:
 If the lines combine by an operation, author the operation with `add`,
 `multiply` or `op`. It is then drawn as a circle, and the arrows point into
 it. A fourth convention, `lines`, chooses between routed right-angled lines
-(the default) and straight ones.
+(the default) and straight ones. A fifth, `pin_spread`, sets where arrows meet
+a side: one arrow meets it at its middle, and two or more are spaced evenly
+across the central `pin_spread` of the side (0.8 by default, so a tenth of the
+side stays clear at each end). An arrow still moves off its place when that
+lets it run straight to the box it faces.
 
 Change a convention for a whole figure with `conventions=`, or in YAML with a
 `conventions:` mapping on the figure:
@@ -386,6 +390,7 @@ flexo.Figure("f", conventions={"branch": "dot"})     # a dot on every fork
 flexo.Figure("f", conventions={"merge": "plain"})    # no arrowheads at joins
 flexo.Figure("f", conventions={"arrivals": "joined"})  # join before the port
 flexo.Figure("f", conventions={"lines": "straight"})     # diagonals, not routes
+flexo.Figure("f", conventions={"pin_spread": 0.5})       # arrows nearer the middle
 ```
 
 | Convention | Values (default first) |
@@ -394,6 +399,7 @@ flexo.Figure("f", conventions={"lines": "straight"})     # diagonals, not routes
 | `merge` | `"auto"`, `"arrow"`, `"plain"`, `"dot"` |
 | `arrivals` | `"separate"`, `"joined"` |
 | `lines` | `"orthogonal"`, `"straight"` |
+| `pin_spread` | `0.8`, or any number from 0 to 1 |
 
 A theme can carry its own conventions (`LayoutStyle.conventions`). A net's
 `joint="arrow"` or `joint="dot"` overrides the conventions for that one net.

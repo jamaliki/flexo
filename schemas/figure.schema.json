@@ -105,7 +105,8 @@
             "branch": {"enum": ["plain", "dot"]},
             "merge": {"enum": ["auto", "arrow", "plain", "dot"]},
             "arrivals": {"enum": ["separate", "joined"]},
-            "lines": {"enum": ["orthogonal", "straight"]}
+            "lines": {"enum": ["orthogonal", "straight"]},
+            "pin_spread": {"type": "number", "minimum": 0, "maximum": 1}
           }
         }
       }
