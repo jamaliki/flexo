@@ -6,16 +6,30 @@ connectors, it is laid out again with the room they need. A hint that cannot
 be honoured is reported as a warning, not an error. (A `lane=` or waypoint
 that names nothing in the figure is still an error.)
 
-1. **Pins.** Every end of every connection gets its own attachment point
-   (a pin), on the side of the box that faces the other end. When one gap
-   is at least twice the other, the wider gap decides the side; otherwise the
-   component's own default side wins. The branches of one net attach on one
-   common side: branches spread left to right are entered from above or
-   below, and branches stacked top to bottom from the left or right. Pins on
-   one side are ordered by where their lines go; ties put the farthest
-   counterpart first, so skip connections nest. Two pins that face each other
-   across a gap move to one coordinate, so the arrow between them is straight.
-   The pin of a net's shared end stays at the middle of its side.
+1. **Pins.** Every end of every connection gets an attachment point (a pin)
+   on one side of its component. The side is chosen by these rules, in order:
+   - An authored port side, `depart=`/`arrive=`, or `via=` is kept.
+   - Otherwise the side faces the other end. When one gap between the two
+     boxes is at least twice the other, the wider gap decides; when they are
+     comparable, the layout decides -- vertical if both ends share a column,
+     horizontal if they share a row.
+   - The branches of one net attach on one common side: branches spread left
+     to right are entered from above or below, branches stacked top to bottom
+     from the left or right.
+   - A side whose approach another component blocks is exchanged for a facing
+     side with a clear approach, or failing that any clear side.
+   - A circle, diamond, or operator takes one line per corner while corners
+     last, arrivals first.
+
+   Ends then share a pin or get their own. Edges leaving one port share its
+   pin and are drawn as a tree, unless their targets stand side by side
+   within the component's span, when each gets its own arrow. Values arriving
+   at one port get a pin each (the `arrivals` convention), and a captioned
+   edge always has pins of its own. Pins on one side are ordered by where
+   their lines go; ties put the farthest counterpart first, so skip
+   connections nest. Two pins that face each other across a gap move to one
+   coordinate, so the arrow between them is straight; the pin of a net's
+   shared end stays at the middle of its side.
 2. **Search.** Each connection is routed on its own with a bend-aware A* search
    over a grid of the figure's lines. Components, their clearance rings,
    group titles, and containers that the connection does not belong to are
