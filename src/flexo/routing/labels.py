@@ -70,7 +70,10 @@ def place_edge_labels(
                 best = (cost, position)
             if cost < 1.0:
                 break
-        assert best is not None
+        if best is None:
+            # No run to sit beside (the connector has no length): keep the
+            # position the edge was given.
+            best = (0.0, edge.label_position)
         placed.append(label_box(best[1], edge.label_metrics))
         result.append(replace(edge, label_position=best[1]))
     return result
