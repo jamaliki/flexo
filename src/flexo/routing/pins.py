@@ -785,8 +785,14 @@ def _spread_operator_inputs(ends: list[End]) -> None:
         if end.node.measured.spec.kind == "op":
             by_node[end.node.measured.spec.id].append(end)
     for node_ends in by_node.values():
-        taken = {end.group[2] for end in node_ends if not end.arriving}  # type: ignore[index]
-        arriving = [end for end in node_ends if end.arriving]
+        taken = {
+            end.group[2]  # type: ignore[index]
+            for end in node_ends
+            if not end.arriving or end.fixed
+        }
+        # An arrival whose side was fixed -- authored, or turned by a trial --
+        # keeps it; the others spread round what is left.
+        arriving = [end for end in node_ends if end.arriving and not end.fixed]
         from_side: dict[Side, list[End]] = defaultdict(list)
         for end in arriving:
             assert end.group is not None
@@ -798,7 +804,13 @@ def _spread_operator_inputs(ends: list[End]) -> None:
                     end.group = (end.group[0], f"{end.group[1]}#joined", side, end.group[3])
                 taken.add(side)
                 arriving = [end for end in arriving if end not in joined]
-        for end in sorted(arriving, key=_alignment_first):
+        # The most squarely aligned choose first, and of those the nearest:
+        # the step just above a sum keeps the top, the skip from far above
+        # comes in by the side.
+        def rank(end: End) -> tuple[float, float]:
+            return _alignment_first(end), _gap(end.node.bounds, end.counterpart)
+
+        for end in sorted(arriving, key=rank):
             assert end.group is not None
             ranked = _facing_sides(end.node.bounds, end.counterpart, end.group[2])
             free = [side for side in ranked if side not in taken]
@@ -821,9 +833,11 @@ POINT_KINDS = CORNER_KINDS | {"op"}
 def _one_end_per_corner(ends: list[End]) -> None:
     """Give each end at a circle or a diamond a side of its own, while sides last.
 
-    Arrivals choose first, so a decision keeps its question's input where the
-    flow brings it and the branches leave by the other corners -- the "no"
-    of a loop back out of the side, not out of the top the input came in by.
+    The end whose other end is nearest chooses first, arrivals before
+    departures, so a decision keeps its question's input where the flow brings
+    it and its branches leave by the other corners -- the "no" of a loop back
+    out of the side, not out of the top the input came in by -- and a line
+    looping back from far down the flow comes in by whatever corner is left.
     """
 
     by_node: dict[str, list[End]] = defaultdict(list)
@@ -833,7 +847,17 @@ def _one_end_per_corner(ends: list[End]) -> None:
     for node_ends in by_node.values():
         taken: set[Side] = set()
         claimed: dict[tuple[str, str, Side, bool], Side] = {}
-        ordered = sorted(node_ends, key=lambda end: (not end.arriving, _alignment_first(end)))
+        # The line to the nearest neighbour chooses first -- the flow through a
+        # decision keeps its corners, and a loop back from far away takes
+        # what is left -- then arrivals before departures.
+        ordered = sorted(
+            node_ends,
+            key=lambda end: (
+                round(_gap(end.node.bounds, end.counterpart), 3),
+                not end.arriving,
+                _alignment_first(end),
+            ),
+        )
         for end in ordered:
             assert end.group is not None
             if end.fixed:

@@ -38,8 +38,11 @@ that names nothing in the figure is still an error.)
      one side and comes back by the next, round the corner between the two
      emptiest neighbours. A loop is never drawn straight.
    - A circle, diamond, or operator takes one line per corner while corners
-     last, arrivals first. Three or more arrivals at an operator from one
-     direction share that side instead, as a bus.
+     last. The line to the nearest neighbour chooses first, so the flow
+     through a decision keeps its corners and a loop back from far away takes
+     what is left; at an operator, the step just above a sum keeps the top and
+     a skip from further up comes in by a side. Three or more arrivals at an
+     operator from one direction share that side instead, as a bus.
 
    Ends then share a pin or get their own. Edges leaving one port share its
    pin and are drawn as a tree, unless their targets stand side by side
@@ -73,7 +76,8 @@ that names nothing in the figure is still an error.)
 5. **Uncross.** If lines still cross, or run closer than a lane, neighbouring
    pins on the sides those lines attach to are swapped one pair at a time;
    then each end of such a line whose side is a default is tried on the two
-   sides across from its own. The figure is rerouted and separated after each
+   sides across from its own (a line arriving at an operator or a circle is
+   tried on the opposite side first; what leaves one keeps its side). The figure is rerouted and separated after each
    trial, and a trial is kept when fewer pairs of lines cross or crowd. This is
    what sends a loop back to an earlier step over the top instead of through
    everything between.
