@@ -58,8 +58,9 @@ that names nothing in the figure is still an error.)
 4. **Separate.** Lines that share a corridor are ordered so that they cross
    least, and spaced one lane apart by a constraint solver (VPSC). A line
    running over the middle of a captioned edge's longest horizontal run keeps
-   the caption's height from it instead, so the caption fits between; when
-   that cannot be met, plain lanes are used. The
+   the caption's height from it instead, so the caption fits between; for an
+   edge with no horizontal run, a line to the right of its vertical run keeps
+   the caption's width from it. When that cannot be met, plain lanes are used. The
    crossbar of a Z and the trunk of a tree sit in the middle of the room they
    have.
 5. **Uncross.** If lines still cross, or run closer than a lane, neighbouring

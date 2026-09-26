@@ -46,7 +46,7 @@ from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet
 from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.routing.hints import forced_points
-from flexo.routing.ink import caption_rise
+from flexo.routing.ink import caption_reach, caption_rise
 from flexo.routing.labels import place_captions
 from flexo.routing.pins import (
     POINT_KINDS,
@@ -60,7 +60,13 @@ from flexo.routing.pins import (
     title_rect,
 )
 from flexo.routing.search import EAST, NORTH, SOUTH, WEST, Grid, Zone, simplify
-from flexo.routing.separate import Terminal, Wire, _perpendicular_cross, separate
+from flexo.routing.separate import (
+    CaptionRoom,
+    Terminal,
+    Wire,
+    _perpendicular_cross,
+    separate,
+)
 from flexo.routing.trees import (
     WireGraph,
     arrows_at_joins,
@@ -815,8 +821,8 @@ class _Scene:
                 wire.rail_side = spec.rail_hint
         return wire
 
-    def _caption(self, bundle: Bundle, members: list[Member]) -> tuple[float, float] | None:
-        """The room a lone captioned edge's caption needs above its run: see ``Wire``."""
+    def _caption(self, bundle: Bundle, members: list[Member]) -> CaptionRoom | None:
+        """The room a lone captioned edge's caption needs beside its run: see ``Wire``."""
 
         if len(bundle.members) != 1:
             return None
@@ -824,13 +830,15 @@ class _Scene:
         if not isinstance(edge, EdgeSpec) or not edge.label:
             return None
         metrics = self.measurer.measure(edge.label)
-        room = (
-            caption_rise(metrics, self.style)
-            + metrics.baseline
-            + self.style.caption_clearance.points
-            + self.style.connector_width.points / 2.0
+        # The caption's far edge, then clearance and half a stroke before the
+        # next line may pass.
+        margin = self.style.caption_clearance.points + self.style.connector_width.points / 2.0
+        return CaptionRoom(
+            above=caption_rise(metrics, self.style) + metrics.baseline + margin,
+            width=metrics.width,
+            beside=caption_reach(metrics, self.style) + metrics.width + margin,
+            height=metrics.height,
         )
-        return room, metrics.width
 
     def _forced_route(self, edge: EdgeSpec, source: Pin, target: Pin, bend: float) -> Wire:
 
