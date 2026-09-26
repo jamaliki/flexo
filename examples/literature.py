@@ -1281,6 +1281,40 @@ def citric_acid_cycle(theme: str = "paper") -> Figure:
     return figure
 
 
+def alphazero(theme: str = "paper") -> Figure:
+    """AlphaZero's training loop (Silver et al. 2018), as a ``cycle``."""
+
+    with Figure("alphazero", width="single-column", theme=theme) as figure:
+        with figure.module("loop", label="AlphaZero training", layout="cycle") as m:
+            steps = [
+                m.block("play", label="Self-play with MCTS"),
+                m.block("games", label="Games buffer", tone="data"),
+                m.block("train", label="Train network", tone="model"),
+                m.block("network", label=r"Network $f_\theta$", tone="model"),
+            ]
+        for before, after in zip(steps, steps[1:] + steps[:1], strict=True):
+            figure.connect(before, after)
+    return figure
+
+
+def knowledge_graph(theme: str = "paper") -> Figure:
+    """A small knowledge graph: entities and labelled relations."""
+
+    with Figure(
+        "knowledge-graph", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.module("graph", label="Knowledge graph", layout="grid", columns=3) as m:
+            curie = m.circle("curie", "Curie", at=(0, 0))
+            radium = m.circle("radium", "Radium", at=(0, 2))
+            paris = m.circle("paris", "Paris", at=(1, 1))
+            nobel = m.circle("nobel", "Nobel", at=(2, 0))
+        figure.connect(curie, radium, label="discovered")
+        figure.connect(curie, paris, label="lived in")
+        figure.connect(curie, nobel, label="won")
+        figure.connect(radium, paris, label="isolated in")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1350,6 +1384,8 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         speculative_decoding,
         multi_task_learning,
         citric_acid_cycle,
+        alphazero,
+        knowledge_graph,
     )
 }
 """Every figure here, by name."""
