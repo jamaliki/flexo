@@ -510,6 +510,8 @@ described in [docs/routing.md](docs/routing.md).
 
 - [Tutorial](docs/tutorial.md): figures step by step, from a first box to a
   themed, hand-drawn panel, and a table of where each choice lives.
+- [SKILL.md](SKILL.md): the whole of it on one page -- the loop, the calls, the
+  habits that make figures read well -- for a person or an assistant.
 - [Authoring guide](docs/guide.md): every component, grids and alignment,
   vector glyphs, band rows, paint and retheming, artwork, shadows, export
   formats, and which palette role paints what.
