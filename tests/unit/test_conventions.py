@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001 -- the expected strings are typeset math.
 """Drawing conventions, math in labels, and the figure-level choices they ride on."""
 
 from __future__ import annotations
@@ -177,3 +178,25 @@ def test_math_alphabets_operators_and_relations() -> None:
     assert parse_label(r"$\mathbb{E}$") == (TextRun("\U0001d53c"),)
     assert parse_label(r"$\log p$") == (TextRun("log "), TextRun("p", italic=True))
     assert parse_label(r"$x \in X$")[1] == TextRun(" \u2208 ")
+
+
+@pytest.mark.parametrize(
+    ("source", "drawn"),
+    [
+        (r"$d\times d$", "d × d"),
+        (r"$B=0$", "B = 0"),
+        (r"$B = 0$", "B = 0"),
+        (r"$\mathbb{R}^{d \times d}$", "ℝd×d"),
+        (r"$x_{t-1}$", "xt−1"),
+        (r"$-y$", "−y"),
+        (r"$(-1)$", "(−1)"),
+        (r"$a, -b$", "a, −b"),
+        (r"$\alpha x$", "αx"),
+        (r"$\log p$", "log p"),
+        (r"$\log(x)$", "log(x)"),
+        (r"$q(x_t | x_{t-1})$", "q(xt | xt−1)"),
+        (r"$QK^T/\sqrt{d_k}$", "QKT/√dk"),
+    ],
+)
+def test_math_is_spaced_the_way_tex_spaces_it(source: str, drawn: str) -> None:
+    assert "".join(run.text for run in parse_label(source)) == drawn
