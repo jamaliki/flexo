@@ -361,6 +361,7 @@ def plan_pins(
     _common_net_sides(fitted, members, ends, hints)
     _clear_approaches(fitted, ends, hints, style)
     _separate_directions(fitted, ends, members, hints, style)
+    _spill_crowded_sides(fitted, ends, hints, style)
     _spread_operator_inputs(ends)
     _one_end_per_corner(ends)
     by_side: dict[tuple[str, Side], dict[tuple[str, str, Side, bool], list[End]]] = defaultdict(
@@ -623,6 +624,84 @@ def _separate_directions(
                 # tapped from a plant's output -- instead of leaving backwards.
                 # A pair of arrows each way between two boxes stays as it is.
                 end.group = (end.group[0], end.group[1], port_spec.side, end.group[3])
+
+
+def _spill_crowded_sides(
+    fitted: FittedFigure,
+    ends: list[End],
+    hints: dict[tuple[str, str], Side],
+    style: LayoutStyle,
+) -> None:
+    """Move pins a side has no room for onto the sides at either end of it.
+
+    A side holds two pins fewer than fit exactly a lane apart, so its lines
+    have room to spread -- but at least two, where two fit. Past that, the
+    outermost pins -- in the order their lines arrive, so nothing crosses --
+    go round the corner nearest them, onto a side that faces where they go:
+    six phases of a compiler reading one symbol table meet it on three sides,
+    not squeezed onto one.
+    """
+
+    spacing = style.port_spacing.points
+    by_side: dict[tuple[str, Side], dict[tuple, list[End]]] = defaultdict(lambda: defaultdict(list))
+    for end in ends:
+        assert end.group is not None
+        by_side[(end.group[0], end.group[2])][end.group].append(end)
+    for (_, side), groups in list(by_side.items()):
+        node = next(iter(groups.values()))[0].node
+        if node.measured.spec.kind in POINT_KINDS:
+            continue
+        along_x = side in {Side.NORTH, Side.SOUTH}
+        span = node.bounds.width if along_x else node.bounds.height
+        # Pins keep off the rounded corners (see ``_place_on_side``).
+        inset = min(style.corner_radius.points + style.connector_width.points, span / 2.0)
+        fit = int((span - 2.0 * inset) / spacing) + 1  # pins exactly a lane apart
+        capacity = max(min(fit, 2), fit - 2)
+        if len(groups) <= capacity:
+            continue
+
+        position = {
+            key: sum(
+                end.counterpart.center.x if along_x else end.counterpart.center.y
+                for end in group
+            )
+            / len(group)
+            for key, group in groups.items()
+        }
+        ordered = sorted(groups, key=position.__getitem__)
+        low_side, high_side = (Side.WEST, Side.EAST) if along_x else (Side.NORTH, Side.SOUTH)
+        low, high = 0, len(ordered) - 1
+        excess = len(ordered) - capacity
+        while excess > 0 and low <= high:
+            # Alternate ends, taking whichever outer pin is further out.
+            centre = node.bounds.center.x if along_x else node.bounds.center.y
+            take_low = centre - position[ordered[low]] >= position[ordered[high]] - centre
+            index = low if take_low else high
+            key = ordered[index]
+            target = low_side if take_low else high_side
+            # Round the corner only onto a side every counterpart lies beyond.
+            if _free_to_move(fitted, hints, groups[key]) and all(
+                _faces(node.bounds, end.counterpart, target) for end in groups[key]
+            ):
+                for end in groups[key]:
+                    end.group = (key[0], key[1], target, key[3])
+                excess -= 1
+            if take_low:
+                low += 1
+            else:
+                high -= 1
+
+
+def _free_to_move(
+    fitted: FittedFigure, hints: dict[tuple[str, str], Side], group: list[End]
+) -> bool:
+    """Whether every end of ``group`` may change side: none authored, fixed, or hinted."""
+
+    for end in group:
+        key = (end.node.measured.spec.id, end.reference.port_name)
+        if end.fixed or key in hints or not _authored_port(fitted, *key).auto_side:
+            return False
+    return True
 
 
 def _spread_operator_inputs(ends: list[End]) -> None:
@@ -1009,6 +1088,11 @@ def _align(
         trial[root_two] = root_one
         if not _orders_consistent(trial, orders):
             continue
+        # A straight line is worth nothing if the pins beside it on either
+        # side are then squeezed closer than a lane: the merge must fit.
+        trial_ranges = {**ranges, root_one: (low, high)}
+        if not _orders_fit(trial, trial_ranges, orders, spacing):
+            continue
         parent[root_two] = root_one
         ranges[root_one] = (low, high)
     for axis in (True, False):
@@ -1096,6 +1180,34 @@ def _clear_stretch(
         return 0.0 if start <= wanted <= end else min(abs(wanted - start), abs(wanted - end))
 
     return min(stretches, key=distance)
+
+
+def _orders_fit(
+    parent: dict,
+    ranges: dict,
+    orders: list[list],
+    spacing: float,
+) -> bool:
+    """Whether every side can still hold its pins in order, a lane apart, in their ranges."""
+
+    def find(key):
+        while parent[key] != key:
+            key = parent[key]
+        return key
+
+    for order in orders:
+        position = float("-inf")
+        previous = None
+        for key in order:
+            root = find(key)
+            low, high = ranges[root]
+            if root == previous:
+                continue
+            position = max(low, position + spacing)
+            if position > high + 1e-6:
+                return False
+            previous = root
+    return True
 
 
 def _orders_consistent(parent: dict, orders: list[list]) -> bool:
