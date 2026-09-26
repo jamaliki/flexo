@@ -621,8 +621,32 @@ with flexo.Figure("ornament", width="double-column") as figure:
         module.mlp("q-mlp", label="MLP", motif=False)
 ```
 
-`title_side="right"` places the title at the right end of the top edge. The
-title band has the same height either way, so nothing else moves. A title
+`title_side="right"` places the title at the right end of the top edge.
+`"bottom-left"` and `"bottom-right"` set it under the contents instead, in a
+band of its own. The title band has the same height either way.
+
+A **plate** is how a graphical model writes repetition: a bare frame round the
+variables repeated, its count in the bottom-right corner. `plate(id, count)`
+opens one; plates nest, and a plate is drawn as a plain frame in every theme.
+Latent Dirichlet allocation (Blei et al. 2003) is three circles in two plates:
+
+```python
+import flexo
+
+with flexo.Figure("lda", conventions={"lines": "straight"}) as figure:
+    with figure.root.row("model") as model:
+        alpha = model.circle("alpha", r"$\alpha$")
+        with model.plate("documents", "$M$") as documents:
+            theta = documents.circle("theta", r"$\theta$", input=alpha)
+            with documents.plate("words", "$N$") as words:
+                z = words.circle("z", "$z$", input=theta)
+                w = words.circle("w", "$w$", shaded=True, input=z)
+        beta = model.circle("beta", r"$\beta$")
+    figure.connect(beta, w)
+```
+
+`module(id, label=...)` opens a titled container anywhere, not only on the
+figure: a worker node inside a cluster is `cluster.module("node", label="Node 1")`. A title
 accepts styled runs like any label, for example
 `label=(TextRun("QK"), TextRun("T", baseline_shift="super"))`. Titles are set
 at the style's `title_weight`; a run with a weight other than the default 400

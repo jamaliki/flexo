@@ -79,9 +79,13 @@ def measure_figure(
         # A title is drawn at the style's title weight, so it is measured there
         # too: a semibold "Sequence module" is wider than the same words at 400,
         # and the band this reserves is the band those glyphs land in.
+        # A plate's count is a symbol, not a title: set as written, at the
+        # label weight.
+        plate = group.role == "plate"
+        typography = layout_style.typography
         label = title_measurer.measure(
-            title_runs(group.label, layout_style.typography),
-            weight=layout_style.typography.title_weight,
+            group.label if plate else title_runs(group.label, typography),
+            weight=typography.label_weight if plate else typography.title_weight,
         )
         gaps = routing_gaps_for_group(
             semantic,
@@ -274,7 +278,7 @@ def _group_anchor(
     padding = layout.resolved_padding(style.group_padding)
     content = Rect(
         padding.left,
-        padding.top + title_height,
+        padding.top + (0.0 if group.title_below else title_height),
         max(0.0, size.width - padding.horizontal),
         max(0.0, size.height - padding.vertical - title_height),
     )

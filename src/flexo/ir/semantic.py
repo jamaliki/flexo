@@ -43,7 +43,7 @@ EDGE_SHAPES = ("auto", "orthogonal", "straight")
 type JointStyle = Literal["dot", "arrow", "auto"]
 JOINT_STYLES = ("dot", "arrow", "auto")
 """How a branch is marked where it meets the trunk of its net."""
-TITLE_SIDES = ("left", "right")
+TITLE_SIDES = ("left", "right", "bottom-left", "bottom-right")
 """Where a group may anchor its title along its own top edge."""
 _ZERO_LENGTH = Length(0.0)
 
@@ -62,6 +62,13 @@ class TextRun:
     weight: int = 400
     italic: bool = False
     baseline_shift: Literal["normal", "super", "sub"] = "normal"
+    accent: str = ""
+    """A mark set centred over the whole run, such as the arrow of ``\\vec{h}``.
+
+    Fonts place a combining accent over one letter only when they carry an
+    anchor for it, and none of the bundled text faces has a combining arrow;
+    Flexo draws these marks itself, above the run, adding nothing to its width.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,7 +495,7 @@ class GroupSpec:
     collision_policy: CollisionPolicy = "disjoint"
     label: tuple[TextRun, ...] = ()
     role: str = "container"
-    title_side: Literal["left", "right"] = "left"
+    title_side: Literal["left", "right", "bottom-left", "bottom-right"] = "left"
     """Which end of the group's top edge its title is anchored to.
 
     Paint and typography only: the title band is the same height either way, so
@@ -550,6 +557,16 @@ class GroupSpec:
     @property
     def text(self) -> str:
         return "".join(run.text for run in self.label)
+
+    @property
+    def title_below(self) -> bool:
+        """Whether the title sits under the contents (a plate's count), not over them."""
+
+        return self.title_side.startswith("bottom")
+
+    @property
+    def title_right(self) -> bool:
+        return self.title_side.endswith("right")
 
 
 @dataclass(frozen=True, slots=True)

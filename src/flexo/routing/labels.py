@@ -39,6 +39,13 @@ NEAR_LINE = 50.0
 A reader takes a caption to name the line nearest it, so one that sits a lane
 from someone else's arrow reads as that arrow's."""
 
+CROWDED = 10.0
+"""Price of a caption within two lanes of another connector's line.
+
+Clear of it, but close enough that where lines converge -- the weights into a
+perceptron's sum -- two captions end up side by side between two lines; a
+place with open space round it reads as one line's own."""
+
 OUTSIDE = 100.0
 """Price of a caption leaving the canvas.
 
@@ -116,11 +123,14 @@ def place_captions(
 
     def price(index: int, position: Point, captions: Iterable[Rect]) -> float:
         box = box_of(index, position)
-        return _price(box, solid, [*fixed, *captions], others, canvas) + NEAR_LINE * sum(
-            1
-            for line in foreign[index]
-            if any(_crosses(box.inflated(near), a, b) for a, b in itertools.pairwise(line))
-        )
+        cost = _price(box, solid, [*fixed, *captions], others, canvas)
+        for line in foreign[index]:
+            pieces = list(itertools.pairwise(line))
+            if any(_crosses(box.inflated(near), a, b) for a, b in pieces):
+                cost += NEAR_LINE
+            elif any(_crosses(box.inflated(2.0 * near), a, b) for a, b in pieces):
+                cost += CROWDED
+        return cost
 
     def placed_except(*skipped: int) -> list[Rect]:
         return [box_of(other, at) for other, at in chosen.items() if other not in skipped]

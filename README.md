@@ -127,7 +127,8 @@ Text between dollar signs is math, in a small subset of TeX:
 m.text("c", "$c_{t-1}$")               # subscript: one character, or {a group}
 m.block("attn", label="softmax($QK^T$)V")
 m.text("eps", r"$\epsilon \sim N(0, I)$")
-m.text("out", r"$\hat{x}$")            # \hat, \bar, \tilde, \dot, \vec
+m.text("out", r"$\hat{x}$")            # \hat, \bar, \tilde, \dot
+m.text("h", r"$\vec{h}_1$")            # \vec, \overrightarrow, \overleftarrow
 m.block("w", label=r"$W_{\text{out}}$")  # \text{} and \mathrm{} are upright
 ```
 
@@ -138,7 +139,10 @@ and relations (`\times`, `\cdot`, `\sim`, `\in`, `\nabla`, `\to`, `\le`,
 functions are upright; `\mathcal{L}`, `\mathbb{E}` and `\mathfrak{g}` give
 script, blackboard, and fraktur capitals. A superscript and a subscript on one
 letter (`$\sigma^2_B$`) are stacked, as in TeX. `\sqrt{d}` is `√d`, and
-`\frac{a}{b}` is set inline as `a/b`.
+`\frac{a}{b}` is set inline as `a/b`. `\vec`, `\overrightarrow` and
+`\overleftarrow` draw an arrow centred over their whole argument
+(`$\overleftarrow{h}$`, the backward state of a bidirectional network); Flexo
+draws that arrow itself, because no bundled text face can place one.
 
 Spacing follows TeX. A binary operator or a relation gets one space on each
 side, whatever was typed: `$B=0$` and `$B = 0$` both give *B* = 0, and

@@ -59,7 +59,8 @@
         "text": {"type": "string"},
         "weight": {"type": "integer", "minimum": 100, "maximum": 900, "default": 400},
         "italic": {"type": "boolean", "default": false},
-        "baseline_shift": {"enum": ["normal", "super", "sub"], "default": "normal"}
+        "baseline_shift": {"enum": ["normal", "super", "sub"], "default": "normal"},
+        "accent": {"type": "string", "default": ""}
       }
     },
     "label": {
@@ -318,7 +319,7 @@
         "collision_policy": {"enum": ["disjoint", "overlay", "ignore"], "default": "disjoint"},
         "label": {"$ref": "#/$defs/label", "default": ""},
         "role": {"$ref": "#/$defs/identifier", "default": "container"},
-        "title_side": {"enum": ["left", "right"], "default": "left"},
+        "title_side": {"enum": ["left", "right", "bottom-left", "bottom-right"], "default": "left"},
         "anchor": {"$ref": "#/$defs/identifier"},
         "shadow": {"type": "boolean", "default": false},
         "paint": {"$ref": "#/$defs/paint"}

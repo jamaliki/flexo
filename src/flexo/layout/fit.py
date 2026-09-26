@@ -68,9 +68,11 @@ class _Fitter:
             if measured_group.spec.label
             else 0.0
         )
+        # A title under the contents (a plate's count) takes its band at the bottom.
+        above = 0.0 if measured_group.spec.title_below else title_height
         content = Rect(
             bounds.x + padding.left,
-            bounds.y + padding.top + title_height,
+            bounds.y + padding.top + above,
             max(0.0, bounds.width - padding.horizontal),
             max(0.0, bounds.height - padding.vertical - title_height),
         )
