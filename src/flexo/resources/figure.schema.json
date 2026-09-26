@@ -239,7 +239,7 @@
       "additionalProperties": false,
       "required": ["kind"],
       "properties": {
-        "kind": {"enum": ["row", "column", "grid", "overlay", "stack", "flow", "flow-right"]},
+        "kind": {"enum": ["row", "column", "grid", "overlay", "stack", "flow", "flow-right", "cycle"]},
         "gap": {"$ref": "#/$defs/length"},
         "row_gap": {"$ref": "#/$defs/length"},
         "column_gap": {"$ref": "#/$defs/length"},

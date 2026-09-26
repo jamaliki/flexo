@@ -13,9 +13,11 @@ from flexo.units import Extent, Length
 
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
-type LayoutKind = Literal["row", "column", "grid", "overlay", "stack", "flow", "flow-right"]
+type LayoutKind = Literal[
+    "row", "column", "grid", "overlay", "stack", "flow", "flow-right", "cycle"
+]
 
-LAYOUT_KINDS = ("row", "column", "grid", "overlay", "stack", "flow", "flow-right")
+LAYOUT_KINDS = ("row", "column", "grid", "overlay", "stack", "flow", "flow-right", "cycle")
 ALIGNMENTS = ("start", "center", "end", "stretch", "ports", "auto")
 JUSTIFICATIONS = ("start", "center", "end", "space-between")
 

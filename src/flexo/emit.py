@@ -34,6 +34,36 @@ from flexo.themes import figure_palette, figure_style
 from flexo.units import MILLIMETRES_PER_INCH, POINTS_PER_INCH
 
 
+def _unique_ids(root: ET.Element) -> None:
+    """Keep every id unique: a part named after its owner never takes a component's id.
+
+    A component's id is its group's id and its own name, and a group's parts
+    -- its title, its frame -- are its id and a part name; a component called
+    ``label`` in module ``m`` and the module's title are both ``m.label``. The
+    component keeps the id it was given; the part is numbered.
+    """
+
+    owners = {
+        item.get("id")
+        for item in root.iter()
+        if item.get("data-flexo-entity") is not None and item.get("id")
+    }
+    seen: set[str] = set()
+    for item in root.iter():
+        identifier = item.get("id")
+        if identifier is None:
+            continue
+        if identifier in seen or (
+            identifier in owners and item.get("data-flexo-entity") is None
+        ):
+            suffix = 2
+            while f"{identifier}-{suffix}" in seen or f"{identifier}-{suffix}" in owners:
+                suffix += 1
+            identifier = f"{identifier}-{suffix}"
+            item.set("id", identifier)
+        seen.add(identifier)
+
+
 def emit_svg(
     routed: RoutedFigure,
     *,
@@ -83,6 +113,7 @@ def emit_svg(
     hierarchy = _Hierarchy(routed)
     hierarchy.render(root, layout_style, paint_palette)
     embed_fonts(fonts, root, layout_style)
+    _unique_ids(root)
     return SVGDocument(xml_document(root), width_mm, height_mm)
 
 

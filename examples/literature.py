@@ -1260,6 +1260,27 @@ def multi_task_learning(theme: str = "paper") -> Figure:
     return figure
 
 
+def citric_acid_cycle(theme: str = "paper") -> Figure:
+    """The citric acid cycle, laid round a ring with ``layout="cycle"``."""
+
+    names = (
+        "Citrate",
+        "Isocitrate",
+        "α-Ketoglutarate",
+        "Succinyl-CoA",
+        "Succinate",
+        "Fumarate",
+        "Malate",
+        "Oxaloacetate",
+    )
+    with Figure("citric-acid-cycle", theme=theme) as figure:
+        with figure.module("cycle", label="Citric acid cycle", layout="cycle") as m:
+            steps = [m.block(f"s{index}", label=name) for index, name in enumerate(names)]
+        for before, after in zip(steps, steps[1:] + steps[:1], strict=True):
+            figure.connect(before, after)
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1328,6 +1349,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         dit_block,
         speculative_decoding,
         multi_task_learning,
+        citric_acid_cycle,
     )
 }
 """Every figure here, by name."""
