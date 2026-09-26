@@ -59,6 +59,10 @@ class TypographyStyle:
     """``"upper"`` sets group titles in capitals, as the archive and Bauhaus themes do."""
     title_size: float = 1.0
     """Group-title size as a multiple of ``size``."""
+    math_family: str | None = None
+    """A mathematics family (``Latin Modern Math``) for the symbols ``family``
+    lacks, tried before ``fallbacks``; italic Greek is set in its mathematical
+    italic letters, as TeX sets them."""
 
     def with_family(self, family: str, *fallbacks: str) -> TypographyStyle:
         """This typography set in ``family``, keeping every size and weight."""

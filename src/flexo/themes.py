@@ -416,6 +416,7 @@ _LATIN_MODERN = TypographyStyle(
     title_weight=700,
     fallbacks=("STIX Two Text", "Times New Roman", "Noto Serif"),
     generic="serif",
+    math_family="Latin Modern Math",
 )
 
 

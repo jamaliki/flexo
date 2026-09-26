@@ -99,3 +99,15 @@ def test_common_tex_symbols_are_known() -> None:
     label = r"$r \ll d \Rightarrow \argmax_i \lVert x \rVert \equiv \int$"
     text = "".join(run.text for run in parse_label(label))
     assert "\\" not in text and "≪" in text and "⇒" in text and "arg max" in text
+
+
+def test_a_maths_family_sets_italic_greek_as_tex_does() -> None:
+    from flexo.style import TypographyStyle
+    from flexo.text import FontStack
+
+    stack = FontStack(TypographyStyle(family="Latin Modern Roman", math_family="Latin Modern Math"))
+    pieces = stack.segments("x\u03b1", 400, True)
+    assert pieces[0][1] == "x" and pieces[-1][0].family == "Latin Modern Math"
+    assert pieces[-1][1] == "\U0001d6fc"  # mathematical italic small alpha
+    # Upright text keeps its Greek as written.
+    assert stack.segments("\u03b1", 400, False)[0][1] == "\u03b1"
