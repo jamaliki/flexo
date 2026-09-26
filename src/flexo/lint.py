@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from collections import Counter
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import combinations, pairwise
 
 from flexo.compiler import Compilation
 from flexo.components import TRANSPARENT_KINDS
@@ -282,7 +282,74 @@ def _routing_diagnostics(
             )
     diagnostics.extend(_net_routing_diagnostics(compilation, style, canvas))
     diagnostics.extend(_track_separation_diagnostics(compilation, style))
+    diagnostics.extend(_caption_diagnostics(compilation))
     return tuple(diagnostics)
+
+
+_CAPTION_TOLERANCE = 0.5
+"""How far, in points, a caption box may graze a line or a box before it counts."""
+
+
+def _caption_diagnostics(compilation: Compilation) -> list[Diagnostic]:
+    """A connector caption drawn over a component, another caption, or a line."""
+
+    from flexo.routing.labels import label_box
+
+    routed = compilation.routed
+    captions = [
+        (
+            item.spec.id,
+            label_box(item.label_position, item.label_metrics).inflated(-_CAPTION_TOLERANCE),
+        )
+        for item in (*routed.edges, *routed.nets)
+        if item.label_metrics is not None and item.label_position is not None
+    ]
+    lines = [(edge.spec.id, edge.centerline) for edge in routed.edges] + [
+        (net.spec.id, piece) for net in routed.nets for piece in net.pieces
+    ]
+    solids = [
+        node for node in routed.fitted.nodes if node.measured.spec.kind not in TRANSPARENT_KINDS
+    ]
+    diagnostics = []
+    for index, (owner, box) in enumerate(captions):
+        for node in solids:
+            if node.bounds.intersects(box, strict=True):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.caption.overlap",
+                        f'Caption overlaps component "{node.measured.spec.id}".',
+                        Severity.WARNING,
+                        entity_id=owner,
+                    )
+                )
+        for other, other_box in captions[index + 1 :]:
+            if other_box.intersects(box, strict=True):
+                diagnostics.append(
+                    Diagnostic(
+                        "routing.caption.overlap",
+                        f'Caption overlaps the caption of "{other}".',
+                        Severity.WARNING,
+                        entity_id=owner,
+                    )
+                )
+        covered = sorted(
+            {
+                line_id
+                for line_id, line in lines
+                for start, end in pairwise(line)
+                if segment_crosses_rect(start, end, box)
+            }
+        )
+        for line_id in covered:
+            diagnostics.append(
+                Diagnostic(
+                    "routing.caption.covers-line",
+                    f'Caption is drawn over the line of "{line_id}".',
+                    Severity.WARNING,
+                    entity_id=owner,
+                )
+            )
+    return diagnostics
 
 
 def _straight_edge_diagnostics(edge, fitted, canvas: Rect) -> list[Diagnostic]:

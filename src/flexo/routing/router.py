@@ -46,6 +46,7 @@ from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet
 from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.routing.hints import forced_points
+from flexo.routing.ink import caption_rise
 from flexo.routing.labels import label_box, place_edge_labels
 from flexo.routing.pins import (
     POINT_KINDS,
@@ -601,6 +602,7 @@ class _Scene:
     def __init__(self, fitted: FittedFigure, style: LayoutStyle, measurer: TextMeasurer) -> None:
         self.fitted = fitted
         self.style = style
+        self.measurer = measurer
         self.parents = parent_map(fitted.measured.semantic.groups)
         self.solid = tuple(
             node for node in fitted.nodes if node.measured.spec.kind not in TRANSPARENT_KINDS
@@ -781,7 +783,7 @@ class _Scene:
         for pin in everything:
             stub = stubs.get(pin.key, pin.escape)
             terminals.append(Terminal(pin.point, stub.distance_to(pin.point), stub))
-        wire = Wire(bundle.key, paths, terminals)
+        wire = Wire(bundle.key, paths, terminals, caption=self._caption(bundle, members))
         for member_index in bundle.members:
             spec = members[member_index].spec
             if isinstance(spec, NetSpec):
@@ -816,6 +818,23 @@ class _Scene:
                 )
                 wire.rail_side = spec.rail_hint
         return wire
+
+    def _caption(self, bundle: Bundle, members: list[Member]) -> tuple[float, float] | None:
+        """The room a lone captioned edge's caption needs above its run: see ``Wire``."""
+
+        if len(bundle.members) != 1:
+            return None
+        edge = members[bundle.members[0]].spec
+        if not isinstance(edge, EdgeSpec) or not edge.label:
+            return None
+        metrics = self.measurer.measure(edge.label)
+        room = (
+            caption_rise(metrics, self.style)
+            + metrics.baseline
+            + self.style.caption_clearance.points
+            + self.style.connector_width.points / 2.0
+        )
+        return room, metrics.width
 
     def _forced_route(self, edge: EdgeSpec, source: Pin, target: Pin, bend: float) -> Wire:
 

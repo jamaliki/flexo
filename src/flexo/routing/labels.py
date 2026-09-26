@@ -30,8 +30,11 @@ OVERLAP = 1000.0
 COVERS_LINE = 200.0
 """Price of a caption drawn over another connector's line."""
 
-OUTSIDE = 500.0
-"""Price of a caption leaving the canvas."""
+OUTSIDE = 100.0
+"""Price of a caption leaving the canvas.
+
+The cheapest defect: the canvas grows to take the caption on the next layout
+round, while a caption over a line or a box stays there."""
 
 
 def label_box(position: Point, metrics: TextMetrics) -> Rect:

@@ -574,7 +574,7 @@ def state_machine(theme: str = "paper") -> Figure:
             closed = m.circle("closed", "Closed", at=(0, 0))
             sent = m.circle("sent", "SYN sent", at=(0, 1))
             established = m.circle("established", "Established", shaded=True, at=(0, 2))
-            waiting = m.circle("waiting", "FIN wait", at=(1, 2))
+            waiting = m.circle("waiting", "FIN wait", at=(1, 1))
         m.connect(closed, sent, label="connect")
         m.connect(sent, established, label="SYN-ACK")
         m.connect(established, waiting, label="close")
