@@ -272,6 +272,11 @@ def route_figure(
         ),
         canvas=scene.canvas,
         style=layout_style,
+        from_start=frozenset(
+            edge.spec.id
+            for edge in edges
+            if fitted.node(edge.spec.source.node_id).measured.spec.kind == "decision"
+        ),
     )
     return RoutedFigure(fitted, tuple(edges), tuple(nets))
 
