@@ -75,6 +75,10 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
             result.append(group)
             continue
         across = group.layout.kind == "flow-right"
+        stack = FLOW_KINDS[group.layout.kind]
+        if not group.children:
+            result.append(replace(group, layout=replace(group.layout, kind=stack)))  # type: ignore[arg-type]
+            continue
         layers, chain = _layers(group, groups, connections, links)
         children: list[str] = []
         for band in _bands(layers):
@@ -116,7 +120,6 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
             )
         # Layers are centred on one another, as a layered drawing is.
         align = "center" if group.layout.align == "auto" else group.layout.align
-        stack = FLOW_KINDS[group.layout.kind]
         result.append(
             replace(
                 group,

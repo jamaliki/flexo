@@ -646,12 +646,17 @@ def _svg_diagnostics(compilation: Compilation) -> tuple[Diagnostic, ...]:
         + [edge.id for edge in semantic.edges]
         + [net.id for net in semantic.nets]
     )
-    return _structural_svg_diagnostics(compilation.document.text, expected_ids)
+    worded = any(
+        item.label for item in (*semantic.groups, *semantic.nodes, *semantic.edges, *semantic.nets)
+    )
+    return _structural_svg_diagnostics(compilation.document.text, expected_ids, worded=worded)
 
 
 def _structural_svg_diagnostics(
     svg_text: str,
     expected_ids: tuple[str, ...],
+    *,
+    worded: bool = True,
 ) -> tuple[Diagnostic, ...]:
     diagnostics: list[Diagnostic] = []
     try:
@@ -679,7 +684,7 @@ def _structural_svg_diagnostics(
             Diagnostic("svg.foreign-object", "foreignObject is not editable enough.")
         )
     text_elements = [item for item in elements if local_name(item.tag) == "text"]
-    if expected_ids and not text_elements:
+    if expected_ids and worded and not text_elements:
         diagnostics.append(
             Diagnostic("svg.text.flattened", "Editable master contains no live text.")
         )
