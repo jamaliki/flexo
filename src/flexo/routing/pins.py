@@ -10,7 +10,7 @@ one tree by ``flexo.routing.router``.
 from __future__ import annotations
 
 import itertools
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
@@ -313,6 +313,12 @@ def plan_pins(
 
     hints = _port_hints(fitted.measured.semantic)
     flow = _flow_defaults(fitted, members, ends)
+    edges = [member.spec for member in members if isinstance(member.spec, EdgeSpec)]
+    directed = {(edge.source.node_id, edge.target.node_id) for edge in edges}
+    both_ways = {pair for pair in directed if pair[::-1] in directed}
+    repeats = Counter(
+        (edge.source.node_id, edge.source.port_name, edge.target.node_id) for edge in edges
+    )
     for index, end in enumerate(ends):
         spec = end.node.measured.spec
         port_spec = _authored_port(fitted, spec.id, end.reference.port_name)
@@ -351,6 +357,19 @@ def plan_pins(
             # its own line end to end, even beside another between the same
             # ports -- unless it leaves a side too short for a pin each, where
             # the edges share a stem and each caption goes on its own branch.
+            name = f"{name}@{member.id}"
+        elif (
+            not end.arriving
+            and isinstance(member, EdgeSpec)
+            and spec.kind not in POINT_KINDS
+            and (member.source.node_id, member.target.node_id) in both_ways
+            and repeats[(member.source.node_id, member.source.port_name, member.target.node_id)]
+            == 1
+        ):
+            # A value sent to a box that sends one back: each departure is its
+            # own arrow, so every pair of arrows can sit side by side -- a
+            # server broadcasting to clients that each report back. (A circle's
+            # pins stay at the middle of its sides, so its lines still share.)
             name = f"{name}@{member.id}"
         elif end.arriving and separate and isinstance(member, EdgeSpec) and spec.kind != "op":
             # Two values arriving at one port are two arrows, not a merge: only

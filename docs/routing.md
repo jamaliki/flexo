@@ -38,7 +38,9 @@ that names nothing in the figure is still an error.)
 
    Ends then share a pin or get their own. Edges leaving one port share its
    pin and are drawn as a tree, unless their targets stand side by side
-   within the component's span, when each gets its own arrow. Values arriving
+   within the component's span, when each gets its own arrow. An edge to a
+   component that sends an edge back also gets its own arrow, so each pair
+   of arrows runs side by side (a server and the clients reporting to it). Values arriving
    at one port get a pin each (the `arrivals` convention), and a captioned
    edge always has pins of its own. Pins on one side are ordered by where
    their lines go; ties put the farthest counterpart first, so skip
