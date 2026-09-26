@@ -88,7 +88,7 @@
       "required": ["id"],
       "properties": {
         "id": {"$ref": "#/$defs/identifier"},
-        "theme": {"$ref": "#/$defs/identifier"},
+        "theme": {"type": "string", "minLength": 1},
         "width": {
           "oneOf": [
             {"enum": ["single-column", "double-column", "presentation"]},
@@ -97,7 +97,7 @@
         },
         "height": {"$ref": "#/$defs/length"},
         "root": {"$ref": "#/$defs/identifier"},
-        "style": {"$ref": "#/$defs/identifier", "default": "paper"},
+        "style": {"type": "string", "minLength": 1, "default": "paper"},
         "palette": {"type": "string", "minLength": 1, "default": "default"},
         "font": {"type": "string", "minLength": 1},
         "conventions": {

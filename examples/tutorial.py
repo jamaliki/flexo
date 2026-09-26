@@ -11,6 +11,7 @@ reader copies is the code that drew the picture beside it, and
 
 from __future__ import annotations
 
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -21,26 +22,38 @@ HERE = Path(__file__).resolve().parent
 TUTORIAL = HERE.parent / "docs" / "tutorial.md"
 OUT = HERE / "build" / "tutorial"
 
-_BLOCK = re.compile(r"```(python|yaml)\n(# step: ([\w-]+)\n.*?)```", re.DOTALL)
+_BLOCK = re.compile(r"```(python|yaml)\n(# (step|file): ([\w.-]+)\n.*?)```", re.DOTALL)
 
 
 def steps() -> dict[str, dict[str, flexo.Figure | flexo.FigureSpec]]:
-    """Each step's figures, by step name and then by look (``""`` for a lone figure)."""
+    """Each step's figures, by step name and then by look (``""`` for a lone figure).
+
+    A ```yaml block that starts ``# file: <name>`` is a file a later step uses
+    (a theme, a palette); the steps run in a directory holding those files.
+    """
 
     result: dict[str, dict[str, flexo.Figure | flexo.FigureSpec]] = {}
-    for language, source, name in _BLOCK.findall(TUTORIAL.read_text()):
-        if language == "yaml":
-            with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / f"{name}.yaml"
-                path.write_text(source)
-                result[name] = {"": flexo.load_figure(path)}
-            continue
-        scope: dict[str, object] = {}
-        exec(compile(source, f"tutorial:{name}", "exec"), scope)
-        if "figures" in scope:
-            result[name] = dict(scope["figures"])  # type: ignore[call-overload]
-        else:
-            result[name] = {"": scope["figure"]}  # type: ignore[dict-item]
+    here = Path.cwd()
+    with tempfile.TemporaryDirectory() as directory:
+        os.chdir(directory)
+        try:
+            for language, source, marker, name in _BLOCK.findall(TUTORIAL.read_text()):
+                if marker == "file":
+                    Path(name).write_text(source)
+                    continue
+                if language == "yaml":
+                    path = Path(f"{name}.yaml")
+                    path.write_text(source)
+                    result[name] = {"": flexo.load_figure(path)}
+                    continue
+                scope: dict[str, object] = {}
+                exec(compile(source, f"tutorial:{name}", "exec"), scope)
+                if "figures" in scope:
+                    result[name] = dict(scope["figures"])  # type: ignore[call-overload]
+                else:
+                    result[name] = {"": scope["figure"]}  # type: ignore[dict-item]
+        finally:
+            os.chdir(here)
     return result
 
 

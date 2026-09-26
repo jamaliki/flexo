@@ -40,6 +40,15 @@ def load_figure(source_file: str | Path) -> FigureSpec:
         document = yaml.safe_load(text)
     else:
         raise ValueError("figure specifications must use .yaml, .yml, or .json")
+    # A theme or palette file named in a figure file is found next to it.
+    figure_data = document.get("figure") if isinstance(document, dict) else None
+    if isinstance(figure_data, dict):
+        for key in ("theme", "style", "palette"):
+            value = figure_data.get(key)
+            if isinstance(value, str) and value.lower().endswith((".yaml", ".yml", ".json")):
+                beside = (target_file.parent / value).resolve()
+                if not Path(value).is_absolute() and beside.is_file():
+                    figure_data[key] = str(beside)
     return parse_figure(document)
 
 
@@ -87,13 +96,21 @@ def parse_figure(document: object) -> FigureSpec:
                 role="canvas",
             )
         )
+    from flexo.theme_files import is_file_reference, register_palette, register_theme
+
+    style = str(figure_data.get("theme", figure_data.get("style", "paper")))
+    if is_file_reference(style):
+        style = register_theme(style)
+    palette = str(figure_data.get("palette", "default"))
+    if is_file_reference(palette):
+        palette = register_palette(palette)[0]
     figure = FigureSpec(
         id=figure_data["id"],
         width=_length_or_preset(figure_data.get("width", "double-column")),
         height=_optional_length(figure_data.get("height")),
         root=root,
-        style=figure_data.get("theme", figure_data.get("style", "paper")),
-        palette=figure_data.get("palette", "default"),
+        style=style,
+        palette=palette,
         font=figure_data.get("font"),
         conventions=parse_conventions(figure_data.get("conventions")),
         sketch=parse_sketch(figure_data.get("sketch")),

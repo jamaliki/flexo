@@ -208,7 +208,8 @@ class Figure:
     normally left out, so the canvas ends at the content plus its margin.
 
     ``theme`` picks the whole look -- type, line work, and colour rules -- from
-    ``flexo.THEMES`` (``"paper"``, ``"tikz"``, ``"dark"``, ``"swiss"``, ...).
+    ``flexo.THEMES`` (``"paper"``, ``"tikz"``, ``"dark"``, ``"swiss"``, ...), or
+    from a theme file (``"lab.yaml"``; see ``flexo.theme_files``).
     ``palette`` is a named palette (``flexo.palettes()``), a list of hex
     colours, or ``"default"`` for the theme's own. ``font`` sets the figure in
     any family Flexo can find -- bundled, installed, or registered with
@@ -246,7 +247,14 @@ class Figure:
         self.id = id
         self.width = width
         self.height = Length.parse(height) if height is not None else None
+        from flexo.theme_files import is_file_reference, register_palette, register_theme
+
         self.style = theme or style or "paper"
+        if is_file_reference(self.style):
+            # A theme file is read now, where the path means what the author meant.
+            self.style = register_theme(self.style)
+        if isinstance(palette, str) and is_file_reference(palette):
+            palette = register_palette(palette)[0]
         self.palette = (
             palette
             if isinstance(palette, str)

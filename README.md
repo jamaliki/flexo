@@ -343,6 +343,33 @@ and the plots beside it read as one figure. `flexo themes` lists them all;
 `flexo build figure.yaml --theme tikz --palette "Deep Sea Harvest"` overrides a
 figure's own choice from the command line.
 
+### Your own theme, in a file
+
+A look of your own -- a lab's, a journal's -- is a YAML file that starts from
+any theme and changes what it likes:
+
+```yaml
+theme:
+  name: lab
+  base: paper
+  font: Helvetica
+  type: {size: 7.5pt}
+  palette: ["#1d4e89", "#f26419", "#2a9d8f"]
+  style: {corner_radius: 1.5pt, arrow_shape: latex}
+  conventions: {branch: dot}
+palettes:
+  Lab warm: ["#9b2226", "#ca6702", "#ee9b00"]
+```
+
+`Figure(theme="lab.yaml")` uses it (so does `theme: lab.yaml` in a figure file,
+and `flexo build ... --theme lab.yaml`), `flexo.register_theme("lab.yaml")`
+makes it `theme="lab"`, and a directory named by `FLEXO_THEME_PATH` makes every
+theme and palette in it available everywhere. `uv run flexo theme paper -o
+lab.yaml` writes out every setting a theme has, as a file to start from.
+Palettes can be registered on their own: `flexo.register_palette("Lab",
+["#..", ...])`, or a file of `palettes:`. The
+[tutorial](docs/tutorial.md#12-your-own-theme-and-palette) lists every key.
+
 ### Drawing by hand
 
 `theme="sketch"` draws a figure the way an illustrator would, after
@@ -512,7 +539,7 @@ parse into, so a figure is one thing written two ways -- see
 document too. A hand-written file may be short: nodes are blocks unless they
 say otherwise, `from: encoder` means the node's output (and `to:` its input),
 edges are numbered for you, and a file with no `groups` stacks its nodes in a
-column (see [the tutorial](docs/tutorial.md#12-the-same-figure-as-a-file)).
+column (see [the tutorial](docs/tutorial.md#13-the-same-figure-as-a-file)).
 
 `build` and `gallery` always write their outputs so a flawed figure stays
 inspectable: lint diagnostics go to stderr and the command exits `1` when any of

@@ -17,8 +17,9 @@ every one compiles with no lint diagnostics.)
 - [9. Drawing by hand](#9-drawing-by-hand)
 - [10. Your own colours, and badges](#10-your-own-colours-and-badges)
 - [11. Conventions](#11-conventions)
-- [12. The same figure as a file](#12-the-same-figure-as-a-file)
-- [13. Building, checking, and editing](#13-building-checking-and-editing)
+- [12. Your own theme and palette](#12-your-own-theme-and-palette)
+- [13. The same figure as a file](#13-the-same-figure-as-a-file)
+- [14. Building, checking, and editing](#14-building-checking-and-editing)
 - [Where each choice lives](#where-each-choice-lives)
 
 ## 1. A first figure
@@ -359,7 +360,82 @@ figures = {
 A theme can carry its own conventions, and a net's `joint="arrow"` or
 `joint="dot"` overrides them for that one net.
 
-## 12. The same figure as a file
+## 12. Your own theme and palette
+
+A lab, a journal, or a talk has a look of its own. Write it once as a YAML
+file -- start from any theme, change what you like -- and every figure can use
+it by name or by path. Palettes too: a theme file may carry named palettes,
+or they can live in a file of their own.
+
+```yaml
+# file: lab.yaml
+theme:
+  name: lab
+  base: paper                    # start from this theme; every key is optional
+  description: Our group's figures.
+  font: Liberation Sans          # any family Flexo can find
+  type: {size: 7.5pt, label_weight: 400}
+  palette: ["#1d4e89", "#f26419", "#2a9d8f", "#e9c46a"]
+  tones: {rule: tinted, fill_lightness: 0.92}
+  style: {corner_radius: 1.5pt, stroke_width: 0.6pt, arrow_shape: latex}
+  conventions: {branch: dot}
+palettes:
+  Lab warm: ["#9b2226", "#ca6702", "#ee9b00", "#94d2bd"]
+```
+
+```python
+# step: own-theme
+import flexo
+
+
+def model(**look):
+    with flexo.Figure("lab-model", width="single-column", **look) as figure:
+        with figure.module("model", label="Model", layout="column") as m:
+            x = m.text("x", "$x$")
+            h = m.block("encoder", label="Encoder", input=x, tone="encoder")
+            m.block("head", label="Head", input=h, tone="head")
+    return figure
+
+
+figures = {
+    "lab": model(theme="lab.yaml"),
+    "warm": model(theme="lab.yaml", palette="Lab warm"),
+}
+```
+
+| `theme="lab.yaml"` | `palette="Lab warm"` |
+| --- | --- |
+| ![lab](../examples/build/tutorial/own-theme-lab.preview.png) | ![warm](../examples/build/tutorial/own-theme-warm.preview.png) |
+
+To start from everything a theme sets, print it: `uv run flexo theme paper -o
+lab.yaml` writes every setting of `paper` into a file to edit (drop what you do
+not change). Then there are three ways to use it:
+
+- by path: `Figure(theme="lab.yaml")`, `theme: lab.yaml` in a figure file (found
+  next to the figure file), or `flexo build figure.yaml --theme lab.yaml`;
+- by name, after `flexo.register_theme("lab.yaml")`: `Figure(theme="lab")`;
+- everywhere, by pointing `FLEXO_THEME_PATH` at a directory of theme and palette
+  files: every one is registered the first time a theme or palette is looked up.
+
+A theme file's keys, all optional except `name`:
+
+| Key | What it sets |
+| --- | --- |
+| `base` | The theme it starts from (`paper` if left out) |
+| `font`, `type` | The family, and `size`, `label_weight`, `title_weight`, `line_height`, ... |
+| `palette` | Its own colours: a list, or a palette's name |
+| `page` | Neutral colours: `canvas`, `ink`, `muted`, `connector`, `container_fill`, ... |
+| `tones` | How colours become paint: `rule: tinted` (with `fill_lightness`, ...), `solid`, `accent-then-grey`, `greys` |
+| `style` | Any line or shape setting: `stroke_width`, `corner_radius`, `arrow_shape`, `gap`, `container_style`, `widths`, ... |
+| `conventions`, `sketch`, `background` | As on a figure |
+
+A palette file is `palettes: {Name: [colours], ...}`, registered with
+`flexo.register_palette("palettes.yaml")`; one palette is
+`flexo.register_palette("Name", ["#..", ...])`. `flexo themes` lists what is
+registered. A mistake in a file is reported with the setting's name and the
+values it may take.
+
+## 13. The same figure as a file
 
 Everything above can be written as YAML (or JSON) instead of Python, checked
 against [`schemas/figure.schema.json`](../schemas/figure.schema.json). This is
@@ -394,7 +470,7 @@ Build it from the command line with `uv run flexo build classifier.yaml`, or
 load it with `flexo.load_figure("classifier.yaml")`. `flexo.dump_figure(figure.spec)`
 writes any figure out as YAML, so the Python and the file are one thing.
 
-## 13. Building, checking, and editing
+## 14. Building, checking, and editing
 
 `flexo.build` compiles, writes each format you ask for, and checks the result:
 
@@ -419,7 +495,11 @@ a flawed figure is still there to look at.
 | You want to change | Write |
 | --- | --- |
 | The whole look | `Figure(theme="tikz")` (or `paper`, `dark`, `sketch`, ...) |
+| Your own look, kept in a file | `Figure(theme="lab.yaml")`; start one with `flexo theme paper -o lab.yaml` |
 | The colours | `Figure(palette="Deep Sea Harvest")` or `palette=["#..", ...]` |
+| Your own named palettes | `flexo.register_palette("Lab", [...])`, or a `palettes:` file |
+| A painted page | `Figure(background=True)` or `background="#ffffff"` (transparent by default) |
+| What is frozen or trained | `badge="frozen"`, `"trained"`, `"tuned"` on a component |
 | The typeface | `Figure(font="Helvetica")`, or `flexo.register_font(path)` for a file |
 | Hand-drawn lines | `Figure(sketch=True)` or `sketch={"roughness": 0.3, "fill": "hatch"}` |
 | How forks, joins and arrivals look | `Figure(conventions={"branch": "dot", ...})` |
