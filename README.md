@@ -43,6 +43,17 @@ portable SVG and the PDF are made by Inkscape. (With Inkscape installed, the
 PNG is made by Inkscape too; without it, by resvg.) In a Jupyter notebook, a
 figure displays itself: end a cell with `figure`.
 
+Components can also be written flat, in any order, and laid out from their
+wiring alone:
+
+```python
+with flexo.Figure("heads", layout="flow") as figure:
+    x = figure.root.text("x", "Input $x$")
+    shared = figure.root.block("shared", label="Shared encoder", input=x)
+    heads = [figure.root.block(name, label=name, input=shared) for name in ("Depth", "Normals")]
+    figure.root.add("total", inputs=heads)
+```
+
 ## Figures from the literature
 
 [`examples/literature.py`](examples/literature.py) draws sixty-five figures from
