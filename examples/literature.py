@@ -609,6 +609,20 @@ def ci_pipeline(theme: str = "paper") -> Figure:
     return figure
 
 
+def feedback_control(theme: str = "paper") -> Figure:
+    """A feedback control loop, as in any control textbook."""
+
+    with Figure("feedback-control", theme=theme) as figure:
+        with figure.root.row("loop") as loop:
+            reference = loop.text("r", "$r(t)$")
+            error = loop.add("error", input=reference)
+            controller = loop.block("controller", label="PID controller", input=error)
+            plant = loop.block("plant", label="Plant", input=controller)
+            loop.text("y", "$y(t)$", input=plant)
+        figure.connect(plant, error, label="$-y$")
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -640,6 +654,7 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         training_loop,
         ci_pipeline,
         state_machine,
+        feedback_control,
     )
 }
 """Every figure here, by name."""
