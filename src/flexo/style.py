@@ -218,11 +218,26 @@ class LayoutStyle:
         )
 
     def resolve_width(self, value: str | Length | float) -> Length:
-        if isinstance(value, str):
-            presets = dict(self.widths)
-            if value in presets:
-                return presets[value]
-        return Length.parse(value)
+        presets = dict(self.widths)
+        if isinstance(value, str) and value in presets:
+            return presets[value]
+        try:
+            return Length.parse(value)
+        except FlexoError:
+            if not isinstance(value, str) or any(character.isdigit() for character in value):
+                raise
+            # A word, not a length: a preset misspelt.
+            from difflib import get_close_matches
+
+            close = get_close_matches(value, presets, n=1, cutoff=0.5)
+            guess = f'Did you mean "{close[0]}"? ' if close else ""
+            raise FlexoError(
+                Diagnostic(
+                    "figure.width.unknown",
+                    f'Unknown figure width "{value}".',
+                    hint=f"{guess}Use a length such as \"120mm\" or one of: {', '.join(presets)}.",
+                )
+            ) from None
 
     def resolve_extent(self, value: Extent) -> Length:
         """Turn a declared node size into a physical length under this style."""
