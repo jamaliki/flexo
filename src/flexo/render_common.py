@@ -88,6 +88,35 @@ the tspans would turn the indentation itself into ink.
 """
 
 
+_FRIENDLY = {"accent": "tone-1-stroke", "muted": "muted-ink", "ink": "ink"}
+
+
+def run_role(run: TextRun) -> str | None:
+    """The palette role a run is painted in, when it names one (a link is the accent)."""
+
+    if run.color.startswith("#"):
+        return None
+    if run.color:
+        if run.color.startswith("accent") and run.color[6:].isdigit():
+            return f"tone-{run.color[6:]}-stroke"
+        return _FRIENDLY.get(run.color, run.color)
+    return "tone-1-stroke" if run.link else None
+
+
+def run_colour(run: TextRun, palette: Palette) -> str | None:
+    """The colour a run is painted in when it is not its text's."""
+
+    if run.color.startswith("#"):
+        return run.color
+    role = run_role(run)
+    if role is None:
+        return None
+    try:
+        return palette.get(role)
+    except (KeyError, ValueError):
+        return None
+
+
 def render_runs(
     parent: ET.Element,
     element_id: str,
@@ -178,8 +207,8 @@ def render_runs(
                 holder,
                 "tspan",
                 x=x if position == 0 else None,
-                fill=palette.get("tone-1-stroke") if run.link else None,
-                data__flexo__fill="tone-1-stroke" if run.link else None,
+                fill=run_colour(run, palette),
+                data__flexo__fill=run_role(run),
                 dx=number(step) if run_index in back or run_index in restore else None,
                 dy=metrics.line_height if line_index > 0 and position == 0 else None,
                 font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,

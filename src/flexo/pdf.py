@@ -270,7 +270,12 @@ class _Content:
             pixels = max(1, round(item.width / 72.0 * ARTWORK_DPI))
             # A dpi lets resvg resolve sizes given in pt or mm; the width sets the pixels.
             svg = data.decode("utf-8")
-            data = bytes(resvg_py.svg_to_bytes(svg_string=svg, dpi=72, width=pixels))
+            from flexo.fonts import font_directories
+
+            folders = [str(folder) for folder in font_directories()]
+            data = bytes(
+                resvg_py.svg_to_bytes(svg_string=svg, dpi=72, width=pixels, font_dirs=folders)
+            )
             mime = "image/png"
             x, y, w, h = item.x, item.y, item.width, item.height
         else:

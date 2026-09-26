@@ -397,7 +397,8 @@ Right-to-left text (Persian, Arabic, Hebrew) is ordered by Unicode's bidirection
 algorithm (`flexo.bidi`), English words and formulae inside it included, and set
 in one face per script (Vazirmatn, Noto Sans Arabic, or Geeza Pro, whichever is
 installed first).
-`[words](https://...)` in a label is a link -- clickable in the SVG, the PDF, and
+`[words]{accent}` paints words in a colour (`accent2`..., `muted`, a palette role, or
+`#rrggbb`). `[words](https://...)` in a label is a link -- clickable in the SVG, the PDF, and
 flexo-talk's PowerPoint -- set in the accent colour.
 Code between backticks in a label (`` `fit()` ``) is set in `type: {mono_family: ...}`,
 or the first installed of JetBrains Mono, Menlo, Consolas, DejaVu Sans Mono, ....
