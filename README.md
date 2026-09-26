@@ -206,8 +206,11 @@ with flexo.Figure("mlp", conventions={"lines": "straight"}) as figure:
 `width=` share one size, the size the longest label needs, so a reader does not
 compare variables by the length of their names. `shaded=True` fills it grey,
 the graphical-model mark for an observed variable. A straight edge is one
-segment from outline to outline on the line between the two centres. It is not
-routed, so it goes through anything in its way, and lint reports that as
+segment from outline to outline on the line between the two centres. In a
+figure whose convention is straight lines, an edge whose straight line would
+run through another component is routed round it instead. An edge made
+straight on its own (`shape="straight"`) in a routed figure stays straight
+wherever it goes, and lint reports what it crosses as
 `routing.obstacle.intersection`. Two straight edges between the same pair run
 side by side. Choose straight lines for a whole figure with
 `conventions={"lines": "straight"}`, or for one edge with
