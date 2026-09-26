@@ -97,10 +97,20 @@ class _Writer:
             content = _Content(self, drawing.height)
             content.items(drawing.root.items)
             stream = self.stream(content.bytes())
+            links = [
+                self.add(
+                    (
+                        f"<< /Type /Annot /Subtype /Link /Rect [{' '.join(_n(v) for v in box)}] "
+                        f"/Border [0 0 0] /A << /S /URI /URI {_string(url)} >> >>"
+                    ).encode()
+                )
+                for box, url in content.links
+            ]
+            annotations = f"/Annots [{' '.join(f'{n} 0 R' for n in links)}] " if links else ""
             kids.append(
                 self.add(
                     f"<< /Type /Page /Parent {tree} 0 R "
-                    f"/MediaBox [0 0 {_n(drawing.width)} {_n(drawing.height)}] "
+                    f"/MediaBox [0 0 {_n(drawing.width)} {_n(drawing.height)}] {annotations}"
                     f"/Resources {resources} 0 R /Contents {stream} 0 R >>".encode()
                 )
             )
@@ -156,6 +166,9 @@ class _Writer:
 class _Content:
     def __init__(self, writer: _Writer, height: float) -> None:
         self.writer = writer
+        self.height = height
+        self.links: list[tuple[tuple[float, float, float, float], str]] = []
+        """``(left, bottom, right, top)`` in PDF space, and the URL, of each linked run."""
         # PDF's y runs up; the drawing's runs down. Flip once, for the page.
         self.ops: list[str] = [f"1 0 0 -1 0 {_n(height)} cm"]
 
@@ -212,6 +225,10 @@ class _Content:
             for run in line.runs:
                 if run.face is not None and run.text.strip():
                     self.run(run)
+                    if run.link and not item.angle:
+                        top, bottom = run.baseline - run.size * 0.85, run.baseline + run.size * 0.25
+                        box = (run.x, self.height - bottom, run.x + run.width, self.height - top)
+                        self.links.append((box, run.link))
         if item.angle:
             self.ops.append("Q")
 

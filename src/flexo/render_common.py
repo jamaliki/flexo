@@ -172,10 +172,14 @@ def render_runs(
             run = line.runs[run_index]
             shifted = run.baseline_shift != "normal"
             step = -back.get(run_index, 0.0) + restore.get(run_index, 0.0)
+            # A link wraps its words in <a>, painted in the accent so it reads as one.
+            holder = element(text, "a", href=run.link) if run.link else text
             span = element(
-                text,
+                holder,
                 "tspan",
                 x=x if position == 0 else None,
+                fill=palette.get("tone-1-stroke") if run.link else None,
+                data__flexo__fill="tone-1-stroke" if run.link else None,
                 dx=number(step) if run_index in back or run_index in restore else None,
                 dy=metrics.line_height if line_index > 0 and position == 0 else None,
                 font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
