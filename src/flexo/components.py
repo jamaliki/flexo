@@ -220,13 +220,20 @@ handed the choice to the author, who makes it by naming ``north`` rather than
 ``south``. Moving those ports would move the very thing their names promise.
 """
 
-_IMAGE_PORTS = _VECTOR_PORTS
+_IMAGE_PORTS = (
+    PortSpec("input", Side.WEST, auto_side=True),
+    PortSpec("output", Side.EAST, auto_side=True),
+    PortSpec("north", Side.NORTH),
+    PortSpec("south", Side.SOUTH),
+)
 """Author artwork wires like any other node: one fixed centre port per side.
 
 An adaptive port slides along its edge to meet its counterpart, which is a good
 trade when the compiler drew the body and knows where its ink is. It does not
-know that about an illustration the author drew, so an image pins all four side
-centres and lets the counterpart adapt instead.
+know that about an illustration the author drew, so an image keeps its ports at
+side centres and lets the counterpart adapt instead. Its ``input`` and
+``output`` face whatever they are wired to, as a block's do -- an image above an
+encoder feeds it from below, not from its right side round a corner.
 """
 
 _DEFAULT_CELLS = 3
