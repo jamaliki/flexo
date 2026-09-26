@@ -365,9 +365,11 @@ data beside a generator -- goes one layer before the first child it feeds, and
 a link with no arrowhead (`arrow="none"`) does not order layers at all, so
 twins joined by "shared weights" stay side by side. Within a layer, children are
 sorted by the mean position of the neighbours they are wired to, which removes
-most crossings; ties keep author order. The layers are centred on one another
-unless the group names an `align`. The compiled figure has an unlabelled row
-(or column) per layer; the authored figure keeps its flow group.
+most crossings; ties keep author order. An arrow that skips layers keeps a lane
+through each layer it passes. A layer of one child is centred on its own; a run
+of wider layers becomes one grid, in which each child takes the column nearest
+the ones feeding it, so a branch runs straight down its column. The compiled
+figure has those rows and grids; the authored figure keeps its flow group.
 
 ### Spacing that is not square
 
