@@ -64,3 +64,28 @@ def test_a_script_no_bundled_font_has_is_set_in_one_installed_font() -> None:
         )
     }
     assert word in families and "注意力" in families
+
+
+def test_a_figure_is_transparent_unless_it_asks_for_a_page() -> None:
+    """The page is left unpainted by default; ``background`` paints it."""
+
+    import re
+
+    import yaml
+
+    from flexo.builder import Figure
+    from flexo.compiler import compile_figure
+    from flexo.serialization import dump_figure, parse_figure
+
+    def page(**options: object) -> str:
+        with Figure("page", theme="archive", **options) as figure:
+            figure.root.block("a", label="A")
+        text = compile_figure(figure.spec).document.text
+        return re.search(r'<rect id="canvas\.background"[^>]*>', text).group(0)  # type: ignore[union-attr]
+
+    assert 'fill="none"' in page() and "data-flexo-fill" not in page()
+    assert 'data-flexo-fill="canvas"' in page(background=True)
+    assert 'fill="#fdfaf2"' not in page() and 'fill="#123456"' in page(background="#123456")
+    with Figure("page", background=True) as figure:
+        figure.root.block("a", label="A")
+    assert parse_figure(yaml.safe_load(dump_figure(figure.spec))).background is True
