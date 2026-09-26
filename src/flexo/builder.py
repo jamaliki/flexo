@@ -214,6 +214,8 @@ class Figure:
     ``flexo.register_font`` -- keeping the theme's sizes and weights.
     ``conventions`` changes how branches, merges, and shared arrivals are
     drawn, e.g. ``{"branch": "dot"}``; see ``flexo.Conventions``.
+    ``layout`` arranges what is placed directly on the figure: a column by
+    default, or ``"flow"`` to lay it out from its wiring (see ``group``).
     ``style`` is the older name for ``theme`` and means the same thing.
     """
 
@@ -227,7 +229,7 @@ class Figure:
         palette: str | Sequence[str] = "default",
         font: str | None = None,
         conventions: Conventions | Mapping[str, str] | None = None,
-        layout: LayoutSpec | None = None,
+        layout: LayoutKind | LayoutSpec | None = None,
         style: str | None = None,
     ) -> None:
         if theme is not None and style is not None and theme != style:
@@ -243,9 +245,11 @@ class Figure:
         )
         self.font = font
         self.conventions = parse_conventions(conventions)
+        if layout is None or isinstance(layout, str):
+            layout = LayoutSpec(layout or "column", align="auto", justify="center")  # type: ignore[arg-type]
         root = _GroupDraft(
             "root",
-            layout or LayoutSpec("column", align="auto", justify="center"),
+            layout,
             "disjoint",
             (),
             "canvas",
