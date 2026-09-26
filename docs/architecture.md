@@ -19,10 +19,16 @@ concrete shape. If the measured figure is wider than its page, it measures again
 with gaps and group padding scaled by `COMPACT_SCALES` and keeps the first that
 fits.
 
+Measurement first lowers the compiled figure's own structure: `flow` groups
+become stacks of layer rows and grids (`layout.flow`), rows and columns wired
+one-to-one become grids, and every `align="auto"` becomes a concrete alignment.
+The authored figure keeps what was written; only the measured figure sees the
+lowered form.
+
 Routing feeds back into layout only through padding, for up to `ROOM_ROUNDS`
-rounds: when a route or
-its caption leaves the container it belongs to, or a route runs pressed between
-a box and that container's edge, `routing.room` asks for more room on that side
+rounds: when a route or its caption leaves the container it belongs to, a
+caption over or under its container's contents finds no clear place, or a
+route runs pressed between a box and that container's edge, `routing.room` asks for more room on that side
 (`LayoutSpec.room`, counted as padding by layout but not by the title), and the
 compiler lays the figure out and routes it again. Then, if connectors still
 cross, `_uncrossed` offers a lane of room along the top or bottom of a crossing
@@ -34,7 +40,7 @@ tries). The authored figure is never changed; only the compiled one is.
 
 | Phase | Modules |
 | --- | --- |
-| authoring | `builder` lowers ergonomic Python into `ir.semantic`; `markup` turns `$...$` in string labels into styled runs; `validate` normalizes and checks the figure, resolves `align="auto"`, and merges rows (or columns) wired one-to-one into one grid (`merge_matched_stacks`); `serialization` and `schema` carry the same figure as YAML/JSON |
+| authoring | `builder` lowers ergonomic Python into `ir.semantic`; `markup` turns `$...$` in string labels into styled runs; `validate` normalizes and checks the figure, resolves `align="auto"`, and merges rows (or columns) wired one-to-one into one grid (`merge_matched_stacks`); `layout.flow` lowers a `flow` group into layered rows and grids from its wiring (`lower_flows`); `serialization` and `schema` carry the same figure as YAML/JSON |
 | style | `themes` defines each theme (a `LayoutStyle`, a page, and a tone rule) and derives a palette's paint roles; `colour` holds the Oklab arithmetic and the palette catalogue; `conventions` holds how branches, merges, and shared arrivals are drawn; `fonts` finds, matches, and loads font faces |
 | measure | `layout.measure` walks bottom-up for intrinsic sizes; `components` owns per-kind port tables, motif bands, and intrinsic geometry; `text` shapes and measures runs, falling back per cluster through the font stack; `artwork` loads, sanitizes, and sizes an `image` node's file |
 | fit | `layout.fit` places children into containers; `layout.arrange` computes where a group's children sit and how much room they need; `layout.grid` assigns grid cells (shared by measure and fit, so both agree); `layout.gaps` spaces linear groups; `layout.order` reorders small columns to cut crossings; `layout.ports` places adaptive ports once bounds are known; `layout.sides` picks the side a defaulted port faces |
