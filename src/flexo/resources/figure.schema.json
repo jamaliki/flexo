@@ -108,6 +108,22 @@
             "lines": {"enum": ["orthogonal", "straight"]},
             "pin_spread": {"type": "number", "minimum": 0, "maximum": 1}
           }
+        },
+        "sketch": {
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+                "passes": {"type": "integer", "minimum": 1, "maximum": 4},
+                "fill": {"enum": ["wash", "hatch", "solid", "none"]},
+                "paper": {"type": "boolean"},
+                "seed": {"type": "integer"}
+              }
+            }
+          ]
         }
       }
     },

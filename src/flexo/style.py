@@ -10,6 +10,7 @@ from typing import Literal
 
 from flexo.conventions import DEFAULT_CONVENTIONS, Conventions
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.sketch import Sketch
 from flexo.units import CellSpan, Extent, Length, mm, pt
 
 _PT_0_8 = pt(0.8)
@@ -110,6 +111,8 @@ class LayoutStyle:
     instead. Explicit line breaks (``"\\n"``) are always kept.
     """
     conventions: Conventions = DEFAULT_CONVENTIONS
+    sketch: Sketch | None = None
+    """Draw the figure by hand (see ``flexo.sketch``); ``None`` draws it ruled."""
     """How branches, merges, and shared arrivals are drawn (``flexo.conventions``)."""
     widths: tuple[tuple[str, Length], ...] = _PUBLICATION_WIDTHS
     vector_cell: Length = _PT_8_5

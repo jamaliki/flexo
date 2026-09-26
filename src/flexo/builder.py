@@ -35,6 +35,7 @@ from flexo.ir.semantic import (
     TextRun,
 )
 from flexo.markup import parse_label
+from flexo.sketch import Sketch, parse_sketch
 from flexo.style import (
     PAINT_PARTS,
     PAINT_PROPERTY_PREFIX,
@@ -214,6 +215,9 @@ class Figure:
     ``flexo.register_font`` -- keeping the theme's sizes and weights.
     ``conventions`` changes how branches, merges, and shared arrivals are
     drawn, e.g. ``{"branch": "dot"}``; see ``flexo.Conventions``.
+    ``sketch`` draws the figure by hand: ``True`` for the default hand, or
+    settings such as ``{"roughness": 0.3, "fill": "hatch"}``; see
+    ``flexo.Sketch``. The ``sketch`` theme is already drawn by hand.
     ``layout`` arranges what is placed directly on the figure: a column by
     default, or ``"flow"`` to lay it out from its wiring (see ``group``).
     ``style`` is the older name for ``theme`` and means the same thing.
@@ -229,6 +233,7 @@ class Figure:
         palette: str | Sequence[str] = "default",
         font: str | None = None,
         conventions: Conventions | Mapping[str, str] | None = None,
+        sketch: Sketch | Mapping[str, object] | bool | None = None,
         layout: LayoutKind | LayoutSpec | None = None,
         style: str | None = None,
     ) -> None:
@@ -245,6 +250,7 @@ class Figure:
         )
         self.font = font
         self.conventions = parse_conventions(conventions)
+        self.sketch = parse_sketch(sketch)
         if layout is None or isinstance(layout, str):
             layout = LayoutSpec(layout or "column", align="auto", justify="center")  # type: ignore[arg-type]
         root = _GroupDraft(
@@ -323,6 +329,7 @@ class Figure:
                 palette=self.palette,
                 font=self.font,
                 conventions=self.conventions,
+                sketch=self.sketch,
                 nodes=tuple(self._nodes),
                 edges=tuple(
                     replace(

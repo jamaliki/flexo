@@ -25,6 +25,7 @@ from flexo.ir.semantic import (
 )
 from flexo.markup import has_markup, parse_label
 from flexo.schema import validate_document
+from flexo.sketch import parse_sketch
 from flexo.units import CellSpan, Extent, Length, parse_extent
 from flexo.validate import normalize_and_validate
 
@@ -55,6 +56,7 @@ def parse_figure(document: object) -> FigureSpec:
         palette=figure_data.get("palette", "default"),
         font=figure_data.get("font"),
         conventions=parse_conventions(figure_data.get("conventions")),
+        sketch=parse_sketch(figure_data.get("sketch")),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(_edge(item) for item in document["edges"]),
         nets=tuple(_net(item) for item in document.get("nets", [])),
@@ -110,6 +112,8 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
         result["font"] = figure.font
     if figure.conventions is not None and figure.conventions.changes():
         result["conventions"] = figure.conventions.changes()
+    if figure.sketch is not None:
+        result["sketch"] = figure.sketch.changes() or True
     return result
 
 

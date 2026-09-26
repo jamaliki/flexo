@@ -11,7 +11,8 @@ The themes follow the modes of labviz, the group's plotting style, so a
 diagram and the plots beside it read as one figure: ``paper``, ``slides``,
 ``dark``, ``archive``, ``print``, ``economist``, ``rams``, ``swiss``,
 ``bauhaus``, and ``midcentury`` -- plus ``tikz``, the look of a figure drawn in
-TikZ for a LaTeX paper, set in Latin Modern.
+TikZ for a LaTeX paper, set in Latin Modern, and ``sketch``, a figure drawn by
+hand (see ``flexo.sketch``).
 
 Colour is allocated by *tone*. A tone is a name for a kind of thing --
 ``attention``, ``norm``, ``mlp`` by default, or any name an author writes with
@@ -39,6 +40,7 @@ from flexo.colour import (
 )
 from flexo.conventions import Conventions
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.sketch import Sketch
 from flexo.style import (
     PALETTES,
     RAMP_ROLES,
@@ -767,6 +769,56 @@ _register(
 )
 
 
+_KALAM = TypographyStyle(
+    family="Kalam",
+    size=pt(8.5),
+    minimum_size=pt(7.5),
+    line_height=1.15,
+    label_weight=400,
+    title_weight=700,
+    fallbacks=("Caveat", "IBM Plex Sans"),
+    generic="cursive",
+)
+_register(
+    Theme(
+        "sketch",
+        "Drawn by hand: ink lines that wander, watercolour washes on cream paper, "
+        "Kalam lettering.",
+        _style(
+            "sketch",
+            typography=_KALAM,
+            stroke_width=pt(0.9),
+            connector_width=pt(0.9),
+            corner_radius=pt(4.0),
+            elbow_radius=pt(6.0),
+            arrow_shape="open",
+            arrow_length=pt(5.2),
+            arrow_width=pt(4.4),
+            container_stroke_width=pt(0.7),
+            motif_stroke_width=pt(0.8),
+            sketch=Sketch(roughness=0.5, passes=2, fill="wash"),
+            # Kalam runs wide: wrap a little sooner, so a figure keeps its width.
+            label_measure=13.0,
+        ),
+        Page(
+            canvas="#f6f0e1",
+            ink="#2b2a28",
+            muted="#5b4636",
+            connector="#2b2a28",
+            container_fill="#eadfc4",
+            container_stroke="#8a7a62",
+            neutral_fill="#fbf8f1",
+            neutral_stroke="#2b2a28",
+            inset_fill="#f1e9d6",
+            shadow="#2b2a28",
+            residual="#c2453a",
+        ),
+        ("#3b6fd1", "#ef8a3c", "#58a45c", "#d9534f", "#8e6cc4", "#e2b33c"),
+        tinted(fill_lightness=0.85, fill_chroma=0.11, stroke_lightness=0.36, stroke_chroma=0.09),
+    )
+)
+
+
 def theme(name: str) -> Theme:
     """The theme named ``name``, or a diagnostic listing the ones there are."""
 
@@ -785,15 +837,25 @@ def unknown_theme(name: str) -> Diagnostic:
 
 
 def resolve_style(
-    name: str, font: str | None = None, conventions: Conventions | None = None
+    name: str,
+    font: str | None = None,
+    conventions: Conventions | None = None,
+    sketch: Sketch | None = None,
 ) -> LayoutStyle:
-    """The layout style of theme ``name``, in ``font`` and under ``conventions`` if given."""
+    """The layout style of theme ``name``, in ``font``, under ``conventions``, drawn by ``sketch``.
+
+    A figure's ``sketch`` is laid over the theme's own hand, so ``{"fill":
+    "hatch"}`` on the ``sketch`` theme keeps its roughness and changes only the
+    fill; on a ruled theme it draws the figure by hand from the default hand.
+    """
 
     style = theme(name).style
     if font:
         style = replace(style, typography=style.typography.with_family(font))
     if conventions is not None:
         style = replace(style, conventions=style.conventions.with_updates(conventions))
+    if sketch is not None:
+        style = replace(style, sketch=(style.sketch or Sketch()).with_updates(sketch.changes()))
     return style
 
 
@@ -816,7 +878,7 @@ def resolve_palette(style_name: str, palette: str | Sequence[str] | None = None)
 def figure_style(figure: FigureSpec) -> LayoutStyle:
     """The layout style a figure compiles under: its theme, in its font and conventions."""
 
-    return resolve_style(figure.style, figure.font, figure.conventions)
+    return resolve_style(figure.style, figure.font, figure.conventions, figure.sketch)
 
 
 def figure_palette(figure: FigureSpec) -> Palette:
