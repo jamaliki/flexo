@@ -1038,6 +1038,122 @@ def message_passing(theme: str = "paper") -> Figure:
     return figure
 
 
+def recurrent_network(theme: str = "paper") -> Figure:
+    """A recurrent network, rolled up (Olah 2015)."""
+
+    with Figure("recurrent-network", width="single-column", theme=theme) as figure:
+        with figure.root.column("cell") as column:
+            state = column.text("h", "$h_t$")
+            cell = column.block("a", label="$A$", tone="model")
+            x = column.text("x", "$x_t$")
+        figure.connect(x, cell)
+        figure.connect(cell, state)
+        figure.connect(cell, cell)
+    return figure
+
+
+def unrolled_recurrent_network(theme: str = "paper") -> Figure:
+    """A recurrent network, unrolled through time (Olah 2015)."""
+
+    with Figure("unrolled-recurrent-network", theme=theme) as figure:
+        with figure.root.grid("time", columns=4) as grid:
+            cells = []
+            for t in range(4):
+                state = grid.text(f"h{t}", f"$h_{t}$", at=(0, t))
+                cell = grid.block(f"a{t}", label="$A$", tone="model", at=(1, t))
+                x = grid.text(f"x{t}", f"$x_{t}$", at=(2, t))
+                figure.connect(x, cell)
+                figure.connect(cell, state)
+                cells.append(cell)
+        for before, after in itertools.pairwise(cells):
+            figure.connect(before, after)
+    return figure
+
+
+def markov_chain(theme: str = "paper") -> Figure:
+    """A two-state Markov chain, with the chance of staying put."""
+
+    with Figure(
+        "markov-chain", width="single-column", theme=theme, conventions={"lines": "straight"}
+    ) as figure:
+        with figure.root.row("states", gap="40pt") as states:
+            sunny = states.circle("sunny", "Sunny")
+            rainy = states.circle("rainy", "Rainy")
+        figure.connect(sunny, rainy, label="0.1")
+        figure.connect(rainy, sunny, label="0.5")
+        figure.connect(sunny, sunny, label="0.9")
+        figure.connect(rainy, rainy, label="0.5")
+    return figure
+
+
+def impala(theme: str = "paper") -> Figure:
+    """IMPALA's actors and learner (Espeholt et al. 2018, Figure 1)."""
+
+    with Figure("impala", theme=theme) as figure:
+        with figure.root.row("system") as system:
+            with system.column("actors", label="Actors") as column:
+                actors = [column.block(f"a{k}", label=f"Actor {k}") for k in (1, 2, 3)]
+            queue = system.block("queue", label="Trajectory queue", tone="data", inputs=actors)
+            learner = system.block("learner", label="Learner (GPU)", tone="model", input=queue)
+        figure.net(src=learner, sinks=actors, label="parameters", line="dashed")
+    return figure
+
+
+def class_hierarchy(theme: str = "paper") -> Figure:
+    """A class hierarchy: each subclass points to the class it extends."""
+
+    with Figure("class-hierarchy", width="single-column", theme=theme) as figure:
+        with figure.root.column("classes") as column:
+            base = column.block("module", label="Module")
+            with column.row("subclasses") as row:
+                subclasses = [
+                    row.block(name.lower(), label=name) for name in ("Linear", "Conv2d", "LSTM")
+                ]
+        figure.merge(sinks=subclasses, dst=base)
+    return figure
+
+
+def decision_tree(theme: str = "paper") -> Figure:
+    """A decision tree for the iris flowers."""
+
+    with Figure("decision-tree", theme=theme) as figure:
+        with figure.root.column("tree") as tree:
+            root = tree.decision("root", label="petal length < 2.5?")
+            with tree.row("first") as row:
+                setosa = row.terminal("setosa", label="setosa")
+                width = row.decision("width", label="petal width < 1.8?")
+            with tree.row("second") as row:
+                versicolor = row.terminal("versicolor", label="versicolor")
+                virginica = row.terminal("virginica", label="virginica")
+        figure.connect(root, setosa, label="yes")
+        figure.connect(root, width, label="no")
+        figure.connect(width, versicolor, label="yes")
+        figure.connect(width, virginica, label="no")
+    return figure
+
+
+def neural_turing_machine(theme: str = "paper") -> Figure:
+    """A Neural Turing Machine (Graves et al. 2014, Figure 1)."""
+
+    with Figure("neural-turing-machine", width="single-column", theme=theme) as figure:
+        with figure.root.column("machine") as machine:
+            with machine.row("io") as io:
+                x = io.text("x", "External input")
+                y = io.text("y", "External output")
+            controller = machine.block("controller", label="Controller", tone="model", input=x)
+            with machine.row("heads") as heads:
+                read = heads.block("read", label="Read heads")
+                write = heads.block("write", label="Write heads")
+            memory = machine.block("memory", label="Memory", tone="data", width="160pt")
+        figure.connect(controller, y)
+        figure.connect(controller, read)
+        figure.connect(controller, write)
+        figure.connect(memory, read)
+        figure.connect(write, memory)
+        figure.connect(read, controller)
+    return figure
+
+
 FIGURES: dict[str, Callable[[str], Figure]] = {
     make.__name__.replace("_", "-"): make
     for make in (
@@ -1093,6 +1209,13 @@ FIGURES: dict[str, Callable[[str], Figure]] = {
         extract_transform_load,
         autoencoder,
         message_passing,
+        recurrent_network,
+        unrolled_recurrent_network,
+        markov_chain,
+        impala,
+        class_hierarchy,
+        decision_tree,
+        neural_turing_machine,
     )
 }
 """Every figure here, by name."""

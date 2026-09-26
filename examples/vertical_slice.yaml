@@ -123,7 +123,6 @@ groups:
   - cryo
   layout:
     kind: column
-    align: center
     justify: center
   role: canvas
 - id: cryo
