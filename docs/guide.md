@@ -774,18 +774,17 @@ when lint reports errors; check `result.ok` or `result.report`.
 | Format | File | What it is |
 | --- | --- | --- |
 | `editable` | `<stem>.editable.svg` | the SVG master: live text, named Inkscape layers, paint roles on every shape. Always written |
-| `portable` | `<stem>.portable.svg` | the same figure as plain SVG, for viewers that do not know Inkscape's namespace |
-| `pdf` | `<stem>.pdf` | vector PDF for submission |
-| `png` | `<stem>.preview.png` | a raster preview at `dpi` (default 192) |
+| `portable` | `<stem>.portable.svg` | plain SVG with every word drawn as its glyphs' outlines: looks the same in any viewer, with no fonts. Groups keep their ids; each text keeps its words as an `aria-label` |
+| `pdf` | `<stem>.pdf` | vector PDF for submission: real, selectable text in embedded TrueType subsets (never Type 3), exact arrowheads, dashes and opacity |
+| `png` | `<stem>.preview.png` | a raster preview at `dpi` (default 192), drawn by resvg from the portable SVG |
 
-`portable` and `pdf` are produced from the editable SVG by Inkscape. Flexo
-uses the executable named by `FLEXO_INKSCAPE` if that variable is set;
-otherwise `inkscape` on `PATH`; otherwise
-`/Applications/Inkscape.app/Contents/MacOS/inkscape`. Without Inkscape these
-formats raise `FlexoError`. `png` uses Inkscape when it is found and resvg (a
-Python dependency of Flexo) when it is not. Both read the bundled and
-registered font files, so the raster uses the fonts the figure was measured
-with.
+Every format is written in Python from the editable SVG, read back as a
+`flexo.drawing` -- nothing else needs installing. The words in every format are
+set in the faces the figure was measured with: the PDF embeds a subset of each
+face at each weight used (a variable face at its weight; a CFF `.otf` face is
+converted), and the portable SVG and the PNG draw the same glyphs' outlines.
+For several figures (or slides) in one PDF, `flexo.pdf.write_pdf([svg1, svg2],
+"all.pdf")` writes one page each, sharing fonts.
 
 ## Which role paints what
 

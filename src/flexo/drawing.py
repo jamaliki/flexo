@@ -56,6 +56,8 @@ class Paint:
     opacity: float = 1.0
     fill_role: str | None = None
     stroke_role: str | None = None
+    blend: str = "normal"
+    """How the paint mixes with what is under it: ``normal`` or ``multiply``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +157,26 @@ class Image:
     width: float
     height: float
     href: str
+    """A ``data:`` URI: a PNG, a JPEG, or an SVG (nested artwork, kept as vectors)."""
+    fit: str = "none"
+    """SVG's ``preserveAspectRatio``: how the picture sits in the box."""
+
+    def placed(self, width: float, height: float) -> tuple[float, float, float, float]:
+        """Where a picture of ``width`` by ``height`` is drawn: ``x, y, w, h``."""
+
+        align, _, mode = self.fit.partition(" ")
+        if align == "none" or width <= 0.0 or height <= 0.0:
+            return self.x, self.y, self.width, self.height
+        scale = (min if mode != "slice" else max)(self.width / width, self.height / height)
+        drawn_w, drawn_h = width * scale, height * scale
+        horizontal = {"xMin": 0.0, "xMid": 0.5, "xMax": 1.0}[align[:4]]
+        vertical = {"YMin": 0.0, "YMid": 0.5, "YMax": 1.0}[align[4:]]
+        return (
+            self.x + (self.width - drawn_w) * horizontal,
+            self.y + (self.height - drawn_h) * vertical,
+            drawn_w,
+            drawn_h,
+        )
 
 
 @dataclass(slots=True)
@@ -358,6 +380,7 @@ def _read_children(
             value = child.get(name)
             if value is not None:
                 context[name] = value
+        context["style"] = child.get("style", "")  # not inherited: a blend is the element's own
         # A painted element without a role of its own keeps no inherited one.
         for part in ("fill", "stroke"):
             if child.get(part) is not None and child.get(f"data-flexo-{part}") is None:
@@ -390,8 +413,26 @@ def _read_children(
                     _float(child, "width"),
                     _float(child, "height"),
                     child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or "",
+                    child.get("preserveAspectRatio", "xMidYMid meet"),
                 ), placed)
             )
+        elif tag == "svg":
+            group.items.append(_transformed(_nested_svg(child), placed))
+
+
+def _nested_svg(element: ET.Element) -> Image:
+    """Artwork nested as its own ``<svg>``: a picture of that SVG, kept as vectors."""
+
+    import base64
+
+    box = [_float(element, name) for name in ("x", "y", "width", "height")]
+    artwork = ET.fromstring(ET.tostring(element, encoding="unicode"))
+    for name in ("x", "y", "id"):
+        artwork.attrib.pop(name, None)
+    ET.register_namespace("", "http://www.w3.org/2000/svg")
+    markup = ET.tostring(artwork, encoding="unicode")
+    encoded = base64.b64encode(markup.encode("utf-8")).decode("ascii")
+    return Image(element.get("id"), *box, f"data:image/svg+xml;base64,{encoded}", "none")
 
 
 def _float(element: ET.Element, name: str, default: float = 0.0) -> float:
@@ -405,6 +446,7 @@ def _paint(context: dict[str, str], opacity: float) -> Paint:
         return None if value in (None, "none") or value.startswith("url(") else value
 
     fill = colour("fill") if "fill" in context else "#000000"
+    own_style = context.get("style", "").replace(" ", "")
     pattern = context.get("stroke-dasharray", "none")
     dash = (
         tuple(float(part) for part in re.split(r"[ ,]+", pattern.strip()) if part)
@@ -423,6 +465,7 @@ def _paint(context: dict[str, str], opacity: float) -> Paint:
         opacity=opacity,
         fill_role=context.get("data-flexo-fill") if fill else None,
         stroke_role=context.get("data-flexo-stroke") if colour("stroke") else None,
+        blend="multiply" if "mix-blend-mode:multiply" in own_style else "normal",
     )
 
 
