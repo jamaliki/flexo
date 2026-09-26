@@ -150,9 +150,11 @@ def place_captions(
         # position it was given.
         chosen[index] = best[1] if best is not None else items[index].label_position  # type: ignore[assignment]
     # Repair: a caption left with no clear place takes one that a single other
-    # caption blocks, when that caption has a clear place of its own elsewhere.
+    # caption blocks, when moving that caption elsewhere costs the two of them
+    # less in all -- a caption near a line is better than one over a line.
     for index in order:
-        if price(index, chosen[index], placed_except(index)) < 1.0:
+        current = price(index, chosen[index], placed_except(index))
+        if current < 1.0:
             continue
         for position in candidates[index]:
             if price(index, position, placed_except(index)) < 1.0:
@@ -170,16 +172,15 @@ def place_captions(
                 continue
             blocker = blockers[0]
             captions = [*placed_except(index, blocker), box]
-            moved = next(
-                (
-                    elsewhere
-                    for elsewhere in candidates[blocker]
-                    if price(blocker, elsewhere, captions) < 1.0
-                ),
-                None,
+            before = current + price(blocker, chosen[blocker], placed_except(blocker))
+            cost, rank = min(
+                (price(blocker, elsewhere, captions), rank)
+                for rank, elsewhere in enumerate(candidates[blocker])
             )
-            if moved is not None:
-                chosen[index], chosen[blocker] = position, moved
+            after = cost + price(index, position, placed_except(index, blocker))
+            if after < before - 1.0:
+                chosen[index], chosen[blocker] = position, candidates[blocker][rank]
+                current = after - cost
                 break
     result = list(items)
     for index, position in chosen.items():

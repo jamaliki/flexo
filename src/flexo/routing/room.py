@@ -135,18 +135,26 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
             needs[owner_id]["bottom"] = max(needs[owner_id].get("bottom", 0.0), amount)
         else:
             # Between two rows of the contents: the gap it spans grows. A
-            # caption sits above its line, so the span runs from its top down.
-            top = Point((start.x + end.x) / 2.0, level - amount)
-            widen(top, False, amount, reach=amount)
+            # caption sits above its line, so the span runs from its top down;
+            # failing that, the gap under the line, where it may go instead.
+            # A run between two neighbours of a row lies in no column, so the
+            # columns its ends stand in are asked too.
+            for x in ((start.x + end.x) / 2.0, start.x, end.x):
+                if widen(Point(x, level - amount), False, amount, reach=amount) or widen(
+                    Point(x, level), False, amount, reach=amount
+                ):
+                    break
 
-    def widen(spot: Point, across_x: bool, amount: float, reach: float = 0.0) -> None:
+    def widen(spot: Point, across_x: bool, amount: float, reach: float = 0.0) -> bool:
         """Ask the gap at ``spot`` (or within ``reach`` past it) to grow by ``amount``."""
 
         found = _gutter(routed, spot, across_x, reach)
-        if found is not None:
-            group_id, boundary = found
-            key = f"gap:{boundary}"
-            needs[group_id][key] = max(needs[group_id].get(key, 0.0), amount)
+        if found is None:
+            return False
+        group_id, boundary = found
+        key = f"gap:{boundary}"
+        needs[group_id][key] = max(needs[group_id].get(key, 0.0), amount)
+        return True
 
     above: dict[str, int] = defaultdict(int)
 
