@@ -196,6 +196,8 @@ def test_math_alphabets_operators_and_relations() -> None:
         (r"$\log(x)$", "log(x)"),
         (r"$q(x_t | x_{t-1})$", "q(xt | xt−1)"),
         (r"$QK^T/\sqrt{d_k}$", "QKT/√dk"),
+        (r"$\frac{n_k}{n}$", "nk/n"),
+        (r"$\frac{a+b}{2}$", "(a + b)/2"),
     ],
 )
 def test_math_is_spaced_the_way_tex_spaces_it(source: str, drawn: str) -> None:
