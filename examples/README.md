@@ -54,7 +54,7 @@ themes.
 
 ## [`literature.py`](literature.py)
 
-Thirty-six figures from papers and textbooks, each a short function. They use
+Forty-four figures from papers and textbooks, each a short function. They use
 only plain authoring: components, the values that flow between them, and at
 most one hint where the paper makes a choice that cannot be inferred. Every
 one compiles with no lint diagnostics in every theme it is built in (the test
@@ -76,3 +76,6 @@ suite checks this).
 | [![Feedback control loop](build/literature/feedback-control.preview.png)](build/literature/feedback-control.preview.png) Feedback control loop | [![Mixture of experts](build/literature/mixture-of-experts.preview.png)](build/literature/mixture-of-experts.preview.png) Mixture of experts | [![Faster R-CNN](build/literature/faster-rcnn.preview.png)](build/literature/faster-rcnn.preview.png) Faster R-CNN |
 | [![LoRA](build/literature/lora.preview.png)](build/literature/lora.preview.png) LoRA | [![Retrieval-augmented generation](build/literature/retrieval-augmented-generation.preview.png)](build/literature/retrieval-augmented-generation.preview.png) Retrieval-augmented generation | [![Latent diffusion](build/literature/latent-diffusion.preview.png)](build/literature/latent-diffusion.preview.png) Latent diffusion |
 | [![Actor–critic](build/literature/actor-critic.preview.png)](build/literature/actor-critic.preview.png) Actor–critic | [![MapReduce](build/literature/mapreduce.preview.png)](build/literature/mapreduce.preview.png) MapReduce | [![LoRA in `tikz`](build/literature/lora-tikz.preview.png)](build/literature/lora-tikz.preview.png) LoRA in `tikz` |
+| [![Compiler phases and symbol table](build/literature/compiler.preview.png)](build/literature/compiler.preview.png) Compiler phases and symbol table | [![Pipelined CPU with forwarding](build/literature/cpu-pipeline.preview.png)](build/literature/cpu-pipeline.preview.png) Pipelined CPU with forwarding | [![Kalman filter](build/literature/kalman-filter.preview.png)](build/literature/kalman-filter.preview.png) Kalman filter |
+| [![Sprinkler Bayesian network](build/literature/sprinkler.preview.png)](build/literature/sprinkler.preview.png) Sprinkler Bayesian network | [![CBOW](build/literature/cbow.preview.png)](build/literature/cbow.preview.png) CBOW | [![Knowledge distillation](build/literature/distillation.preview.png)](build/literature/distillation.preview.png) Knowledge distillation |
+| [![Model–view–controller](build/literature/model-view-controller.preview.png)](build/literature/model-view-controller.preview.png) Model–view–controller | [![Load-balanced service](build/literature/load-balancer.preview.png)](build/literature/load-balancer.preview.png) Load-balanced service | [![Pipelined CPU in `tikz`](build/literature/cpu-pipeline-tikz.preview.png)](build/literature/cpu-pipeline-tikz.preview.png) Pipelined CPU in `tikz` |
