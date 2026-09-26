@@ -14,6 +14,7 @@ INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape"
 
 ET.register_namespace("", SVG_NS)
 ET.register_namespace("inkscape", INKSCAPE_NS)
+ET.register_namespace("xlink", "http://www.w3.org/1999/xlink")
 
 
 def svg_tag(name: str) -> str:

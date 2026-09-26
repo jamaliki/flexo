@@ -130,8 +130,8 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
     and a registered or installed face may not. The embedded copy is a subset,
     so a figure carries a few kilobytes of font rather than the whole family --
     the SVG stays self-contained in a browser without weighing a megabyte.
-    Inkscape and PDF export read installed and bundled fonts directly (see
-    ``flexo.export``), so the subset is for viewers only.
+    The PDF embeds its own subsets and the portable SVG and PNG draw outlines
+    (see ``flexo.export``), so this subset is for viewers of the editable SVG.
     """
 
     characters = set()

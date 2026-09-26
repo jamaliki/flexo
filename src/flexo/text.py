@@ -337,8 +337,13 @@ class TextMeasurer:
         *,
         max_width: float | None = None,
         weight: int | None = None,
+        balance: bool = True,
     ) -> TextMetrics:
         """Shape ``runs`` at the weights they will actually be drawn at.
+
+        Wrapped lines are balanced to similar lengths, as a label is set by
+        hand; ``balance=False`` fills each line in turn instead, as a word
+        processor or slide program wraps a paragraph.
 
         ``weight`` is what the text object these runs will sit in declares, and a
         run that named no weight of its own is measured at it -- because that is
@@ -356,7 +361,11 @@ class TextMeasurer:
         lines = tuple(
             line
             for hard_line in hard_lines
-            for line in self._balanced(hard_line, max_width, weight)
+            for line in (
+                self._balanced(hard_line, max_width, weight)
+                if balance
+                else self._wrap_line(hard_line, max_width, weight)
+            )
         )
         measured_lines = tuple(
             MeasuredLine(line, self.line_width(line, weight)) for line in lines
