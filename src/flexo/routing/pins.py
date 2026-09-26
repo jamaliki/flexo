@@ -382,7 +382,7 @@ def plan_pins(
     _separate_directions(fitted, ends, members, hints, style)
     _spill_crowded_sides(fitted, ends, hints, style)
     _spread_operator_inputs(ends)
-    _one_end_per_corner(ends)
+    _one_end_per_corner(ends, _straight_sides(fitted, members))
     _self_loops(fitted, members, ends)
     by_side: dict[tuple[str, Side], dict[tuple[str, str, Side, bool], list[End]]] = defaultdict(
         lambda: defaultdict(list)
@@ -846,7 +846,7 @@ POINT_KINDS = CORNER_KINDS | {"op"}
 """Kinds whose pins stay at the middle of their side: operators too."""
 
 
-def _one_end_per_corner(ends: list[End]) -> None:
+def _one_end_per_corner(ends: list[End], straight: dict[str, list[Side]] | None = None) -> None:
     """Give each end at a circle or a diamond a side of its own, while sides last.
 
     An end in line with its other end chooses first, then the one whose other
@@ -861,8 +861,8 @@ def _one_end_per_corner(ends: list[End]) -> None:
     for end in ends:
         if end.node.measured.spec.kind in CORNER_KINDS:
             by_node[end.node.measured.spec.id].append(end)
-    for node_ends in by_node.values():
-        taken: set[Side] = set()
+    for node_id, node_ends in by_node.items():
+        taken: set[Side] = set((straight or {}).get(node_id, ()))
         claimed: dict[tuple[str, str, Side, bool], Side] = {}
         # A line in line with the circle chooses first, then the one to the
         # nearest neighbour -- the flow through a decision keeps its corners,
@@ -892,11 +892,41 @@ def _one_end_per_corner(ends: list[End]) -> None:
                 for side in _facing_sides(end.node.bounds, end.counterpart, end.group[2])
                 if side is not end.group[2]
             ]
+            # Past the sides that face the other end, a neighbouring corner
+            # turns the line once; the opposite one sends it all the way round.
+            facing = _facing_sides(end.node.bounds, end.counterpart, end.group[2])[0]
+            ranked.sort(
+                key=lambda side: side is facing.opposite
+                and not _faces(end.node.bounds, end.counterpart, side)
+            )
             free = [side for side in ranked if side not in taken]
             side = free[0] if free else end.group[2]
             taken.add(side)
             claimed[original] = side
             end.group = (end.group[0], end.group[1], side, end.group[3])
+
+
+def _straight_sides(fitted: FittedFigure, members: list[Member]) -> dict[str, list[Side]]:
+    """The sides each component's straight edges leave by, per component id.
+
+    Straight edges are not routed and have no pins, but they meet a component
+    on the side facing their other end all the same: a routed line should not
+    take that side of a circle too.
+    """
+
+    routed = {member.spec.id for member in members}
+    sides: dict[str, list[Side]] = defaultdict(list)
+    for edge in fitted.measured.semantic.edges:
+        if edge.id in routed or edge.source.node_id == edge.target.node_id:
+            continue
+        for here, there in (
+            (edge.source.node_id, edge.target.node_id),
+            (edge.target.node_id, edge.source.node_id),
+        ):
+            sides[here].append(
+                _facing(fitted.node(here).bounds, fitted.node(there).bounds, Side.EAST)
+            )
+    return sides
 
 
 LOOP_SIDES = (Side.EAST, Side.NORTH, Side.WEST, Side.SOUTH)
@@ -923,17 +953,7 @@ def _self_loops(fitted: FittedFigure, members: list[Member], ends: list[End]) ->
             for end in ends
             if end.node is node and end not in mine and end.group is not None
         )
-        # Straight edges are not routed, but leave by the side facing their
-        # other end all the same.
-        routed = {member.spec.id for member in members}
-        node_id = node.measured.spec.id
-        for other in fitted.measured.semantic.edges:
-            if other.id in routed or other.source.node_id == other.target.node_id:
-                continue
-            ids = (other.source.node_id, other.target.node_id)
-            if node_id in ids:
-                far = fitted.node(ids[1] if ids[0] == node_id else ids[0]).bounds
-                used[_facing(node.bounds, far, Side.EAST)] += 1
+        used.update(_straight_sides(fitted, members).get(node.measured.spec.id, []))
         departure, arrival = sorted(mine, key=lambda end: end.arriving)
         if node.measured.spec.kind in POINT_KINDS:
             pairs = list(itertools.pairwise((*LOOP_SIDES, LOOP_SIDES[0])))

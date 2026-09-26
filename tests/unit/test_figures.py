@@ -444,3 +444,17 @@ def test_a_cycle_goes_clockwise_round_a_grid_and_ids_stay_unique() -> None:
     assert box["m.evaluate"].center.y > box["m.train"].center.y
     assert box["m.monitor"].center.x < box["m.evaluate"].center.x, "clockwise"
     assert not lint_compilation(compiled).diagnostics, "a step called label keeps its id"
+
+
+def test_a_straight_figure_routes_a_line_that_would_cross_a_component() -> None:
+    with Figure("round", conventions={"lines": "straight"}) as figure:
+        with figure.root.column("stack") as column:
+            top = column.circle("top", "a")
+            column.circle("middle", "b", input=top)
+            bottom = column.circle("bottom", "c")
+        figure.connect(top, bottom)
+    compiled = compile_figure(figure.spec)
+    edges = {edge.spec.id: edge for edge in compiled.routed.edges}
+    assert not edges["edge.2.stack.top-to-stack.bottom"].straight
+    assert edges["edge.1.stack.top-to-stack.middle"].straight
+    assert not lint_compilation(compiled).errors

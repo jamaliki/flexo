@@ -40,7 +40,7 @@ import itertools
 from collections import defaultdict
 
 from flexo.components import CAPTION_KINDS, TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
-from flexo.geometry import Point, Rect, Side, segments
+from flexo.geometry import Point, Rect, Side, segment_crosses_rect, segments
 from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet
@@ -134,7 +134,9 @@ def route_figure(
     layout_style = style or figure_style(fitted.measured.semantic)
     text_measurer = measurer or TextMeasurer(layout_style.typography)
     semantic = fitted.measured.semantic
-    straight = {edge.id for edge in semantic.edges if _is_straight(edge, layout_style)}
+    straight = {
+        edge.id for edge in semantic.edges if _is_straight(edge, layout_style, fitted)
+    }
     members, ends = connections(fitted, straight)
     scene = _Scene(fitted, layout_style, text_measurer)
 
@@ -601,12 +603,26 @@ def _outline(bounds: Rect) -> tuple[Point, ...]:
     return (*corners, corners[0])
 
 
-def _is_straight(edge: EdgeSpec, style: LayoutStyle) -> bool:
+def _is_straight(edge: EdgeSpec, style: LayoutStyle, fitted: FittedFigure) -> bool:
     if edge.source.node_id == edge.target.node_id:
         return False  # a loop has no line between two outlines to draw
     if edge.shape == "auto":
-        return style.conventions.lines == "straight"
-    return edge.shape == "straight"
+        wanted = style.conventions.lines == "straight"
+    else:
+        wanted = edge.shape == "straight"
+    if not wanted or style.conventions.lines != "straight":
+        return wanted
+    # Straight by the figure's convention: a line that would run through
+    # another component is routed round it instead. (An edge made straight on
+    # its own, in a routed figure, was asked for as it is.)
+    first = fitted.node(edge.source.node_id).bounds.center
+    second = fitted.node(edge.target.node_id).bounds.center
+    return not any(
+        segment_crosses_rect(first, second, node.bounds.inflated(-0.5))
+        for node in fitted.nodes
+        if node.measured.spec.id not in {edge.source.node_id, edge.target.node_id}
+        and node.measured.spec.kind not in TRANSPARENT_KINDS
+    )
 
 
 # -- the scene: zones, grids, growing trees -----------------------------------------------
