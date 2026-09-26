@@ -302,6 +302,28 @@ own:
   to half), and only then a wider page, with a `layout.width.grown` warning.
   A figure compiled with an explicit `style=` keeps its spacing exactly.
 
+### Laying a figure out for a box (slides, posters)
+
+A figure is written for a page, which is taller than it is wide. To place one
+in a box of another shape -- a 16:9 slide, a poster panel -- let flexo lay it out
+for that box rather than shrinking the page layout into it:
+
+```python
+fit = flexo.fit_in_box(figure, 864, 380, words=13, largest=20)   # points
+fit.layout      # "as written", "turned", "turned within", each maybe ", tighter"
+fit.words       # the size its words are drawn at in the box
+fit.compilation, fit.scale, fit.ink              # what to draw, and where
+```
+
+It compiles the figure where its words are `words` points once drawn, measures
+its ink, and tries it as written, **turned** (`flexo.turned(spec)`: rows become
+columns, a stack that reads upward reads left to right, grids transpose, ports
+and hints turn with it, vector glyphs lie down), and with tighter spacing --
+keeping the most natural layout whose words come within 12% of the largest.
+Measured sizes rank the candidates, so only layouts that could win are routed.
+[flexo-talk](https://github.com/jamaliki/flexo-talk) lays every slide figure out
+this way.
+
 ## Themes, palettes, and fonts
 
 A **theme** is one name for a whole look -- typeface, line weights, corners,
