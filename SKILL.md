@@ -101,7 +101,9 @@ breaks a line; long labels wrap on their own.
 `flexo.fit_in_box(figure, width, height, words=13)` lays a figure out for a box
 (as written, turned so a tall stack reads left to right, or spaced closer --
 whichever sets its words largest); `flexo.turned(spec)` gives the turned figure
-itself. Write the figure once, as the paper needs it.
+itself. Write the figure once, as the paper needs it. For a whole talk, use
+flexo-talk (a sibling package with its own `SKILL.md`): its decks place flexo
+figures this way and export to editable PowerPoint and PDF.
 
 ## Outputs and files
 
