@@ -7,7 +7,9 @@ import { h, clear, icon, ui, menu } from "/static/studio/studio.js";
 const LINE = 12.5 * 1.6;
 
 export function mount(studio, main) {
-  document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/editor.css" }));
+  if (!document.querySelector('link[href="/static/kinds/figure/editor.css"]')) {
+    document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/editor.css" }));
+  }
 
   let tab = "source";
   let selected = null;
@@ -153,6 +155,7 @@ export function mount(studio, main) {
     for (const row of outline.querySelectorAll(".outline-item")) row.classList.toggle("on", row.dataset.id === id);
     if (id) find(id);
     if (!fromOutline && tab === "outline") outline.querySelector(".outline-item.on")?.scrollIntoView({ block: "nearest" });
+    studio.focus(id ? { label: id, id } : null);
   };
   const entity = (target) => target.closest?.("[data-flexo-entity][id]");
   page.addEventListener("click", (event) => { const hit = entity(event.target); select(hit ? hit.id : null); });
@@ -194,7 +197,39 @@ export function mount(studio, main) {
     fitPage();
   });
 
-  studio.on("change", ({ quiet }) => { if (!quiet && area.value !== studio.doc.text) { area.value = studio.doc.text; numbers(); } });
+  // Someone else's change: take it in, keeping the caret on the same words.
+  studio.on("change", ({ quiet }) => {
+    if (quiet || area.value === studio.doc.text) return;
+    const { selectionStart: start, selectionEnd: end, scrollTop } = area;
+    const before = area.value;
+    const shift = (at) => {
+      const prefix = before.slice(0, at);
+      const index = studio.doc.text.indexOf(prefix.slice(-40));
+      return prefix.length <= 40 ? Math.min(at, studio.doc.text.length) : index >= 0 ? index + Math.min(40, prefix.length) : at;
+    };
+    area.value = studio.doc.text;
+    if (document.activeElement === area) area.setSelectionRange(shift(start), shift(end));
+    area.scrollTop = scrollTop;
+    numbers();
+  });
+  studio.on("remote", () => { page.classList.remove("flash"); void page.offsetWidth; page.classList.add("flash"); });
+  studio.reveal = (where) => {
+    if (where?.id) select(where.id);
+    else if (where?.line) {
+      tab = "source"; showTab();
+      const lines = area.value.split("\n");
+      const start = lines.slice(0, where.line - 1).reduce((sum, line) => sum + line.length + 1, 0);
+      area.setSelectionRange(start, start + (lines[where.line - 1] || "").length);
+      area.scrollTop = Math.max(0, (where.line - 1) * LINE - area.clientHeight / 3);
+    }
+  };
+  studio.commands = () => [
+    { icon: "export", label: "Export editable SVG", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "Export PDF", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "code", label: "Show the source", run: () => { tab = "source"; showTab(); } },
+    { icon: "list", label: "Show the outline", run: () => { tab = "outline"; showTab(); } },
+    ...(outlineData ? flatten(outlineData.root).map((node) => ({ icon: "target", label: `Find ${node.id}`, hint: node.label, run: () => select(node.id) })) : []),
+  ];
 
   const exportMenu = ui.button("Export", (event) => menu(event.currentTarget, [
     { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
@@ -203,5 +238,10 @@ export function mount(studio, main) {
     "-",
     { icon: "export", label: "Everything", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" });
-  studio.tools.append(exportMenu);
+  studio.actions.append(exportMenu);
+  studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"));
+}
+
+function flatten(node) {
+  return node.children ? [node, ...node.children.flatMap(flatten)] : [node];
 }

@@ -24,11 +24,15 @@ dependencies = [
   "uharfbuzz>=0.52",
 ]
 
+[project.optional-dependencies]
+assistant = ["anthropic>=1.9"]
+
 [project.scripts]
 flexo = "flexo.cli:main"
 
 [dependency-groups]
 dev = [
+  "anthropic>=1.9",
   "hypothesis>=6.138",
   "pypdfium2>=5.13.0",
   "pytest>=8.4",
