@@ -241,7 +241,7 @@ def _register(document: Any, base: Path) -> str:
     data = copy.deepcopy(document)
     if not data["theme"].get("name"):
         raise ValueError("the theme needs a name")
-    return register_theme(data)
+    return register_theme(data, folder=base)
 
 
 def _theme_files(document: dict[str, Any], base: Path) -> list[Path]:
