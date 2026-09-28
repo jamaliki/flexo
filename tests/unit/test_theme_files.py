@@ -116,3 +116,54 @@ def test_a_setting_a_theme_does_not_have_is_refused_with_a_suggestion() -> None:
     assert 'Did you mean "base"' in str(caught.value.diagnostics[0].hint)
     with pytest.raises(flexo.FlexoError, match='"type" has no setting "sise"'):
         flexo.register_theme({"name": "wrong", "type": {"sise": "9pt"}})
+
+
+def test_a_theme_file_brings_the_fonts_it_is_set_in(tmp_path: Path) -> None:
+    from fontTools.ttLib import TTFont
+
+    from flexo.fonts import bundled_font_directory, family_faces
+
+    # A face Flexo does not ship: a bundled one under a name of its own.
+    face = TTFont(bundled_font_directory() / "Kalam-Regular.ttf")
+    for record in face["name"].names:
+        if record.nameID in (1, 4, 16):
+            record.string = "Theme Hand Test"
+        elif record.nameID == 6:
+            record.string = "ThemeHandTest-Regular"
+    (tmp_path / "fonts").mkdir()
+    face.save(tmp_path / "fonts" / "ThemeHandTest-Regular.ttf")
+    (tmp_path / "hand.yaml").write_text(
+        "theme: {name: hand-test, base: paper, font: Theme Hand Test}\nfonts: [fonts/]\n"
+    )
+    assert flexo.register_theme(tmp_path / "hand.yaml") == "hand-test"
+    assert family_faces("Theme Hand Test")
+    compiled = compile_figure(_figure(theme="hand-test").spec)
+    assert "Theme Hand Test" in compiled.document.text
+
+    (tmp_path / "missing.yaml").write_text(
+        "theme: {name: missing-font-test, base: paper}\nfonts: [nowhere.ttf]\n"
+    )
+    with pytest.raises(FlexoError, match=r"nowhere\.ttf"):
+        flexo.register_theme(tmp_path / "missing.yaml")
+
+
+def test_a_theme_files_palette_keeps_the_order_it_was_written_in(tmp_path: Path) -> None:
+    from flexo.themes import resolve_palette
+
+    # Left to itself Flexo would lead with the colour that stands out most (the blue);
+    # a theme's author chose to lead with the pale red.
+    (tmp_path / "ordered.yaml").write_text(
+        "theme: {name: ordered-test, base: paper, palette: ['#e8a0a0', '#1d4e89', '#f2d06b']}\n"
+    )
+    flexo.register_theme(tmp_path / "ordered.yaml")
+    paint = resolve_palette("ordered-test")
+    first, second = paint.get("tone-1-stroke"), paint.get("tone-2-stroke")
+    assert _hue(first) < 40 or _hue(first) > 330  # red
+    assert 190 < _hue(second) < 250  # blue
+
+
+def _hue(colour: str) -> float:
+    import colorsys
+
+    red, green, blue = (int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5))
+    return colorsys.rgb_to_hsv(red, green, blue)[0] * 360

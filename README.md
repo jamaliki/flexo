@@ -385,6 +385,10 @@ palettes:
   Lab warm: ["#9b2226", "#ca6702", "#ee9b00"]
 ```
 
+A theme set in faces Flexo does not ship brings them with `fonts: [fonts/]`
+beside `theme:` (files or folders, found from the theme file), and its palette
+is used in the order written: the first colour is the accent.
+
 `Figure(theme="lab.yaml")` uses it (so does `theme: lab.yaml` in a figure file,
 and `flexo build ... --theme lab.yaml`), `flexo.register_theme("lab.yaml")`
 makes it `theme="lab"`, and a directory named by `FLEXO_THEME_PATH` makes every
