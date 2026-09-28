@@ -1,0 +1,308 @@
+"""Themes in the studio: a theme file edited through its settings, shown on samples.
+
+The document is the theme file itself (``theme: {name, base, ...}``): only what
+differs from its base is written, and the page shows every other setting as
+the base has it. The samples are figures drawn in the theme, and whatever
+other packages add through the ``flexo.studio.specimens`` entry-point group
+(flexo-talk adds slides, and any deck in the folder).
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import time
+from collections import OrderedDict
+from dataclasses import fields
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from flexo.studio import Drawing, Message, Page
+
+BUDGET = 0.5
+SAMPLE = {
+    "figure": {"id": "sample", "width": "single-column"},
+    "nodes": [
+        {"id": "x", "kind": "text", "label": "Input $x$"},
+        {"id": "encoder", "label": "Encoder", "properties": {"tone": "encoder"}},
+        {"id": "attention", "label": "Attention", "properties": {"tone": "attention"}},
+        {"id": "head", "label": "Head", "properties": {"tone": "head"}},
+        {"id": "y", "kind": "text", "label": r"Output $\hat{y}$"},
+    ],
+    "edges": [
+        {"from": "x", "to": "encoder"},
+        {"from": "encoder", "to": "attention"},
+        {"from": "attention", "to": "head"},
+        {"from": "head", "to": "y"},
+    ],
+}
+
+
+class ThemeKind:
+    name = "theme"
+    title = "Theme"
+    static = Path(__file__).parent / "static" / "theme"
+
+    def __init__(self) -> None:
+        self._pages: OrderedDict[str, str] = OrderedDict()
+
+    def claims(self, document: object) -> bool:
+        return isinstance(document, dict) and isinstance(document.get("theme"), dict)
+
+    def new(self, path: Path) -> dict[str, Any]:
+        return {
+            "theme": {
+                "name": path.stem.removesuffix(".theme"),
+                "base": "paper",
+                "description": "Our own look.",
+            }
+        }
+
+    def load(self, path: Path) -> dict[str, Any]:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+        if not isinstance(data, dict):
+            raise ValueError(f"{path.name} is not a theme file")
+        return data
+
+    def save(self, path: Path, document: dict[str, Any]) -> None:
+        if path.suffix.lower() == ".json":
+            path.write_text(
+                json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+        else:
+            path.write_text(self.dump(document), encoding="utf-8")
+
+    def dump(self, document: Any) -> str:
+        return yaml.safe_dump(document, sort_keys=False, allow_unicode=True, width=100)
+
+    def parse(self, text: str) -> Any:
+        return yaml.safe_load(text)
+
+    def guide(self) -> str:
+        from flexo import theme_files
+
+        return (
+            "A flexo theme file.\n\n"
+            + (theme_files.__doc__ or "")
+            + (
+                "\nWrite only what differs from `base`; "
+                "`flexo theme <name>` shows every setting a theme has."
+            )
+        )
+
+    def catalog(self) -> dict[str, Any]:
+        from flexo.colour import design_palettes
+        from flexo.conventions import CHOICES
+        from flexo.fonts import available_families
+        from flexo.style import LayoutStyle, TypographyStyle
+        from flexo.themes import TONE_RULES, theme_names
+
+        choices: dict[str, list[str]] = {}
+        for owner in (LayoutStyle, TypographyStyle):
+            for item in fields(owner):
+                text = str(item.type)
+                if text.startswith("Literal["):
+                    choices[item.name] = [part.strip(" '\"") for part in text[8:-1].split(",")]
+        return {
+            "bases": list(theme_names()),
+            "fonts": sorted(available_families()),
+            "palettes": {name: list(colours) for name, colours in design_palettes().items()},
+            "choices": choices,
+            "conventions": {key: list(values) for key, values in CHOICES.items()},
+            "tones": list(TONE_RULES),
+            "specimens": [
+                {"name": "figures", "title": "Figures"},
+                *(
+                    {"name": name, "title": provider.title}
+                    for name, provider in _specimens().items()
+                ),
+            ],
+        }
+
+    def describe(self, before: Any, after: Any) -> list[dict[str, Any]]:
+        old = (before or {}).get("theme") or {}
+        new = (after or {}).get("theme") or {}
+        names = {
+            "palette": "the palette",
+            "page": "the page colours",
+            "type": "the type",
+            "font": "the font",
+            "style": "the lines and spacing",
+            "tones": "the tones",
+            "conventions": "the conventions",
+            "sketch": "the hand-drawn look",
+            "base": "the base theme",
+            "name": "the name",
+        }
+        changed = [key for key in dict.fromkeys([*old, *new]) if old.get(key) != new.get(key)]
+        return [
+            {"text": f"changed {names.get(key, key)}", "where": {"label": key}}
+            for key in changed[:4]
+        ]
+
+    def check(self, document: Any, base: Path) -> list[str]:
+        try:
+            _register(document, base)
+        except Exception as error:
+            return [str(error)]
+        return []
+
+    def draw(
+        self, document: dict[str, Any], base: Path, hints: dict[str, Any] | None = None
+    ) -> Drawing:
+        from flexo.diagnostics import FlexoError
+
+        hints = hints or {}
+        try:
+            name = _register(document, base)
+        except FlexoError as error:
+            return Drawing(
+                [],
+                [
+                    Message(
+                        item.message + (f" ({item.hint})" if item.hint else ""),
+                        "error",
+                        item.entity_id or "",
+                        code=item.code,
+                    )
+                    for item in error.diagnostics
+                ],
+            )
+        except (ValueError, TypeError, KeyError) as error:
+            return Drawing([], [Message(str(error), "error")])
+        specimen = str(hints.get("specimen") or "figures")
+        stamp = hashlib.sha256(
+            json.dumps(
+                [document, specimen, hints.get("deck")], sort_keys=True, default=str
+            ).encode()
+        ).hexdigest()
+        info = {"effective": _effective(name), "tones": _tones(name)}
+        messages: list[Message] = []
+        if specimen == "figures":
+            makers = [
+                ("sample", "A model", lambda: _sample(name)),
+                ("slice", "A paper figure", lambda: _gallery(name)),
+            ]
+        else:
+            provider = _specimens().get(specimen)
+            if provider is None:
+                return Drawing([], [Message(f"No samples called {specimen}.", "error")], info=info)
+            try:
+                makers = provider.pages(name, base, hints)
+            except Exception as error:
+                return Drawing(
+                    [],
+                    [Message(f"The {provider.title.lower()} could not be drawn: {error}", "error")],
+                    info=info,
+                )
+        pages: list[Page] = []
+        started = time.perf_counter()
+        drew = False
+        for identifier, label, make in makers:
+            key = f"{stamp}:{identifier}"
+            svg = self._pages.get(key)
+            if svg is None and drew and time.perf_counter() - started > BUDGET:
+                pages.append(Page(identifier, "", label, pending=True))
+                continue
+            if svg is None:
+                try:
+                    svg = make()
+                except Exception as error:
+                    messages.append(Message(f"{label}: {error}", "error", page=identifier))
+                    continue
+                drew = True
+                self._pages[key] = svg
+                while len(self._pages) > 120:
+                    self._pages.popitem(last=False)
+            pages.append(Page(identifier, svg, label))
+        files = [path for path in _theme_files(document, base)]
+        return Drawing(pages, messages, files, info)
+
+    def export(
+        self, document: dict[str, Any], base: Path, stem: str, formats: list[str]
+    ) -> list[Path]:
+        target = base / "build" / f"{stem}.yaml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        from flexo.theme_files import dump_theme
+
+        target.write_text(dump_theme(_register(document, base)), encoding="utf-8")
+        return [target]
+
+
+def _register(document: Any, base: Path) -> str:
+    from flexo.theme_files import register_theme
+
+    if not isinstance(document, dict) or not isinstance(document.get("theme"), dict):
+        raise ValueError("a theme file is a mapping with theme: {name, base, ...}")
+    data = copy.deepcopy(document)
+    if not data["theme"].get("name"):
+        raise ValueError("the theme needs a name")
+    return register_theme(data)
+
+
+def _theme_files(document: dict[str, Any], base: Path) -> list[Path]:
+    value = (document.get("theme") or {}).get("base")
+    if isinstance(value, str) and value.lower().endswith((".yaml", ".yml", ".json")):
+        path = (base / value).resolve()
+        return [path] if path.is_file() else []
+    return []
+
+
+def _effective(name: str) -> dict[str, Any]:
+    from flexo.theme_files import theme_document
+
+    return json.loads(json.dumps(theme_document(name)["theme"], default=str))
+
+
+def _tones(name: str) -> list[dict[str, str]]:
+    from flexo.themes import resolve_palette
+
+    palette = resolve_palette(name)
+    tones = []
+    for index in range(1, 9):
+        try:
+            tones.append(
+                {
+                    "fill": palette.get(f"tone-{index}-fill"),
+                    "stroke": palette.get(f"tone-{index}-stroke"),
+                }
+            )
+        except (KeyError, ValueError):
+            break
+    return tones
+
+
+def _sample(name: str) -> str:
+    from dataclasses import replace
+
+    from flexo.compiler import compile_figure
+    from flexo.serialization import parse_figure
+
+    spec = replace(parse_figure(copy.deepcopy(SAMPLE)), style=name)
+    return compile_figure(spec).document.text
+
+
+def _gallery(name: str) -> str:
+    from dataclasses import replace
+
+    from flexo.compiler import compile_figure
+    from flexo.gallery import gallery_figure
+
+    return compile_figure(replace(gallery_figure("vertical-slice"), style=name)).document.text
+
+
+def _specimens() -> dict[str, Any]:
+    from importlib.metadata import entry_points
+
+    found = {}
+    for entry in entry_points(group="flexo.studio.specimens"):
+        try:
+            provider = entry.load()
+        except Exception:
+            continue
+        found[entry.name] = provider() if isinstance(provider, type) else provider
+    return found

@@ -1,0 +1,584 @@
+// The studio's frame: open documents as tabs, who is here, what happened, the
+// assistant, and the command palette. A kind's editor fills a document's view.
+
+import { h, clear, icon, ui, menu, dialog, toast } from "./ui.js";
+import { Session } from "./session.js";
+import { AssistantPanel } from "./assistant.js";
+
+const SETTINGS = window.STUDIO || { token: "", file: "" };
+const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
+const COLOURS = ["#e8590c", "#7048e8", "#0ca678", "#d6336c", "#1c7ed6", "#f08c00", "#5c940d", "#ae3ec9"];
+const MCP_COMMAND = "claude mcp add flexo-studio -- flexo studio mcp";
+
+export function colourOf(who) {
+  if (who?.id === "assistant") return "#d97757";
+  let hash = 0;
+  for (const ch of String(who?.id || who?.name || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return COLOURS[hash % COLOURS.length];
+}
+
+export function avatar(who, { size = 24, ring = false } = {}) {
+  const agent = who?.kind === "agent";
+  const initials = agent ? null : String(who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return h("span.avatar", { title: who?.name || "", style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
+    agent ? icon("sparkle", { weight: "1.3" }) : initials);
+}
+
+export function ago(seconds) {
+  const delta = Math.max(0, Date.now() / 1000 - seconds);
+  if (delta < 10) return "just now";
+  if (delta < 60) return `${Math.floor(delta)}s ago`;
+  if (delta < 3600) return `${Math.floor(delta / 60)} min ago`;
+  return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function remembered(key, fallback) { try { return localStorage.getItem(`flexo-studio-${key}`) ?? fallback; } catch { return fallback; } }
+function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`, value); } catch { /* private window */ } }
+
+export class Workspace {
+  constructor(info) {
+    this.info = info;
+    this.client = Math.random().toString(36).slice(2, 10);
+    this.me = { id: this.client, name: remembered("name", "You"), kind: "person" };
+    this.sessions = new Map();
+    this.order = [];
+    this.active = null;
+    this.presence = info.presence || [];
+    this.activity = info.activity || [];
+    this.documents = info.documents || [];
+    this.follow = remembered("follow", "1") === "1";
+    this.unseen = 0;
+    this.listeners = {};
+    this.focusTimer = null;
+  }
+
+  on(event, listener) { (this.listeners[event] ||= []).push(listener); return this; }
+  emit(event, detail) { for (const listener of this.listeners[event] || []) listener(detail); }
+
+  async api(route, body, { method = body === undefined ? "GET" : "POST", raw = false } = {}) {
+    const response = await fetch(route, {
+      method,
+      headers: { "X-Studio-Token": SETTINGS.token, ...(raw ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+    if (!response.ok) throw new Error(data.error || `${response.status}`);
+    return data;
+  }
+
+  url(route, params = {}) {
+    return `${route}?${new URLSearchParams({ token: SETTINGS.token, ...params })}`;
+  }
+
+  // -- documents --
+
+  async open(file, { activate = true } = {}) {
+    let session = this.sessions.get(file);
+    if (!session) {
+      const info = await this.api(this.url("/api/open", { file }));
+      if (this.sessions.has(info.file)) session = this.sessions.get(info.file);
+      else {
+        session = new Session(this, info);
+        this.sessions.set(info.file, session);
+        this.order.push(info.file);
+        session.on("status", () => this.emit("status", session));
+        session.on("change", () => this.emit("status", session));
+        this.emit("opened", session);
+        await this.mount(session);
+        session.requestDraw(0);
+      }
+      file = session.file;
+    }
+    this.remember();
+    if (activate) this.activate(file);
+    return session;
+  }
+
+  async mount(session) {
+    try {
+      const editor = await import(`/static/kinds/${session.kind}/editor.js`);
+      await editor.mount(session, session.container);
+    } catch (error) {
+      console.error(error);
+      clear(session.container, h("div.fatal", {}, h("h1", {}, `The ${session.title.toLowerCase()} editor failed to start`), h("pre", {}, String(error.stack || error))));
+    }
+  }
+
+  activate(file) {
+    const session = this.sessions.get(file);
+    if (!session) return;
+    for (const other of this.sessions.values()) {
+      if (other.active && other !== session) { other.active = false; other.emit("deactivate"); }
+    }
+    this.active = session;
+    session.active = true;
+    session.emit("activate");
+    history.replaceState(null, "", `?file=${encodeURIComponent(file)}`);
+    document.title = `${file.split("/").pop()} — Flexo studio`;
+    this.emit("active", session);
+    this.reportFocus(file, null);
+  }
+
+  close(file) {
+    const session = this.sessions.get(file);
+    if (!session) return;
+    session.push();
+    session.emit("close");
+    this.sessions.delete(file);
+    this.order = this.order.filter((name) => name !== file);
+    if (this.active === session) {
+      this.active = null;
+      const next = this.order[this.order.length - 1];
+      if (next) this.activate(next);
+      else { history.replaceState(null, "", "?"); this.emit("active", null); }
+    }
+    this.emit("closed", session);
+    this.remember();
+  }
+
+  remember() { remember(`tabs:${this.info.folder}`, JSON.stringify(this.order)); }
+  rememberedTabs() { try { return JSON.parse(remembered(`tabs:${this.info.folder}`, "[]")); } catch { return []; } }
+
+  async create(kind, name) {
+    const result = await this.api("/api/new", { file: name, kind, client: this.client, who: this.me });
+    await this.refreshDocuments();
+    return this.open(result.file);
+  }
+
+  async refreshDocuments() {
+    this.documents = (await this.api(this.url("/api/documents"))).documents;
+    this.emit("documents");
+  }
+
+  // -- who is where --
+
+  reportFocus(file, where) {
+    clearTimeout(this.focusTimer);
+    this.focusTimer = setTimeout(() => {
+      this.api("/api/presence", { client: this.client, who: this.me, file, where }).catch(() => {});
+    }, 250);
+  }
+
+  presenceOn(file) {
+    return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.client);
+  }
+
+  others() {
+    return this.presence.filter((entry) => entry.who.id !== this.client);
+  }
+
+  setName(name) {
+    this.me = { ...this.me, name: name || "You" };
+    remember("name", this.me.name);
+    this.reportFocus(this.active?.file || null, null);
+  }
+
+  setFollow(on) { this.follow = on; remember("follow", on ? "1" : "0"); this.emit("follow"); }
+
+  // -- events --
+
+  connect() {
+    const source = new EventSource(this.url("/api/events", { client: this.client, name: this.me.name }));
+    source.onmessage = (message) => this.handle(JSON.parse(message.data));
+    source.addEventListener("hello", () => this.emit("online", true));
+    source.onerror = () => this.emit("online", false);
+    this.source = source;
+  }
+
+  handle(event) {
+    const session = event.file ? this.sessions.get(event.file) : null;
+    switch (event.type) {
+      case "doc":
+        session?.remote(event);
+        if (session && event.client !== this.client) session.emit("remote", event);
+        break;
+      case "saved": session?.saved(event.version); break;
+      case "problem": if (session) { session.problem = event.text; session.emit("status"); } break;
+      case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
+      case "presence": this.presence = event.presence; this.emit("presence"); break;
+      case "documents": this.documents = event.documents; this.emit("documents"); break;
+      case "opened":
+        if (!this.sessions.has(event.file)) {
+          this.open(event.file, { activate: this.follow }).then(() => {
+            if (!this.follow) toast(h("span", {}, `${event.who?.name || "An agent"} opened `, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.open(event.file); } }, event.file)), { icon: "sparkle" });
+          });
+        } else if (this.follow && event.who?.kind === "agent") this.activate(event.file);
+        break;
+      case "activity": {
+        const entry = event.entry;
+        const index = this.activity.findIndex((item) => item.id === entry.id);
+        if (index >= 0) this.activity[index] = entry; else { this.activity.push(entry); this.unseen += 1; }
+        if (this.activity.length > 300) this.activity.shift();
+        this.emit("activity", entry);
+        if (this.follow && entry.who?.kind === "agent") this.goTo(entry.file, entry.where, { quiet: true });
+        break;
+      }
+      case "assistant": this.emit("assistant", event); break;
+      default: break;
+    }
+  }
+
+  async goTo(file, where, { quiet = false } = {}) {
+    if (!file) return;
+    const session = await this.open(file, { activate: true });
+    if (where) session.reveal(where, { quiet });
+  }
+}
+
+// -- the frame --------------------------------------------------------------------------
+
+function applyTheme(mode) {
+  if (mode === "light" || mode === "dark") document.documentElement.dataset.theme = mode;
+  else delete document.documentElement.dataset.theme;
+}
+
+export async function start() {
+  applyTheme(remembered("theme", "auto"));
+  const root = document.getElementById("studio");
+  let info;
+  try {
+    const response = await fetch(`/api/session?token=${encodeURIComponent(SETTINGS.token)}`, { headers: { "X-Studio-Token": SETTINGS.token } });
+    info = await response.json();
+    if (!response.ok) throw new Error(info.error || response.statusText);
+  } catch (error) {
+    clear(root, h("div.fatal", {}, h("h1", {}, "The studio could not start"), h("pre", {}, String(error.message || error))));
+    return;
+  }
+  const workspace = new Workspace(info);
+  window.flexoStudio = workspace;
+
+  // -- the top bar --
+  const tabs = h("nav.tabs.scroll-thin");
+  const people = h("div.people");
+  const followChip = h("button.chip-toggle", { type: "button", title: "Follow agents: show what they change as they change it", onclick: () => workspace.setFollow(!workspace.follow) }, icon("target"), "Follow");
+  const activityButton = ui.button("", () => side.toggle("activity"), { kind: "ghost", icon: "activity", title: "Activity" });
+  const activityCount = h("span.badge-count", { hidden: true });
+  activityButton.append(activityCount);
+  const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
+  const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Commands (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
+  const themeButton = ui.button("", () => {
+    const order = ["auto", "light", "dark"];
+    const next = order[(order.indexOf(remembered("theme", "auto")) + 1) % 3];
+    remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${next}`, { seconds: 1.5 });
+  }, { kind: "ghost", title: "Appearance" });
+  const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
+  showTheme();
+  const bar = h("header.bar", {},
+    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo studio")),
+    tabs,
+    h("div.spacer"),
+    paletteButton,
+    people, followChip,
+    h("div.bar-sep"),
+    activityButton, themeButton, claudeButton);
+
+  // -- the document bar --
+  const docLeft = h("div.docbar-slot");
+  const docRight = h("div.docbar-slot");
+  const status = h("div.status", {}, h("span.dot"), h("span.status-text"));
+  const undo = ui.button("", () => workspace.active?.undo(), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
+  const redo = ui.button("", () => workspace.active?.redo(), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
+  const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo), h("div.bar-sep"), docRight);
+
+  const views = h("main.views");
+  const doing = h("div.doing-strip");
+  const side = new SidePanel(workspace);
+  const body = h("div.workbench", {}, h("div.center", {}, docbar, views, doing), side.node);
+  clear(root, h("div.studio", {}, bar, body));
+
+  // -- keeping the frame current --
+  const renderTabs = () => {
+    clear(tabs, workspace.order.map((file) => {
+      const session = workspace.sessions.get(file);
+      const here = workspace.presenceOn(file);
+      const tab = h(`div.tab${workspace.active === session ? ".on" : ""}`, {
+        title: file, onclick: () => workspace.activate(file),
+        onauxclick: (event) => { if (event.button === 1) workspace.close(file); },
+      },
+      icon(KIND_ICONS[session.kind] || "file"),
+      h("span.tab-name", {}, file.split("/").pop()),
+      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving" }) : null,
+      here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
+      h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
+      return tab;
+    }), h("button.tab-new", { type: "button", title: "New or open…", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
+  };
+
+  const renderPeople = () => {
+    const others = workspace.others();
+    clear(people,
+      others.map((entry) => {
+        const button = h("button.person", { type: "button", onclick: () => entry.file && workspace.goTo(entry.file, entry.where),
+          title: `${entry.who.name}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
+        avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
+        return button;
+      }),
+      h("button.person.add", { type: "button", title: "Invite an agent", onclick: () => connectDialog(workspace) }, icon("plug")));
+    followChip.hidden = !others.some((entry) => entry.who.kind === "agent");
+    followChip.classList.toggle("on", workspace.follow);
+    const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
+    clear(doing, working.map((entry) => h("button.doing", { type: "button", onclick: () => workspace.goTo(entry.file, entry.where) },
+      avatar(entry.who, { size: 18 }), h("b", {}, entry.who.name), h("span", {}, entry.doing), h("span.pulse"))));
+    renderTabs();
+  };
+
+  const renderStatus = () => {
+    const session = workspace.active;
+    docbar.hidden = !session;
+    if (!session) return;
+    undo.disabled = !session.past.length;
+    redo.disabled = !session.future.length;
+    const state = session.state;
+    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
+    status.title = session.problem || "";
+    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? "Not saved: the file on disk does not read" : "Saving…";
+  };
+
+  const renderViews = () => {
+    const session = workspace.active;
+    for (const other of workspace.sessions.values()) if (other.container.parentNode !== views) views.append(other.container);
+    for (const child of [...views.children]) {
+      const owner = [...workspace.sessions.values()].find((item) => item.container === child);
+      if (!owner) child.remove();
+      else child.hidden = owner !== session;
+    }
+    welcome.hidden = Boolean(session);
+    if (!session) { views.append(welcome); renderWelcome(); }
+    clear(docLeft, session ? session.tools : null);
+    clear(docRight, session ? session.actions : null);
+    renderTabs();
+    renderStatus();
+  };
+
+  const welcome = h("div.welcome.scroll-thin");
+  const renderWelcome = () => {
+    const kinds = info.kinds.map((kind) => kind.name);
+    const card = (kind, title, note, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title), h("span.start-note", {}, note)) : null;
+    clear(welcome, h("div.welcome-inner", {},
+      h("h1", {}, "What are we making?"),
+      h("p.lead", {}, "Decks, figures, and their themes — edited here, by you and by any agent you invite, at the same time."),
+      h("div.start-cards", {},
+        card("deck", "A deck", "Slides for a talk, with real figures", "talk.yaml"),
+        card("figure", "A figure", "A diagram flexo lays out for you", "figure.yaml"),
+        card("theme", "A theme", "Type, colour, and line for everything", "theme.yaml")),
+      workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In this folder"),
+        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
+          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, item.file), h("span.doc-kind", {}, item.title))))) : null,
+      h("div.welcome-section", {}, h("h2", {}, "Work with an agent"),
+        h("p", {}, "Ask Claude in the panel on the right, or let Claude Code (or any MCP agent) work here. Run this once in the folder, then ask it to build something — you'll watch it happen:"),
+        copyable(MCP_COMMAND),
+        h("p.hint-line", {}, info.folder))));
+  };
+
+  workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
+    .on("status", (session) => { if (session === workspace.active) renderStatus(); renderTabs(); })
+    .on("presence", renderPeople).on("follow", renderPeople)
+    .on("documents", () => { if (!workspace.active) renderWelcome(); })
+    .on("activity", () => {
+      activityCount.hidden = side.open === "activity" || !workspace.unseen;
+      activityCount.textContent = workspace.unseen > 9 ? "9+" : String(workspace.unseen);
+    });
+
+  // -- keys --
+  document.addEventListener("keydown", (event) => {
+    const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const session = workspace.active;
+    if (mod && key === "k") { event.preventDefault(); palette(workspace); return; }
+    if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
+    if (document.querySelector(".scrim, .present")) return;
+    if (mod && key === "s") { event.preventDefault(); session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 })); }
+    else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
+    else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
+    else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
+  });
+  addEventListener("beforeunload", () => { for (const session of workspace.sessions.values()) session.push(); });
+
+  workspace.connect();
+  renderPeople();
+  const first = SETTINGS.file || info.start;
+  const tabsToOpen = [...new Set([...workspace.rememberedTabs().filter((file) => info.documents.some((item) => item.file === file) || file === first), ...(first ? [first] : [])])];
+  for (const file of tabsToOpen) {
+    try { await workspace.open(file, { activate: file === first || (!first && file === tabsToOpen[tabsToOpen.length - 1]) }); }
+    catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
+  }
+  renderViews();
+  if (remembered("side", "") && info.assistant) side.show(remembered("side", ""));
+}
+
+function inField(event) {
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "");
+}
+
+function markIcon() {
+  const node = icon("info");
+  node.firstChild.setAttribute("d", "M3 4.5h4v7H3zM9 4.5h4v3H9zM9 9.5h4v2H9zM7 8h2");
+  node.setAttribute("stroke-width", "1.6");
+  return node;
+}
+
+export function copyable(text) {
+  const button = ui.button("", async () => {
+    try { await navigator.clipboard.writeText(text); toast("Copied", { icon: "check", seconds: 1.2 }); }
+    catch { toast("Select the text and copy it", { seconds: 2 }); }
+  }, { kind: "ghost", icon: "copy", small: true, title: "Copy" });
+  return h("div.copyable", {}, h("code", {}, text), button);
+}
+
+function newMenu(anchor, workspace) {
+  const open = workspace.documents.filter((item) => !workspace.sessions.has(item.file));
+  menu(anchor, [
+    { title: "New" },
+    { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", "talk.yaml") },
+    { icon: "figure", label: "Figure", hint: "A diagram flexo lays out", run: () => askName(workspace, "figure", "figure.yaml") },
+    { icon: "theme", label: "Theme", hint: "Type, colour, and line", run: () => askName(workspace, "theme", "theme.yaml") },
+    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: item.file, hint: item.title, run: () => workspace.open(item.file) }))] : []),
+  ]);
+}
+
+export function askName(workspace, kind, suggestion) {
+  const taken = new Set(workspace.documents.map((item) => item.file));
+  let name = suggestion;
+  for (let n = 2; taken.has(name); n++) name = suggestion.replace(/(\.\w+)$/, `-${n}$1`);
+  const input = ui.input({ value: name, mono: true });
+  const go = async () => {
+    const file = input.value.trim();
+    if (!file) return false;
+    try { await workspace.create(kind, /\.(ya?ml|json)$/i.test(file) ? file : `${file}.yaml`); }
+    catch (error) { toast(error.message, { kind: "error", icon: "error" }); }
+    return true;
+  };
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go().then((ok) => ok && box.close()); } });
+  const box = dialog({ title: `New ${kind}`, body: [ui.field("File", input, { hint: "in the studio's folder" })],
+    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: () => { go(); } }] });
+  setTimeout(() => { input.focus(); input.setSelectionRange(0, input.value.lastIndexOf(".")); }, 30);
+}
+
+export function connectDialog(workspace) {
+  const name = ui.input({ value: workspace.me.name, onChange: (value) => workspace.setName(value.trim()) });
+  dialog({ title: "Work with agents", body: [
+    h("p", {}, "Any agent that speaks MCP can work in this studio: you see its edits as it makes them, where it is, and what it's doing — and you can keep editing too."),
+    h("ol.steps", {},
+      h("li", {}, "In a terminal in this folder, add the studio to Claude Code once:", copyable(MCP_COMMAND)),
+      h("li", {}, "Ask it for what you want — “make a 6-slide talk from the README with a figure of the model” — and watch it build here."),
+      h("li", {}, "Turn on ", h("b", {}, "Follow"), " to have the studio show whatever it is changing.")),
+    h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
+    ui.field("Your name, as others see it", name),
+  ], actions: [{ label: "Done", kind: "primary" }] });
+}
+
+function shortcutsDialog() {
+  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").map((key) => h("span.kbd", {}, key))));
+  dialog({ title: "Keyboard", body: [h("div.shortcuts", {},
+    row("⌘ K", "Search and commands"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo your last change"), row("⇧ ⌘ Z", "Redo"),
+    row("⌘ S", "Save now (saving is automatic)"), row("↑ ↓", "Previous / next slide"), row("Enter", "Edit the chosen part in place"),
+    row("Esc", "Let go of the chosen part"), row("⌫", "Delete the chosen part"), row("⌘ D", "Duplicate the slide"),
+    row("⌘ ⏎", "Present"), row("?", "This list"))] });
+}
+
+// -- the side panel: Claude and activity --------------------------------------------
+
+class SidePanel {
+  constructor(workspace) {
+    this.workspace = workspace;
+    this.open = null;
+    this.assistant = new AssistantPanel(workspace);
+    this.tabs = h("div.side-tabs");
+    this.body = h("div.side-body");
+    this.node = h("aside.side", { hidden: true }, h("div.side-head", {}, this.tabs, h("div.spacer"),
+      ui.button("", () => this.hide(), { kind: "ghost", icon: "close", small: true, title: "Close" })), this.body);
+    this.activityList = h("div.activity-list.scroll-thin");
+    workspace.on("activity", () => { if (this.open === "activity") this.renderActivity(); });
+  }
+
+  toggle(which) { if (this.open === which) this.hide(); else this.show(which); }
+
+  show(which) {
+    this.open = which;
+    remember("side", which);
+    this.node.hidden = false;
+    clear(this.tabs,
+      h(`button.side-tab${which === "assistant" ? ".on" : ""}`, { type: "button", onclick: () => this.show("assistant") }, icon("sparkle"), "Claude"),
+      h(`button.side-tab${which === "activity" ? ".on" : ""}`, { type: "button", onclick: () => this.show("activity") }, icon("activity"), "Activity"));
+    if (which === "assistant") { clear(this.body, this.assistant.node); this.assistant.focus(); }
+    else { this.workspace.unseen = 0; this.workspace.emit("activity"); this.renderActivity(); clear(this.body, this.activityList); }
+    document.body.classList.toggle("side-open", true);
+  }
+
+  hide() {
+    this.open = null;
+    remember("side", "");
+    this.node.hidden = true;
+    document.body.classList.remove("side-open");
+  }
+
+  renderActivity() {
+    const entries = [...this.workspace.activity].reverse();
+    clear(this.activityList, entries.length ? entries.map((entry) => h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
+      avatar(entry.who, { size: 22 }),
+      h("span.activity-text", {}, h("b", {}, entry.who?.name || "Someone"), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
+        h("span.activity-where", {}, [entry.file, entry.where?.label].filter(Boolean).join(" · "))),
+      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "Nothing yet. Changes by you, Claude, and other agents appear here."));
+  }
+}
+
+// -- the command palette --------------------------------------------------------------
+
+export function palette(workspace) {
+  if (document.querySelector(".palette")) return;
+  const session = workspace.active;
+  const commands = [
+    ...(session ? session.commands() : []),
+    ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${file}`, run: () => workspace.activate(file) })),
+    ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${item.file}`, hint: item.title, run: () => workspace.open(item.file) })),
+    { icon: "deck", label: "New deck", run: () => askName(workspace, "deck", "talk.yaml") },
+    { icon: "figure", label: "New figure", run: () => askName(workspace, "figure", "figure.yaml") },
+    { icon: "theme", label: "New theme", run: () => askName(workspace, "theme", "theme.yaml") },
+    { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
+    { icon: "target", label: workspace.follow ? "Stop following agents" : "Follow agents", run: () => workspace.setFollow(!workspace.follow) },
+    { icon: "plug", label: "Invite an agent (MCP)", run: () => connectDialog(workspace) },
+    { icon: "keyboard", label: "Keyboard shortcuts", keys: "?", run: () => shortcutsDialog() },
+  ];
+  const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…", spellcheck: false });
+  const list = h("div.command-list.scroll-thin");
+  let shown = [];
+  let index = 0;
+  // Letters of the query in order, closer together and nearer the start ranking higher;
+  // null when they are not all there.
+  const score = (label, query) => {
+    const text = label.toLowerCase();
+    let position = 0, total = 0;
+    for (const ch of query) {
+      const found = text.indexOf(ch, position);
+      if (found < 0) return null;
+      total += found - position;
+      position = found + 1;
+    }
+    const whole = text.indexOf(query);
+    return total + (whole >= 0 ? -20 + whole * 0.1 : 0) + text.length * 0.01;
+  };
+  const render = () => {
+    const query = input.value.trim().toLowerCase();
+    shown = query ? commands.map((command) => [score(`${command.label} ${command.hint || ""}`, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
+    shown = shown.slice(0, 60);
+    index = Math.min(index, Math.max(0, shown.length - 1));
+    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
+      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),
+      command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "Nothing matches."));
+  };
+  const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
+  const run = (command) => { scrim.remove(); command.run(); };
+  input.addEventListener("input", () => { index = 0; render(); });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") { event.preventDefault(); index = Math.min(index + 1, shown.length - 1); mark(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); index = Math.max(index - 1, 0); mark(); }
+    else if (event.key === "Enter") { event.preventDefault(); if (shown[index]) run(shown[index]); }
+    else if (event.key === "Escape") { event.preventDefault(); scrim.remove(); }
+  });
+  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) scrim.remove(); } },
+    h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list));
+  document.body.append(scrim);
+  render();
+  input.focus();
+}
