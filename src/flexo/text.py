@@ -6,7 +6,7 @@ import itertools
 import re
 import unicodedata
 from dataclasses import dataclass, replace
-from functools import cache
+from functools import cache, lru_cache
 
 import uharfbuzz as hb
 
@@ -302,6 +302,28 @@ def font_stack(typography: TypographyStyle) -> FontStack:
     return FontStack(typography)
 
 
+@lru_cache(maxsize=200_000)
+def _advance(
+    typography: TypographyStyle, text: str, weight: int, italic: bool, code: bool
+) -> float:
+    """How far ``text`` advances, in ems, shaped as ``font_stack(typography)`` sets it.
+
+    Wrapping and balancing a paragraph measures each word many times over; a
+    word measured once is not shaped again.
+    """
+
+    advance = 0.0
+    for face, piece in font_stack(typography).segments(text, weight, italic, code=code):
+        font = hb_font(face, weight)
+        buffer = hb.Buffer()
+        buffer.add_str(piece)
+        buffer.guess_segment_properties()
+        hb.shape(font, buffer, {"kern": True, "liga": True})
+        upem = load_face(face).upem
+        advance += sum(position.x_advance for position in buffer.glyph_positions) / upem
+    return advance
+
+
 def font_data(italic: bool = False, typography: TypographyStyle | None = None) -> FontData:
     """The primary face's metrics for ``typography`` (default: the paper style)."""
 
@@ -493,15 +515,7 @@ class TextMeasurer:
         if not run.text:
             return 0.0
         weight = drawn_weight(run, inherited)
-        advance = 0.0
-        for face, text in self.stack.segments(run.text, weight, run.italic, code=run.code):
-            font = hb_font(face, weight)
-            buffer = hb.Buffer()
-            buffer.add_str(text)
-            buffer.guess_segment_properties()
-            hb.shape(font, buffer, {"kern": True, "liga": True})
-            upem = load_face(face).upem
-            advance += sum(position.x_advance for position in buffer.glyph_positions) / upem
+        advance = _advance(self.typography, run.text, weight, run.italic, run.code)
         scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
         tracking = self.typography.tracking * len(run.text)
         return (advance + tracking) * self.typography.size.points * scale

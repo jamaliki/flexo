@@ -56,15 +56,16 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing --
 
-    def _reply(self, status: int, body: bytes, kind: str) -> None:
+    def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
         encoding = None
-        if len(body) > 2048 and "gzip" in self.headers.get("Accept-Encoding", ""):
+        compressible = len(body) > 2048 and not kind.startswith("font/")
+        if compressible and "gzip" in self.headers.get("Accept-Encoding", ""):
             body = gzip.compress(body, compresslevel=5)
             encoding = "gzip"
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "max-age=86400, immutable" if cache else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         if encoding:
             self.send_header("Content-Encoding", encoding)
@@ -115,6 +116,8 @@ class Handler(BaseHTTPRequestHandler):
             self._index(query)
         elif route.startswith("/static/studio/"):
             self._static(STATIC / "studio", route.removeprefix("/static/studio/"))
+        elif route.startswith("/fonts/"):
+            self._font(route.removeprefix("/fonts/"))
         elif route.startswith("/static/kinds/"):
             name, _, rest = route.removeprefix("/static/kinds/").partition("/")
             kind = self.workspace.kinds.get(name)
@@ -156,6 +159,23 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:
             traceback.print_exc()
             self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
+
+    def _font(self, name: str) -> None:
+        """The bundled fonts, which drawings in the studio name rather than embed."""
+
+        from flexo.svg_resources import bundled_faces, bundled_font_css
+
+        faces = bundled_faces()
+        if name == "faces.css":
+            body = bundled_font_css(lambda index, face: f"/fonts/{index}").encode("utf-8")
+            self._reply(200, body, "text/css; charset=utf-8")
+            return
+        if not name.isdigit() or int(name) >= len(faces):
+            self._fail(HTTPStatus.NOT_FOUND, f"no font {name}")
+            return
+        source = Path(faces[int(name)].source)
+        kind = "font/otf" if source.suffix.lower() == ".otf" else "font/ttf"
+        self._reply(200, source.read_bytes(), kind, cache=True)
 
     def _index(self, query: dict[str, list[str]]) -> None:
         name = (query.get("file") or [self.start_file])[0]

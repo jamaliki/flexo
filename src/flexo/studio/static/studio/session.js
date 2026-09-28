@@ -30,6 +30,8 @@ export class Session {
     this.sending = null;                  // the document in flight, while one is
     this.pushTimer = null;
     this.drawTimer = null;
+    this.drawBusy = false;
+    this.drawWanted = false;
     this.drawVersion = 0;
     this.drawn = 0;
     this.pages = new Map();
@@ -97,9 +99,14 @@ export class Session {
 
   // -- keeping in step --
 
-  schedulePush(delay = 140) {
-    clearTimeout(this.pushTimer);
-    this.pushTimer = setTimeout(() => this.push(), delay);
+  // Edits go out while typing continues, not only after it stops: at most one is
+  // in flight, and the next carries everything made meanwhile.
+  schedulePush(delay = 60) {
+    if (this.pushTimer !== null) {
+      if (delay > 0) return;
+      clearTimeout(this.pushTimer);
+    }
+    this.pushTimer = setTimeout(() => { this.pushTimer = null; this.push(); }, delay);
   }
 
   async push() {
@@ -170,12 +177,29 @@ export class Session {
 
   // -- drawing --
 
-  requestDraw(delay = 120) {
-    clearTimeout(this.drawTimer);
-    this.drawTimer = setTimeout(() => this.draw(), delay);
+  // Likewise drawing: one drawing at a time, and when it comes back the next
+  // starts from the document as it is then. The page follows typing as fast as
+  // the server draws.
+  requestDraw(delay = 40) {
+    this.drawWanted = true;
+    if (this.drawBusy) return;
+    if (this.drawTimer !== null) {
+      if (delay > 0) return;
+      clearTimeout(this.drawTimer);
+    }
+    this.drawTimer = setTimeout(() => { this.drawTimer = null; this.draw(); }, delay);
   }
 
   async draw() {
+    this.drawWanted = false;
+    this.drawBusy = true;
+    try { await this.drawOnce(); } finally {
+      this.drawBusy = false;
+      if (this.drawWanted) this.requestDraw(0);
+    }
+  }
+
+  async drawOnce() {
     const version = ++this.drawVersion;
     const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
     this.emit("drawing", { version });
@@ -199,9 +223,9 @@ export class Session {
     const ids = new Set(pages.map((page) => page.id));
     for (const id of [...this.pages.keys()]) if (!ids.has(id)) this.pages.delete(id);
     this.info = result.info || {};
-    const latest = version === this.drawVersion;
+    const latest = version === this.drawVersion && !this.drawWanted;
     this.emit("drawn", { version, pages, messages: result.messages, info: this.info, seconds: result.seconds, latest, unfinished: result.unfinished });
-    if (result.unfinished && latest) this.requestDraw(0);
+    if (result.unfinished && latest) this.drawWanted = true;
   }
 
   // -- files beside the document --

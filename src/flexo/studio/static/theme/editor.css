@@ -44,10 +44,10 @@
 .samples { display: grid; gap: 28px; justify-items: center; }
 .samples.slides { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); justify-items: stretch; }
 .sample { margin: 0; display: grid; gap: 8px; justify-items: center; }
-.sample img { max-width: min(100%, 900px); background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; display: block; }
-.sample.slide img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; }
+.sample .picture { max-width: min(100%, 900px); background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; display: block; }
+.sample.slide .picture { width: 100%; aspect-ratio: 16 / 9; }
 .sample figcaption { font-size: 12px; color: var(--ink-3); }
-.sample.stale img { opacity: 0.55; transition: opacity 0.2s; }
+.sample.stale .picture { opacity: 0.55; transition: opacity 0.2s; }
 .sample-wait { width: 320px; height: 180px; display: grid; place-items: center; background: var(--panel); border-radius: 4px; }
 .theme-messages { position: absolute; left: 16px; right: 16px; bottom: 16px; }
 .show-on { display: flex; align-items: center; gap: 8px; }
