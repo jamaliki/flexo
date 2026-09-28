@@ -5,10 +5,13 @@ from __future__ import annotations
 import base64
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import cache
 from io import BytesIO
 
-from flexo.fonts import select_face
+from flexo.fonts import FontFace, bundled_families, family_faces, select_face
 from flexo.ir.routed import RoutedFigure
 from flexo.render_common import paint_attributes
 from flexo.style import LayoutStyle, Palette
@@ -123,6 +126,46 @@ def _arrow_marker(
     )
 
 
+_LINKED: ContextVar[bool] = ContextVar("flexo_fonts_linked", default=False)
+
+
+@contextmanager
+def fonts_linked() -> Iterator[None]:
+    """Draw without embedding fonts, for a page that loads them once itself.
+
+    A drawing's embedded subsets are the bulk of its bytes and much of the time
+    it takes; a page showing many drawings -- the studio -- declares every
+    bundled face once (``bundled_font_css``) and has the drawings name them.
+    """
+
+    token = _LINKED.set(True)
+    try:
+        yield
+    finally:
+        _LINKED.reset(token)
+
+
+def bundled_faces() -> list[FontFace]:
+    """Every bundled face, in a fixed order (a page's font URLs are indexes into it)."""
+
+    return [face for family in bundled_families() for face in family_faces(family) if face.bundled]
+
+
+def bundled_font_css(url: Callable[[int, FontFace], str]) -> str:
+    """``@font-face`` rules for every bundled face; ``url`` says where each is served."""
+
+    rules = []
+    for index, face in enumerate(bundled_faces()):
+        weight = f"{face.weight_min} {face.weight_max}" if face.variable else str(face.weight)
+        fmt = "opentype" if face.source.lower().endswith(".otf") else "truetype"
+        rules.append(
+            f"@font-face{{font-family:'{face.family}';"
+            f"font-style:{'italic' if face.italic else 'normal'};font-weight:{weight};"
+            f"font-display:block;src:url({url(index, face)}) format('{fmt}');}}"
+        )
+    return "\n".join(rules)
+
+
 def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) -> None:
     """Embed the bundled faces the figure uses, cut down to the characters it uses.
 
@@ -154,7 +197,7 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
                 )
             )
     characters.discard("\n")
-    if not characters:
+    if not characters or _LINKED.get():
         return
     stack = font_stack(style.typography)
     rules = []

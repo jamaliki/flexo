@@ -119,6 +119,23 @@ def test_a_figure_is_drawn_and_sent_only_when_changed(served: tuple[str, Workspa
     assert "svg" not in call(f"{base}/api/draw", workspace.token, request)[1]["pages"][0]
 
 
+def test_drawings_name_the_fonts_the_page_loads_once(served: tuple[str, Workspace]) -> None:
+    base, workspace = served
+    request = {"file": "figure.yaml", "document": {"text": NEW_FIGURE}, "version": 1, "known": {}}
+    (page,) = call(f"{base}/api/draw", workspace.token, {**request, "hints": {}})[1]["pages"]
+    assert "@font-face" not in page["svg"] and "font-family" in page["svg"]
+    with OPENER.open(f"{base}/") as response:
+        assert 'href="/fonts/faces.css"' in response.read().decode()
+    with OPENER.open(f"{base}/fonts/faces.css") as response:
+        css = response.read().decode()
+    assert "font-family:'Figtree'" in css and "url(/fonts/0)" in css
+    with OPENER.open(f"{base}/fonts/0") as response:
+        assert response.headers["Content-Type"].startswith("font/")
+        assert "max-age" in response.headers["Cache-Control"] and len(response.read()) > 10_000
+    # Outside the studio a drawing still carries its fonts.
+    assert "@font-face" in FigureKind().draw({"text": NEW_FIGURE}, workspace.root).pages[0].svg
+
+
 def test_an_update_is_saved_and_told_to_everyone(served: tuple[str, Workspace]) -> None:
     base, workspace = served
     listener = workspace.listen("page-b", {"id": "page-b", "name": "Bo", "kind": "person"})
@@ -474,13 +491,26 @@ def test_the_page_merges_as_the_server_does() -> None:
             {"s": [{"t": "A"}, {"t": "Theirs"}]},
         ],
     ]
+    pairs = [
+        [{"a": [1, {"b": None}]}, {"a": [1, {"b": None}]}],
+        [{"a": 1, "b": 2}, {"b": 2, "a": 1}],
+        [{"a": 1}, {"a": 1, "b": 2}],
+        [[1, 2], [1, 2, 3]],
+        [{"a": [1]}, {"a": {"0": 1}}],
+        ["1", 1],
+        [None, {}],
+    ]
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/merge.js"
     code = (
-        f"import {{ merge3 }} from {json.dumps(script.as_uri())};\n"
+        f"import {{ merge3, same }} from {json.dumps(script.as_uri())};\n"
         f"const cases = {json.dumps(cases)};\n"
-        "console.log(JSON.stringify(cases.map(([b, o, t]) => merge3(b, o, t))));\n"
+        f"const pairs = {json.dumps(pairs)};\n"
+        "console.log(JSON.stringify([cases.map(([b, o, t]) => merge3(b, o, t)),"
+        " pairs.map(([a, b]) => same(a, b))]));\n"
     )
     result = subprocess.run(
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
-    assert json.loads(result.stdout) == [merge3(*case) for case in cases]
+    merged, equal = json.loads(result.stdout)
+    assert merged == [merge3(*case) for case in cases]
+    assert equal == [True, True, False, False, False, False, False]
