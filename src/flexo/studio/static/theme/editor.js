@@ -3,7 +3,7 @@
 // slides, or a deck in the folder. Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, keepFocus, picture } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -22,7 +22,6 @@ export function mount(studio, container) {
   let pages = [];
   let messages = [];
   let effectiveKey = "";
-  const urls = new Map();
 
   studio.hints = () => ({ specimen: specimen.name, deck: specimen.deck });
   const theme = () => studio.doc.theme || {};
@@ -183,16 +182,10 @@ export function mount(studio, container) {
 
   // -- the samples --
   const renderStage = () => {
-    const live = new Set();
-    const cards = pages.map((page) => {
-      if (page.hash) live.add(page.hash);
-      if (page.svg && page.hash && !urls.has(page.hash)) urls.set(page.hash, URL.createObjectURL(new Blob([page.svg], { type: "image/svg+xml" })));
-      const url = page.hash ? urls.get(page.hash) : null;
-      return h(`figure.sample${page.stale ? ".stale" : ""}${specimen.name === "figures" ? "" : ".slide"}`, {},
-        url ? h("img", { src: url, alt: page.label }) : h("div.sample-wait", {}, h("div.spinner")),
-        h("figcaption", {}, page.label));
-    });
-    for (const [hash, url] of urls) if (!live.has(hash)) { URL.revokeObjectURL(url); urls.delete(hash); }
+    const figures = specimen.name === "figures";
+    const cards = pages.map((page) => h(`figure.sample${page.stale ? ".stale" : ""}${figures ? "" : ".slide"}`, {},
+      page.svg ? picture(page.svg, page.hash, { natural: figures }) : h("div.sample-wait", {}, h("div.spinner")),
+      h("figcaption", {}, page.label)));
     clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards : h("div.empty", {}, h("div.spinner"))));
     clear(note, messages.filter((m) => m.severity !== "note").map((message) => h(`div.message.${message.severity}`, {}, icon(message.severity === "error" ? "error" : "warning"), h("div", {}, message.text))));
   };

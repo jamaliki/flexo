@@ -31,6 +31,7 @@ import yaml
 
 from flexo.studio import Kind, kinds
 from flexo.studio.merge import merge3
+from flexo.svg_resources import fonts_linked
 
 HISTORY = 400
 """Versions of each document kept, for merging changes made from an older one."""
@@ -429,7 +430,9 @@ class Workspace:
                 return {"version": version, "stale": True}
             started = time.perf_counter()
             try:
-                drawing = doc.kind.draw(document, doc.path.parent, hints)
+                # The page has every bundled font; drawings name them rather than carry them.
+                with fonts_linked():
+                    drawing = doc.kind.draw(document, doc.path.parent, hints)
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
                 return {
@@ -481,7 +484,8 @@ class Workspace:
             document = copy.deepcopy(doc.document)
         with self.drawing:
             for _ in range(200):
-                drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))
+                with fonts_linked():
+                    drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))
                 if not drawing.unfinished:
                     return drawing
         return drawing

@@ -93,9 +93,24 @@ export function stable(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
 
+// Whether two documents are equal, as ``stable`` would find them, without writing
+// either out: it stops at the first difference and allocates nothing, so it can
+// run on every keystroke.
 export function same(first, second) {
   if (first === second) return true;
-  if (typeof first !== typeof second) return false;
-  if (typeof first !== "object" || first === null || second === null) return false;
-  return stable(first) === stable(second);
+  if (first === undefined) first = null;
+  if (second === undefined) second = null;
+  if (first === second) return true;
+  if (typeof first !== "object" || typeof second !== "object" || first === null || second === null) return false;
+  const list = Array.isArray(first);
+  if (list !== Array.isArray(second)) return false;
+  if (list) {
+    if (first.length !== second.length) return false;
+    for (let index = 0; index < first.length; index++) if (!same(first[index], second[index])) return false;
+    return true;
+  }
+  const keys = Object.keys(first);
+  if (keys.length !== Object.keys(second).length) return false;
+  for (const key of keys) if (!Object.hasOwn(second, key) || !same(first[key], second[key])) return false;
+  return true;
 }
