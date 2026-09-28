@@ -39,6 +39,20 @@ edges:
 """
 
 
+GUIDE = """\
+A flexo figure file: YAML naming what the figure is, not where things go -- flexo lays it out
+and routes every line.
+
+figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), palette, width}
+nodes: each {id, label, kind (block by default; text, op, circle, feature-strip, mlp,
+  attention, channels, inset, ...), properties: {tone: encoder|head|attention|..., badge, ...}}
+edges: each {from: node or node.port, to: node or node.port, label, role}
+groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
+  (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
+Labels are markup: $maths$, *emphasis*, **strong**. `flexo schema` prints the full schema.
+"""
+
+
 class FigureKind:
     name = "figure"
     title = "Figure"
@@ -60,6 +74,42 @@ class FigureKind:
 
     def save(self, path: Path, document: dict[str, Any]) -> None:
         path.write_text(document["text"], encoding="utf-8")
+
+    def dump(self, document: dict[str, Any]) -> str:
+        return document["text"]
+
+    def parse(self, text: str) -> dict[str, Any]:
+        yaml.safe_load(text)  # refuse what does not read, before anyone sees it
+        return {"text": text}
+
+    def guide(self) -> str:
+        return GUIDE
+
+    def describe(self, before: Any, after: Any) -> list[dict[str, Any]]:
+        import difflib
+
+        old = (before or {}).get("text", "").splitlines()
+        new = (after or {}).get("text", "").splitlines()
+        changed = [
+            (tag, start)
+            for tag, start, _, _, _ in difflib.SequenceMatcher(None, old, new).get_opcodes()
+            if tag != "equal"
+        ]
+        if not changed:
+            return []
+        first = changed[0][1] + 1
+        return [
+            {
+                "text": f"edited line {first}"
+                if len(changed) == 1
+                else f"edited {len(changed)} places",
+                "where": {"line": first, "label": f"line {first}"},
+            }
+        ]
+
+    def check(self, document: dict[str, Any], base: Path) -> list[str]:
+        drawing = self.draw(document, base)
+        return [message.text for message in drawing.messages if message.severity == "error"]
 
     def catalog(self) -> dict[str, Any]:
         from flexo.colour import design_palettes

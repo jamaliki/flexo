@@ -55,8 +55,9 @@ SUFFIXES = (".yaml", ".yml", ".json")
 CUSTOM_PALETTES: dict[str, tuple[str, ...]] = {}
 """Palettes registered by name, in the order they were given."""
 
-_LOADED: dict[str, str] = {}
-"""Theme files already registered: resolved path -> theme name."""
+_LOADED: dict[str, tuple[int, str]] = {}
+"""Theme files already registered: resolved path -> (when the file last changed, theme name).
+A file changed since is read again, so an edited theme is seen without restarting."""
 
 _ENVIRONMENT_LOADED = False
 
@@ -167,8 +168,10 @@ def register_theme(source: str | Path | Mapping[str, Any]) -> str:
         data = dict(source)
     else:
         path = Path(source).expanduser().resolve()
-        if str(path) in _LOADED:
-            return _LOADED[str(path)]
+        stamp = path.stat().st_mtime_ns if path.is_file() else 0
+        known = _LOADED.get(str(path))
+        if known and known[0] == stamp:
+            return known[1]
         data = _read(path)
     for name, colours in (data.get("palettes") or {}).items():
         register_palette(name, colours)
@@ -233,7 +236,7 @@ def register_theme(source: str | Path | Mapping[str, Any]) -> str:
     THEMES.pop(name, None)
     _register(made)
     if path is not None:
-        _LOADED[str(path)] = name
+        _LOADED[str(path)] = (stamp, name)
     return name
 
 

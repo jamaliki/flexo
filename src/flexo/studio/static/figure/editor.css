@@ -37,3 +37,6 @@
 
 .fig-messages { position: absolute; left: 14px; bottom: 14px; right: 170px; max-height: 40%; overflow: auto; z-index: 5; }
 .fig-empty { color: var(--ink-3); display: grid; gap: 8px; justify-items: center; }
+
+.fig-page.flash { animation: flash 0.9s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px #d97757, var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }

@@ -567,17 +567,44 @@ uv run flexo gallery --output examples/build
 uv run flexo themes                      # themes, palettes, and bundled fonts
 uv run flexo retheme build/slice.editable.svg "Deep Sea Harvest" -o build/slice.recoloured.svg
 uv run flexo schema
-uv run flexo studio figure.yaml          # edit a figure in the browser (made if missing)
+uv run flexo studio                      # edit this folder's figures and themes in the browser
+uv run flexo studio mcp                  # the studio's tools for an agent (MCP over stdio)
 ```
 
-`flexo studio` serves an editor from this machine: the figure's file on the
-left, the figure drawn on the right as you type, its parts in an outline --
-choose one there or in the drawing to mark it and find it in the file -- and
-every lint message beside it. It exports the editable SVG, PDF, and PNG. Other
-packages add kinds of document to the studio through the `flexo.studio`
-entry-point group (flexo-talk adds decks); `flexo.studio.Kind` says what one
-provides. The studio reads and writes only inside the folder it was opened in,
-answers on `127.0.0.1` alone, and needs the token its page is given.
+### The studio: edit with people and agents, live
+
+`flexo studio` (in a folder, or on a file) opens an editor in the browser, served
+from this machine, for every document in the folder: figures, themes, and --
+with flexo-talk -- decks, each in a tab. It is made for working *with* an
+agent: what anyone changes -- you, Claude in the studio's side panel, an agent
+such as Claude Code working through MCP, or any program writing the files --
+is merged with everyone else's edits, saved, and shown at once. Slides and parts
+an agent touches flash in its colour, its avatar and what it is doing ("Tightening
+slide 4") show where it works, the activity list says who changed what, and
+**Follow** keeps the view on whatever an agent is changing. Undo takes back your
+own last change and leaves others' alone.
+
+- **Figures**: the file on the left, the drawing on the right; choose a part in
+  the outline or the drawing to find it in the file; every lint message beside it.
+- **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
+  and spacing, each shown as the base theme has it until changed, with samples
+  drawn as you go -- figures, slides, or any deck in the folder.
+- **Claude**: ⌘J opens a conversation with Claude that works on the open
+  documents, told what you are looking at. It needs `pip install 'flexo[assistant]'`
+  and credentials the Anthropic SDK finds (`ANTHROPIC_API_KEY`, or `ant auth login`).
+- **Agents**: `claude mcp add flexo-studio -- flexo studio mcp` (once, in the
+  folder) gives Claude Code the studio's tools: list, open, read, and edit
+  documents (as their YAML), *look* at pages as pictures with their warnings,
+  see what you are looking at, and say what it is doing. It joins the studio open
+  on the folder, or starts one. Any MCP client can run `flexo studio mcp` the same way.
+- ⌘K searches every command, slide, and file; `?` lists the keys.
+
+Other packages add kinds of document through the `flexo.studio` entry-point
+group (`flexo.studio.Kind` says what one provides) and samples for the theme
+editor through `flexo.studio.specimens`. The studio reads and writes only inside
+its folder, answers on `127.0.0.1` alone, and needs the token its page is given
+(agents find it in a session file only its owner can read). A document that names
+Python -- a deck's plots -- runs it when drawn.
 
 The builder lowers to the same validated, versioned schema that YAML and JSON
 parse into, so a figure is one thing written two ways -- see

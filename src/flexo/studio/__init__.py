@@ -95,6 +95,14 @@ class Kind(Protocol):
     def export(self, document: Any, base: Path, stem: str, formats: list[str]) -> list[Path]:
         """Write the document's outputs into ``base / "build"``; the files written."""
 
+    # A kind may also offer, for agents and the activity list:
+    #   dump(document) -> str and parse(text) -> document: the document as text
+    #       an agent edits (YAML by default);
+    #   guide() -> str: how its documents are written, given to an agent once;
+    #   describe(before, after) -> [{"text", "where"}]: what a change did;
+    #   check(document, base) -> [str]: what is wrong with a document, quickly;
+    #   adopt(data) -> document: a parsed document as this kind keeps it.
+
 
 def kinds() -> dict[str, Kind]:
     """Every kind the studio knows: flexo's own and those installed packages add."""
@@ -102,8 +110,9 @@ def kinds() -> dict[str, Kind]:
     from importlib.metadata import entry_points
 
     from flexo.studio.figure_kind import FigureKind
+    from flexo.studio.theme_kind import ThemeKind
 
-    found: dict[str, Kind] = {"figure": FigureKind()}
+    found: dict[str, Kind] = {"figure": FigureKind(), "theme": ThemeKind()}
     for entry in entry_points(group="flexo.studio"):
         try:
             kind = entry.load()
