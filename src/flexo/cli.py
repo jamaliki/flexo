@@ -63,6 +63,14 @@ def parser() -> argparse.ArgumentParser:
     )
     retheme.add_argument("--output", "-o", type=Path, required=True)
 
+    studio = subcommands.add_parser(
+        "studio", help="Edit a figure (or any document a plug-in knows) in the browser."
+    )
+    studio.add_argument("source", nargs="?", help="The file to edit; made when first saved.")
+    studio.add_argument("--port", type=int, default=0)
+    studio.add_argument("--kind", help="The kind of a new file: figure, or one a plug-in adds.")
+    studio.add_argument("--no-browser", action="store_true")
+
     subcommands.add_parser("themes", help="List themes, palettes, and bundled fonts.")
     theme = subcommands.add_parser(
         "theme", help="Print a theme as a file to start your own from (see docs/tutorial.md)."
@@ -100,6 +108,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _schema(arguments)
         if arguments.command == "retheme":
             return _retheme(arguments)
+        if arguments.command == "studio":
+            from flexo.studio.server import serve
+
+            serve(
+                arguments.source,
+                port=arguments.port,
+                kind=arguments.kind,
+                browser=not arguments.no_browser,
+            )
+            return 0
         if arguments.command == "themes":
             return _themes()
         if arguments.command == "theme":

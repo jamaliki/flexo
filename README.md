@@ -567,7 +567,17 @@ uv run flexo gallery --output examples/build
 uv run flexo themes                      # themes, palettes, and bundled fonts
 uv run flexo retheme build/slice.editable.svg "Deep Sea Harvest" -o build/slice.recoloured.svg
 uv run flexo schema
+uv run flexo studio figure.yaml          # edit a figure in the browser (made if missing)
 ```
+
+`flexo studio` serves an editor from this machine: the figure's file on the
+left, the figure drawn on the right as you type, its parts in an outline --
+choose one there or in the drawing to mark it and find it in the file -- and
+every lint message beside it. It exports the editable SVG, PDF, and PNG. Other
+packages add kinds of document to the studio through the `flexo.studio`
+entry-point group (flexo-talk adds decks); `flexo.studio.Kind` says what one
+provides. The studio reads and writes only inside the folder it was opened in,
+answers on `127.0.0.1` alone, and needs the token its page is given.
 
 The builder lowers to the same validated, versioned schema that YAML and JSON
 parse into, so a figure is one thing written two ways -- see
