@@ -1072,7 +1072,7 @@ class GroupBuilder:
         gutter: float | None = None,
         secondary: str | None = None,
         sequence: str | None = None,
-        helix: str = "spiral",
+        helix: str = "ribbon",
         numbered: bool = True,
         **options: object,
     ) -> NodeHandle:
@@ -1096,7 +1096,8 @@ class GroupBuilder:
         ``secondary`` draws the secondary structure (see ``flexo.secondary``): a DSSP
         string, one letter a residue from residue 1 (``H`` helix, ``E`` strand, ``T``
         turn, anything else loop), or features of type ``helix``, ``strand``, ``turn``.
-        Helices are spirals (``helix="cylinder"`` for bars) and strands arrows,
+        Helices are ribbons seen side on (``helix="cylinder"`` for bars,
+        ``"spiral"`` for a line) and strands arrows,
         numbered over them unless ``numbered=False``; the strip takes the chain's place
         when nothing else is on it. ``sequence`` writes the one-letter sequence under
         it, where the scale leaves room for a letter a residue. A track with ``start``
@@ -1118,7 +1119,7 @@ class GroupBuilder:
             properties["secondary"] = secondary
         if sequence:
             properties["sequence"] = sequence
-        if helix != "spiral":
+        if helix != "ribbon":
             properties["helix"] = helix
         if not numbered:
             properties["numbered"] = False
