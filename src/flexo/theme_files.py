@@ -17,6 +17,7 @@ theme:
   conventions: {branch: dot}
   sketch: {roughness: 0.3}     # or leave out: drawn ruled
   background: false
+fonts: [fonts/]                # font files (or folders of them) the theme is set in
 ```
 
 ``Figure(theme="lab.yaml")`` uses the file directly; ``flexo.register_theme``
@@ -24,6 +25,11 @@ makes it available by its name (``theme="lab"``); and every file in a directory
 named by ``FLEXO_THEME_PATH`` is registered on first use, so a lab sets the
 variable once. ``flexo theme paper`` prints any theme -- built in or
 registered -- as a complete file to start from.
+
+A theme set in faces Flexo does not ship brings them: ``fonts:`` names font
+files, or folders of them, beside the theme file, and they are registered with
+it (as ``flexo.register_font`` would), so the file works wherever it is copied
+with its fonts.
 
 Palettes are the same: ``flexo.register_palette("Lab", ["#..", ...])``, a file
 of named palettes (``palettes: {Lab: [...], Lab muted: [...]}``) registered with
@@ -44,6 +50,7 @@ from typing import Any
 
 import yaml
 
+from flexo.colour import keep_order
 from flexo.conventions import Conventions, parse_conventions
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.sketch import parse_sketch
@@ -155,10 +162,12 @@ def _plain(value: object) -> object:
 # -- themes ---------------------------------------------------------------------------
 
 
-def register_theme(source: str | Path | Mapping[str, Any]) -> str:
+def register_theme(source: str | Path | Mapping[str, Any], *, folder: Path | None = None) -> str:
     """Register the theme a file (or a mapping) describes, and return its name.
 
-    A file may also carry ``palettes:``, which are registered with it.
+    A file may also carry ``palettes:`` and ``fonts:``, which are registered with
+    it. A mapping's ``fonts:`` are found from ``folder`` (the working directory
+    when it is not given); a file's, from the file's own folder.
     """
 
     from flexo.themes import THEMES, Page, Theme, _register, theme, tone_rule
@@ -173,6 +182,8 @@ def register_theme(source: str | Path | Mapping[str, Any]) -> str:
         if known and known[0] == stamp:
             return known[1]
         data = _read(path)
+        folder = path.parent
+    _register_fonts(data.get("fonts"), folder or Path.cwd())
     for name, colours in (data.get("palettes") or {}).items():
         register_palette(name, colours)
     settings = data.get("theme", data)
@@ -221,6 +232,7 @@ def register_theme(source: str | Path | Mapping[str, Any]) -> str:
     palette = base.palette
     if "palette" in settings:
         palette = _palette_colours(settings["palette"])
+        keep_order(palette)
     tones = base.tones
     if "tones" in settings:
         tones = tone_rule(dict(settings["tones"]))
@@ -314,6 +326,37 @@ def _load_environment() -> None:
                 register_palette(item)
 
 
+_FONTS: dict[str, int] = {}
+"""Font files and folders a theme has registered: resolved path -> when it last changed."""
+
+
+def _register_fonts(entries: object, folder: Path) -> None:
+    """Register the fonts a theme file names, each once for each version of it."""
+
+    from flexo.fonts import register_font
+
+    if entries is None:
+        return
+    if isinstance(entries, str):
+        entries = [entries]
+    if not isinstance(entries, list) or not all(isinstance(entry, str) for entry in entries):
+        raise _fail(
+            "theme.file.invalid",
+            "fonts: is a list of font files or folders.",
+            hint='Write "fonts: [fonts/]" or "fonts: [Face-Regular.ttf, Face-Bold.ttf]".',
+        )
+    for entry in entries:
+        path = (folder / entry).expanduser().resolve()
+        if not path.exists():
+            raise _fail(
+                "theme.font.missing", f'The theme names a font "{entry}" that is not there.'
+            )
+        stamp = path.stat().st_mtime_ns
+        if _FONTS.get(str(path)) != stamp:
+            register_font(path)
+            _FONTS[str(path)] = stamp
+
+
 # -- palettes -------------------------------------------------------------------------
 
 
@@ -387,6 +430,7 @@ def register_palette(
         for existing in [key for key in CUSTOM_PALETTES if key.casefold() == name.casefold()]:
             del CUSTOM_PALETTES[existing]
         CUSTOM_PALETTES[name] = _palette_colours(list(colours))
+        keep_order(CUSTOM_PALETTES[name])
         return (name,)
     path = Path(source).expanduser()
     data = _read(path)
