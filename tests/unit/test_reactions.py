@@ -163,3 +163,20 @@ def test_a_long_label_keeps_its_block_clear_of_the_motif() -> None:
         figure.root.cnn("two", label="Ca prediction\n(U-Net)")
     svg = compile_figure(figure.spec).document.text
     assert 'id="one.motif"' in svg and 'id="two.motif"' not in svg
+
+
+def test_a_block_feeding_a_titled_module_lines_up_with_the_block_it_feeds() -> None:
+    with flexo.Figure("overview", layout="flow-right") as figure:
+        source = figure.root.inset("map", label="Map")
+        unet = figure.root.cnn("unet", label="Prediction\n(U-Net)", input=source)
+        with figure.root.module("gnn", label="Graph network") as gnn:
+            first = gnn.block("first", label="First")
+            second = gnn.block("second", label="Second")
+            figure.connect(first, second)
+        figure.connect(unet, first)
+        figure.connect(second, figure.root.block("out", label="Out"))
+        figure.connect(figure.root.block("side", label="Side"), second)
+    fitted = compile_figure(figure.spec).routed.fitted
+    # The module's children all carry connections out of it; its port line is
+    # still theirs, not its frame's middle, which the title band moves down.
+    assert abs(fitted.node("unet").bounds.center.y - fitted.node("gnn.first").bounds.center.y) < 0.5
