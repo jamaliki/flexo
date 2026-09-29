@@ -157,7 +157,18 @@
         "shadow": {"type": "boolean", "default": false},
         "properties": {
           "type": "object",
-          "additionalProperties": {"type": ["string", "number", "integer", "boolean"]},
+          "additionalProperties": {
+            "anyOf": [
+              {"type": ["string", "number", "integer", "boolean"]},
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {"type": ["string", "number", "integer", "boolean"]}
+                }
+              }
+            ]
+          },
           "default": {}
         }
       }

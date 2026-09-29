@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from flexo.components import COMPONENTS
+from flexo.components import COMPONENTS, normalize_node
 from flexo.conventions import parse_conventions
 from flexo.geometry import Side
 from flexo.ir.semantic import (
@@ -23,6 +24,8 @@ from flexo.ir.semantic import (
     PortSpec,
     TextRun,
     Waypoint,
+    freeze_property,
+    thaw_property,
 )
 from flexo.markup import has_markup, parse_label
 from flexo.schema import validate_document
@@ -182,7 +185,8 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
     _put_label(result, node.label)
     if node.role != "block":
         result["role"] = node.role
-    default_ports = COMPONENTS.get(node.kind)
+    # The ports a node's kind gives it (a construct's include one per part) are not written.
+    default_ports = normalize_node(replace(node, ports=())) if node.kind in COMPONENTS else None
     if default_ports is None or node.ports != default_ports.ports:
         result["ports"] = [
             {
@@ -200,7 +204,7 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
     if node.shadow:
         result["shadow"] = True
     if node.properties:
-        result["properties"] = dict(node.properties)
+        result["properties"] = {name: thaw_property(value) for name, value in node.properties}
     return result
 
 
@@ -398,7 +402,8 @@ def _node(data: dict[str, Any]) -> NodeSpec:
         height=_optional_extent(data.get("height")),
         properties=tuple(
             sorted(
-                {
+                (name, freeze_property(name, value))
+                for name, value in {
                     **data.get("properties", {}),
                     **({"badge": data["badge"]} if data.get("badge") else {}),
                 }.items()

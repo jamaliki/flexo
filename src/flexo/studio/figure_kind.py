@@ -46,6 +46,9 @@ and routes every line.
 figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), palette, width}
 nodes: each {id, label, kind (block by default; text, op, circle, feature-strip, mlp,
   attention, channels, inset, ...), properties: {tone: encoder|head|attention|..., badge, ...}}
+Genetics: kind construct, properties {parts: [{type: promoter|rbs|cds|terminator|operator|origin|
+  insulator|primer|site|region, label, id (makes a port), strand: + or -, tone}]}; kind plasmid,
+  properties {length: bp, features: [{type, label, start, end, strand}]}.
 edges: each {from: node or node.port, to: node or node.port, label, role}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.

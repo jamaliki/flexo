@@ -395,6 +395,10 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ComponentDefinition("spacer", Size(0.0, 0.0), ()),
         # A badge's mark on its own, as large as the author asks (a legend key).
         ComponentDefinition("icon", Size(0.0, 0.0), ()),
+        # Genetic designs (flexo.genetics): a construct's parts on a backbone, its
+        # ends and each part with an id a port; a plasmid map, wired at its sides.
+        ComponentDefinition("construct", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("plasmid", Size(0.0, 0.0), _OP_PORTS),
     )
 }
 
@@ -591,6 +595,16 @@ def motif_area(kind: str, bounds: Rect, label: TextMetrics, style: LayoutStyle) 
 def normalize_node(node: NodeSpec) -> NodeSpec:
     if node.ports or node.kind not in COMPONENTS:
         return node
+    if node.kind == "construct":
+        # Each part with an id is a port; measurement puts it under its glyph.
+        from flexo.genetics import construct_parts
+
+        parts = tuple(
+            PortSpec(part.id, Side.NORTH if part.reverse else Side.SOUTH)
+            for part in construct_parts(node)
+            if part.id is not None
+        )
+        return replace(node, ports=COMPONENTS["construct"].ports + parts)
     return replace(node, ports=COMPONENTS[node.kind].ports)
 
 
@@ -686,6 +700,11 @@ def intrinsic_node_size(
         height = style.resolve_extent(node.height).points if node.height is not None else side
         side = max(width, height)
         return Size(side, side)
+    elif node.kind in {"construct", "plasmid"}:
+        # A genetic design is as big as its drawing: glyphs, arcs, and their words.
+        from flexo.genetics import genetic_drawing
+
+        return genetic_drawing(node, style).size
     elif node.kind == "image":
         # Artwork has a size of its own, and one authored extent implies the
         # other, so image sizing answers on its own rather than through the
