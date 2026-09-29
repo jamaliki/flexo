@@ -22,7 +22,8 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``ungroup``: ``id``'s children take its place;
 - ``move``: ``id`` into ``parent`` at ``index``; ``step``: ``id`` by ``delta``
   places among its siblings;
-- ``duplicate``: ``ids``, with the edges between them.
+- ``duplicate``: ``ids``, with the edges between them;
+- ``read``: nothing; the page asks for the figure as it is.
 
 A figure file that leaves its root group out stacks its parts in a column; the
 first edit that needs the root written down (gathering, moving) writes it, as
@@ -62,7 +63,7 @@ def apply(
     document = _Document(text, suffix)
     verb = str(action.get("do", ""))
     handler = getattr(document, f"_{verb}", None)
-    if verb not in STRUCTURAL | {"update"} or handler is None:
+    if verb not in STRUCTURAL | {"update", "read"} or handler is None:
         raise EditError(f'unknown figure edit "{verb}"')
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
@@ -72,6 +73,23 @@ def apply(
         if problem:
             raise EditError(f"that would break the figure: {problem}")
     return {"text": result, "select": list(select)}
+
+
+def apply_to_data(
+    data: Mapping[str, Any], action: Mapping[str, Any], *, base: Path | None = None
+) -> dict[str, Any]:
+    """``action`` made to a figure written inline in another document (a deck's
+    slide): the figure's data after it, the ids to choose, and its model."""
+
+    import yaml
+
+    text = yaml.safe_dump(dict(data), sort_keys=False, allow_unicode=True)
+    result = apply(text, action, base=base)
+    return {
+        "data": yaml.safe_load(result["text"]),
+        "select": result["select"],
+        "model": model(result["text"]),
+    }
 
 
 def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
@@ -346,6 +364,9 @@ class _Document:
         children.insert(index, identifier)
 
     # -- the actions --
+
+    def _read(self, action: Mapping[str, Any]) -> list[str]:
+        return []  # nothing changes: the page asked for the figure's model
 
     def _add(self, action: Mapping[str, Any]) -> list[str]:
         kind = str(action.get("kind", "block"))

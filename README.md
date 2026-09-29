@@ -813,7 +813,8 @@ own last change and leaves others' alone.
   the parts as they nest, dragged to move them. Every edit is made to the figure's
   file, which the **Source** tab shows and edits too: comments and order stay, and
   what the page has no control for can be written there. Lint messages sit under
-  the drawing; clicking one chooses the part it is about.
+  the drawing; clicking one chooses the part it is about. flexo-talk edits the
+  figures on a deck's slides the same way, where they are drawn.
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.
