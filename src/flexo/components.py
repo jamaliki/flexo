@@ -9,6 +9,7 @@ from math import log2
 
 from flexo.artwork import node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.drawn import DRAWN_KINDS
 from flexo.geometry import Rect, Side, Size
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec
@@ -399,6 +400,15 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # ends and each part with an id a port; a plasmid map, wired at its sides.
         ComponentDefinition("construct", Size(0.0, 0.0), _STANDARD),
         ComponentDefinition("plasmid", Size(0.0, 0.0), _OP_PORTS),
+        # A protein's domain map (flexo.proteins): ends at its chain, and each
+        # feature with an id a port over it.
+        ComponentDefinition("protein", Size(0.0, 0.0), _STANDARD),
+        # A tree (flexo.phylogeny): wired at its root and beside its tips.
+        ComponentDefinition("tree", Size(0.0, 0.0), _STANDARD),
+        # The bench (flexo.bench): a well plate by condition, a protocol timeline
+        # whose events with an id are ports over them.
+        ComponentDefinition("wellplate", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("timeline", Size(0.0, 0.0), _STANDARD),
     )
 }
 
@@ -605,6 +615,21 @@ def normalize_node(node: NodeSpec) -> NodeSpec:
             if part.id is not None
         )
         return replace(node, ports=COMPONENTS["construct"].ports + parts)
+    if node.kind == "protein":
+        from flexo.proteins import protein_features
+
+        named = tuple(
+            PortSpec(feature.id, Side.NORTH)
+            for feature in protein_features(node)
+            if feature.id is not None
+        )
+        return replace(node, ports=COMPONENTS["protein"].ports + named)
+    if node.kind == "timeline":
+        from flexo.bench import timeline_moments
+
+        events, _ = timeline_moments(node)
+        named = tuple(PortSpec(event.id, Side.NORTH) for event in events if event.id is not None)
+        return replace(node, ports=COMPONENTS["timeline"].ports + named)
     return replace(node, ports=COMPONENTS[node.kind].ports)
 
 
@@ -700,11 +725,12 @@ def intrinsic_node_size(
         height = style.resolve_extent(node.height).points if node.height is not None else side
         side = max(width, height)
         return Size(side, side)
-    elif node.kind in {"construct", "plasmid"}:
-        # A genetic design is as big as its drawing: glyphs, arcs, and their words.
-        from flexo.genetics import genetic_drawing
+    elif node.kind in DRAWN_KINDS:
+        # A drawn component (a genetic design, a protein, a tree, a plate) is as
+        # big as its picture: its outlines and their words.
+        from flexo.drawn import picture
 
-        return genetic_drawing(node, style).size
+        return picture(node, style).size
     elif node.kind == "image":
         # Artwork has a size of its own, and one authored extent implies the
         # other, so image sizing answers on its own rather than through the

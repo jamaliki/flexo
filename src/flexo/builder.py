@@ -19,6 +19,7 @@ from flexo.geometry import Side
 from flexo.ir.semantic import (
     TITLE_SIDES,
     ArrowEnds,
+    EdgeHead,
     EdgeShape,
     EdgeSpec,
     FigureSpec,
@@ -478,6 +479,9 @@ class Figure:
         shape: EdgeShape = "auto",
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
+        head: EdgeHead = "arrow",
+        back_label: str | tuple[TextRun, ...] = "",
+        cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
         """Draw one connector from ``source`` to ``target``; see ``GroupBuilder.connect``.
 
@@ -498,6 +502,9 @@ class Figure:
             shape=shape,
             line=line,
             arrow=arrow,
+            head=head,
+            back_label=back_label,
+            cofactors=cofactors,
         )
 
     def connect_all(
@@ -509,11 +516,12 @@ class Figure:
         role: str = "flow",
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
+        head: EdgeHead = "arrow",
     ) -> list[EdgeSpec]:
         """Connect every source to every target; see ``GroupBuilder.connect_all``."""
 
         return self.root.connect_all(
-            sources, targets, shape=shape, role=role, line=line, arrow=arrow
+            sources, targets, shape=shape, role=role, line=line, arrow=arrow, head=head
         )
 
     def residual(
@@ -1051,6 +1059,147 @@ class GroupBuilder:
         if not ticks:
             properties["ticks"] = False
         return self.node(id, "plasmid", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
+    def protein(
+        self,
+        id: str,
+        length: int,
+        features: Sequence[Mapping[str, Scalar]] = (),
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        tracks: Sequence[Mapping[str, Scalar]] | None = None,
+        scale: float | None = None,
+        gutter: float | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A protein's domain map: a chain of ``length`` residues drawn to scale, its
+        ``features`` on it (see ``flexo.proteins``).
+
+        A feature is ``{"type": ..., "label": ..., "start": residue, "end": residue,
+        "tone": ..., "id": ...}``, or ``{"type": "site", "label": ..., "at": residue}``
+        for one residue. ``type`` is ``domain`` (the default), ``region``, ``motif``,
+        ``transmembrane``, ``signal``, a site (``site``, ``mutation``,
+        ``phosphorylation``, ``glycosylation``, ...: a lollipop over the chain), or
+        ``disulfide`` (a bracket under it, from ``start`` to ``end``). Domains take a
+        colour by their name; every mutation shares one, every kind of modification
+        another.
+
+        ``tracks`` draws the protein several times on one scale -- the constructs of a
+        study -- each ``{"label": ..., "start": residue, "end": residue, "delete":
+        "61-121"}``. ``scale`` fixes the points a residue and ``gutter`` the room left
+        of the chain for track names, so separate proteins line up.
+        A feature with an ``id`` is a port over it; ``input`` and ``output`` are the
+        chain's ends.
+        """
+
+        properties: dict[str, object] = {
+            "length": int(length), "features": [dict(feature) for feature in features],
+        }
+        if tracks:
+            properties["tracks"] = [dict(track) for track in tracks]
+        if scale is not None:
+            properties["scale"] = float(scale)
+        if gutter is not None:
+            properties["gutter"] = float(gutter)
+        return self.node(id, "protein", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
+    def tree(
+        self,
+        id: str,
+        newick: str,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        layout: str = "rectangular",
+        clades: Sequence[Mapping[str, Scalar]] = (),
+        lengths: bool = True,
+        support: bool = False,
+        italic: bool = False,
+        scale_bar: bool = True,
+        depth: float | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A tree read from ``newick`` -- a phylogeny, a dendrogram (see ``flexo.phylogeny``).
+
+        ``layout`` is ``"rectangular"`` (root left, tips down the right) or
+        ``"circular"``. Branch lengths in the Newick set the branches (with a scale
+        bar); ``lengths=False`` or a tree without them lines the tips up. Each clade
+        in ``clades`` is ``{"tips": "A, B", "label": ..., "tone": ...}``: the smallest
+        subtree holding those tips is coloured, and named with a bracket beside its
+        tips. ``support=True`` writes internal labels (support values) by their
+        nodes; ``italic=True`` sets tip names in italic, as species names are.
+        ``depth`` is how far, in points, the deepest tip stands from the root.
+        """
+
+        properties: dict[str, object] = {"newick": newick}
+        if layout != "rectangular":
+            properties["layout"] = layout
+        if clades:
+            properties["clades"] = [dict(clade) for clade in clades]
+        for name, value, default in (
+            ("lengths", lengths, True),
+            ("support", support, False),
+            ("italic", italic, False),
+            ("scale_bar", scale_bar, True),
+        ):
+            if value != default:
+                properties[name] = value
+        if depth is not None:
+            properties["depth"] = float(depth)
+        return self.node(id, "tree", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
+    def wellplate(
+        self,
+        id: str,
+        groups: Sequence[Mapping[str, Scalar]] = (),
+        *,
+        wells: int = 96,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A well plate by condition (see ``flexo.bench``): 6, 12, 24, 48, 96, or 384
+        ``wells``, rows lettered and columns numbered.
+
+        Each group is ``{"wells": ..., "label": ..., "tone": ...}``; ``wells`` names
+        a well (``"A1"``), a block (``"B1-D6"``), a row (``"C"``), a column
+        (``"7"``), or several, separated by commas. A group's wells are filled in its
+        condition's colour, named in a legend under the plate; wells in no group are
+        drawn empty.
+        """
+
+        properties: dict[str, object] = {
+            "wells": int(wells), "groups": [dict(group) for group in groups],
+        }
+        return self.node(id, "wellplate", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
+    def timeline(
+        self,
+        id: str,
+        events: Sequence[Mapping[str, Scalar]] = (),
+        spans: Sequence[Mapping[str, Scalar]] = (),
+        *,
+        unit: str = "",
+        label: str | tuple[TextRun, ...] = "",
+        length: float | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A protocol along a time axis (see ``flexo.bench``).
+
+        An event is ``{"at": time, "label": ..., "tone": ..., "id": ...}``: a dot on
+        the axis, named over it (an event with an ``id`` is a port there). A span is
+        ``{"start": time, "end": time, "label": ..., "tone": ...}``: a bar under the
+        axis -- a treatment, say -- coloured by its name and stacked where spans
+        overlap. ``unit`` names the times: ``"day"`` writes "Day 2", ``"h"`` "2 h".
+        ``length`` is the axis's length in points.
+        """
+
+        properties: dict[str, object] = {
+            "events": [dict(event) for event in events], "spans": [dict(span) for span in spans],
+        }
+        if unit:
+            properties["unit"] = unit
+        if length is not None:
+            properties["length"] = float(length)
+        return self.node(id, "timeline", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def feature_strip(
         self,
@@ -2034,6 +2183,9 @@ class GroupBuilder:
         shape: EdgeShape = "auto",
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
+        head: EdgeHead = "arrow",
+        back_label: str | tuple[TextRun, ...] = "",
+        cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
         """Draw one connector from ``source`` to ``target``.
 
@@ -2053,6 +2205,16 @@ class GroupBuilder:
         instead of a routed path; ``"auto"`` follows the figure's ``lines``
         convention. ``line="dashed"`` or ``"dotted"`` strokes it that way, and
         ``arrow="none"`` (an undirected link) or ``"both"`` moves its arrowheads.
+
+        For pathways, gene circuits, and reactions, ``head=`` says what the
+        connector does to its target, after SBGN: ``"inhibition"`` (a bar, ⊣),
+        ``"catalysis"`` (an open circle), ``"stimulation"`` (an open triangle),
+        ``"necessary"`` (a bar and an open triangle), or ``"modulation"`` (an
+        open diamond). ``arrow="reversible"`` draws a reversible step as two
+        half-headed lines (⇌), with ``label`` over them and ``back_label`` --
+        the reverse rate constant, say -- under them. ``cofactors=("ATP",
+        "ADP")`` writes what the step takes in and gives off as a curved arrow
+        touching the line, opposite ``label`` (either may be ``""``).
         """
 
         source_ref = _reference(source, source_port)
@@ -2069,6 +2231,9 @@ class GroupBuilder:
             shape=shape,
             line=line,
             arrow=arrow,
+            head=head,
+            back_label=_label(back_label),
+            cofactors=tuple(_label(item) for item in cofactors) if cofactors else (),
         )
         self.figure._edges.append(edge)
         return edge
@@ -2082,6 +2247,7 @@ class GroupBuilder:
         role: str = "flow",
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
+        head: EdgeHead = "arrow",
     ) -> list[EdgeSpec]:
         """Connect every source to every target: a fully connected layer.
 
@@ -2090,7 +2256,9 @@ class GroupBuilder:
         """
 
         return [
-            self.connect(source, target, shape=shape, role=role, line=line, arrow=arrow)
+            self.connect(
+                source, target, shape=shape, role=role, line=line, arrow=arrow, head=head
+            )
             for source in sources
             for target in targets
         ]

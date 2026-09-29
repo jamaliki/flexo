@@ -18,6 +18,7 @@ from flexo.geometry import Point, Rect, Side, segments
 from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.routed import RoutedEdge, RoutedNet, RoutedStem
 from flexo.ir.semantic import EdgeSpec, NetSpec
+from flexo.routing.aside import aside_metrics
 from flexo.routing.hints import SideBias, via_diagnostics
 from flexo.routing.ink import (
     edge_label_position,
@@ -313,6 +314,7 @@ def routed_edge(
             "none": 0.0,
             "end": style.connector_standoff.points,
             "both": style.arrow_length.points + style.connector_standoff.points,
+            "reversible": style.arrow_length.points + style.connector_standoff.points,
         }[edge.arrow]
         shaft = shorten_start(drawn, start)
     metrics = measurer.measure(edge.label) if edge.label else None
@@ -341,6 +343,7 @@ def routed_edge(
         bundle=bundle,
         joined_at=joined_at,
         join_arrow=join_arrow,
+        aside_metrics=aside_metrics(edge, measurer.measure),
     )
 
 
@@ -359,7 +362,7 @@ def _shaft(edge: EdgeSpec, drawn: tuple[Point, ...], style: LayoutStyle) -> tupl
         arrow_length=style.arrow_length.points,
         standoff=style.connector_standoff.points,
     )
-    if edge.arrow == "both":
+    if edge.arrow in {"both", "reversible"}:
         shaft = shorten_start(shaft, head - style.connector_standoff.points)
     return shaft
 

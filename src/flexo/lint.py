@@ -200,6 +200,7 @@ def _routing_diagnostics(
         reserved = {
             "end": head + style.connector_standoff.points,
             "both": 2.0 * head,
+            "reversible": 2.0 * head,
             "none": 0.0,
         }[edge.spec.arrow]
         if edge.joined_at is None and abs(center_length - shaft_length - reserved) > 1e-5:
@@ -303,6 +304,10 @@ def _caption_diagnostics(compilation: Compilation) -> list[Diagnostic]:
         )
         for item in (*routed.edges, *routed.nets)
         if item.label_metrics is not None and item.label_position is not None
+    ] + [
+        (edge.spec.id, edge.aside.box.inflated(-_CAPTION_TOLERANCE))
+        for edge in routed.edges
+        if edge.aside is not None
     ]
     lines = [(edge.spec.id, edge.centerline) for edge in routed.edges] + [
         (net.spec.id, piece) for net in routed.nets for piece in net.pieces

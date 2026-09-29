@@ -1,7 +1,7 @@
-"""Constructs and plasmids drawn: the shapes and words of ``flexo.genetics``, painted.
+"""Drawn components painted: the shapes and words of a ``flexo.drawn`` picture.
 
-Every shape is a plain path painted by role -- a gene's colour by its tone, the
-backbone and the promoters in ink -- so ``flexo retheme`` recolours a drawing,
+Every shape is a plain path painted by role -- a gene's or a domain's colour by
+its tone, backbones and axes in ink -- so ``flexo retheme`` recolours a drawing,
 the portable SVG and PDF carry it, and a sketched theme draws it by hand.
 """
 
@@ -11,7 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 
-from flexo.genetics import GeneticDrawing, Shape, genetic_drawing
+from flexo.drawn import Picture, Shape, picture
 from flexo.ir.fitted import FittedNode
 from flexo.render_common import paint_attributes, render_runs
 from flexo.style import LayoutStyle, Palette
@@ -46,13 +46,13 @@ def _number(value: float) -> str:
     return "0" if text in {"", "-0"} else text
 
 
-def render_genetic(
+def render_drawn(
     parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette
 ) -> None:
-    """Draw a construct or plasmid, centred in the bounds layout gave it."""
+    """Draw a drawn component, centred in the bounds layout gave it."""
 
     spec = node.measured.spec
-    drawing: GeneticDrawing = genetic_drawing(spec, style)
+    drawing: Picture = picture(spec, style)
     dx = node.bounds.x + (node.bounds.width - drawing.size.width) / 2.0
     dy = node.bounds.y + (node.bounds.height - drawing.size.height) / 2.0
     for shape in drawing.shapes:
@@ -104,6 +104,12 @@ def _paint(shape: Shape, palette: Palette) -> dict[str, object]:
         return paint_attributes(palette=palette, stroke_role="ink", stroke_width=width)
     if shape.paint in {"tick", "leader"}:
         return paint_attributes(palette=palette, stroke_role="muted-ink", stroke_width=width)
+    if shape.paint == "guide":
+        # A dotted guide: a name led to where it is written, lighter than any line.
+        return {
+            **paint_attributes(palette=palette, stroke_role="muted-ink", stroke_width=width * 0.6),
+            "stroke__dasharray": f"0 {_number(width * 2.2)}",
+        }
     if shape.paint == "line":
         return paint_attributes(palette=palette, stroke_role=line, stroke_width=width)
     if shape.paint == "solid":
@@ -118,6 +124,6 @@ def _paint(shape: Shape, palette: Palette) -> dict[str, object]:
 
 
 def _caps(shape: Shape) -> dict[str, object]:
-    if shape.paint in {"line", "backbone", "tick", "leader"}:
+    if shape.paint in {"line", "backbone", "tick", "leader", "guide"}:
         return {"stroke__linecap": "round", "stroke__linejoin": "round"}
     return {"stroke__linejoin": "round"}

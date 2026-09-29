@@ -18,7 +18,7 @@ and plasmid of a figure; any part or feature can name a ``tone`` of its own.
 
 This module is geometry only: where every glyph, arc, and word goes, in the
 component's own coordinates, from the style and the measured words. Measurement
-sizes the component from it; ``render_genetics`` draws it.
+sizes the component from it; ``render_drawn`` draws it.
 """
 
 from __future__ import annotations
@@ -28,13 +28,11 @@ import math
 from dataclasses import dataclass, replace
 
 from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.drawn import Picture, Shape, Words, nice_step, path, units
 from flexo.geometry import Side, Size
-from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, TextRun
 from flexo.markup import parse_label
 from flexo.style import LayoutStyle
-from flexo.text import TextMeasurer
-from flexo.units import pt
 
 GENETIC_KINDS = frozenset({"construct", "plasmid"})
 
@@ -231,78 +229,6 @@ def genetic_tones(node: NodeSpec) -> tuple[str, ...]:
     return tuple(dict.fromkeys(tone for part in parts if (tone := part_tone(part)) is not None))
 
 
-# -- what is drawn ------------------------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class Shape:
-    """One outline of a drawing, in the component's own coordinates.
-
-    ``paint`` is ``"line"`` (stroked only), ``"body"`` (filled and outlined), ``"hollow"``
-    (outlined over the page colour) or ``"backbone"``; ``tone`` names the colour, or
-    none for ink.
-    """
-
-    id: str
-    d: str
-    paint: str
-    tone: str | None = None
-    width: float = 1.0
-
-
-@dataclass(frozen=True, slots=True)
-class Words:
-    """A label set at ``x``, its first baseline at ``y``, anchored start, middle, or end."""
-
-    id: str
-    runs: tuple[TextRun, ...]
-    metrics: TextMetrics
-    x: float
-    y: float
-    anchor: str = "middle"
-    role: str = "ink"
-    tone: str | None = None
-    size: float | None = None
-    weight: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class GeneticDrawing:
-    """Everything a construct or plasmid draws, and how big it is."""
-
-    size: Size
-    shapes: tuple[Shape, ...] = ()
-    words: tuple[Words, ...] = ()
-    ports: tuple[PortSpec, ...] = ()
-
-
-def _f(value: float) -> str:
-    text = f"{value:.2f}".rstrip("0").rstrip(".")
-    return "0" if text in {"-0", ""} else text
-
-
-def _path(*commands: object) -> str:
-    return " ".join(_f(item) if isinstance(item, float | int) else str(item) for item in commands)
-
-
-class _Type:
-    """The measures a drawing is made in: the label size ``u``, and the pen."""
-
-    def __init__(self, style: LayoutStyle) -> None:
-        self.style = style
-        self.u = style.typography.size.points
-        self.pen = style.stroke_width.points
-        self.measurer = TextMeasurer(style.typography)
-        small = replace(style.typography, size=pt(self.u * 0.78), minimum_size=pt(self.u * 0.6))
-        self.small = TextMeasurer(small)
-        self.small_size = self.u * 0.78
-
-    def measure(
-        self, runs: tuple[TextRun, ...], *, small: bool = False, weight: int | None = None
-    ) -> TextMetrics:
-        return (self.small if small else self.measurer).measure(runs, weight=weight)
-
-
 # -- constructs ---------------------------------------------------------------------------
 
 
@@ -359,7 +285,7 @@ def _glyph_shapes(
 
     def line(*points: tuple[float, float]) -> str:
         first, *rest = [at(*point) for point in points]
-        return _path("M", *first, *[item for point in rest for item in ("L", *point)])
+        return path("M", *first, *[item for point in rest for item in ("L", *point)])
 
     half = width / 2.0
     heavy = pen * 1.6
@@ -386,7 +312,7 @@ def _glyph_shapes(
     if kind == "rbs":
         r = 0.68 * u
         (x1, y1), (x2, y2) = at(-r, 0.0), at(r, 0.0)
-        return [Shape(name, _path("M", x1, y1, "A", r, r, 0, 0, 1, x2, y2, "Z"), "body", tone, pen)]
+        return [Shape(name, path("M", x1, y1, "A", r, r, 0, 0, 1, x2, y2, "Z"), "body", tone, pen)]
     if kind == "cds":
         h = 0.9 * u
         tip = min(1.1 * u, width / 3.0)
@@ -435,7 +361,7 @@ def _glyph_shapes(
         return [
             Shape(
                 name,
-                _path(
+                path(
                     "M",
                     cx - r,
                     cy,
@@ -472,11 +398,11 @@ def _glyph_shapes(
     return []
 
 
-def construct_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
+def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     """A construct laid out: parts left to right on the backbone, names under them
     (over them for reverse parts, inside for genes), the construct's name over all."""
 
-    measures = _Type(style)
+    measures = units(style)
     u, pen = measures.u, measures.pen
     parts = construct_parts(node)
     if not parts:
@@ -519,7 +445,7 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
     shapes = [
         Shape(
             f"{node.id}.backbone",
-            _path("M", 0.0, base, "L", length, base),
+            path("M", 0.0, base, "L", length, base),
             "backbone",
             None,
             pen * 1.4,
@@ -570,7 +496,7 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
                 weight=style.typography.title_weight,
             )
         )
-    return GeneticDrawing(Size(length, height), tuple(shapes), tuple(words), tuple(ports))
+    return Picture(Size(length, height), tuple(shapes), tuple(words), tuple(ports))
 
 
 # -- plasmids -----------------------------------------------------------------------------
@@ -626,34 +552,11 @@ def _overlap(a1: float, a2: float, b1: float, b2: float, clearance: float) -> bo
     return False
 
 
-def _nice_step(length: int) -> int:
-    for step in (
-        10,
-        20,
-        50,
-        100,
-        200,
-        250,
-        500,
-        1000,
-        2000,
-        2500,
-        5000,
-        10000,
-        20000,
-        50000,
-        100000,
-    ):
-        if length / step <= 8:
-            return step
-    return 10 ** int(math.log10(length))
-
-
-def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
+def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     """A plasmid map: the backbone a circle, features arcs by their base pairs (stacked
     where they overlap), sites ticks, every feature named outside with a leader line."""
 
-    measures = _Type(style)
+    measures = units(style)
     u, pen = measures.u, measures.pen
     length = plasmid_length(node)
     features = plasmid_features(node)
@@ -754,7 +657,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
     shapes = [
         Shape(
             f"{node.id}.backbone",
-            _path(
+            path(
                 "M",
                 cx - radius,
                 cy,
@@ -784,7 +687,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
     # Ticks inside the backbone, every round number of base pairs, each numbered.
     words: list[Words] = []
     if node.property("ticks", True) not in (False, "false", "no"):
-        step = _nice_step(length)
+        step = nice_step(length)
         ticks = []
         for position in range(step, length, step):
             angle = position / length * 2.0 * math.pi
@@ -810,7 +713,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
                 )
             )
         if ticks:
-            shapes.append(Shape(f"{node.id}.ticks", _path(*ticks), "tick", None, pen * 0.8))
+            shapes.append(Shape(f"{node.id}.ticks", path(*ticks), "tick", None, pen * 0.8))
 
     for index, part in enumerate(features):
         name = f"{node.id}.feature{index + 1}"
@@ -819,7 +722,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
             angle = (part.start - 0.5) / length * 2.0 * math.pi
             x1, y1 = point(radius - 0.35 * u, angle)
             x2, y2 = point(radius + 0.9 * u, angle)
-            shapes.append(Shape(name, _path("M", x1, y1, "L", x2, y2), "line", tone, pen * 1.2))
+            shapes.append(Shape(name, path("M", x1, y1, "L", x2, y2), "line", tone, pen * 1.2))
             continue
         if part.type == "terminator":
             angle = (part.start + part.end - 1) / 2.0 / length * 2.0 * math.pi
@@ -831,7 +734,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
             shapes.append(
                 Shape(
                     name,
-                    _path("M", *stem_in, "L", *stem_out, "M", *bar1, "L", *bar2),
+                    path("M", *stem_in, "L", *stem_out, "M", *bar1, "L", *bar2),
                     "line",
                     tone,
                     pen * 1.6,
@@ -868,7 +771,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
         shapes.append(
             Shape(
                 f"{label.words.id.removesuffix('.label')}.leader",
-                _path("M", fx, fy, "L", ex, ey, "L", tx, ty),
+                path("M", fx, fy, "L", ex, ey, "L", tx, ty),
                 "leader",
                 None,
                 pen * 0.7,
@@ -911,7 +814,7 @@ def plasmid_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
                 size=measures.small_size,
             )
         )
-    return GeneticDrawing(size, tuple(shapes), tuple(words), ())
+    return Picture(size, tuple(shapes), tuple(words), ())
 
 
 def _arc(
@@ -965,10 +868,13 @@ def _arc(
             *point(outer + wide * 0.5, a1),
         ]
     commands.append("Z")
-    return _path(*commands)
+    return path(*commands)
 
 
-def genetic_drawing(node: NodeSpec, style: LayoutStyle) -> GeneticDrawing:
+def genetic_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     if node.kind == "construct":
         return construct_drawing(node, style)
     return plasmid_drawing(node, style)
+
+
+GeneticDrawing = Picture

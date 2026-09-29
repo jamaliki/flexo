@@ -61,6 +61,8 @@ def thaw_property(value: PropertyValue) -> object:
     if isinstance(value, tuple):
         return [record.as_dict() for record in value]
     return value
+
+
 type LayoutKind = Literal[
     "row", "column", "grid", "overlay", "stack", "flow", "flow-right", "cycle"
 ]
@@ -79,10 +81,19 @@ def _unknown(what: str, value: object, valid: tuple[str, ...]) -> str:
     guess = f' (did you mean "{close[0]}"?)' if close else ""
     return f'unknown {what} "{value}"{guess}; valid: {", ".join(valid)}'
 
+
 type CollisionPolicy = Literal["disjoint", "overlay", "ignore"]
 type NetKind = Literal["fan-out", "merge"]
-type ArrowEnds = Literal["end", "none", "both"]
-ARROW_ENDS = ("end", "none", "both")
+type ArrowEnds = Literal["end", "none", "both", "reversible"]
+ARROW_ENDS = ("end", "none", "both", "reversible")
+type EdgeHead = Literal[
+    "arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"
+]
+EDGE_HEADS = ("arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation")
+"""What an arrowhead says, after SBGN: an ordinary arrow; a bar for inhibition
+(a repressor on its promoter); an open circle for catalysis; an open triangle for
+stimulation, with a bar behind it for necessary stimulation; an open diamond for
+modulation."""
 type LineStyle = Literal["solid", "dashed", "dotted"]
 LINE_STYLES = ("solid", "dashed", "dotted")
 type EdgeShape = Literal["auto", "orthogonal", "straight"]
@@ -416,7 +427,17 @@ class EdgeSpec:
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
     arrow: ArrowEnds = "end"
     """Where the arrowheads are: ``"end"`` (the target), ``"none"`` for an
-    undirected link, or ``"both"``."""
+    undirected link, or ``"both"``; ``"reversible"`` draws a reaction's two
+    directions as two half-headed lines side by side (⇌)."""
+    head: EdgeHead = "arrow"
+    """The head's shape and meaning; see ``EDGE_HEADS``."""
+    back_label: tuple[TextRun, ...] = ()
+    """A second caption, on the other side of the line from ``label``: the rate
+    constant of a reversible reaction's way back, say."""
+    cofactors: tuple[tuple[TextRun, ...], ...] = ()
+    """What a reaction takes in and gives off on the side (ATP and ADP), drawn as
+    a curved arrow that touches the line opposite ``label``: two captions, the
+    one taken in first; either may be empty."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Edge ID")
@@ -424,6 +445,23 @@ class EdgeSpec:
             raise ValueError(
                 f'unknown arrow "{self.arrow}" for edge "{self.id}"; '
                 f"valid values: {', '.join(ARROW_ENDS)}"
+            )
+        if self.head not in EDGE_HEADS:
+            raise ValueError(f'edge "{self.id}": ' + _unknown("head", self.head, EDGE_HEADS))
+        if self.head != "arrow" and self.arrow in {"none", "reversible"}:
+            raise ValueError(
+                f'edge "{self.id}" has head "{self.head}" but arrow "{self.arrow}"; '
+                'a head needs arrow "end" or "both"'
+            )
+        if self.cofactors and (len(self.cofactors) != 2 or not any(self.cofactors)):
+            raise ValueError(
+                f'edge "{self.id}": cofactors are two captions, what goes in and what '
+                'comes out, e.g. ("ATP", "ADP"); either may be empty, not both'
+            )
+        if self.cofactors and self.back_label:
+            raise ValueError(
+                f'edge "{self.id}" has both cofactors and a back label; both go on the '
+                "side opposite its label, so it takes one or the other"
             )
         if self.lane_hint is not None:
             _validate_id(self.lane_hint, "Lane hint")
@@ -500,8 +538,7 @@ class NetSpec:
         if self.rail_at is not None:
             if not 0.0 < self.rail_at < 1.0:
                 raise ValueError(
-                    f'net "{self.id}" rail_at must lie strictly between 0 and 1, '
-                    f"not {self.rail_at}"
+                    f'net "{self.id}" rail_at must lie strictly between 0 and 1, not {self.rail_at}'
                 )
             if self.rail_hint is not None:
                 raise ValueError(

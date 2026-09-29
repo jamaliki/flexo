@@ -223,6 +223,10 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
                 (Point(box.left, box.top), Point(box.right, box.bottom)),
             )
             cramped(owner, edge.spec.id, edge.centerline, box)
+        if edge.aside is not None:
+            box = edge.aside.box
+            check(owner, (Point(box.left, box.top), Point(box.right, box.bottom)))
+            cramped(owner, edge.spec.id, edge.centerline, box)
     for net in routed.nets:
         ids = tuple(ref.node_id for ref in net.spec.sources + net.spec.targets)
         owner = bounded_owner(figure, parents, ids)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import cache
@@ -34,8 +34,17 @@ def add_metadata(parent: ET.Element, routed: RoutedFigure, palette: Palette) -> 
     )
 
 
-def add_definitions(parent: ET.Element, style: LayoutStyle, palette: Palette) -> ET.Element:
+def add_definitions(
+    parent: ET.Element,
+    style: LayoutStyle,
+    palette: Palette,
+    heads: Iterable[str] = (),
+) -> ET.Element:
     """Arrowhead markers and the (still empty) font stylesheet.
+
+    ``heads`` names the other heads the figure's connectors end in, as their
+    marker ids (``arrow.flow.inhibition``, ``arrow.flow.harpoon``, with
+    ``.start`` for the head at a line's start); only those are defined.
 
     The stylesheet is filled by ``embed_fonts`` once the document is written,
     because only then is it known which characters the figure actually uses.
@@ -47,7 +56,114 @@ def add_definitions(parent: ET.Element, style: LayoutStyle, palette: Palette) ->
         _arrow_marker(definitions, role, paint_role, style, palette)
         # The same head for the start of a line, turned to point back along it.
         _arrow_marker(definitions, role, paint_role, style, palette, start=True)
+    for identifier in sorted(set(heads)):
+        _, role, head, *start = identifier.split(".")
+        paint_role = "residual" if role == "residual" else "connector"
+        _head_marker(definitions, identifier, head, paint_role, style, palette, start=bool(start))
     return stylesheet
+
+
+def head_marker_id(role: str, head: str, *, start: bool = False) -> str:
+    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``)."""
+
+    base = "residual" if role == "residual" else "flow"
+    name = f"arrow.{base}" if head == "arrow" else f"arrow.{base}.{head}"
+    return f"{name}.start" if start else name
+
+
+def _head_marker(
+    definitions: ET.Element,
+    identifier: str,
+    head: str,
+    paint_role: str,
+    style: LayoutStyle,
+    palette: Palette,
+    *,
+    start: bool,
+) -> None:
+    """A head that says something other than "goes to", after SBGN.
+
+    Each is drawn in the arrow's own box -- from where the shaft stops to the
+    tip ``arrow_length`` on -- so any head fits wherever an arrow fits:
+
+    - ``inhibition``: the line runs on to a bar across it (⊣);
+    - ``catalysis``: an open circle at the tip;
+    - ``stimulation``: an open triangle; ``necessary``: a bar, then one;
+    - ``modulation``: an open diamond;
+    - ``harpoon``: half an arrowhead, on the left of the line's travel -- one
+      of the two lines of a reversible reaction (⇌).
+    """
+
+    length = style.arrow_length.points
+    half = style.arrow_width.points / 2.0
+    width = style.connector_width.points
+    marker = element(
+        definitions,
+        "marker",
+        id=identifier,
+        viewBox=f"{number(-width - half)} {number(-2 * half - width)} "
+        f"{number(length + 2 * width + 2 * half)} {number(4 * half + 2 * width)}",
+        refX=0.0,
+        refY=0.0,
+        markerWidth=length + 2 * width + 2 * half,
+        markerHeight=4 * half + 2 * width,
+        markerUnits="userSpaceOnUse",
+        orient="auto-start-reverse" if start else "auto",
+        overflow="visible",
+    )
+    n = number
+    # Open heads are left unfilled: the shaft stops at their base, and the page
+    # behind them may be anything.
+    hollow = {"stroke_role": paint_role, "stroke_width": width}
+    # A regulation head touches what it acts on: its tip goes on over the
+    # standoff an arrow keeps, to the component's edge.
+    tip = length + style.connector_standoff.points - width / 2.0
+    if head == "inhibition":
+        bar = half * 2.1
+        data = f"M 0 0 L {n(tip)} 0 M {n(tip)} {n(-bar)} L {n(tip)} {n(bar)}"
+        paint = {"stroke_role": paint_role, "stroke_width": width * 1.4}
+    elif head == "catalysis":
+        radius = half * 1.1
+        left = tip - 2.0 * radius
+        data = (
+            f"M 0 0 L {n(left)} 0 M {n(left)} 0 "
+            f"A {n(radius)} {n(radius)} 0 1 1 {n(tip)} 0 "
+            f"A {n(radius)} {n(radius)} 0 1 1 {n(left)} 0 Z"
+        )
+        paint = hollow
+    elif head in {"stimulation", "necessary"}:
+        wide, base = half * 1.2, tip - length * 1.2
+        data = f"M 0 0 L {n(base)} 0 M {n(base)} {n(-wide)} L {n(tip)} 0 L {n(base)} {n(wide)} Z"
+        if head == "necessary":
+            bar = base - 2.6 * width
+            data = f"M {n(bar)} {n(-wide)} L {n(bar)} {n(wide)} " + data
+        paint = hollow
+    elif head == "modulation":
+        wide, base = half * 1.2, tip - length * 1.5
+        middle = (base + tip) / 2.0
+        data = (
+            f"M 0 0 L {n(base)} 0 M {n(base)} 0 L {n(middle)} {n(-wide)} "
+            f"L {n(tip)} 0 L {n(middle)} {n(wide)} Z"
+        )
+        paint = hollow
+    elif head == "harpoon":
+        if style.arrow_shape == "open":
+            data = f"M 0 0 L {n(length)} 0 L 0 {n(-half)}"
+            paint = {"stroke_role": paint_role, "stroke_width": width}
+        else:
+            data = f"M 0 {n(-half)} L {n(length)} 0 L 0 0 Z"
+            paint = {"fill_role": paint_role}
+    else:
+        raise ValueError(f'unknown arrowhead "{head}"')
+    element(
+        marker,
+        "path",
+        id=f"{identifier}.shape",
+        d=data,
+        stroke__linecap="round",
+        stroke__linejoin="round" if head != "harpoon" else "miter",
+        **paint_attributes(palette=palette, **paint),  # type: ignore[arg-type]
+    )
 
 
 def _arrow_marker(
@@ -103,10 +219,7 @@ def _arrow_marker(
         return
     if shape == "stealth":
         notch = length / 3.0
-        data = (
-            f"M 0 {number(-half)} L {number(length)} 0 L 0 {number(half)} "
-            f"L {number(notch)} 0 Z"
-        )
+        data = f"M 0 {number(-half)} L {number(length)} 0 L 0 {number(half)} L {number(notch)} 0 Z"
     elif shape == "latex":
         bulge = half * 0.35
         data = (
@@ -223,9 +336,7 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
             if not used:
                 continue
             data = _subset(face, loaded.raw, frozenset(used))
-            weight = (
-                f"{face.weight_min} {face.weight_max}" if face.variable else str(face.weight)
-            )
+            weight = f"{face.weight_min} {face.weight_max}" if face.variable else str(face.weight)
             fmt = "opentype" if face.source.lower().endswith(".otf") else "truetype"
             mime = "font/otf" if fmt == "opentype" else "font/ttf"
             encoded = base64.b64encode(data).decode("ascii")

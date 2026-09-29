@@ -16,6 +16,7 @@ from flexo.components import (
     vector_grid,
     volume_geometry,
 )
+from flexo.drawn import DRAWN_KINDS
 from flexo.ir.fitted import FittedNode
 from flexo.ir.semantic import NodeSpec
 from flexo.render_common import (
@@ -46,10 +47,10 @@ def render_node(
         data__flexo__kind=spec.kind,
         data__flexo__role=spec.role,
     )
-    if spec.kind in {"construct", "plasmid"}:
-        from flexo.render_genetics import render_genetic
+    if spec.kind in DRAWN_KINDS:
+        from flexo.render_drawn import render_drawn
 
-        render_genetic(group, node, style, palette)
+        render_drawn(group, node, style, palette)
         return group
     if spec.kind == "icon":
         bounds = node.bounds

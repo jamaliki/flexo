@@ -207,7 +207,17 @@
         "via": {"$ref": "#/$defs/side"},
         "shape": {"enum": ["auto", "orthogonal", "straight"]},
         "line": {"enum": ["solid", "dashed", "dotted"]},
-        "arrow": {"enum": ["end", "none", "both"]}
+        "arrow": {"enum": ["end", "none", "both", "reversible"]},
+        "head": {
+          "enum": ["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"]
+        },
+        "back_label": {"$ref": "#/$defs/label"},
+        "cofactors": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/label"}
+        }
       }
     },
     "net": {
