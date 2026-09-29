@@ -34,6 +34,15 @@ from flexo.geometry import Side, Size
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, TextRun
 from flexo.markup import parse_label
+from flexo.secondary import (
+    HELIX_TONE,
+    SECONDARY_KINDS,
+    STRAND_TONE,
+    Element,
+    dssp_elements,
+    make_lane,
+    numbered,
+)
 from flexo.style import LayoutStyle
 
 FEATURE_TYPES: dict[str, str] = {
@@ -47,7 +56,13 @@ FEATURE_TYPES: dict[str, str] = {
     "motif": "motif",
     "transmembrane": "transmembrane",
     "tm": "transmembrane",
-    "helix": "transmembrane",
+    "helix": "helix",
+    "alpha-helix": "helix",
+    "310-helix": "helix",
+    "strand": "strand",
+    "beta-strand": "strand",
+    "sheet": "strand",
+    "turn": "turn",
     "signal": "signal",
     "signal-peptide": "signal",
     "transit-peptide": "signal",
@@ -271,9 +286,43 @@ def feature_tone(feature: Feature) -> str | None:
 
 
 def protein_tones(node: NodeSpec) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(tone for feature in protein_features(node) if (tone := feature_tone(feature)))
-    )
+    tones = [tone for feature in protein_features(node) if (tone := feature_tone(feature))]
+    kinds = {element.kind for element in protein_secondary(node)}
+    tones += [
+        tone for kind, tone in (("helix", HELIX_TONE), ("strand", STRAND_TONE)) if kind in kinds
+    ]
+    return tuple(dict.fromkeys(tones))
+
+
+def protein_secondary(node: NodeSpec) -> list[Element]:
+    """The protein's helices, strands, and turns: its DSSP string's, and its features'."""
+
+    length = protein_length(node)
+    elements: list[Element] = []
+    text = node.property("secondary")
+    if text:
+        first = int(node.property("secondary_start") or 1)  # type: ignore[arg-type]
+        read = dssp_elements(str(text), first)
+        if isinstance(read, str):
+            raise _fail(
+                node,
+                "secondary",
+                f'"{read}" is not a DSSP letter.',
+                hint="Write H, G, I (helix), E (strand), T (turn), or C, S, B, - (loop).",
+            )
+        last = first + len(str(text)) - 1
+        if first < 1 or last > length:
+            raise _fail(
+                node,
+                "secondary",
+                f"the secondary structure runs from residue {first} to {last}, "
+                f"outside the protein (1 to {length}).",
+            )
+        elements.extend(read)
+    for feature in protein_features(node):
+        if feature.kind in SECONDARY_KINDS:
+            elements.append(Element(feature.kind, feature.start, feature.end, feature.label))
+    return numbered(elements, node.property("numbered") is not False)
 
 
 # -- layout ---------------------------------------------------------------------------
@@ -363,11 +412,15 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         # A gutter for track names as wide as another protein's, so the two line up.
         gutter = max(gutter, float(authored))  # type: ignore[arg-type]
     left = pad + gutter + 0.3 * u
-    right = left + length * scale
+    # The stretch any track shows: a close view of a segment starts at its first residue.
+    first = min(track.start for track in tracks)
+    last = max(track.end for track in tracks)
+    right = left + (last - first + 1) * scale
+    secondary = protein_secondary(node)
 
     def x_of(residue: float) -> float:
-        # A residue fills [residue - 1, residue] of the chain.
-        return left + (residue - 1.0) * scale
+        # Residue r fills [x_of(r), x_of(r + 1)] of the chain; its centre is x_of(r + 0.5).
+        return left + (residue - first) * scale
 
     title = (
         measures.measure(node.label, weight=style.typography.title_weight) if node.label else None
@@ -398,6 +451,12 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             [chain / 2.0]
             + [(tall if item.kind == "transmembrane" else box) / 2.0 for item in spans]
         )
+        # Secondary structure: in the chain's place when nothing else is on it,
+        # else in a strip of its own under the chain.
+        lane = make_lane(node, secondary, track.pieces(), scale, measures)
+        replacing = lane is not None and not spans
+        if replacing:
+            top_reach = max(top_reach, lane.up)
 
         # Sites: lollipops over the chain, names spread over them.
         site_labels = [
@@ -405,7 +464,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                 f"{key}.site{index}",
                 item.label,
                 measures.measure(item.label, small=True),
-                x_of(item.start - 0.5),
+                x_of(item.start + 0.5),
             )
             for index, item in enumerate(sites, 1)
             if item.label
@@ -419,7 +478,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         levels: list[int] = []
         last_at: dict[int, float] = {}
         for item in sites:
-            x = x_of(item.start - 0.5)
+            x = x_of(item.start + 0.5)
             level = 0
             while level in last_at and x - last_at[level] < 2.6 * head:
                 level += 1
@@ -459,6 +518,16 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         bond_lanes = _lanes([(x_of(b.start), x_of(b.end)) for b in bonds], 0.4 * u)
         if bonds:
             below = bond_top - base + (max(bond_lanes) + 1) * 0.6 * u
+        if lane is not None:
+            if replacing and not bonds:
+                below = max(below, lane.down)
+                strip = base
+            else:
+                strip = base + below + 0.6 * u + lane.up
+                below = strip - base + lane.down
+            lane_shapes, lane_words = lane.draw(f"{key}.secondary", strip, x_of, measures)
+            shapes.extend(lane_shapes)
+            words.extend(lane_words)
         # The chain, piece by piece; a deletion is a hinge between two pieces.
         pieces = track.pieces()
         for index, (low, high) in enumerate(pieces, 1):
@@ -475,15 +544,28 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         pen,
                     )
                 )
-            shapes.append(
-                Shape(
-                    f"{key}.chain{index}" if len(pieces) > 1 else f"{key}.chain",
-                    _box(x1, base - chain / 2.0, x2 - x1, chain, chain * 0.3),
-                    "body",
-                    None,
-                    pen,
+            if replacing and not bonds:
+                continue
+            # The chain shows between the boxes on it, not under them, so a
+            # translucent wash (a sketch, a print) never shows it through a domain.
+            shown = _uncovered(low, high, spans)
+            for part, (start, end) in enumerate(shown, 1):
+                name = f"{key}.chain{index}" if len(pieces) > 1 else f"{key}.chain"
+                shapes.append(
+                    Shape(
+                        name if part == 1 else f"{name}.{part}",
+                        _box(
+                            x_of(start),
+                            base - chain / 2.0,
+                            x_of(end) - x_of(start),
+                            chain,
+                            chain * 0.3,
+                        ),
+                        "body",
+                        None,
+                        pen,
+                    )
                 )
-            )
         # Spans, the widest first, so a motif inside a domain is drawn over it.
         for item in sorted(spans, key=lambda item: -(item.end - item.start)):
             index = features.index(item) + 1
@@ -554,7 +636,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         # Disulfides: brackets under the chain.
         for item, lane in zip(bonds, bond_lanes, strict=True):
             index = features.index(item) + 1
-            x1, x2 = x_of(item.start - 0.5), x_of(item.end - 0.5)
+            x1, x2 = x_of(item.start + 0.5), x_of(item.end + 0.5)
             depth = bond_top + lane * 0.6 * u + 0.35 * u
             shapes.append(
                 Shape(
@@ -584,7 +666,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             placed = {label.key: label for label in site_labels}
             top_head = base - top_reach - stem - raised
             for index, item in enumerate(sites, 1):
-                x = x_of(item.start - 0.5)
+                x = x_of(item.start + 0.5)
                 head_y = base - top_reach - stem - levels[index - 1] * rise
                 tone = feature_tone(item)
                 name = f"{key}.site{index}"
@@ -639,15 +721,17 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         y = base + below + 0.9 * u
 
     # The residue axis, under the last track.
-    step = nice_step(length)
-    ticks = sorted({1, *range(step, length, step), length})
-    if length - ticks[-2] < step * 0.35 and ticks[-2] != 1:
+    step = nice_step(last - first + 1)
+    ticks = sorted({first, *range((first // step + 1) * step, last, step), last})
+    if len(ticks) > 2 and last - ticks[-2] < step * 0.35:
         ticks.remove(ticks[-2])
+    if len(ticks) > 2 and ticks[1] - first < step * 0.35:
+        ticks.remove(ticks[1])
     axis = y - 0.3 * u
     shapes.append(
         Shape(
             f"{node.id}.axis",
-            path("M", x_of(1), axis, "L", x_of(length + 1), axis),
+            path("M", x_of(first), axis, "L", x_of(last + 1), axis),
             "tick",
             None,
             pen * 0.8,
@@ -656,9 +740,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     numbers = []
     for value in ticks:
         x = (
-            x_of(value - 0.5)
-            if value not in {1, length}
-            else (x_of(1) if value == 1 else x_of(length + 1))
+            x_of(value + 0.5)
+            if value not in {first, last}
+            else (x_of(first) if value == first else x_of(last + 1))
         )
         shapes.append(
             Shape(
@@ -711,12 +795,28 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     placed = [
         PortSpec("input", Side.WEST, base_at),
         PortSpec("output", Side.EAST, base_at),
-        *(
-            PortSpec(name, side, min(max(offset / width, 0.0), 1.0))
-            for name, side, offset in ports
-        ),
+        *(PortSpec(name, side, min(max(offset / width, 0.0), 1.0)) for name, side, offset in ports),
     ]
     return Picture(Size(width, bottom), tuple(shapes), tuple(words), tuple(placed))
+
+
+def _uncovered(low: int, high: int, spans: list[Feature]) -> list[tuple[float, float]]:
+    """The stretches of residues ``low`` to ``high`` (as edges) that no span covers."""
+
+    covered = sorted((item.start, item.end + 1) for item in spans)
+    shown: list[tuple[float, float]] = []
+    at, stop = float(low), float(high + 1)
+    for start, end in covered:
+        if end <= at or start >= stop:
+            continue
+        if start > at:
+            shown.append((at, start))
+        at = max(at, end)
+    if at < stop:
+        shown.append((at, stop))
+    # Each stretch runs a little under its neighbours, so the chain meets them.
+    tuck = 0.3
+    return [(max(low, a - tuck), min(high + 1, b + tuck)) for a, b in shown]
 
 
 def _height(kind: str, box: float) -> float:

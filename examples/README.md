@@ -133,10 +133,12 @@ and GFP one colour in the construct, on the plasmid, and in the box toned `"GFP"
 ## [`biology.py`](biology.py)
 
 Reaction and regulation arrows (cofactors, reversible steps, SBGN heads),
-protein domain maps with a stack of constructs on one scale, a phylogeny drawn
+protein domain maps with a stack of constructs on one scale, secondary structure
+from a DSSP string with the sequence under it, a phylogeny drawn
 rectangular and circular, and a methods figure's plate layout and protocol.
 
 [![pathway](build/pathway.preview.png)](build/pathway.preview.png)
 [![proteins](build/proteins.preview.png)](build/proteins.preview.png)
+[![structure](build/structure.preview.png)](build/structure.preview.png)
 [![trees](build/trees.preview.png)](build/trees.preview.png)
 [![bench](build/bench.preview.png)](build/bench.preview.png)

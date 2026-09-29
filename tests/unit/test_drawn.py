@@ -141,8 +141,15 @@ def test_a_plate_fills_its_groups_and_leaves_the_rest_empty() -> None:
     assert paints["all.plate.A1"] == ("body", "Control")
     assert paints["all.plate.C7"] == ("body", "Drug")
     assert paints["all.plate.H12"][0] == "hollow"
-    assert sum(shape.id.startswith("all.plate.") and shape.id[10:11].isalpha() and
-               shape.id[11:].isdigit() for shape in drawing.shapes) == 96
+    assert (
+        sum(
+            shape.id.startswith("all.plate.")
+            and shape.id[10:11].isalpha()
+            and shape.id[11:].isdigit()
+            for shape in drawing.shapes
+        )
+        == 96
+    )
 
 
 def test_a_timeline_writes_its_times_and_stacks_its_spans() -> None:
@@ -156,10 +163,14 @@ def test_a_timeline_writes_its_times_and_stacks_its_spans() -> None:
 @pytest.mark.parametrize(
     ("make", "words"),
     [
-        (lambda g: g.protein("p", 100, [{"type": "domain", "start": 50, "end": 200}]),
-         "outside the protein"),
-        (lambda g: g.protein("p", 100, [{"type": "helicase", "start": 5, "end": 9}]),
-         'no feature called "helicase"'),
+        (
+            lambda g: g.protein("p", 100, [{"type": "domain", "start": 50, "end": 200}]),
+            "outside the protein",
+        ),
+        (
+            lambda g: g.protein("p", 100, [{"type": "helicase", "start": 5, "end": 9}]),
+            'no feature called "helicase"',
+        ),
         (lambda g: g.protein("p", 100, tracks=[{"delete": "a-b"}]), "not a stretch"),
         (lambda g: g.tree("t", "((A,B);"), "does not read"),
         (lambda g: g.tree("t", "(A,B);", clades=[{"tips": "A, Z"}]), "no tip called 'Z'"),
@@ -179,3 +190,101 @@ def test_a_wrong_drawing_says_what_is_wrong(make, words: str) -> None:
 def test_drawn_components_draw_in_every_theme(theme: str) -> None:
     compiled = compile_figure(_figure(theme).spec)
     assert 'id="all.abl.chain"' in compiled.document.text
+
+
+UBIQUITIN = "MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"
+UBIQUITIN_DSSP = "CEEEEEETTSCEEEEEECTTSBHHHHHHHHHHHHCCCGGGEEEEETTEEECTTSBTTTTTCCTTCEEEEEEECCCC"
+
+
+def test_dssp_reads_into_numbered_helices_strands_and_turns() -> None:
+    from flexo.secondary import dssp_elements, numbered
+
+    elements = numbered(dssp_elements("CHHHHCCEEEETTEEEC", 10), True)
+    assert [(item.kind, item.start, item.end) for item in elements] == [
+        ("helix", 11, 14),
+        ("strand", 17, 20),
+        ("turn", 21, 22),
+        ("strand", 23, 25),
+    ]
+    assert ["".join(run.text for run in item.label) for item in elements] == [
+        "\N{GREEK SMALL LETTER ALPHA}1",
+        "\N{GREEK SMALL LETTER BETA}1",
+        "",
+        "\N{GREEK SMALL LETTER BETA}2",
+    ]
+    assert dssp_elements("HHX", 1) == "X"
+
+
+def _ubiquitin(**options: object) -> flexo.Figure:
+    with flexo.Figure("ubq") as figure:
+        options.setdefault("secondary", UBIQUITIN_DSSP)
+        figure.root.protein("ubq", 76, **options)  # type: ignore[arg-type]
+    return figure
+
+
+def test_secondary_structure_takes_the_chains_place_or_a_strip_under_it() -> None:
+    alone = _drawing(_ubiquitin(), "ubq")
+    ids = {shape.id for shape in alone.shapes}
+    assert "ubq.chain" not in ids and "ubq.secondary.ss1" in ids
+    kinds = {shape.id: shape.tone for shape in alone.shapes}
+    assert "helix" in kinds.values() and "strand" in kinds.values()
+    compiled = compile_figure(_ubiquitin().spec)
+    assert not lint_compilation(compiled).diagnostics
+    domain = [{"type": "domain", "label": "Ubiquitin-like", "start": 1, "end": 72}]
+    with flexo.Figure("both") as figure:
+        figure.root.protein("ubq", 76, domain, secondary=UBIQUITIN_DSSP)
+    both = _drawing(figure, "ubq")
+    chain_y = min(
+        float(v) for v in re.findall(r"M [\d.]+ ([\d.]+)", _shape(both, "ubq.feature1").d)
+    )
+    strip_y = float(re.findall(r"M [\d.]+ ([\d.]+)", _shape(both, "ubq.secondary.loop1").d)[0])
+    assert strip_y > chain_y
+
+
+def _shape(drawing, identifier: str):
+    return next(shape for shape in drawing.shapes if shape.id == identifier)
+
+
+def test_the_sequence_is_written_only_where_a_letter_fits_a_residue() -> None:
+    close = _drawing(_ubiquitin(sequence=UBIQUITIN, scale=6.5), "ubq")
+    letters = [words for words in close.words if ".residue" in words.id]
+    assert "".join(words.runs[0].text for words in letters) == UBIQUITIN
+    far = _drawing(_ubiquitin(sequence=UBIQUITIN, scale=1.0), "ubq")
+    assert not [words for words in far.words if ".residue" in words.id]
+
+
+def test_a_track_can_show_a_close_view_of_a_segment() -> None:
+    drawing = _drawing(
+        _ubiquitin(sequence=UBIQUITIN, scale=8.0, tracks=[{"start": 20, "end": 45}]), "ubq"
+    )
+    ticks = [
+        words.runs[0].text
+        for words in drawing.words
+        if words.id.endswith(".label") and ".tick" in words.id
+    ]
+    assert ticks[0] == "20" and ticks[-1] == "45"
+    assert drawing.size.width < 26 * 8.0 + 80
+
+
+@pytest.mark.parametrize(
+    ("options", "words"),
+    [
+        ({"secondary": "HHHXHH"}, '"X" is not a DSSP letter'),
+        ({"secondary": "H" * 90}, "outside the protein"),
+    ],
+)
+def test_a_wrong_secondary_structure_says_what_is_wrong(options: dict, words: str) -> None:
+    with pytest.raises(FlexoError, match=re.escape(words)):
+        compile_figure(_ubiquitin(**options).spec)
+
+
+def test_a_residue_letter_sits_over_its_own_residue() -> None:
+    drawing = _drawing(
+        _ubiquitin(sequence=UBIQUITIN, scale=8.0, tracks=[{"start": 20, "end": 45}]), "ubq"
+    )
+    axis = _shape(drawing, "ubq.axis")
+    left = float(re.findall(r"M (-?[\d.]+)", axis.d)[0])
+    letters = {words.id: words for words in drawing.words if ".residue" in words.id}
+    # Residue 20 is the first of the view: its letter centred on the first 8 points.
+    assert abs(letters["ubq.secondary.residue20"].x - (left + 4.0)) < 0.01
+    assert letters["ubq.secondary.residue20"].runs[0].text == UBIQUITIN[19]

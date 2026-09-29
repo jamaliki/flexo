@@ -208,6 +208,24 @@ colour, every kind of modification another. `scale=` (points a residue) and
 `gutter=` (room for track names) line up separate proteins; a feature with an
 `id` is a port over it.
 
+![Secondary structure (examples/biology.py)](examples/build/structure.preview.png)
+
+```python
+figure.root.protein("ubiquitin", 76, secondary=dssp, sequence=sequence, scale=6.2)
+figure.root.protein("close", 76, secondary=dssp, sequence=sequence, scale=12,
+                    helix="cylinder", tracks=[{"start": 18, "end": 42}])
+```
+
+`secondary=` draws the secondary structure along the chain, on its scale: a
+DSSP string, one letter a residue (`H`, `G`, `I` helix; `E` strand; `T` turn;
+anything else loop), or features of type `helix`, `strand`, and `turn`.
+Helices are spirals (`helix="cylinder"` for bars), strands arrows, turns low
+arches, numbered α1, β1, ... over them (`numbered=False` to leave them bare). The
+strip takes the chain's place when nothing else is on it, and runs under the
+domains when they are. `sequence=` writes the one-letter sequence under it
+wherever the scale leaves room for a letter a residue, and a track's `start`
+and `end` make a close view of a segment.
+
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
 ```python
