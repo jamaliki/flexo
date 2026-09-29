@@ -151,6 +151,12 @@ class Name:
     """The x the words would centre on, left alone."""
     x: float = 0.0
     """The x they centre on, spread."""
+    size: float | None = None
+    """How wide a place it takes, when not its words' width (a lollipop's head)."""
+
+    @property
+    def width(self) -> float:
+        return self.size if self.size is not None else self.metrics.width
 
 
 def spread(
@@ -164,18 +170,18 @@ def spread(
         item.x = item.want
     for _ in range(6):
         for before, after in itertools.pairwise(names):
-            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
+            need = (before.width + after.width) / 2.0 + gap
             if after.x - before.x < need:
                 push = (need - (after.x - before.x)) / 2.0
                 before.x -= push
                 after.x += push
         if low is not None and high is not None:
             for item in names:
-                half = item.metrics.width / 2.0
+                half = item.width / 2.0
                 item.x = min(max(item.x, low + half), high - half)
     # A last sweep left to right, so what the bounds pushed back never overlaps.
     for before, after in itertools.pairwise(names):
-        need = (before.metrics.width + after.metrics.width) / 2.0 + gap
+        need = (before.width + after.width) / 2.0 + gap
         after.x = max(after.x, before.x + need)
 
 

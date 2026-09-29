@@ -41,6 +41,7 @@ from flexo.drawn import (
     units,
 )
 from flexo.geometry import Side, Size
+from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, TextRun
 from flexo.markup import parse_label
 from flexo.secondary import (
@@ -93,6 +94,9 @@ FEATURE_TYPES: dict[str, str] = {
 }
 """Every feature a protein knows, by the names people write, to how it is drawn."""
 
+_NO_WORDS = TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ())
+"""A lollipop head has no words; it is spread by its own ``size``."""
+
 _SPANS = frozenset({"domain", "region", "motif", "transmembrane", "signal"})
 
 
@@ -121,6 +125,7 @@ class Track:
     start: int
     end: int
     deleted: tuple[tuple[int, int], ...] = ()
+    id: str | None = None
 
     def keeps(self, residue: float) -> bool:
         return self.start <= residue <= self.end and not any(
@@ -241,15 +246,16 @@ def protein_tracks(node: NodeSpec) -> tuple[Track, ...]:
     if not records:
         return (Track((), 1, length),)
     tracks = []
+    ids = {feature.id for feature in protein_features(node) if feature.id is not None}
     for index, record in enumerate(records):
         where = f"track {index + 1}"
-        extra = sorted(set(record.as_dict()) - {"label", "start", "end", "delete"})
+        extra = sorted(set(record.as_dict()) - {"label", "start", "end", "delete", "id"})
         if extra:
             raise _fail(
                 node,
                 "track.field",
                 f"{where}: {', '.join(extra)} is not a track field.",
-                hint="Fields are: label, start, end, delete.",
+                hint="Fields are: label, start, end, delete, id.",
             )
         start = _residue(node, record.get("start", 1), where, length)
         end = _residue(node, record.get("end", length), where, length)
@@ -275,8 +281,15 @@ def protein_tracks(node: NodeSpec) -> tuple[Track, ...]:
                     _residue(node, max(low, high), where, length),
                 )
             )
+        identifier = record.get("id")
         tracks.append(
-            Track(parse_label(str(record.get("label", ""))), start, end, tuple(sorted(deleted)))
+            Track(
+                parse_label(str(record.get("label", ""))),
+                start,
+                end,
+                tuple(sorted(deleted)),
+                None if identifier is None else check_port_id(node, str(identifier), where, ids),
+            )
         )
     return tuple(tracks)
 
@@ -452,18 +465,16 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         labels_up = (
             (max(item.metrics.height for item in site_labels) + 0.9 * u) if site_labels else 0.0
         )
-        # Heads closer than a head apart stand at two heights, so both show.
-        levels: list[int] = []
-        last_at: dict[int, float] = {}
-        for item in sites:
-            x = x_of(item.start + 0.5)
-            level = 0
-            while level in last_at and x - last_at[level] < 2.6 * head:
-                level += 1
-            last_at[level] = x
-            levels.append(level)
-        rise = 2.4 * head
-        raised = max(levels, default=0) * rise
+        # Heads closer than a head apart are fanned out sideways: each stem
+        # rises from its own residue, then bends to a head of its own.
+        heads = [
+            Name(f"{key}.site{index}", item.label, _NO_WORDS, x_of(item.start + 0.5), size=2 * head)
+            for index, item in enumerate(sites, 1)
+        ]
+        spread(heads, 0.5 * head, left - 2.0 * u, right + 2.0 * u)
+        head_at = {name.key: name.x for name in heads}
+        fanned = any(abs(name.x - name.want) > 0.05 * u for name in heads)
+        raised = 0.8 * u if fanned else 0.0
         above = top_reach + (stem + raised + head + labels_up if sites else 0.0)
         base = y + above
         first_base = first_base if first_base is not None else base
@@ -642,30 +653,36 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         if sites:
             spread(site_labels, 0.35 * u, left - 2.0 * u, right + 2.0 * u)
             placed = {label.key: label for label in site_labels}
-            top_head = base - top_reach - stem - raised
+            head_y = base - top_reach - stem - raised
+            for label in site_labels:
+                label.want = head_at[label.key]
+            spread(site_labels, 0.35 * u, left - 2.0 * u, right + 2.0 * u)
+            placed = {label.key: label for label in site_labels}
             for index, item in enumerate(sites, 1):
-                x = x_of(item.start + 0.5)
-                head_y = base - top_reach - stem - levels[index - 1] * rise
-                tone = feature_tone(item)
                 name = f"{key}.site{index}"
+                x = x_of(item.start + 0.5)
+                hx = head_at[name]
+                tone = feature_tone(item)
+                foot = base - reach_at(item.start)
+                if abs(hx - x) > 0.05 * u:
+                    knee = foot - stem * 0.55
+                    stem_path = path("M", x, foot, "L", x, knee, "L", hx, head_y + head)
+                else:
+                    stem_path = path("M", x, foot, "L", x, head_y + head)
+                shapes.append(Shape(f"{name}.stem", stem_path, "line", None, pen * 0.8))
                 shapes.append(
                     Shape(
-                        f"{name}.stem",
-                        path("M", x, base - reach_at(item.start), "L", x, head_y + head),
-                        "line",
-                        None,
-                        pen * 0.8,
-                    )
-                )
-                shapes.append(
-                    Shape(
-                        name, circle_path(x, head_y, head), "solid" if tone else "hollow", tone, pen
+                        name,
+                        circle_path(hx, head_y, head),
+                        "solid" if tone else "hollow",
+                        tone,
+                        pen,
                     )
                 )
                 label = placed.get(name)
                 if label is None:
                     continue
-                bottom = top_head - head - 0.7 * u
+                bottom = head_y - head - 0.7 * u
                 words.append(
                     Words(
                         name + ".label",
@@ -679,14 +696,17 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                 shapes.append(
                     Shape(
                         f"{name}.leader",
-                        path("M", x, head_y - head - 0.15 * u, "L", label.x, bottom - 0.1 * u),
+                        path("M", hx, head_y - head - 0.15 * u, "L", label.x, bottom - 0.1 * u),
                         "leader",
                         None,
                         pen * 0.7,
                     )
                 )
                 if item.id is not None and number == 1:
-                    ports.append((item.id, Side.NORTH, x))
+                    ports.append((item.id, Side.NORTH, hx))
+        if track.id is not None:
+            # A track is a port at each end of its chain, level with it.
+            ports += [(track.id, Side.WEST, base), (f"{track.id}.end", Side.EAST, base)]
         if heading is not None:
             words.append(
                 Words(
@@ -768,14 +788,24 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     if shift:
         shapes = [_moved(shape, shift) for shape in shapes]
         words = [_shifted(item, shift) for item in words]
-        ports = [(name, side, offset + shift) for name, side, offset in ports]
+        ports = [
+            (name, side, offset + shift if side is Side.NORTH else offset)
+            for name, side, offset in ports
+        ]
         reach_right += shift
     width = max(width + shift, reach_right + pad)
     base_at = (first_base or 0.0) / bottom
     placed = [
         PortSpec("input", Side.WEST, base_at),
         PortSpec("output", Side.EAST, base_at),
-        *(PortSpec(name, side, min(max(offset / width, 0.0), 1.0)) for name, side, offset in ports),
+        *(
+            PortSpec(
+                name,
+                side,
+                min(max(offset / (width if side is Side.NORTH else bottom), 0.0), 1.0),
+            )
+            for name, side, offset in ports
+        ),
     ]
     return Picture(Size(width, bottom), tuple(shapes), tuple(words), tuple(placed))
 
@@ -803,6 +833,23 @@ def _height(kind: str, box: float) -> float:
     """How tall a span's box is: a domain's full height, a region or signal less."""
 
     return box * 0.62 if kind in {"region", "signal"} else box
+
+
+def protein_ports(node: NodeSpec) -> tuple[tuple[str, Side], ...]:
+    """The ports a protein's ids give it: a feature's over it (on the first track,
+    the one an arrow from above reaches), and a track's at the ends of its chain."""
+
+    features = protein_features(node)
+    first = protein_tracks(node)[0]
+    named = [
+        (feature.id, Side.NORTH)
+        for feature in features
+        if feature.id is not None and _kept(feature, first)
+    ]
+    for track in protein_tracks(node):
+        if track.id is not None:
+            named += [(track.id, Side.WEST), (f"{track.id}.end", Side.EAST)]
+    return tuple(named)
 
 
 def _widest(feature: Feature, track: Track) -> tuple[int, int]:

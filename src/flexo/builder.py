@@ -1006,6 +1006,8 @@ class GroupBuilder:
         parts: Sequence[Mapping[str, Scalar]],
         *,
         label: str | tuple[TextRun, ...] = "",
+        scale: float | None = None,
+        ticks: bool = True,
         **options: object,
     ) -> NodeHandle:
         """A genetic construct: ``parts`` left to right on a backbone, each in its SBOL
@@ -1020,11 +1022,21 @@ class GroupBuilder:
         an ``id`` is a port of the construct (``handle.port("gfp")``), under its glyph,
         so an arrow can leave a gene for what it makes; ``input`` and ``output`` are the
         backbone's ends.
+
+        ``scale`` draws the construct to scale, that many points a base pair: each part
+        then needs its length (``"bp": 720``). Genes, regions, spacers, and primers
+        are as long as they are; the other glyphs keep their size, centred on their
+        stretch; names that crowd are spread apart and led to their parts, and a
+        base-pair ruler runs underneath (``ticks=False`` drops it).
         """
 
+        properties: dict[str, object] = {"parts": [dict(part) for part in parts]}
+        if scale is not None:
+            properties["scale"] = float(scale)
+        if not ticks:
+            properties["ticks"] = False
         return self.node(
-            id, "construct", label=label,
-            **_with_properties(options, parts=[dict(part) for part in parts]),  # type: ignore[arg-type]
+            id, "construct", label=label, **_with_properties(options, **properties),  # type: ignore[arg-type]
         )
 
     def plasmid(
