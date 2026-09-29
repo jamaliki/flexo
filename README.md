@@ -235,6 +235,25 @@ domains when they are. `sequence=` writes the one-letter sequence under it
 wherever the scale leaves room for a letter a residue, and a track's `start`
 and `end` make a close view of a segment.
 
+#### From a structure or a UniProt entry
+
+```python
+figure.root.protein("ubq", **flexo.from_structure("1ubq.cif"))           # sequence, helices, strands
+figure.root.protein("abl1", **flexo.from_uniprot("P00519"))              # domains, motifs, bonds
+figure.root.protein("abl1", **flexo.from_uniprot("P00519.json", sites=True, variants=True))
+```
+
+`from_structure` reads a PDB or mmCIF file (install the `structures` extra, which
+brings [gemmi](https://gemmi.readthedocs.io)): the chain's sequence and its
+secondary structure, from the file's helix and sheet records or -- for a model
+without them, a design or a prediction, or with `assign=True` -- from the
+backbone's hydrogen bonds after DSSP. `from_uniprot` reads an entry from the
+UniProt REST service, or a saved entry's JSON: domains, regions, motifs,
+transmembrane and signal segments, and disulfides; modified residues and
+glycosylations with `sites=True`, variants with `variants=True`, and the entry's
+helices and strands with `structure=True`. Each returns the arguments `protein()`
+takes, as a plain dict to edit or merge before drawing.
+
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
 ```python

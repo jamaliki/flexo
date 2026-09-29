@@ -1,0 +1,18 @@
+{
+  "primaryAccession": "P00519",
+  "uniProtkbId": "ABL1_HUMAN",
+  "genes": [{"geneName": {"value": "ABL1"}}],
+  "sequence": {"length": 60, "value": "MLEICLKLVGCKSKKGLSSSSSCYLEEALQRPVASDFEPQGLSEAARWNSKENLLAGPSE"},
+  "features": [
+    {"type": "Domain", "location": {"start": {"value": 5}, "end": {"value": 20}}, "description": "SH3; atypical"},
+    {"type": "Region", "location": {"start": {"value": 40}, "end": {"value": 60}}, "description": "Disordered"},
+    {"type": "Motif", "location": {"start": {"value": 28}, "end": {"value": 31}}, "description": "Nuclear localization signal"},
+    {"type": "Disulfide bond", "location": {"start": {"value": 5}, "end": {"value": 11}}, "description": ""},
+    {"type": "Modified residue", "location": {"start": {"value": 24}, "end": {"value": 24}}, "description": "Phosphotyrosine; by autocatalysis"},
+    {"type": "Glycosylation", "location": {"start": {"value": 49}, "end": {"value": 49}}, "description": "N-linked (GlcNAc...) asparagine"},
+    {"type": "Natural variant", "location": {"start": {"value": 6}, "end": {"value": 6}}, "description": "in dbSNP", "alternativeSequence": {"originalSequence": "I", "alternativeSequences": ["T"]}},
+    {"type": "Helix", "location": {"start": {"value": 22}, "end": {"value": 30}}},
+    {"type": "Beta strand", "location": {"start": {"value": 33}, "end": {"value": 37}}},
+    {"type": "Chain", "location": {"start": {"value": 1}, "end": {"value": 60}}, "description": "Tyrosine-protein kinase ABL1"}
+  ]
+}
