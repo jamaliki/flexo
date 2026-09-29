@@ -108,6 +108,22 @@ def structure() -> flexo.FigureSpec:
     return figure.spec
 
 
+E2_STRUCTURE = Path(__file__).resolve().parents[1] / "tests" / "unit" / "data" / "1a7g.cif"
+
+
+def molecule() -> flexo.FigureSpec:
+    """A structure drawn by mol-sketch beside its own secondary structure, read from
+    the same file: the map's helix and strand colours are the molecule's."""
+
+    with flexo.Figure("molecule", width="double-column") as figure:
+        row = figure.root.row("row", gap=24, align="center")
+        row.structure("model", E2_STRUCTURE, label="E2 DNA-binding domain", yaw=30,
+                      width=150, height=120)
+        read = flexo.from_structure(E2_STRUCTURE)
+        row.protein("map", **{**read, "label": "Its secondary structure"}, scale=3.2)
+    return figure.spec
+
+
 def trees() -> flexo.FigureSpec:
     clades = [
         {"tips": "Human, Gorilla", "label": "Primates"},
@@ -144,12 +160,23 @@ def bench() -> flexo.FigureSpec:
     return figure.spec
 
 
+def _can_draw_molecules() -> bool:
+    try:
+        import gemmi  # noqa: F401
+        import molsketch  # noqa: F401
+    except ImportError:
+        print("molecule: skipped (needs gemmi and mol-sketch)")
+        return False
+    return True
+
+
 def main() -> None:
     for name, spec in (
         ("pathway", pathway()),
         ("proteins", proteins()),
         ("trees", trees()),
         ("structure", structure()),
+        *((("molecule", molecule()),) if _can_draw_molecules() else ()),
         ("bench", bench()),
     ):
         result = build(spec, OUTPUT, stem=name, formats=("editable", "png"), dpi=DPI)

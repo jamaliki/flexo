@@ -409,6 +409,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # whose events with an id are ports over them.
         ComponentDefinition("wellplate", Size(0.0, 0.0), _STANDARD),
         ComponentDefinition("timeline", Size(0.0, 0.0), _STANDARD),
+        # A molecule drawn by mol-sketch (flexo.structures), wired at its sides.
+        ComponentDefinition("structure", Size(0.0, 0.0), _STANDARD),
     )
 }
 

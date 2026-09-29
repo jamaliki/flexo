@@ -1,0 +1,68 @@
+"""A molecule drawn by mol-sketch, as a component in the figure's colours."""
+
+from __future__ import annotations
+
+import base64
+import re
+from pathlib import Path
+
+import pytest
+
+import flexo
+from flexo.compiler import compile_figure
+from flexo.lint import lint_compilation
+from flexo.structures import _png, _without_paper
+
+DATA = Path(__file__).parent / "data"
+
+
+def test_the_paper_is_taken_out_and_the_ink_kept() -> None:
+    np = pytest.importorskip("numpy")
+    pixels = np.zeros((1, 3, 4), dtype=np.uint8)
+    pixels[0, 0] = (251, 250, 246, 255)  # the paper
+    pixels[0, 1] = (0, 0, 0, 255)  # ink
+    pixels[0, 2] = (253, 252, 250, 255)  # halfway to white from the paper
+    out = _without_paper(pixels, "#fbfaf6")
+    assert out[0, 0, 3] == 0
+    assert tuple(out[0, 1]) == (0, 0, 0, 255)
+    assert 0 < out[0, 2, 3] < 255
+    assert _png(out).startswith(b"\x89PNG")
+
+
+def test_a_structure_is_a_panel_with_the_molecule_in_the_figures_colours() -> None:
+    pytest.importorskip("molsketch")
+    with flexo.Figure("e2") as figure:
+        row = figure.root.row("row", gap=20)
+        row.structure(
+            "model", DATA / "1a7g.cif", label="E2", width=120, height=90, colors={"E": "Viral"}
+        )
+        row.block("tag", label="E2 protein", tone="Viral")
+    compiled = compile_figure(figure.spec)
+    assert not lint_compilation(compiled).diagnostics
+    svg = compiled.document.text
+    found = re.search(r'id="row.model.molecule"[^>]*href="data:image/png;base64,([^"]+)"', svg)
+    assert found
+    png = base64.b64decode(found.group(1))
+    assert png.startswith(b"\x89PNG") and len(png) > 1000
+    model = compiled.routed.fitted.node("row.model").bounds
+    assert model.width >= 120 and model.height >= 90
+
+
+def test_without_mol_sketch_a_structure_says_how_to_get_it(monkeypatch) -> None:
+    import builtins
+
+    real = builtins.__import__
+
+    def refuse(name: str, *args: object, **kwargs: object):
+        if name == "molsketch":
+            raise ImportError(name)
+        return real(name, *args, **kwargs)
+
+    from flexo import structures
+
+    structures._render.cache_clear()
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    with flexo.Figure("none") as figure:
+        figure.root.structure("m", DATA / "1a7g.cif")
+    with pytest.raises(flexo.FlexoError, match="needs mol-sketch"):
+        compile_figure(figure.spec)

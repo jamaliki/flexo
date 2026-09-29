@@ -140,5 +140,6 @@ rectangular and circular, and a methods figure's plate layout and protocol.
 [![pathway](build/pathway.preview.png)](build/pathway.preview.png)
 [![proteins](build/proteins.preview.png)](build/proteins.preview.png)
 [![structure](build/structure.preview.png)](build/structure.preview.png)
+[![molecule](build/molecule.preview.png)](build/molecule.preview.png)
 [![trees](build/trees.preview.png)](build/trees.preview.png)
 [![bench](build/bench.preview.png)](build/bench.preview.png)

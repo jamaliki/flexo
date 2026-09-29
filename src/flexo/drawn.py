@@ -26,7 +26,9 @@ from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer
 from flexo.units import pt
 
-DRAWN_KINDS = frozenset({"construct", "plasmid", "protein", "tree", "wellplate", "timeline"})
+DRAWN_KINDS = frozenset(
+    {"construct", "plasmid", "protein", "tree", "wellplate", "timeline", "structure"}
+)
 
 
 # -- shapes and words ------------------------------------------------------------------------
@@ -73,6 +75,9 @@ class Picture:
     shapes: tuple[Shape, ...] = ()
     words: tuple[Words, ...] = ()
     ports: tuple[PortSpec, ...] = ()
+    images: tuple[tuple[str, float, float, float, float], ...] = ()
+    """Boxes (id, x, y, width, height) a picture fills with an image drawn at render
+    time -- a molecule, drawn by mol-sketch in the figure's colours."""
 
 
 def _f(value: float) -> str:
@@ -250,6 +255,10 @@ def _lay_out(node: NodeSpec, style: LayoutStyle) -> Picture:
         from flexo.phylogeny import tree_drawing
 
         return tree_drawing(node, style)
+    if node.kind == "structure":
+        from flexo.structures import structure_drawing
+
+        return structure_drawing(node, style)
     from flexo.bench import bench_drawing
 
     return bench_drawing(node, style)
@@ -274,4 +283,8 @@ def drawn_tones(node: NodeSpec) -> tuple[str, ...]:
         from flexo.bench import bench_tones
 
         return bench_tones(node)
+    if node.kind == "structure":
+        from flexo.structures import structure_tones
+
+        return structure_tones(node)
     return ()
