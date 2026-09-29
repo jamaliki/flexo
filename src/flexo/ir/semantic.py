@@ -14,6 +14,53 @@ from flexo.units import Extent, Length
 
 ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
 type Scalar = str | int | float | bool
+
+
+@dataclass(frozen=True, slots=True)
+class Record:
+    """A small mapping of scalars, held in a list by a node property: one part of a
+    genetic construct, one feature of a plasmid. Frozen, so a figure stays hashable."""
+
+    items: tuple[tuple[str, Scalar], ...]
+
+    def get(self, key: str, default: Scalar | None = None) -> Scalar | None:
+        return dict(self.items).get(key, default)
+
+    def as_dict(self) -> dict[str, Scalar]:
+        return dict(self.items)
+
+
+type PropertyValue = Scalar | tuple[Record, ...]
+"""What a node property holds: one scalar, or a list of records."""
+
+
+def freeze_property(name: str, value: object) -> PropertyValue:
+    """A property as a figure holds it: a list of mappings becomes a tuple of records."""
+
+    if isinstance(value, str | bool | int | float):
+        return value
+    if isinstance(value, list | tuple) and all(isinstance(item, Record | dict) for item in value):
+        records = []
+        for item in value:
+            if isinstance(item, Record):
+                records.append(item)
+                continue
+            for key, field in item.items():
+                if not isinstance(key, str) or not isinstance(field, str | bool | int | float):
+                    raise ValueError(
+                        f'property "{name}": each record maps names to text, numbers, or booleans'
+                    )
+            records.append(Record(tuple(item.items())))
+        return tuple(records)
+    raise ValueError(f'property "{name}" is text, a number, a boolean, or a list of records')
+
+
+def thaw_property(value: PropertyValue) -> object:
+    """A property as a file writes it: records back to mappings."""
+
+    if isinstance(value, tuple):
+        return [record.as_dict() for record in value]
+    return value
 type LayoutKind = Literal[
     "row", "column", "grid", "overlay", "stack", "flow", "flow-right", "cycle"
 ]
@@ -307,7 +354,7 @@ class NodeSpec:
     ports: tuple[PortSpec, ...] = ()
     width: Extent | None = None
     height: Extent | None = None
-    properties: tuple[tuple[str, Scalar], ...] = ()
+    properties: tuple[tuple[str, PropertyValue], ...] = ()
     shadow: bool = False
     """Whether this component casts a soft drop shadow. Paint only; off by default."""
 
@@ -322,7 +369,7 @@ class NodeSpec:
     def text(self) -> str:
         return "".join(run.text for run in self.label)
 
-    def property(self, name: str, default: Scalar | None = None) -> Scalar | None:
+    def property(self, name: str, default: Scalar | None = None) -> PropertyValue | None:
         return dict(self.properties).get(name, default)
 
 

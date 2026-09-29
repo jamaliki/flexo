@@ -136,6 +136,7 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
     """
 
     from flexo.components import node_tone
+    from flexo.genetics import GENETIC_KINDS, genetic_tones
     from flexo.themes import TONE_COUNT
 
     names: list[str] = []
@@ -143,10 +144,17 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
         tone = node_tone(node, style.kind_tones)
         if tone is not None and not tone.isdigit() and tone not in names:
             names.append(tone)
+        # A construct's or plasmid's genes: each gene one colour across the figure.
+        if node.kind in GENETIC_KINDS:
+            for name in genetic_tones(node):
+                if not name.isdigit() and name not in names:
+                    names.append(name)
     claimed = {
         int(tone)
         for node in figure.nodes
-        if (tone := node_tone(node, style.kind_tones)) is not None and tone.isdigit()
+        for tone in (node_tone(node, style.kind_tones),
+                     *(genetic_tones(node) if node.kind in GENETIC_KINDS else ()))
+        if tone is not None and tone.isdigit()
     }
     free = [index for index in range(1, TONE_COUNT + 1) if index not in claimed] or [1]
     mapping = {name: free[position % len(free)] for position, name in enumerate(names)}

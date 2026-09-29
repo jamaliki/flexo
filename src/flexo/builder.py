@@ -33,6 +33,7 @@ from flexo.ir.semantic import (
     PortSpec,
     Scalar,
     TextRun,
+    freeze_property,
 )
 from flexo.markup import parse_label
 from flexo.sketch import Sketch, parse_sketch
@@ -845,7 +846,7 @@ class GroupBuilder:
         ports: tuple[PortSpec, ...] = (),
         width: Extent | str | float | None = None,
         height: Extent | str | float | None = None,
-        properties: dict[str, Scalar] | None = None,
+        properties: dict[str, object] | None = None,
         paint: Mapping[str, str] | None = None,
         motif: bool = True,
         shadow: bool = False,
@@ -916,7 +917,7 @@ class GroupBuilder:
                 ports,
                 _extent(width),
                 _extent(height),
-                tuple(sorted(resolved.items())),
+                tuple(sorted((k, freeze_property(k, v)) for k, v in resolved.items())),
                 shadow,
             )
         )
@@ -990,6 +991,66 @@ class GroupBuilder:
         """A plain labelled box: the component to reach for when none of the others fit."""
 
         return self.node(id, "block", label=label, **options)
+
+    def construct(
+        self,
+        id: str,
+        parts: Sequence[Mapping[str, Scalar]],
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        **options: object,
+    ) -> NodeHandle:
+        """A genetic construct: ``parts`` left to right on a backbone, each in its SBOL
+        Visual glyph (see ``flexo.genetics``).
+
+        A part is ``{"type": ..., "label": ..., "id": ..., "strand": "+" or "-",
+        "tone": ...}``; ``type`` is ``promoter``, ``rbs``, ``cds`` (or ``gene``),
+        ``terminator``, ``operator``, ``origin``, ``insulator``, ``primer``, ``site``,
+        ``region``, or ``spacer``. A gene is written inside its arrow and takes a colour
+        by its name; the other parts are drawn in ink and named under their glyphs. A
+        part on the ``-`` strand points left and hangs below the backbone. A part with
+        an ``id`` is a port of the construct (``handle.port("gfp")``), under its glyph,
+        so an arrow can leave a gene for what it makes; ``input`` and ``output`` are the
+        backbone's ends.
+        """
+
+        return self.node(
+            id, "construct", label=label,
+            **_with_properties(options, parts=[dict(part) for part in parts]),  # type: ignore[arg-type]
+        )
+
+    def plasmid(
+        self,
+        id: str,
+        length: int,
+        features: Sequence[Mapping[str, Scalar]] = (),
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        radius: float | None = None,
+        ticks: bool = True,
+        **options: object,
+    ) -> NodeHandle:
+        """A plasmid map: a circle of ``length`` base pairs, the name (``label``) and
+        length in the middle, each feature an arc placed by its base pairs.
+
+        A feature is ``{"type": ..., "label": ..., "start": bp, "end": bp, "strand":
+        "+" or "-", "tone": ...}``; ``type`` is ``cds`` (or ``gene``), ``promoter``,
+        ``origin``, ``terminator``, ``primer``, ``region``, or ``site`` (a restriction
+        site: a tick at ``start``, named with its position). Genes, promoters and
+        primers point along their strand; overlapping features stack outward; every
+        named feature is labelled outside with a leader line. ``radius`` sets the
+        circle (points; about seven and a half times the label size by default) and
+        ``ticks=False`` drops the marks every round number of base pairs.
+        """
+
+        properties: dict[str, object] = {
+            "length": int(length), "features": [dict(feature) for feature in features],
+        }
+        if radius is not None:
+            properties["radius"] = float(radius)
+        if not ticks:
+            properties["ticks"] = False
+        return self.node(id, "plasmid", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def feature_strip(
         self,

@@ -10,6 +10,7 @@ uv run python examples/vertical_slice.py
 uv run python examples/attention_module.py
 uv run python examples/modelangelo_gnn.py
 uv run python examples/tutorial.py
+uv run python examples/genetics.py
 ```
 
 ## [`tutorial.py`](tutorial.py)
@@ -119,3 +120,11 @@ A dozen of the figures are also built in the `sketch` theme -- the same code,
 | [![LDA, drawn by hand](build/literature/lda-sketch.preview.png)](build/literature/lda-sketch.preview.png) LDA | [![Additive attention, drawn by hand](build/literature/bahdanau-attention-sketch.preview.png)](build/literature/bahdanau-attention-sketch.preview.png) Additive attention | [![Perceptron, drawn by hand](build/literature/perceptron-sketch.preview.png)](build/literature/perceptron-sketch.preview.png) Perceptron |
 | [![Graph attention, drawn by hand](build/literature/graph-attention-sketch.preview.png)](build/literature/graph-attention-sketch.preview.png) Graph attention | [![Central dogma, drawn by hand](build/literature/central-dogma-sketch.preview.png)](build/literature/central-dogma-sketch.preview.png) Central dogma | [![PCR, drawn by hand](build/literature/pcr-sketch.preview.png)](build/literature/pcr-sketch.preview.png) PCR |
 | [![Code-review flowchart, drawn by hand](build/literature/code-review-sketch.preview.png)](build/literature/code-review-sketch.preview.png) Code-review flowchart | [![Citric acid cycle, drawn by hand](build/literature/citric-acid-cycle-sketch.preview.png)](build/literature/citric-acid-cycle-sketch.preview.png) Citric acid cycle | [![Vision Transformer, drawn by hand](build/literature/vision-transformer-sketch.preview.png)](build/literature/vision-transformer-sketch.preview.png) Vision Transformer |
+
+## [`genetics.py`](genetics.py)
+
+Two constructs in SBOL Visual glyphs and the plasmid that carries them: a gene's
+port wired to its product, a cluster of restriction sites named without overlap,
+and GFP one colour in the construct, on the plasmid, and in the box toned `"GFP"`.
+
+[![genetic circuit](build/genetic-circuit.preview.png)](build/genetic-circuit.preview.png)

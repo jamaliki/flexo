@@ -46,6 +46,11 @@ def render_node(
         data__flexo__kind=spec.kind,
         data__flexo__role=spec.role,
     )
+    if spec.kind in {"construct", "plasmid"}:
+        from flexo.render_genetics import render_genetic
+
+        render_genetic(group, node, style, palette)
+        return group
     if spec.kind == "icon":
         bounds = node.bounds
         radius = min(bounds.width, bounds.height) / 2.0

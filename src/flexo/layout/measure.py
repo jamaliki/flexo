@@ -9,7 +9,7 @@ from dataclasses import replace
 from flexo.components import intrinsic_node_size
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.geometry import Point, Rect, Size
-from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode
+from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode, TextMetrics
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, layout_connections
 from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, declared_size
 from flexo.layout.flow import lower_flows
@@ -186,11 +186,34 @@ def _measure_node(
     style: LayoutStyle,
 ) -> MeasuredNode:
     label = measurer.measure(node.label, max_width=_label_width(node, style))
+    if node.kind in {"construct", "plasmid"}:
+        return _measure_genetic(node, label, style)
     size = intrinsic_node_size(node, label, style)
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
     # cell grid because the caption is a sibling node rather than padding.
     return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0))
+
+
+def _measure_genetic(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> MeasuredNode:
+    """A construct or plasmid: as big as its drawing, each generated port where its
+    drawing puts it (a part's under its glyph), a construct's ports on its backbone."""
+
+    from flexo.genetics import genetic_drawing
+
+    drawing = genetic_drawing(node, style)
+    size = drawing.size
+    placed = {port.name: port for port in drawing.ports}
+    ports = tuple(
+        replace(port, side=placed[port.name].side, offset=placed[port.name].offset)
+        if port.name in placed
+        else port
+        for port in node.ports
+    )
+    anchor = Point(size.width / 2.0, size.height / 2.0)
+    if node.kind == "construct" and "input" in placed:
+        anchor = Point(size.width / 2.0, placed["input"].offset * size.height)
+    return MeasuredNode(replace(node, ports=ports), label, size, anchor)
 
 
 def _one_circle_size(nodes: tuple[MeasuredNode, ...]) -> tuple[MeasuredNode, ...]:

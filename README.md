@@ -86,6 +86,7 @@ and, unless given a label, draw nothing. Every component is a method on the grou
 | Boxes | `block`, `mlp`, `cnn`, `attention`, `add_norm`, `prediction`, `loss`, `tensor`, `matrix`, `sequence`, `feature_strip`, `concat`, `channels` |
 | Shapes | `circle`, `decision`, `terminal`, `volume`, `op` (and `add`, `multiply`) |
 | Words and art | `text`, `vector`, `image`, `graph`, `inset`, `legend` |
+| Genetics | `construct`, `plasmid` (see [Genetic designs](#genetic-designs-constructs-and-plasmids)) |
 
 A label longer than 16 ems wraps into balanced lines, and a component with an
 authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
@@ -98,6 +99,56 @@ Edges and nets belong to the figure, not to a group: `figure.connect(a, b)`
 and `m.connect(a, b)` are the same edge, so an edge between groups is written
 wherever both ends are in hand. The [authoring guide](docs/guide.md) covers
 each component and option.
+
+### Genetic designs: constructs and plasmids
+
+A genetic construct is drawn in [SBOL Visual](https://sbolstandard.org/visual-about/)
+glyphs on a backbone, and a plasmid as a circular map. Both are components like any
+other: they sit in a figure, take its theme (type, palette, hand), and are wired to
+other components.
+
+```python
+with flexo.Figure("reporter") as figure:
+    circuit = figure.root.construct("circuit", label="pTet–GFP reporter", parts=[
+        {"type": "promoter", "label": "pTet"},
+        {"type": "rbs", "label": "B0034"},
+        {"type": "cds", "label": "GFP", "id": "gfp"},   # an id makes the part a port
+        {"type": "terminator", "label": "B0015"},
+        {"type": "cds", "label": "TetR", "strand": "-"},
+    ])
+    figure.root.plasmid("vector", 5421, label="pTet-GFP", features=[
+        {"type": "promoter", "label": "pTet", "start": 120, "end": 180},
+        {"type": "cds", "label": "GFP", "start": 220, "end": 940},
+        {"type": "cds", "label": "AmpR", "start": 3300, "end": 4160, "strand": "-"},
+        {"type": "origin", "label": "ColE1", "start": 2500, "end": 3090},
+        {"type": "site", "label": "EcoRI", "start": 5},
+    ])
+    protein = figure.root.block("protein", label="Fluorescence", tone="GFP")
+    figure.connect(circuit.port("gfp"), protein)
+```
+
+| Part | Construct glyph | On a plasmid |
+| --- | --- | --- |
+| `promoter` | a bent arrow | a short arrow along the circle |
+| `rbs` | a half circle on the backbone | -- |
+| `cds` (`gene`) | an arrow with the gene's name in it | an arrow arc |
+| `terminator` | a T | a T standing out from the circle |
+| `operator`, `insulator` | a square; a square in a square | -- |
+| `origin` (`ori`) | a circle on the backbone | an arc |
+| `primer`, `site`, `region`, `spacer` | a half arrow; a tick; a box; a gap | a thin arrow; a tick named with its position; an arc |
+
+A part on the `-` strand is turned over: it points left and hangs below the
+backbone, or runs anticlockwise round the plasmid. A gene takes a colour by its
+name, so `GFP` is one colour in every construct and plasmid of a figure, and a
+component given `tone="GFP"` matches it; any part can name a `tone` of its own,
+and the other parts are drawn in ink. A construct's part with an `id` is a port
+under its glyph (`input` and `output` are the backbone's ends), so an arrow can
+leave a gene for what it makes. On a plasmid, features are placed by their base
+pairs (`start`, `end`; a feature may run across the origin), overlapping features
+stack outward, every named feature is labelled outside the circle with a leader
+line, and ticks mark every round number of base pairs (`ticks=False` drops them).
+In a figure file the same are `kind: construct` with `properties: {parts: [...]}`
+and `kind: plasmid` with `properties: {length: 5421, features: [...]}`.
 
 ### Operators and words
 
