@@ -52,7 +52,8 @@ Genetics: kind construct, properties {parts: [{type: promoter|rbs|cds|terminator
 Proteins: kind protein, properties {length, features: [{type: domain|region|motif|transmembrane|
   signal|mutation|phosphorylation|...|disulfide, label, start, end (or at, for a site)}],
   tracks: [{label, start, end, delete: "61-121"}], secondary: DSSP string (H helix, E strand,
-  T turn), sequence: one-letter, helix: spiral|cylinder}. Trees: kind tree, properties {newick,
+  T turn), sequence: one-letter, helix: ribbon|cylinder|spiral}. Trees: kind tree,
+  properties {newick,
   layout: rectangular|circular, clades: [{tips: "A, B", label}], support}. The bench: kind
   wellplate {wells: 96, groups: [{wells: "A1-A12", label}]}; kind timeline {unit: day,
   events: [{at, label}], spans: [{start, end, label}]}.

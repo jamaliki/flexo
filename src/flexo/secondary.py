@@ -3,7 +3,9 @@
 A ``protein`` given its secondary structure draws a strip under its chain (or
 in its place, when nothing else is on it), on the protein's own residue scale:
 
-- a **helix** as a spiral -- or, with ``helix="cylinder"``, a rounded bar;
+- a **helix** as a ribbon wound round its axis, seen side on: the near half of
+  each turn in the helix's colour over the far half, darker -- or, with
+  ``helix="cylinder"``, a rounded bar, or with ``helix="spiral"`` a line;
 - a **strand** as a broad arrow pointing to the C terminus;
 - a **turn** as a small arch in the loop; everything else as a plain line;
 - each helix and strand numbered over it (alpha 1, 2, ... then beta 1, 2, ...), unless
@@ -30,6 +32,7 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, TextRun
 
 SECONDARY_KINDS = frozenset({"helix", "strand", "turn"})
+HELIX_STYLES = ("ribbon", "cylinder", "spiral")
 HELIX_TONE = "helix"
 STRAND_TONE = "strand"
 
@@ -108,7 +111,8 @@ class Lane:
     pieces: tuple[tuple[int, int], ...]
     sequence: str
     sequence_start: int
-    cylinder: bool
+    helix: str
+    """How a helix is drawn: ``ribbon``, ``cylinder``, or ``spiral``."""
     up: float
     """How far the strip's drawing reaches above its centre line (names included)."""
     down: float
@@ -147,7 +151,7 @@ class Lane:
             for low, high in _clipped(item, self.pieces):
                 x1, x2 = x_of(low), x_of(high + 1)
                 if item.kind == "helix":
-                    shapes.append(_helix(name, x1, x2, centre, u, pen, self.cylinder, x_of))
+                    shapes.extend(_helix(name, x1, x2, centre, u, pen, self.helix, x_of))
                 elif item.kind == "strand":
                     shapes.append(_strand(name, x1, x2, centre, u, pen))
                 else:
@@ -246,8 +250,10 @@ def make_lane(
     label_height = probe.height if names else 0.0
     up = _REACH * u + (0.3 * u + label_height if names else 0.0)
     down = _REACH * u + (0.35 * u + probe.height if letters else 0.0)
-    style = str(node.property("helix") or "spiral").strip().lower()
-    return Lane(kept, tuple(pieces), sequence, start, style == "cylinder", up, down, names, letters)
+    style = str(node.property("helix") or "ribbon").strip().lower()
+    if style not in HELIX_STYLES:
+        raise ValueError(f'helix "{style}" is not one of {", ".join(HELIX_STYLES)}')
+    return Lane(kept, tuple(pieces), sequence, start, style, up, down, names, letters)
 
 
 def _between(pieces, elements) -> list[tuple[float, float]]:
@@ -277,58 +283,76 @@ def _clipped(item: Element, pieces) -> list[tuple[int, int]]:
     return kept
 
 
-def _helix(name, x1, x2, centre, u, pen, cylinder, x_of) -> Shape:
-    """A helix: a spiral seen side on, a turn every 3.6 residues where there is room."""
+def _helix(name, x1, x2, centre, u, pen, style, x_of) -> list[Shape]:
+    """A helix seen side on, a turn every 3.6 residues where there is room for one."""
 
     width = x2 - x1
-    if cylinder:
+    amplitude = _REACH * u * 0.9
+    if style == "cylinder":
         half = 0.5 * u
         r = min(half, width / 2.0)
-        return Shape(
-            name,
-            path(
-                "M",
-                x1 + r,
-                centre - half,
-                "L",
-                x2 - r,
-                centre - half,
-                "A",
-                r,
-                half,
-                0,
-                0,
-                1,
-                x2 - r,
-                centre + half,
-                "L",
-                x1 + r,
-                centre + half,
-                "A",
-                r,
-                half,
-                0,
-                0,
-                1,
-                x1 + r,
-                centre - half,
-                "Z",
-            ),
-            "body",
+        outline = path(
+            "M", x1 + r, centre - half, "L", x2 - r, centre - half,
+            "A", r, half, 0, 0, 1, x2 - r, centre + half,
+            "L", x1 + r, centre + half,
+            "A", r, half, 0, 0, 1, x1 + r, centre - half, "Z",
+        )  # fmt: skip
+        return [Shape(name, outline, "body", HELIX_TONE, pen)]
+    period = max(abs(x_of(4.6) - x_of(1.0)), 0.8 * u)
+    if style == "spiral":
+        turns = max(1, round(width / period))
+        samples = turns * 16
+        commands: list[object] = ["M", x1, centre]
+        for index in range(1, samples + 1):
+            t = index / samples
+            y = centre - amplitude * math.sin(2 * math.pi * turns * t)
+            commands += ["L", x1 + width * t, y]
+        return [Shape(name, path(*commands), "line", HELIX_TONE, pen * 2.4)]
+    # A ribbon: two edges, the second the first moved along the axis by the
+    # ribbon's breadth. Where the edges rise the ribbon faces the reader (a
+    # right-handed helix's near side runs up to the right); where they fall it
+    # is the far side, drawn first and paler, so the near side crosses over it.
+    # A cartoon's proportions: a turn every 3.6 residues where that keeps it
+    # between one and a half and two times as long as the helix is wide.
+    period = min(max(period, 3.0 * amplitude), 4.0 * amplitude)
+    breadth = min(0.42 * period, 0.3 * width)
+    run = width - breadth
+    halves = max(1, round(2.0 * run / period))
+    end = math.pi * halves
+
+    def edge(phase: float, shift: float) -> tuple[float, float]:
+        return x1 + shift + run * phase / end, centre - amplitude * math.sin(phase)
+
+    cuts = [
+        0.0,
+        *(math.pi / 2 + k * math.pi for k in range(halves) if math.pi / 2 + k * math.pi < end),
+        end,
+    ]
+    far: list[Shape] = []
+    near: list[Shape] = []
+    for number, (a, b) in enumerate(itertools.pairwise(cuts), 1):
+        steps = 10
+        phases = [a + (b - a) * k / steps for k in range(steps + 1)]
+        front = [edge(phase, 0.0) for phase in phases]
+        back = [edge(phase, breadth) for phase in reversed(phases)]
+        commands = ["M", *front[0]]
+        for point in front[1:] + back:
+            commands += ["L", *point]
+        commands.append("Z")
+        facing = math.cos((a + b) / 2.0) > 0.0
+        shape = Shape(
+            f"{name}.{'near' if facing else 'far'}{number}",
+            path(*commands),
+            "solid" if facing else "body",
             HELIX_TONE,
-            pen,
+            pen * 0.8,
         )
-    per_turn = abs(x_of(4.6) - x_of(1.0))
-    period = max(per_turn, 0.55 * u)
-    turns = max(1, round(width / period))
-    amplitude = _REACH * u * 0.9
-    # A sine, sampled finely enough to read as a smooth coil: up and over, then under.
-    samples = turns * 16
-    commands: list[object] = ["M", x1, centre]
-    for index in range(1, samples + 1):
-        t = index / samples
-        commands += ["L", x1 + width * t, centre - amplitude * math.sin(2 * math.pi * turns * t)]
-    return Shape(name, path(*commands), "line", HELIX_TONE, pen * 2.4)
+        (near if facing else far).append(shape)
+    # The first piece carries the helix's own id, so it is found by name.
+    pieces = far + near
+    first = pieces[0]
+    pieces[0] = Shape(name, first.d, first.paint, first.tone, first.width)
+    return pieces
 
 
 def _strand(name, x1, x2, centre, u, pen) -> Shape:
