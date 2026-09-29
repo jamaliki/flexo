@@ -484,7 +484,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         for item in spans:
             if not item.label:
                 continue
-            if _named_inside(item, track, measures, x_of):
+            if _named_inside(item, track, measures, x_of, spans):
                 continue
             # A name that does not fit inside the widest piece the track keeps
             # goes under it -- the same piece the inside test measured.
@@ -582,13 +582,16 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             metrics = measures.measure(item.label, small=item.kind != "domain")
             low, high = _widest(item, track)
             x1, x2 = x_of(low), x_of(high + 1)
-            if _named_inside(item, track, measures, x_of):
+            if _named_inside(item, track, measures, x_of, spans):
+                # Centred in the widest stretch nothing drawn over the span covers:
+                # a motif inside a domain keeps clear of the domain's name.
+                free_low, free_high = _name_room(item, track, spans)
                 words.append(
                     Words(
                         f"{key}.feature{index}.label",
                         item.label,
                         metrics,
-                        (x1 + x2) / 2.0,
+                        (x_of(free_low) + x_of(free_high)) / 2.0,
                         base - metrics.height / 2.0 + metrics.baseline,
                         role="tone-ink" if tone else "ink",
                         tone=tone,
@@ -858,14 +861,45 @@ def _widest(feature: Feature, track: Track) -> tuple[int, int]:
     return max(_clip(feature, track), key=lambda piece: piece[1] - piece[0])
 
 
-def _named_inside(feature: Feature, track: Track, measures, x_of) -> bool:
-    """Whether ``feature``'s name fits inside the widest piece of it ``track`` keeps."""
+def _name_room(feature: Feature, track: Track, spans: list[Feature]) -> tuple[float, float]:
+    """The widest stretch (as residue edges) of ``feature``'s widest kept piece that no
+    smaller span drawn over it covers: where its name can be read."""
+
+    low, high = _widest(feature, track)
+    over = [
+        item
+        for item in spans
+        if item is not feature
+        and item.end - item.start < feature.end - feature.start
+        and item.start <= high
+        and item.end >= low
+    ]
+    covered = sorted((max(item.start, low), min(item.end, high) + 1) for item in over)
+    free: list[tuple[float, float]] = []
+    at, stop = float(low), float(high + 1)
+    for start, end in covered:
+        if start > at:
+            free.append((at, start))
+        at = max(at, end)
+    if at < stop:
+        free.append((at, stop))
+    return max(free, key=lambda item: item[1] - item[0]) if free else (at, at)
+
+
+def _named_inside(
+    feature: Feature,
+    track: Track,
+    measures,
+    x_of,
+    spans: list[Feature],
+) -> bool:
+    """Whether ``feature``'s name fits inside it, clear of the spans drawn over it."""
 
     if feature.kind == "transmembrane":
         return False
     metrics = measures.measure(feature.label, small=feature.kind != "domain")
-    low, high = _widest(feature, track)
-    return metrics.width + 0.6 * measures.u <= x_of(high + 1) - x_of(low)
+    low, high = _name_room(feature, track, spans)
+    return metrics.width + 0.6 * measures.u <= x_of(high) - x_of(low)
 
 
 def _kept(feature: Feature, track: Track) -> bool:

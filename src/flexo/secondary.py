@@ -200,8 +200,8 @@ class Lane:
             for low, high in self.pieces:
                 for residue in range(low, high + 1):
                     index = residue - self.sequence_start
-                    if not 0 <= index < len(self.sequence):
-                        continue
+                    if not 0 <= index < len(self.sequence) or self.sequence[index] in "-. ":
+                        continue  # a residue the sequence (or the model) leaves out
                     runs = (TextRun(self.sequence[index], code=True),)
                     metrics = measures.measure(runs, small=True)
                     words.append(

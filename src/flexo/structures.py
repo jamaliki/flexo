@@ -214,7 +214,12 @@ def _render(
     del stamp  # part of the cache key: an edited file draws again
     figure = ms.load(source) if Path(source).exists() else ms.fetch(source)
     figure = figure.look(look)
-    figure.set(palette={"paper": paper, **dict(roles)}, **{"paper.grain": 0, "paper.wash": 0})
+    figure.set(
+        palette={"paper": paper, **dict(roles)},
+        # A scene's own captions and step labels are the app's; the figure names
+        # the panel itself.
+        **{"paper.grain": 0, "paper.wash": 0, "show.caption": False, "show.step_label": False},
+    )
     for group, colour in colours:
         figure.color(group, colour)
     if show:

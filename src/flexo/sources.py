@@ -42,14 +42,29 @@ _UNIPROT = "https://rest.uniprot.org/uniprotkb/{accession}.json"
 # -- structures ---------------------------------------------------------------------------
 
 
-def from_structure(path: str | Path, chain: str | None = None, *, assign: bool = False) -> dict:
+def from_structure(
+    path: str | Path,
+    chain: str | None = None,
+    *,
+    assign: bool = False,
+    numbering: str = "chain",
+) -> dict:
     """``protein()``'s arguments for ``chain`` (the first protein chain by default)
     of the structure at ``path``: ``length``, ``sequence``, and ``secondary``.
 
     The file's own helix and sheet records are used when it has them;
     ``assign=True`` (or a file without them) assigns the secondary structure from
     the backbone's hydrogen bonds instead.
+
+    ``numbering="chain"`` numbers the modelled residues from 1. ``"author"`` keeps
+    the file's own residue numbers -- a domain modelled from residue 151 starts at
+    151, so its secondary structure lines up with the full-length protein's map:
+    ``length`` is then the last residue's number, and ``secondary_start`` and
+    ``sequence_start`` the first's (residues the model lacks are loop, ``-``).
     """
+
+    if numbering not in {"chain", "author"}:
+        raise ValueError(f'numbering is "chain" or "author", not "{numbering}".')
 
     try:
         import gemmi
@@ -91,6 +106,25 @@ def from_structure(path: str | Path, chain: str | None = None, *, assign: bool =
                 _mark(letters, by_author, strand.start.res_id.seqid, strand.end.res_id.seqid, "E")
     if not recorded:
         letters = list(assign_secondary(_backbone(residues)))
+    if numbering == "author":
+        numbers = [residue.seqid.num for residue in residues]
+        first, last = min(numbers), max(numbers)
+        if first >= 1:
+            span_letters = ["-"] * (last - first + 1)
+            span_sequence = ["-"] * (last - first + 1)
+            for residue, letter, code in zip(residues, letters, sequence, strict=True):
+                span_letters[residue.seqid.num - first] = letter
+                span_sequence[residue.seqid.num - first] = code
+            info = structure.info
+            title = (info["_struct.title"] if "_struct.title" in info else "") or structure.name  # noqa: SIM401
+            return {
+                "length": last,
+                "sequence": "".join(span_sequence),
+                "sequence_start": first,
+                "secondary": "".join(span_letters),
+                "secondary_start": first,
+                "label": title.strip() if len(title.strip()) <= 60 else structure.name,
+            }
     info = structure.info
     title = (info["_struct.title"] if "_struct.title" in info else "") or structure.name  # noqa: SIM401 - InfoMap has no get
     return {

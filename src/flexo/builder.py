@@ -1084,6 +1084,8 @@ class GroupBuilder:
         gutter: float | None = None,
         secondary: str | None = None,
         sequence: str | None = None,
+        secondary_start: int = 1,
+        sequence_start: int = 1,
         helix: str = "ribbon",
         numbered: bool = True,
         **options: object,
@@ -1111,7 +1113,8 @@ class GroupBuilder:
         Helices are ribbons seen side on (``helix="cylinder"`` for bars,
         ``"spiral"`` for a line) and strands arrows,
         numbered over them unless ``numbered=False``; the strip takes the chain's place
-        when nothing else is on it. ``sequence`` writes the one-letter sequence under
+        when nothing else is on it; ``secondary_start`` is the residue its first letter
+        is (1 by default). ``sequence`` writes the one-letter sequence under
         it, where the scale leaves room for a letter a residue. A track with ``start``
         and ``end`` then shows a close view of a segment.
         A feature with an ``id`` is a port over it; ``input`` and ``output`` are the
@@ -1129,8 +1132,12 @@ class GroupBuilder:
             properties["gutter"] = float(gutter)
         if secondary:
             properties["secondary"] = secondary
+            if secondary_start != 1:
+                properties["secondary_start"] = int(secondary_start)
         if sequence:
             properties["sequence"] = sequence
+            if sequence_start != 1:
+                properties["sequence_start"] = int(sequence_start)
         if helix != "ribbon":
             properties["helix"] = helix
         if not numbered:

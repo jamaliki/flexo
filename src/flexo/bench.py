@@ -457,6 +457,8 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         high = low + 1.0
     extent = high - low
     step = _tick_step(extent)
+    if step < 1 and all(float(time).is_integer() for time in times):
+        step = 1.0  # whole days stay whole: no "Day 0.5" between them
     first = math.floor(low / step) * step
     last = math.ceil(high / step) * step
     width = float(node.property("length") or 0) or max(
