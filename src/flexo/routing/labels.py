@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Iterable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
-from flexo.geometry import Point, Rect, segment_crosses_rect, segments
+from flexo.geometry import Point, Rect, Segment, segment_crosses_rect, segments
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedNet
+from flexo.routing.aside import Aside, line_reach, place_aside
 from flexo.routing.ink import caption_reach, caption_rise
 from flexo.style import LayoutStyle
 
@@ -60,6 +61,14 @@ def label_box(position: Point, metrics: TextMetrics) -> Rect:
     return Rect(position.x - metrics.width / 2.0, top, metrics.width, metrics.height)
 
 
+@dataclass(frozen=True, slots=True)
+class _Spot:
+    """One place for a connector's writing: its caption, its aside, or both."""
+
+    label: Point | None
+    aside: Aside | None = None
+
+
 def place_captions(
     edges: Sequence[RoutedEdge],
     nets: Sequence[RoutedNet],
@@ -76,6 +85,8 @@ def place_captions(
     ``rail_label_position``), then the same places an edge's caption would.
     An edge in ``from_start`` -- a branch out of a decision -- tries the places
     nearest where it starts first, so "yes" and "no" sit by the question.
+    An edge with an aside (``flexo.routing.aside``) places caption and aside
+    together, one each side of the same point of its line.
     """
 
     items: list[RoutedEdge | RoutedNet] = [*edges, *nets]
@@ -85,62 +96,70 @@ def place_captions(
     # clears it by construction, but beside a diagonal it would not.
     others = [line for _, line in lines]
     near = style.port_spacing.points
-    labelled = [
-        index
-        for index, item in enumerate(items)
-        if item.label_metrics is not None and item.label_position is not None
-    ]
-    candidates: dict[int, list[Point]] = {}
-    for index in labelled:
-        item = items[index]
-        assert item.label_metrics is not None and item.label_position is not None
+    candidates: dict[int, list[_Spot]] = {}
+    for index, item in enumerate(items):
+        if isinstance(item, RoutedEdge) and (item.aside_metrics or item.spec.arrow == "reversible"):
+            if item.label_metrics is None and not item.aside_metrics:
+                continue
+            candidates[index] = _paired(item, style, from_start=item.spec.id in from_start)
+            continue
+        if item.label_metrics is None or item.label_position is None:
+            continue
         if isinstance(item, RoutedEdge):
-            candidates[index] = _candidates(
+            places = _candidates(
                 (item.centerline,),
                 item.label_metrics,
                 style,
                 from_start=item.spec.id in from_start,
             )
         else:
-            candidates[index] = [
-                item.label_position,
-                *_candidates(item.pieces, item.label_metrics, style),
-            ]
+            places = [item.label_position, *_candidates(item.pieces, item.label_metrics, style)]
+        candidates[index] = [_Spot(place) for place in places]
+    labelled = [index for index in candidates if candidates[index]]
     # Close beside another connector costs a little; a container outline (a
     # closed line) is not a connector.
     foreign = {
-        index: [
-            line
-            for key, line in lines
-            if key != items[index].spec.id and line[0] != line[-1]
-        ]
+        index: [line for key, line in lines if key != items[index].spec.id and line[0] != line[-1]]
         for index in labelled
     }
-    chosen: dict[int, Point] = {}
+    chosen: dict[int, _Spot] = {}
 
-    def box_of(index: int, position: Point) -> Rect:
-        return label_box(position, items[index].label_metrics)  # type: ignore[arg-type]
+    def boxes_of(index: int, spot: _Spot) -> list[Rect]:
+        item = items[index]
+        boxes = []
+        if spot.label is not None and item.label_metrics is not None:
+            boxes.append(label_box(spot.label, item.label_metrics))
+        if spot.aside is not None:
+            boxes.append(spot.aside.box)
+        return boxes
 
-    def price(index: int, position: Point, captions: Iterable[Rect]) -> float:
-        box = box_of(index, position)
-        cost = _price(box, solid, [*fixed, *captions], others, canvas)
-        for line in foreign[index]:
-            pieces = list(itertools.pairwise(line))
-            if any(_crosses(box.inflated(near), a, b) for a, b in pieces):
-                cost += NEAR_LINE
-            elif any(_crosses(box.inflated(2.0 * near), a, b) for a, b in pieces):
-                cost += CROWDED
+    def price(index: int, spot: _Spot, captions: Iterable[Rect]) -> float:
+        captions = list(captions)
+        cost = 0.0
+        for box in boxes_of(index, spot):
+            cost += _price(box, solid, [*fixed, *captions], others, canvas)
+            for line in foreign[index]:
+                pieces = list(itertools.pairwise(line))
+                if any(_crosses(box.inflated(near), a, b) for a, b in pieces):
+                    cost += NEAR_LINE
+                elif any(_crosses(box.inflated(2.0 * near), a, b) for a, b in pieces):
+                    cost += CROWDED
         return cost
 
     def placed_except(*skipped: int) -> list[Rect]:
-        return [box_of(other, at) for other, at in chosen.items() if other not in skipped]
+        return [
+            box
+            for other, at in chosen.items()
+            if other not in skipped
+            for box in boxes_of(other, at)
+        ]
 
-    def best_place(index: int, captions: list[Rect]) -> tuple[float, Point] | None:
-        best: tuple[float, Point] | None = None
-        for rank, position in enumerate(candidates[index]):
-            cost = rank * 0.01 + price(index, position, captions)
+    def best_place(index: int, captions: list[Rect]) -> tuple[float, _Spot] | None:
+        best: tuple[float, _Spot] | None = None
+        for rank, spot in enumerate(candidates[index]):
+            cost = rank * 0.01 + price(index, spot, captions)
             if best is None or cost < best[0] - 1e-9:
-                best = (cost, position)
+                best = (cost, spot)
             if cost < 1.0:
                 break
         return best
@@ -150,15 +169,14 @@ def place_captions(
     order = sorted(
         labelled,
         key=lambda index: (
-            sum(price(index, position, ()) < 1.0 for position in candidates[index]),
+            sum(price(index, spot, ()) < 1.0 for spot in candidates[index]),
             index,
         ),
     )
     for index in order:
         best = best_place(index, placed_except())
-        # No run to sit beside (the connector has no length): keep the
-        # position it was given.
-        chosen[index] = best[1] if best is not None else items[index].label_position  # type: ignore[assignment]
+        assert best is not None
+        chosen[index] = best[1]
     # Repair: a caption left with no clear place takes one that a single other
     # caption blocks, when moving that caption elsewhere costs the two of them
     # less in all -- a caption near a line is better than one over a line.
@@ -166,36 +184,122 @@ def place_captions(
         current = price(index, chosen[index], placed_except(index))
         if current < 1.0:
             continue
-        for position in candidates[index]:
-            if price(index, position, placed_except(index)) < 1.0:
-                chosen[index] = position  # freed by an earlier repair
+        for spot in candidates[index]:
+            if price(index, spot, placed_except(index)) < 1.0:
+                chosen[index] = spot  # freed by an earlier repair
                 break
-            if price(index, position, ()) >= 1.0:
+            if price(index, spot, ()) >= 1.0:
                 continue
-            box = box_of(index, position)
+            boxes = boxes_of(index, spot)
             blockers = [
                 other
                 for other, at in chosen.items()
-                if other != index and box_of(other, at).intersects(box, strict=True)
+                if other != index
+                and any(
+                    theirs.intersects(box, strict=True)
+                    for theirs in boxes_of(other, at)
+                    for box in boxes
+                )
             ]
             if len(blockers) != 1:
                 continue
             blocker = blockers[0]
-            captions = [*placed_except(index, blocker), box]
+            captions = [*placed_except(index, blocker), *boxes]
             before = current + price(blocker, chosen[blocker], placed_except(blocker))
             cost, rank = min(
                 (price(blocker, elsewhere, captions), rank)
                 for rank, elsewhere in enumerate(candidates[blocker])
             )
-            after = cost + price(index, position, placed_except(index, blocker))
+            after = cost + price(index, spot, placed_except(index, blocker))
             if after < before - 1.0:
-                chosen[index], chosen[blocker] = position, candidates[blocker][rank]
+                chosen[index], chosen[blocker] = spot, candidates[blocker][rank]
                 current = after - cost
                 break
     result = list(items)
-    for index, position in chosen.items():
-        result[index] = replace(items[index], label_position=position)
+    for index, spot in chosen.items():
+        item = items[index]
+        if isinstance(item, RoutedEdge):
+            result[index] = replace(
+                item,
+                label_position=spot.label if spot.label is not None else item.label_position,
+                aside=spot.aside,
+            )
+        elif spot.label is not None:
+            result[index] = replace(item, label_position=spot.label)
     return result[: len(edges)], result[len(edges) :]  # type: ignore[return-value]
+
+
+def _runs(
+    polylines: Iterable[tuple[Point, ...]], *, from_start: bool = False
+) -> list[tuple[float, Segment]]:
+    """The places along ``polylines`` a caption may sit by, most preferred first."""
+
+    runs = [
+        segment for points in polylines for segment in segments(points) if segment.length > 1e-6
+    ]
+    if from_start:
+        return [(fraction, segment) for segment in runs for fraction in sorted(FRACTIONS)]
+    horizontal = sorted(
+        (segment for segment in runs if segment.horizontal), key=lambda s: -s.length
+    )
+    vertical = sorted(
+        (segment for segment in runs if not segment.horizontal), key=lambda s: -s.length
+    )  # vertical runs, and the diagonals of straight edges
+    return [(fraction, segment) for fraction in FRACTIONS for segment in (*horizontal, *vertical)]
+
+
+def _paired(edge: RoutedEdge, style: LayoutStyle, *, from_start: bool) -> list[_Spot]:
+    """Places for a caption and an aside together, one each side of the line.
+
+    The caption keeps its classic side -- above a horizontal run, right of a
+    vertical one -- with the aside across the line from it; then the two swap.
+    A reversible connector's writing stands clear of both its lines.
+    """
+
+    metrics = edge.label_metrics
+    extra = line_reach(edge.spec, style)
+    spots: list[_Spot] = []
+    for fraction, segment in _runs((edge.centerline,), from_start=from_start):
+        short = metrics is not None and segment.length < metrics.width * 0.6
+        if segment.horizontal and short and fraction != 0.5:
+            continue
+        at = Point(
+            segment.start.x + (segment.end.x - segment.start.x) * fraction,
+            segment.start.y + (segment.end.y - segment.start.y) * fraction,
+        )
+        along = Point(
+            (segment.end.x - segment.start.x) / segment.length,
+            (segment.end.y - segment.start.y) / segment.length,
+        )
+        if segment.horizontal:
+            first = Point(0.0, -1.0)
+        elif segment.vertical:
+            first = Point(1.0, 0.0)
+        else:
+            first = Point(-along.y, along.x)
+        for side in (first, Point(-first.x, -first.y)):
+            label = _beside(at, side, metrics, style, extra) if metrics is not None else None
+            across = Point(-side.x, -side.y)
+            aside = (
+                place_aside(edge.spec, edge.aside_metrics, at, along, across, style)
+                if edge.aside_metrics
+                else None
+            )
+            spots.append(_Spot(label, aside))
+    return spots
+
+
+def _beside(
+    at: Point, side: Point, metrics: TextMetrics, style: LayoutStyle, extra: float
+) -> Point:
+    """A caption's position beside ``at``, on the side ``side`` points to."""
+
+    if abs(side.x) < 1e-9 and side.y < 0.0:
+        return at.translated(dy=-(extra + caption_rise(metrics, style)))
+    half = abs(side.x) * metrics.width / 2.0 + abs(side.y) * metrics.height / 2.0
+    distance = extra + caption_reach(metrics, style) + half
+    centre = Point(at.x + side.x * distance, at.y + side.y * distance)
+    return Point(centre.x, centre.y - metrics.height / 2.0 + metrics.baseline)
 
 
 def _candidates(
@@ -212,30 +316,7 @@ def _candidates(
     from the end nearest its start -- a decision's "yes" beside the decision.
     """
 
-    runs = [
-        segment
-        for points in polylines
-        for segment in segments(points)
-        if segment.length > 1e-6
-    ]
-    if from_start:
-        order = [
-            (fraction, segment)
-            for segment in runs
-            for fraction in sorted(FRACTIONS)
-        ]
-    else:
-        horizontal = sorted(
-            (segment for segment in runs if segment.horizontal), key=lambda s: -s.length
-        )
-        vertical = sorted(
-            (segment for segment in runs if not segment.horizontal), key=lambda s: -s.length
-        )  # vertical runs, and the diagonals of straight edges
-        order = [
-            (fraction, segment)
-            for fraction in FRACTIONS
-            for segment in (*horizontal, *vertical)
-        ]
+    order = _runs(polylines, from_start=from_start)
     rise = caption_rise(metrics, style)
     reach = caption_reach(metrics, style)
     candidates: list[Point] = []

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from flexo.diagnostics import Diagnostic
 from flexo.geometry import Point
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef
+
+if TYPE_CHECKING:
+    from flexo.routing.aside import Aside
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +54,10 @@ class RoutedEdge:
     Edges of one bundle share ink on purpose, so lint does not read their common
     trunk as two routes too close together.
     """
+    aside_metrics: tuple[TextMetrics | None, ...] = ()
+    """The words written on the far side of the line: a back label, or cofactors."""
+    aside: Aside | None = None
+    """Where those words (and the cofactors' arc) went; see ``flexo.routing.aside``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,9 +104,9 @@ class RoutedNet:
 
     @property
     def junctions(self) -> tuple[Point, ...]:
-        return tuple(
-            stem.centerline[-1] for stem in self.source_stems
-        ) + tuple(stem.centerline[0] for stem in self.target_stems)
+        return tuple(stem.centerline[-1] for stem in self.source_stems) + tuple(
+            stem.centerline[0] for stem in self.target_stems
+        )
 
 
 @dataclass(frozen=True, slots=True)

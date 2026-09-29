@@ -11,6 +11,7 @@ uv run python examples/attention_module.py
 uv run python examples/modelangelo_gnn.py
 uv run python examples/tutorial.py
 uv run python examples/genetics.py
+uv run python examples/biology.py
 ```
 
 ## [`tutorial.py`](tutorial.py)
@@ -128,3 +129,14 @@ port wired to its product, a cluster of restriction sites named without overlap,
 and GFP one colour in the construct, on the plasmid, and in the box toned `"GFP"`.
 
 [![genetic circuit](build/genetic-circuit.preview.png)](build/genetic-circuit.preview.png)
+
+## [`biology.py`](biology.py)
+
+Reaction and regulation arrows (cofactors, reversible steps, SBGN heads),
+protein domain maps with a stack of constructs on one scale, a phylogeny drawn
+rectangular and circular, and a methods figure's plate layout and protocol.
+
+[![pathway](build/pathway.preview.png)](build/pathway.preview.png)
+[![proteins](build/proteins.preview.png)](build/proteins.preview.png)
+[![trees](build/trees.preview.png)](build/trees.preview.png)
+[![bench](build/bench.preview.png)](build/bench.preview.png)

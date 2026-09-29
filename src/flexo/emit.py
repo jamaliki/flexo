@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -14,7 +15,8 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
-from flexo.routing.ink import shorten_end
+from flexo.routing.aside import Aside, arrowhead_outline, harpoon_offset
+from flexo.routing.ink import shorten_end, shorten_start
 from flexo.sketch import sketch_svg
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
@@ -28,7 +30,7 @@ from flexo.svg import (
     rounded_polyline_path,
     xml_document,
 )
-from flexo.svg_resources import add_definitions, add_metadata, embed_fonts
+from flexo.svg_resources import add_definitions, add_metadata, embed_fonts, head_marker_id
 from flexo.text import title_typography
 from flexo.theme import retheme_svg as retheme_svg
 from flexo.themes import figure_palette, figure_style
@@ -54,9 +56,7 @@ def _unique_ids(root: ET.Element) -> None:
         identifier = item.get("id")
         if identifier is None:
             continue
-        if identifier in seen or (
-            identifier in owners and item.get("data-flexo-entity") is None
-        ):
+        if identifier in seen or (identifier in owners and item.get("data-flexo-entity") is None):
             suffix = 2
             while f"{identifier}-{suffix}" in seen or f"{identifier}-{suffix}" in owners:
                 suffix += 1
@@ -99,7 +99,7 @@ def emit_svg(
     from flexo.themes import with_tone_roles
 
     paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(semantic, layout_style))
-    fonts = add_definitions(root, layout_style, paint_palette)
+    fonts = add_definitions(root, layout_style, paint_palette, _heads(routed))
     background = layer(root, "layer.background", "Background")
     # The page is transparent unless asked for: the rectangle stays, unpainted,
     # so an editor can still fill it.
@@ -136,7 +136,7 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
     """
 
     from flexo.components import node_tone
-    from flexo.genetics import GENETIC_KINDS, genetic_tones
+    from flexo.drawn import DRAWN_KINDS, drawn_tones
     from flexo.themes import TONE_COUNT
 
     names: list[str] = []
@@ -144,16 +144,19 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
         tone = node_tone(node, style.kind_tones)
         if tone is not None and not tone.isdigit() and tone not in names:
             names.append(tone)
-        # A construct's or plasmid's genes: each gene one colour across the figure.
-        if node.kind in GENETIC_KINDS:
-            for name in genetic_tones(node):
+        # A drawn component's tones (a construct's genes, a protein's domains):
+        # each one colour across the figure.
+        if node.kind in DRAWN_KINDS:
+            for name in drawn_tones(node):
                 if not name.isdigit() and name not in names:
                     names.append(name)
     claimed = {
         int(tone)
         for node in figure.nodes
-        for tone in (node_tone(node, style.kind_tones),
-                     *(genetic_tones(node) if node.kind in GENETIC_KINDS else ()))
+        for tone in (
+            node_tone(node, style.kind_tones),
+            *(drawn_tones(node) if node.kind in DRAWN_KINDS else ()),
+        )
         if tone is not None and tone.isdigit()
     }
     free = [index for index in range(1, TONE_COUNT + 1) if index not in claimed] or [1]
@@ -350,6 +353,21 @@ class _Hierarchy:
         )
 
 
+def _heads(routed: RoutedFigure) -> set[str]:
+    """The markers beyond the plain arrow that the figure's connectors end in."""
+
+    wanted: set[str] = set()
+    for edge in routed.edges:
+        spec = edge.spec
+        if spec.arrow == "reversible":
+            wanted.add(head_marker_id(spec.role, "harpoon"))
+        elif spec.head != "arrow" and spec.arrow != "none":
+            wanted.add(head_marker_id(spec.role, spec.head))
+            if spec.arrow == "both":
+                wanted.add(head_marker_id(spec.role, spec.head, start=True))
+    return wanted
+
+
 def _render_edge(
     parent: ET.Element,
     edge: RoutedEdge,
@@ -357,7 +375,6 @@ def _render_edge(
     palette: Palette,
 ) -> None:
     paint_role = "residual" if edge.spec.role == "residual" else "connector"
-    marker_role = "residual" if edge.spec.role == "residual" else "flow"
     group = element(
         parent,
         "g",
@@ -366,23 +383,51 @@ def _render_edge(
         data__flexo__role=edge.spec.role,
         stroke__dasharray=_dash(edge.spec.line, style),
     )
-    element(
-        group,
-        "path",
-        id=f"{edge.spec.id}.shaft",
-        d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
-        marker__end=f"url(#arrow.{marker_role})"
-        if edge.spec.arrow != "none" and (edge.joined_at is None or edge.join_arrow)
-        else None,
-        marker__start=f"url(#arrow.{marker_role}.start)" if edge.spec.arrow == "both" else None,
-        stroke__linecap="round",
-        stroke__linejoin="round",
-        **paint_attributes(
-            palette=palette,
-            stroke_role=paint_role,
-            stroke_width=style.connector_width.points,
-        ),
+    stroke = paint_attributes(
+        palette=palette,
+        stroke_role=paint_role,
+        stroke_width=style.connector_width.points,
     )
+    if edge.spec.arrow == "reversible":
+        # Two lines, one each way, each on the left of its own travel and
+        # ending in half a head on its outer side: ⇌.
+        harpoon = f"url(#{head_marker_id(edge.spec.role, 'harpoon')})"
+        head = style.arrow_length.points + style.connector_standoff.points
+        standoff = style.connector_standoff.points
+        line = edge.centerline
+        there = shorten_start(shorten_end(line, head), standoff)
+        back = shorten_start(shorten_end(line, standoff), head)[::-1]
+        for name, points in (("forward", there), ("back", back)):
+            element(
+                group,
+                "path",
+                id=f"{edge.spec.id}.{name}",
+                d=rounded_polyline_path(
+                    _offset_left(points, harpoon_offset(style)),
+                    style.elbow_radius.points,
+                ),
+                marker__end=harpoon,
+                stroke__linecap="round",
+                stroke__linejoin="round",
+                **stroke,
+            )
+    else:
+        heads = edge.spec.arrow != "none" and (edge.joined_at is None or edge.join_arrow)
+        element(
+            group,
+            "path",
+            id=f"{edge.spec.id}.shaft",
+            d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
+            marker__end=f"url(#{head_marker_id(edge.spec.role, edge.spec.head)})"
+            if heads
+            else None,
+            marker__start=f"url(#{head_marker_id(edge.spec.role, edge.spec.head, start=True)})"
+            if edge.spec.arrow == "both"
+            else None,
+            stroke__linecap="round",
+            stroke__linejoin="round",
+            **stroke,
+        )
     if edge.dots:
         for index, point in enumerate(edge.dots, 1):
             element(
@@ -403,6 +448,81 @@ def _render_edge(
             style,
             palette,
         )
+    if edge.aside is not None:
+        _render_aside(group, edge, edge.aside, style, palette, paint_role)
+
+
+def _render_aside(
+    group: ET.Element,
+    edge: RoutedEdge,
+    aside: Aside,
+    style: LayoutStyle,
+    palette: Palette,
+    paint_role: str,
+) -> None:
+    """The words across the line from the caption, and the cofactors' curve."""
+
+    identifier = edge.spec.id
+    if aside.arc:
+        first, *rest = aside.arc
+        data = f"M {number(first.x)} {number(first.y)} C " + " ".join(
+            f"{number(point.x)} {number(point.y)}" for point in rest
+        )
+        element(
+            group,
+            "path",
+            id=f"{identifier}.cofactors",
+            d=data,
+            stroke__linecap="round",
+            stroke__dasharray="none",
+            **paint_attributes(
+                palette=palette, stroke_role=paint_role, stroke_width=style.connector_width.points
+            ),
+        )
+    if aside.head is not None:
+        corners = arrowhead_outline(*aside.head, style)
+        element(
+            group,
+            "path",
+            id=f"{identifier}.cofactors.head",
+            d="M " + " L ".join(f"{number(point.x)} {number(point.y)}" for point in corners) + " Z",
+            stroke__dasharray="none",
+            **paint_attributes(palette=palette, fill_role=paint_role),
+        )
+    if edge.spec.back_label:
+        names = ["back-label"]
+    else:
+        names = [
+            name for name, runs in zip(("taken", "given"), edge.spec.cofactors, strict=True) if runs
+        ]
+    for name, words in zip(names, aside.words, strict=True):
+        _connector_label(
+            group, f"{identifier}.{name}", words.metrics, words.position, style, palette
+        )
+
+
+def _offset_left(points: tuple[Point, ...], distance: float) -> tuple[Point, ...]:
+    """``points`` moved ``distance`` to the left of their travel, corners mitred."""
+
+    if len(points) < 2:
+        return points
+
+    def normal(start: Point, end: Point) -> tuple[float, float]:
+        dx, dy = end.x - start.x, end.y - start.y
+        length = (dx * dx + dy * dy) ** 0.5 or 1.0
+        return dy / length, -dx / length
+
+    normals = [normal(a, b) for a, b in itertools.pairwise(points)]
+    moved = []
+    for index, point in enumerate(points):
+        before = normals[max(0, index - 1)]
+        after = normals[min(len(normals) - 1, index)]
+        dot = before[0] * after[0] + before[1] * after[1]
+        scale = distance / (1.0 + dot) if dot > -0.99 else distance
+        nx = (before[0] + after[0]) * scale if dot > -0.99 else before[0] * distance
+        ny = (before[1] + after[1]) * scale if dot > -0.99 else before[1] * distance
+        moved.append(Point(point.x + nx, point.y + ny))
+    return tuple(moved)
 
 
 def _render_net(
@@ -458,10 +578,7 @@ def _tree_ink(
             (f"{net.spec.id}.trunk.{index}", trunk, False)
             for index, trunk in enumerate(net.trunks, 1)
         ),
-        *(
-            (f"{net.spec.id}.join.{index}", join, True)
-            for index, join in enumerate(net.joins, 1)
-        ),
+        *((f"{net.spec.id}.join.{index}", join, True) for index, join in enumerate(net.joins, 1)),
         *(
             (f"{net.spec.id}.source.{index}", stem.shaft, stem.arrow_end)
             for index, stem in enumerate(net.source_stems, 1)
@@ -600,21 +717,15 @@ def _net_ink(
     standoff: float = 0.0,
 ) -> _NetInk:
     stems = [
-        (f"{net.spec.id}.source.{index}", stem)
-        for index, stem in enumerate(net.source_stems, 1)
-    ] + [
-        (f"{net.spec.id}.target.{index}", stem)
-        for index, stem in enumerate(net.target_stems, 1)
-    ]
+        (f"{net.spec.id}.source.{index}", stem) for index, stem in enumerate(net.source_stems, 1)
+    ] + [(f"{net.spec.id}.target.{index}", stem) for index, stem in enumerate(net.target_stems, 1)]
     shafts = {stem_id: stem.shaft for stem_id, stem in stems}
     rail = list(net.rail)
     for position, lead in _terminal_leads(net, radius).items():
         terminal = net.rail[position]
         stem_id, stem = next(item for item in stems if _junction(item[1]) == terminal)
         anchor = _along(terminal, net.rail[-1 - position], lead)
-        shafts[stem_id] = (
-            (anchor, *stem.shaft) if stem.arrow_end else (*stem.shaft, anchor)
-        )
+        shafts[stem_id] = (anchor, *stem.shaft) if stem.arrow_end else (*stem.shaft, anchor)
         rail[position] = anchor
     branches = _branch_points(net)
     reach = arrow_length + standoff
@@ -658,9 +769,7 @@ def _arrow_joints(
     arrowed: set[str] = set()
     marked: set[Point] = set()
     for point in branches:
-        arrival = next(
-            (stem for stem in net.target_stems if stem.centerline[0] == point), None
-        )
+        arrival = next((stem for stem in net.target_stems if stem.centerline[0] == point), None)
         approach = segments(arrival.shaft) if arrival is not None else ()
         through = approach[0].horizontal if approach else rail_axis
         if through is not rail_axis and _rail_reaches(rail, point, reach):
@@ -724,9 +833,7 @@ def _terminal_leads(net: RoutedNet, radius: float) -> dict[int, float]:
         stem = next((item for item in stems if _junction(item) == terminal), None)
         if stem is None or not _turns_at(stem, rail):
             continue
-        interior = tuple(
-            terminal.distance_to(point) for point in counts if point != terminal
-        )
+        interior = tuple(terminal.distance_to(point) for point in counts if point != terminal)
         result[position] = min(2.0 * radius, min(interior, default=span), span)
     if len(result) == 2:
         return {position: min(lead, span / 2.0) for position, lead in result.items()}
@@ -862,11 +969,7 @@ def _render_group_label(
         parent,
         f"{spec.id}.label",
         label,
-        x=(
-            group.bounds.right - authored.right
-            if right
-            else group.bounds.x + authored.left
-        ),
+        x=(group.bounds.right - authored.right if right else group.bounds.x + authored.left),
         y=top + label.baseline,
         typography=title_typography(style.typography),
         palette=palette,

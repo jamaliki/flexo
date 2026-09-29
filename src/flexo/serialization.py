@@ -231,6 +231,19 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["line"] = edge.line
     if edge.arrow != "end":
         result["arrow"] = edge.arrow
+    if edge.head != "arrow":
+        result["head"] = edge.head
+    if edge.back_label:
+        back: dict[str, object] = {}
+        _put_label(back, edge.back_label)
+        result["back_label"] = back["label"]
+    if edge.cofactors:
+        cofactors = []
+        for runs in edge.cofactors:
+            item: dict[str, object] = {}
+            _put_label(item, runs)
+            cofactors.append(item.get("label", ""))
+        result["cofactors"] = cofactors
     if edge.waypoints:
         result["waypoints"] = [_waypoint_data(waypoint) for waypoint in edge.waypoints]
     return result
@@ -428,6 +441,9 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         shape=data.get("shape", "auto"),
         line=data.get("line", "solid"),
         arrow=data.get("arrow", "end"),
+        head=data.get("head", "arrow"),
+        back_label=_label(data.get("back_label", "")),
+        cofactors=tuple(_label(item) for item in data.get("cofactors", ())),
     )
 
 

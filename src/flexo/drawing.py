@@ -74,7 +74,8 @@ class Arrowhead:
     angle: float
     """The direction the head points, in radians (0 is +x, clockwise on the page)."""
     shape: str
-    """The marker's shape: ``triangle``, ``stealth``, ``latex``, or ``open``."""
+    """The marker's shape: ``triangle``, ``stealth``, ``latex``, or ``open``; or what
+    it says, for the heads of ``EDGE_HEADS`` (``inhibition``, ...) and ``harpoon``."""
     length: float
     width: float
     outline: tuple[Segment, ...]
@@ -1240,7 +1241,11 @@ def _arrowhead(
     ys = [y for segment in local for _, y in segment.points]
     identifier = marker.get("id") or ""
     filled = body.get("fill", "none") != "none"
-    shape = "open" if not filled else _marker_shape(local)
+    named = identifier.removesuffix(".start").split(".")
+    if len(named) == 3 and named[0] == "arrow":
+        shape = named[2]  # an SBGN head, or a harpoon
+    else:
+        shape = "open" if not filled else _marker_shape(local)
     paint = Paint(
         fill=body.get("fill") if filled else None,
         stroke=body.get("stroke") if body.get("stroke") not in (None, "none") else None,

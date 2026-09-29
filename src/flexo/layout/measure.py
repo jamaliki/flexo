@@ -8,6 +8,7 @@ from dataclasses import replace
 
 from flexo.components import intrinsic_node_size
 from flexo.diagnostics import Diagnostic, Severity
+from flexo.drawn import DRAWN_KINDS, picture
 from flexo.geometry import Point, Rect, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode, TextMetrics
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, layout_connections
@@ -15,6 +16,7 @@ from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, de
 from flexo.layout.flow import lower_flows
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
+from flexo.routing.aside import writing_room
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
@@ -44,7 +46,12 @@ def measure_figure(
     measured_nodes = _one_circle_size(
         tuple(_measure_node(node, text_measurer, layout_style) for node in semantic.nodes)
     )
-    measured_edge_labels = tuple(text_measurer.measure(edge.label) for edge in semantic.edges)
+    # What each connector writes beside its line -- its caption, and across the
+    # line from it any aside (flexo.routing.aside) -- sizes the gap it crosses.
+    measured_edge_labels = tuple(
+        writing_room(edge, text_measurer.measure(edge.label), text_measurer.measure, layout_style)
+        for edge in semantic.edges
+    )
     edge_labels = {
         edge.id: metrics
         for edge, metrics in zip(semantic.edges, measured_edge_labels, strict=True)
@@ -186,8 +193,8 @@ def _measure_node(
     style: LayoutStyle,
 ) -> MeasuredNode:
     label = measurer.measure(node.label, max_width=_label_width(node, style))
-    if node.kind in {"construct", "plasmid"}:
-        return _measure_genetic(node, label, style)
+    if node.kind in DRAWN_KINDS:
+        return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
@@ -195,13 +202,12 @@ def _measure_node(
     return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0))
 
 
-def _measure_genetic(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> MeasuredNode:
-    """A construct or plasmid: as big as its drawing, each generated port where its
-    drawing puts it (a part's under its glyph), a construct's ports on its backbone."""
+def _measure_drawn(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> MeasuredNode:
+    """A drawn component (``flexo.drawn``): as big as its picture, each generated port
+    where the picture puts it (a part's under its glyph), a construct's ports on its
+    backbone."""
 
-    from flexo.genetics import genetic_drawing
-
-    drawing = genetic_drawing(node, style)
+    drawing = picture(node, style)
     size = drawing.size
     placed = {port.name: port for port in drawing.ports}
     ports = tuple(

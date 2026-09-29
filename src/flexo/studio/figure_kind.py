@@ -49,7 +49,14 @@ nodes: each {id, label, kind (block by default; text, op, circle, feature-strip,
 Genetics: kind construct, properties {parts: [{type: promoter|rbs|cds|terminator|operator|origin|
   insulator|primer|site|region, label, id (makes a port), strand: + or -, tone}]}; kind plasmid,
   properties {length: bp, features: [{type, label, start, end, strand}]}.
-edges: each {from: node or node.port, to: node or node.port, label, role}
+Proteins: kind protein, properties {length, features: [{type: domain|region|motif|transmembrane|
+  signal|mutation|phosphorylation|...|disulfide, label, start, end (or at, for a site)}],
+  tracks: [{label, start, end, delete: "61-121"}]}. Trees: kind tree, properties {newick,
+  layout: rectangular|circular, clades: [{tips: "A, B", label}], support}. The bench: kind
+  wellplate {wells: 96, groups: [{wells: "A1-A12", label}]}; kind timeline {unit: day,
+  events: [{at, label}], spans: [{start, end, label}]}.
+edges: each {from: node or node.port, to: node or node.port, label, role, head: inhibition|
+  catalysis|stimulation|necessary|modulation, arrow: reversible, back_label, cofactors: [ATP, ADP]}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
 Labels are markup: $maths$, *emphasis*, **strong**. `flexo schema` prints the full schema.

@@ -87,6 +87,7 @@ and, unless given a label, draw nothing. Every component is a method on the grou
 | Shapes | `circle`, `decision`, `terminal`, `volume`, `op` (and `add`, `multiply`) |
 | Words and art | `text`, `vector`, `image`, `graph`, `inset`, `legend` |
 | Genetics | `construct`, `plasmid` (see [Genetic designs](#genetic-designs-constructs-and-plasmids)) |
+| Proteins, trees, the bench | `protein`, `tree`, `wellplate`, `timeline` (see [Proteins, trees, plates, and timelines](#proteins-trees-plates-and-timelines)) |
 
 A label longer than 16 ems wraps into balanced lines, and a component with an
 authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
@@ -149,6 +150,100 @@ stack outward, every named feature is labelled outside the circle with a leader
 line, and ticks mark every round number of base pairs (`ticks=False` drops them).
 In a figure file the same are `kind: construct` with `properties: {parts: [...]}`
 and `kind: plasmid` with `properties: {length: 5421, features: [...]}`.
+
+### Pathways, regulation, and reactions
+
+![A pathway and a gene circuit (examples/biology.py)](examples/build/pathway.preview.png)
+
+```python
+figure.connect(glucose, g6p, label="hexokinase", cofactors=("ATP", "ADP"))
+figure.connect(g6p, f6p, arrow="reversible", label="$k_1$", back_label="$k_{-1}$")
+figure.connect(tetr, ptet, head="inhibition")      # a repressor on its promoter
+figure.connect(ptet, gfp, head="stimulation")
+```
+
+`head=` says what a connector does to its target, in
+[SBGN](https://sbgn.github.io/)'s arrowheads: `"inhibition"` (a bar, ⊣),
+`"catalysis"` (an open circle), `"stimulation"` (an open triangle),
+`"necessary"` (a bar and an open triangle), or `"modulation"` (an open
+diamond). These heads touch what they act on, where an arrow stops just short.
+`arrow="reversible"` draws a reversible step as two half-headed lines (⇌),
+with `label` over them and `back_label` under them. `cofactors=("ATP", "ADP")`
+writes what a step takes in and gives off as a curved arrow touching the line,
+across it from the label; either may be `""` (water taken in, nothing given
+off). Layout makes room for both sides of the line, as it does for a caption.
+In a figure file these are the edge fields `head`, `arrow: reversible`,
+`back_label`, and `cofactors: [ATP, ADP]`.
+
+### Proteins, trees, plates, and timelines
+
+![Protein domain maps (examples/biology.py)](examples/build/proteins.preview.png)
+
+```python
+figure.root.protein("abl1", 1130, label="ABL1", features=[
+    {"type": "domain", "label": "SH3", "start": 61, "end": 121},
+    {"type": "domain", "label": "Kinase", "start": 242, "end": 493},
+    {"type": "region", "label": "Disordered", "start": 540, "end": 960},
+    {"type": "transmembrane", "start": 1000, "end": 1022},
+    {"type": "mutation", "label": "T315I", "at": 315},
+    {"type": "phosphorylation", "label": "Y412", "at": 412},
+    {"type": "disulfide", "start": 600, "end": 700},
+])
+figure.root.protein("constructs", 1130, features=domains, tracks=[
+    {"label": "Full length"},
+    {"label": "ΔSH3", "delete": "61-121"},
+    {"label": "Kinase domain", "start": 229, "end": 500},
+])
+```
+
+`protein` draws a chain to scale by residue: domains, regions, and motifs as
+boxes (named inside when the name fits, under the box when not), transmembrane
+helices as tall dark bars, a signal peptide as a short box, sites (`mutation`,
+`phosphorylation`, `glycosylation`, ... at one residue, `at:`) as lollipops
+with their names spread apart, and disulfides as brackets under the chain, over
+a residue axis. `tracks` draws the protein several times on one scale -- a
+truncation keeps `start` to `end`, a `delete` breaks the chain with a hinge.
+A domain takes a colour by its name, as a gene does; every mutation shares one
+colour, every kind of modification another. `scale=` (points a residue) and
+`gutter=` (room for track names) line up separate proteins; a feature with an
+`id` is a port over it.
+
+![Trees (examples/biology.py)](examples/build/trees.preview.png)
+
+```python
+figure.root.tree("mammals", "((Human:0.08,Chimp:0.09)100:0.37,(Mouse:0.35,Rat:0.33):0.3);",
+                 support=True, italic=True,
+                 clades=[{"tips": "Human, Chimp", "label": "Primates"}])
+figure.root.tree("ring", newick, layout="circular")
+```
+
+`tree` reads [Newick](https://en.wikipedia.org/wiki/Newick_format): branch
+lengths make a phylogram with a scale bar, a tree without them (or
+`lengths=False`) a cladogram with its tips lined up. `layout="circular"` puts
+the root in the middle, names on the ring. A clade -- the smallest subtree
+holding the `tips` named -- is coloured by its name and bracketed beside its
+tips; `support=True` writes support values by their nodes.
+
+![A plate and a protocol (examples/biology.py)](examples/build/bench.preview.png)
+
+```python
+figure.root.wellplate("plate", [
+    {"wells": "A1-A12", "label": "Control"},
+    {"wells": "B-D", "label": "Drug, 1 µM"},
+], wells=96)
+figure.root.timeline("protocol", unit="day",
+    events=[{"at": 0, "label": "Seed"}, {"at": 2, "label": "Induce"}],
+    spans=[{"start": 2, "end": 5, "label": "Doxycycline"}])
+```
+
+`wellplate` draws 6, 12, 24, 48, 96, or 384 wells, each group's wells (a well
+`A1`, a block `B1-D6`, rows `A-D`, columns `1-3`) filled in its condition's
+colour, with a legend. `timeline` sets events as dots on a time axis, named
+over it, and spans as bars under it, stacked where they overlap; `unit="day"`
+writes "Day 2", `unit="h"` "2 h".
+
+In a figure file each is a node kind -- `protein`, `tree`, `wellplate`,
+`timeline` -- with the same names under `properties`.
 
 ### Operators and words
 
