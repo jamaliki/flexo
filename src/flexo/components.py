@@ -616,13 +616,9 @@ def normalize_node(node: NodeSpec) -> NodeSpec:
         )
         return replace(node, ports=COMPONENTS["construct"].ports + parts)
     if node.kind == "protein":
-        from flexo.proteins import protein_features
+        from flexo.proteins import protein_ports
 
-        named = tuple(
-            PortSpec(feature.id, Side.NORTH)
-            for feature in protein_features(node)
-            if feature.id is not None
-        )
+        named = tuple(PortSpec(name, side) for name, side in protein_ports(node))
         return replace(node, ports=COMPONENTS["protein"].ports + named)
     if node.kind == "timeline":
         from flexo.bench import timeline_moments

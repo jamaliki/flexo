@@ -148,6 +148,11 @@ leave a gene for what it makes. On a plasmid, features are placed by their base
 pairs (`start`, `end`; a feature may run across the origin), overlapping features
 stack outward, every named feature is labelled outside the circle with a leader
 line, and ticks mark every round number of base pairs (`ticks=False` drops them).
+`scale=0.1` draws a construct to scale, that many points a base pair: give each
+part its length (`"bp": 720`). Genes, regions, and spacers are then as long as
+they are, the smaller glyphs keep their size centred on their stretch, the names
+sit in one row clear of every glyph and are spread apart where they crowd, and a
+base-pair ruler runs underneath (`ticks=False` drops it).
 In a figure file the same are `kind: construct` with `properties: {parts: [...]}`
 and `kind: plasmid` with `properties: {length: 5421, features: [...]}`.
 
@@ -205,8 +210,11 @@ a residue axis. `tracks` draws the protein several times on one scale -- a
 truncation keeps `start` to `end`, a `delete` breaks the chain with a hinge.
 A domain takes a colour by its name, as a gene does; every mutation shares one
 colour, every kind of modification another. `scale=` (points a residue) and
-`gutter=` (room for track names) line up separate proteins; a feature with an
-`id` is a port over it.
+`gutter=` (room for track names) line up separate proteins. A feature with an
+`id` is a port over it; a track with an `id` is a port at each end of its chain
+(`"short"` on the left, `"short.end"` on the right), so an arrow can point at one
+construct of a stack. Sites closer than their heads are fanned out sideways, each
+stem bending from its own residue to a head of its own.
 
 ![Secondary structure (examples/biology.py)](examples/build/structure.preview.png)
 

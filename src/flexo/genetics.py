@@ -81,6 +81,8 @@ class Part:
     reverse: bool = False
     start: int = 0
     end: int = 0
+    bp: int = 0
+    """A construct part's length in base pairs, for a construct drawn to scale."""
 
     @property
     def text(self) -> str:
@@ -125,7 +127,7 @@ def _part(node: NodeSpec, record: Record, where: str, allowed: frozenset[str]) -
             f'{where}: no part called "{written}".',
             hint=f"Parts are: {', '.join(names)}.",
         )
-    known = {"type", "label", "id", "tone", "strand", "start", "end"}
+    known = {"type", "label", "id", "tone", "strand", "start", "end", "bp"}
     extra = sorted(set(record.as_dict()) - known)
     if extra:
         raise _fail(
@@ -144,12 +146,17 @@ def _part(node: NodeSpec, record: Record, where: str, allowed: frozenset[str]) -
         )
     tone = record.get("tone")
     label = parse_label(str(record.get("label", "")))
+    try:
+        bp = int(record.get("bp", 0) or 0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise _fail(node, "part.bp", f"{where}: bp is a length in base pairs.") from None
     return Part(
         kind,
         label,
         None if identifier is None else str(identifier),
         None if tone is None else str(tone),
         _strand(node, record),
+        bp=bp,
     )
 
 
@@ -423,6 +430,9 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         slots.append((part, glyph, metrics, x, slot))
         x += slot + gap
     length = x - gap + lead
+    scale = _construct_scale(node)
+    if scale is not None:
+        slots, length = _scaled_slots(node, parts, measures, scale, lead)
 
     # How far the drawing reaches above and below the backbone, words included.
     above = below = 0.0
@@ -434,6 +444,17 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         else:
             above, below = max(above, up), max(below, down + words)
     above, below = max(above, 0.9 * u), max(below, 0.9 * u)
+    # Drawn to scale, a name sits in one row clear of every glyph on its side,
+    # not just its own: a long gene's box runs under its small neighbours.
+    reach_down = max((glyph.up if part.reverse else glyph.down) for part, glyph, *_ in slots)
+    reach_up = max((glyph.down if part.reverse else glyph.up) for part, glyph, *_ in slots)
+    if scale is not None:
+        heights_down = [m.height for p, g, m, *_ in slots if m and not g.inside and not p.reverse]
+        heights_up = [m.height for p, g, m, *_ in slots if m and not g.inside and p.reverse]
+        if heights_down:
+            below = max(below, reach_down + word_gap + max(heights_down))
+        if heights_up:
+            above = max(above, reach_up + word_gap + max(heights_up))
     title = (
         measures.measure(node.label, weight=style.typography.title_weight) if node.label else None
     )
@@ -448,7 +469,10 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         length += extra
     pad = 0.25 * u
     base = pad + top + above
-    height = base + below + pad
+    axis_room = 0.0
+    if scale is not None and node.property("ticks") is not False:
+        axis_room = 0.9 * u + measures.small.measure((TextRun("0"),)).height
+    height = base + below + axis_room + pad
 
     shapes = [
         Shape(
@@ -464,7 +488,12 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         PortSpec("input", Side.WEST, base / height),
         PortSpec("output", Side.EAST, base / height),
     ]
-    for index, (part, glyph, metrics, left, slot) in enumerate(slots):
+    # Long parts first, so the small glyphs drawn to scale over them show.
+    order = sorted(
+        enumerate(slots),
+        key=lambda item: 0 if scale is not None and item[1][0].type in _SCALED else 1,
+    )
+    for index, (part, glyph, metrics, left, slot) in order:
         name = f"{node.id}.part{index + 1}"
         tone = part_tone(part)
         glyph_left = left + (slot - glyph.width) / 2.0
@@ -483,15 +512,27 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     )
                 )
             elif part.reverse:
-                reach = glyph.down
+                reach = reach_up if scale is not None else glyph.down
                 y = base - reach - word_gap - metrics.height + metrics.baseline
                 words.append(Words(f"{name}.label", part.label, metrics, centre, y))
             else:
-                y = base + glyph.down + word_gap + metrics.baseline
+                reach = reach_down if scale is not None else glyph.down
+                y = base + reach + word_gap + metrics.baseline
                 words.append(Words(f"{name}.label", part.label, metrics, centre, y))
         if part.id is not None:
             side = Side.NORTH if part.reverse else Side.SOUTH
             ports.append(PortSpec(part.id, side, min(max(centre / length, 0.0), 1.0)))
+    if scale is not None:
+        # Drawn to scale, small parts sit close: their names are spread apart
+        # (under the backbone and over it separately), each led to its part.
+        words, leaders = _spread_part_names(words, slots, node.id, u, pen, base, length)
+        shapes.extend(leaders)
+        if axis_room:
+            shapes_axis, words_axis = _bp_axis(
+                node.id, parts, scale, lead, base + below + 0.4 * u, measures, pen
+            )
+            shapes.extend(shapes_axis)
+            words.extend(words_axis)
     if title is not None:
         words.append(
             Words(
@@ -505,6 +546,136 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             )
         )
     return Picture(Size(length, height), tuple(shapes), tuple(words), tuple(ports))
+
+
+_SCALED = frozenset({"cds", "region", "spacer", "primer"})
+"""Parts drawn as long as they are, on a construct drawn to scale; the rest are
+glyphs of their own size, centred on their stretch of backbone."""
+
+
+def _construct_scale(node: NodeSpec) -> float | None:
+    value = node.property("scale")
+    if value is None:
+        return None
+    try:
+        scale = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise _fail(
+            node, "construct.scale", f"scale {value!r} is not points a base pair."
+        ) from None
+    if scale <= 0:
+        raise _fail(node, "construct.scale", "scale is points a base pair, more than 0.")
+    return scale
+
+
+def _scaled_slots(node: NodeSpec, parts, measures, scale: float, lead: float):
+    """Each part's stretch of backbone, ``bp`` times ``scale`` long, end to end."""
+
+    u = measures.u
+    slots = []
+    x = lead
+    for index, part in enumerate(parts, 1):
+        if part.bp <= 0:
+            raise _fail(
+                node,
+                "part.bp",
+                f"part {index}: a construct drawn to scale needs each part's length.",
+                hint="Write bp: 720 on every part, or leave out scale.",
+            )
+        metrics = measures.measure(part.label) if part.label else None
+        glyph = _glyph(part.type, u, metrics.width if metrics else 0.0)
+        slot = part.bp * scale
+        if part.type in _SCALED:
+            margin = 2.4 * u if part.type == "cds" else 1.6 * u
+            fits = glyph.inside and metrics is not None and metrics.width + margin <= slot
+            glyph = replace(glyph, width=max(slot, 0.8 * u), inside=fits)
+        slots.append((part, glyph, metrics, x, slot))
+        x += slot
+    return slots, x + lead
+
+
+def _spread_part_names(
+    words, slots, node_id: str, u: float, pen: float, base: float, length: float
+):
+    from flexo.drawn import Name, spread
+
+    by_id = {item.id: item for item in words}
+    leaders: list[Shape] = []
+    for below in (True, False):
+        names = []
+        for index, (part, glyph, _, left, slot) in enumerate(slots, 1):
+            key = f"{node_id}.part{index}.label"
+            item = by_id.get(key)
+            if item is None or glyph.inside or part.reverse == below:
+                continue
+            names.append(Name(key, item.runs, item.metrics, left + slot / 2.0))
+        spread(names, 0.4 * u, 0.0, length)
+        for name in names:
+            item = by_id[name.key]
+            by_id[name.key] = replace(item, x=name.x)
+            if abs(name.x - name.want) > 0.2 * u:
+                edge = (
+                    item.y - item.metrics.baseline
+                    if below
+                    else item.y - item.metrics.baseline + item.metrics.height
+                )
+                start = base + (0.95 * u if below else -0.95 * u)
+                leaders.append(
+                    Shape(
+                        f"{name.key}.leader",
+                        path("M", name.want, start, "L", name.x, edge),
+                        "leader",
+                        None,
+                        pen * 0.7,
+                    )
+                )
+    return [by_id[item.id] for item in words], leaders
+
+
+def _bp_axis(node_id: str, parts, scale: float, lead: float, y: float, measures, pen: float):
+    """A base-pair ruler under a construct drawn to scale."""
+
+    total = sum(part.bp for part in parts)
+    step = nice_step(total)
+    u = measures.u
+    shapes = [
+        Shape(
+            f"{node_id}.axis",
+            path("M", lead, y, "L", lead + total * scale, y),
+            "tick",
+            None,
+            pen * 0.8,
+        )
+    ]
+    words = []
+    values = [*range(0, total, step), total]
+    if len(values) > 2 and total - values[-2] < step * 0.35:
+        values.pop(-2)
+    for value in values:
+        x = lead + value * scale
+        shapes.append(
+            Shape(
+                f"{node_id}.tick{value}",
+                path("M", x, y, "L", x, y + 0.3 * u),
+                "tick",
+                None,
+                pen * 0.8,
+            )
+        )
+        runs = (TextRun(f"{value:,} bp" if value == total else f"{value:,}"),)
+        metrics = measures.measure(runs, small=True)
+        words.append(
+            Words(
+                f"{node_id}.tick{value}.label",
+                runs,
+                metrics,
+                x,
+                y + 0.45 * u + metrics.baseline,
+                size=measures.small_size,
+                role="muted-ink",
+            )
+        )
+    return shapes, words
 
 
 # -- plasmids -----------------------------------------------------------------------------

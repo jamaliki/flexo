@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 
 import pytest
@@ -380,3 +381,67 @@ def test_a_feature_all_the_way_round_a_plasmid_is_a_ring() -> None:
     }
     ring = shapes["p.feature1"].d
     assert ring.count("M") == 2 and ring.count("A") == 4
+
+
+# -- limitations lifted ---------------------------------------------------------------
+
+
+def test_crowded_sites_fan_out_at_one_height() -> None:
+    with flexo.Figure("crowded") as figure:
+        figure.root.protein(
+            "p",
+            400,
+            [{"type": "mutation", "label": f"X{at}", "at": at} for at in (100, 101, 102, 103)],
+        )
+    drawing = _drawing(figure, "p")
+    heads = [shape for shape in drawing.shapes if re.fullmatch(r"p\.site\d", shape.id)]
+    centres = sorted(
+        (float(x) + 0.0, float(y))
+        for x, y in (re.findall(r"M (-?[\d.]+) (-?[\d.]+)", shape.d)[0] for shape in heads)
+    )
+    assert len({round(y, 3) for _, y in centres}) == 1  # one height
+    assert all(b[0] - a[0] > 1.0 for a, b in itertools.pairwise(centres))  # apart
+
+
+def test_a_track_with_an_id_is_a_port_at_its_chain() -> None:
+    with flexo.Figure("tracks") as figure:
+        row = figure.root.row("r", gap=40)
+        nanobody = row.block("nb", label="Nanobody")
+        protein = row.protein(
+            "p",
+            500,
+            [{"type": "domain", "label": "Kinase", "start": 100, "end": 300}],
+            tracks=[{"label": "Full"}, {"label": "ΔN", "start": 90, "id": "short"}],
+        )
+        figure.connect(nanobody, protein.port("short"))
+    compiled = compile_figure(figure.spec)
+    assert not lint_compilation(compiled).diagnostics
+    ports = {port.name: port for port in compiled.measured.node("r.p").spec.ports}
+    assert ports["short"].side.value == "west" and ports["short.end"].side.value == "east"
+    assert ports["short"].offset > ports["input"].offset  # the second track is lower
+
+
+def test_a_construct_drawn_to_scale_sets_parts_by_their_base_pairs() -> None:
+    from flexo.genetics import construct_drawing
+
+    parts = [
+        {"type": "promoter", "label": "pTet", "bp": 55},
+        {"type": "cds", "label": "GFP", "bp": 720},
+        {"type": "spacer", "bp": 300},
+        {"type": "cds", "label": "TetR", "bp": 624},
+    ]
+    with flexo.Figure("scaled") as figure:
+        figure.root.construct("c", parts, scale=0.1)
+    drawing = construct_drawing(figure.spec.nodes[0], figure_style(figure.spec))
+    shapes = {shape.id: shape for shape in drawing.shapes}
+
+    def span(identifier: str) -> float:
+        xs = [float(x) for x in re.findall(r"[ML] (-?[\d.]+)", shapes[identifier].d)]
+        return max(xs) - min(xs)
+
+    assert abs(span("c.part2") - 72.0) < 0.5 and abs(span("c.part4") - 62.4) < 0.5
+    assert any(words.id == "c.tick1699.label" for words in drawing.words)
+    with pytest.raises(FlexoError, match="needs each part's length"):
+        with flexo.Figure("unscaled") as broken:
+            broken.root.construct("c", [{"type": "cds", "label": "GFP"}], scale=0.1)
+        compile_figure(broken.spec)
