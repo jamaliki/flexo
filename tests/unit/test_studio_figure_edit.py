@@ -238,3 +238,16 @@ def test_a_picture_beside_the_figure_is_found_when_it_is_drawn(tmp_path: Path) -
     )["text"]
     drawing = FigureKind().draw({"text": text}, tmp_path)
     assert drawing.pages and not [m for m in drawing.messages if m.severity == "error"]
+
+
+def test_reading_changes_nothing_and_a_figure_inside_another_document_is_edited_as_data() -> None:
+    from flexo.studio.figure_edit import apply_to_data
+
+    result = apply(NEW_FIGURE, {"do": "read"})
+    assert result == {"text": NEW_FIGURE, "select": []}
+    inline = yaml.safe_load(NEW_FIGURE)
+    made = apply_to_data(inline, {"do": "rename", "id": "encoder", "to": "backbone"})
+    assert made["select"] == ["backbone"]
+    assert [node["id"] for node in made["data"]["nodes"]] == ["x", "backbone", "y"]
+    assert [node["id"] for node in made["model"]["nodes"]] == ["x", "backbone", "y"]
+    assert inline["nodes"][1]["id"] == "encoder"
