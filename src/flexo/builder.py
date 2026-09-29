@@ -1070,6 +1070,10 @@ class GroupBuilder:
         tracks: Sequence[Mapping[str, Scalar]] | None = None,
         scale: float | None = None,
         gutter: float | None = None,
+        secondary: str | None = None,
+        sequence: str | None = None,
+        helix: str = "spiral",
+        numbered: bool = True,
         **options: object,
     ) -> NodeHandle:
         """A protein's domain map: a chain of ``length`` residues drawn to scale, its
@@ -1088,6 +1092,15 @@ class GroupBuilder:
         study -- each ``{"label": ..., "start": residue, "end": residue, "delete":
         "61-121"}``. ``scale`` fixes the points a residue and ``gutter`` the room left
         of the chain for track names, so separate proteins line up.
+
+        ``secondary`` draws the secondary structure (see ``flexo.secondary``): a DSSP
+        string, one letter a residue from residue 1 (``H`` helix, ``E`` strand, ``T``
+        turn, anything else loop), or features of type ``helix``, ``strand``, ``turn``.
+        Helices are spirals (``helix="cylinder"`` for bars) and strands arrows,
+        numbered over them unless ``numbered=False``; the strip takes the chain's place
+        when nothing else is on it. ``sequence`` writes the one-letter sequence under
+        it, where the scale leaves room for a letter a residue. A track with ``start``
+        and ``end`` then shows a close view of a segment.
         A feature with an ``id`` is a port over it; ``input`` and ``output`` are the
         chain's ends.
         """
@@ -1101,6 +1114,14 @@ class GroupBuilder:
             properties["scale"] = float(scale)
         if gutter is not None:
             properties["gutter"] = float(gutter)
+        if secondary:
+            properties["secondary"] = secondary
+        if sequence:
+            properties["sequence"] = sequence
+        if helix != "spiral":
+            properties["helix"] = helix
+        if not numbered:
+            properties["numbered"] = False
         return self.node(id, "protein", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def tree(

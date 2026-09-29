@@ -8,6 +8,8 @@ What this example is here to show:
   inhibition, an open circle for catalysis, ...);
 * **``protein``** draws a chain to scale by residue, with domains, sites, and
   bonds; its ``tracks`` line up the constructs of a study;
+* **``secondary``** draws a protein's helices, strands, and turns from its DSSP
+  string, numbered, with the sequence under them when the scale has room;
 * **``tree``** reads Newick and draws a phylogram, rectangular or circular,
   with its clades coloured and named;
 * **``wellplate``** and **``timeline``** draw a methods figure's plate layout
@@ -90,6 +92,22 @@ def proteins() -> flexo.FigureSpec:
     return figure.spec
 
 
+UBIQUITIN = "MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"
+# DSSP for 1UBQ: H helix, G 3-10 helix, E strand, T turn, anything else loop.
+UBIQUITIN_DSSP = "CEEEEEETTSCEEEEEECTTSBHHHHHHHHHHHHCCCGGGEEEEETTEEECTTSBTTTTTCCTTCEEEEEEECCCC"
+
+
+def structure() -> flexo.FigureSpec:
+    with flexo.Figure("structure", width="double-column") as figure:
+        maps = figure.root.column("maps", gap=16, align="start")
+        maps.protein("ubiquitin", 76, label="Ubiquitin (1UBQ)", secondary=UBIQUITIN_DSSP,
+                     sequence=UBIQUITIN, scale=6.2)
+        maps.protein("close", 76, label="Residues 18-42, closer", secondary=UBIQUITIN_DSSP,
+                     sequence=UBIQUITIN, scale=12, helix="cylinder",
+                     tracks=[{"start": 18, "end": 42}])
+    return figure.spec
+
+
 def trees() -> flexo.FigureSpec:
     clades = [
         {"tips": "Human, Gorilla", "label": "Primates"},
@@ -131,6 +149,7 @@ def main() -> None:
         ("pathway", pathway()),
         ("proteins", proteins()),
         ("trees", trees()),
+        ("structure", structure()),
         ("bench", bench()),
     ):
         result = build(spec, OUTPUT, stem=name, formats=("editable", "png"), dpi=DPI)
