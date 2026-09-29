@@ -68,3 +68,30 @@ def test_a_long_row_folds_onto_two_lines() -> None:
     cells = group.layout.placement_map()
     assert cells["steps.s2"] == (0, 3) and cells["steps.s3"] == (1, 0)
     compile_figure(spec)
+
+
+def _model() -> Figure:
+    """A tall column with a side input: too tall for a slide as written, not so tall
+    that its words would be tiny."""
+
+    with Figure("model") as figure, figure.column("model", gap=22) as column:
+        patches = column.text("patches", "Image, cut into patches")
+        projection = column.block(
+            "projection", label="Linear projection of flattened patches", input=patches
+        )
+        tokens = column.block("tokens", label="Prepend a learned [class] token", input=projection)
+        with column.row("positions", gap=18) as row:
+            position = row.text("position", "Position embedding")
+            total = row.add("sum", inputs=[tokens, position])
+        encoder = column.block("encoder", label="Transformer encoder", input=total)
+        head = column.block("head", label="MLP head", input=encoder)
+        column.text("class", "Class", input=head)
+    return figure
+
+
+def test_a_fold_that_sets_the_words_clearly_larger_is_taken() -> None:
+    kept = flexo.fit_in_box(_model(), 864, 361, words=13, largest=20, turn=False)
+    fit = flexo.fit_in_box(_model(), 864, 361, words=13, largest=20)
+    # As written it reaches most of the size it was meant to have; folded it reaches more.
+    assert kept.words > 13 * 0.7
+    assert "folded" in fit.layout and fit.words > kept.words * 1.3
