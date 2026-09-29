@@ -802,8 +802,18 @@ slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
 own last change and leaves others' alone.
 
-- **Figures**: the file on the left, the drawing on the right; choose a part in
-  the outline or the drawing to find it in the file; every lint message beside it.
+- **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
+  blocks and operators, the machine-learning components, constructs, plasmids,
+  proteins, trees, plates, timelines, structures -- and a part added while another
+  is chosen comes after it, a line between them. **Connect** (C) draws a line from
+  one part to the next; double-click a part or a line to type its words on the
+  drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
+  or titled module. The inspector on the right has each part's settings, down to
+  a plasmid's features or a plate's groups as a table; the list on the left holds
+  the parts as they nest, dragged to move them. Every edit is made to the figure's
+  file, which the **Source** tab shows and edits too: comments and order stay, and
+  what the page has no control for can be written there. Lint messages sit under
+  the drawing; clicking one chooses the part it is about.
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.

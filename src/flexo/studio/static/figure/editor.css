@@ -1,42 +1,123 @@
-.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 460px) 5px 1fr; }
+/* The figure editor: parts on the left, the figure in the middle, what is chosen on the right. */
+
+.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 328px; }
+.fig.wide { grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 468px; }
 .fig-left { border-right: 1px solid var(--line); }
 .fig-split { cursor: col-resize; background: transparent; position: relative; z-index: 2; margin: 0 -2px; }
 .fig-split:hover, .fig-split.dragging { background: var(--accent-line); }
-.fig-right { position: relative; min-width: 0; }
+.fig-center { position: relative; min-width: 0; min-height: 0; }
+.fig-inspector { border-left: 1px solid var(--line); }
 
 .tabs { display: flex; gap: 2px; }
 .tab { height: 28px; border: 0; background: transparent; border-radius: 6px; padding: 0 10px; color: var(--ink-3); cursor: pointer; font-weight: 560; }
 .tab:hover { color: var(--ink); }
 .tab.on { background: var(--sunken); color: var(--ink); }
 
+.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+/* -- source -- */
 .code { position: relative; display: grid; grid-template-columns: auto 1fr; height: 100%; font: 12.5px/1.6 var(--mono); background: var(--raised); }
 .code-gutter { padding: 10px 8px 40px 12px; color: var(--ink-3); text-align: right; user-select: none; overflow: hidden; background: var(--panel); border-right: 1px solid var(--line); }
 .code-gutter div { height: calc(12.5px * 1.6); }
 .code-gutter .bad { color: var(--error); font-weight: 700; }
 .code-area { border: 0; outline: none; resize: none; padding: 10px 14px 40px; font: inherit; line-height: inherit; background: transparent; white-space: pre; overflow: auto; tab-size: 2; color: var(--ink); }
 
-.outline { padding: 8px 6px 30px; font-size: 12.5px; }
-.outline-item { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-radius: 5px; cursor: pointer; min-width: 0; overflow: hidden; }
-.outline-item:hover { background: var(--sunken); }
-.outline-item.on { background: var(--accent-soft); }
-.outline-item .id { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-.outline-item .what { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.outline-item svg { width: 14px; height: 14px; color: var(--ink-3); flex: none; }
-.outline-children { margin-left: 13px; border-left: 1px solid var(--line); padding-left: 4px; }
-.outline-head { font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); padding: 14px 8px 4px; }
+/* -- the parts, listed -- */
+.tree { padding: 4px 6px 40px; font-size: 12.5px; }
+.tree-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); padding: 12px 8px 4px; }
+.tree-head .count { font-weight: 500; letter-spacing: 0; }
+.tree-row { display: flex; align-items: center; gap: 6px; height: 26px; padding-right: 8px; border-radius: 5px; cursor: pointer; min-width: 0; position: relative; color: var(--ink-2); }
+.tree-row:hover { background: var(--sunken); }
+.tree-row.on { background: var(--accent-soft); color: var(--ink); }
+.tree-row.root .tree-name { font-weight: 620; color: var(--ink); }
+.tree-row .glyph { color: var(--ink-3); }
+.tree-row.on .glyph { color: var(--accent); }
+.tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; color: var(--ink); }
+.tree-id { font: 11px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 8px; min-width: 0; }
+.tree-caret { width: 16px; height: 16px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: var(--ink-3); cursor: pointer; border-radius: 3px; }
+.tree-caret svg { width: 11px; height: 11px; transition: transform 0.12s; }
+.tree-caret.open svg { transform: rotate(90deg); }
+.tree-caret:hover { background: var(--line); }
+.tree-row.dragging { opacity: 0.4; }
+.tree-row.drop-before::before, .tree-row.drop-after::after { content: ""; position: absolute; left: 20px; right: 4px; height: 2px; background: var(--accent); border-radius: 2px; }
+.tree-row.drop-before::before { top: -1px; }
+.tree-row.drop-after::after { bottom: -1px; }
+.tree-row.drop-into { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); }
+.empty.small { padding: 6px 8px; text-align: left; }
 
+/* -- the drawing -- */
 .fig-stage { display: grid; place-items: center; padding: 48px; }
-.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; transform-origin: center; }
+.fig-stage.connecting .fig-page, .fig-stage.connecting .fig-page [data-flexo-entity] { cursor: crosshair; }
+.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; }
 .fig-page svg { display: block; }
 .fig-page [data-flexo-entity] { cursor: pointer; }
-.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 3px; background: var(--accent-soft); transition: all 0.12s; }
-.fig-hover { position: absolute; pointer-events: none; border: 1px dashed var(--accent-line); border-radius: 3px; }
+.fig-page .hit-line { fill: none; stroke: transparent; stroke-width: 9; pointer-events: stroke; cursor: pointer; }
+.fig-marks { position: absolute; inset: 0; pointer-events: none; }
+.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 4px; background: var(--accent-soft); transition: all 0.1s; }
+.fig-mark.group { background: transparent; border-style: dashed; }
+.fig-mark-label { position: absolute; top: -19px; left: -2px; background: var(--accent); color: var(--accent-ink); font: 600 10.5px/17px var(--font); padding: 0 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; }
+.fig-hover { position: absolute; pointer-events: none; border: 1px dashed var(--accent-line); border-radius: 4px; }
+.fig-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 99px; background: var(--ink); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-2); white-space: nowrap; }
+.fig-hint svg { width: 14px; height: 14px; }
+.fig-hint .kbd { color: inherit; border-color: currentColor; opacity: 0.7; }
+.fig-inline { position: absolute; z-index: 20; background: var(--raised); border-radius: 10px; box-shadow: var(--shadow-2), 0 0 0 1px var(--accent-line); padding: 6px; display: grid; gap: 4px; line-height: normal; animation: pop 0.1s ease-out; }
+.fig-inline .markup { border: 0; box-shadow: none; }
+.fig-inline .inline-foot { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--ink-3); padding: 0 6px 2px; }
 
 .zoom { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 2px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 3px; z-index: 5; }
 .zoom .value { min-width: 46px; text-align: center; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-
-.fig-messages { position: absolute; left: 14px; bottom: 14px; right: 170px; max-height: 40%; overflow: auto; z-index: 5; }
+.fig-messages { position: absolute; left: 14px; bottom: 14px; right: 190px; max-height: 40%; overflow: auto; z-index: 5; }
+.fig-messages .message.link { cursor: pointer; }
+.fig-messages .where { font: 11px var(--mono); color: var(--ink-3); }
 .fig-empty { color: var(--ink-3); display: grid; gap: 8px; justify-items: center; }
-
 .fig-page.flash { animation: flash 0.9s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px #d97757, var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }
+
+/* -- adding -- */
+.menu.add-menu { padding: 0; width: 392px; }
+.add-palette { display: grid; gap: 8px; padding: 10px; }
+.add-where { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.add-where svg { width: 13px; height: 13px; }
+.add-grid { max-height: min(460px, 60vh); overflow: auto; display: grid; gap: 4px; margin: 0 -4px; padding: 0 4px; }
+.add-head { font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); padding: 8px 2px 2px; }
+.add-tiles, .gather-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.add-tile { display: grid; justify-items: center; gap: 5px; padding: 9px 4px 7px; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; color: var(--ink-2); font-size: 11.5px; text-align: center; line-height: 1.2; }
+.add-tile .glyph { width: 26px; height: 26px; stroke-width: 1.1; color: var(--ink-2); }
+.add-tile:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
+.add-tile:hover:not(:disabled) .glyph { color: var(--accent); }
+.add-tile:disabled { opacity: 0.4; cursor: default; }
+
+/* -- the inspector -- */
+.insp-top { gap: 10px; }
+.insp-row { display: flex; align-items: flex-start; gap: 8px; }
+.insp-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.insp-title > svg { width: 30px; height: 30px; padding: 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); flex: none; box-sizing: border-box; }
+.insp-words { min-width: 0; }
+.insp-name { font-weight: 640; font-size: 13.5px; }
+.insp-hint { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.insp-actions { display: flex; gap: 1px; flex: none; }
+.crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 12px; color: var(--ink-3); }
+.crumbs svg { width: 11px; height: 11px; }
+.crumb { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 2px 4px; border-radius: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.crumb:hover { background: var(--sunken); color: var(--ink); }
+.crumb.here { color: var(--ink); font-weight: 560; cursor: default; }
+.fields { display: grid; gap: 12px; }
+.hint-line { color: var(--ink-3); font-size: 12px; line-height: 1.45; }
+.how { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.line-list { display: grid; gap: 1px; }
+.line-row { display: flex; align-items: center; gap: 2px; }
+.line-row .link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; border: 0; background: transparent; text-align: left; padding: 4px 6px; border-radius: 5px; cursor: pointer; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line-row .link:hover { background: var(--sunken); color: var(--ink); }
+.line-row .link .glyph { color: var(--ink-3); }
+.line-row .muted { color: var(--ink-3); }
+
+.records-scroll { overflow-x: auto; margin: 0 -2px; padding: 0 2px 2px; }
+.records-table { display: grid; gap: 3px; align-items: center; min-width: 100%; }
+.records-head { font-size: 10.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.records-table .input, .records-table .select { height: 26px; font-size: 12px; padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
+.records-table .select { padding-right: 18px; background-position: right 4px center; }
+.records-table .cell { display: contents; }
+.field.records { gap: 6px; }
+.field.records > .btn { justify-self: start; }
+.list-rows { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
+.list-rows .pic { width: 34px; height: 34px; object-fit: contain; border-radius: 4px; background: var(--sunken); }

@@ -35,6 +35,7 @@ FILE_TYPES = {
     "figure": (".yaml", ".yml", ".json"),
     "python": (".py",),
     "theme": (".yaml", ".yml", ".json"),
+    "structure": (".pdb", ".cif", ".mmcif", ".ent"),
 }
 
 
@@ -245,6 +246,16 @@ class Handler(BaseHTTPRequestHandler):
                     document, doc.path.parent, doc.path.stem, list(data.get("formats") or [])
                 )
             self._json({"files": [workspace.relative(file) for file in written]})
+        elif route == "/api/act":
+            # An edit the page asks the document's kind to make (a figure's parts added,
+            # connected, renamed): the kind answers with the document as it would be.
+            doc = workspace.open(name)
+            act = getattr(doc.kind, "act", None)
+            if act is None:
+                self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
+                return
+            self._json(act(data.get("document", doc.document), data.get("action") or {},
+                           doc.path.parent))
         elif route == "/api/presence":
             workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
             self._json({"ok": True})
