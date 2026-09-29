@@ -89,10 +89,17 @@ def caption_rise(metrics: TextMetrics, style: LayoutStyle) -> float:
     )
 
 
+def beside_clearance(style: LayoutStyle) -> float:
+    """The air between a line and anything written beside it: half its stroke, then
+    ``caption_clearance``. A caption and a connector's aside keep the same."""
+
+    return style.connector_width.points / 2.0 + style.caption_clearance.points
+
+
 def caption_reach(metrics: TextMetrics, style: LayoutStyle) -> float:
     """How far beside a run's centerline a caption's near edge has to sit."""
 
-    return style.connector_width.points / 2.0 + style.caption_clearance.points
+    return beside_clearance(style)
 
 
 def edge_label_position(

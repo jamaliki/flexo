@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from flexo.geometry import Point, Rect
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import EdgeSpec, TextRun
+from flexo.routing.ink import beside_clearance
 from flexo.style import LayoutStyle
 
 
@@ -109,7 +110,7 @@ def place_aside(
     """``edge``'s aside beside ``at``, on the side ``normal`` points to."""
 
     reach = line_reach(edge, style)
-    clear = reach + caption_reach_for(style)
+    clear = reach + beside_clearance(style)
     if edge.back_label:
         (label,) = metrics
         assert label is not None
@@ -172,13 +173,26 @@ def place_aside(
             (max(box.left, line), box.right) if normal.x > 0 else (box.left, min(box.right, line))
         )
         box = Rect(left, box.top, right - left, box.height)
+    else:
+        # Beside a diagonal (a straight edge), an upright box round a curve that
+        # touches the line would take the line in: the aside stands off instead,
+        # just far enough that its box keeps clear.
+        corners = (
+            Point(box.left, box.top),
+            Point(box.right, box.top),
+            Point(box.left, box.bottom),
+            Point(box.right, box.bottom),
+        )
+        nearest = min((c.x - at.x) * normal.x + (c.y - at.y) * normal.y for c in corners)
+        if nearest < keep:
+            shift = keep - nearest
+            dx, dy = normal.x * shift, normal.y * shift
+            arc = tuple(point.translated(dx, dy) for point in arc)
+            words = [AsideWords(item.metrics, item.position.translated(dx, dy)) for item in words]
+            if arrowhead is not None:
+                arrowhead = (arrowhead[0].translated(dx, dy), arrowhead[1].translated(dx, dy))
+            box = Rect(box.x + dx, box.y + dy, box.width, box.height)
     return Aside(at, along, normal, box, tuple(words), arc, arrowhead)
-
-
-def caption_reach_for(style: LayoutStyle) -> float:
-    """The air between a line and anything written beside it."""
-
-    return style.connector_width.points / 2.0 + style.caption_clearance.points
 
 
 def arrowhead_outline(base: Point, tip: Point, style: LayoutStyle) -> tuple[Point, ...]:

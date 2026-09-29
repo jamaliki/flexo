@@ -14,6 +14,8 @@ draws each kind.
 
 from __future__ import annotations
 
+import functools
+import itertools
 import math
 from dataclasses import dataclass, replace
 
@@ -100,6 +102,89 @@ class Units:
         return (self.small if small else self.measurer).measure(runs, weight=weight)
 
 
+def check_port_id(node: NodeSpec, identifier: str, where: str, taken: set[str]) -> str:
+    """``identifier`` if it can name a port of ``node``; a diagnostic saying why not otherwise.
+
+    A drawn component's parts, features, and events with an ``id`` become its
+    ports: each id has to be one a port can take, not ``input`` or ``output``
+    (the component's own ends), and not another part's. ``taken`` collects them.
+    """
+
+    from flexo.diagnostics import Diagnostic, FlexoError
+    from flexo.ir.semantic import ID_PATTERN
+
+    if not ID_PATTERN.fullmatch(identifier) or identifier in {"input", "output"}:
+        reason = (
+            "is the component's own end"
+            if identifier in {"input", "output"}
+            else ("is not a usable id")
+        )
+        raise FlexoError(
+            Diagnostic(
+                f"{node.kind}.id",
+                f'{where}: "{identifier}" {reason}.',
+                entity_id=node.id,
+                hint="Ids start with a letter and use letters, digits, '.', '_' and '-';"
+                " input and output are taken.",
+            )
+        )
+    if identifier in taken:
+        raise FlexoError(
+            Diagnostic(
+                f"{node.kind}.id",
+                f'{where}: "{identifier}" names another part already.',
+                entity_id=node.id,
+            )
+        )
+    taken.add(identifier)
+    return identifier
+
+
+@dataclass(slots=True)
+class Name:
+    """Words to set over one point of a drawing, pushed apart from their neighbours."""
+
+    key: str
+    runs: tuple[TextRun, ...]
+    metrics: TextMetrics
+    want: float
+    """The x the words would centre on, left alone."""
+    x: float = 0.0
+    """The x they centre on, spread."""
+
+
+def spread(
+    names: list[Name], gap: float, low: float | None = None, high: float | None = None
+) -> None:
+    """Centre each name as near the x it wants as its neighbours allow, ``gap`` apart,
+    within ``low`` and ``high`` when given. ``names`` ends sorted by the x it wants."""
+
+    names.sort(key=lambda item: item.want)
+    for item in names:
+        item.x = item.want
+    for _ in range(6):
+        for before, after in itertools.pairwise(names):
+            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
+            if after.x - before.x < need:
+                push = (need - (after.x - before.x)) / 2.0
+                before.x -= push
+                after.x += push
+        if low is not None and high is not None:
+            for item in names:
+                half = item.metrics.width / 2.0
+                item.x = min(max(item.x, low + half), high - half)
+    # A last sweep left to right, so what the bounds pushed back never overlaps.
+    for before, after in itertools.pairwise(names):
+        need = (before.metrics.width + after.metrics.width) / 2.0 + gap
+        after.x = max(after.x, before.x + need)
+
+
+def circle_path(x: float, y: float, r: float) -> str:
+    """A circle as a path of two half arcs (an arc cannot end where it starts)."""
+
+    return path("M", x - r, y, "A", r, r, 0, 1, 1, x + r, y, "A", r, r, 0, 1, 1, x - r, y, "Z")
+
+
 def units(style: LayoutStyle) -> Units:
     return Units(style)
 
@@ -128,8 +213,25 @@ def nice_step(length: int) -> int:
 
 
 def picture(node: NodeSpec, style: LayoutStyle) -> Picture:
-    """What a drawn component draws, laid out by the module for its kind."""
+    """What a drawn component draws, laid out by the module for its kind.
 
+    Measurement sizes the component from its picture and rendering draws the same
+    picture, so it is laid out once per node and style (both are frozen values),
+    not once for each.
+    """
+
+    try:
+        return _picture(node, style)
+    except TypeError:  # an unhashable value somewhere in the style: lay it out afresh
+        return _lay_out(node, style)
+
+
+@functools.lru_cache(maxsize=256)
+def _picture(node: NodeSpec, style: LayoutStyle) -> Picture:
+    return _lay_out(node, style)
+
+
+def _lay_out(node: NodeSpec, style: LayoutStyle) -> Picture:
     if node.kind in {"construct", "plasmid"}:
         from flexo.genetics import genetic_drawing
 

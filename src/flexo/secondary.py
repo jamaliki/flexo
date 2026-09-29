@@ -27,8 +27,7 @@ import itertools
 import math
 from dataclasses import dataclass
 
-from flexo.drawn import Shape, Units, Words, path
-from flexo.ir.measured import TextMetrics
+from flexo.drawn import Name, Shape, Units, Words, path, spread
 from flexo.ir.semantic import NodeSpec, TextRun
 
 SECONDARY_KINDS = frozenset({"helix", "strand", "turn"})
@@ -94,15 +93,6 @@ def numbered(elements: list[Element], number: bool) -> list[Element]:
     return result
 
 
-@dataclass(slots=True)
-class _Name:
-    key: str
-    runs: tuple[TextRun, ...]
-    metrics: TextMetrics
-    want: float
-    x: float = 0.0
-
-
 @dataclass(frozen=True, slots=True)
 class Lane:
     """One track's strip, ready to draw at any height."""
@@ -145,7 +135,7 @@ class Lane:
                         pen * 1.3,
                     )
                 )
-        labels: list[_Name] = []
+        labels: list[Name] = []
         for number, item in enumerate(self.elements, 1):
             name = f"{key}.ss{number}"
             for low, high in _clipped(item, self.pieces):
@@ -173,7 +163,7 @@ class Lane:
                     widest = max(kept, key=lambda piece: piece[1] - piece[0])
                     metrics = measures.measure(item.label, small=True)
                     labels.append(
-                        _Name(
+                        Name(
                             f"{name}.label",
                             item.label,
                             metrics,
@@ -181,7 +171,7 @@ class Lane:
                         )
                     )
         if labels:
-            _spread(labels, 0.3 * u)
+            spread(labels, 0.3 * u)
             height = max(item.metrics.height for item in labels)
             bottom = centre - _REACH * u - 0.3 * u
             for label in labels:
@@ -391,23 +381,6 @@ def _strand(name, x1, x2, centre, u, pen) -> Shape:
         STRAND_TONE,
         pen,
     )
-
-
-def _spread(names: list[_Name], gap: float) -> None:
-    names.sort(key=lambda item: item.want)
-    for item in names:
-        item.x = item.want
-    for _ in range(6):
-        moved = False
-        for before, after in itertools.pairwise(names):
-            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
-            if after.x - before.x < need - 1e-6:
-                push = (need - (after.x - before.x)) / 2.0
-                before.x -= push
-                after.x += push
-                moved = True
-        if not moved:
-            break
 
 
 __all__ = ["SECONDARY_KINDS", "Element", "Lane", "dssp_elements", "make_lane", "numbered"]
