@@ -64,6 +64,8 @@ def render_drawn(
             **_paint(shape, palette),
             **_caps(shape),
         )
+    for identifier, x, y, width, height in drawing.images:
+        _image(parent, identifier, spec, style, palette, x + dx, y + dy, width, height)
     for words in drawing.words:
         typography = style.typography
         if words.size is not None:
@@ -127,3 +129,34 @@ def _caps(shape: Shape) -> dict[str, object]:
     if shape.paint in {"line", "backbone", "tick", "leader", "guide"}:
         return {"stroke__linecap": "round", "stroke__linejoin": "round"}
     return {"stroke__linejoin": "round"}
+
+
+def _image(
+    parent: ET.Element,
+    identifier: str,
+    spec,
+    style: LayoutStyle,
+    palette: Palette,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+) -> None:
+    """A picture's image box, filled: a molecule drawn by mol-sketch, embedded as a PNG."""
+
+    import base64
+
+    from flexo.structures import structure_png
+
+    data = structure_png(spec, style, palette, width, height)
+    element(
+        parent,
+        "image",
+        id=identifier,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        preserveAspectRatio="xMidYMid meet",
+        href="data:image/png;base64," + base64.b64encode(data).decode("ascii"),
+    )

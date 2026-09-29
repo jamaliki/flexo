@@ -1235,6 +1235,56 @@ class GroupBuilder:
             properties["length"] = float(length)
         return self.node(id, "timeline", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
+    def structure(
+        self,
+        id: str,
+        source: str | Path,
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        look: str | None = None,
+        colors: Mapping[str, str] | None = None,
+        yaw: float | None = None,
+        pitch: float | None = None,
+        roll: float | None = None,
+        zoom: float | None = None,
+        cartoon: str | None = None,
+        sticks: str | None = None,
+        surface: str | None = None,
+        site: str | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
+
+        ``source`` is a PDB or mmCIF file, or a PDB ID to fetch. The look follows the
+        theme unless ``look`` names one (``engraved-colour``, ``watercolour``,
+        ``ink``, ...). ``colors`` maps a chain, residue, subunit, or entity to a colour
+        -- a hex colour or one of the figure's tones, so a chain can match its domain
+        on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
+        it; ``cartoon``, ``sticks``, and ``surface`` are mol-sketch selections of what
+        to draw, and ``site`` marks an active site. ``width`` and ``height`` size the
+        molecule's box in points (20 by 15 label sizes by default), its name above it.
+        Needs mol-sketch installed.
+        """
+
+        properties: dict[str, object] = {"source": str(source)}
+        # The molecule's box, in points: the component is that, and its name over it.
+        for extent in ("width", "height"):
+            if extent in options:
+                properties[extent] = float(options.pop(extent))  # type: ignore[arg-type]
+        if look is not None:
+            properties["look"] = look
+        if colors:
+            properties["colors"] = [
+                {"group": group, "color": colour} for group, colour in colors.items()
+            ]
+        for name, value in (
+            ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
+            ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
+        ):
+            if value is not None:
+                properties[name] = value
+        return self.node(id, "structure", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
     def feature_strip(
         self,
         id: str,

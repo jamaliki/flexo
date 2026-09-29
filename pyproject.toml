@@ -27,6 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 assistant = ["anthropic>=1.9"]
 structures = ["gemmi>=0.6"]
+molecules = ["molsketch @ git+https://github.com/jamaliki/mol-sketch#subdirectory=python"]
 
 [project.scripts]
 flexo = "flexo.cli:main"

@@ -254,6 +254,27 @@ glycosylations with `sites=True`, variants with `variants=True`, and the entry's
 helices and strands with `structure=True`. Each returns the arguments `protein()`
 takes, as a plain dict to edit or merge before drawing.
 
+#### A molecule beside its map
+
+![A structure by mol-sketch beside its secondary structure (examples/biology.py)](examples/build/molecule.preview.png)
+
+```python
+row.structure("model", "1a7g.cif", label="E2 DNA-binding domain", yaw=30, width=150, height=120)
+row.protein("map", **flexo.from_structure("1a7g.cif"), scale=3.2)
+```
+
+`structure` draws a PDB or mmCIF file (or a PDB ID) by hand with
+[mol-sketch](https://github.com/jamaliki/mol-sketch), as a component of the
+figure: its look follows the theme (watercolour in `sketch`, dark paper on a dark
+page, engraved colour otherwise) unless `look=` names one; it is drawn on the
+figure's page colour and that colour taken out, so it sits on the page with no
+box; its ink is the figure's, and its helices and strands take the colours a
+protein map in the figure gives them. `colors={"A": "Kinase"}` colours a chain
+(or a residue, subunit, or entity) with a hex colour or one of the figure's
+tones; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
+`surface`, and `site` are mol-sketch selections. Install the `molecules` extra
+(or `pip install path/to/mol-sketch/python`).
+
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
 ```python
