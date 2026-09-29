@@ -190,11 +190,22 @@ CURATED_PALETTES = frozenset(EXTRA_PALETTES)
 """Palettes whose order is the design: taken as written, not re-sorted for contrast."""
 
 
+_AUTHORED: set[tuple[str, ...]] = set()
+"""Palettes someone wrote down in order -- in a theme file, or registered by name."""
+
+
+def keep_order(colours: Sequence[str]) -> None:
+    """Take ``colours`` as written wherever they are used: their order is the design."""
+
+    _AUTHORED.add(tuple(colour.lower() for colour in colours))
+
+
 def curated(colours: Sequence[str]) -> bool:
-    """Whether ``colours`` is one of the curated palettes, to be used in its own order."""
+    """Whether ``colours`` is a curated palette, or one written down in order (a theme
+    file's, a registered one), to be used in its own order."""
 
     wanted = tuple(colour.lower() for colour in colours)
-    return any(wanted == palette for palette in EXTRA_PALETTES.values())
+    return wanted in _AUTHORED or any(wanted == palette for palette in EXTRA_PALETTES.values())
 
 
 @cache
