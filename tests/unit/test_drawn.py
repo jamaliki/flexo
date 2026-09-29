@@ -445,3 +445,32 @@ def test_a_construct_drawn_to_scale_sets_parts_by_their_base_pairs() -> None:
         with flexo.Figure("unscaled") as broken:
             broken.root.construct("c", [{"type": "cds", "label": "GFP"}], scale=0.1)
         compile_figure(broken.spec)
+
+
+# -- found rebuilding real figures ----------------------------------------------------
+
+
+def test_a_domain_name_keeps_clear_of_a_motif_inside_it() -> None:
+    with flexo.Figure("capsid") as figure:
+        figure.root.protein(
+            "ca",
+            231,
+            [
+                {"type": "domain", "label": "N-terminal domain", "start": 1, "end": 145},
+                {"type": "motif", "label": "CypA loop", "start": 85, "end": 93},
+            ],
+            scale=1.9,
+        )
+    drawing = _drawing(figure, "ca")
+    name = next(words for words in drawing.words if words.id == "ca.feature1.label")
+    loop = _shape(drawing, "ca.feature2")
+    xs = [float(x) for x in re.findall(r"[ML] (-?[\d.]+)", loop.d)]
+    left, right = name.x - name.metrics.width / 2.0, name.x + name.metrics.width / 2.0
+    assert right < min(xs) or left > max(xs)
+
+
+def test_a_timeline_of_whole_days_ticks_whole_days() -> None:
+    with flexo.Figure("days") as figure:
+        figure.root.timeline("t", events=[{"at": 0}, {"at": 3}], unit="day")
+    ticks = [words.runs[0].text for words in _drawing(figure, "t").words if ".tick" in words.id]
+    assert ticks == ["Day 0", "Day 1", "Day 2", "Day 3"]

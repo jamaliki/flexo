@@ -12,6 +12,7 @@ uv run python examples/modelangelo_gnn.py
 uv run python examples/tutorial.py
 uv run python examples/genetics.py
 uv run python examples/biology.py
+uv run python examples/lab_figures.py
 ```
 
 ## [`tutorial.py`](tutorial.py)
@@ -143,3 +144,16 @@ rectangular and circular, and a methods figure's plate layout and protocol.
 [![molecule](build/molecule.preview.png)](build/molecule.preview.png)
 [![trees](build/trees.preview.png)](build/trees.preview.png)
 [![bench](build/bench.preview.png)](build/bench.preview.png)
+
+## [`lab_figures.py`](lab_figures.py)
+
+Figures of the kind the lab draws, rebuilt to find what flexo still lacks: a
+ModelAngelo overview, a reaction-aware enzyme-design loop (the reaction as
+chemistry, the generative loop, the plate and protocol), and a structure paper's
+Figure 1 for HIV-1 capsid protein (its domain map and constructs, the C-terminal
+domain's secondary structure from 1A8O in the protein's own numbering, and the
+structure by mol-sketch). The structures are in [`data/`](data).
+
+[![ModelAngelo overview](build/modelangelo-overview.preview.png)](build/modelangelo-overview.preview.png)
+[![Enzyme design](build/enzyme-design.preview.png)](build/enzyme-design.preview.png)
+[![Capsid Figure 1](build/capsid-figure-1.preview.png)](build/capsid-figure-1.preview.png)

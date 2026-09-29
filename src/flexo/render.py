@@ -159,9 +159,14 @@ def _block(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pa
     base_rect(parent, node, style, palette, fill_role=fill_role, stroke_role=stroke_role)
     if kind not in {"mlp", "cnn"} or not motif_enabled(spec):
         return
-    motif = element(parent, "g", id=f"{spec.id}.motif")
     bounds = node.bounds
     y = bounds.bottom - 6.0
+    # The words come first: a label long enough to reach the motif's band (two
+    # lines, say) keeps it, and the block goes without its little drawing.
+    label_bottom = bounds.center.y + node.measured.label.height / 2.0
+    if y - 3.0 < label_bottom + 1.5:
+        return
+    motif = element(parent, "g", id=f"{spec.id}.motif")
     if kind == "mlp":
         for index, radius in enumerate((1.2, 1.6, 1.2)):
             element(

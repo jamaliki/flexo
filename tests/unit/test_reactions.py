@@ -155,3 +155,11 @@ def test_cofactors_beside_a_diagonal_edge_keep_off_their_own_line() -> None:
         d = grid.block("d", label="D")
         figure.connect(a, d, id="r", shape="straight", label="kinase", cofactors=("ATP", "ADP"))
     assert not lint_compilation(compile_figure(figure.spec)).diagnostics
+
+
+def test_a_long_label_keeps_its_block_clear_of_the_motif() -> None:
+    with flexo.Figure("cnn") as figure:
+        figure.root.cnn("one", label="U-Net")
+        figure.root.cnn("two", label="Ca prediction\n(U-Net)")
+    svg = compile_figure(figure.spec).document.text
+    assert 'id="one.motif"' in svg and 'id="two.motif"' not in svg

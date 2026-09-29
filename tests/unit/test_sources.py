@@ -74,3 +74,20 @@ def test_an_accession_that_cannot_be_fetched_says_how_to_work_offline(monkeypatc
         ValueError, match=re.escape("Save https://rest.uniprot.org/uniprotkb/P00519.json")
     ):
         flexo.from_uniprot("P00519")
+
+
+def test_author_numbering_lines_a_domain_up_with_its_full_length_protein() -> None:
+    pytest.importorskip("gemmi")
+    capsid = Path(__file__).parents[2] / "examples" / "data" / "1a8o.pdb"
+    read = flexo.from_structure(capsid, numbering="author")
+    assert read["secondary_start"] == read["sequence_start"] == 151
+    assert read["length"] == 220
+    with flexo.Figure("ctd") as figure:
+        figure.root.protein(
+            "ca",
+            231,
+            secondary=read["secondary"],
+            secondary_start=read["secondary_start"],
+            tracks=[{"start": 146, "end": 231}],
+        )
+    assert not lint_compilation(compile_figure(figure.spec)).diagnostics
