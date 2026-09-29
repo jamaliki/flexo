@@ -32,6 +32,7 @@ from flexo.lint import LintReport, lint_compilation, lint_svg
 from flexo.orient import turned
 from flexo.serialization import dump_figure, load_figure, save_figure
 from flexo.sketch import Sketch
+from flexo.sources import from_structure, from_uniprot
 from flexo.style import (
     COLOR_VISION_SAFE_PALETTE,
     DEFAULT_PALETTE,
@@ -106,6 +107,8 @@ __all__ = [
     "dump_theme",
     "export_outputs",
     "fit_in_box",
+    "from_structure",
+    "from_uniprot",
     "inch",
     "lint_compilation",
     "lint_svg",
