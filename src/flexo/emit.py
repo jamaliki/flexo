@@ -140,25 +140,18 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
     from flexo.themes import TONE_COUNT
 
     names: list[str] = []
+    claimed: set[int] = set()
     for node in figure.nodes:
-        tone = node_tone(node, style.kind_tones)
-        if tone is not None and not tone.isdigit() and tone not in names:
-            names.append(tone)
         # A drawn component's tones (a construct's genes, a protein's domains):
-        # each one colour across the figure.
-        if node.kind in DRAWN_KINDS:
-            for name in drawn_tones(node):
-                if not name.isdigit() and name not in names:
-                    names.append(name)
-    claimed = {
-        int(tone)
-        for node in figure.nodes
-        for tone in (
-            node_tone(node, style.kind_tones),
-            *(drawn_tones(node) if node.kind in DRAWN_KINDS else ()),
-        )
-        if tone is not None and tone.isdigit()
-    }
+        # each one colour across the figure. Read once per node.
+        own = drawn_tones(node) if node.kind in DRAWN_KINDS else ()
+        for tone in (node_tone(node, style.kind_tones), *own):
+            if tone is None:
+                continue
+            if tone.isdigit():
+                claimed.add(int(tone))
+            elif tone not in names:
+                names.append(tone)
     free = [index for index in range(1, TONE_COUNT + 1) if index not in claimed] or [1]
     mapping = {name: free[position % len(free)] for position, name in enumerate(names)}
     mapping.update({str(index): (index - 1) % TONE_COUNT + 1 for index in claimed})

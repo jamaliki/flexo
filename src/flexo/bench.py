@@ -20,9 +20,18 @@ import re
 from dataclasses import dataclass
 
 from flexo.diagnostics import Diagnostic, FlexoError
-from flexo.drawn import Picture, Shape, Words, path, units
+from flexo.drawn import (
+    Name,
+    Picture,
+    Shape,
+    Words,
+    check_port_id,
+    circle_path,
+    path,
+    spread,
+    units,
+)
 from flexo.geometry import Side, Size
-from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, TextRun
 from flexo.markup import parse_label
 from flexo.style import LayoutStyle
@@ -256,7 +265,7 @@ def wellplate_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         shapes.append(
             Shape(
                 f"{node.id}.{letters[row]}{column + 1}",
-                _circle(cx, cy, radius),
+                circle_path(cx, cy, radius),
                 paint,
                 tone,
                 pen * 0.7,
@@ -309,7 +318,7 @@ def wellplate_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         shapes.append(
             Shape(
                 f"{node.id}.legend{index + 1}",
-                _circle(x + radius, middle, radius),
+                circle_path(x + radius, middle, radius),
                 "body" if group.tone else "solid",
                 group.tone,
                 pen * 0.7,
@@ -351,13 +360,6 @@ def wellplate_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     )
 
 
-def _circle(x: float, y: float, r: float) -> str:
-    return path("M", x - r, y, "A", r, r, 0, 1, 1, x + r, y, "A", r, r, 0, 1, 1, x - r, y, "Z")
-
-
-# -- timelines --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class _Moment:
     label: tuple[TextRun, ...]
@@ -380,6 +382,7 @@ def _number(node: NodeSpec, value: object, where: str) -> float:
 
 def timeline_moments(node: NodeSpec) -> tuple[tuple[_Moment, ...], tuple[_Moment, ...]]:
     events = []
+    ids: set[str] = set()
     for index, record in enumerate(_records(node, "events")):
         where = f"event {index + 1}"
         _check_fields(node, record, where, {"at", "label", "tone", "id"})
@@ -394,7 +397,7 @@ def timeline_moments(node: NodeSpec) -> tuple[tuple[_Moment, ...], tuple[_Moment
                 at,
                 at,
                 _tone((), record.get("tone")),
-                None if identifier is None else str(identifier),
+                None if identifier is None else check_port_id(node, str(identifier), where, ids),
             )
         )
     spans = []
@@ -443,28 +446,6 @@ def _time_text(value: float, unit: str) -> str:
     return f"{unit[:1].upper()}{unit[1:]} {number}"
 
 
-@dataclass(slots=True)
-class _Name:
-    key: str
-    runs: tuple[TextRun, ...]
-    metrics: TextMetrics
-    want: float
-    x: float = 0.0
-
-
-def _spread(names: list[_Name], gap: float) -> None:
-    names.sort(key=lambda item: item.want)
-    for item in names:
-        item.x = item.want
-    for _ in range(6):
-        for before, after in itertools.pairwise(names):
-            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
-            if after.x - before.x < need:
-                push = (need - (after.x - before.x)) / 2.0
-                before.x -= push
-                after.x += push
-
-
 def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     measures = units(style)
     u, pen = measures.u, measures.pen
@@ -491,21 +472,28 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
 
     # Event names over the axis, spread apart, each led down to its moment.
     names = [
-        _Name(f"{node.id}.event{index}", item.label, measures.measure(item.label), 0.0)
+        Name(f"{node.id}.event{index}", item.label, measures.measure(item.label), 0.0)
         for index, item in enumerate(events, 1)
         if item.label
     ]
-    left = pad + max([0.0] + [item.metrics.width / 2.0 for item in names]) + 0.3 * u
+    by_key = {}
+    for index, item in enumerate(events, 1):
+        by_key[f"{node.id}.event{index}"] = item
+    # Spread the names along the axis first, then leave room on the left for
+    # wherever the spreading pushed the first of them (and the first time).
+    for name in names:
+        name.want = (by_key[name.key].start - first) / (last - first) * width
+    spread(names, 0.6 * u)
+    first_time = measures.measure((TextRun(_time_text(first, unit)),), small=True)
+    overhang = max([first_time.width / 2.0] + [item.metrics.width / 2.0 - item.x for item in names])
+    left = pad + 0.3 * u + max(0.0, overhang)
+    for name in names:
+        name.want += left
+        name.x += left
 
     def x_of(time: float) -> float:
         return left + (time - first) / (last - first) * width
 
-    by_key = {}
-    for index, item in enumerate(events, 1):
-        by_key[f"{node.id}.event{index}"] = item
-    for name in names:
-        name.want = x_of(by_key[name.key].start)
-    _spread(names, 0.6 * u)
     name_height = max((item.metrics.height for item in names), default=0.0)
     axis = top + (name_height + 1.2 * u if names else 0.4 * u)
     dot = 0.32 * u
@@ -579,7 +567,7 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         shapes.append(
             Shape(
                 f"{node.id}.event{index}",
-                _circle(x, axis, dot),
+                circle_path(x, axis, dot),
                 "body" if item.tone else "solid",
                 item.tone,
                 pen,
@@ -647,10 +635,7 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     placed = [
         PortSpec("input", Side.WEST, axis / size.height),
         PortSpec("output", Side.EAST, axis / size.height),
-        *(
-            PortSpec(name, Side.NORTH, min(max(x / size.width, 0.0), 1.0))
-            for name, x in ports
-        ),
+        *(PortSpec(name, Side.NORTH, min(max(x / size.width, 0.0), 1.0)) for name, x in ports),
     ]
     return Picture(size, tuple(shapes), tuple(words), tuple(placed))
 

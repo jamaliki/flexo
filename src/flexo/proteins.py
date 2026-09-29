@@ -24,14 +24,23 @@ Geometry only, like ``flexo.genetics``: ``flexo.render_drawn`` paints it.
 
 from __future__ import annotations
 
-import itertools
 import re
 from dataclasses import dataclass
 
 from flexo.diagnostics import Diagnostic, FlexoError
-from flexo.drawn import Picture, Shape, Words, nice_step, path, units
+from flexo.drawn import (
+    Name,
+    Picture,
+    Shape,
+    Words,
+    check_port_id,
+    circle_path,
+    nice_step,
+    path,
+    spread,
+    units,
+)
 from flexo.geometry import Side, Size
-from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, TextRun
 from flexo.markup import parse_label
 from flexo.secondary import (
@@ -172,6 +181,7 @@ def protein_length(node: NodeSpec) -> int:
 def protein_features(node: NodeSpec) -> tuple[Feature, ...]:
     length = protein_length(node)
     features = []
+    ids: set[str] = set()
     for index, record in enumerate(_records(node, "features")):
         where = f"feature {index + 1}"
         written = str(record.get("type", "domain")).strip().lower()
@@ -216,7 +226,7 @@ def protein_features(node: NodeSpec) -> tuple[Feature, ...]:
                 start,
                 end,
                 None if tone is None else str(tone),
-                None if identifier is None else str(identifier),
+                None if identifier is None else check_port_id(node, str(identifier), where, ids),
             )
         )
     return tuple(features)
@@ -243,6 +253,8 @@ def protein_tracks(node: NodeSpec) -> tuple[Track, ...]:
             )
         start = _residue(node, record.get("start", 1), where, length)
         end = _residue(node, record.get("end", length), where, length)
+        if end < start:
+            raise _fail(node, "track.range", f"{where} ends ({end}) before it starts ({start}).")
         deleted = []
         for piece in str(record.get("delete", "") or "").split(","):
             if not piece.strip():
@@ -326,40 +338,6 @@ def protein_secondary(node: NodeSpec) -> list[Element]:
 
 
 # -- layout ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class _Label:
-    """A name to set over (or under) a point of the chain, pushed apart from its neighbours."""
-
-    key: str
-    runs: tuple[TextRun, ...]
-    metrics: TextMetrics
-    want: float
-    x: float = 0.0
-
-
-def _spread(labels: list[_Label], gap: float, low: float, high: float) -> None:
-    """Centre each label over the x it wants, pushing neighbours apart, within [low, high]."""
-
-    labels.sort(key=lambda item: item.want)
-    for item in labels:
-        item.x = item.want
-    for _ in range(4):
-        for before, after in itertools.pairwise(labels):
-            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
-            if after.x - before.x < need:
-                push = (need - (after.x - before.x)) / 2.0
-                before.x -= push
-                after.x += push
-        for item in labels:
-            item.x = min(
-                max(item.x, low + item.metrics.width / 2.0), high - item.metrics.width / 2.0
-            )
-        # A last sweep left to right, so what the edges pushed back never overlaps.
-        for before, after in itertools.pairwise(labels):
-            need = (before.metrics.width + after.metrics.width) / 2.0 + gap
-            after.x = max(after.x, before.x + need)
 
 
 def _lanes(spans: list[tuple[float, float]], clearance: float) -> list[int]:
@@ -460,7 +438,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
 
         # Sites: lollipops over the chain, names spread over them.
         site_labels = [
-            _Label(
+            Name(
                 f"{key}.site{index}",
                 item.label,
                 measures.measure(item.label, small=True),
@@ -495,18 +473,19 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         for item in spans:
             if not item.label:
                 continue
-            metrics = measures.measure(item.label, small=item.kind != "domain")
-            width = (min(item.end, track.end) - max(item.start, track.start) + 1) * scale
-            if item.kind == "transmembrane" or metrics.width + 0.6 * u > width:
-                outside.append(
-                    _Label(
-                        f"{key}.feature{features.index(item) + 1}.label",
-                        item.label,
-                        measures.measure(item.label, small=True),
-                        (x_of(max(item.start, track.start)) + x_of(min(item.end, track.end) + 1))
-                        / 2.0,
-                    )
+            if _named_inside(item, track, measures, x_of):
+                continue
+            # A name that does not fit inside the widest piece the track keeps
+            # goes under it -- the same piece the inside test measured.
+            low, high = _widest(item, track)
+            outside.append(
+                Name(
+                    f"{key}.feature{features.index(item) + 1}.label",
+                    item.label,
+                    measures.measure(item.label, small=True),
+                    (x_of(low) + x_of(high + 1)) / 2.0,
                 )
+            )
         below = top_reach
         if outside:
             below += 0.35 * u + max(item.metrics.height for item in outside)
@@ -590,10 +569,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             if not item.label:
                 continue
             metrics = measures.measure(item.label, small=item.kind != "domain")
-            pieces_in = _clip(item, track)
-            widest = max(pieces_in, key=lambda piece: piece[1] - piece[0])
-            x1, x2 = x_of(widest[0]), x_of(widest[1] + 1)
-            if item.kind != "transmembrane" and metrics.width + 0.6 * u <= x2 - x1:
+            low, high = _widest(item, track)
+            x1, x2 = x_of(low), x_of(high + 1)
+            if _named_inside(item, track, measures, x_of):
                 words.append(
                     Words(
                         f"{key}.feature{index}.label",
@@ -609,7 +587,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             if item.id is not None and number == 1:
                 ports.append((item.id, Side.NORTH, (x1 + x2) / 2.0))
         if outside:
-            _spread(outside, 0.4 * u, left, right)
+            spread(outside, 0.4 * u, left, right)
             top = base + top_reach + 0.35 * u
             for label in outside:
                 words.append(
@@ -662,7 +640,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             )
         # Sites last: lollipops on top of the boxes.
         if sites:
-            _spread(site_labels, 0.35 * u, left - 2.0 * u, right + 2.0 * u)
+            spread(site_labels, 0.35 * u, left - 2.0 * u, right + 2.0 * u)
             placed = {label.key: label for label in site_labels}
             top_head = base - top_reach - stem - raised
             for index, item in enumerate(sites, 1):
@@ -680,7 +658,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     )
                 )
                 shapes.append(
-                    Shape(name, _circle(x, head_y, head), "solid" if tone else "hollow", tone, pen)
+                    Shape(
+                        name, circle_path(x, head_y, head), "solid" if tone else "hollow", tone, pen
+                    )
                 )
                 label = placed.get(name)
                 if label is None:
@@ -825,6 +805,22 @@ def _height(kind: str, box: float) -> float:
     return box * 0.62 if kind in {"region", "signal"} else box
 
 
+def _widest(feature: Feature, track: Track) -> tuple[int, int]:
+    """The longest stretch of ``feature`` that ``track`` keeps."""
+
+    return max(_clip(feature, track), key=lambda piece: piece[1] - piece[0])
+
+
+def _named_inside(feature: Feature, track: Track, measures, x_of) -> bool:
+    """Whether ``feature``'s name fits inside the widest piece of it ``track`` keeps."""
+
+    if feature.kind == "transmembrane":
+        return False
+    metrics = measures.measure(feature.label, small=feature.kind != "domain")
+    low, high = _widest(feature, track)
+    return metrics.width + 0.6 * measures.u <= x_of(high + 1) - x_of(low)
+
+
 def _kept(feature: Feature, track: Track) -> bool:
     return bool(_clip(feature, track))
 
@@ -861,10 +857,6 @@ def _box(x: float, y: float, width: float, height: float, radius: float) -> str:
         "A", r, r, 0, 0, 1, x + r, y,
         "Z",
     )  # fmt: skip
-
-
-def _circle(x: float, y: float, r: float) -> str:
-    return path("M", x - r, y, "A", r, r, 0, 1, 1, x + r, y, "A", r, r, 0, 1, 1, x - r, y, "Z")
 
 
 def _left(words: Words) -> float:

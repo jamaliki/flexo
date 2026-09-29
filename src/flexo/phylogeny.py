@@ -207,6 +207,9 @@ def _ancestor(root: Clade, names: tuple[str, ...], node: NodeSpec) -> Clade:
     """The smallest subtree holding every tip in ``names``."""
 
     tips = {tip.name: tip for tip in root.tips()}
+    # A tip is named as the Newick writes it or as it is drawn: "Homo_sapiens"
+    # and "Homo sapiens" are one tip (Newick's underscore is a space).
+    names = tuple(_tip_name(name) for name in names)
     missing = [name for name in names if name not in tips]
     if missing:
         raise _fail(
@@ -222,6 +225,13 @@ def _ancestor(root: Clade, names: tuple[str, ...], node: NodeSpec) -> Clade:
         if wanted <= held and len(held) < len({id(tip) for tip in best.tips()}):
             best = candidate
     return best
+
+
+def _tip_name(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] == "'":
+        return text[1:-1].replace("''", "'")
+    return text.replace("_", " ")
 
 
 def _bool(node: NodeSpec, name: str, default: bool) -> bool:

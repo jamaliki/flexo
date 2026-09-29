@@ -23,9 +23,7 @@ def _pathway(layout: str = "row", theme: str = "paper") -> flexo.Figure:
         g6p = parent.text("g6p", label="Glucose-6-P")
         f6p = parent.text("f6p", label="Fructose-6-P")
         fig.connect(glucose, g6p, id="hk", label="hexokinase", cofactors=("ATP", "ADP"))
-        fig.connect(
-            g6p, f6p, id="pgi", arrow="reversible", label="$k_1$", back_label="$k_{-1}$"
-        )
+        fig.connect(g6p, f6p, id="pgi", arrow="reversible", label="$k_1$", back_label="$k_{-1}$")
     return fig
 
 
@@ -146,3 +144,14 @@ def test_reactions_draw_in_every_theme_and_export(theme: str, tmp_path) -> None:
     result = flexo.build(_pathway(theme=theme).spec, tmp_path, formats=("portable", "pdf"))
     assert len(result.outputs.existing()) == 3  # the editable SVG always
     assert result.ok
+
+
+def test_cofactors_beside_a_diagonal_edge_keep_off_their_own_line() -> None:
+    with flexo.Figure("diagonal") as figure:
+        grid = figure.root.grid("g", columns=2, gap=60)
+        a = grid.block("a", label="A")
+        grid.block("b", label="B")
+        grid.block("c", label="C")
+        d = grid.block("d", label="D")
+        figure.connect(a, d, id="r", shape="straight", label="kinase", cofactors=("ATP", "ADP"))
+    assert not lint_compilation(compile_figure(figure.spec)).diagnostics

@@ -438,6 +438,14 @@ def construct_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         measures.measure(node.label, weight=style.typography.title_weight) if node.label else None
     )
     top = (title.height + 0.6 * u) if title else 0.0
+    if title is not None and title.width + 2 * lead > length:
+        # A name longer than the parts: the backbone runs under all of it, with
+        # the parts in the middle of it.
+        extra = title.width + 2 * lead - length
+        slots = [
+            (part, glyph, metrics, x + extra / 2.0, slot) for part, glyph, metrics, x, slot in slots
+        ]
+        length += extra
     pad = 0.25 * u
     base = pad + top + above
     height = base + below + pad
@@ -832,6 +840,20 @@ def _arc(
     top), with an arrowhead at its end -- or its start, on the reverse strand."""
 
     outer, inner = r + thick / 2.0, r - thick / 2.0
+    if end - start >= 2 * math.pi - 1e-6:
+        if not arrow:
+            # All the way round: a ring. An arc's ends cannot meet (SVG drops an
+            # arc that starts where it ends), so each circle is two half arcs,
+            # the inner one run the other way to leave the middle open.
+            top, bottom = cy - outer, cy + outer
+            inside_top, inside_bottom = cy - inner, cy + inner
+            return path(
+                "M", cx, top, "A", outer, outer, 0, 1, 1, cx, bottom,
+                "A", outer, outer, 0, 1, 1, cx, top, "Z",
+                "M", cx, inside_top, "A", inner, inner, 0, 1, 0, cx, inside_bottom,
+                "A", inner, inner, 0, 1, 0, cx, inside_top, "Z",
+            )  # fmt: skip
+        end = start + 2 * math.pi - 1e-3
     head = min(0.9 * u / r, (end - start) * 0.45) if arrow else 0.0
     a1, a2 = (start + head, end) if reverse else (start, end - head)
 

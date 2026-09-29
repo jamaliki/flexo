@@ -288,3 +288,95 @@ def test_a_residue_letter_sits_over_its_own_residue() -> None:
     # Residue 20 is the first of the view: its letter centred on the first 8 points.
     assert abs(letters["ubq.secondary.residue20"].x - (left + 4.0)) < 0.01
     assert letters["ubq.secondary.residue20"].runs[0].text == UBIQUITIN[19]
+
+
+# -- regressions from review ------------------------------------------------------------
+
+
+def test_a_domain_name_survives_a_deletion_through_it() -> None:
+    with flexo.Figure("deleted") as figure:
+        figure.root.protein(
+            "p",
+            400,
+            [{"type": "domain", "label": "Kinase domain", "start": 100, "end": 300}],
+            tracks=[{"label": "Δ", "delete": "130-290"}],
+        )
+    drawing = _drawing(figure, "p")
+    assert any(words.id.endswith("feature1.label") for words in drawing.words)
+
+
+def test_a_construct_is_as_wide_as_its_title() -> None:
+    from flexo.genetics import construct_drawing
+
+    with flexo.Figure("title") as figure:
+        figure.root.construct(
+            "c", [{"type": "promoter"}], label="A very long construct title that goes on and on"
+        )
+    node = figure.spec.nodes[0]
+    drawing = construct_drawing(node, figure_style(figure.spec))
+    title = next(words for words in drawing.words if words.id == "c.label")
+    assert drawing.size.width >= title.x + title.metrics.width
+
+
+def test_crowded_timeline_names_stay_inside_the_picture() -> None:
+    with flexo.Figure("crowded") as figure:
+        figure.root.timeline(
+            "t",
+            events=[
+                {"at": 0, "label": "Transfect cells now"},
+                {"at": 0.2, "label": "Induce expression now"},
+                {"at": 10, "label": "Harvest"},
+            ],
+        )
+    drawing = _drawing(figure, "t")
+    for words in drawing.words:
+        left = words.x - (words.metrics.width / 2.0 if words.anchor == "middle" else 0.0)
+        assert left >= 0.0, words.id
+        assert left + words.metrics.width <= drawing.size.width + 0.01, words.id
+
+
+def test_clade_tips_may_be_written_as_the_newick_writes_them() -> None:
+    with flexo.Figure("apes") as figure:
+        figure.root.tree(
+            "t",
+            "((Homo_sapiens,Pan_troglodytes),Mus_musculus);",
+            clades=[{"tips": "Homo_sapiens, Pan_troglodytes", "label": "Apes"}],
+        )
+    assert not lint_compilation(compile_figure(figure.spec)).diagnostics
+
+
+@pytest.mark.parametrize(
+    ("make", "code"),
+    [
+        (lambda g: g.protein("p", 400, tracks=[{"start": 300, "end": 100}]), "protein.track.range"),
+        (lambda g: g.timeline("t", events=[{"at": 0, "label": "a", "id": "input"}]), "timeline.id"),
+        (
+            lambda g: g.timeline("t", events=[{"at": 0, "id": "seed"}, {"at": 1, "id": "seed"}]),
+            "timeline.id",
+        ),
+        (
+            lambda g: g.protein("p", 100, [{"type": "domain", "start": 1, "end": 9, "id": "1st"}]),
+            "protein.id",
+        ),
+    ],
+)
+def test_a_bad_range_or_id_is_a_diagnostic(make, code: str) -> None:
+    with pytest.raises(FlexoError) as caught:
+        with flexo.Figure("bad") as figure:
+            make(figure.root)
+        compile_figure(figure.spec)
+    assert caught.value.diagnostics[0].code == code
+
+
+def test_a_feature_all_the_way_round_a_plasmid_is_a_ring() -> None:
+    from flexo.genetics import plasmid_drawing
+
+    with flexo.Figure("ring") as figure:
+        figure.root.plasmid(
+            "p", 5421, [{"type": "region", "label": "backbone", "start": 1, "end": 5421}]
+        )
+    shapes = {
+        s.id: s for s in plasmid_drawing(figure.spec.nodes[0], figure_style(figure.spec)).shapes
+    }
+    ring = shapes["p.feature1"].d
+    assert ring.count("M") == 2 and ring.count("A") == 4
