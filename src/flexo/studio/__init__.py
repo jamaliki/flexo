@@ -101,7 +101,9 @@ class Kind(Protocol):
     #   guide() -> str: how its documents are written, given to an agent once;
     #   describe(before, after) -> [{"text", "where"}]: what a change did;
     #   check(document, base) -> [str]: what is wrong with a document, quickly;
-    #   adopt(data) -> document: a parsed document as this kind keeps it.
+    #   adopt(data) -> document: a parsed document as this kind keeps it;
+    #   act(document, action, base) -> {"document", ...}: an edit the page asks for
+    #       by name (a figure's part added or connected), made by the kind.
 
 
 def kinds() -> dict[str, Kind]:

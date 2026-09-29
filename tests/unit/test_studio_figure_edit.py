@@ -1,0 +1,240 @@
+"""The figure page's edits, made to the figure file's own words: parts added, connected,
+renamed, gathered, moved, and removed, the file keeping its comments and reading as a figure."""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+import yaml
+from test_studio import call
+
+from flexo.compiler import compile_figure
+from flexo.studio.figure_edit import EditError, apply, model
+from flexo.studio.figure_kind import NEW_FIGURE, FigureKind, parse
+from flexo.studio.figure_parts import catalogue
+from flexo.studio.server import start
+
+
+@pytest.fixture(autouse=True)
+def _sessions(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("run")))
+
+
+def edit(text: str, **action: object) -> tuple[str, list[str]]:
+    result = apply(text, action)
+    return result["text"], result["select"]
+
+
+def data(text: str) -> dict:
+    return yaml.safe_load(text)
+
+
+def edges(text: str) -> list[tuple[str, str]]:
+    return [(item["from"], item["to"]) for item in data(text).get("edges") or []]
+
+
+def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> None:
+    text, chosen = edit(NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
+    assert chosen == ["mlp"]
+    assert text.startswith("# A flexo figure")
+    ids = [node["id"] for node in data(text)["nodes"]]
+    # A file of nodes alone stacks them as listed: the new one comes right after.
+    assert ids == ["x", "encoder", "mlp", "y"]
+    assert ("encoder", "mlp") in edges(text)
+    compile_figure(parse(text, Path.cwd()))
+
+
+def test_every_part_in_the_palette_can_be_added_and_drawn(tmp_path: Path) -> None:
+    (tmp_path / "picture.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30">'
+        '<rect width="40" height="30" fill="#4a7"/></svg>'
+    )
+    for kind, part in catalogue()["parts"].items():
+        if part.get("unavailable") or kind == "structure":
+            continue
+        node = {"properties": {"source": "picture.svg"}} if part.get("needs_file") else None
+        result = apply(
+            NEW_FIGURE,
+            {"do": "add", "kind": kind, "after": "encoder", "source": "encoder", "node": node},
+            base=tmp_path,
+        )
+        compile_figure(parse(result["text"], tmp_path))
+
+
+def test_gathering_writes_the_root_the_file_only_implied() -> None:
+    text, chosen = edit(NEW_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
+    groups = {group["id"]: group for group in data(text)["groups"]}
+    assert chosen == ["row"]
+    assert groups["root"]["children"] == ["x", "row"]
+    assert groups["row"] == {"id": "row", "children": ["encoder", "y"], "layout": {"kind": "row"}}
+    text, chosen = edit(text, do="gather", ids=["row"], layout="row", role="module")
+    module = next(group for group in data(text)["groups"] if group["id"] == chosen[0])
+    assert module["role"] == "module" and module["label"] == "Module"
+    with pytest.raises(EditError, match="side by side"):
+        edit(text, do="gather", ids=["x", "encoder"], layout="column")
+
+
+def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
+    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="row")
+    text += "nets:\n- id: fan\n  kind: fan-out\n  sources: [x]\n  targets: [encoder.input, y]\n"
+    text, chosen = edit(text, do="rename", id="encoder", to="backbone")
+    assert chosen == ["backbone"]
+    assert ("x", "backbone") in edges(text) and ("backbone", "y") in edges(text)
+    assert data(text)["nets"][0]["targets"] == ["backbone.input", "y"]
+    assert "backbone" in next(g for g in data(text)["groups"] if g["id"] == "row")["children"]
+    with pytest.raises(EditError, match="names another part"):
+        edit(text, do="rename", id="x", to="y")
+    with pytest.raises(EditError, match="cannot name"):
+        edit(text, do="rename", id="x", to="2x")
+
+
+def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
+    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="row")
+    text, _ = edit(text, do="delete", ids=["encoder"])
+    assert edges(text) == []
+    assert [group["id"] for group in data(text)["groups"]] == ["root"]
+    assert "encoder" not in data(text)["groups"][0]["children"]
+    with pytest.raises(EditError, match="cannot be deleted"):
+        edit(text, do="delete", ids=["root"])
+
+
+def test_a_line_is_found_by_the_id_the_drawing_gives_it() -> None:
+    text, _ = edit(NEW_FIGURE, do="delete", ids=["edge.2.encoder-to-y"])
+    assert edges(text) == [("x", "encoder")]
+
+
+def test_lines_land_where_a_part_takes_them() -> None:
+    text, _ = edit(NEW_FIGURE, do="add", kind="concat", after="encoder")
+    text, _ = edit(text, do="connect", source="x", target="concat")
+    text, _ = edit(text, do="connect", source="encoder", target="concat")
+    assert {("x", "concat.input1"), ("encoder", "concat.input2")} <= set(edges(text))
+    text, _ = edit(text, do="add", kind="attention", after="y", source="y")
+    net = data(text)["nets"][0]
+    assert net["sources"] == ["y"] and net["targets"] == [f"attention.{p}" for p in "qkv"]
+    with pytest.raises(EditError, match="connected already"):
+        edit(text, do="connect", source="x", target="encoder")
+    with pytest.raises(EditError, match="itself"):
+        edit(text, do="connect", source="x", target="x")
+    compile_figure(parse(text, Path.cwd()))
+
+
+def test_updates_set_and_clear_keys_and_a_new_kind_keeps_what_it_can() -> None:
+    target = {"type": "node", "id": "encoder"}
+    text, _ = edit(NEW_FIGURE, do="update", target=target, values={"properties.badge": "frozen"})
+    encoder = data(text)["nodes"][1]
+    assert encoder["properties"] == {"tone": "encoder", "badge": "frozen"}
+    text, _ = edit(text, do="update", target=target, values={"kind": "protein"})
+    encoder = data(text)["nodes"][1]
+    assert list(encoder)[:3] == ["id", "kind", "label"]  # the kind written under the id
+    assert encoder["properties"]["tone"] == "encoder" and encoder["properties"]["length"] == 420
+    text, _ = edit(text, do="update", target=target, values={"kind": "block", "label": ""})
+    encoder = data(text)["nodes"][1]
+    assert encoder == {"id": "encoder", "properties": {"tone": "encoder", "badge": "frozen"}}
+    edge = {"type": "edge", "id": "edge.2.encoder-to-y"}
+    text, _ = edit(text, do="update", target=edge, values={"head": "inhibition"})
+    text, _ = edit(text, do="update", target=edge, values={"arrow": "reversible"})
+    assert data(text)["edges"][1] == {"from": "encoder", "to": "y", "arrow": "reversible"}
+    text, _ = edit(text, do="update", target={"type": "figure"}, values={"figure.style": "tikz"})
+    assert data(text)["figure"]["style"] == "tikz"
+
+
+def test_parts_move_between_groups_and_step_among_their_siblings() -> None:
+    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="column")
+    text, _ = edit(text, do="move", id="y", parent="column", index=0)
+    groups = {group["id"]: group for group in data(text)["groups"]}
+    assert groups["column"]["children"] == ["y", "encoder"]
+    text, _ = edit(text, do="step", id="y", delta=1)
+    text, _ = edit(text, do="ungroup", id="column")
+    assert data(text)["groups"][0]["children"] == ["x", "encoder", "y"]
+    with pytest.raises(EditError, match="inside itself"):
+        edit(text, do="move", id="root", parent="root")
+
+
+def test_duplicating_a_group_copies_its_parts_and_the_lines_between_them() -> None:
+    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
+    text, chosen = edit(text, do="duplicate", ids=["row"])
+    assert chosen == ["row-2"]
+    assert ("encoder-2", "y-2") in edges(text)
+    compile_figure(parse(text, Path.cwd()))
+
+
+def test_an_edit_that_would_break_the_figure_is_refused_and_one_already_broken_is_kept() -> None:
+    with pytest.raises(EditError, match="unknown figure edit"):
+        edit(NEW_FIGURE, do="explode")
+    broken = NEW_FIGURE.replace("to: encoder", "to: nowhere")
+    text, _ = edit(broken, do="add", kind="block")  # the file was broken before: made anyway
+    assert "Block" in text
+
+
+def test_the_model_names_lines_as_the_drawing_does_and_marks_the_implied_root() -> None:
+    found = model(NEW_FIGURE)
+    assert found is not None
+    assert [edge["id"] for edge in found["edges"]] == ["edge.1.x-to-encoder", "edge.2.encoder-to-y"]
+    assert found["groups"][-1] == {
+        "id": "root",
+        "children": ["x", "encoder", "y"],
+        "layout": {"kind": "column"},
+        "implied": True,
+    }
+    assert found["nodes"][1]["ports"] == ["input", "output"]
+    assert model("nodes: [") is None
+
+
+def test_an_indented_file_keeps_its_indentation() -> None:
+    indented = (
+        NEW_FIGURE.replace("\n- ", "\n  - ").replace("\n  ", "\n    ").replace("\n    - ", "\n  - ")
+    )
+    text, _ = edit(indented, do="add", kind="block")
+    assert "\n  - id: block" in text
+
+
+@pytest.fixture
+def served(tmp_path: Path) -> Iterator[tuple[str, object]]:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    server, workspace = start(tmp_path / "figure.yaml", browser=False)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", workspace
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_page_asks_the_server_for_an_edit_and_gets_the_file_and_its_model(served) -> None:
+    base, workspace = served
+    token = workspace.token
+    status, opened = call(f"{base}/api/open?file=figure.yaml", token)
+    assert status == 200 and "editor" in opened["catalog"]
+    action = {"do": "add", "kind": "protein", "after": "encoder", "source": "encoder"}
+    body = {"file": "figure.yaml", "document": opened["document"], "action": action}
+    status, result = call(f"{base}/api/act", token, body)
+    assert status == 200 and result["select"] == ["kinase"]
+    assert any(node["id"] == "kinase" for node in result["model"]["nodes"])
+    status, failed = call(
+        f"{base}/api/act", token, {**body, "action": {"do": "rename", "id": "x", "to": "y"}}
+    )
+    assert status == 400 and "names another part" in failed["error"]
+    status, drawn = call(
+        f"{base}/api/draw", token, {"file": "figure.yaml", "document": result["document"]}
+    )
+    assert status == 200 and drawn["info"]["model"]["nodes"][2]["kind"] == "protein"
+
+
+def test_a_picture_beside_the_figure_is_found_when_it_is_drawn(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art" / "logo.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
+        '<circle cx="10" cy="10" r="8"/></svg>'
+    )
+    text = apply(
+        NEW_FIGURE,
+        {"do": "add", "kind": "image", "node": {"properties": {"source": "art/logo.svg"}}},
+        base=tmp_path,
+    )["text"]
+    drawing = FigureKind().draw({"text": text}, tmp_path)
+    assert drawing.pages and not [m for m in drawing.messages if m.severity == "error"]
