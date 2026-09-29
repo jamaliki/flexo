@@ -181,8 +181,9 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
                     role="layout",
                 )
             )
-        # Layers are centred on one another, as a layered drawing is.
-        align = "center" if group.layout.align == "auto" else group.layout.align
+        # Layers line up on their port lines, so an arrow from one layer to the
+        # next runs level: into a titled module's blocks, not its frame's middle.
+        align = "ports" if group.layout.align == "auto" else group.layout.align
         result.append(
             replace(
                 group,

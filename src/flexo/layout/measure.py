@@ -299,9 +299,11 @@ def _group_anchor(
     and spacers) the group falls back to its own centre.
     """
 
-    primary = _anchor_child(group, node_kinds, outward or {})
+    speakers = [
+        child for child in _anchor_children(group, node_kinds, outward or {}) if child in child_ids
+    ]
     centre = Point(size.width / 2.0, size.height / 2.0)
-    if primary is None or primary not in child_ids:
+    if not speakers:
         return centre
     layout = group.layout
     padding = layout.resolved_padding(style.group_padding)
@@ -324,43 +326,58 @@ def _group_anchor(
         anchors=anchors,
         group_id=group.id,
     )
-    index = child_ids.index(primary)
-    return Point(
-        bounds[index].x + anchors[index].x,
-        bounds[index].y + anchors[index].y,
-    )
+    points = [
+        Point(
+            bounds[index].x + anchors[index].x,
+            bounds[index].y + anchors[index].y,
+        )
+        for index in (child_ids.index(child) for child in speakers)
+    ]
+    if len(points) == 1:
+        return points[0]
+    # Several children speak for the group together. Across the way it runs they
+    # share one line -- a row's blocks, one height -- and that line is the group's,
+    # title band and all. Along the way it runs they are spread out, and the group
+    # speaks from its middle, as a column of experts fed by one router does.
+    if layout.kind == "row":
+        return Point(centre.x, sum(point.y for point in points) / len(points))
+    if layout.kind == "column":
+        return Point(sum(point.x for point in points) / len(points), centre.y)
+    return centre
 
 
-def _anchor_child(
+def _anchor_children(
     group: GroupSpec,
     node_kinds: dict[str, str],
     outward: dict[str, int],
-) -> str | None:
+) -> tuple[str, ...]:
     """The child a group takes its port line from.
 
     The author's, when named. Otherwise the child that carries the group's
     connections to the rest of the figure -- the encoder at the bottom of a
     tower, not the input at its top -- because that is the line a sibling wired
     to this group wants to share. Ties, and groups wired to nothing outside,
-    fall back to the first real child.
+    fall back to the first real child. Several children carrying the group's
+    connections equally all speak for it.
     """
 
     if group.anchor is not None:
-        return group.anchor
+        return (group.anchor,)
     candidates = [
         child_id
         for child_id in group.children
         if node_kinds.get(child_id, "") not in NON_ANCHOR_KINDS
     ]
     if not candidates:
-        return None
+        return ()
     best = max(outward.get(child_id, 0) for child_id in candidates)
     leaders = [child_id for child_id in candidates if outward.get(child_id, 0) == best]
     if best > 0 and len(leaders) > 1:
         # Several children carry the group's connections equally -- a column of
-        # experts fed by one router: the group speaks from its middle.
-        return None
-    return leaders[0]
+        # experts fed by one router, a chain wired in and out along its length:
+        # the group speaks from where they are, together.
+        return tuple(leaders)
+    return (leaders[0],)
 
 
 def _outward_connections(figure: FigureSpec) -> dict[str, dict[str, int]]:
