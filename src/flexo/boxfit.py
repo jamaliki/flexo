@@ -14,8 +14,9 @@ words come out largest:
 - **turned within**: the outermost parts stay as written, each turned inside;
 - each of those with **tighter spacing**, which buys room without shrinking a
   single word;
-- and, when none of those sets the words at three quarters of their size,
-  **folded** (``flexo.orient.wrapped``): a long row or column set on two lines.
+- and, when none of those sets the words at their size, **folded**
+  (``flexo.orient.wrapped``): a long row or column set on two lines, if that
+  sets them clearly larger (``FOLD_GAIN``).
 
 It stops as soon as a layout lets the words reach ``largest``, so a figure that
 already fits costs one compile. A turned or tightened layout is only chosen when
@@ -42,8 +43,10 @@ if TYPE_CHECKING:  # pragma: no cover
 
 PREFERENCE = 1.12
 """How much larger another layout's words must be before it replaces the one written."""
-FOLD_BELOW = 0.75
-"""Below this share of the words' size, long rows and columns are folded onto two lines."""
+FOLD_GAIN = 1.3
+"""How much larger a fold must set the words before it replaces a layout that
+keeps each row and column whole: folding changes how the figure reads, so it has
+to buy more than turning does (``PREFERENCE``)."""
 TIGHTER = 0.65
 """The spacing (gaps and group padding) of the tighter variants, as a share of the theme's."""
 
@@ -138,9 +141,10 @@ def fit_in_box(
         (fit for fit in usable if fit.scale * PREFERENCE >= top_scale),
         key=lambda fit: order.index(fit.layout),
     )
-    if turn and best.scale < least * FOLD_BELOW:
-        # Still small: fold long rows and columns onto two lines. Routing a
-        # folded figure is costly, so only the most promising fold is tried.
+    if turn and best.scale < least:
+        # Smaller than the words were meant to be: fold long rows and columns onto
+        # two lines, if that sets them clearly larger. Routing a folded figure is
+        # costly, so only the most promising fold is tried.
         folds = [
             (f"{label}, folded", wrapped(candidate), layout_style)
             for label, candidate, layout_style in candidates
@@ -149,7 +153,7 @@ def fit_in_box(
         folds.sort(key=lambda item: -_estimate(item[1], item[2] or style, width, height, most))
         label, candidate, layout_style = folds[0]
         promise = _estimate(candidate, layout_style or style, width, height, most)
-        if promise > best.scale * PREFERENCE:
+        if promise > best.scale * FOLD_GAIN:
             try:
                 compiled = compile_figure(candidate, style=layout_style)
             except Exception:
@@ -158,7 +162,7 @@ def fit_in_box(
             ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
             scale = min(most, width / ink[2], height / ink[3])
             errors = len(lint_compilation(compiled, style=layout_style).errors)
-            if errors <= written_errors and scale > best.scale * PREFERENCE:
+            if errors <= written_errors and scale > best.scale * FOLD_GAIN:
                 best = BoxFit(compiled, scale, ink, label, base * scale, errors, layout_style)
     return best
 

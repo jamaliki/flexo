@@ -43,6 +43,9 @@ dev = [
   "ruff>=0.12",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true  # mol-sketch is installed from its repository
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/flexo"]
 
