@@ -9,6 +9,8 @@ description = "A semantic compiler for editable scientific figures"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Kiarash Jamali" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = ["scientific-visualization", "svg", "neural-networks", "inkscape"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
@@ -21,6 +23,7 @@ dependencies = [
   "jsonschema>=4.25",
   "pyyaml>=6.0.2",
   "resvg-py>=0.2",
+  "ruamel.yaml>=0.18",
   "uharfbuzz>=0.52",
 ]
 
@@ -43,11 +46,14 @@ dev = [
   "ruff>=0.12",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true  # mol-sketch is installed from its repository
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/flexo"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/flexo", "schemas", "README.md", "pyproject.toml"]
+include = ["src/flexo", "schemas", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

@@ -10,9 +10,18 @@ live drawing, exports, and a shared set of controls (``static/studio.js``).
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+
+# The folder being edited, while a document is drawn or exported in it: a file the
+# document names must be inside it. The workspace sets it.
+from flexo.confine import folder_root as folder_root
+
+code_allowed: ContextVar[bool] = ContextVar("flexo_studio_code_allowed", default=True)
+"""Whether a document's own code (a deck's plots.py) may run as it is drawn or exported:
+not in a folder its person has not said they trust. The workspace sets it."""
 
 
 @dataclass(slots=True)
@@ -101,7 +110,12 @@ class Kind(Protocol):
     #   guide() -> str: how its documents are written, given to an agent once;
     #   describe(before, after) -> [{"text", "where"}]: what a change did;
     #   check(document, base) -> [str]: what is wrong with a document, quickly;
-    #   adopt(data) -> document: a parsed document as this kind keeps it.
+    #   adopt(data) -> document: a parsed document as this kind keeps it;
+    #   act(document, action, base) -> {"document", ...}: an edit the page asks for
+    #       by name (a figure's part added or connected), made by the kind.
+    #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
+    #       document: the theme a document is drawn in (a name, or a theme file named
+    #       from its folder), read and set, so one theme can be put to use in many.
 
 
 def kinds() -> dict[str, Kind]:

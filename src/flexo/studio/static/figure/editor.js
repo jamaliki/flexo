@@ -1,8 +1,14 @@
-// The figure editor: the figure's file on the left, the figure drawn on the right.
-// Its parts are listed in an outline; choosing one -- there or in the drawing --
-// marks it and finds it in the file.
+// The figure editor: the figure drawn in the middle, its parts listed on the left,
+// what is chosen on the right. Parts come from a palette, lines are drawn by
+// choosing one part and then another, words are typed on the drawing, and parts
+// are gathered into rows, columns, grids and modules (parts.js, shared with the
+// deck editor, which edits figures on its slides the same way). Every edit is
+// made by the server to the figure's own file (the Source tab), so the file stays
+// the figure, comments and all, and anything the page offers no control for can
+// be written there.
 
-import { h, clear, icon, ui, menu } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField } from "/static/studio/studio.js";
+import { figureParts, glyph, groupGlyph, plain, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
 
@@ -10,14 +16,238 @@ export function mount(studio, main) {
   if (!document.querySelector('link[href="/static/kinds/figure/editor.css"]')) {
     document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/editor.css" }));
   }
-
-  let tab = "source";
-  let selected = null;
-  let zoom = null;             // null: fit to the stage
-  let outlineData = null;
+  const catalog = studio.catalog.editor;
+  const state = { tab: "parts", zoom: null, closed: new Set() };
   let messages = [];
 
-  // -- source --
+  // -- the frame --
+  const leftBody = h("div.panel-body.scroll-thin");
+  const leftTabs = h("div.tabs");
+  const left = h("section.panel.fig-left", {}, h("div.panel-head", {}, leftTabs), leftBody);
+  const page = h("div.fig-page");
+  const hover = h("div.fig-hover", { hidden: true });
+  const marks = h("div.fig-marks");
+  const stage = h("div.stage.fig-stage.scroll-thin", {}, h("div.fig-empty", {}, h("div.spinner"), "Drawing…"));
+  const note = h("div.messages.fig-messages.scroll-thin");
+  const hint = h("div.fig-hint", { hidden: true });
+  const zoomValue = h("span.value", {}, "");
+  const zoomBar = h("div.zoom", {},
+    ui.button("", () => setZoom((state.zoom ?? fitScale()) / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom out" }),
+    zoomValue,
+    ui.button("", () => setZoom((state.zoom ?? fitScale()) * 1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom in" }),
+    ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
+    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
+  const center = h("section.fig-center", {}, stage, hint, note, zoomBar);
+  const inspectorBody = h("div.panel-body.scroll-thin");
+  const inspector = h("aside.panel.fig-inspector", {}, inspectorBody);
+  const split = h("div.fig-split");
+  const root = h("div.fig", {}, left, split, center, inspector);
+  clear(main, root);
+  split.addEventListener("pointerdown", (event) => {
+    split.setPointerCapture(event.pointerId);
+    split.classList.add("dragging");
+    const move = (e) => root.style.setProperty("--left", `${Math.min(Math.max(200, e.clientX - root.getBoundingClientRect().left), 720)}px`);
+    split.addEventListener("pointermove", move);
+    split.addEventListener("pointerup", () => { split.classList.remove("dragging"); split.removeEventListener("pointermove", move); fitPage(); }, { once: true });
+  });
+
+  // -- the bar --
+  const addButton = ui.button("Add", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "primary", title: "Add a part (A)" });
+  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one part to another (C)" });
+  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Gather the chosen parts into a row, column, grid or module (G)" });
+  const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
+  studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
+  studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
+    { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "image", label: "PNG", run: () => studio.exportFiles(["png"]) },
+    "-",
+    { icon: "export", label: "Everything", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+  ], { align: "end" }), { icon: "export", kind: "ghost" }));
+
+  // -- the drawing's parts, edited --
+  const elementOf = (id) => {
+    const svg = page.querySelector("svg");
+    return svg && [...svg.querySelectorAll("[id]")].find((el) => el.id === id);
+  };
+  function boxOf(id) {
+    const target = elementOf(id);
+    if (!target) return null;
+    const outer = page.getBoundingClientRect(), inner = target.getBoundingClientRect();
+    if (!inner.width && !inner.height) return null;
+    return { left: inner.left - outer.left - 3, top: inner.top - outer.top - 3, width: inner.width + 6, height: inner.height + 6 };
+  }
+  const figure = figureParts({
+    catalog,
+    overlay: page,
+    element: elementOf,
+    idOf: (id) => id,
+    box: boxOf,
+    changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
+    reveal: (id) => {
+      outlineBody.querySelector(`.tree-row[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
+      if (state.tab === "source") find(id);
+    },
+    focus: (where) => studio.focus(where),
+    chooseFile,
+    themeField: (value, set) => themeField(studio, { value, onPick: set, onCustomise: (current) => customiseTheme(current, set) }),
+    tones: () => studio.info?.tones,
+    addAnchor: () => addButton,
+    groupAnchor: () => gatherButton,
+    // The server makes the edit to the file's words; if the file changed while it did
+    // (someone typed, an agent wrote), it is made again on the file as it is now.
+    run: async (action, { merge }) => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const sent = studio.doc.text;
+        const result = await studio.api("/api/act", { file: studio.file, document: studio.doc, action });
+        if (studio.doc.text !== sent) continue;
+        studio.change((d) => ({ ...d, text: result.document.text }), { merge });
+        return result;
+      }
+      return null;
+    },
+  });
+
+  function renderBar() {
+    const chosen = figure.selected;
+    deleteButton.disabled = !chosen.length || chosen.includes(figure.model?.root);
+    connectButton.classList.toggle("on", Boolean(figure.connecting));
+    gatherButton.disabled = !figure.model;
+    addButton.disabled = !figure.model;
+  }
+  function showHint() {
+    const words = figure.hint();
+    hint.hidden = !words;
+    stage.classList.toggle("connecting", Boolean(words));
+    if (words) clear(hint, words);
+  }
+
+  // -- the drawing --
+  let natural = { width: 1, height: 1 };
+  const fitScale = () => {
+    const room = stage.getBoundingClientRect();
+    return Math.min((room.width - 96) / natural.width, (room.height - 96) / natural.height, 3);
+  };
+  const setZoom = (value) => { state.zoom = value && Math.min(Math.max(value, 0.1), 8); fitPage(); };
+  function fitPage() {
+    const svg = page.querySelector("svg");
+    if (!svg) return;
+    const scale = state.zoom ?? fitScale();
+    svg.style.width = `${natural.width * scale}px`;
+    svg.style.height = `${natural.height * scale}px`;
+    zoomValue.textContent = `${Math.round(scale * 100)}%`;
+    placeMarks();
+    figure.placeInline();
+  }
+  new ResizeObserver(() => fitPage()).observe(stage);
+
+  function placeMarks() {
+    clear(marks, figure.marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
+      left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
+    group ? h("span.fig-mark-label", {}, name) : null)));
+  }
+  page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
+  stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting) figure.select([]); });
+  page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
+  page.addEventListener("mousemove", (event) => {
+    const id = figure.idAt(event);
+    const where = id && boxOf(id);
+    hover.hidden = !where;
+    if (where) Object.assign(hover.style, { left: `${where.left}px`, top: `${where.top}px`, width: `${where.width}px`, height: `${where.height}px` });
+  });
+  page.addEventListener("mouseleave", () => { hover.hidden = true; });
+
+  // -- the outline --
+  const outlineBody = h("div.tree");
+  function renderOutline() {
+    if (state.tab !== "parts") return;
+    const found = figure.model;
+    if (!found) { clear(outlineBody, h("div.empty", {}, "The parts appear once the file reads.")); return; }
+    const chosen = figure.selected;
+    const choose = (event, id) => {
+      if (event.shiftKey || event.metaKey || event.ctrlKey) figure.select(chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id]);
+      else figure.select([id]);
+    };
+    const row = (id, depth) => {
+      const node = figure.nodeOf(id), group = figure.groupOf(id);
+      const isRoot = id === found.root;
+      const children = group ? group.children || [] : [];
+      const open = !state.closed.has(id);
+      const item = h(`div.tree-row${chosen.includes(id) ? ".on" : ""}${isRoot ? ".root" : ""}`, {
+        draggable: isRoot ? "false" : "true", dataset: { id }, style: { paddingLeft: `${6 + depth * 14}px` },
+        onclick: (event) => choose(event, id),
+        ondblclick: () => (node ? figure.openInline(id) : null),
+      },
+      group && children.length ? h(`button.tree-caret${open ? ".open" : ""}`, { type: "button", onclick: (event) => {
+        event.stopPropagation();
+        if (open) state.closed.add(id); else state.closed.delete(id);
+        renderOutline();
+      } }, icon("chevron")) : h("span.tree-caret"),
+      node ? glyph(node.kind || "block") : group ? glyph(groupGlyph(group)) : glyph("block"),
+      h("span.tree-name", {}, isRoot ? "Figure" : figure.nameOf(id)),
+      h("span.tree-id", {}, isRoot ? "" : id));
+      outlineDrop(item, id, isRoot);
+      if (!isRoot) outlineDrag(item, id);
+      return [item, group && open ? children.map((child) => row(child, depth + 1)) : null];
+    };
+    const lines = [...found.edges, ...found.nets.map((net) => ({ ...net, net: true }))];
+    clear(outlineBody,
+      h("div.tree-head", {}, "Parts", h("span.count", {}, found.nodes.length)),
+      figure.groupOf(found.root) ? row(found.root, 0) : null,
+      h("div.tree-head", {}, "Lines", h("span.count", {}, lines.length)),
+      lines.length ? lines.map((line) => h(`div.tree-row.line${chosen.includes(line.id) ? ".on" : ""}`, {
+        dataset: { id: line.id }, onclick: () => figure.select([line.id]),
+      }, h("span.tree-caret"), glyph(line.net ? "net" : "edge"),
+      h("span.tree-name", {}, line.net
+        ? `${figure.nameOf(figure.nodeOfRef(line.sources?.[0] || ""))} → ${(line.targets || []).map((t) => figure.nameOf(figure.nodeOfRef(t))).join(", ")}`
+        : figure.nameOf(line.id)),
+      line.label ? h("span.tree-id", {}, plain(line.label)) : null)) : h("div.empty.small", {}, "Choose a part, then Connect."));
+  }
+
+  let dragging = null;
+  function outlineDrag(item, id) {
+    item.addEventListener("dragstart", (event) => { dragging = id; item.classList.add("dragging"); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", id); });
+    item.addEventListener("dragend", () => { dragging = null; item.classList.remove("dragging"); clearDrops(); });
+  }
+  const clearDrops = () => outlineBody.querySelectorAll(".drop-before,.drop-after,.drop-into").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-into"));
+  function dropZone(item, id, event, isRoot) {
+    if (isRoot) return "into";
+    const box = item.getBoundingClientRect();
+    const y = (event.clientY - box.top) / box.height;
+    if (figure.groupOf(id) && y > 0.28 && y < 0.72) return "into";
+    return y < 0.5 ? "before" : "after";
+  }
+  function outlineDrop(item, id, isRoot) {
+    item.addEventListener("dragover", (event) => {
+      if (!dragging || dragging === id) return;
+      event.preventDefault();
+      clearDrops();
+      item.classList.add(`drop-${dropZone(item, id, event, isRoot)}`);
+    });
+    item.addEventListener("dragleave", () => item.classList.remove("drop-before", "drop-after", "drop-into"));
+    item.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const moving = dragging;
+      clearDrops();
+      if (!moving || moving === id) return;
+      const zone = dropZone(item, id, event, isRoot);
+      let parent, index;
+      if (zone === "into") {
+        parent = id;
+        index = (figure.groupOf(id).children || []).filter((child) => child !== moving).length;
+      } else {
+        const holder = figure.parentOf(id);
+        if (!holder) return;
+        parent = holder.id;
+        const siblings = (holder.children || []).filter((child) => child !== moving);
+        index = siblings.indexOf(id) + (zone === "after" ? 1 : 0);
+      }
+      figure.act({ do: "move", id: moving, parent, index });
+    });
+  }
+
+  // -- the source --
   const gutter = h("div.code-gutter");
   const area = h("textarea.code-area.scroll-thin", { spellcheck: false, wrap: "off" });
   area.value = studio.doc.text;
@@ -36,148 +266,109 @@ export function mount(studio, main) {
     area.dispatchEvent(new Event("input"));
   });
   const code = h("div.code", {}, gutter, area);
-
-  const numbers = () => {
+  function numbers() {
     const count = area.value.split("\n").length;
     const bad = new Set(messages.map((m) => /^line (\d+)$/.exec(m.where)?.[1]).filter(Boolean).map(Number));
     if (gutter.childElementCount !== count || bad.size || gutter.querySelector(".bad")) {
       clear(gutter, Array.from({ length: count }, (_, i) => h(`div${bad.has(i + 1) ? ".bad" : ""}`, {}, i + 1)));
     }
-  };
-  numbers();
-
-  const find = (id) => {
+  }
+  function find(id) {
     const lines = area.value.split("\n");
     const pattern = new RegExp(`^\\s*(-\\s*)?id:\\s*['"]?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*$`);
     const index = lines.findIndex((line) => pattern.test(line));
     if (index < 0) return;
     const start = lines.slice(0, index).reduce((sum, line) => sum + line.length + 1, 0);
-    if (tab !== "source") return;
-    area.focus({ preventScroll: true });
     area.setSelectionRange(start, start + lines[index].length);
     area.scrollTop = Math.max(0, index * LINE - area.clientHeight / 3);
-  };
+  }
 
-  // -- outline --
-  const outline = h("div.outline");
-  const renderOutline = () => {
-    if (!outlineData) { clear(outline, h("div.empty", {}, "The outline appears once the figure draws.")); return; }
-    const item = (node) => {
-      const glyph = node.type === "group" ? "layout" : node.kind === "text" ? "text" : "figure";
-      const row = h(`div.outline-item${selected === node.id ? ".on" : ""}`, { onclick: () => select(node.id, true) },
-        icon(glyph), h("span.id", {}, node.id), h("span.what", {}, [node.kind, node.label].filter(Boolean).join(" · ")));
-      row.dataset.id = node.id;
-      return node.children ? [row, h("div.outline-children", {}, node.children.map(item))] : [row];
-    };
-    clear(outline,
-      h("div.outline-head", {}, "Parts"), item(outlineData.root),
-      outlineData.edges.length ? h("div.outline-head", {}, `Edges · ${outlineData.edges.length}`) : null,
-      outlineData.edges.map((edge) => {
-        const row = h(`div.outline-item${selected === edge.id ? ".on" : ""}`, { onclick: () => select(edge.id, true) },
-          icon("right"), h("span.id", {}, edge.source), h("span.what", {}, "→"), h("span.id", {}, edge.target),
-          edge.label ? h("span.what", {}, edge.label) : null);
-        row.dataset.id = edge.id;
-        return row;
-      }));
-  };
-
-  // -- the left panel --
-  const body = h("div.panel-body.scroll-thin");
-  const tabs = h("div.tabs");
-  const showTab = () => {
-    clear(tabs,
-      h(`button.tab${tab === "source" ? ".on" : ""}`, { onclick: () => { tab = "source"; showTab(); } }, "Source"),
-      h(`button.tab${tab === "outline" ? ".on" : ""}`, { onclick: () => { tab = "outline"; showTab(); } }, "Outline"));
-    clear(body, tab === "source" ? code : outline);
-    if (tab === "outline") renderOutline();
-  };
-  const left = h("section.panel.fig-left", {}, h("div.panel-head", {}, tabs), body);
+  function showTab() {
+    clear(leftTabs,
+      h(`button.tab${state.tab === "parts" ? ".on" : ""}`, { onclick: () => { state.tab = "parts"; showTab(); } }, "Parts"),
+      h(`button.tab${state.tab === "source" ? ".on" : ""}`, { onclick: () => { state.tab = "source"; showTab(); } }, "Source"));
+    clear(leftBody, state.tab === "source" ? code : outlineBody);
+    if (state.tab === "parts") renderOutline();
+    else { numbers(); const id = figure.selected.length === 1 ? figure.selected[0] : null; if (id) find(id); }
+  }
   showTab();
 
-  // -- the drawing --
-  const page = h("div.fig-page");
-  const mark = h("div.fig-mark", { hidden: true });
-  const hover = h("div.fig-hover", { hidden: true });
-  const stage = h("div.stage.fig-stage.scroll-thin", {}, h("div.fig-empty", {}, h("div.spinner"), "Drawing…"));
-  const note = h("div.messages.fig-messages.scroll-thin");
-  const zoomValue = h("span.value", {}, "");
-  const zoomBar = h("div.zoom", {},
-    ui.button("", () => setZoom((zoom ?? fitScale()) / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom out" }),
-    zoomValue,
-    ui.button("", () => setZoom((zoom ?? fitScale()) * 1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom in" }),
-    ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
-    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
-  const right = h("section.fig-right", {}, stage, note, zoomBar);
+  // -- the inspector --
+  function renderInspector() {
+    root.classList.toggle("wide", figure.wantsRoom());
+    keepFocus(inspectorBody, () => {
+      clear(inspectorBody, figure.model ? figure.panel()
+        : h("div.empty", {}, "The file does not read as a figure. Fix it in Source; the messages under the drawing say where."));
+    });
+  }
 
-  const split = h("div.fig-split");
-  split.addEventListener("pointerdown", (event) => {
-    split.setPointerCapture(event.pointerId);
-    split.classList.add("dragging");
-    const move = (e) => root.style.setProperty("--left", `${Math.min(Math.max(260, e.clientX), innerWidth - 320)}px`);
-    split.addEventListener("pointermove", move);
-    split.addEventListener("pointerup", () => { split.classList.remove("dragging"); split.removeEventListener("pointermove", move); fitPage(); }, { once: true });
+  // -- files --
+  // A theme file made from the theme in use, next to the figure, and the figure put in it:
+  // its colours, type and lines are then changed in the theme's own tab.
+  async function customiseTheme(current, set) {
+    const folder = studio.folder();
+    if (/\.(ya?ml|json)$/i.test(current)) { studio.workspace.open(folder + current); return; }
+    const stem = studio.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+    const taken = new Set(studio.workspace.documents.map((item) => item.file));
+    let file = `${folder}${stem}.theme.yaml`;
+    for (let n = 2; taken.has(file); n++) file = `${folder}${stem}-${n}.theme.yaml`;
+    const name = file.split("/").pop().replace(/\.theme\.yaml$/, "");
+    try {
+      const made = (await studio.api("/api/new", { file, kind: "theme", data: { theme: { name: `${name}-look`, base: current, description: `The look of ${stem}.` } } })).file;
+      set(made.slice(folder.length));
+      await studio.workspace.refreshDocuments();
+      studio.workspace.open(made);
+      toast("Change the theme in its tab: the figure redraws as you go.", { icon: "theme", seconds: 4 });
+    } catch (error) {
+      toast(`Could not make the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+    }
+  }
+
+  function chooseFile({ title, types }) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
+      const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
+      const accept = types.includes("image") ? "image/*,.svg" : ".pdb,.cif,.mmcif,.ent";
+      const upload = h("input", { type: "file", accept, hidden: true,
+        onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
+      const box = dialog({ title, body: [list, upload], actions: [
+        { label: "Upload…", run: () => { upload.click(); return false; } },
+        { label: "Cancel", run: () => finish(null) },
+      ], onClose: () => finish(null) });
+      studio.files(types).then((files) => {
+        clear(list, files.length ? files.map((file) => h("button.menu-item", { type: "button", onclick: () => finish(file) },
+          types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon("file"),
+          h("span.menu-text", {}, h("span", {}, file.split("/").pop()), h("span.menu-hint", {}, file))))
+          : h("div.empty", {}, "No such files beside the figure yet: upload one."));
+      });
+    });
+  }
+
+  // -- keys --
+  const typing = (target) => target.closest?.("input, textarea, select, [contenteditable]");
+  document.addEventListener("keydown", (event) => {
+    if (!studio.active || typing(event.target) || document.querySelector(".scrim, .menu")) return;
+    figure.key(event);
   });
-  const root = h("div.fig", {}, left, split, right);
-  clear(main, root);
 
-  let natural = { width: 1, height: 1 };
-  const fitScale = () => {
-    const room = stage.getBoundingClientRect();
-    return Math.min((room.width - 96) / natural.width, (room.height - 96) / natural.height, 3);
-  };
-  const setZoom = (value) => { zoom = value && Math.min(Math.max(value, 0.1), 8); fitPage(); };
-  const fitPage = () => {
-    const svg = page.querySelector("svg");
-    if (!svg) return;
-    const scale = zoom ?? fitScale();
-    svg.style.width = `${natural.width * scale}px`;
-    svg.style.height = `${natural.height * scale}px`;
-    zoomValue.textContent = `${Math.round(scale * 100)}%`;
-    placeMark();
-  };
-  new ResizeObserver(() => fitPage()).observe(stage);
-
-  const box = (id) => {
-    const svg = page.querySelector("svg");
-    const target = svg && [...svg.querySelectorAll("[id]")].find((el) => el.id === id);
-    if (!target) return null;
-    const outer = page.getBoundingClientRect(), inner = target.getBoundingClientRect();
-    return { left: inner.left - outer.left - 3, top: inner.top - outer.top - 3, width: inner.width + 6, height: inner.height + 6 };
-  };
-  const placeMark = () => {
-    const where = selected && box(selected);
-    mark.hidden = !where;
-    if (where) Object.assign(mark.style, { left: `${where.left}px`, top: `${where.top}px`, width: `${where.width}px`, height: `${where.height}px` });
-  };
-  const select = (id, fromOutline = false) => {
-    selected = id;
-    placeMark();
-    for (const row of outline.querySelectorAll(".outline-item")) row.classList.toggle("on", row.dataset.id === id);
-    if (id) find(id);
-    if (!fromOutline && tab === "outline") outline.querySelector(".outline-item.on")?.scrollIntoView({ block: "nearest" });
-    studio.focus(id ? { label: id, id } : null);
-  };
-  const entity = (target) => target.closest?.("[data-flexo-entity][id]");
-  page.addEventListener("click", (event) => { const hit = entity(event.target); select(hit ? hit.id : null); });
-  page.addEventListener("mousemove", (event) => {
-    const hit = entity(event.target);
-    const where = hit && box(hit.id);
-    hover.hidden = !where;
-    if (where) Object.assign(hover.style, { left: `${where.left}px`, top: `${where.top}px`, width: `${where.width}px`, height: `${where.height}px` });
-  });
-  page.addEventListener("mouseleave", () => { hover.hidden = true; });
-
+  // -- what the drawing brings --
   const showMessages = () => {
     clear(note, messages.map((message) => h(`div.message.${message.severity}${message.where ? ".link" : ""}`,
-      { onclick: () => message.where && !message.where.startsWith("line ") && select(message.where) },
+      { onclick: () => {
+        if (!message.where) return;
+        if (message.where.startsWith("line ")) studio.reveal({ line: Number(message.where.slice(5)) });
+        else if (figure.typeOf(message.where)) figure.select([message.where]);
+      } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
       h("div", {}, message.text, message.where ? h("div.where", {}, message.where) : null))));
-    numbers();
+    if (state.tab === "source") numbers();
   };
 
   studio.on("drawn", (result) => {
     messages = result.messages || [];
     showMessages();
+    if (result.info?.model) figure.setModel(result.info.model);
     const drawn = result.pages[0];
     if (!drawn) {
       if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to draw yet"));
@@ -186,18 +377,18 @@ export function mount(studio, main) {
     }
     page.style.opacity = "";
     page.innerHTML = drawn.svg.replace(/^<\?xml[^>]*>\s*/, "");
-    page.append(hover, mark);
     const svg = page.querySelector("svg");
+    widenLines(svg);
+    page.append(hover, marks);
     const view = svg.viewBox.baseVal;
     natural = view && view.width ? { width: view.width * 96 / 72, height: view.height * 96 / 72 } : { width: 600, height: 400 };
-    svg.removeAttribute("width"); svg.removeAttribute("height");
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
     if (page.parentNode !== stage) clear(stage, page);
-    outlineData = drawn.outline;
-    if (tab === "outline") renderOutline();
     fitPage();
   });
 
-  // Someone else's change: take it in, keeping the caret on the same words.
+  // Someone else's change, or undo: the source follows, keeping the caret on its words.
   studio.on("change", ({ quiet }) => {
     if (quiet || area.value === studio.doc.text) return;
     const { selectionStart: start, selectionEnd: end, scrollTop } = area;
@@ -210,38 +401,31 @@ export function mount(studio, main) {
     area.value = studio.doc.text;
     if (document.activeElement === area) area.setSelectionRange(shift(start), shift(end));
     area.scrollTop = scrollTop;
-    numbers();
+    if (state.tab === "source") numbers();
   });
   studio.on("remote", () => { page.classList.remove("flash"); void page.offsetWidth; page.classList.add("flash"); });
   studio.reveal = (where) => {
-    if (where?.id) select(where.id);
+    if (where?.id) figure.select([where.id]);
     else if (where?.line) {
-      tab = "source"; showTab();
+      state.tab = "source"; showTab();
       const lines = area.value.split("\n");
       const start = lines.slice(0, where.line - 1).reduce((sum, line) => sum + line.length + 1, 0);
+      area.focus({ preventScroll: true });
       area.setSelectionRange(start, start + (lines[where.line - 1] || "").length);
       area.scrollTop = Math.max(0, (where.line - 1) * LINE - area.clientHeight / 3);
     }
   };
   studio.commands = () => [
+    { icon: "plus", label: "Add a part", run: () => figure.addPalette(addButton) },
+    ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${part.title.toLowerCase()}`, hint: part.hint, run: () => figure.addPart(kind) })),
+    { icon: "right", label: "Connect two parts", run: () => figure.toggleConnect(true) },
     { icon: "export", label: "Export editable SVG", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "Export PDF", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "code", label: "Show the source", run: () => { tab = "source"; showTab(); } },
-    { icon: "list", label: "Show the outline", run: () => { tab = "outline"; showTab(); } },
-    ...(outlineData ? flatten(outlineData.root).map((node) => ({ icon: "target", label: `Find ${node.id}`, hint: node.label, run: () => select(node.id) })) : []),
+    { icon: "code", label: "Show the source", run: () => { state.tab = "source"; showTab(); } },
+    { icon: "list", label: "Show the parts", run: () => { state.tab = "parts"; showTab(); } },
+    ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Find ${figure.nameOf(node.id)}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];
 
-  const exportMenu = ui.button("Export", (event) => menu(event.currentTarget, [
-    { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "image", label: "PNG", run: () => studio.exportFiles(["png"]) },
-    "-",
-    { icon: "export", label: "Everything", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
-  ], { align: "end" }), { icon: "export", kind: "ghost" });
-  studio.actions.append(exportMenu);
-  studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"));
-}
-
-function flatten(node) {
-  return node.children ? [node, ...node.children.flatMap(flatten)] : [node];
+  renderBar();
+  renderInspector();
 }

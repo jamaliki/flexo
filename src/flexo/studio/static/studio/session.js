@@ -42,6 +42,8 @@ export class Session {
     this.tools = h("div.docbar-group");
     this.actions = h("div.docbar-group");
     this.commands = () => [];
+    this.exports = [];      // what the kind exports: [{ format, label }], for the Mac app's menu
+    this.present = null;    // a kind that presents (a deck) sets how
     this.reveal = () => {};
     this.hints = () => ({});
   }

@@ -1,42 +1,66 @@
-.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 460px) 5px 1fr; }
+/* The figure editor: parts on the left, the figure in the middle, what is chosen on the right. */
+
+.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 328px; }
+.fig.wide { grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 468px; }
 .fig-left { border-right: 1px solid var(--line); }
 .fig-split { cursor: col-resize; background: transparent; position: relative; z-index: 2; margin: 0 -2px; }
 .fig-split:hover, .fig-split.dragging { background: var(--accent-line); }
-.fig-right { position: relative; min-width: 0; }
+.fig-center { position: relative; min-width: 0; min-height: 0; }
+.fig-inspector { border-left: 1px solid var(--line); }
 
 .tabs { display: flex; gap: 2px; }
 .tab { height: 28px; border: 0; background: transparent; border-radius: 6px; padding: 0 10px; color: var(--ink-3); cursor: pointer; font-weight: 560; }
 .tab:hover { color: var(--ink); }
 .tab.on { background: var(--sunken); color: var(--ink); }
 
+
+/* -- source -- */
 .code { position: relative; display: grid; grid-template-columns: auto 1fr; height: 100%; font: 12.5px/1.6 var(--mono); background: var(--raised); }
 .code-gutter { padding: 10px 8px 40px 12px; color: var(--ink-3); text-align: right; user-select: none; overflow: hidden; background: var(--panel); border-right: 1px solid var(--line); }
 .code-gutter div { height: calc(12.5px * 1.6); }
 .code-gutter .bad { color: var(--error); font-weight: 700; }
 .code-area { border: 0; outline: none; resize: none; padding: 10px 14px 40px; font: inherit; line-height: inherit; background: transparent; white-space: pre; overflow: auto; tab-size: 2; color: var(--ink); }
 
-.outline { padding: 8px 6px 30px; font-size: 12.5px; }
-.outline-item { display: flex; align-items: center; gap: 7px; padding: 3px 8px; border-radius: 5px; cursor: pointer; min-width: 0; overflow: hidden; }
-.outline-item:hover { background: var(--sunken); }
-.outline-item.on { background: var(--accent-soft); }
-.outline-item .id { font-family: var(--mono); font-size: 11.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-.outline-item .what { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.outline-item svg { width: 14px; height: 14px; color: var(--ink-3); flex: none; }
-.outline-children { margin-left: 13px; border-left: 1px solid var(--line); padding-left: 4px; }
-.outline-head { font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); padding: 14px 8px 4px; }
+/* -- the parts, listed -- */
+.tree { padding: 4px 6px 40px; font-size: 12.5px; }
+.tree-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); padding: 12px 8px 4px; }
+.tree-head .count { font-weight: 500; letter-spacing: 0; }
+.tree-row { display: flex; align-items: center; gap: 6px; height: 26px; padding-right: 8px; border-radius: 5px; cursor: pointer; min-width: 0; position: relative; color: var(--ink-2); }
+.tree-row:hover { background: var(--sunken); }
+.tree-row.on { background: var(--accent-soft); color: var(--ink); }
+.tree-row.root .tree-name { font-weight: 620; color: var(--ink); }
+.tree-row .glyph { color: var(--ink-3); }
+.tree-row.on .glyph { color: var(--accent); }
+.tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; color: var(--ink); }
+.tree-id { font: 11px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 8px; min-width: 0; }
+.tree-caret { width: 16px; height: 16px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: var(--ink-3); cursor: pointer; border-radius: 3px; }
+.tree-caret svg { width: 11px; height: 11px; transition: transform 0.12s; }
+.tree-caret.open svg { transform: rotate(90deg); }
+.tree-caret:hover { background: var(--line); }
+.tree-row.dragging { opacity: 0.4; }
+.tree-row.drop-before::before, .tree-row.drop-after::after { content: ""; position: absolute; left: 20px; right: 4px; height: 2px; background: var(--accent); border-radius: 2px; }
+.tree-row.drop-before::before { top: -1px; }
+.tree-row.drop-after::after { bottom: -1px; }
+.tree-row.drop-into { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); }
+.empty.small { padding: 6px 8px; text-align: left; }
 
+/* -- the drawing -- */
 .fig-stage { display: grid; place-items: center; padding: 48px; }
-.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; transform-origin: center; }
+.fig-stage.connecting .fig-page, .fig-stage.connecting .fig-page [data-flexo-entity] { cursor: crosshair; }
+.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; }
 .fig-page svg { display: block; }
 .fig-page [data-flexo-entity] { cursor: pointer; }
-.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 3px; background: var(--accent-soft); transition: all 0.12s; }
-.fig-hover { position: absolute; pointer-events: none; border: 1px dashed var(--accent-line); border-radius: 3px; }
 
 .zoom { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 2px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 3px; z-index: 5; }
 .zoom .value { min-width: 46px; text-align: center; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-
-.fig-messages { position: absolute; left: 14px; bottom: 14px; right: 170px; max-height: 40%; overflow: auto; z-index: 5; }
+.fig-messages { position: absolute; left: 14px; bottom: 14px; right: 190px; max-height: 40%; overflow: auto; z-index: 5; }
+.fig-messages .message.link { cursor: pointer; }
+.fig-messages .where { font: 11px var(--mono); color: var(--ink-3); }
 .fig-empty { color: var(--ink-3); display: grid; gap: 8px; justify-items: center; }
-
 .fig-page.flash { animation: flash 0.9s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px #d97757, var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }
+
+/* -- adding -- */
+
+/* -- the inspector -- */
+

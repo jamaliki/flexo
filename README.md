@@ -533,8 +533,9 @@ its ink, and tries it as written, **turned** (`flexo.turned(spec)`: rows become
 columns, a stack that reads upward reads left to right, grids transpose, ports
 and hints turn with it, vector glyphs lie down), and with tighter spacing --
 keeping the most natural layout whose words come within 12% of the largest.
-When none sets the words at three quarters of their size, long rows and columns
-are **folded** onto two lines (`flexo.orient.wrapped`) as a last resort.
+When none sets the words at their size, long rows and columns are **folded**
+onto two lines (`flexo.orient.wrapped`) -- if that sets them at least 30% larger,
+since a fold changes how the figure reads.
 Measured sizes rank the candidates, so only layouts that could win are routed.
 [flexo-talk](https://github.com/jamaliki/flexo-talk) lays every slide figure out
 this way.
@@ -801,8 +802,19 @@ slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
 own last change and leaves others' alone.
 
-- **Figures**: the file on the left, the drawing on the right; choose a part in
-  the outline or the drawing to find it in the file; every lint message beside it.
+- **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
+  blocks and operators, the machine-learning components, constructs, plasmids,
+  proteins, trees, plates, timelines, structures -- and a part added while another
+  is chosen comes after it, a line between them. **Connect** (C) draws a line from
+  one part to the next; double-click a part or a line to type its words on the
+  drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
+  or titled module. The inspector on the right has each part's settings, down to
+  a plasmid's features or a plate's groups as a table; the list on the left holds
+  the parts as they nest, dragged to move them. Every edit is made to the figure's
+  file, which the **Source** tab shows and edits too: comments and order stay, and
+  what the page has no control for can be written there. Lint messages sit under
+  the drawing; clicking one chooses the part it is about. flexo-talk edits the
+  figures on a deck's slides the same way, where they are drawn.
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.
@@ -872,4 +884,9 @@ version.
 - explicit editorial layout with bounded local automation;
 - linting that reads the finished figure and never feeds back into it.
 
-The repository is public but does not yet declare an open-source license.
+## License
+
+Flexo is licensed under the [Apache License 2.0](LICENSE). The fonts in
+`src/flexo/resources/fonts` keep their own licenses, which sit beside them: the SIL
+Open Font License for Caveat, Figtree, IBM Plex Sans and Kalam, the GUST Font License
+for Latin Modern, and Liberation's license for Liberation Sans.

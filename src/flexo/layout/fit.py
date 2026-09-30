@@ -14,6 +14,8 @@ from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.layout.ports import adapt_ports
 from flexo.layout.sides import choose_port_sides
+from flexo.layout.slide import slide_groups
+from flexo.layout.widen import widen_boxes
 from flexo.style import LayoutStyle
 from flexo.themes import figure_style
 
@@ -24,8 +26,12 @@ def fit_figure(
     measured: MeasuredFigure,
     *,
     style: LayoutStyle | None = None,
+    slide: bool = True,
 ) -> FittedFigure:
-    fitter = _Fitter(measured, style or figure_style(measured.semantic))
+    """Place every component; ``slide=False`` leaves groups where their parents
+    put them (see ``flexo.layout.slide``)."""
+
+    fitter = _Fitter(measured, style or figure_style(measured.semantic), slide=slide)
     return fitter.fit()
 
 
@@ -38,8 +44,9 @@ class _Child:
 
 
 class _Fitter:
-    def __init__(self, measured: MeasuredFigure, style: LayoutStyle) -> None:
+    def __init__(self, measured: MeasuredFigure, style: LayoutStyle, *, slide: bool) -> None:
         self.measured = measured
+        self.slide = slide
         self.style = style
         self.nodes = {node.spec.id: node for node in measured.nodes}
         self.groups = {group.spec.id: group for group in measured.groups}
@@ -47,6 +54,7 @@ class _Fitter:
         self.edge_labels = measured.edge_label_index
         self.fitted_nodes: dict[str, FittedNode] = {}
         self.fitted_groups: dict[str, FittedGroup] = {}
+        self.kinds: dict[str, LayoutKind] = {}
 
     def fit(self) -> FittedFigure:
         canvas = self.measured.canvas_size
@@ -56,6 +64,15 @@ class _Fitter:
         # is on, so it has to be told which side that is before it starts.
         groups = tuple(self.fitted_groups[group.spec.id] for group in self.measured.groups)
         nodes, diagnostics = choose_port_sides(self.measured.semantic, nodes, groups)
+        # A centred row can leave an input outside the reach of the port it feeds;
+        # sliding the row is the one fix that moving ports cannot make.
+        if self.slide:
+            nodes, groups = slide_groups(
+                self.measured.semantic, nodes, groups, self.kinds, self.style
+            )
+        # Then a box several straight arrows share a side of grows until they meet
+        # its middle, so the boxes they come from keep their centres.
+        nodes = widen_boxes(self.measured.semantic, nodes, groups, self.kinds, self.style)
         nodes = adapt_ports(self.measured.semantic, nodes, self.style)
         return FittedFigure(self.measured, nodes, groups, canvas, diagnostics)
 
@@ -79,6 +96,7 @@ class _Fitter:
         child_ids = self.child_orders.get(group_id, measured_group.spec.children)
         children = tuple(self._child(child_id) for child_id in child_ids)
         kind = self._resolve_kind(measured_group, children, content.size)
+        self.kinds[group_id] = kind
         child_bounds = self._arrange(children, layout, kind, content, group_id)
         self.fitted_groups[group_id] = FittedGroup(measured_group, bounds, content)
         for child, child_bounds_value in zip(children, child_bounds, strict=True):

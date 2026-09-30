@@ -553,6 +553,18 @@ The zero-size `spacer` component holds the grid open without padding:
 this way; its canvas ends at the content plus the standard margin on every
 side.
 
+## Maths in labels
+
+A label is words, with LaTeX maths between `$`: `"Input $x_t$"`, `r"$\frac{QK^\top}{\sqrt{d_k}}$"`.
+Simple maths -- letters, scripts, Greek, the everyday signs -- is set as the label's own
+words, so it stays text an editor can change. Maths that is not a line of words (a
+fraction, a root, a matrix, a sum with its limits, brackets that grow, scripts on
+scripts) is laid out as TeX lays it out, measured from the bundled Latin Modern
+Math, and drawn as outlines in place; its letters are the figure's own face. `$$...$$`
+sets a formula on a line of its own, in display style. A formula flexo cannot read
+is drawn as far as it goes, the rest in red, and `flexo check` reports it (`label.math`)
+with the command a typo probably meant.
+
 ## Paint: palettes, overrides, and retheming
 
 A theme (see [Themes, palettes, and

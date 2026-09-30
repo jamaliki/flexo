@@ -64,6 +64,7 @@ class Connection:
             return {
                 "content": [{"type": "text", "text": f"The studio did not answer: {error}"}],
                 "is_error": True,
+                "unreachable": True,
             }
 
 
@@ -138,9 +139,14 @@ def serve(folder: Path, stdin=None, stdout=None) -> None:
             ]
             send({"jsonrpc": "2.0", "id": ident, "result": {"tools": tools}})
         elif method == "tools/call":
+            name, arguments = str(params.get("name")), params.get("arguments") or {}
             if connection is None:
                 connection = Connection(folder)
-            result = connection.call(str(params.get("name")), params.get("arguments") or {}, who)
+            result = connection.call(name, arguments, who)
+            if result.get("unreachable"):
+                # The studio closed, or opened again on another port: find it once more.
+                connection = Connection(folder)
+                result = connection.call(name, arguments, who)
             send(
                 {
                     "jsonrpc": "2.0",
