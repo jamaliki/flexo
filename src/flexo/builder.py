@@ -1242,6 +1242,71 @@ class GroupBuilder:
             properties["length"] = float(length)
         return self.node(id, "timeline", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
+    def cells(
+        self,
+        id: str,
+        grid: str | Sequence[Sequence[object]],
+        key: Mapping[str, object] | Sequence[Mapping[str, Scalar]] = (),
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        cell: float | None = None,
+        gap: float | None = None,
+        corner: float | None = None,
+        lines: str | None = None,
+        row_labels: str | Sequence[str] | None = None,
+        row_side: str | None = None,
+        column_labels: str | Sequence[str] | None = None,
+        column_side: str | None = None,
+        ramp: str | Sequence[str] | None = None,
+        range: tuple[float, float] | None = None,
+        values: bool = False,
+        legend: bool | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A grid of cells (see ``flexo.cells``): a plate map, a heatmap, a number square.
+
+        ``grid`` is text, one row per line and one symbol per word (``.`` for an
+        empty cell), or rows of values: a string is a symbol, a number a value,
+        ``None`` an empty cell. ``key`` says what each symbol is, either as a list
+        of ``{"symbol", "color", "mark", "label"}`` or as a mapping from symbol to a
+        colour or to such a mapping; ``color`` is a tone name or an exact ``#hex``,
+        ``mark`` a small word written in the cell, ``label`` its legend entry. A
+        symbol the key does not name takes a tone by its name. Numbers are shaded
+        along ``ramp`` (two ``#hex``, low then high) over ``range``; ``values=True``
+        writes them. ``cell`` is a cell's side in points; ``gap`` and ``corner`` are
+        fractions of it; ``lines`` rules the grid (``"ink"``, ``"muted"``, a
+        ``#hex``); ``row_labels`` and ``column_labels`` are ``"numbers"``,
+        ``"letters"``, or names, on ``row_side`` (left, right) and ``column_side``
+        (top, bottom).
+        """
+
+        properties: dict[str, object] = {"grid": _grid_text(grid)}
+        records = _key_records(key)
+        if records:
+            properties["key"] = records
+        for name, value in (
+            ("cell", cell), ("gap", gap), ("corner", corner),
+        ):  # fmt: skip
+            if value is not None:
+                properties[name] = float(value)
+        for name, value in (
+            ("lines", lines), ("row_side", row_side), ("column_side", column_side),
+        ):  # fmt: skip
+            if value is not None:
+                properties[name] = str(value)
+        for name, value in (("row_labels", row_labels), ("column_labels", column_labels)):
+            if value is not None:
+                properties[name] = value if isinstance(value, str) else ", ".join(value)
+        if ramp is not None:
+            properties["ramp"] = ramp if isinstance(ramp, str) else ", ".join(ramp)
+        if range is not None:
+            properties["range"] = f"{float(range[0]):g}, {float(range[1]):g}"
+        if values:
+            properties["values"] = True
+        if legend is not None:
+            properties["legend"] = bool(legend)
+        return self.node(id, "cells", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
     def structure(
         self,
         id: str,
@@ -2475,6 +2540,44 @@ def _authored_ports(options: dict[str, object]) -> tuple[PortSpec, ...]:
 
     authored = options.pop("ports", None)
     return tuple(authored) if authored else ()  # type: ignore[arg-type]
+
+
+def _grid_text(grid: str | Sequence[Sequence[object]]) -> str:
+    """A ``cells`` grid as the text the figure keeps: one row per line."""
+
+    if isinstance(grid, str):
+        return grid.strip()
+    lines = []
+    for row in grid:
+        words = []
+        for value in row:
+            if value is None or value == "":
+                words.append(".")
+            elif isinstance(value, bool):
+                raise ValueError("a cell is a symbol, a number, or None, not a bool")
+            elif isinstance(value, int | float):
+                words.append(f"{value:g}")
+            else:
+                word = str(value).strip()
+                if not word or any(character.isspace() or character == "," for character in word):
+                    raise ValueError(f'a cell symbol is one word, not "{value}"')
+                words.append(word)
+        lines.append(" ".join(words))
+    return "\n".join(lines)
+
+
+def _key_records(key: Mapping[str, object] | Sequence[Mapping[str, Scalar]]) -> list[dict]:
+    """A ``cells`` key as records: from a list of them, or a mapping by symbol."""
+
+    if isinstance(key, Mapping):
+        records = []
+        for symbol, meaning in key.items():
+            if isinstance(meaning, Mapping):
+                records.append({"symbol": str(symbol), **dict(meaning)})
+            else:
+                records.append({"symbol": str(symbol), "color": str(meaning)})
+        return records
+    return [dict(record) for record in key]
 
 
 def _with_properties(options: dict[str, object], **defaults: Scalar) -> dict[str, object]:

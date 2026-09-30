@@ -27,7 +27,7 @@ from flexo.text import TextMeasurer
 from flexo.units import pt
 
 DRAWN_KINDS = frozenset(
-    {"construct", "plasmid", "protein", "tree", "wellplate", "timeline", "structure"}
+    {"construct", "plasmid", "protein", "tree", "wellplate", "timeline", "structure", "cells"}
 )
 
 
@@ -41,7 +41,9 @@ class Shape:
     ``paint`` is ``"line"`` (stroked only), ``"body"`` (filled and outlined),
     ``"solid"`` (filled and outlined in the line colour), ``"hollow"`` (outlined over
     the page colour), ``"backbone"``, ``"tick"`` and ``"leader"`` (thin, muted), or
-    ``"guide"`` (dotted); ``tone`` names the colour, or none for ink.
+    ``"guide"`` (dotted); ``tone`` names the colour, or none for ink. ``color``, an
+    exact ``#hex`` the author asked for, paints the shape that colour instead of a
+    role, so ``flexo retheme`` leaves it as written.
     """
 
     id: str
@@ -49,6 +51,7 @@ class Shape:
     paint: str
     tone: str | None = None
     width: float = 1.0
+    color: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +262,10 @@ def _lay_out(node: NodeSpec, style: LayoutStyle) -> Picture:
         from flexo.structures import structure_drawing
 
         return structure_drawing(node, style)
+    if node.kind == "cells":
+        from flexo.cells import cells_drawing
+
+        return cells_drawing(node, style)
     from flexo.bench import bench_drawing
 
     return bench_drawing(node, style)
@@ -287,4 +294,8 @@ def drawn_tones(node: NodeSpec) -> tuple[str, ...]:
         from flexo.structures import structure_tones
 
         return structure_tones(node)
+    if node.kind == "cells":
+        from flexo.cells import cells_tones
+
+        return cells_tones(node)
     return ()
