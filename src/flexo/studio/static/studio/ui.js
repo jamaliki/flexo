@@ -261,20 +261,46 @@ export const ui = {
     return node;
   },
 
-  swatches({ value, colours, onChange, none = true } = {}) {
+  // Colours to choose from; `custom` adds one more, any colour, from the system's picker.
+  swatches({ value, colours, onChange, none = true, custom = false } = {}) {
     const node = h("div.swatches");
     const all = [...(none ? [{ value: null, colour: null, title: "None" }] : []), ...colours];
+    const choose = (button, next) => { node.querySelectorAll(".swatch").forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(next); };
     const buttons = all.map((item) => {
       const button = h("button.swatch", { type: "button", title: item.title || item.value || "None",
         class: [item.value === (value ?? null) ? "on" : "", item.colour ? "" : "none"].join(" "),
-        style: item.colour ? { background: item.colour } : {},
-        onclick: () => { buttons.forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(item.value); } });
+        style: item.colour ? { background: item.colour, ...(item.border ? { borderColor: item.border } : {}) } : {},
+        onclick: () => choose(button, item.value) });
       return button;
     });
     node.append(...buttons);
+    if (custom) {
+      const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
+      const input = h("input", { type: "color", value: own || "#888888" });
+      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Your own colour", style: own ? { background: own } : {} }, icon("plus"), input);
+      input.addEventListener("input", () => { well.style.background = input.value; choose(well, input.value); });
+      node.append(well);
+    }
     return node;
   },
+
+  // One colour of a thing's own, or none (the theme's): a well that opens the system's
+  // picker, and a button to go back to the theme's.
+  colour({ value, onChange, title = "", key } = {}) {
+    const set = HEX.test(value || "") ? value : null;
+    const input = h("input", { type: "color", value: set || "#888888", "data-key": key });
+    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: set ? `${title} ${set}` : `${title}: the theme's` },
+      h("span.colour-chip", { style: set ? { background: set } : {} }), input);
+    input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
+    const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; onChange?.(null); },
+      { kind: "ghost", small: true, icon: "undo", title: "Back to the theme's" });
+    reset.hidden = !set;
+    input.addEventListener("input", () => { reset.hidden = false; });
+    return h("div.colour-control", {}, well, reset);
+  },
 };
+
+const HEX = /^#[0-9a-f]{6}$/i;
 
 function fit(area) {
   area.style.height = "auto";

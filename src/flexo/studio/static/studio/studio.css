@@ -449,3 +449,56 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .docbar-title { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--ink-2); padding: 0 6px; }
 .docbar-title svg { width: 15px; height: 15px; }
+
+/* -- themes, chosen by sight (themes.js) -- */
+.theme-card { display: grid; grid-template-rows: auto auto; gap: 5px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); cursor: pointer; text-align: left; min-width: 0; color: var(--ink); }
+.theme-card:hover { border-color: var(--ink-3); }
+.theme-card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.theme-card.problem { opacity: 0.6; }
+.theme-page { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 40px; padding: 0 8px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); overflow: hidden; }
+.theme-aa { font-size: 17px; font-weight: 600; line-height: 1; }
+.theme-tones { display: flex; gap: 3px; }
+.theme-tones span { width: 11px; height: 18px; border-radius: 3px; border: 1.5px solid transparent; }
+.theme-words { display: grid; min-width: 0; padding: 0 2px; }
+.theme-name { font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-where { font: 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-where.bad { color: var(--danger, #c0392b); font-family: inherit; }
+.theme-card.compact { grid-template-columns: 76px 1fr; grid-template-rows: none; align-items: center; flex: 1; }
+.theme-card.compact .theme-page { height: 30px; padding: 0 6px; }
+.theme-card.compact .theme-aa { font-size: 14px; }
+.theme-card.compact .theme-tones span { width: 7px; height: 14px; }
+.theme-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.menu.theme-menu { width: min(460px, calc(100vw - 24px)); max-width: none; max-height: min(560px, calc(100vh - 40px)); overflow: auto; padding: 8px; }
+.theme-picker { display: grid; gap: 8px; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.theme-uses .line-row { align-items: center; }
+.theme-uses .line-row .link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.chip-on { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--accent); white-space: nowrap; }
+.chip-on svg { width: 12px; height: 12px; }
+
+/* -- a thing's own colours -- */
+.colour-control { display: inline-flex; align-items: center; gap: 2px; }
+.colour-well { position: relative; width: 30px; height: 22px; border-radius: 5px; box-shadow: 0 0 0 1px var(--line-strong); cursor: pointer; overflow: hidden; display: block; }
+.colour-well .colour-chip { position: absolute; inset: 0; }
+.colour-well.unset .colour-chip { background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
+.colour-well input, .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; padding: 0; border: 0; }
+.swatch.custom { display: grid; place-items: center; overflow: hidden; background: conic-gradient(#e0474c, #e8b23a, #5aa85c, #3b82c4, #8e6cc4, #e0474c); color: #fff; }
+.swatch.custom svg { width: 12px; height: 12px; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6)); }
+.swatch.custom.on svg { display: none; }
+.own-colours { display: flex; gap: 14px; }
+.own-colour { display: grid; justify-items: center; gap: 3px; }
+.own-colour > span { font-size: 11px; color: var(--ink-3); }
+.own-colour .colour-control { position: relative; }
+.own-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
+
+/* -- palettes, chosen by sight -- */
+.palette-strip { display: inline-flex; gap: 2px; }
+.palette-strip span { width: 12px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.palette-pick { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; }
+.palette-pick > span:not(.palette-strip) { flex: 1; font-size: 12.5px; }
+.palette-pick svg { width: 14px; height: 14px; color: var(--ink-3); }
+.menu.palette-menu { max-width: 340px; }
+.palette-choices { display: grid; gap: 2px; }
+.palette-choice { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12.5px; }
+.palette-choice:hover { background: var(--accent-soft); }
+.palette-choice.on { box-shadow: inset 0 0 0 1.5px var(--accent); }

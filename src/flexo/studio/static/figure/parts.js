@@ -465,8 +465,9 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
         h("div.insp-row", {}, titleBlock(glyph(node.kind || "block"), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
+      colourSection([{ type: "node", id: node.id, item: node }]),
       h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Kind", retype)),
-        fields(part.fields, node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
+        fields(part.fields.filter((field) => field.key !== "properties.tone"), node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length)),
         lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([edge.id]) },
@@ -489,6 +490,7 @@ export function figureParts(host) {
             `${count} part${count === 1 ? "" : "s"}, ${group.layout?.kind || "column"}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Its parts take its place" })),
+      isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
       h("div.section", {}, isRoot || group.implied ? null : idField(group.id, "group"),
         fields(catalog.group_fields, group, (values, merge) => update({ type: "group", id: group.id }, values, merge), `group:${group.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Holds", h("span.count", {}, count)),
@@ -547,8 +549,11 @@ export function figureParts(host) {
 
   function manyPanel(ids) {
     const gatherable = ids.every((id) => nodeOf(id) || (groupOf(id) && id !== model().root));
+    const colourable = ids.flatMap((id) => nodeOf(id) ? [{ type: "node", id, item: nodeOf(id) }]
+      : groupOf(id) && id !== model().root && !groupOf(id).implied ? [{ type: "group", id, item: groupOf(id) }] : []);
     return [
       h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} chosen`, ids.map(nameOf).join(", "))),
+      colourable.length ? colourSection(colourable) : null,
       h("div.section", {}, h("div.section-title", {}, "Gather them into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
           glyph(group.kind), h("span", {}, group.title)))),
@@ -560,6 +565,55 @@ export function figureParts(host) {
 
   // -- fields, from the catalogue --
   const valueAt = (item, key) => key.split(".").reduce((at, part) => (at == null ? undefined : at[part]), item);
+  // -- colours: a part's tone (a colour of the theme's, shared by parts with the same
+  // tone), or colours of its own, which win over the tone and the theme --
+
+  const OWN = [["fill", "Fill"], ["stroke", "Outline"], ["label", "Words"]];
+  const GROUP_OWN = { fill: "Background", stroke: "Border", label: "Title" };
+  const TONE_NAMES = () => Object.values(parts).flatMap((part) => part.fields).find((field) => field.key === "properties.tone")?.options.filter((name) => !/^\d+$/.test(name)) || [];
+
+  function colourSection(targets) {
+    const nodes = targets.filter((target) => target.type === "node");
+    const tones = host.tones?.();
+    const scope = targets.map((target) => target.id).join(",");
+    // One edit for every chosen thing; a colour dragged in the picker is one undo step.
+    const paint = (type, values) => {
+      const list = targets.filter((target) => target.type === type);
+      if (list.length) act({ do: "update", targets: list.map(({ type: kind, id }) => ({ type: kind, id })), values },
+        { merge: `colour:${type}:${Object.keys(values)[0]}:${scope}`, select: false });
+    };
+    const common = (read) => {
+      const values = targets.map((target) => read(target) ?? null);
+      return values.every((value) => value === values[0]) ? values[0] : undefined;
+    };
+    const toneOf = (node) => {
+      const tone = node.properties?.tone;
+      if (tone === undefined || tone === null || tone === "") return null;
+      return /^\d+$/.test(String(tone)) ? String(tone) : tones?.used?.[tone] !== undefined ? String(tones.used[tone]) : `named:${tone}`;
+    };
+    const chips = nodes.length && tones?.colours?.length ? ui.field("The theme's", ui.swatches({
+      value: common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null,
+      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `The theme's colour ${index + 1}` })),
+      onChange: (value) => paint("node", { "properties.tone": value }),
+    })) : null;
+    // A tone by name: parts that share one share its colour, whichever the theme gives it.
+    const named = nodes.length ? ui.field("Tone name", ui.combo({
+      value: (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
+      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "none",
+      onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
+    }), { hint: "Parts with one name share a colour" }) : null;
+    const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
+      ui.colour({
+        title: label, key: `colour:${scope}:${part}`,
+        value: common((target) => target.type === "node" ? target.item.properties?.[`paint-${part}`] : target.item.paint?.[part]),
+        onChange: (value) => { paint("node", { [`properties.paint-${part}`]: value }); paint("group", { [`paint.${part}`]: value }); },
+      }),
+      h("span", {}, nodes.length ? label : GROUP_OWN[part]))));
+    return h("div.section", {}, h("div.section-title", {}, "Colour"), chips, named,
+      ui.field("Its own", own, { hint: "Win over tones and the theme" }));
+  }
+
+
   function fields(list, item, write, scope) {
     const holds = (key, wanted) => {
       const value = valueAt(item, key) ?? list.find((f) => f.key === key)?.default;
@@ -608,6 +662,20 @@ export function figureParts(host) {
           } }), options);
       case "combo":
         return ui.field(field.label, ui.combo({ value: value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
+      case "palette": {
+        const current = value ?? field.default;
+        const strip = (name) => h("span.palette-strip", {}, (field.colours?.[name] || []).slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
+        const title = (name) => (name === field.default ? "The theme's own" : name);
+        const choose = (event) => popover(event.currentTarget, h("div.palette-choices", {},
+          field.options.map((name) => h(`button.palette-choice${name === current ? ".on" : ""}`, { type: "button",
+            onclick: () => { closeMenu(); set(name === field.default ? null : name); } }, strip(name), h("span", {}, title(name))))),
+          { className: "palette-menu" });
+        return ui.field(field.label, h("button.palette-pick", { type: "button", onclick: choose }, strip(current), h("span", {}, title(current)), icon("chevron")), options);
+      }
+      case "theme":
+        // A host that can show themes by sight does; otherwise, their names.
+        return ui.field(field.label, host.themeField ? host.themeField(value, set)
+          : ui.combo({ value: value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
       case "pair": {
         const pair = Array.isArray(value) ? [...value] : ["", ""];
         const half = (index) => ui.input({ value: pair[index] ?? "", key: `${key}:${index}`, placeholder: field.labels?.[index], onInput: (text) => {

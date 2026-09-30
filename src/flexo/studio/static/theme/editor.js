@@ -3,7 +3,7 @@
 // slides, or a deck in the folder. Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus, picture } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, keepFocus, picture, themeUses } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -121,6 +121,10 @@ export function mount(studio, container) {
   };
 
   const section = (title, ...children) => h("div.section.theme-section", {}, h("div.section-title", {}, title), ...children);
+  // The folder's figures and decks, and which of them are drawn in this theme: kept
+  // across redraws of the form, and asked for again when documents come and go.
+  let uses = themeUses(studio);
+  studio.workspace.on?.("documents", () => { if (form.isConnected) { uses = themeUses(studio); renderForm(); } });
 
   const renderForm = () => keepFocus(form, () => {
     const t = theme();
@@ -131,6 +135,7 @@ export function mount(studio, container) {
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "how figures and decks name it" })),
         ui.field("Starts from", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What it is for", onInput: (value) => set(["description"], value || null) }))),
+      section("Use this theme in", uses),
       section("Colour",
         h("div.setting-group-label", {}, "Palette", h("span.hint", {}, "the tones blocks are drawn in, in order")),
         paletteView(),

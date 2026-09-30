@@ -212,6 +212,14 @@ class Handler(BaseHTTPRequestHandler):
             self._raw(query)
         elif route == "/api/events":
             self._events(_one(query, "client"), (query.get("name") or ["You"])[0])
+        elif route == "/api/themes":
+            from flexo.studio import theming
+
+            self._json({"themes": theming.cards(workspace, _one(query, "file"))})
+        elif route == "/api/theme/uses":
+            from flexo.studio import theming
+
+            self._json({"documents": theming.uses(workspace, _one(query, "file"))})
         elif route == "/api/agent/tools":
             from flexo.studio.agent import TOOLS
 
@@ -267,6 +275,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(act(data.get("document", doc.document), data.get("action") or {},
                            doc.path.parent))
+        elif route == "/api/theme/use":
+            from flexo.studio import theming
+
+            targets = [str(target) for target in data.get("targets") or []]
+            self._json({"documents": theming.use(workspace, name, targets, who)})
         elif route == "/api/presence":
             workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
             self._json({"ok": True})
