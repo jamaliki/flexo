@@ -15,6 +15,7 @@ import json
 import mimetypes
 import queue
 import secrets
+import socketserver
 import sys
 import threading
 import traceback
@@ -37,6 +38,16 @@ FILE_TYPES = {
     "theme": (".yaml", ".yml", ".json"),
     "structure": (".pdb", ".cif", ".mmcif", ".ent"),
 }
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        # HTTPServer asks DNS what its address is called, a reverse lookup that can wait
+        # half a minute on macOS (inside an app, say); nothing here uses the name.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -435,8 +446,7 @@ def start(
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
     workspace = Workspace(folder, kind=kind)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    server.daemon_threads = True
+    server = Server(("127.0.0.1", port), handler)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]
