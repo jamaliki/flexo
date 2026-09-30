@@ -172,8 +172,10 @@ class ThemeKind:
                     for item in error.diagnostics
                 ],
             )
-        except (ValueError, TypeError, KeyError) as error:
-            return Drawing([], [Message(str(error), "error")])
+        except Exception as error:
+            from flexo.studio.plain import explain
+
+            return Drawing([], [Message(explain(error), "error")])
         specimen = str(hints.get("specimen") or "figures")
         stamp = hashlib.sha256(
             json.dumps(
@@ -196,7 +198,8 @@ class ThemeKind:
             except Exception as error:
                 return Drawing(
                     [],
-                    [Message(f"The {provider.title.lower()} could not be drawn: {error}", "error")],
+                    [Message(f"The {provider.title.lower()} could not be drawn: "
+                             f"{_explain(error)}", "error")],
                     info=info,
                 )
         pages: list[Page] = []
@@ -212,7 +215,9 @@ class ThemeKind:
                 try:
                     svg = make()
                 except Exception as error:
-                    messages.append(Message(f"{label}: {error}", "error", page=identifier))
+                    from flexo.studio.plain import explain
+
+                    messages.append(Message(f"{label}: {explain(error)}", "error", page=identifier))
                     continue
                 drew = True
                 self._pages[key] = svg
@@ -306,3 +311,9 @@ def _specimens() -> dict[str, Any]:
             continue
         found[entry.name] = provider() if isinstance(provider, type) else provider
     return found
+
+
+def _explain(error: BaseException) -> str:
+    from flexo.studio.plain import explain
+
+    return explain(error)

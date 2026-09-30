@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace
 
 THEME_FILES = (".yaml", ".yml", ".json")
@@ -30,7 +31,7 @@ def cards(workspace: Workspace, name: str) -> list[dict[str, Any]]:
         try:
             card.update(_card(register_theme(path)))
         except Exception as error:  # a theme file half-written, or wrong: offered, with why
-            card.update({"title": path.name.split(".")[0], "problem": str(error)})
+            card.update({"title": path.name.split(".")[0], "problem": explain(error)})
         found.append(card)
     found += [{"value": theme, "source": "built-in", **_built_in(theme)} for theme in BUILT_IN]
     return found

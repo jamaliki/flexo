@@ -34,6 +34,7 @@ import yaml
 
 from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
+from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
 
 HISTORY = 400
@@ -195,7 +196,7 @@ class Doc:
             try:
                 found = self.kind.load(self.path)
             except Exception as error:  # a file half-written, or wrong: say so, keep ours
-                self.problem = f"{self.name} on disk does not read: {error}"
+                self.problem = f"{self.name} on disk does not read: {explain(error)}"
                 self.disk_text = text
                 return "problem"
             self.problem = None
@@ -547,7 +548,7 @@ class Workspace:
                     "seconds": time.perf_counter() - started,
                     "messages": [
                         {
-                            "text": f"{type(error).__name__}: {error}",
+                            "text": explain(error),
                             "severity": "error",
                             "where": "",
                             "page": "",
