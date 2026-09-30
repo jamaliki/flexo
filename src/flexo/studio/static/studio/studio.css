@@ -287,7 +287,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 999px; background: var(--sunken); color: var(--ink-2); font-size: 11px; font-weight: 550;
   border: 1px solid var(--line); white-space: nowrap;
 }
-.status { color: var(--ink-3); font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.status { color: var(--ink-3); font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.status .status-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
 .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
 .status.dirty .dot { background: var(--warn); }
 .status.saved .dot { background: var(--ok); }

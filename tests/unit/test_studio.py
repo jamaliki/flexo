@@ -424,6 +424,115 @@ def test_the_assistant_edits_through_the_tools_and_says_so_to_everyone(tmp_path:
         workspace.close()
 
 
+# -- keeping files safe ----------------------------------------------------------------------
+
+
+def test_a_save_cut_short_leaves_the_file_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+
+        def full(path: Path, document: dict) -> None:
+            path.write_text(document["text"][:20])
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(doc.kind, "save", full)
+        workspace.flush()
+        assert (tmp_path / "figure.yaml").read_text() == NEW_FIGURE
+        assert "could not be saved: no space left on device" in (doc.problem or "")
+        assert [path.name for path in tmp_path.iterdir()] == ["figure.yaml"]
+    finally:
+        monkeypatch.undo()
+        workspace.close()
+    assert "Changed" in (tmp_path / "figure.yaml").read_text()  # written once it could be
+
+
+def test_a_file_that_cannot_be_written_does_not_stop_the_others(tmp_path: Path) -> None:
+    for name in ("a.yaml", "b.yaml"):
+        (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        for name in ("a.yaml", "b.yaml"):
+            doc = workspace.open(name)
+            doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+        (tmp_path / "a.yaml").unlink()
+        (tmp_path / "a.yaml").mkdir()  # a folder where the file was: it cannot be written
+        workspace.flush()
+        assert "Changed" in (tmp_path / "b.yaml").read_text()
+        assert "could not be saved" in (workspace.open("a.yaml").problem or "")
+    finally:
+        workspace.close()
+
+
+def test_odd_files_in_the_folder_do_not_stop_it_opening(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "date.yaml").write_text("released: 2024-02-30\n")
+    (tmp_path / "deep.json").write_text("[" * 5000 + "]" * 5000)
+    (tmp_path / "binary.yaml").write_bytes(bytes(range(256)))
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "other.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    (tmp_path / "loop").mkdir()
+    (tmp_path / "loop" / "again").symlink_to(tmp_path, target_is_directory=True)
+    workspace = Workspace(tmp_path)
+    try:
+        assert [entry["file"] for entry in workspace.documents()] == ["figure.yaml"]
+    finally:
+        workspace.close()
+
+
+def test_a_document_of_endless_aliases_is_refused(tmp_path: Path) -> None:
+    letters = "abcdefghij"
+    lines = ["a: &a [x, x, x, x, x, x, x, x, x, x]"]
+    for index in range(1, 9):
+        refs = ", ".join([f"*{letters[index - 1]}"] * 10)
+        lines.append(f"{letters[index]}: &{letters[index]} [{refs}]")
+    lines.append("theme: {name: bomb, notes: *i}")
+    (tmp_path / "bomb.yaml").write_text("\n".join(lines) + "\n")
+    workspace = Workspace(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="too large"):
+            workspace.open("bomb.yaml")
+    finally:
+        workspace.close()
+
+
+def test_one_file_named_two_ways_is_one_document(tmp_path: Path) -> None:
+    import unicodedata
+
+    name = unicodedata.normalize("NFD", "résumé.yaml")
+    (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        first = workspace.open(name)
+        again = workspace.open(unicodedata.normalize("NFC", "résumé.yaml"))
+        assert first is again
+    finally:
+        workspace.close()
+
+
+def test_two_studios_on_one_folder_are_both_found_until_each_closes(tmp_path: Path) -> None:
+    from flexo.studio import sessions
+
+    first, _ = start(tmp_path, browser=False)
+    second, _ = start(tmp_path, browser=False)
+    ports = [first.server_address[1], second.server_address[1]]
+    try:
+        assert sessions.find(tmp_path)["port"] in ports
+        sessions.unregister(tmp_path, ports[1])
+        assert sessions.find(tmp_path)["port"] == ports[0]
+        sessions.unregister(tmp_path, ports[0])
+        assert sessions.find(tmp_path) is None
+    finally:
+        first.server_close()
+        second.server_close()
+
+
 # -- themes --------------------------------------------------------------------------------
 
 

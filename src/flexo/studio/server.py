@@ -434,7 +434,13 @@ def _agent_tools(workspace: Workspace, who: dict[str, Any]):
         key = (id(workspace), ident)
         if key not in _AGENTS:
             _AGENTS[key] = Tools(workspace, {"id": ident, "name": str(who.get("name") or "Agent")})
+            workspace.on_close.append(lambda: _forget(key))
         return _AGENTS[key]
+
+
+def _forget(key: tuple[int, str]) -> None:
+    with _AGENTS_LOCK:
+        _AGENTS.pop(key, None)
 
 
 def _assistant(workspace: Workspace):
@@ -489,7 +495,7 @@ def serve(
         print()
     finally:
         workspace.close()
-        sessions.unregister(workspace.root)
+        sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
 
 

@@ -193,7 +193,12 @@ export class Workspace {
         if (session && event.client !== this.client) session.emit("remote", event);
         break;
       case "saved": session?.saved(event.version); break;
-      case "problem": if (session) { session.problem = event.text; session.emit("status"); } break;
+      case "problem":
+        if (session) {
+          if (session.problem !== event.text) toast(event.text, { kind: "error", icon: "error", seconds: 8 });
+          session.problem = event.text; session.emit("status");
+        }
+        break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
@@ -331,7 +336,7 @@ export async function start() {
     const state = session.state;
     status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
     status.title = session.problem || "";
-    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? "Not saved: the file on disk does not read" : "Saving…";
+    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "the file on disk does not read: ")}` : "Saving…";
   };
 
   const renderViews = () => {
@@ -388,7 +393,11 @@ export async function start() {
     if (mod && key === "k") { event.preventDefault(); palette(workspace); return; }
     if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
     if (document.querySelector(".scrim, .present")) return;
-    if (mod && key === "s") { event.preventDefault(); session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 })); }
+    if (mod && key === "s") {
+      event.preventDefault();
+      session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+        (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+    }
     else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
     else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
     else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }

@@ -113,7 +113,7 @@ def _card(name: str) -> dict[str, Any]:
     found = theme(name)
     palette = resolve_palette(name)
     return {
-        "title": found.name,
+        "title": found.name.split("@")[0],
         "description": found.description,
         "font": found.style.typography.family,
         "canvas": found.page.canvas,
