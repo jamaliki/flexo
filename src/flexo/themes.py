@@ -967,3 +967,6 @@ _register(
 
 STYLES.clear()
 STYLES.update({name: registered.style for name, registered in THEMES.items()})
+
+BUILT_IN = tuple(THEMES)
+"""The themes flexo defines itself, named before any theme file registers its own."""

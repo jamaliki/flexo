@@ -104,6 +104,9 @@ class Kind(Protocol):
     #   adopt(data) -> document: a parsed document as this kind keeps it;
     #   act(document, action, base) -> {"document", ...}: an edit the page asks for
     #       by name (a figure's part added or connected), made by the kind.
+    #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
+    #       document: the theme a document is drawn in (a name, or a theme file named
+    #       from its folder), read and set, so one theme can be put to use in many.
 
 
 def kinds() -> dict[str, Kind]:

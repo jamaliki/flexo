@@ -445,6 +445,13 @@ class _Document:
         return f"{target}.{(free or numbered)[0]}"
 
     def _update(self, action: Mapping[str, Any]) -> list[str]:
+        many = action.get("targets")
+        if many:
+            # The same values for several things at once (parts coloured together): one edit.
+            chosen: list[str] = []
+            for target in many:
+                chosen += self._update({"target": target, "values": action.get("values")})
+            return chosen
         target = action.get("target") or {}
         kind, identifier = target.get("type"), str(target.get("id", ""))
         values = dict(action.get("values") or {})

@@ -459,6 +459,54 @@ def test_a_theme_file_changed_is_read_again(tmp_path: Path) -> None:
     assert resolve_palette("lab-reread").get("tone-1-stroke") != first
 
 
+def test_the_themes_offered_are_the_folder_s_files_then_flexo_s_own(tmp_path: Path) -> None:
+    from flexo.studio import theming
+
+    (tmp_path / "lab.theme.yaml").write_text(
+        yaml.safe_dump({"theme": {"name": "lab-offered", "palette": ["#c2410c", "#1d4e89"]}})
+    )
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "a.yaml").write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        found = theming.cards(workspace, "figures/a.yaml")
+    finally:
+        workspace.close()
+    assert found[0]["value"] == "../lab.theme.yaml" and found[0]["source"] == "folder"
+    assert found[0]["title"] == "lab-offered" and found[0]["tones"][0]["fill"].startswith("#")
+    built_in = [card["value"] for card in found if card["source"] == "built-in"]
+    assert {"paper", "classic"} <= set(built_in) and "lab-offered" not in built_in
+
+
+def test_a_theme_file_is_put_to_use_in_several_figures_at_once(tmp_path: Path) -> None:
+    from flexo.studio import theming
+
+    (tmp_path / "lab.theme.yaml").write_text(
+        yaml.safe_dump({"theme": {"name": "lab-used", "palette": ["#c2410c"]}})
+    )
+    for name in ("a.yaml", "b.yaml"):
+        (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        listed = theming.uses(workspace, "lab.theme.yaml")
+        before = {entry["file"]: entry["uses"] for entry in listed}
+        after = theming.use(workspace, "lab.theme.yaml", ["a.yaml"], PERSON)
+    finally:
+        workspace.close()
+    assert before == {"a.yaml": False, "b.yaml": False}
+    assert {entry["file"]: entry["uses"] for entry in after} == {"a.yaml": True, "b.yaml": False}
+    written = yaml.safe_load((tmp_path / "a.yaml").read_text())
+    assert written["figure"]["style"] == "lab.theme.yaml"
+    assert [node["id"] for node in written["nodes"]] == ["x", "encoder", "y"]
+
+
+def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> None:
+    drawing = FigureKind().draw({"text": NEW_FIGURE}, tmp_path, {})
+    tones = drawing.info["tones"]
+    assert tones["used"] == {"encoder": 1} and len(tones["colours"]) == 8
+    assert tones["colours"][0]["fill"].startswith("#")
+
+
 def test_the_figure_kind_and_theme_kind_are_always_there() -> None:
     found = kinds()
     assert isinstance(found["figure"], FigureKind) and isinstance(found["theme"], ThemeKind)
