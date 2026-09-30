@@ -266,3 +266,41 @@ def test_a_formula_wider_than_its_line_breaks_after_a_sign_as_tex_breaks_it() ->
     # Set side by side, the pieces are as wide as the whole.
     pieces = sum(line.width for line in narrow.lines)
     assert pieces == pytest.approx(whole.width, abs=0.5)
+
+
+def test_the_maths_font_suits_the_words_and_greek_is_its_own_everywhere() -> None:
+    from flexo.texmath import Fonts, GlyphItem
+    from flexo.text import font_stack, maths_family
+
+    serif = TypographyStyle(family="Latin Modern Roman", generic="serif")
+    assert maths_family(TYPE) == "Fira Math" and maths_family(serif) == "Latin Modern Math"
+    assert maths_family(TypographyStyle(family="Figtree", math_family="Latin Modern Math")) == (
+        "Latin Modern Math"
+    )
+    fonts = Fonts(TYPE)
+    assert fonts.maths.face.family == "Fira Math" and fonts.spare.face.family == "Latin Modern Math"
+
+    def families(source: str, typography: TypographyStyle = TYPE) -> set[str]:
+        formula = typeset(source, typography, 20.0)
+        return {item.face.face.family for _, _, item in formula.box.items if isinstance(item, GlyphItem)}
+
+    # Greek, signs and big operators in the maths font; letters the words' own.
+    assert families(r"\theta") == {"Fira Math"} and families(r"\sum_i x_i") == {"Fira Math", "Figtree"}
+    # A text face's italic Greek is never used, even when it has Greek (IBM Plex Sans's
+    # italic θ is drawn as ϑ).
+    assert families(r"\theta", TypographyStyle(family="IBM Plex Sans")) == {"Fira Math"}
+    # What the chosen maths font lacks comes from the spare: Fira Math has no script capitals.
+    assert families(r"\mathcal{L}") == {"Latin Modern Math"}
+    assert families(r"\theta", serif) == {"Latin Modern Math"}
+    # Maths set as words takes its Greek from the same font.
+    (theta,) = parse_label(r"$\theta$")
+    assert theta.text == "\U0001d703"
+    (face, _), *_ = font_stack(TYPE).segments(theta.text, 400, False)
+    assert face.family == "Fira Math"
+
+
+def test_code_is_set_in_the_bundled_monospace_on_every_machine() -> None:
+    from flexo.text import font_stack
+
+    (face, _), *_ = font_stack(TYPE).segments("def f(x):", 400, False, code=True)
+    assert face.family == "IBM Plex Mono" and face.bundled

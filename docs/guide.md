@@ -559,8 +559,10 @@ A label is words, with LaTeX maths between `$`: `"Input $x_t$"`, `r"$\frac{QK^\t
 Simple maths -- letters, scripts, Greek, the everyday signs -- is set as the label's own
 words, so it stays text an editor can change. Maths that is not a line of words (a
 fraction, a root, a matrix, a sum with its limits, brackets that grow, scripts on
-scripts) is laid out as TeX lays it out, measured from the bundled Latin Modern
-Math, and drawn as outlines in place; its letters are the figure's own face. `$$...$$`
+scripts) is laid out as TeX lays it out and drawn as outlines in place. Its letters
+are the figure's own face; its Greek, signs, brackets and big operators come from a
+maths font that suits that face -- Fira Math beside a sans face, Latin Modern Math
+beside a serif one (`math_family` in a theme chooses another). `$$...$$`
 sets a formula on a line of its own, in display style. A formula flexo cannot read
 is drawn as far as it goes, the rest in red, and `flexo check` reports it (`label.math`)
 with the command a typo probably meant.
