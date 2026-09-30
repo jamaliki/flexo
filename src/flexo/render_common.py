@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 
 from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
-from flexo.ir.measured import TextMetrics
+from flexo.ir.measured import MeasuredLine, TextMetrics
 from flexo.ir.semantic import GroupSpec, NodeSpec, TextRun
 from flexo.style import PAINT_PROPERTY_PREFIX, LayoutStyle, Palette, TypographyStyle
 from flexo.svg import element, number
@@ -19,6 +19,7 @@ from flexo.text import (
     accent_rise,
     drawn_weight,
     font_stack,
+    formula_of,
     is_math_italic,
     script_shift,
     stacked_scripts,
@@ -153,6 +154,11 @@ def render_runs(
 
     if not metrics.lines:
         return None
+    if any(run.math for line in metrics.lines for run in line.runs):
+        return _with_formulas(
+            parent, element_id, metrics, x=x, y=y, typography=typography, palette=palette,
+            fill_role=fill_role, fill=fill, anchor=anchor, weight=weight,
+        )
     stack = font_stack(typography)
     primary = stack.families[0][0].family
     size = typography.size.points
@@ -243,6 +249,72 @@ def render_runs(
                 if piece != piece.strip():
                     inner.set(_XML_SPACE, "preserve")
     return text
+
+
+def _with_formulas(
+    parent: ET.Element,
+    element_id: str,
+    metrics: TextMetrics,
+    *,
+    x: float,
+    y: float,
+    typography: TypographyStyle,
+    palette: Palette,
+    fill_role: str,
+    fill: str | None,
+    anchor: str | None,
+    weight: int | None,
+) -> ET.Element:
+    """Text with formulas in it (``TextRun.math``): each line set as its words, a text
+    object for each stretch between formulas, and each formula drawn where the
+    measurement left room for it -- one group, so it moves and recolours as one."""
+
+    from flexo.texmath import draw
+
+    group = element(
+        parent, "g", id=element_id,
+        **paint_attributes(palette=palette, fill_role=fill_role, fill=fill),
+    )
+    measurer = TextMeasurer(typography)
+
+    def paint(colour: str) -> tuple[str | None, str | None]:
+        run = TextRun("", color=colour)
+        return run_colour(run, palette) or colour, run_role(run)
+
+    def words(runs: tuple[TextRun, ...], pen: float, line_index: int, baseline: float) -> float:
+        """A stretch of words between formulas, set as its own text object; its width."""
+
+        width = measurer.line_width(runs, weight)
+        one = TextMetrics(width, metrics.line_height, metrics.ascent, metrics.descent,
+                          metrics.baseline, metrics.line_height, (MeasuredLine(runs, width),),
+                          metrics.cap_height)
+        render_runs(
+            group, f"{element_id}.{line_index + 1}.{len(group)}", one, x=pen, y=baseline,
+            typography=typography, palette=palette, fill_role=fill_role, fill=fill, weight=weight,
+        )
+        return width
+
+    for line_index, line in enumerate(metrics.lines):
+        baseline = y + line_index * metrics.line_height
+        pen = x - {"middle": line.width / 2.0, "end": line.width}.get(anchor or "start", 0.0)
+        stretch: list[TextRun] = []
+        for run in line.runs:
+            if not run.math:
+                stretch.append(run)
+                continue
+            if stretch:
+                pen += words(tuple(stretch), pen, line_index, baseline)
+                stretch = []
+            formula = formula_of(run, typography, weight)
+            shift = script_shift(run.baseline_shift, run.italic, typography)
+            colour = run_colour(run, palette) if run.color else None
+            draw(group, formula, pen, baseline - shift, colour=paint, attributes={
+                "fill": colour, "data__flexo__fill": run_role(run) if run.color else None,
+            })
+            pen += formula.width
+        if stretch:
+            words(tuple(stretch), pen, line_index, baseline)
+    return group
 
 
 def _mark(
