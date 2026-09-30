@@ -5,12 +5,14 @@ from dataclasses import replace
 import pytest
 
 from flexo.builder import Figure
+from flexo.compiler import compile_figure
 from flexo.components import (
     TRANSPARENT_KINDS,
     attachment_lane_tracks,
     component_port_offsets,
     route_clearance,
 )
+from flexo.conventions import DEFAULT_CONVENTIONS
 from flexo.diagnostics import FlexoError
 from flexo.gallery import gallery_figure
 from flexo.geometry import Side, segments
@@ -1250,3 +1252,71 @@ def _assert_straight(line: tuple) -> None:
 
     assert len(line) == 2
     assert line[0].y == pytest.approx(line[1].y)
+
+
+def _inputs_over_a_product() -> Figure:
+    """Q and K feed the first product, V the last; the long title leaves the row room."""
+
+    with (
+        Figure("slide") as figure,
+        figure.root.group("panel", label="Scaled dot-product attention", layout="column") as panel,
+    ):
+        with panel.row("inputs") as row:
+            q, k, v = (row.text(name.lower(), name) for name in "QKV")
+        scores = panel.block("scores", label="MatMul", inputs=[q, k])
+        scale = panel.block("scale", label="Scale", input=scores)
+        softmax = panel.block("softmax", label="SoftMax", input=scale)
+        panel.block("weighted", label="MatMul", inputs=[softmax, v])
+    return figure
+
+
+def _corner_count(points) -> int:
+    return sum(
+        abs((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > 1e-6
+        for a, b, c in zip(points, points[1:], points[2:], strict=False)
+    )
+
+
+def test_a_centred_row_slides_so_the_inputs_it_feeds_run_straight() -> None:
+    routed = compile_figure(_inputs_over_a_product().spec).routed
+    into_scores = [edge for edge in routed.edges if edge.spec.target.node_id.endswith("scores")]
+    assert len(into_scores) == 2
+    assert all(_corner_count(edge.centerline) == 0 for edge in into_scores)
+
+
+def test_a_slide_stays_inside_its_parent_and_is_skipped_on_request() -> None:
+    measured = measure_figure(_inputs_over_a_product().spec)
+    slid = fit_figure(measured)
+    plain = fit_figure(measured, slide=False)
+    row = {group.measured.spec.id: group for group in slid.groups}["panel.inputs"]
+    parent = {group.measured.spec.id: group for group in slid.groups}["panel"]
+    before = {group.measured.spec.id: group for group in plain.groups}["panel.inputs"]
+    assert row.bounds.x > before.bounds.x
+    assert parent.content_bounds.contains_rect(row.bounds)
+    assert row.bounds.y == before.bounds.y
+
+
+
+def test_a_box_widens_so_the_arrows_it_shares_a_side_with_meet_its_middle() -> None:
+    """Three projections into one block: each leaves its own centre, runs straight,
+    and lands within the central spread of a block widened to take them."""
+
+    with (
+        Figure("heads") as figure,
+        figure.root.group("b", label="Multi-head attention", layout="column") as b,
+    ):
+        with b.row("projections") as row:
+            projections = [row.block(f"linear-{index}", label="Linear") for index in range(3)]
+        # The label makes the block about as wide as its inputs, as in the paper.
+        b.block("heads", label="Scaled dot-product attention", inputs=projections)
+    routed = compile_figure(figure.spec).routed
+    nodes = {node.measured.spec.id: node for node in routed.fitted.nodes}
+    heads = nodes["b.heads"]
+    margin = heads.bounds.width * (1.0 - DEFAULT_CONVENTIONS.pin_spread) / 2.0
+    assert len(routed.edges) == 3
+    for edge in routed.edges:
+        source = nodes[edge.spec.source.node_id]
+        assert _corner_count(edge.centerline) == 0
+        assert abs(edge.centerline[0].x - source.bounds.center.x) < 0.1  # shared pins weigh 1e-3
+        assert heads.bounds.left + margin - 1e-6 <= edge.centerline[-1].x
+        assert edge.centerline[-1].x <= heads.bounds.right - margin + 1e-6
