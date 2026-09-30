@@ -122,7 +122,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tab-dot.problem { background: var(--error); }
 .tab-people { display: flex; gap: 2px; }
 .tab-people .mini { width: 7px; height: 7px; border-radius: 50%; }
-.tab-close { width: 20px; height: 20px; border: 0; background: transparent; border-radius: 4px; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; opacity: 0; }
+.tab-close { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; border-radius: 4px; color: var(--ink-3); display: grid; place-items: center; cursor: pointer; opacity: 0; }
 .tab:hover .tab-close, .tab.on .tab-close { opacity: 1; }
 .tab-close:hover { background: var(--line); color: var(--ink); }
 .tab-close svg { width: 12px; height: 12px; }
