@@ -2,7 +2,7 @@
 // (static/kinds/<kind>/editor.js) exports mount(session, container): `session`
 // is the open document (see session.js), `container` the space it fills.
 
-export { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast } from "./ui.js";
+export { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, mathWords } from "./ui.js";
 export { merge3, same } from "./merge.js";
 export { avatar, colourOf, ago, copyable } from "./shell.js";
 export { themeCard, themeField, themeUses, themesFor } from "./themes.js";

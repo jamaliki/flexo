@@ -408,3 +408,58 @@ export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}
   return node;
 }
 
+
+// -- maths, as words to read in a list ----------------------------------------------------
+
+const GREEK = "alpha α beta β gamma γ delta δ epsilon ϵ varepsilon ε zeta ζ eta η theta θ vartheta ϑ iota ι kappa κ lambda λ mu μ nu ν xi ξ pi π varpi ϖ rho ρ varrho ϱ sigma σ varsigma ς tau τ upsilon υ phi ϕ varphi φ chi χ psi ψ omega ω Gamma Γ Delta Δ Theta Θ Lambda Λ Xi Ξ Pi Π Sigma Σ Upsilon Υ Phi Φ Psi Ψ Omega Ω";
+const SIGNS = "cdot · times × pm ± mp ∓ div ÷ le ≤ leq ≤ ge ≥ geq ≥ ne ≠ neq ≠ approx ≈ sim ∼ simeq ≃ equiv ≡ propto ∝ in ∈ notin ∉ subset ⊂ subseteq ⊆ cup ∪ cap ∩ to → rightarrow → leftarrow ← Rightarrow ⇒ implies ⟹ iff ⟺ mapsto ↦ infty ∞ partial ∂ nabla ∇ sum Σ prod Π int ∫ oint ∮ sqrt √ mid | parallel ∥ ldots … dots … cdots ⋯ langle ⟨ rangle ⟩ forall ∀ exists ∃ neg ¬ wedge ∧ vee ∨ oplus ⊕ otimes ⊗ odot ⊙ circ ∘ ell ℓ hbar ℏ emptyset ∅ top ⊤ perp ⊥ star ⋆ ast ∗ prime ′ lVert ‖ rVert ‖ lvert | rvert | lfloor ⌊ rfloor ⌋ lceil ⌈ rceil ⌉ degree °";
+const TEX_WORDS = Object.fromEntries([...GREEK.split(" "), ...SIGNS.split(" ")].reduce((pairs, item, i, all) => (i % 2 ? pairs : [...pairs, [item, all[i + 1]]]), []));
+const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ", h: "ₕ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", p: "ₚ", s: "ₛ", t: "ₜ", i: "ᵢ", j: "ⱼ", r: "ᵣ", u: "ᵤ", v: "ᵥ" };
+const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", "⊤": "ᵀ", "′": "′", k: "ᵏ", t: "ᵗ", x: "ˣ", "*": "*" };
+const ALPHABET = { mathcal: [0x1d49c, { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ" }],
+  mathbb: [0x1d538, { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" }] };
+
+function script(text, table, mark) {
+  const chars = [...text];
+  return chars.every((ch) => ch in table) ? chars.map((ch) => table[ch]).join("") : `${mark}${text.length > 1 ? `(${text})` : text}`;
+}
+
+// A fraction's part in brackets when it is more than one term.
+const grouped = (tex) => { const words = mathWords(tex); return /[\s+−\-=/·×]/.test(words) ? `(${words})` : words; };
+
+// A formula as a line of words: Greek and signs as themselves, fractions as a/b,
+// scripts raised or lowered where Unicode can, commands without their backslashes.
+export function mathWords(tex) {
+  let text = String(tex ?? "").replace(/\\(left|right|big|Big|bigg|Bigg)[lrm]?\b\.?/g, "")
+    .replace(/\\(displaystyle|textstyle|limits|nolimits|,|;|:|!|quad|qquad)\b|\\[,;:!]/g, " ")
+    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, " ").replace(/&/g, "").replace(/\\\\/g, "; ");
+  for (let i = 0; i < 20; i++) {
+    const before = text;
+    text = text
+      .replace(/\\[dtc]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a, b) => `${grouped(a)}/${grouped(b)}`)
+      .replace(/\\sqrt\{([^{}]*)\}/g, (_, a) => `√${grouped(a)}`)
+      .replace(/\\(mathcal|mathbb)\{([A-Z])\}/g, (_, font, ch) => ALPHABET[font][1][ch] || String.fromCodePoint(ALPHABET[font][0] + ch.charCodeAt(0) - 65))
+      .replace(/\\(mathrm|mathbf|mathit|mathsf|mathtt|text|textrm|textbf|operatorname\*?|boldsymbol|bm|hat|bar|tilde|vec|dot|overline|underline|mathcal|mathbb|mathfrak|ce)\{([^{}]*)\}/g, "$2")
+      .replace(/_\{([^{}]*)\}/g, (_, a) => script(a, SUB, "_"))
+      .replace(/\^\{([^{}]*)\}/g, (_, a) => script(a, SUP, "^"))
+      // A group of its own (not a command's argument) is only its contents.
+      .replace(/(^|[^A-Za-z}])\{([^{}]*)\}/g, "$1$2");
+    if (text === before) break;
+  }
+  return text
+    .replace(/\\([A-Za-z]+)/g, (_, name) => TEX_WORDS[name] ?? name)
+    .replace(/\\([{}$%#&_|])/g, "$1")
+    .replace(/_([^\s_^])/g, (_, a) => script(a, SUB, "_"))
+    .replace(/\^([^\s_^])/g, (_, a) => script(a, SUP, "^"))
+    .replace(/'/g, "′").replace(/-/g, "−").replace(/\s+/g, " ").trim();
+}
+
+// Words in flexo markup as they read: maths as words, emphasis, links and colours as plain words.
+export function readable(markup) {
+  return String(markup ?? "").replace(/\\\$/g, "\u0000")
+    .replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g, (_, a, b, c) => mathWords(a ?? b ?? c))
+    .replace(/\$(?!\s)([^$]+?)(?<!\s)\$(?!\d)/g, (_, tex) => mathWords(tex))
+    .replace(/\u0000/g, "$")
+    .replace(/\[([^\]]+)\]\{[^}]+\}/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*|\*|`/g, "");
+}
