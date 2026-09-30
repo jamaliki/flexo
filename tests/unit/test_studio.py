@@ -591,6 +591,47 @@ def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path:
         workspace.close()
 
 
+def test_a_photograph_is_sent_to_the_page_once_by_address_and_exported_whole(
+    tmp_path: Path,
+) -> None:
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        crc = struct.pack(">I", zlib.crc32(kind + data))
+        return struct.pack(">I", len(data)) + kind + data + crc
+
+    rows = (b"\x00" + b"\x33\x66\xaa" * 600) * 400
+    header = struct.pack(">IIBBBBB", 600, 400, 8, 2, 0, 0, 0)
+    (tmp_path / "photo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+    (tmp_path / "figure.yaml").write_text(
+        "figure: {id: f}\nnodes:\n"
+        "- {id: a, kind: image, label: A, properties: {source: photo.png}}\n"
+    )
+    server, workspace = start(tmp_path, browser=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        doc = workspace.open("figure.yaml")
+        svg = workspace.draw("figure.yaml", doc.document, 1, {}, {})["pages"][0]["svg"]
+        assert "data:image" not in svg and "/api/picture?" in svg
+        found = re.search(r'href="(/api/picture\?[^"]+)"', svg)
+        with OPENER.open(url + found.group(1).replace("&amp;", "&")) as response:
+            assert response.headers["Cache-Control"].endswith("immutable")
+            assert response.read().startswith(b"\x89PNG")
+        body = {"file": "figure.yaml", "formats": ["editable"]}
+        exported = call(f"{url}/api/export", workspace.token, body)[1]["files"]
+        written = (tmp_path / exported[0]).read_text()
+        assert "data:image/png;base64," in written and "/api/picture" not in written
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
 # -- themes --------------------------------------------------------------------------------
 
 

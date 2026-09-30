@@ -32,7 +32,7 @@ from typing import Any
 
 import yaml
 
-from flexo.studio import Kind, code_allowed, folder_root, kinds
+from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
 from flexo.svg_resources import fonts_linked
 
@@ -537,7 +537,7 @@ class Workspace:
             started = time.perf_counter()
             try:
                 # The page has every bundled font; drawings name them rather than carry them.
-                with fonts_linked(), self.running():
+                with fonts_linked(), self.running(), pictures.linked(self):
                     drawing = doc.kind.draw(document, doc.path.parent, hints)
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
