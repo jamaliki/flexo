@@ -13,6 +13,8 @@ uv run python examples/tutorial.py
 uv run python examples/genetics.py
 uv run python examples/biology.py
 uv run python examples/lab_figures.py
+uv run python examples/cells.py
+uv run python examples/jensen.py
 ```
 
 ## [`tutorial.py`](tutorial.py)
@@ -157,3 +159,19 @@ structure by mol-sketch). The structures are in [`data/`](data).
 [![ModelAngelo overview](build/modelangelo-overview.preview.png)](build/modelangelo-overview.preview.png)
 [![Enzyme design](build/enzyme-design.preview.png)](build/enzyme-design.preview.png)
 [![Capsid Figure 1](build/capsid-figure-1.preview.png)](build/capsid-figure-1.preview.png)
+
+## [`cells.py`](cells.py)
+
+`cells`: a dose-response plate map written as text, with a key and a legend,
+and a contact map from rows of numbers, shaded on a ramp with its values
+written in.
+
+[![cells](build/cells.preview.png)](build/cells.preview.png)
+
+## [`jensen.py`](jensen.py)
+
+After Alfred Jensen's number squares: the odd square's and the even square's
+rings of colour, every count he wrote computed from the same rings, set in a
+handwriting font and painted with the sketch theme's `gouache` fill.
+
+[![after Jensen](build/jensen.preview.png)](build/jensen.preview.png)
