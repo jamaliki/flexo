@@ -13,7 +13,7 @@
 //   changed()               what is chosen, or the figure, changed: draw again;
 //   chooseFile({ title, types }), focus(where), nothing()  (the panel when nothing is chosen).
 
-import { h, clear, icon, ui, menu, popover, closeMenu, toast } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, toast, readable } from "/static/studio/studio.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -65,7 +65,7 @@ export function glyph(name) {
 }
 
 export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.text ?? "").join("") : label ?? "");
-export const plain = (label) => words(label).replace(/\$|\*\*|\*|`/g, "");
+export const plain = (label) => readable(words(label));
 export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
 
 // Lines are thin: each is given a wide, invisible twin to click, named for the line
