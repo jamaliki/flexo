@@ -214,6 +214,14 @@ Unicode placed early in its Letterlike Symbols block instead."""
 BOLD = {"mathbf", "boldsymbol"}
 
 _REPLACEMENTS = {"-": "−", "*": "∗", "'": "′"}
+_MATH_ITALIC = {
+    **{chr(0x03B1 + index): chr(0x1D6FC + index) for index in range(25)},
+    **{
+        chr(code): chr(0x1D716 + index)
+        for index, code in enumerate((0x3F5, 0x3D1, 0x3F0, 0x3D5, 0x3F1, 0x3D6))
+    },
+}
+"""Lower-case Greek and its mathematical italic letters (U+1D6FC on)."""
 BINARY = frozenset("+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆∖")
 """Symbols TeX spaces as binary operators: ``a + b``, but ``-a`` for a sign."""
 RELATIONS = frozenset("=<>≤≥≠≈≡∼≃≅∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔⟺⟹↦∣≪≫∥")
@@ -582,6 +590,10 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                     and name not in {"sum", "prod", "partial", "infty"}
                 )
             )
+            if italic and symbol in _MATH_ITALIC:
+                # TeX's italic Greek is the maths font's own letter, the one formulas
+                # are set in: a text face's italic θ may be drawn as ϑ.
+                symbol, italic = _MATH_ITALIC[symbol], False
             runs.append(TextRun(symbol, weight, italic, shift))  # type: ignore[arg-type]
             continue
         if character in "{}":
