@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.artwork import node_artwork
+from flexo.artwork import node_artwork, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     MOTIF_LABEL_KINDS,
@@ -669,7 +669,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
             width=bounds.width,
             height=bounds.height,
             preserveAspectRatio=_ARTWORK_FIT,
-            href=artwork.data_uri,
+            href=picture_href(artwork),
         )
         return
     nested = ET.fromstring(artwork.markup)

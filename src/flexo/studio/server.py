@@ -70,7 +70,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
         encoding = None
-        compressible = len(body) > 2048 and not kind.startswith("font/")
+        # Fonts and photographs are compressed already.
+        packed = kind.startswith(("font/", "image/png", "image/jpeg"))
+        compressible = len(body) > 2048 and not packed
         if compressible and "gzip" in self.headers.get("Accept-Encoding", ""):
             body = gzip.compress(body, compresslevel=5)
             encoding = "gzip"
@@ -210,6 +212,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._files(_one(query, "file"), types))
         elif route == "/api/raw":
             self._raw(query)
+        elif route == "/api/picture":
+            # A photograph a drawing names: its address carries its version, so it keeps.
+            path = workspace.path(_one(query, "path"))
+            if path.suffix.lower() not in {".png", ".jpg", ".jpeg"} or not path.is_file():
+                raise FileNotFoundError(f"no picture {_one(query, 'path')}")
+            from flexo.studio import pictures
+
+            body, kind = pictures.shown(path)
+            self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
             self._events(_one(query, "client"), (query.get("name") or ["You"])[0])
         elif route == "/api/themes":
