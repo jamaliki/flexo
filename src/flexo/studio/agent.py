@@ -12,6 +12,7 @@ Each tool returns content blocks in the Messages API's shape: ``text`` and
 from __future__ import annotations
 
 import base64
+import inspect
 from typing import Any
 
 import yaml
@@ -158,11 +159,17 @@ class Tools:
         if handler is None or name not in {tool["name"] for tool in TOOLS}:
             return [_text(f"There is no tool {name}.")], True
         try:
-            return handler(**arguments), False
+            inspect.signature(handler).bind(**arguments)
         except TypeError as error:
             return [_text(f"{name} was given the wrong arguments: {error}")], True
+        try:
+            return handler(**arguments), False
         except (ValueError, KeyError, FileExistsError, PermissionError, FileNotFoundError) as error:
             return [_text(str(error))], True
+        except Exception as error:
+            # Whatever a document can make go wrong: the agent reads it and carries on, and
+            # the conversation keeps going.
+            return [_text(f"{name} failed: {type(error).__name__}: {error}")], True
 
     # -- the tools --
 

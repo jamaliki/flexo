@@ -41,9 +41,19 @@ def unavailable() -> str | None:
     """Why the assistant cannot run here, or None when it can."""
 
     try:
-        import anthropic  # noqa: F401
+        import anthropic
     except ImportError:
         return "The assistant needs the anthropic package: pip install 'flexo[assistant]'."
+    try:
+        client = anthropic.Anthropic()
+    except Exception as error:
+        return f"Claude could not be reached: {error}"
+    if client.api_key is None and client.auth_token is None and client.credentials is None:
+        # An app opened from the Finder has no shell's environment to find a key in.
+        return (
+            "Claude needs an API key: set ANTHROPIC_API_KEY, or run `ant auth login`, "
+            "then open the studio again."
+        )
     return None
 
 
