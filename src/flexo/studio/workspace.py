@@ -14,14 +14,17 @@ pages that are listening (``Listener``).
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
+import os
 import queue
 import secrets
 import threading
 import time
 import traceback
+import unicodedata
 from collections import OrderedDict, deque
 from dataclasses import asdict
 from pathlib import Path
@@ -29,20 +32,37 @@ from typing import Any
 
 import yaml
 
-from flexo.studio import Kind, kinds
+from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
+from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
 
 HISTORY = 400
 """Versions of each document kept, for merging changes made from an older one."""
 QUIET = 0.35
 """Seconds a document rests unchanged before it is written."""
+PATIENCE = 3.0
+"""Seconds a document changing without rest waits, at most, before it is written anyway."""
+RETRY = 5.0
+"""Seconds before a document that could not be written is tried again."""
 AGENT_TIMEOUT = 120.0
 """Seconds after its last action an agent stops being shown as present."""
 DOING_TIMEOUT = 45.0
 """Seconds after its last action an agent's word on what it is doing is dropped."""
-IGNORED = {".git", ".venv", "venv", "node_modules", "__pycache__", "build", ".cache", ".ruff_cache"}
+IGNORED = {
+    ".git", ".venv", "venv", "env", "node_modules", "bower_components", "__pycache__", "build",
+    "dist", "target", "site-packages", ".cache", ".ruff_cache", "Library", "Applications",
+    "Pods", "DerivedData", ".Trash",
+}
+"""Folders no document is looked for in: tools' output, caches, and a home's own folders."""
 DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
+CLAIM_LIMIT = 2_000_000
+"""Bytes: a larger file is not read to find out what kind of document it is."""
+WALK_LIMIT = 20_000
+"""Files looked at, at most, when listing a folder's documents."""
+SIZE_LIMIT = 2_000_000
+"""Values in one document, at most (a YAML file of aliases can name billions)."""
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 class Listener:
@@ -65,10 +85,13 @@ class Doc:
         self.lock = threading.RLock()
         self.exists = path.is_file()
         self.document = kind.load(path) if self.exists else kind.new(path)
+        _bounded(self.document)
         self.version = 1
         self.history: OrderedDict[int, str] = OrderedDict({1: _dumps(self.document)})
         self.saved = 1 if self.exists else 0
         self.changed_at = 0.0
+        self.unsaved_since = 0.0
+        self.retry_at = 0.0
         self.on_disk = copy.deepcopy(self.document) if self.exists else None
         self.disk_text = path.read_text(encoding="utf-8") if self.exists else None
         self.disk_stamp = _stamp(path)
@@ -114,6 +137,8 @@ class Doc:
         while len(self.history) > HISTORY:
             self.history.popitem(last=False)
         self.changed_at = time.monotonic()
+        if self.saved >= self.version - 1:
+            self.unsaved_since = self.changed_at
         self.workspace.changed(self, before, merged, who, client)
         return self.version, merged
 
@@ -130,7 +155,20 @@ class Doc:
             if self.saved >= self.version:
                 return False
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.kind.save(self.path, self.document)
+            # Written beside the file and moved over it: a write cut short (a full disk,
+            # the app quitting) leaves the file as it was, not half of the new one.
+            partial = self.path.with_name(
+                f".{self.path.name}.{secrets.token_hex(4)}.saving{self.path.suffix}"
+            )
+            try:
+                self.kind.save(partial, self.document)
+                with contextlib.suppress(OSError):
+                    os.chmod(partial, self.path.stat().st_mode & 0o7777)
+                os.replace(partial, self.path)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    partial.unlink()
+                raise
             self.disk_text = self.path.read_text(encoding="utf-8")
             self.disk_stamp = _stamp(self.path)
             self.on_disk = copy.deepcopy(self.document)
@@ -158,7 +196,7 @@ class Doc:
             try:
                 found = self.kind.load(self.path)
             except Exception as error:  # a file half-written, or wrong: say so, keep ours
-                self.problem = f"{self.name} on disk does not read: {error}"
+                self.problem = f"{self.name} on disk does not read: {explain(error)}"
                 self.disk_text = text
                 return "problem"
             self.problem = None
@@ -182,8 +220,12 @@ class Doc:
 class Workspace:
     """A folder being edited: its open documents, who is here, and what happened."""
 
-    def __init__(self, root: Path, *, kind: str | None = None) -> None:
+    def __init__(self, root: Path, *, kind: str | None = None, trusted: bool = True) -> None:
         self.root = root.resolve()
+        self.trusted = trusted
+        """Whether code the folder brings (a deck's plots) may run; a folder someone else
+        made runs none until its person says they trust it."""
+        self.on_trust: list[Any] = []
         self.kinds = kinds()
         self.default_kind = kind
         self.token = secrets.token_urlsafe(24)
@@ -197,12 +239,47 @@ class Workspace:
         self._documents: dict[Path, tuple[float, str | None]] = {}
         self._stop = threading.Event()
         self.assistant = None
+        self.on_close: list[Any] = []
+        """What to do when the workspace closes (forget its agents' tools, say)."""
         self._ticker = threading.Thread(target=self._tick, name="studio-tick", daemon=True)
         self._ticker.start()
 
+    def trust(self) -> None:
+        """Let the folder's own code run from now on, and have every page draw again."""
+
+        self.trusted = True
+        for then in self.on_trust:
+            with contextlib.suppress(Exception):
+                then()
+        self.broadcast({"type": "trusted"})
+
+    @contextlib.contextmanager
+    def running(self):
+        """Around drawing and exporting: the folder's trust, and the folder itself, for
+        a kind that runs a document's code or reads the files it names."""
+
+        allowed, root = code_allowed.set(self.trusted), folder_root.set(self.root)
+        try:
+            yield
+        finally:
+            code_allowed.reset(allowed)
+            folder_root.reset(root)
+
     def close(self) -> None:
         self._stop.set()
-        self.flush()
+        if self.assistant is not None:
+            with contextlib.suppress(Exception):
+                self.assistant.stop()
+        try:
+            self.flush()
+        finally:
+            with self.lock:
+                listeners = list(self.listeners.values())
+            for listener in listeners:
+                listener.events.put(None)  # the page's event stream ends
+            for then in self.on_close:
+                with contextlib.suppress(Exception):
+                    then()
 
     # -- files --
 
@@ -238,18 +315,19 @@ class Workspace:
             return cached[1]
         found = None
         try:
-            if path.stat().st_size < 4_000_000:
+            if path.stat().st_size < CLAIM_LIMIT:
                 text = path.read_text(encoding="utf-8")
-                parsed = (
-                    json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-                )
+                json_file = path.suffix.lower() == ".json"
+                parsed = json.loads(text) if json_file else yaml.load(text, _LOADER)
                 # The figure kind claims broadly; every other kind is asked first.
                 for kind in sorted(self.kinds.values(), key=lambda item: item.name == "figure"):
                     if kind.claims(parsed):
                         found = kind.name
                         break
-        except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError):
-            found = None
+        except Exception:
+            # Anything a file can be (a typo mid-edit, a date that is no date, nesting too
+            # deep to read): not a document now, but one it was stays that kind.
+            found = cached[1] if cached else None
         self._documents[path] = (stamp, found)
         return found
 
@@ -257,23 +335,37 @@ class Workspace:
         """Every document in the folder a kind can edit."""
 
         found = []
-        for file in sorted(_walk(self.root, depth=4)):
-            if file.suffix.lower() not in DOCUMENT_SUFFIXES:
+        seen: set[str] = set()
+        files = []
+        for count, file in enumerate(_walk(self.root, depth=4)):
+            if count >= WALK_LIMIT:
+                break
+            if file.suffix.lower() in DOCUMENT_SUFFIXES:
+                files.append(file)
+        for file in sorted(files):
+            try:
+                name = self.relative(file)
+            except PermissionError:
+                continue  # a link to somewhere outside the folder
+            if name in seen:
                 continue
             kind = self._claim(file)
             if kind:
-                found.append(
-                    {"file": self.relative(file), "kind": kind, "title": self.kinds[kind].title}
-                )
+                seen.add(name)
+                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title})
             if len(found) >= 300:
                 break
         return found
 
     def open(self, name: str, kind: str | None = None) -> Doc:
         path = self.path(name)
-        relative = self.relative(path)
+        relative = unicodedata.normalize("NFC", self.relative(path))
         with self.lock:
             doc = self.docs.get(relative)
+            if doc is None:
+                # The same file by another spelling (decomposed accents, other capitals, as
+                # macOS allows) is the document already open.
+                doc = next((open_ for open_ in self.docs.values() if _same(open_.path, path)), None)
             if doc is None:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
                 self.docs[relative] = doc
@@ -304,8 +396,23 @@ class Workspace:
 
     def flush(self) -> None:
         for doc in list(self.docs.values()):
-            if doc.write():
-                self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            self._write(doc)
+
+    def _write(self, doc: Doc) -> None:
+        """Write one document; one that cannot be written says why on its page, and is
+        tried again later, while the others are written as usual."""
+
+        try:
+            wrote = doc.write()
+        except Exception as error:
+            problem = f"{doc.name} could not be saved: {_reason(error)}"
+            doc.retry_at = time.monotonic() + RETRY
+            if doc.problem != problem:
+                doc.problem = problem
+                self.broadcast({"type": "problem", "file": doc.name, "text": problem})
+            return
+        if wrote:
+            self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
 
     # -- changes --
 
@@ -431,7 +538,7 @@ class Workspace:
             started = time.perf_counter()
             try:
                 # The page has every bundled font; drawings name them rather than carry them.
-                with fonts_linked():
+                with fonts_linked(), self.running(), pictures.linked(self):
                     drawing = doc.kind.draw(document, doc.path.parent, hints)
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
@@ -441,7 +548,7 @@ class Workspace:
                     "seconds": time.perf_counter() - started,
                     "messages": [
                         {
-                            "text": f"{type(error).__name__}: {error}",
+                            "text": explain(error),
                             "severity": "error",
                             "where": "",
                             "page": "",
@@ -484,7 +591,7 @@ class Workspace:
             document = copy.deepcopy(doc.document)
         with self.drawing:
             for _ in range(200):
-                with fonts_linked():
+                with fonts_linked(), self.running():
                     drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))
                 if not drawing.unfinished:
                     return drawing
@@ -505,8 +612,9 @@ class Workspace:
             happened = doc.reread()
             if happened == "problem":
                 self.broadcast({"type": "problem", "file": doc.name, "text": doc.problem})
-            if doc.saved < doc.version and now - doc.changed_at > QUIET and doc.write():
-                self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            rested = now - doc.changed_at > QUIET or now - doc.unsaved_since > PATIENCE
+            if doc.saved < doc.version and rested and now >= doc.retry_at:
+                self._write(doc)
             moved = False
             for file in list(doc.depends):
                 stamp = _stamp(file)
@@ -544,8 +652,13 @@ def _walk(folder: Path, depth: int):
     for entry in entries:
         if entry.name.startswith(".") or entry.name in IGNORED:
             continue
-        if entry.is_dir():
-            if depth > 0:
+        try:
+            is_dir = entry.is_dir()
+        except OSError:
+            continue
+        if is_dir:
+            # A linked folder is not followed: it may lead outside, or round in a loop.
+            if depth > 0 and not entry.is_symlink():
                 yield from _walk(entry, depth - 1)
         else:
             yield entry
@@ -555,6 +668,38 @@ def walk(folder: Path, depth: int = 4):
     """The files under ``folder`` a person would call theirs (no build output, no caches)."""
 
     return _walk(folder, depth)
+
+
+def _same(one: Path, other: Path) -> bool:
+    try:
+        return one.samefile(other)
+    except OSError:
+        return False
+
+
+def _bounded(document: Any, limit: int = SIZE_LIMIT) -> None:
+    """Refuse a document of more values than anyone writes: a YAML file of aliases to
+    aliases names billions, and would take the app down when shown."""
+
+    budget = limit
+    stack = [document]
+    while stack:
+        item = stack.pop()
+        budget -= 1
+        if budget < 0:
+            raise ValueError(
+                "the document is too large to open (does it repeat itself with aliases?)"
+            )
+        if isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+
+
+def _reason(error: Exception) -> str:
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror.lower()
+    return str(error) or type(error).__name__
 
 
 def _stamp(path: Path) -> float:

@@ -21,10 +21,13 @@ import base64
 import re
 import struct
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.ir.semantic import NodeSpec
 from flexo.svg import local_name
@@ -66,8 +69,16 @@ class Artwork:
     height: float | None
     markup: str = ""
     """Sanitized, id-prefixed ``<svg>`` markup (SVG artwork only)."""
-    data_uri: str = ""
-    """Base64 ``data:`` URI of the original bytes (PNG artwork only)."""
+    stamp: int = 0
+    """When the file last changed (nanoseconds): its bytes are read only when wanted."""
+
+    @property
+    def data_uri(self) -> str:
+        """Base64 ``data:`` URI of the original bytes (PNG and JPEG artwork only)."""
+
+        if self.format not in {"png", "jpeg"}:
+            return ""
+        return _data_uri(str(self.path), self.stamp, self.format)
 
     @property
     def aspect(self) -> float | None:
@@ -76,6 +87,29 @@ class Artwork:
         if self.width is None or self.height is None or self.height <= 0.0:
             return None
         return self.width / self.height
+
+
+picture_link: ContextVar[Callable[[Artwork], str] | None] = ContextVar(
+    "flexo_picture_link", default=None
+)
+"""How a drawing names a photograph instead of carrying its bytes: the studio, drawing for
+its page, names it by an address the page loads once. Exports carry the bytes."""
+
+
+def picture_href(artwork: Artwork) -> str:
+    """What a drawing's ``<image href>`` says for a photograph: an address, while the
+    studio draws for its page, and the photograph itself otherwise."""
+
+    link = picture_link.get()
+    if link is not None and artwork.format in {"png", "jpeg"}:
+        return link(artwork)
+    return artwork.data_uri
+
+
+@lru_cache(maxsize=8)
+def _data_uri(resolved: str, stamp: int, format: str) -> str:
+    encoded = base64.b64encode(Path(resolved).read_bytes()).decode("ascii")
+    return f"data:image/{format};base64,{encoded}"
 
 
 def node_artwork(spec: NodeSpec) -> Artwork:
@@ -112,6 +146,14 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             f'Unsupported artwork format "{suffix or path.name}".',
             hint="Embed an .svg file for vector artwork, or a .png or .jpg file for a render.",
         )
+    if outside(path):
+        raise _error(
+            "image.source.outside",
+            node_id,
+            path,
+            "The artwork file is outside the folder.",
+            hint="Put it in the folder, beside the figure.",
+        )
     try:
         stat = path.stat()
     except OSError as exc:
@@ -126,11 +168,20 @@ def load_artwork(node_id: str, source: str) -> Artwork:
     return _load(node_id, str(path.resolve()), stat.st_mtime_ns, stat.st_size)
 
 
+HEADER = 1 << 20
+"""Bytes of a photograph read to find its size: its header, and space for the metadata a
+camera writes before a JPEG's frame."""
+
+
 @lru_cache(maxsize=128)
 def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
     path = Path(resolved)
     try:
-        data = path.read_bytes()
+        if path.suffix.lower() in PNG_SUFFIXES | JPEG_SUFFIXES:
+            with path.open("rb") as handle:
+                data = handle.read(HEADER)
+        else:
+            data = path.read_bytes()
     except OSError as exc:
         raise _error(
             "image.source.unreadable",
@@ -139,13 +190,13 @@ def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
             f"Cannot read the artwork file ({exc.strerror or exc}).",
         ) from exc
     if path.suffix.lower() in PNG_SUFFIXES:
-        return _png_artwork(node_id, path, data)
+        return _png_artwork(node_id, path, data, mtime_ns)
     if path.suffix.lower() in JPEG_SUFFIXES:
-        return _jpeg_artwork(node_id, path, data)
+        return _jpeg_artwork(node_id, path, data, mtime_ns)
     return _svg_artwork(node_id, path, data)
 
 
-def _png_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
+def _png_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artwork:
     """A PNG travels as its own bytes; only its pixel size is read out."""
 
     if not data.startswith(_PNG_SIGNATURE) or len(data) < 24 or data[12:16] != b"IHDR":
@@ -158,18 +209,17 @@ def _png_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
     pixel_width, pixel_height = struct.unpack(">II", data[16:24])
     # A PNG pixel is a CSS pixel, which is the unit "px" already means.
     scale = POINTS_PER_UNIT["px"]
-    encoded = base64.b64encode(data).decode("ascii")
     return Artwork(
         node_id,
         path,
         "png",
         float(pixel_width) * scale,
         float(pixel_height) * scale,
-        data_uri=f"data:image/png;base64,{encoded}",
+        stamp=stamp,
     )
 
 
-def _jpeg_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
+def _jpeg_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artwork:
     """A JPEG travels as its own bytes, like a PNG; its size is read from its frame header."""
 
     index = 2
@@ -187,14 +237,13 @@ def _jpeg_artwork(node_id: str, path: Path, data: bytes) -> Artwork:
     if size is None:
         raise _error("image.jpeg.invalid", node_id, path, "The file is not a readable JPEG.")
     scale = POINTS_PER_UNIT["px"]
-    encoded = base64.b64encode(data).decode("ascii")
     return Artwork(
         node_id,
         path,
         "jpeg",
         float(size[0]) * scale,
         float(size[1]) * scale,
-        data_uri=f"data:image/jpeg;base64,{encoded}",
+        stamp=stamp,
     )
 
 

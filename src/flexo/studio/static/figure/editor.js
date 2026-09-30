@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, plain, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
@@ -57,6 +57,7 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Gather the chosen parts into a row, column, grid or module (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
     { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
@@ -90,6 +91,8 @@ export function mount(studio, main) {
     },
     focus: (where) => studio.focus(where),
     chooseFile,
+    themeField: (value, set) => themeField(studio, { value, onPick: set, onCustomise: (current) => customiseTheme(current, set) }),
+    tones: () => studio.info?.tones,
     addAnchor: () => addButton,
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did
@@ -300,6 +303,27 @@ export function mount(studio, main) {
   }
 
   // -- files --
+  // A theme file made from the theme in use, next to the figure, and the figure put in it:
+  // its colours, type and lines are then changed in the theme's own tab.
+  async function customiseTheme(current, set) {
+    const folder = studio.folder();
+    if (/\.(ya?ml|json)$/i.test(current)) { studio.workspace.open(folder + current); return; }
+    const stem = studio.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+    const taken = new Set(studio.workspace.documents.map((item) => item.file));
+    let file = `${folder}${stem}.theme.yaml`;
+    for (let n = 2; taken.has(file); n++) file = `${folder}${stem}-${n}.theme.yaml`;
+    const name = file.split("/").pop().replace(/\.theme\.yaml$/, "");
+    try {
+      const made = (await studio.api("/api/new", { file, kind: "theme", data: { theme: { name: `${name}-look`, base: current, description: `The look of ${stem}.` } } })).file;
+      set(made.slice(folder.length));
+      await studio.workspace.refreshDocuments();
+      studio.workspace.open(made);
+      toast("Change the theme in its tab: the figure redraws as you go.", { icon: "theme", seconds: 4 });
+    } catch (error) {
+      toast(`Could not make the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+    }
+  }
+
   function chooseFile({ title, types }) {
     return new Promise((resolve) => {
       let done = false;

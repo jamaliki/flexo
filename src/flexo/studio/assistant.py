@@ -41,10 +41,33 @@ def unavailable() -> str | None:
     """Why the assistant cannot run here, or None when it can."""
 
     try:
-        import anthropic  # noqa: F401
+        import anthropic
     except ImportError:
         return "The assistant needs the anthropic package: pip install 'flexo[assistant]'."
+    try:
+        client = anthropic.Anthropic()
+    except Exception as error:
+        return f"Claude could not be reached: {error}"
+    if client.api_key is None and client.auth_token is None and client.credentials is None:
+        # An app opened from the Finder has no shell's environment to find a key in.
+        # The app that holds the studio may say where a key is set in it.
+        return os.environ.get("FLEXO_STUDIO_KEY_HINT") or (
+            "Claude needs an API key: set ANTHROPIC_API_KEY, or run `ant auth login`, "
+            "then open the studio again."
+        )
     return None
+
+
+def announce(workspace: Workspace) -> None:
+    """Tell the workspace's pages whether the assistant can run now (a key was set, or
+    taken away), and have it sign in afresh when next asked."""
+
+    if workspace.assistant is not None:
+        workspace.assistant.client = None
+    why = unavailable()
+    workspace.broadcast(
+        {"type": "assistant", "event": "availability", "available": why is None, "why": why}
+    )
 
 
 class Assistant:

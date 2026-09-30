@@ -424,6 +424,214 @@ def test_the_assistant_edits_through_the_tools_and_says_so_to_everyone(tmp_path:
         workspace.close()
 
 
+# -- keeping files safe ----------------------------------------------------------------------
+
+
+def test_a_save_cut_short_leaves_the_file_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+
+        def full(path: Path, document: dict) -> None:
+            path.write_text(document["text"][:20])
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(doc.kind, "save", full)
+        workspace.flush()
+        assert (tmp_path / "figure.yaml").read_text() == NEW_FIGURE
+        assert "could not be saved: no space left on device" in (doc.problem or "")
+        assert [path.name for path in tmp_path.iterdir()] == ["figure.yaml"]
+    finally:
+        monkeypatch.undo()
+        workspace.close()
+    assert "Changed" in (tmp_path / "figure.yaml").read_text()  # written once it could be
+
+
+def test_a_file_that_cannot_be_written_does_not_stop_the_others(tmp_path: Path) -> None:
+    for name in ("a.yaml", "b.yaml"):
+        (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        for name in ("a.yaml", "b.yaml"):
+            doc = workspace.open(name)
+            doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+        (tmp_path / "a.yaml").unlink()
+        (tmp_path / "a.yaml").mkdir()  # a folder where the file was: it cannot be written
+        workspace.flush()
+        assert "Changed" in (tmp_path / "b.yaml").read_text()
+        assert "could not be saved" in (workspace.open("a.yaml").problem or "")
+    finally:
+        workspace.close()
+
+
+def test_odd_files_in_the_folder_do_not_stop_it_opening(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "date.yaml").write_text("released: 2024-02-30\n")
+    (tmp_path / "deep.json").write_text("[" * 5000 + "]" * 5000)
+    (tmp_path / "binary.yaml").write_bytes(bytes(range(256)))
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "other.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    (tmp_path / "loop").mkdir()
+    (tmp_path / "loop" / "again").symlink_to(tmp_path, target_is_directory=True)
+    workspace = Workspace(tmp_path)
+    try:
+        assert [entry["file"] for entry in workspace.documents()] == ["figure.yaml"]
+    finally:
+        workspace.close()
+
+
+def test_a_document_of_endless_aliases_is_refused(tmp_path: Path) -> None:
+    letters = "abcdefghij"
+    lines = ["a: &a [x, x, x, x, x, x, x, x, x, x]"]
+    for index in range(1, 9):
+        refs = ", ".join([f"*{letters[index - 1]}"] * 10)
+        lines.append(f"{letters[index]}: &{letters[index]} [{refs}]")
+    lines.append("theme: {name: bomb, notes: *i}")
+    (tmp_path / "bomb.yaml").write_text("\n".join(lines) + "\n")
+    workspace = Workspace(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="too large"):
+            workspace.open("bomb.yaml")
+    finally:
+        workspace.close()
+
+
+def test_one_file_named_two_ways_is_one_document(tmp_path: Path) -> None:
+    import unicodedata
+
+    name = unicodedata.normalize("NFD", "résumé.yaml")
+    (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        first = workspace.open(name)
+        again = workspace.open(unicodedata.normalize("NFC", "résumé.yaml"))
+        assert first is again
+    finally:
+        workspace.close()
+
+
+def test_two_studios_on_one_folder_are_both_found_until_each_closes(tmp_path: Path) -> None:
+    from flexo.studio import sessions
+
+    first, _ = start(tmp_path, browser=False)
+    second, _ = start(tmp_path, browser=False)
+    ports = [first.server_address[1], second.server_address[1]]
+    try:
+        assert sessions.find(tmp_path)["port"] in ports
+        sessions.unregister(tmp_path, ports[1])
+        assert sessions.find(tmp_path)["port"] == ports[0]
+        sessions.unregister(tmp_path, ports[0])
+        assert sessions.find(tmp_path) is None
+    finally:
+        first.server_close()
+        second.server_close()
+
+
+def test_a_folder_is_trusted_to_run_its_code_when_its_person_says(tmp_path: Path) -> None:
+    from flexo.studio import code_allowed, folder_root
+
+    server, workspace = start(tmp_path, browser=False, trusted=False)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        listener = workspace.listen("page", PERSON)
+        assert call(f"{url}/api/session", workspace.token)[1]["trusted"] is False
+        with workspace.running():
+            assert code_allowed.get() is False and folder_root.get() == tmp_path.resolve()
+        assert code_allowed.get() is True and folder_root.get() is None
+        assert call(f"{url}/api/trust", workspace.token, {})[0] == 200
+        assert call(f"{url}/api/session", workspace.token)[1]["trusted"] is True
+        events = [listener.events.get(timeout=2) for _ in range(listener.events.qsize())]
+        assert {"type": "trusted"} in events
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path: Path) -> None:
+    import struct
+    import zlib
+
+    folder = tmp_path / "sent"
+    folder.mkdir()
+
+    def png(path: Path) -> None:
+        rows = b"\x00\xff\x00\x00"
+        chunk = lambda kind, data: (  # noqa: E731
+            struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        )
+        header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                         + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+    png(tmp_path / "private.png")
+    png(folder / "own.png")
+    figure = (
+        "figure: {id: f}\nnodes:\n"
+        "- {id: a, kind: image, label: A, properties: {source: %s}}\n"
+    )
+    workspace = Workspace(folder)
+    try:
+        for source, allowed in ((folder / "own.png", True), (tmp_path / "private.png", False)):
+            name = f"{source.stem}.yaml"
+            (folder / name).write_text(figure % source)
+            doc = workspace.open(name)
+            drawn = workspace.draw(name, doc.document, 1, {}, {})
+            refused = any("outside the folder" in m["text"] for m in drawn["messages"])
+            assert refused is not allowed, drawn["messages"]
+    finally:
+        workspace.close()
+
+
+def test_a_photograph_is_sent_to_the_page_once_by_address_and_exported_whole(
+    tmp_path: Path,
+) -> None:
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        crc = struct.pack(">I", zlib.crc32(kind + data))
+        return struct.pack(">I", len(data)) + kind + data + crc
+
+    rows = (b"\x00" + b"\x33\x66\xaa" * 600) * 400
+    header = struct.pack(">IIBBBBB", 600, 400, 8, 2, 0, 0, 0)
+    (tmp_path / "photo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+    (tmp_path / "figure.yaml").write_text(
+        "figure: {id: f}\nnodes:\n"
+        "- {id: a, kind: image, label: A, properties: {source: photo.png}}\n"
+    )
+    server, workspace = start(tmp_path, browser=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        doc = workspace.open("figure.yaml")
+        svg = workspace.draw("figure.yaml", doc.document, 1, {}, {})["pages"][0]["svg"]
+        assert "data:image" not in svg and "/api/picture?" in svg
+        found = re.search(r'href="(/api/picture\?[^"]+)"', svg)
+        with OPENER.open(url + found.group(1).replace("&amp;", "&")) as response:
+            assert response.headers["Cache-Control"].endswith("immutable")
+            assert response.read().startswith(b"\x89PNG")
+        body = {"file": "figure.yaml", "formats": ["editable"]}
+        exported = call(f"{url}/api/export", workspace.token, body)[1]["files"]
+        written = (tmp_path / exported[0]).read_text()
+        assert "data:image/png;base64," in written and "/api/picture" not in written
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
 # -- themes --------------------------------------------------------------------------------
 
 
@@ -457,6 +665,54 @@ def test_a_theme_file_changed_is_read_again(tmp_path: Path) -> None:
     )
     register_theme(path)
     assert resolve_palette("lab-reread").get("tone-1-stroke") != first
+
+
+def test_the_themes_offered_are_the_folder_s_files_then_flexo_s_own(tmp_path: Path) -> None:
+    from flexo.studio import theming
+
+    (tmp_path / "lab.theme.yaml").write_text(
+        yaml.safe_dump({"theme": {"name": "lab-offered", "palette": ["#c2410c", "#1d4e89"]}})
+    )
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "a.yaml").write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        found = theming.cards(workspace, "figures/a.yaml")
+    finally:
+        workspace.close()
+    assert found[0]["value"] == "../lab.theme.yaml" and found[0]["source"] == "folder"
+    assert found[0]["title"] == "lab-offered" and found[0]["tones"][0]["fill"].startswith("#")
+    built_in = [card["value"] for card in found if card["source"] == "built-in"]
+    assert {"paper", "classic"} <= set(built_in) and "lab-offered" not in built_in
+
+
+def test_a_theme_file_is_put_to_use_in_several_figures_at_once(tmp_path: Path) -> None:
+    from flexo.studio import theming
+
+    (tmp_path / "lab.theme.yaml").write_text(
+        yaml.safe_dump({"theme": {"name": "lab-used", "palette": ["#c2410c"]}})
+    )
+    for name in ("a.yaml", "b.yaml"):
+        (tmp_path / name).write_text(NEW_FIGURE)
+    workspace = Workspace(tmp_path)
+    try:
+        listed = theming.uses(workspace, "lab.theme.yaml")
+        before = {entry["file"]: entry["uses"] for entry in listed}
+        after = theming.use(workspace, "lab.theme.yaml", ["a.yaml"], PERSON)
+    finally:
+        workspace.close()
+    assert before == {"a.yaml": False, "b.yaml": False}
+    assert {entry["file"]: entry["uses"] for entry in after} == {"a.yaml": True, "b.yaml": False}
+    written = yaml.safe_load((tmp_path / "a.yaml").read_text())
+    assert written["figure"]["style"] == "lab.theme.yaml"
+    assert [node["id"] for node in written["nodes"]] == ["x", "encoder", "y"]
+
+
+def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> None:
+    drawing = FigureKind().draw({"text": NEW_FIGURE}, tmp_path, {})
+    tones = drawing.info["tones"]
+    assert tones["used"] == {"encoder": 1} and len(tones["colours"]) == 8
+    assert tones["colours"][0]["fill"].startswith("#")
 
 
 def test_the_figure_kind_and_theme_kind_are_always_there() -> None:

@@ -94,6 +94,19 @@ class FigureKind:
         yaml.safe_load(text)  # refuse what does not read, before anyone sees it
         return {"text": text}
 
+    def theme_of(self, document: dict[str, Any]) -> str | None:
+        data = yaml.safe_load(document["text"])
+        figure = data.get("figure") if isinstance(data, dict) else None
+        style = figure.get("style") if isinstance(figure, dict) else None
+        return str(style) if style else None
+
+    def with_theme(self, document: dict[str, Any], theme: str, base: Path) -> dict[str, Any]:
+        from flexo.studio.figure_edit import apply
+
+        action = {"do": "update", "target": {"type": "figure"}, "values": {"figure.style": theme}}
+        result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
+        return {**document, "text": result["text"]}
+
     def guide(self) -> str:
         return GUIDE
 
@@ -162,9 +175,13 @@ class FigureKind:
         from flexo.diagnostics import FlexoError
         from flexo.lint import lint_compilation
         from flexo.studio.figure_edit import model
+        from flexo.studio.plain import explain
 
         # The figure as written, for the page's inspector, whether or not it draws.
-        info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+        try:
+            info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+        except Exception:  # not a shape the inspector can list: the drawing says why
+            info = {}
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except (yaml.YAMLError, json.JSONDecodeError) as error:
@@ -172,13 +189,16 @@ class FigureKind:
                            info=info)
         except FlexoError as error:
             return Drawing([], [_message(item) for item in error.diagnostics], info=info)
-        except (ValueError, TypeError, KeyError) as error:
-            return Drawing([], [Message(str(error), "error")], info=info)
+        except Exception as error:
+            return Drawing([], [Message(explain(error), "error")], info=info)
         try:
             compilation = compile_figure(spec)
         except FlexoError as error:
             return Drawing([], [_message(item) for item in error.diagnostics], info=info)
+        except Exception as error:
+            return Drawing([], [Message(explain(error), "error")], info=info)
         report = lint_compilation(compilation)
+        info["tones"] = _tones(spec)
         page = Page(
             spec.id, compilation.document.text, label=spec.id, extra={"outline": outline(spec)}
         )
@@ -193,6 +213,21 @@ class FigureKind:
         spec = parse(document["text"], base)
         result = build(spec, base / "build", stem=stem, formats=tuple(formats))
         return list(result.outputs.existing())
+
+
+def _tones(spec) -> dict[str, Any]:
+    """The figure's tone colours, for the page's colour chips: the theme's, in order,
+    and which of them each tone name the figure uses paints with."""
+
+    from flexo.emit import _tone_map
+    from flexo.themes import TONE_COUNT, figure_palette, figure_style, with_tone_roles
+
+    palette = with_tone_roles(figure_palette(spec))
+    colours = [
+        {"fill": palette.get(f"tone-{index}-fill"), "stroke": palette.get(f"tone-{index}-stroke")}
+        for index in range(1, TONE_COUNT + 1)
+    ]
+    return {"colours": colours, "used": _tone_map(spec, figure_style(spec))}
 
 
 def outline(spec) -> dict[str, Any]:
