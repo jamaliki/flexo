@@ -46,7 +46,7 @@ SYMBOLS = {
     "beta": "β",
     "gamma": "γ",
     "delta": "δ",
-    "epsilon": "ε",
+    "epsilon": "ϵ",  # as TeX sets it: \varepsilon is the curly ε
     "varepsilon": "ε",
     "zeta": "ζ",
     "eta": "η",
@@ -62,7 +62,7 @@ SYMBOLS = {
     "sigma": "σ",
     "tau": "τ",
     "upsilon": "υ",
-    "phi": "φ",
+    "phi": "ϕ",  # as TeX sets it: \varphi is the open φ
     "varphi": "φ",
     "chi": "χ",
     "psi": "ψ",
@@ -235,7 +235,10 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
 
     if not text:
         return ()
-    if "$" not in text and "`" not in text and "](" not in text and "]{" not in text:
+    if (
+        "$" not in text and "`" not in text and "](" not in text and "]{" not in text
+        and "\\(" not in text and "\\[" not in text
+    ):
         return (TextRun(text),)
     runs: list[TextRun] = []
     plain: list[str] = []
@@ -274,6 +277,33 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
                 runs.append(TextRun(text[index + 1 : end], code=True))
                 index = end + 1
                 continue
+        display = text.startswith("$$", index) or text.startswith("\\[", index)
+        if display:
+            closing = "$$" if character == "$" else "\\]"
+            end = text.find(closing, index + 2)
+            if end > index + 2:
+                if plain:
+                    runs.append(TextRun("".join(plain)))
+                    plain = []
+                # A formula on its own line, in display style.
+                if runs:
+                    runs.append(TextRun("\n"))
+                runs.extend(_math(text[index + 2 : end], display=True))
+                index = end + 2
+                if index < len(text):
+                    runs.append(TextRun("\n"))
+                    while index < len(text) and text[index] == " ":
+                        index += 1
+                continue
+        if character == "\\" and text.startswith("\\(", index):
+            end = text.find("\\)", index + 2)
+            if end > index + 2:
+                if plain:
+                    runs.append(TextRun("".join(plain)))
+                    plain = []
+                runs.extend(_math(text[index + 2 : end]))
+                index = end + 2
+                continue
         if character == "$":
             end = _closing_dollar(text, index + 1)
             if end is not None:
@@ -290,6 +320,45 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
     return _merged(runs)
 
 
+def math_spans(text: str) -> list[tuple[int, int]]:
+    """Where maths is in ``text``, delimiters and all, as ``parse_label`` reads it:
+    ``$...$``, ``\\(...\\)``, ``$$...$$`` and ``\\[...\\]``; not an escaped ``\\$``, not
+    a price (``$5``), not inside backticks."""
+
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "\\" and text[index + 1 : index + 2] in {"$", "`"}:
+            index += 2
+            continue
+        if character == "`":
+            end = text.find("`", index + 1)
+            if end > index:
+                index = end + 1
+                continue
+        if text.startswith("$$", index) or text.startswith("\\[", index):
+            end = text.find("$$" if character == "$" else "\\]", index + 2)
+            if end > index + 2:
+                spans.append((index, end + 2))
+                index = end + 2
+                continue
+        if text.startswith("\\(", index):
+            end = text.find("\\)", index + 2)
+            if end > index + 2:
+                spans.append((index, end + 2))
+                index = end + 2
+                continue
+        if character == "$":
+            end = _closing_dollar(text, index + 1)
+            if end is not None:
+                spans.append((index, end + 1))
+                index = end + 1
+                continue
+        index += 1
+    return spans
+
+
 def has_markup(text: str) -> bool:
     """Whether ``parse_label(text)`` differs from the plain run ``TextRun(text)``."""
 
@@ -297,23 +366,84 @@ def has_markup(text: str) -> bool:
 
 
 def _closing_dollar(text: str, start: int) -> int | None:
+    """Where the ``$`` that closes maths opened just before ``start`` is, if any.
+
+    As pandoc reads dollars: maths starts with no space after its ``$`` and ends
+    with none before its ``$``, and that ``$`` is not followed by a digit -- so
+    "it costs $5 and $10" is two prices, not maths. Maths that is plainly TeX (a
+    command, a script, a brace) may have spaces inside: ``$ \\alpha $``.
+    """
+
     index = start
     while index < len(text):
         if text[index] == "\\":
             index += 2
             continue
         if text[index] == "$":
+            inside = text[start:index]
+            if not inside or text[index + 1 : index + 2].isdigit():
+                return None
+            plainly_tex = any(ch in inside.replace("\\$", "") for ch in "\\^_{")
+            if (inside[0].isspace() or inside[-1].isspace()) and not plainly_tex:
+                return None
             return index
         index += 1
     return None
 
 
-def _math(source: str) -> list[TextRun]:
+def _math(source: str, *, display: bool = False) -> list[TextRun]:
+    source = source.strip()
     runs: list[TextRun] = []
     _read(source, runs, shift="normal", mode="math", weight=400)
     while runs and runs[-1].text == " ":
         runs.pop()
+    if display or needs_layout(source):
+        # Set in two dimensions (flexo.texmath); the words are what it reads as.
+        words = "".join(run.text for run in runs).replace("\\", "").replace("\n", " ").strip()
+        prefix = "\\displaystyle " if display else ""
+        return [TextRun(words or source.strip(), math=prefix + source.strip())]
     return runs
+
+
+_LINEAR = frozenset({
+    *(name for name, symbol in SYMBOLS.items() if symbol.isalpha() and name.isalpha()),
+    "times", "cdot", "pm", "mp", "le", "leq", "ge", "geq", "ne", "neq", "approx", "sim",
+    "simeq", "equiv", "propto", "in", "notin", "to", "rightarrow", "leftarrow", "infty",
+    "partial", "nabla", "ell", "prime", "circ", ",", "{", "}", "$", "_",
+    *ACCENTS, *OVER, *UPRIGHT, *CODE, *ALPHABETS, *OPERATORS, *BOLD,
+}) - {"sum", "prod", "int", "oint"}
+"""Commands maths set as a line of words shows as well as a laid-out formula would:
+letters, the everyday signs, words and alphabets. Everything else is laid out."""
+
+
+def needs_layout(source: str) -> bool:
+    """Whether maths needs setting in two dimensions (``flexo.texmath``): a fraction,
+    a radical, a matrix, a big operator, brackets that grow, scripts on scripts, or a
+    command the words cannot show -- rather than as a line of styled words."""
+
+    if "&" in source:
+        return True
+    if any(name not in _LINEAR for name in _COMMAND.findall(source)):
+        return True
+    # Words set upright (\mathrm{H_2O}) are read as words: their scripts need laying out.
+    words = "|".join(sorted(UPRIGHT | CODE | BOLD))
+    for match in re.finditer(r"\\(?:" + words + r")\s*\{([^{}]*)", source):
+        if "_" in match.group(1) or "^" in match.group(1):
+            return True
+    # Scripts inside scripts (e^{-E_a/RT}): words have one level of each.
+    for match in re.finditer(r"[_^]\{", source):
+        depth, index = 0, match.end() - 1
+        while index < len(source):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            elif source[index] in "_^" and source[index - 1] != "\\":
+                return True
+            index += 1
+    return False
 
 
 def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None:
@@ -511,7 +641,8 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
     for run in runs:
         if not run.text:
             continue
-        if result and not run.accent and not result[-1].accent and (
+        if result and not run.accent and not result[-1].accent and not run.math \
+                and not result[-1].math and (
             result[-1].weight,
             result[-1].italic,
             result[-1].baseline_shift,
