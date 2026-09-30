@@ -28,6 +28,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from flexo.studio import sessions
+from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
@@ -169,10 +170,10 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(HTTPStatus.NOT_FOUND, str(error))
         except ValueError as error:
             # Something the document says (a missing file, a malformed block): the page shows it.
-            self._fail(HTTPStatus.BAD_REQUEST, str(error))
+            self._fail(HTTPStatus.BAD_REQUEST, explain(error))
         except Exception as error:
             traceback.print_exc()
-            self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
+            self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, explain(error))
 
     def _font(self, name: str) -> None:
         """The bundled fonts, which drawings in the studio name rather than embed."""

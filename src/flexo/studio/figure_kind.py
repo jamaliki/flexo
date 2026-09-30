@@ -175,9 +175,13 @@ class FigureKind:
         from flexo.diagnostics import FlexoError
         from flexo.lint import lint_compilation
         from flexo.studio.figure_edit import model
+        from flexo.studio.plain import explain
 
         # The figure as written, for the page's inspector, whether or not it draws.
-        info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+        try:
+            info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+        except Exception:  # not a shape the inspector can list: the drawing says why
+            info = {}
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except (yaml.YAMLError, json.JSONDecodeError) as error:
@@ -185,12 +189,14 @@ class FigureKind:
                            info=info)
         except FlexoError as error:
             return Drawing([], [_message(item) for item in error.diagnostics], info=info)
-        except (ValueError, TypeError, KeyError) as error:
-            return Drawing([], [Message(str(error), "error")], info=info)
+        except Exception as error:
+            return Drawing([], [Message(explain(error), "error")], info=info)
         try:
             compilation = compile_figure(spec)
         except FlexoError as error:
             return Drawing([], [_message(item) for item in error.diagnostics], info=info)
+        except Exception as error:
+            return Drawing([], [Message(explain(error), "error")], info=info)
         report = lint_compilation(compilation)
         info["tones"] = _tones(spec)
         page = Page(

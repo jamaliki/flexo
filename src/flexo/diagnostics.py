@@ -44,3 +44,22 @@ def raise_if_errors(diagnostics: Iterable[Diagnostic]) -> tuple[Diagnostic, ...]
     if errors:
         raise FlexoError(errors)
     return values
+
+
+def described(value: object) -> str:
+    """A value as a person would name it: "a number (7)", "a list", "nothing"."""
+
+    if value is None:
+        return "nothing"
+    if isinstance(value, bool):
+        return f"yes/no ({str(value).lower()})"
+    if isinstance(value, int | float):
+        return f"a number ({value:g})"
+    if isinstance(value, str):
+        shown = value if len(value) <= 24 else value[:21] + "…"
+        return f'the words "{shown}"' if value else "empty words"
+    if isinstance(value, dict):
+        return "a set of settings"
+    if isinstance(value, list | tuple):
+        return "a list"
+    return "something else"
