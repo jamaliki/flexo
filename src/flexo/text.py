@@ -536,6 +536,8 @@ class TextMeasurer:
             line_height=line_height,
             lines=measured_lines,
             cap_height=cap,
+            rise=rise,
+            fall=fall,
         )
 
     def mark_width(self, mark: str, italic: bool = False) -> float:
