@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.ir.semantic import NodeSpec
 from flexo.svg import local_name
@@ -111,6 +112,14 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
             hint="Embed an .svg file for vector artwork, or a .png or .jpg file for a render.",
+        )
+    if outside(path):
+        raise _error(
+            "image.source.outside",
+            node_id,
+            path,
+            "The artwork file is outside the folder.",
+            hint="Put it in the folder, beside the figure.",
         )
     try:
         stat = path.stat()

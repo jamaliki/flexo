@@ -202,6 +202,11 @@ export class Workspace {
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
+      case "trusted":
+        this.info.trusted = true;
+        for (const session of this.sessions.values()) session.requestDraw(0);
+        this.emit("trusted");
+        break;
       case "opened":
         if (!this.sessions.has(event.file)) {
           this.open(event.file, { activate: this.follow }).then(() => {
@@ -288,7 +293,20 @@ export async function start() {
   const views = h("main.views");
   const doing = h("div.doing-strip");
   const side = new SidePanel(workspace);
-  const body = h("div.workbench", {}, h("div.center", {}, docbar, views, doing), side.node);
+  // A folder someone else made runs none of its own Python until its person says so.
+  const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
+    h("div.trust-words", {}, h("b", {}, "This folder's Python has not been run. "),
+      "A deck here draws with Python files from the folder. Run them only if you trust where the folder came from."),
+    ui.button("Trust and run", async () => {
+      try { await workspace.api("/api/trust", {}); }
+      catch (error) { toast(`Could not trust the folder: ${error.message}`, { kind: "error", icon: "error" }); }
+    }, { kind: "primary", small: true }));
+  const untrusted = (drawn) => {
+    if (!workspace.info.trusted && drawn?.messages?.some((message) => message.code === "code.untrusted")) trustBar.hidden = false;
+  };
+  workspace.on("opened", (session) => session.on("drawn", untrusted));
+  workspace.on("trusted", () => { trustBar.hidden = true; });
+  const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
   clear(root, h("div.studio", {}, bar, body));
 
   // -- keeping the frame current --

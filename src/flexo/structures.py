@@ -27,6 +27,7 @@ import struct
 import zlib
 from pathlib import Path
 
+from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.drawn import Picture, Words, units
 from flexo.geometry import Side, Size
@@ -154,6 +155,8 @@ def structure_png(
         if index is not None:
             roles.append((key, palette.get(f"tone-{index}-stroke")))
     path = Path(source).expanduser()
+    if path.exists() and outside(path):
+        raise _fail(node, "source", "The structure file is outside the folder.")
     stamp = path.stat().st_mtime if path.exists() else 0.0
     try:
         return _render(

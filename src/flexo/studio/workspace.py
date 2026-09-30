@@ -32,7 +32,7 @@ from typing import Any
 
 import yaml
 
-from flexo.studio import Kind, kinds
+from flexo.studio import Kind, code_allowed, folder_root, kinds
 from flexo.studio.merge import merge3
 from flexo.svg_resources import fonts_linked
 
@@ -219,8 +219,12 @@ class Doc:
 class Workspace:
     """A folder being edited: its open documents, who is here, and what happened."""
 
-    def __init__(self, root: Path, *, kind: str | None = None) -> None:
+    def __init__(self, root: Path, *, kind: str | None = None, trusted: bool = True) -> None:
         self.root = root.resolve()
+        self.trusted = trusted
+        """Whether code the folder brings (a deck's plots) may run; a folder someone else
+        made runs none until its person says they trust it."""
+        self.on_trust: list[Any] = []
         self.kinds = kinds()
         self.default_kind = kind
         self.token = secrets.token_urlsafe(24)
@@ -238,6 +242,27 @@ class Workspace:
         """What to do when the workspace closes (forget its agents' tools, say)."""
         self._ticker = threading.Thread(target=self._tick, name="studio-tick", daemon=True)
         self._ticker.start()
+
+    def trust(self) -> None:
+        """Let the folder's own code run from now on, and have every page draw again."""
+
+        self.trusted = True
+        for then in self.on_trust:
+            with contextlib.suppress(Exception):
+                then()
+        self.broadcast({"type": "trusted"})
+
+    @contextlib.contextmanager
+    def running(self):
+        """Around drawing and exporting: the folder's trust, and the folder itself, for
+        a kind that runs a document's code or reads the files it names."""
+
+        allowed, root = code_allowed.set(self.trusted), folder_root.set(self.root)
+        try:
+            yield
+        finally:
+            code_allowed.reset(allowed)
+            folder_root.reset(root)
 
     def close(self) -> None:
         self._stop.set()
@@ -512,7 +537,7 @@ class Workspace:
             started = time.perf_counter()
             try:
                 # The page has every bundled font; drawings name them rather than carry them.
-                with fonts_linked():
+                with fonts_linked(), self.running():
                     drawing = doc.kind.draw(document, doc.path.parent, hints)
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
@@ -565,7 +590,7 @@ class Workspace:
             document = copy.deepcopy(doc.document)
         with self.drawing:
             for _ in range(200):
-                with fonts_linked():
+                with fonts_linked(), self.running():
                     drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))
                 if not drawing.unfinished:
                     return drawing

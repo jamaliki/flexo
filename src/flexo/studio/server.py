@@ -260,7 +260,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/export":
             doc = workspace.open(name)
             document = data.get("document", doc.document)
-            with workspace.drawing:
+            with workspace.drawing, workspace.running():
                 written = doc.kind.export(
                     document, doc.path.parent, doc.path.stem, list(data.get("formats") or [])
                 )
@@ -280,6 +280,9 @@ class Handler(BaseHTTPRequestHandler):
 
             targets = [str(target) for target in data.get("targets") or []]
             self._json({"documents": theming.use(workspace, name, targets, who)})
+        elif route == "/api/trust":
+            workspace.trust()
+            self._json({"ok": True})
         elif route == "/api/presence":
             workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
             self._json({"ok": True})
@@ -308,6 +311,7 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "folder": str(workspace.root),
             "address": getattr(workspace, "address", ""),
+            "trusted": workspace.trusted,
             "kinds": [
                 {"name": kind.name, "title": kind.title} for kind in workspace.kinds.values()
             ],
@@ -458,12 +462,15 @@ def start(
     port: int = 0,
     kind: str | None = None,
     browser: bool = True,
+    trusted: bool = True,
 ) -> tuple[ThreadingHTTPServer, Workspace]:
-    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``)."""
+    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``).
+    Code the folder brings runs only if it is ``trusted`` (the app asks; a person who
+    starts ``flexo studio`` in a folder has chosen it)."""
 
     path = Path(target or ".").resolve()
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
-    workspace = Workspace(folder, kind=kind)
+    workspace = Workspace(folder, kind=kind, trusted=trusted)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
     server = Server(("127.0.0.1", port), handler)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]
