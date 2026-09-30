@@ -114,7 +114,7 @@ export class Workspace {
     session.active = true;
     session.emit("activate");
     history.replaceState(null, "", `?file=${encodeURIComponent(file)}`);
-    document.title = `${file.split("/").pop()} — Flexo studio`;
+    document.title = `${file.split("/").pop()} — Flexo Studio`;
     this.emit("active", session);
     this.reportFocus(file, null);
   }
@@ -256,6 +256,10 @@ export async function start() {
   }
   const workspace = new Workspace(info);
   window.flexoStudio = workspace;
+  // Settled once the tabs open when the page was last left are open again: what an app
+  // around the page asks (open this document) waits for it, rather than being undone.
+  let settled;
+  workspace.ready = new Promise((done) => { settled = done; });
 
   // -- the top bar --
   const tabs = h("nav.tabs.scroll-thin");
@@ -274,7 +278,7 @@ export async function start() {
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
   showTheme();
   const bar = h("header.bar", {},
-    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo studio")),
+    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo Studio")),
     tabs,
     h("div.spacer"),
     paletteButton,
@@ -468,6 +472,7 @@ export async function start() {
     try { await workspace.open(file, { activate: file === first || (!first && file === tabsToOpen[tabsToOpen.length - 1]) }); }
     catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
   }
+  settled();
   renderViews();
   if (remembered("side", "") && info.assistant) side.show(remembered("side", ""));
 }

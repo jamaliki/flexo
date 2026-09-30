@@ -79,6 +79,11 @@ export function widenLines(svg) {
       twin.setAttribute("d", path.getAttribute("d"));
       if (path.getAttribute("transform")) twin.setAttribute("transform", path.getAttribute("transform"));
       twin.setAttribute("class", "hit-line");
+      // Unpainted by itself, not only by parts.css: a slide shows its figure's lines
+      // widened before that sheet is loaded, and a path left to SVG's defaults is black.
+      twin.setAttribute("fill", "none");
+      twin.setAttribute("stroke", "transparent");
+      twin.setAttribute("stroke-width", "9");
       twin.dataset.hitFor = id;
       path.after(twin);
     }
