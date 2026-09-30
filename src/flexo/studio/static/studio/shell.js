@@ -306,6 +306,44 @@ export async function start() {
   };
   workspace.on("opened", (session) => session.on("drawn", untrusted));
   workspace.on("trusted", () => { trustBar.hidden = true; });
+
+  // -- the Mac app: its menus do what the page does, and it is told what they may do --
+  workspace.command = (name, arg) => {
+    const session = workspace.active;
+    switch (name) {
+      case "undo": session?.undo(); break;
+      case "redo": session?.redo(); break;
+      case "save":
+        session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+          (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+        break;
+      case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
+      case "present": session?.present?.(); break;
+      case "palette": palette(workspace); break;
+      case "assistant": side.toggle("assistant"); break;
+      case "activity": side.toggle("activity"); break;
+      case "new": askName(workspace, arg, { figure: "figure.yaml", deck: "talk.yaml", theme: "theme.yaml" }[arg] || "document.yaml"); break;
+      case "close-tab": if (session) workspace.close(session.file); break;
+      case "agents": connectDialog(workspace); break;
+      case "shortcuts": shortcutsDialog(); break;
+      default: break;
+    }
+  };
+  let reporting = null;
+  const report = () => {
+    if (reporting) return;
+    reporting = setTimeout(() => {
+      reporting = null;
+      const session = workspace.active;
+      window.pywebview?.api?.studio_state?.({
+        file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
+        can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
+        exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
+      });
+    }, 80);
+  };
+  for (const event of ["status", "active", "opened", "closed", "documents"]) workspace.on(event, report);
+  window.addEventListener("pywebviewready", report);
   const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
   clear(root, h("div.studio", {}, bar, body));
 
