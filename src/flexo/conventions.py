@@ -36,7 +36,10 @@ one net.
     two at 30% and 70% of it with the default ``0.8``, three at 23%, 50%
     and 77%. ``0`` puts every arrow at the middle; ``1`` shares out the
     whole side. An arrow still moves off its place to run straight to the
-    box it faces.
+    box it faces, and one alone on its side keeps that side's middle. So that
+    both hold, a plain box (a block, an MLP) that several straight arrows
+    share a side of is widened, as far as its parent has room, until they
+    meet it within its central ``pin_spread``.
 
 An operation on the values that meet -- a sum, a product -- is not a
 convention: author it with ``add``, ``multiply`` or ``op`` and it is drawn as a
