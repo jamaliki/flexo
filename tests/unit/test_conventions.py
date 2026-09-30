@@ -127,10 +127,8 @@ def test_math_between_dollars_sets_scripts_italics_and_symbols() -> None:
         TextRun("T", italic=True, baseline_shift="super"),
         TextRun(")"),
     )
-    assert parse_label("$\\mu$, $\\Sigma$") == (
-        TextRun("μ", italic=True),
-        TextRun(", Σ"),
-    )
+    # Italic Greek is the maths font's letter (the one formulas are set in); capitals upright.
+    assert parse_label("$\\mu$, $\\Sigma$") == (TextRun("\U0001d707, Σ"),)
     assert parse_label("$W_{\\text{out}}$")[1] == TextRun("out", baseline_shift="sub")
     assert parse_label("$\\hat{x}$") == (TextRun("x̂", italic=True),)
     assert parse_label("costs \\$5 or $6") == (TextRun("costs $5 or $6"),)
@@ -191,7 +189,7 @@ def test_math_alphabets_operators_and_relations() -> None:
         (r"$-y$", "−y"),
         (r"$(-1)$", "(−1)"),
         (r"$a, -b$", "a, −b"),
-        (r"$\alpha x$", "αx"),
+        (r"$\alpha x$", "\U0001d6fcx"),
         (r"$\log p$", "log p"),
         (r"$\log(x)$", "log(x)"),
         (r"$q(x_t | x_{t-1})$", "q(xt | xt−1)"),

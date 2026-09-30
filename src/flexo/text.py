@@ -80,24 +80,39 @@ class FontData:
     codepoints: frozenset[int]
 
 
-DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans", "Latin Modern Math")
+DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans", "Latin Modern Math", "Fira Math")
 """Bundled families every stack ends in, for the glyphs its own families lack.
 
 Figtree has no Greek and Latin Modern has no subscripts; Plex covers Greek and
 most of the mathematical letters a caption reaches for, Liberation Sans the
-modifier letters (``ᵀ``) Plex does not, and Latin Modern Math the rest of
-mathematics: script, blackboard and fraktur capitals, and symbols such as
-``∇`` and ``∈``. All three always resolve, so a glyph missing from the
-author's family is still measured in the face that will draw it rather than
-rejected.
+modifier letters (``ᵀ``) Plex does not, and the two maths fonts the rest of
+mathematics: its italic letters, script, blackboard and fraktur capitals, and
+symbols such as ``∇`` and ``∈`` -- the one that suits the typography first (see
+``maths_family``). All always resolve, so a glyph missing from the author's
+family is still measured in the face that will draw it rather than rejected.
 """
+
+SERIF_MATHS = "Latin Modern Math"
+SANS_MATHS = "Fira Math"
+
+
+def maths_family(typography: TypographyStyle) -> str:
+    """The maths font a typography sets its formulas in: its own (``math_family``),
+    else Latin Modern Math beside a serif face and Fira Math beside any other, so a
+    formula's Greek, signs and brackets are drawn in the manner of its words."""
+
+    if typography.math_family:
+        return typography.math_family
+    return SERIF_MATHS if typography.generic == "serif" else SANS_MATHS
 
 
 MONO_FAMILIES = (
-    "JetBrains Mono", "Fira Code", "IBM Plex Mono", "SF Mono", "Menlo", "Consolas",
+    "IBM Plex Mono", "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas",
     "DejaVu Sans Mono", "Liberation Mono", "Courier New",
 )
-"""Monospace families tried, in order, for code when a typography names none."""
+"""Monospace families tried, in order, for code when a typography names none. The
+first is bundled, so code is set alike on every machine, in the sibling of the Plex
+Sans that sets what the words' face lacks."""
 
 
 class FontStack:
@@ -112,7 +127,11 @@ class FontStack:
     def __init__(self, typography: TypographyStyle) -> None:
         self.typography = typography
         maths = (typography.math_family,) if typography.math_family else ()
-        names = (typography.family, *maths, *typography.fallbacks, *DEFAULT_FALLBACKS)
+        # The maths font that suits the words comes before the other one.
+        chosen = maths_family(typography)
+        other = SERIF_MATHS if chosen != SERIF_MATHS else SANS_MATHS
+        tail = (*DEFAULT_FALLBACKS[:2], chosen, other)
+        names = (typography.family, *maths, *typography.fallbacks, *tail)
         primary = require_family(typography.family)
         families: list[tuple[FontFace, ...]] = [primary]
         seen = {primary[0].family.casefold()}
@@ -189,8 +208,6 @@ class FontStack:
         # Italic Greek the words' face lacks is TeX's, from the maths font -- a
         # fallback's italic θ may be drawn as ϑ, which is another letter in maths.
         maths = self.maths_index()
-        if maths is None:
-            maths = self.maths_index("Latin Modern Math")
         if maths is not None and italic:
             # TeX's italic Greek is the mathematical italic alphabet of the maths font.
             text = "".join(

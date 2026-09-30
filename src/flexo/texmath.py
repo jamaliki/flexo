@@ -1742,6 +1742,8 @@ def _face(face: FontFace, weight: int) -> Face:
 
 @lru_cache(maxsize=8)
 def _math_face(family: str | None) -> Face:
+    """The maths font ``family``, if it is one (has a MATH table); else Latin Modern Math."""
+
     for name in (family, "Latin Modern Math"):
         if not name:
             continue
@@ -1759,12 +1761,27 @@ class Fonts:
     maths font, whose measures set the whole formula."""
 
     def __init__(self, typography: TypographyStyle) -> None:
-        from flexo.text import font_stack
+        from flexo.text import font_stack, maths_family
 
         self.typography = typography
         self.stack = font_stack(typography)
-        self.maths = _math_face(typography.math_family)
+        # The maths font that suits the words (Fira Math beside a sans face, Latin Modern
+        # Math beside a serif) sets the formula; Latin Modern Math draws what it lacks
+        # (Fira Math has no script or fraktur capitals).
+        self.maths = _math_face(maths_family(typography))
+        spare = _math_face("Latin Modern Math")
+        self.spare = spare if spare is not self.maths else None
         self._constants: dict[str, float] = {}
+
+    def maths_for(self, char: str) -> tuple[Face, int | None]:
+        """The maths face that has ``char``, and its glyph: the chosen one, else the spare."""
+
+        gid = self.maths.glyph(char)
+        if gid is None and self.spare is not None:
+            spare = self.spare.glyph(char)
+            if spare is not None:
+                return self.spare, spare
+        return self.maths, gid
 
     def constant(self, name: str) -> float:
         """A MATH table constant in em (a percentage for the ``*_PERCENT*`` ones)."""
@@ -1935,8 +1952,7 @@ class _Layout:
         return box
 
     def maths_glyph(self, char: str, style: _Style) -> Box | None:
-        face = self.fonts.maths
-        gid = face.glyph(char)
+        face, gid = self.fonts.maths_for(char)
         if gid is None:
             return None
         return self.glyph(face, gid, self.size(style))
@@ -1945,14 +1961,14 @@ class _Layout:
         char, font, size = sym.char, sym.font, self.size(style)
         if font in {"cal", "scr", "bb", "frak", "sf", "tt", "sfit", "bfsf"}:
             # Alphabets the maths font carries: script, blackboard, fraktur, sans, typewriter.
-            mapped = _alphabet(char, font)
+            mapped = alphabet(char, font)
             box = self.maths_glyph(mapped, style) if mapped != char else None
             if box is not None:
                 return box
         letter = char.isascii() and char.isalpha()
         greek = "\u0370" <= char <= "\u03ff"
         if greek and font in {"bf", "bi"}:
-            box = self.maths_glyph(_alphabet(char, font), style)
+            box = self.maths_glyph(alphabet(char, font), style)
             if box is not None:
                 return box
         if (
@@ -1966,13 +1982,9 @@ class _Layout:
             )
             weight = 700 if font in {"bf", "bi"} else self.weight
             face, slant = self.fonts.text_face(char, italic, weight)
-            if (
-                greek
-                and italic
-                and (slant or face.face.family != self.fonts.stack.families[0][0].family)
-            ):
-                # TeX's lower-case Greek is italic: the maths font's, when the words' face has
-                # none of its own (a fallback's italic θ may be drawn as ϑ).
+            if greek and italic:
+                # TeX's lower-case Greek is italic, and the maths font's own letter -- the
+                # one maths set as words has too; a text face's italic θ may be drawn as ϑ.
                 box = self.maths_glyph(_GREEK_ITALIC.get(char, char), style)
                 if box is not None:
                     return box
@@ -2246,8 +2258,7 @@ class _Layout:
             box = self.words(Text(item.symbol, "rm"), style)
             box.single = False
             return box, True
-        face = self.fonts.maths
-        gid = face.glyph(item.symbol)
+        face, gid = self.fonts.maths_for(item.symbol)
         if gid is None:
             return self.symbol(Sym(item.symbol, OP), style), False
         if style.level == 0:
@@ -2386,9 +2397,8 @@ class _Layout:
         """``char`` from the maths font at least ``target`` points long (tall, or wide):
         a larger variant, or else one built from its parts."""
 
-        face = self.fonts.maths
+        face, gid = self.fonts.maths_for(char)
         size = self.size(style)
-        gid = face.glyph(char)
         if gid is None:
             box = self.symbol(Sym(char), style)
             return box
@@ -2505,8 +2515,7 @@ class _Layout:
 
     def accent(self, item: Accent, style: _Style) -> Box:
         body = self.items(item.body, style.cramp())
-        face = self.fonts.maths
-        gid = face.glyph(item.mark)
+        face, gid = self.fonts.maths_for(item.mark)
         if gid is None:
             return body
         size = self.size(style)
@@ -2805,7 +2814,7 @@ _WORDS_OWN = frozenset("+−=<>±×÷()[]|/!,;:.")
 """Signs set in the typography's face rather than the maths font's."""
 
 
-def _alphabet(char: str, font: str | None) -> str:
+def alphabet(char: str, font: str | None) -> str:
     if font == "bf" and char in _GREEK_BOLD:
         return _GREEK_BOLD[char]
     if font == "bi" and char in _GREEK_BOLD_ITALIC:
