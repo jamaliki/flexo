@@ -99,6 +99,7 @@ export class AssistantPanel {
       }
       case "idle": this.state.running = false; break;
       case "cleared": this.state.transcript = []; break;
+      case "availability": this.state.available = event.available; this.state.why = event.why; break;
       default: break;
     }
     this.render();

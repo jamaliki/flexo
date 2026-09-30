@@ -57,6 +57,7 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Gather the chosen parts into a row, column, grid or module (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
     { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
