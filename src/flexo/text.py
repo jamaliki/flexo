@@ -186,7 +186,11 @@ class FontStack:
         faces = [self.face(weight, italic, index) for index in range(len(self.families))]
         loaded = [load_face(face) for face in faces]
         pieces: list[tuple[FontFace, str]] = []
+        # Italic Greek the words' face lacks is TeX's, from the maths font -- a
+        # fallback's italic θ may be drawn as ϑ, which is another letter in maths.
         maths = self.maths_index()
+        if maths is None:
+            maths = self.maths_index("Latin Modern Math")
         if maths is not None and italic:
             # TeX's italic Greek is the mathematical italic alphabet of the maths font.
             text = "".join(
@@ -224,10 +228,10 @@ class FontStack:
                 pieces.append((face, cluster))
         return pieces
 
-    def maths_index(self) -> int | None:
-        """Where the typography's maths family sits in the stack, if it has one."""
+    def maths_index(self, name: str | None = None) -> int | None:
+        """Where the typography's maths family (or ``name``) sits in the stack, if it has one."""
 
-        name = self.typography.math_family
+        name = name or self.typography.math_family
         if not name:
             return None
         return next(
@@ -353,6 +357,17 @@ def drawn_weight(run: TextRun, inherited: int | None) -> int:
     return inherited
 
 
+def formula_of(run: TextRun, typography: TypographyStyle, inherited: int | None = None):
+    """The formula a maths run (``TextRun.math``) is set as, at the size its words would be."""
+
+    from flexo.texmath import typeset
+
+    scale = SHIFTED_SIZE if run.baseline_shift != "normal" else 1.0
+    return typeset(
+        run.math, typography, typography.size.points * scale, weight=drawn_weight(run, inherited)
+    )
+
+
 def script_shift(shift: str, italic: bool, typography: TypographyStyle) -> float:
     """How far a sub- or superscript run's baseline moves, in points, up positive.
 
@@ -416,6 +431,9 @@ def ink_descent(metrics: TextMetrics, typography: TypographyStyle) -> float:
     depth = metrics.descent
     for line in metrics.lines:
         for run in line.runs:
+            if run.math:
+                depth = max(depth, formula_of(run, typography).depth)
+                continue
             if run.baseline_shift != "sub":
                 continue
             font = font_data(run.italic, typography)
@@ -481,6 +499,17 @@ class TextMeasurer:
         leading = max(0.0, line_height - ascent - descent)
         baseline = leading / 2.0 + ascent
         cap = font.cap_height / font.upem * size if font.cap_height else 0.7 * size
+        # A formula taller than the line (a fraction, a matrix) opens the lines up
+        # enough to hold it; every line keeps the same step, so they stay even.
+        rise = fall = 0.0
+        for measured in measured_lines:
+            for run in measured.runs:
+                if run.math:
+                    formula = formula_of(run, self.typography, weight)
+                    rise = max(rise, formula.height - (ascent + leading / 2.0))
+                    fall = max(fall, formula.depth - (descent + leading / 2.0))
+        line_height += rise + fall
+        baseline += rise
         return TextMetrics(
             width=max((line.width for line in measured_lines), default=0.0),
             height=line_height * len(measured_lines),
@@ -512,6 +541,8 @@ class TextMeasurer:
         return width
 
     def _shape_run(self, run: TextRun, inherited: int | None = None) -> float:
+        if run.math:
+            return formula_of(run, self.typography, inherited).width
         if not run.text:
             return 0.0
         weight = drawn_weight(run, inherited)
@@ -560,15 +591,27 @@ class TextMeasurer:
         current: list[TextRun] = []
         current_width = 0.0
         for run in line:
-            tokens = _TOKEN_PATTERN.findall(run.text)
-            if break_words:
-                tokens = [
-                    piece
-                    for token in tokens
-                    for piece in self._pieces(replace(run, text=token), max_width, weight)
-                ]
-            for token in tokens:
-                token_run = replace(run, text=token)
+            if run.math:
+                # A formula wider than the line breaks where TeX would break it, after a
+                # relation or an operator at its top level; else it is one piece.
+                pieces = (run.math,)
+                inline = not run.math.startswith("\\displaystyle")
+                if inline and self._shape_run(run, weight) > max_width:
+                    from flexo.texmath import breakable
+
+                    pieces = breakable(run.math)
+                token_runs = [replace(run, math=piece) for piece in pieces]
+            else:
+                tokens = _TOKEN_PATTERN.findall(run.text)
+                if break_words:
+                    tokens = [
+                        piece
+                        for token in tokens
+                        for piece in self._pieces(replace(run, text=token), max_width, weight)
+                    ]
+                token_runs = [replace(run, text=token) for token in tokens]
+            for token_run in token_runs:
+                token = token_run.text
                 token_width = self._shape_run(token_run, weight)
                 is_space = token.isspace()
                 if current and not is_space and current_width + token_width > max_width:
@@ -605,6 +648,7 @@ class TextMeasurer:
 
     def _validate_glyphs(self, runs: tuple[TextRun, ...]) -> None:
         missing: set[str] = set()
+        runs = tuple(run for run in runs if not run.math)  # a formula brings its own glyphs
         for run in runs:
             missing |= self.stack.missing(run.text, run.italic)
         if missing and self.stack.adopt(missing):
@@ -644,7 +688,8 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
         runs.pop()
     merged: list[TextRun] = []
     for run in runs:
-        if merged and not run.accent and not merged[-1].accent and (
+        if merged and not run.accent and not merged[-1].accent and not run.math \
+                and not merged[-1].math and (
             merged[-1].weight,
             merged[-1].italic,
             merged[-1].baseline_shift,
@@ -664,7 +709,7 @@ def title_runs(runs: tuple[TextRun, ...], typography: TypographyStyle) -> tuple[
     if typography.title_transform != "upper":
         return runs
     return tuple(
-        replace(run, text=run.text.upper()) for run in runs
+        run if run.math else replace(run, text=run.text.upper()) for run in runs
     )
 
 

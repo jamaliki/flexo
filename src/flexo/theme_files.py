@@ -39,6 +39,7 @@ of named palettes (``palettes: {Lab: [...], Lab muted: [...]}``) registered with
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import types
@@ -65,6 +66,11 @@ CUSTOM_PALETTES: dict[str, tuple[str, ...]] = {}
 _LOADED: dict[str, tuple[int, str]] = {}
 """Theme files already registered: resolved path -> (when the file last changed, theme name).
 A file changed since is read again, so an edited theme is seen without restarting."""
+
+_OWNERS: dict[str, str] = {}
+"""Where each registered theme came from: a file's path, or the folder a theme written as a
+mapping was read in. A theme never takes the place of flexo's own, or of another file's
+of the same name: it is registered as ``name@<hash of where it came from>`` instead."""
 
 _ENVIRONMENT_LOADED = False
 
@@ -194,7 +200,8 @@ def register_theme(source: str | Path | Mapping[str, Any], *, folder: Path | Non
             hint='Write "theme: {name: my-theme, base: paper, ...}".',
         )
     _check_settings(settings)
-    name = str(settings["name"])
+    owner = str(path) if path is not None else f"mapping:{(folder or Path.cwd()).resolve()}"
+    name = _registered_name(str(settings["name"]), owner)
     base = theme(str(settings.get("base", "paper")))
     style = base.style
     typography = style.typography
@@ -247,9 +254,20 @@ def register_theme(source: str | Path | Mapping[str, Any], *, folder: Path | Non
     )
     THEMES.pop(name, None)
     _register(made)
+    _OWNERS[name] = owner
     if path is not None:
         _LOADED[str(path)] = (stamp, name)
     return name
+
+
+def _registered_name(name: str, owner: str) -> str:
+    """``name``, unless flexo's own theme or another source's already has it."""
+
+    from flexo.themes import BUILT_IN, THEMES
+
+    if name not in BUILT_IN and (name not in THEMES or _OWNERS.get(name) == owner):
+        return name
+    return f"{name}@{hashlib.sha256(owner.encode('utf-8')).hexdigest()[:8]}"
 
 
 def resolve_theme(reference: str) -> str | None:

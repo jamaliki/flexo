@@ -52,6 +52,7 @@ def lint_compilation(
     layout_style = style or figure_style(compilation.measured.semantic)
     diagnostics = [
         *_fitted_diagnostics(compilation),
+        *_maths_diagnostics(compilation),
         *_routing_diagnostics(compilation, layout_style),
         *_svg_diagnostics(compilation),
         *_publication_diagnostics(compilation, layout_style),
@@ -61,6 +62,33 @@ def lint_compilation(
 
 def lint_svg(svg_text: str) -> LintReport:
     return LintReport(_structural_svg_diagnostics(svg_text, expected_ids=()))
+
+
+def _maths_diagnostics(compilation: Compilation) -> list[Diagnostic]:
+    """Maths in a label that could not be read: it is drawn as far as it goes, the
+    rest in red, and said here in words."""
+
+    from flexo.texmath import problems_in
+
+    semantic = compilation.measured.semantic
+    labelled = [*semantic.nodes, *semantic.groups, *semantic.edges]
+    found: list[Diagnostic] = []
+    for item in labelled:
+        for run in getattr(item, "label", None) or ():
+            if not run.math:
+                continue
+            source = run.math.removeprefix("\\displaystyle ").strip()
+            shown = source if len(source) <= 40 else source[:39] + "\u2026"
+            for problem in problems_in(run.math):
+                found.append(
+                    Diagnostic(
+                        "label.math",
+                        f"{problem[:1].upper()}{problem[1:]}, in the maths \u201c{shown}\u201d.",
+                        Severity.WARNING,
+                        entity_id=item.id,
+                    )
+                )
+    return found
 
 
 def _fitted_diagnostics(

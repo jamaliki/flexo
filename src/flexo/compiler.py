@@ -52,17 +52,57 @@ def compile_figure(
                 break
     fitted = fit_figure(measured, style=layout_style)
     routed = route_figure(fitted, style=layout_style)
+    fitted, routed, slide = _judged_slides(measured, fitted, routed, layout_style)
     current, measured, fitted, routed = _with_room_rounds(
-        figure, measured, fitted, routed, layout_style
+        figure, measured, fitted, routed, layout_style, slide=slide
     )
     current, measured, fitted, routed = _uncrossed(
-        current, measured, fitted, routed, layout_style
+        current, measured, fitted, routed, layout_style, slide=slide
     )
     document = emit_svg(routed, style=layout_style, palette=paint_palette)
     return Compilation(measured, fitted, routed, document)
 
 
-def _with_room_rounds(figure, measured, fitted, routed, style):
+def _judged_slides(measured, fitted, routed, style):
+    """The layout with its groups slid to straighten arrows, if the routes agree.
+
+    Fitting slides a group on a prediction of where the router will put each
+    arrow; a port several arrows share can prove it wrong. So the figure is also
+    fitted with every group where its parent put it, and the slid layout is kept
+    only when its routes bend less and cross no more. Returns the chosen fitting,
+    its routes, and whether later refits should slide.
+    """
+
+    plain = fit_figure(measured, style=style, slide=False)
+    if plain.nodes == fitted.nodes:
+        return fitted, routed, True
+    plain_routed = route_figure(plain, style=style)
+    if _bends(routed) < _bends(plain_routed) and len(crossings(routed)) <= len(
+        crossings(plain_routed)
+    ):
+        return fitted, routed, True
+    return plain, plain_routed, False
+
+
+def _bends(routed: RoutedFigure) -> int:
+    """Corners in every drawn line: how far a figure's arrows are from straight."""
+
+    lines = [edge.centerline for edge in routed.edges]
+    for net in routed.nets:
+        lines += [net.rail, *net.trunks, *net.joins]
+        lines += [stem.centerline for stem in (*net.source_stems, *net.target_stems)]
+    return sum(_corners(line) for line in lines)
+
+
+def _corners(points) -> int:
+    count = 0
+    for before, at, after in zip(points, points[1:], points[2:], strict=False):
+        cross = (at.x - before.x) * (after.y - at.y) - (at.y - before.y) * (after.x - at.x)
+        count += abs(cross) > 1e-6
+    return count
+
+
+def _with_room_rounds(figure, measured, fitted, routed, style, *, slide=True):
     """Lay out again, up to ``ROOM_ROUNDS`` times, with the room routing asked for."""
 
     current = figure
@@ -73,7 +113,7 @@ def _with_room_rounds(figure, measured, fitted, routed, style):
         attempt = with_room(current, needs, style)
         try:
             next_measured = measure_figure(attempt, style=style)
-            next_fitted = fit_figure(next_measured, style=style)
+            next_fitted = fit_figure(next_measured, style=style, slide=slide)
         except FlexoError:
             break  # The room does not fit the figure's width: keep what routed.
         current, measured, fitted = attempt, next_measured, next_fitted
@@ -81,7 +121,7 @@ def _with_room_rounds(figure, measured, fitted, routed, style):
     return current, measured, fitted, routed
 
 
-def _uncrossed(figure, measured, fitted, routed, style):
+def _uncrossed(figure, measured, fitted, routed, style, *, slide=True):
     """Try a lane of room along a container's edge where it would take a crossing out.
 
     A route that crosses another often has a clean way round -- over the top
@@ -102,7 +142,7 @@ def _uncrossed(figure, measured, fitted, routed, style):
             attempt = with_room(figure, needs, style)
             try:
                 trial_measured = measure_figure(attempt, style=style)
-                trial_fitted = fit_figure(trial_measured, style=style)
+                trial_fitted = fit_figure(trial_measured, style=style, slide=slide)
             except FlexoError:
                 continue
             trial = _with_room_rounds(
@@ -111,6 +151,7 @@ def _uncrossed(figure, measured, fitted, routed, style):
                 trial_fitted,
                 route_figure(trial_fitted, style=style),
                 style,
+                slide=slide,
             )
             count = len(crossings(trial[3]))
             if count < best:

@@ -261,20 +261,46 @@ export const ui = {
     return node;
   },
 
-  swatches({ value, colours, onChange, none = true } = {}) {
+  // Colours to choose from; `custom` adds one more, any colour, from the system's picker.
+  swatches({ value, colours, onChange, none = true, custom = false } = {}) {
     const node = h("div.swatches");
     const all = [...(none ? [{ value: null, colour: null, title: "None" }] : []), ...colours];
+    const choose = (button, next) => { node.querySelectorAll(".swatch").forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(next); };
     const buttons = all.map((item) => {
       const button = h("button.swatch", { type: "button", title: item.title || item.value || "None",
         class: [item.value === (value ?? null) ? "on" : "", item.colour ? "" : "none"].join(" "),
-        style: item.colour ? { background: item.colour } : {},
-        onclick: () => { buttons.forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(item.value); } });
+        style: item.colour ? { background: item.colour, ...(item.border ? { borderColor: item.border } : {}) } : {},
+        onclick: () => choose(button, item.value) });
       return button;
     });
     node.append(...buttons);
+    if (custom) {
+      const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
+      const input = h("input", { type: "color", value: own || "#888888" });
+      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Your own colour", style: own ? { background: own } : {} }, icon("plus"), input);
+      input.addEventListener("input", () => { well.style.background = input.value; choose(well, input.value); });
+      node.append(well);
+    }
     return node;
   },
+
+  // One colour of a thing's own, or none (the theme's): a well that opens the system's
+  // picker, and a button to go back to the theme's.
+  colour({ value, onChange, title = "", key } = {}) {
+    const set = HEX.test(value || "") ? value : null;
+    const input = h("input", { type: "color", value: set || "#888888", "data-key": key });
+    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: set ? `${title} ${set}` : `${title}: the theme's` },
+      h("span.colour-chip", { style: set ? { background: set } : {} }), input);
+    input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
+    const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; onChange?.(null); },
+      { kind: "ghost", small: true, icon: "undo", title: "Back to the theme's" });
+    reset.hidden = !set;
+    input.addEventListener("input", () => { reset.hidden = false; });
+    return h("div.colour-control", {}, well, reset);
+  },
 };
+
+const HEX = /^#[0-9a-f]{6}$/i;
 
 function fit(area) {
   area.style.height = "auto";
@@ -382,3 +408,58 @@ export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}
   return node;
 }
 
+
+// -- maths, as words to read in a list ----------------------------------------------------
+
+const GREEK = "alpha α beta β gamma γ delta δ epsilon ϵ varepsilon ε zeta ζ eta η theta θ vartheta ϑ iota ι kappa κ lambda λ mu μ nu ν xi ξ pi π varpi ϖ rho ρ varrho ϱ sigma σ varsigma ς tau τ upsilon υ phi ϕ varphi φ chi χ psi ψ omega ω Gamma Γ Delta Δ Theta Θ Lambda Λ Xi Ξ Pi Π Sigma Σ Upsilon Υ Phi Φ Psi Ψ Omega Ω";
+const SIGNS = "cdot · times × pm ± mp ∓ div ÷ le ≤ leq ≤ ge ≥ geq ≥ ne ≠ neq ≠ approx ≈ sim ∼ simeq ≃ equiv ≡ propto ∝ in ∈ notin ∉ subset ⊂ subseteq ⊆ cup ∪ cap ∩ to → rightarrow → leftarrow ← Rightarrow ⇒ implies ⟹ iff ⟺ mapsto ↦ infty ∞ partial ∂ nabla ∇ sum Σ prod Π int ∫ oint ∮ sqrt √ mid | parallel ∥ ldots … dots … cdots ⋯ langle ⟨ rangle ⟩ forall ∀ exists ∃ neg ¬ wedge ∧ vee ∨ oplus ⊕ otimes ⊗ odot ⊙ circ ∘ ell ℓ hbar ℏ emptyset ∅ top ⊤ perp ⊥ star ⋆ ast ∗ prime ′ lVert ‖ rVert ‖ lvert | rvert | lfloor ⌊ rfloor ⌋ lceil ⌈ rceil ⌉ degree °";
+const TEX_WORDS = Object.fromEntries([...GREEK.split(" "), ...SIGNS.split(" ")].reduce((pairs, item, i, all) => (i % 2 ? pairs : [...pairs, [item, all[i + 1]]]), []));
+const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ", h: "ₕ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", p: "ₚ", s: "ₛ", t: "ₜ", i: "ᵢ", j: "ⱼ", r: "ᵣ", u: "ᵤ", v: "ᵥ" };
+const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", "⊤": "ᵀ", "′": "′", k: "ᵏ", t: "ᵗ", x: "ˣ", "*": "*" };
+const ALPHABET = { mathcal: [0x1d49c, { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ" }],
+  mathbb: [0x1d538, { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" }] };
+
+function script(text, table, mark) {
+  const chars = [...text];
+  return chars.every((ch) => ch in table) ? chars.map((ch) => table[ch]).join("") : `${mark}${text.length > 1 ? `(${text})` : text}`;
+}
+
+// A fraction's part in brackets when it is more than one term.
+const grouped = (tex) => { const words = mathWords(tex); return /[\s+−\-=/·×]/.test(words) ? `(${words})` : words; };
+
+// A formula as a line of words: Greek and signs as themselves, fractions as a/b,
+// scripts raised or lowered where Unicode can, commands without their backslashes.
+export function mathWords(tex) {
+  let text = String(tex ?? "").replace(/\\(left|right|big|Big|bigg|Bigg)[lrm]?\b\.?/g, "")
+    .replace(/\\(displaystyle|textstyle|limits|nolimits|,|;|:|!|quad|qquad)\b|\\[,;:!]/g, " ")
+    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, " ").replace(/&/g, "").replace(/\\\\/g, "; ");
+  for (let i = 0; i < 20; i++) {
+    const before = text;
+    text = text
+      .replace(/\\[dtc]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a, b) => `${grouped(a)}/${grouped(b)}`)
+      .replace(/\\sqrt\{([^{}]*)\}/g, (_, a) => `√${grouped(a)}`)
+      .replace(/\\(mathcal|mathbb)\{([A-Z])\}/g, (_, font, ch) => ALPHABET[font][1][ch] || String.fromCodePoint(ALPHABET[font][0] + ch.charCodeAt(0) - 65))
+      .replace(/\\(mathrm|mathbf|mathit|mathsf|mathtt|text|textrm|textbf|operatorname\*?|boldsymbol|bm|hat|bar|tilde|vec|dot|overline|underline|mathcal|mathbb|mathfrak|ce)\{([^{}]*)\}/g, "$2")
+      .replace(/_\{([^{}]*)\}/g, (_, a) => script(a, SUB, "_"))
+      .replace(/\^\{([^{}]*)\}/g, (_, a) => script(a, SUP, "^"))
+      // A group of its own (not a command's argument) is only its contents.
+      .replace(/(^|[^A-Za-z}])\{([^{}]*)\}/g, "$1$2");
+    if (text === before) break;
+  }
+  return text
+    .replace(/\\([A-Za-z]+)/g, (_, name) => TEX_WORDS[name] ?? name)
+    .replace(/\\([{}$%#&_|])/g, "$1")
+    .replace(/_([^\s_^])/g, (_, a) => script(a, SUB, "_"))
+    .replace(/\^([^\s_^])/g, (_, a) => script(a, SUP, "^"))
+    .replace(/'/g, "′").replace(/-/g, "−").replace(/\s+/g, " ").trim();
+}
+
+// Words in flexo markup as they read: maths as words, emphasis, links and colours as plain words.
+export function readable(markup) {
+  return String(markup ?? "").replace(/\\\$/g, "\u0000")
+    .replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g, (_, a, b, c) => mathWords(a ?? b ?? c))
+    .replace(/\$(?!\s)([^$]+?)(?<!\s)\$(?!\d)/g, (_, tex) => mathWords(tex))
+    .replace(/\u0000/g, "$")
+    .replace(/\[([^\]]+)\]\{[^}]+\}/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*|\*|`/g, "");
+}

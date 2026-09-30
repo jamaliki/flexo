@@ -134,6 +134,10 @@ class TextRun:
     color: str = ""
     """A colour for these words (``[words]{accent}``): a palette role, a friendly name
     (``accent``, ``accent2``..., ``muted``), or ``#rrggbb``. Empty: the text's own."""
+    math: str = ""
+    """LaTeX maths set in two dimensions (``flexo.texmath``): a fraction, a radical, a
+    matrix. The run is measured and drawn as that formula, and ``text`` is only what it
+    reads as in plain words. Empty for words, and for maths set as words (``x_t``)."""
 
 
 @dataclass(frozen=True, slots=True)
