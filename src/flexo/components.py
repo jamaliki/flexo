@@ -411,6 +411,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ComponentDefinition("timeline", Size(0.0, 0.0), _STANDARD),
         # A molecule drawn by mol-sketch (flexo.structures), wired at its sides.
         ComponentDefinition("structure", Size(0.0, 0.0), _STANDARD),
+        # A grid of cells (flexo.cells): a plate map, a heatmap, a number square.
+        ComponentDefinition("cells", Size(0.0, 0.0), _STANDARD),
     )
 }
 

@@ -46,6 +46,7 @@ export const GLYPHS = {
   wellplate: "M2.5 3.5h11v9h-11zM5 6h.01M8 6h.01M11 6h.01M5 10h.01M8 10h.01M11 10h.01",
   timeline: "M1.5 8h13M4 8a1 1 0 100 .1M8 8a1 1 0 100 .1M12 8a1 1 0 100 .1M4 11.5h8",
   structure: "M2 11c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
+  cells: "M2.5 2.5h3v3h-3zM9.5 2.5h3v3h-3zM6 6h3v3H6zM2.5 9.5h3v3h-3zM9.5 9.5h3v3h-3z",
   row: "M1.5 5h3.5v6H1.5zM6.25 5h3.5v6h-3.5zM11 5h3.5v6H11z",
   column: "M4.5 1.5h7v3.5h-7zM4.5 6.25h7v3.5h-7zM4.5 11h7v3.5h-7z",
   grid: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
