@@ -71,6 +71,9 @@ def _grid(
         return
     area = _motif_bounds(node, style)
     motif = element(parent, "g", id=f"{node.measured.spec.id}.grid")
+    width = max(0.8, area.width / columns - 0.8)
+    height = max(0.8, area.height / rows - 0.8)
+    radius = min(style.vector_cell_radius.points, min(width, height) / 4)  # as a vector's cells
     for row in range(rows):
         for column in range(columns):
             fraction = ((row * 3 + column * 2) % 7) / 8.0 + 0.12
@@ -79,9 +82,9 @@ def _grid(
                 "rect",
                 x=area.x + column * area.width / columns,
                 y=area.y + row * area.height / rows,
-                width=max(0.8, area.width / columns - 0.8),
-                height=max(0.8, area.height / rows - 0.8),
-                rx=0.4,
+                width=width,
+                height=height,
+                rx=radius,
                 opacity=fraction,
                 **paint_attributes(palette=palette, fill_role="accent-motif"),
             )
