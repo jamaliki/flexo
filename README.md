@@ -884,4 +884,9 @@ version.
 - explicit editorial layout with bounded local automation;
 - linting that reads the finished figure and never feeds back into it.
 
-The repository is public but does not yet declare an open-source license.
+## License
+
+Flexo is licensed under the [Apache License 2.0](LICENSE). The fonts in
+`src/flexo/resources/fonts` keep their own licenses, which sit beside them: the SIL
+Open Font License for Caveat, Figtree, IBM Plex Sans and Kalam, the GUST Font License
+for Latin Modern, and Liberation's license for Liberation Sans.
