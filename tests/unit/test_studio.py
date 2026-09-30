@@ -533,6 +533,64 @@ def test_two_studios_on_one_folder_are_both_found_until_each_closes(tmp_path: Pa
         second.server_close()
 
 
+def test_a_folder_is_trusted_to_run_its_code_when_its_person_says(tmp_path: Path) -> None:
+    from flexo.studio import code_allowed, folder_root
+
+    server, workspace = start(tmp_path, browser=False, trusted=False)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        listener = workspace.listen("page", PERSON)
+        assert call(f"{url}/api/session", workspace.token)[1]["trusted"] is False
+        with workspace.running():
+            assert code_allowed.get() is False and folder_root.get() == tmp_path.resolve()
+        assert code_allowed.get() is True and folder_root.get() is None
+        assert call(f"{url}/api/trust", workspace.token, {})[0] == 200
+        assert call(f"{url}/api/session", workspace.token)[1]["trusted"] is True
+        events = [listener.events.get(timeout=2) for _ in range(listener.events.qsize())]
+        assert {"type": "trusted"} in events
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path: Path) -> None:
+    import struct
+    import zlib
+
+    folder = tmp_path / "sent"
+    folder.mkdir()
+
+    def png(path: Path) -> None:
+        rows = b"\x00\xff\x00\x00"
+        chunk = lambda kind, data: (  # noqa: E731
+            struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        )
+        header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                         + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+    png(tmp_path / "private.png")
+    png(folder / "own.png")
+    figure = (
+        "figure: {id: f}\nnodes:\n"
+        "- {id: a, kind: image, label: A, properties: {source: %s}}\n"
+    )
+    workspace = Workspace(folder)
+    try:
+        for source, allowed in ((folder / "own.png", True), (tmp_path / "private.png", False)):
+            name = f"{source.stem}.yaml"
+            (folder / name).write_text(figure % source)
+            doc = workspace.open(name)
+            drawn = workspace.draw(name, doc.document, 1, {}, {})
+            refused = any("outside the folder" in m["text"] for m in drawn["messages"])
+            assert refused is not allowed, drawn["messages"]
+    finally:
+        workspace.close()
+
+
 # -- themes --------------------------------------------------------------------------------
 
 
