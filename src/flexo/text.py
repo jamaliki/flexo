@@ -591,16 +591,27 @@ class TextMeasurer:
         current: list[TextRun] = []
         current_width = 0.0
         for run in line:
-            # A formula is one piece: it is never broken across lines.
-            tokens = [run.text] if run.math else _TOKEN_PATTERN.findall(run.text)
-            if break_words and not run.math:
-                tokens = [
-                    piece
-                    for token in tokens
-                    for piece in self._pieces(replace(run, text=token), max_width, weight)
-                ]
-            for token in tokens:
-                token_run = replace(run, text=token)
+            if run.math:
+                # A formula wider than the line breaks where TeX would break it, after a
+                # relation or an operator at its top level; else it is one piece.
+                pieces = (run.math,)
+                inline = not run.math.startswith("\\displaystyle")
+                if inline and self._shape_run(run, weight) > max_width:
+                    from flexo.texmath import breakable
+
+                    pieces = breakable(run.math)
+                token_runs = [replace(run, math=piece) for piece in pieces]
+            else:
+                tokens = _TOKEN_PATTERN.findall(run.text)
+                if break_words:
+                    tokens = [
+                        piece
+                        for token in tokens
+                        for piece in self._pieces(replace(run, text=token), max_width, weight)
+                    ]
+                token_runs = [replace(run, text=token) for token in tokens]
+            for token_run in token_runs:
+                token = token_run.text
                 token_width = self._shape_run(token_run, weight)
                 is_space = token.isspace()
                 if current and not is_space and current_width + token_width > max_width:

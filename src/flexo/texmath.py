@@ -1273,7 +1273,7 @@ class _Parser:
             return Group([*_number(self.word_argument()), Sym("°")])
         if name == "degree":
             return Sym("°")
-        self.said(f"\\{name} is not a maths command flexo knows")
+        self.said(f"\\{name} is not a maths command flexo knows{_nearest(name)}")
         return Mistake(f"\\{name}")
 
     def length(self, command: str) -> float:
@@ -1367,6 +1367,31 @@ class _Parser:
 
 
 # fmt: off
+_COMMANDS = frozenset({
+    *GREEK, *ORDINARY, *BINARY, *RELATION, *OPENING, *CLOSING, *PUNCTUATION, *BIG_OPERATORS,
+    *NAMED, *NAMED_LIMITS, *ACCENTS, *SPACES, *FONT_COMMANDS, *FONT_SWITCHES, *TEXT_COMMANDS,
+    "frac", "dfrac", "tfrac", "cfrac", "binom", "dbinom", "tbinom", "over", "choose", "atop",
+    "sqrt", "left", "right", "middle", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl",
+    "Bigr", "biggl", "biggr", "Biggl", "Biggr", "overline", "underline", "overbrace",
+    "underbrace", "overrightarrow", "overleftarrow", "overleftrightarrow", "xrightarrow",
+    "xleftarrow", "xleftrightarrow", "xRightarrow", "xLeftarrow", "xmapsto", "overset",
+    "underset", "stackrel", "substack", "operatorname", "mathop", "mathbin", "mathrel",
+    "mathord", "textcolor", "color", "phantom", "hphantom", "vphantom", "smash", "boxed",
+    "not", "begin", "end", "hline", "pmod", "bmod", "mod", "ce", "si", "SI", "num", "ang",
+    "displaystyle", "textstyle", "scriptstyle", "hspace", "limits", "nolimits",
+})
+"""Every command the reader knows, for suggesting one when a name is mistyped."""
+
+
+def _nearest(name: str) -> str:
+    """A command near ``name`` (``\\xrigtarrow``: ``\\xrightarrow``), as a suggestion."""
+
+    import difflib
+
+    found = difflib.get_close_matches(name, [c for c in _COMMANDS if len(c) > 1], n=1, cutoff=0.75)
+    return f": did you mean \\{found[0]}?" if found and len(name) > 1 else ""
+
+
 _TEXT_SYMBOLS = {
     "%": "%", "&": "&", "#": "#", "$": "$", "_": "_", "{": "{", "}": "}", " ": " ",
     ",": "\u2009", ";": "\u2005", "quad": "\u2003", "qquad": "\u2003\u2003",
@@ -2874,6 +2899,39 @@ def _implicit_rows(items: list, display: bool) -> list:
             lines=frozenset(lines),
         )
     ]
+
+
+@lru_cache(maxsize=1024)
+def breakable(source: str) -> tuple[str, ...]:
+    """``source`` cut where TeX may break a line of maths: after each relation and
+    operator at its top level (not inside braces, brackets that grow, or an
+    environment), which ends its line. A piece ending in a sign ends with an empty
+    atom too, so set side by side the pieces space their signs as the whole would."""
+
+    tokens = _tokens(source)
+    pieces: list[str] = [""]
+    depth = 0
+    for index, token in enumerate(tokens):
+        raw = ("\\" + token.value) if token.kind == "command" else token.value
+        if token.kind == "char" and token.value == "{":
+            depth += 1
+        elif token.kind == "char" and token.value == "}":
+            depth = max(0, depth - 1)
+        elif token.kind == "command" and token.value in {"left", "begin"}:
+            depth += 1
+        elif token.kind == "command" and token.value in {"right", "end"}:
+            depth = max(0, depth - 1)
+        sign = (token.kind == "char" and token.value in "=<>+-") or (
+            token.kind == "command" and (token.value in RELATION or token.value in BINARY)
+        )
+        previous = next((t for t in reversed(tokens[:index]) if t.kind != "space"), None)
+        scripted = previous is not None and previous.kind == "char" and previous.value in "^_"
+        if depth == 0 and sign and not scripted and pieces[-1].strip():
+            pieces[-1] += raw + "{}"
+            pieces.append("")
+            continue
+        pieces[-1] += raw
+    return tuple(piece for piece in pieces if piece.strip())
 
 
 @lru_cache(maxsize=4096)
