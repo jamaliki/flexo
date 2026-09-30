@@ -9,7 +9,7 @@
 .setting.changed .setting-dot { background: var(--accent); }
 .setting.changed .setting-label { color: var(--ink); font-weight: 560; }
 .setting-control { min-width: 0; }
-.setting-reset { width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
+.setting-reset { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
 .setting-reset:disabled { visibility: hidden; }
 .setting-reset:hover { background: var(--sunken); color: var(--ink); }
 .setting-reset svg { width: 13px; height: 13px; }

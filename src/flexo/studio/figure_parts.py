@@ -660,13 +660,14 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         _field("figure.id", "Name", "text"),
         _field(
-            "figure.style", "Theme", "combo", options=catalog.get("themes", []), default="paper"
+            "figure.style", "Theme", "theme", options=catalog.get("themes", []), default="paper"
         ),
         _field(
             "figure.palette",
             "Palette",
-            "combo",
+            "palette",
             options=["default", *sorted(catalog.get("palettes", {}))],
+            colours=catalog.get("palettes", {}),
             default="default",
         ),
         _field(

@@ -97,7 +97,30 @@ def test_a_theme_path_in_a_figure_file_is_found_beside_it(tmp_path: Path) -> Non
         "edges: [{from: a, to: b}]\n"
     )
     spec = flexo.load_figure(tmp_path / "figure.yaml")
-    assert theme(spec.style).name == "lab-test"
+    assert theme(spec.style).name.split("@")[0] == "lab-test"
+    assert theme(spec.style).description == "A test lab."
+
+
+def test_a_theme_file_never_takes_the_place_of_flexo_s_own_or_another_file_s(
+    tmp_path: Path,
+) -> None:
+    from flexo.themes import resolve_palette
+
+    before = resolve_palette("paper").get("canvas")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "night.yaml").write_text(
+        "theme: {name: paper, base: dark, palette: ['#ff0000']}\n"
+    )
+    (tmp_path / "b" / "night.yaml").write_text(
+        "theme: {name: paper, base: paper, palette: ['#0000ff']}\n"
+    )
+    first = flexo.register_theme(tmp_path / "a" / "night.yaml")
+    second = flexo.register_theme(tmp_path / "b" / "night.yaml")
+    assert first != second and "paper" not in {first, second}
+    assert resolve_palette("paper").get("canvas") == before
+    assert resolve_palette(first).get("canvas") != before
+    assert flexo.register_theme(tmp_path / "a" / "night.yaml") == first
 
 
 def test_themes_on_the_theme_path_load_themselves(

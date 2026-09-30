@@ -5,6 +5,7 @@
 export { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast } from "./ui.js";
 export { merge3, same } from "./merge.js";
 export { avatar, colourOf, ago, copyable } from "./shell.js";
+export { themeCard, themeField, themeUses, themesFor } from "./themes.js";
 import { start } from "./shell.js";
 
 // Draw a form again without taking the field someone is typing in away from them.

@@ -15,6 +15,7 @@ import json
 import mimetypes
 import queue
 import secrets
+import socketserver
 import sys
 import threading
 import traceback
@@ -27,6 +28,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from flexo.studio import sessions
+from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
@@ -37,6 +39,16 @@ FILE_TYPES = {
     "theme": (".yaml", ".yml", ".json"),
     "structure": (".pdb", ".cif", ".mmcif", ".ent"),
 }
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        # HTTPServer asks DNS what its address is called, a reverse lookup that can wait
+        # half a minute on macOS (inside an app, say); nothing here uses the name.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -59,7 +71,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
         encoding = None
-        compressible = len(body) > 2048 and not kind.startswith("font/")
+        # Fonts and photographs are compressed already.
+        packed = kind.startswith(("font/", "image/png", "image/jpeg"))
+        compressible = len(body) > 2048 and not packed
         if compressible and "gzip" in self.headers.get("Accept-Encoding", ""):
             body = gzip.compress(body, compresslevel=5)
             encoding = "gzip"
@@ -156,10 +170,10 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(HTTPStatus.NOT_FOUND, str(error))
         except ValueError as error:
             # Something the document says (a missing file, a malformed block): the page shows it.
-            self._fail(HTTPStatus.BAD_REQUEST, str(error))
+            self._fail(HTTPStatus.BAD_REQUEST, explain(error))
         except Exception as error:
             traceback.print_exc()
-            self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
+            self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, explain(error))
 
     def _font(self, name: str) -> None:
         """The bundled fonts, which drawings in the studio name rather than embed."""
@@ -199,8 +213,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._files(_one(query, "file"), types))
         elif route == "/api/raw":
             self._raw(query)
+        elif route == "/api/picture":
+            # A photograph a drawing names: its address carries its version, so it keeps.
+            path = workspace.path(_one(query, "path"))
+            if path.suffix.lower() not in {".png", ".jpg", ".jpeg"} or not path.is_file():
+                raise FileNotFoundError(f"no picture {_one(query, 'path')}")
+            from flexo.studio import pictures
+
+            body, kind = pictures.shown(path)
+            self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
             self._events(_one(query, "client"), (query.get("name") or ["You"])[0])
+        elif route == "/api/themes":
+            from flexo.studio import theming
+
+            self._json({"themes": theming.cards(workspace, _one(query, "file"))})
+        elif route == "/api/theme/uses":
+            from flexo.studio import theming
+
+            self._json({"documents": theming.uses(workspace, _one(query, "file"))})
         elif route == "/api/agent/tools":
             from flexo.studio.agent import TOOLS
 
@@ -241,7 +272,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/export":
             doc = workspace.open(name)
             document = data.get("document", doc.document)
-            with workspace.drawing:
+            with workspace.drawing, workspace.running():
                 written = doc.kind.export(
                     document, doc.path.parent, doc.path.stem, list(data.get("formats") or [])
                 )
@@ -256,6 +287,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(act(data.get("document", doc.document), data.get("action") or {},
                            doc.path.parent))
+        elif route == "/api/theme/use":
+            from flexo.studio import theming
+
+            targets = [str(target) for target in data.get("targets") or []]
+            self._json({"documents": theming.use(workspace, name, targets, who)})
+        elif route == "/api/trust":
+            workspace.trust()
+            self._json({"ok": True})
         elif route == "/api/presence":
             workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
             self._json({"ok": True})
@@ -284,6 +323,7 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "folder": str(workspace.root),
             "address": getattr(workspace, "address", ""),
+            "trusted": workspace.trusted,
             "kinds": [
                 {"name": kind.name, "title": kind.title} for kind in workspace.kinds.values()
             ],
@@ -410,7 +450,13 @@ def _agent_tools(workspace: Workspace, who: dict[str, Any]):
         key = (id(workspace), ident)
         if key not in _AGENTS:
             _AGENTS[key] = Tools(workspace, {"id": ident, "name": str(who.get("name") or "Agent")})
+            workspace.on_close.append(lambda: _forget(key))
         return _AGENTS[key]
+
+
+def _forget(key: tuple[int, str]) -> None:
+    with _AGENTS_LOCK:
+        _AGENTS.pop(key, None)
 
 
 def _assistant(workspace: Workspace):
@@ -428,15 +474,17 @@ def start(
     port: int = 0,
     kind: str | None = None,
     browser: bool = True,
+    trusted: bool = True,
 ) -> tuple[ThreadingHTTPServer, Workspace]:
-    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``)."""
+    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``).
+    Code the folder brings runs only if it is ``trusted`` (the app asks; a person who
+    starts ``flexo studio`` in a folder has chosen it)."""
 
     path = Path(target or ".").resolve()
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
-    workspace = Workspace(folder, kind=kind)
+    workspace = Workspace(folder, kind=kind, trusted=trusted)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    server.daemon_threads = True
+    server = Server(("127.0.0.1", port), handler)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]
@@ -466,7 +514,7 @@ def serve(
         print()
     finally:
         workspace.close()
-        sessions.unregister(workspace.root)
+        sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
 
 

@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.diagnostics import Diagnostic, FlexoError, described
 
 POINTS_PER_INCH = 72.0
 MILLIMETRES_PER_INCH = 25.4
@@ -45,7 +45,9 @@ class Length:
             return cls(float(value))
         if not isinstance(value, str):
             raise FlexoError(
-                Diagnostic("length.type", f"Expected a length, received {type(value).__name__}.")
+                Diagnostic(
+                    "length.type", f"Expected a length such as 12pt or 3mm, not {described(value)}."
+                )
             )
         match = _LENGTH_PATTERN.match(value)
         if match is None:

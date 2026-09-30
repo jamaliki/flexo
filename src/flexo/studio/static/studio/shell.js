@@ -114,7 +114,7 @@ export class Workspace {
     session.active = true;
     session.emit("activate");
     history.replaceState(null, "", `?file=${encodeURIComponent(file)}`);
-    document.title = `${file.split("/").pop()} — Flexo studio`;
+    document.title = `${file.split("/").pop()} — Flexo Studio`;
     this.emit("active", session);
     this.reportFocus(file, null);
   }
@@ -193,10 +193,20 @@ export class Workspace {
         if (session && event.client !== this.client) session.emit("remote", event);
         break;
       case "saved": session?.saved(event.version); break;
-      case "problem": if (session) { session.problem = event.text; session.emit("status"); } break;
+      case "problem":
+        if (session) {
+          if (session.problem !== event.text) toast(event.text, { kind: "error", icon: "error", seconds: 8 });
+          session.problem = event.text; session.emit("status");
+        }
+        break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
+      case "trusted":
+        this.info.trusted = true;
+        for (const session of this.sessions.values()) session.requestDraw(0);
+        this.emit("trusted");
+        break;
       case "opened":
         if (!this.sessions.has(event.file)) {
           this.open(event.file, { activate: this.follow }).then(() => {
@@ -246,6 +256,10 @@ export async function start() {
   }
   const workspace = new Workspace(info);
   window.flexoStudio = workspace;
+  // Settled once the tabs open when the page was last left are open again: what an app
+  // around the page asks (open this document) waits for it, rather than being undone.
+  let settled;
+  workspace.ready = new Promise((done) => { settled = done; });
 
   // -- the top bar --
   const tabs = h("nav.tabs.scroll-thin");
@@ -264,7 +278,7 @@ export async function start() {
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
   showTheme();
   const bar = h("header.bar", {},
-    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo studio")),
+    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo Studio")),
     tabs,
     h("div.spacer"),
     paletteButton,
@@ -283,7 +297,58 @@ export async function start() {
   const views = h("main.views");
   const doing = h("div.doing-strip");
   const side = new SidePanel(workspace);
-  const body = h("div.workbench", {}, h("div.center", {}, docbar, views, doing), side.node);
+  // A folder someone else made runs none of its own Python until its person says so.
+  const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
+    h("div.trust-words", {}, h("b", {}, "This folder's Python has not been run. "),
+      "A deck here draws with Python files from the folder. Run them only if you trust where the folder came from."),
+    ui.button("Trust and run", async () => {
+      try { await workspace.api("/api/trust", {}); }
+      catch (error) { toast(`Could not trust the folder: ${error.message}`, { kind: "error", icon: "error" }); }
+    }, { kind: "primary", small: true }));
+  const untrusted = (drawn) => {
+    if (!workspace.info.trusted && drawn?.messages?.some((message) => message.code === "code.untrusted")) trustBar.hidden = false;
+  };
+  workspace.on("opened", (session) => session.on("drawn", untrusted));
+  workspace.on("trusted", () => { trustBar.hidden = true; });
+
+  // -- the Mac app: its menus do what the page does, and it is told what they may do --
+  workspace.command = (name, arg) => {
+    const session = workspace.active;
+    switch (name) {
+      case "undo": session?.undo(); break;
+      case "redo": session?.redo(); break;
+      case "save":
+        session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+          (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+        break;
+      case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
+      case "present": session?.present?.(); break;
+      case "palette": palette(workspace); break;
+      case "assistant": side.toggle("assistant"); break;
+      case "activity": side.toggle("activity"); break;
+      case "new": askName(workspace, arg, { figure: "figure.yaml", deck: "talk.yaml", theme: "theme.yaml" }[arg] || "document.yaml"); break;
+      case "close-tab": if (session) workspace.close(session.file); break;
+      case "agents": connectDialog(workspace); break;
+      case "shortcuts": shortcutsDialog(); break;
+      default: break;
+    }
+  };
+  let reporting = null;
+  const report = () => {
+    if (reporting) return;
+    reporting = setTimeout(() => {
+      reporting = null;
+      const session = workspace.active;
+      window.pywebview?.api?.studio_state?.({
+        file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
+        can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
+        exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
+      });
+    }, 80);
+  };
+  for (const event of ["status", "active", "opened", "closed", "documents"]) workspace.on(event, report);
+  window.addEventListener("pywebviewready", report);
+  const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
   clear(root, h("div.studio", {}, bar, body));
 
   // -- keeping the frame current --
@@ -331,7 +396,7 @@ export async function start() {
     const state = session.state;
     status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
     status.title = session.problem || "";
-    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? "Not saved: the file on disk does not read" : "Saving…";
+    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "the file on disk does not read: ")}` : "Saving…";
   };
 
   const renderViews = () => {
@@ -388,7 +453,11 @@ export async function start() {
     if (mod && key === "k") { event.preventDefault(); palette(workspace); return; }
     if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
     if (document.querySelector(".scrim, .present")) return;
-    if (mod && key === "s") { event.preventDefault(); session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 })); }
+    if (mod && key === "s") {
+      event.preventDefault();
+      session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+        (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+    }
     else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
     else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
     else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
@@ -403,6 +472,7 @@ export async function start() {
     try { await workspace.open(file, { activate: file === first || (!first && file === tabsToOpen[tabsToOpen.length - 1]) }); }
     catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
   }
+  settled();
   renderViews();
   if (remembered("side", "") && info.assistant) side.show(remembered("side", ""));
 }

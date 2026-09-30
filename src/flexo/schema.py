@@ -8,7 +8,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from flexo.diagnostics import Diagnostic, FlexoError
+from flexo.diagnostics import Diagnostic, FlexoError, described
 
 
 def load_schema() -> dict[str, Any]:
@@ -28,11 +28,56 @@ def validate_document(document: object) -> None:
         diagnostics.append(
             Diagnostic(
                 "schema.invalid",
-                f"{location}: {error.message}",
+                f"{location}: {_said(error)}",
                 entity_id=entity_id,
             )
         )
     raise FlexoError(diagnostics)
+
+
+TYPES = {
+    "object": "a set of settings",
+    "array": "a list",
+    "string": "words",
+    "number": "a number",
+    "integer": "a whole number",
+    "boolean": "yes or no",
+    "null": "nothing",
+}
+
+
+def _said(error: Any) -> str:
+    """What the schema found wrong, in words rather than the checker's own (which shows
+    the value as Python writes it)."""
+
+    kind, expected, value = error.validator, error.validator_value, error.instance
+    if kind == "type":
+        wanted = [expected] if isinstance(expected, str) else list(expected)
+        names = " or ".join(TYPES.get(item, item) for item in wanted)
+        return f"should be {names}, not {described(value)}"
+    if kind == "required":
+        missing = [name for name in expected if isinstance(value, dict) and name not in value]
+        return f"needs {', '.join(missing) or 'more'}"
+    if kind == "additionalProperties" and isinstance(value, dict):
+        allowed = set((error.schema.get("properties") or {}).keys())
+        extra = [str(name) for name in value if name not in allowed]
+        return f"takes no {', '.join(extra)}" if extra else error.message
+    if kind == "enum":
+        choices = ", ".join(str(item) for item in expected)
+        return f"should be one of {choices}, not {described(value)}"
+    if kind in {"minimum", "exclusiveMinimum"}:
+        return f"should be at least {expected}, not {described(value)}"
+    if kind in {"maximum", "exclusiveMaximum"}:
+        return f"should be at most {expected}, not {described(value)}"
+    if kind == "minItems":
+        return f"needs at least {expected} item{'s' if expected != 1 else ''}"
+    if kind == "pattern":
+        return f"is not written as expected ({described(value)})"
+    if kind in {"oneOf", "anyOf"}:
+        return f"is not written as expected ({described(value)})"
+    if len(error.message) < 120:
+        return error.message
+    return f"is not written as expected ({described(value)})"
 
 
 def _entity_id(document: object, location: tuple[object, ...]) -> str | None:
