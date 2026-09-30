@@ -1,6 +1,6 @@
 ---
 name: flexo
-description: Make publication-quality, editable scientific and neural-network figures (architectures, pipelines, flowcharts, graphical models) in Python or YAML with flexo. Use when asked to draw or reproduce a model diagram, block diagram, flowchart, state machine, Bayesian network, or any boxes-and-arrows figure for a paper, poster, or slide.
+description: Make publication-quality, editable scientific figures in Python or YAML with flexo -- neural-network architectures, pipelines, flowcharts, graphical models, and biology (genetic constructs, plasmid maps, protein domain maps, phylogenetic trees, well plates, protocol timelines, pathways with SBGN arrows, molecular structures drawn by hand). Use when asked to draw or reproduce a model diagram, block diagram, flowchart, state machine, Bayesian network, pathway, construct, or any boxes-and-arrows figure for a paper, poster, or slide, or to work on figures in flexo studio.
 ---
 
 # Making figures with flexo
@@ -9,6 +9,17 @@ flexo compiles a description of *what* a figure shows -- components and the valu
 that flow between them -- into an SVG made of ordinary editable objects. You never
 give coordinates, sizes, colours, ports, or routes: it measures every word, lays
 the figure out, routes every arrow, places every caption, and checks the result.
+
+## Setup
+
+```bash
+uv sync --all-groups --all-extras    # in the flexo checkout: Python 3.12 to 3.14
+```
+
+Extras: `structures` (gemmi: read PDB/mmCIF), `molecules` (mol-sketch, for
+`structure()`; it needs skia-python, which has wheels up to Python 3.14 only),
+`assistant` (the Anthropic SDK, for Claude in the studio). Everything else is pure
+Python plus wheels: no Inkscape, no Cairo, no LaTeX.
 
 ## The loop
 
@@ -53,11 +64,46 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 (operator circles; label with the symbol, caption the edge out), `circle`
 (`shaded=True` for observed), `decision`, `terminal`, `loss`, `prediction`,
 `concat`, `tensor`, `matrix`, `sequence`, `vector`, `volume`, `feature_strip`,
-`graph`, `image(id, "art.svg")`, `inset`, `legend(entries=, badges=)`. Nets:
+`graph`, `image(id, "art.svg" or "photo.png")`, `inset`, `legend(entries=, badges=)`. Nets:
 `figure.net(src=a, sinks=[b, c])` (one value to many), `figure.merge(sinks=[a, b], dst=c)`,
 `figure.residual(a, b)`. Any component: `tone="name"` (same tone = same colour),
 `badge="frozen"|"trained"|"tuned"` (snowflake/flame/bolt), `paint={"fill": "#..."}`,
 `width=`, `height=`.
+
+### Biology
+
+Each is one component: it sizes itself, colours its parts by name (a tone per
+gene, per domain, per condition), and has ports where arrows belong.
+
+- `construct(id, parts=[{"type": "promoter", "label": "pTet"}, {"type": "cds",
+  "label": "GFP", "id": "gfp"}, {"type": "terminator"}])`: SBOL Visual glyphs on
+  a backbone (`promoter`, `rbs`, `cds`/`gene`, `terminator`, `operator`, `origin`,
+  `insulator`, `primer`, `site`, `region`, `spacer`); `"strand": "-"` points left;
+  a part with an `id` is a port (`handle.port("gfp")`), so a gene can point at
+  what it makes.
+- `plasmid(id, length=5400, features=[{"type": "cds", "label": "AmpR",
+  "start": 100, "end": 960}, {"type": "site", "label": "EcoRI", "start": 396}])`:
+  a circular map, features as arcs by base pair, labels outside on leaders.
+- `protein(id, length, features=[{"type": "domain", "label": "SH3", "start": 60,
+  "end": 120}, {"type": "mutation", "label": "T315I", "at": 315}])`: a domain map
+  to scale (`region`, `motif`, `transmembrane`, `signal`, sites as lollipops,
+  `disulfide` brackets), with `secondary=` / `sequence=` tracks.
+  `flexo.from_uniprot("P00519", sites=True)` or `flexo.from_structure("1abc.cif")`
+  returns `protein()`'s arguments: `figure.protein("abl", **flexo.from_uniprot(...))`.
+- `tree(id, "((A:0.1,B:0.2):0.3,C:0.4);", layout="rectangular"|"circular",
+  clades=[{"tips": "A, B", "label": "Clade 1"}], italic=True, support=True)`.
+- `wellplate(id, groups=[{"wells": "A1-C6", "label": "Drug"}], wells=96)`.
+- `timeline(id, events=[{"at": 0, "label": "Seed"}], spans=[{"start": 1, "end":
+  3, "label": "Treatment"}], unit="day")`.
+- `structure(id, "1ubq" or "model.cif", look=, colors={"A": "kinase"}, yaw=,
+  pitch=, cartoon=, sticks=, surface=, site=)`: a molecule drawn by hand by
+  mol-sketch (the `molecules` extra); a chain can take the tone of its domain.
+
+**Pathways and reactions**: `connect(a, b, head="inhibition")` (⊣), `"catalysis"`,
+`"stimulation"`, `"necessary"`, `"modulation"` (SBGN heads);
+`arrow="reversible"` draws ⇌ with `label=` over and `back_label=` under;
+`cofactors=("ATP", "ADP")` curls what a step takes in and gives off onto its line
+(opposite , so not with ).
 
 ### Words
 
@@ -76,6 +122,12 @@ breaks a line; long labels wrap on their own.
 - **Graphs use straight lines:** `conventions={"lines": "straight"}` with
   `circle`s and `plate`s for Bayesian networks, HMMs, GNNs, Markov chains.
 - **Captions on edges** (`label=`) for what a line carries; keep them short.
+- **Let the layout straighten lines.** A row feeding a block below it slides
+  sideways, within its parent, when that lets more of its arrows run straight
+  (kept only if the routed figure bends less); a plain box (block, MLP, CNN,
+  terminal) that several straight arrows share a side of widens until they meet
+  its middle (`pin_spread`), so each arrow leaves its own box's centre. You get
+  this by grouping and ordering, not by sizing boxes.
 - **Hints last.** `via=` picks a side for a route; `lane=`/waypoints pin one.
   A hint that cannot be kept is reported, not silently obeyed.
 - Read the report: `routing.connector.crossing` (lines cross; reorder or regroup),
@@ -91,7 +143,9 @@ breaks a line; long labels wrap on their own.
   any installed family. SVGs are transparent; `background=True` paints the page.
 - `sketch=True` (or `{"roughness": 0.3, "fill": "hatch"}`) draws any theme by hand.
 - `conventions={"branch": "dot", "merge": "plain", "arrivals": "joined",
-  "lines": "straight", "pin_spread": 0.8}` sets how lines meet.
+  "lines": "straight", "pin_spread": 0.8}` sets how lines meet. `pin_spread`
+  is the middle share of a side that arrows sharing it are spread over (two at
+  30% and 70%, three at 23/50/77%); an arrow alone on its side meets the middle.
 - A look of your own is a YAML theme file: `flexo theme paper -o lab.yaml`,
   edit, then `Figure(theme="lab.yaml")` (or `FLEXO_THEME_PATH`). Palettes:
   `flexo.register_palette("Lab", [...])` or a `palettes:` file.
@@ -113,8 +167,30 @@ as outlines), PDF (selectable text, embedded fonts), and PNG. YAML figures (`fle
 may be short: nodes default to blocks, `from: a` / `to: b` name ports for you,
 no `groups` stacks nodes. `flexo.dump_figure(figure.spec)` writes any figure as YAML.
 
+## The studio: figures without code, with people and agents
+
+`flexo studio` (in a folder, or on a file: `flexo studio fig.yaml`) opens a local
+editor in the browser for every figure, theme, and (with flexo-talk) deck in the
+folder. Parts are added from a palette (A), connected (C), typed on in place
+(double-click), gathered into rows, columns, grids and modules (G), and set in an
+inspector; every edit is written to the YAML file, comments and order kept.
+People and agents edit the same files live.
+
+**Working as an agent in a studio**: `claude mcp add flexo-studio -- flexo studio
+mcp` (once, in the folder) gives you `list_documents`, `open_document`,
+`read_document`, `edit_document` (replace text that occurs once, like an edit
+tool), `write_document`, `look` (the pages as pictures, with lint), and
+`status` (tell the people what you are doing, in a few words). The loop is the
+same as above: read, edit the YAML, `look`, fix, `look` again. Write figures as
+YAML there (`flexo.dump_figure(spec)` shows how any Python figure reads as YAML).
+
+A folder's Python (a deck's plots) runs only once its person trusts the folder;
+the studio reads and writes only inside the folder.
+
 ## Reference
 
 `docs/tutorial.md` (step by step, every picture made from its code),
 `docs/guide.md` (every component and option), `docs/routing.md` (how lines are
-routed), `examples/literature.py` (79 figures from papers to copy from).
+routed), `README.md` (biology components, the studio), `examples/literature.py`
+(79 figures from papers to copy from), `examples/genetics.py`,
+`examples/biology.py` and `examples/lab_figures.py` (biology to copy from).
