@@ -249,3 +249,20 @@ def test_maths_a_label_cannot_read_is_a_warning_on_its_part() -> None:
             " \u201c\\frac{1}{2} + \\foo\u201d.",
         ),
     ]
+
+
+def test_a_formula_wider_than_its_line_breaks_after_a_sign_as_tex_breaks_it() -> None:
+    from flexo.texmath import breakable
+
+    assert breakable(r"a = b + \frac{c+d}{e} - \left(f + g\right)") == (
+        "a ={}", " b +{}", r" \frac{c+d}{e} -{}", r" \left(f + g\right)",
+    )
+    assert breakable("-x = y^{a+b}") == ("-x ={}", " y^{a+b}")
+    source = r"$\mathcal{L} = \mathcal{L}_{\mathrm{rec}} + \beta D_{\mathrm{KL}} + \lambda \|w\|^2$"
+    whole = TextMeasurer(TYPE).measure(parse_label(source))
+    half = whole.width / 2
+    narrow = TextMeasurer(TYPE).measure(parse_label(source), max_width=half, balance=False)
+    assert len(narrow.lines) >= 2 and max(line.width for line in narrow.lines) <= half + 1e-6
+    # Set side by side, the pieces are as wide as the whole.
+    pieces = sum(line.width for line in narrow.lines)
+    assert pieces == pytest.approx(whole.width, abs=0.5)
