@@ -9,6 +9,7 @@ import re
 import pytest
 
 import flexo
+from flexo.chemistry.curly import INK
 from flexo.chemistry.electrons import MechanismError, compare, push, read_arrow
 from flexo.chemistry.layout import lay_out, rings
 from flexo.chemistry.molecule import SmilesError, read_smiles
@@ -234,9 +235,12 @@ def test_a_mechanism_draws_its_steps_arrows_and_what_they_make() -> None:
     curly = [
         shape for shape in drawing.shapes if ".arrow" in shape.id and shape.id.startswith("m.step")
     ]
-    assert len([shape for shape in curly if not shape.id.endswith(".head")]) == 4
-    assert all(shape.tone == "electrons" for shape in curly)
-    assert all(" C " in shape.d for shape in curly if not shape.id.endswith(".head"))
+    strokes = [shape for shape in curly if not shape.id.endswith(".electrons")]
+    assert len(strokes) == 4
+    assert all(" C " in shape.d for shape in strokes)
+    # The lone pairs two arrows take are drawn at their tails, all in the arrows' one ink.
+    assert len(curly) - len(strokes) == 2
+    assert {shape.color for shape in curly} == {INK}
     assert {"m.arrow1", "m.arrow2"} <= ids  # a reaction arrow into each step after the first
     words = {"".join(run.text for run in words.runs) for words in drawing.words}
     assert {"acid chloride", "NaOH", "Cl"} <= words
@@ -268,6 +272,78 @@ def test_a_later_step_may_bring_in_a_new_molecule_and_leave_out_a_spectator() ->
         ]
     )
     assert any(".radical" in shape.id for shape in drawing.shapes)
+    # Br's electron and one of the pi bond's meet in the gap where Br-C3 is made, from
+    # either side of it.
+    ends = {}
+    for shape in drawing.shapes:
+        if shape.id in {"m.step2.arrow0", "m.step2.arrow1"}:
+            numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", shape.d)]
+            ends[shape.id] = (numbers[8], numbers[9])  # the tip: after M and the curve, "L"
+    first, second = ends["m.step2.arrow0"], ends["m.step2.arrow1"]
+    (bond,) = [shape for shape in drawing.shapes if shape.id == "m.step2.bond1"]
+    length = math.dist(*_ends_of(bond.d))
+    assert 0.25 < math.dist(first, second) / length < 0.6
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [{"smiles": ACYL, "arrows": "5 -> 2; 2=3 -> 3"}, {"arrows": "3 -> 2; 2-4 -> 4"}],
+        [{"smiles": "[CH3:1][C:2](=[O:3])[CH3:4].[OH2+:5][H:6]", "arrows": "3 -> 6; 6-5 -> 5"}],
+        [{"smiles": "[Br:1].[CH2:3]=[CH:4]C", "arrows": "1 ~> 1-3; 3=4 ~> 3-1; 3=4 ~> 4"}],
+        [{"smiles": "[OH-:1].[H:2][CH2:3][CH2:4][Br:5]", "arrows": "1 -> 2; 2-3 -> 3-4; 4-5 -> 5"}],
+    ],
+)
+def test_each_curly_arrow_is_one_curve_crossing_no_bond_and_no_charge(steps) -> None:
+    from flexo.chemistry.curly import _bends_both_ways, _crossing
+
+    _, drawing = _mechanism(steps)
+    bonds = [
+        (*first, *second)
+        for shape in drawing.shapes
+        if ".bond" in shape.id
+        for first, second in [_ends_of(shape.d)]
+    ]
+    charges = [_circle_of(shape.d) for shape in drawing.shapes if ".charge" in shape.id]
+    for shape in drawing.shapes:
+        if not re.fullmatch(r"m\.step\d+\.arrow\d+", shape.id):
+            continue
+        numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", shape.d)]
+        start, first, second, end = (tuple(numbers[i : i + 2]) for i in (0, 2, 4, 6))
+        curve = [_cubic(start, first, second, end, step / 24) for step in range(25)]
+        assert not _bends_both_ways(curve), shape.id
+        assert not _crossing(curve, bonds), shape.id
+        for x, y, radius in charges:
+            assert all(math.dist(point, (x, y)) > radius for point in curve), shape.id
+
+
+def _ends_of(d: str):
+    numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", d)]
+    return (numbers[0], numbers[1]), (numbers[-2], numbers[-1])
+
+
+def _circle_of(d: str):
+    left, y, radius = (float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", d)[:3])
+    return left + radius, y, radius
+
+
+def _cubic(a, b, c, d, t):
+    u = 1 - t
+    return tuple(
+        u**3 * a[i] + 3 * u * u * t * b[i] + 3 * u * t * t * c[i] + t**3 * d[i] for i in (0, 1)
+    )
+
+
+def test_a_mechanism_draws_its_arrows_in_the_colour_asked_and_the_lone_pairs_they_leave() -> None:
+    _, drawing = _mechanism(
+        [{"smiles": ACYL, "arrows": "5 -> 2; 2=3 -> 3"}], arrow_colour="#1f77b4", lone_pairs="all"
+    )
+    arrows = [shape for shape in drawing.shapes if shape.id.startswith("m.step1.arrow")]
+    assert arrows and {shape.color for shape in arrows} == {"#1f77b4"}
+    # O5 of hydroxide has three lone pairs: the arrow draws the one it takes, the rest stay.
+    assert len([shape for shape in drawing.shapes if shape.id.startswith("m.step1.pair")]) >= 2
+    with pytest.raises(FlexoError, match="arrow_colour"):
+        _mechanism([{"smiles": ACYL}], arrow_colour="magenta")
 
 
 def test_a_cycloaddition_is_drawn_ready_to_close_its_ring() -> None:

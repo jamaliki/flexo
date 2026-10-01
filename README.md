@@ -345,11 +345,22 @@ gives (`F/C=C/F`), a stereocentre drawn with the wedge or hash its `@`/`@@` mean
 cycloaddition is drawn in the shape of its product, so a diene curls s-cis. The
 proportions are the ACS document settings: bonds 1.44 label heights long, double
 bonds inside their rings, labels clipping the bonds that meet them, hydrogens on the
-side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Lone pairs are drawn
-where arrows leave them (`lone_pairs="all"` for every one); a radical is a dot.
-Reaction arrows carry their `reagents` over them and `conditions` under them; `arrow`
-is `forward`, `equilibrium`, `resonance` or `none`; steps fold into rows when there
-are many (`per_row=`). The curly arrows take the figure's first tone.
+side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Reaction arrows carry
+their `reagents` over them and `conditions` under them; `arrow` is `forward`,
+`equilibrium`, `resonance` or `none`; steps fold into rows when there are many
+(`per_row=`).
+
+The curly arrows are drawn by rule, in one ink (magenta; `arrow_colour=` for another).
+An arrow carries its electrons: the lone pair (or radical) it starts from is drawn at
+its tail, in its ink, out from the atom where its bonds leave room; an arrow from a
+bond leaves square to it, a little off its middle. It goes into a bond square to it,
+and into an atom along a radius -- on the side with room, facing the electrons, never
+back down the bond they leave; a pair re-forming its own atom's double bond curls
+from beside the bond down onto it, and two half arrows making a bond meet in its
+middle from either side. Of the curves that would do, the smoothest is drawn that
+crosses no bond, no other arrow and no charge, and bends one way only; charges move
+out of the arrows' way. Other lone pairs are drawn with `lone_pairs="all"`; a radical
+is a dot.
 
 ### Grids of cells
 

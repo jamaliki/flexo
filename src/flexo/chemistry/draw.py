@@ -16,6 +16,7 @@ Everything is in points, y down: shapes and words for ``flexo.drawn``.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -98,6 +99,9 @@ class Drawn:
     """The ink of every label and mark, to keep arrows clear of."""
     lines: dict[frozenset[int], list[tuple[Point, Point]]] = field(default_factory=dict)
     """Each bond's drawn lines, its main line first (a wedge's middle stands for it)."""
+    marks: list[tuple[int, float, float, float]] = field(default_factory=list)
+    """What is drawn beside an atom besides its label -- a circled charge -- as the atom
+    it belongs to and a circle (x, y, radius), for arrows to keep off."""
 
     def bounds(self) -> Box:
         xs, ys = [], []
@@ -146,13 +150,17 @@ def draw_molecule(
     lone: dict[int, float] | None = None,
     charges: str = "circled",
     wedges: dict[tuple[int, int], str] | None = None,
+    avoid: list[list[Point]] | None = None,
 ) -> Drawn:
     """Shapes and words for ``molecule``, its layout's unit scaled to a bond.
 
-    ``pairs`` says which lone pairs are drawn: ``all`` (on every atom but carbon, and a
-    carbanion's), ``used`` (those an arrow leaves, given by ``used``: atom to the
-    directions its arrows go), or ``none``. ``wedges`` maps a bond (from its stereo
-    centre) to ``wedge`` or ``hash``."""
+    The electrons an arrow takes are drawn by the arrow, at its tail, in its ink
+    (``flexo.chemistry.curly``): ``used`` gives, for each atom, the directions its arrows
+    leave it, which its other marks keep clear of, and ``lone`` the atoms whose radical a
+    fishhook takes. ``pairs`` says which other lone pairs are drawn: ``all`` (on every
+    atom but carbon, and a carbanion's) or none (``used``, ``none``). ``wedges`` maps a
+    bond (from its stereo centre) to ``wedge`` or ``hash``; ``avoid`` gives the arrows'
+    strokes, as points, for circled charges to keep off."""
 
     drawn = Drawn()
     scale = pen.bond
@@ -174,33 +182,29 @@ def draw_molecule(
         style = (wedges or {}).get((bond.a, bond.b)) or (wedges or {}).get((bond.b, bond.a))
         start = bond.a if (wedges or {}).get((bond.a, bond.b)) else bond.b if style else bond.a
         _bond(molecule, bond, pen, drawn, f"{prefix}.bond{number}", found, style, start)
+    for index, leaving in (used or {}).items():
+        drawn.atoms[index].taken.extend(leaving)  # where the arrows' own electrons are drawn
+    strokes = [line for stroke in avoid or [] for line in itertools.pairwise(stroke)]
     for index in range(len(molecule.atoms)):
         if charges == "circled" and molecule.charge_of(index) and (
             abs(molecule.charge_of(index)) == 1 or not labelled(molecule, index)
         ):
-            _circled(molecule, index, pen, drawn, prefix)
+            _circled(molecule, index, pen, drawn, prefix, strokes)
         elif charges != "circled" and molecule.charge_of(index) and not labelled(molecule, index):
             _vertex_charge(molecule, index, pen, drawn, prefix)
     for index, atom in enumerate(molecule.atoms):
         if atom.element in METALS:
             continue  # a metal's d electrons are not drawn as lone pairs
-        wanted = (used or {}).get(index, [])
-        count = atom.lone // 2
+        leaving = (used or {}).get(index, [])
+        place = drawn.atoms[index]
         show = 0
         if pairs == "all" and (labelled(molecule, index) or atom.lone):
-            show = count
-        elif pairs == "used":
-            show = min(len(wanted), count)
-        place = drawn.atoms[index]
-        if atom.lone % 2 and index in (lone or {}):
-            # A radical a fishhook leaves: its dot first, facing the way the arrow goes.
-            marks = _spread(place.taken, show + 1, [(lone or {})[index], *wanted[:show]])
-            marks = marks[1:] + marks[:1]
-        else:
-            marks = _spread(place.taken, show + atom.lone % 2, wanted[:show])
+            show = max(0, atom.lone // 2 - len(leaving))
+        radical = bool(atom.lone % 2) and index not in (lone or {})
+        marks = _spread(place.taken, show + radical, [])
         for number, angle in enumerate(marks[:show]):
             _lone_pair(pen, drawn, index, angle, f"{prefix}.pair{index}.{number}")
-        if atom.lone % 2:
+        if radical:
             _radical(pen, drawn, index, marks[-1], f"{prefix}.radical{index}")
     return drawn
 
@@ -581,14 +585,16 @@ def _radical(pen: Pen, drawn: Drawn, index: int, angle: float, identifier: str) 
     drawn.boxes.append((x - pen.dot * 2, y - pen.dot * 2, x + pen.dot * 2, y + pen.dot * 2))
 
 
-def _circled(molecule: Molecule, index: int, pen: Pen, drawn: Drawn, prefix: str) -> None:
+def _circled(
+    molecule: Molecule, index: int, pen: Pen, drawn: Drawn, prefix: str, avoid=(),
+) -> None:
     """A charge in a circle beside its atom: at the upper right if that is clear, else
-    wherever round the atom it touches no bond and no other label."""
+    wherever round the atom it touches no bond, no other label and no arrow."""
 
     place = drawn.atoms[index]
     radius = pen.u * 0.3
     u = pen.u
-    lines = [line for key, items in drawn.lines.items() for line in items]
+    lines = [line for key, items in drawn.lines.items() for line in items] + list(avoid)
 
     def clash(x: float, y: float) -> float:
         hits = 0.0
@@ -623,6 +629,7 @@ def _circled(molecule: Molecule, index: int, pen: Pen, drawn: Drawn, prefix: str
     d = _circle(x, y, radius) + " " + path(*sign)
     drawn.shapes.append(Shape(f"{prefix}.charge{index}", d, "line", width=pen.line * 0.85))
     drawn.boxes.append((x - radius, y - radius, x + radius, y + radius))
+    drawn.marks.append((index, x, y, radius))
 
 
 def _edge(place: Atomic, angle: float, pen: Pen) -> float:
