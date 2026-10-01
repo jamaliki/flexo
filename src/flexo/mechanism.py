@@ -21,6 +21,7 @@ plain`` for superscripts).
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass, field
@@ -454,6 +455,7 @@ class Composed:
     problem: Diagnostic | None
 
 
+@functools.lru_cache(maxsize=32)
 def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
     """The mechanism's picture, and what is in it. With ``partial`` a step that cannot be
     is drawn and the rest left out (``problem`` says why) rather than refused; with
@@ -486,36 +488,24 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
             colour=colour,
         )
         x0, y0, x1, y1 = drawn.bounds()
-        drawn, molecule, renumber = draw_panel(
-            panels[chosen],
-            pen,
-            prefix=f"{node.id}.step{chosen + 1}",
-            origin=(-x0, -y0),
-            pairs=pairs,
-            charges=charges,
-            colour=colour,
-        )
+        drawn = drawn.moved(-x0, -y0)
         kept[chosen] = (drawn, molecule, renumber)
         picture = Picture(Size(x1 - x0, y1 - y0), tuple(drawn.shapes), tuple(drawn.words))
         return Composed(picture, kept, pen, panels, problem)
 
-    def drawing(index: int, panel: Panel, origin: tuple[float, float]) -> Drawn:
-        drawn, molecule, renumber = draw_panel(
+    # Each structure drawn once, where it falls, to measure it; then moved where it goes.
+    first: dict[int, tuple[Drawn, Molecule, dict[int, int]]] = {}
+    sizes = []
+    for index, panel in enumerate(panels):
+        first[index] = draw_panel(
             panel,
             pen,
             prefix=f"{node.id}.step{index + 1}",
-            origin=origin,
             pairs=pairs,
             charges=charges,
             colour=colour,
         )
-        kept[index] = (drawn, molecule, renumber)
-        return drawn
-
-    # Each structure drawn once where it falls, to measure it, then where it goes.
-    sizes = []
-    for index, panel in enumerate(panels):
-        x0, y0, x1, y1 = drawing(index, panel, (0.0, 0.0)).bounds()
+        x0, y0, x1, y1 = first[index][0].bounds()
         if panel.step.label:
             # A name wider than its structure widens its room, centred under it.
             wide = measures.measure(parse_label(panel.step.label), small=True).width + u * 0.6
@@ -573,7 +563,9 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
                     x += gap * 2
             x0, y0, x1, y1 = sizes[index]
             origin = (x - x0, middle - (y0 + y1) / 2.0)
-            drawn = drawing(index, panels[index], origin)
+            drawn, molecule, renumber = first[index]
+            drawn = drawn.moved(*origin)
+            kept[index] = (drawn, molecule, renumber)
             shapes += drawn.shapes
             words += drawn.words
             label = panels[index].step.label
@@ -611,19 +603,23 @@ def draw_panel(
     colour: str = INK,
 ) -> tuple[Drawn, Molecule, dict[int, int]]:
     """One structure and its arrows: the molecule drawn once to see where everything
-    falls, which way its arrows leave their atoms and where they would go, then again
-    keeping those clear, the arrows over it. Also the molecule as drawn (hydrogens no arrow moves
-    folded back into their labels) and how its atoms are numbered in it."""
+    falls and which way its arrows leave their atoms; again with those ways kept clear
+    (the hydrogens written beside an atom go to its other side), to see where the arrows
+    would go; and, if it has charges, a last time with the charges kept off them, the
+    arrows over it. Also the molecule as drawn (hydrogens no arrow moves folded back
+    into their labels) and how its atoms are numbered in it."""
 
     molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
     marks = wedges(molecule)
-    first = draw_molecule(
-        molecule, pen, prefix=prefix, origin=origin, pairs=pairs, charges=charges, wedges=marks
-    )
+    style = {
+        "prefix": prefix,
+        "origin": origin,
+        "pairs": pairs,
+        "charges": charges,
+        "wedges": marks,
+    }
+    first = draw_molecule(molecule, pen, **style)  # type: ignore[arg-type]
     used = tail_ways(molecule, first, arrows, pen)
-    # Where the arrows would go with the charges out of their way, for the charges to keep off.
-    first.marks.clear()
-    tried = draw_arrows(molecule, first, arrows, pen, prefix=prefix)
     radicals = {
         arrow.source[0]: 0.0
         for arrow in arrows
@@ -631,19 +627,19 @@ def draw_panel(
         and len(arrow.source) == 1
         and molecule.atoms[arrow.source[0]].lone % 2
     }
-    drawn = draw_molecule(
-        molecule,
-        pen,
-        prefix=prefix,
-        origin=origin,
-        pairs=pairs,
-        used=used,
-        lone=radicals,
-        charges=charges,
-        wedges=marks,
-        avoid=tried,
-    )
-    draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour)
+    drawn = draw_molecule(molecule, pen, used=used, lone=radicals, **style)  # type: ignore[arg-type]
+    if drawn.marks and arrows:
+        # Where the arrows would go with the charges out of their way, for the charges
+        # to keep off -- and the curves found then, kept where they still keep clear.
+        chosen: list = []
+        drawn.marks.clear()
+        tried = draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, chosen=chosen)
+        drawn = draw_molecule(  # type: ignore[misc]
+            molecule, pen, used=used, lone=radicals, avoid=tried, **style
+        )
+        draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour, prefer=chosen)
+    else:
+        draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour)
     return drawn, molecule, renumber
 
 

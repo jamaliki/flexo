@@ -507,3 +507,32 @@ def test_a_figure_file_writes_a_mechanisms_arrows_and_places_as_python_does() ->
     assert picture(figure.nodes[0], STYLES["paper"]) == picture(same.spec.nodes[0], STYLES["paper"])
     back = figure_to_document(figure)["nodes"][0]["properties"]["steps"][0]
     assert back["arrows"] == "1 -> 2; 2-3 -> 3"
+
+
+@pytest.mark.parametrize(
+    "smiles, arrow",
+    [
+        ("C[C+:1](C)C.[OH2:3]", "3 -> 1"),  # water onto a cation: written OH2, facing it
+        ("[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]", "5 -> 2"),
+        ("[CH3:1][C:2](=[O:3])[CH3:4].[OH2+:5][H:6]", "3 -> 6"),
+    ],
+)
+def test_a_lone_pair_an_arrow_takes_faces_what_it_attacks(smiles, arrow) -> None:
+    from flexo.mechanism import mechanism_composed
+
+    figure, _ = _mechanism([{"smiles": smiles, "arrows": arrow}], partial=True)
+    composed = mechanism_composed(figure.spec.nodes[0], STYLES["paper"])
+    drawn, molecule, renumber = composed.drawn[0]
+    giver, taker = (renumber[molecule.index_of(int(n))] for n in arrow.split(" -> "))
+    (dots,) = [shape for shape in drawn.shapes if shape.id.endswith("arrow0.electrons")]
+    numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", dots.d)]
+    # Each dot is "M x-r y A r r 0 1 1 x+r y A ...": its centre is between its first two points.
+    centres = [
+        ((numbers[i] + numbers[i + 7]) / 2, numbers[i + 1]) for i in range(0, len(numbers), 16)
+    ]
+    middle = (sum(x for x, _ in centres) / len(centres), sum(y for _, y in centres) / len(centres))
+    here, there = drawn.atoms[giver].point, drawn.atoms[taker].point
+    pair = (middle[0] - here[0], middle[1] - here[1])
+    toward = (there[0] - here[0], there[1] - here[1])
+    cosine = (pair[0] * toward[0] + pair[1] * toward[1]) / (math.hypot(*pair) * math.hypot(*toward))
+    assert cosine > 0.5  # within 60 degrees of the way to what it attacks
