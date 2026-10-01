@@ -854,9 +854,9 @@ class _Parser:
         if token is None:
             return None
         if token.kind == "char" and token.value == "{":
-            items = self.items(stop={"}"}, font=font)
+            items = self.items(stop=set(), font=font)
             closing = self.take()
-            if closing is None or closing.value != "}":
+            if closing is None or closing.kind != "char" or closing.value != "}":
                 self.said("a { is not closed")
             return items
         if token.kind == "char" and token.value in "}&^_":
@@ -965,9 +965,10 @@ class _Parser:
 
     def char(self, char: str, font: str | None) -> object | None:
         if char == "{":
-            items = self.items(stop={"}"}, font=font)
+            # Up to the brace that closes it: an escaped \} (a brace to be drawn) is not one.
+            items = self.items(stop=set(), font=font)
             closing = self.take()
-            if closing is None or closing.value != "}":
+            if closing is None or closing.kind != "char" or closing.value != "}":
                 self.said("a { is not closed")
             return Group(items)
         if char == "}":
@@ -1495,45 +1496,60 @@ _PREFIXES = {
 
 
 def _units(words: str) -> list:
-    """siunitx's units, upright: ``\\si{\\kilo\\gram\\per\\metre\\squared}``, ``\\si{m.s^{-1}}``."""
+    """siunitx's units, upright, as it sets them by default: ``\\per`` a negative power
+    of the unit after it (``\\joule\\per\\mole\\per\\kelvin``: J mol⁻¹ K⁻¹), powers
+    after (``\\squared``) or before (``\\square``) a unit, and units written out
+    (``m.s^{-1}``, ``m/s``) as written."""
 
-    items: list = []
+    # Each unit: [its letters, its power (as written, or a number), whether \per came first].
+    parts: list = []
     prefix = ""
+    inverse, before = False, 1
+
+    def unit(letters: str) -> None:
+        nonlocal prefix, inverse, before
+        parts.append([Group([Sym(ch, ORD, "rm") for ch in prefix + letters]), before, inverse])
+        prefix, inverse, before = "", False, 1
+
     for token in re.findall(r"\\[A-Za-z]+|\^\{?-?\d+\}?|[A-Za-zΩμÅ°%]+|[.~]|/|\S", words):
         if token.startswith("\\"):
             name = token[1:]
             if name in _PREFIXES:
                 prefix += _PREFIXES[name]
-                continue
-            if name == "per":
-                if items:
-                    items.append(Sym("/", ORD, "rm"))
-                continue
-            if name in {"squared", "cubed"}:
-                power = "2" if name == "squared" else "3"
-                if items:
-                    items[-1] = Scripts(items[-1], [Sym(power, ORD, "rm")])
-                continue
-            if name in {"square", "cubic"}:
-                continue
-            unit = _UNITS.get(name, name)
-            if items and not (isinstance(items[-1], Sym) and items[-1].char == "/"):
-                items.append(Space(3 / 18))
-            items.append(Group([Sym(ch, ORD, "rm") for ch in prefix + unit]))
-            prefix = ""
-            continue
-        if token.startswith("^"):
-            power = token.strip("^{}").replace("-", "−")
-            if items:
-                items[-1] = Scripts(items[-1], [Sym(ch, ORD, "rm") for ch in power])
-            continue
-        if token in ".~":
-            items.append(Space(3 / 18))
-            continue
-        if token == "/":
+            elif name == "per":
+                inverse = True
+            elif name in {"squared", "cubed"}:
+                if parts and isinstance(parts[-1], list):
+                    parts[-1][1] = 2 if name == "squared" else 3
+            elif name in {"square", "cubic"}:
+                before = 2 if name == "square" else 3
+            else:
+                unit(_UNITS.get(name, name))
+        elif token.startswith("^"):
+            if parts and isinstance(parts[-1], list):
+                parts[-1][1] = token.strip("^{}")
+        elif token in ".~":
+            continue  # units are spaced apart anyway
+        elif token == "/":
+            parts.append("/")
+        else:
+            unit(token)
+    items: list = []
+    for part in parts:
+        if part == "/":
             items.append(Sym("/", ORD, "rm"))
             continue
-        items.append(Group([Sym(ch, ORD, "rm") for ch in token]))
+        letters, power, per = part
+        if items and not (isinstance(items[-1], Sym) and items[-1].char == "/"):
+            items.append(Space(3 / 18))
+        exponent = str(power)
+        if per and not exponent.startswith("-"):
+            exponent = "-" + exponent
+        if exponent == "1":
+            items.append(letters)
+        else:
+            power_symbols = [Sym(ch, ORD, "rm") for ch in exponent.replace("-", "−")]
+            items.append(Scripts(letters, power_symbols))
     return items
 
 
