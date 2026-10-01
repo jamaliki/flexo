@@ -114,6 +114,29 @@ def test_pdf_parts_a_pictures_colour_from_its_alpha_pixel_for_pixel() -> None:
     assert colour == bytes(value for *rgb, _ in pixels for value in rgb)
 
 
+def test_a_picture_much_enlarged_shows_its_pixels_in_the_png_as_in_the_pdf() -> None:
+    import base64
+
+    from flexo.export import _pixels_shown, rasterise
+    from flexo.pdf import _png_decode
+
+    def page(width: int, height: int) -> str:
+        """A grey picture, black at its left half and white at its right, filling the page."""
+
+        row = b"\x00" + bytes(0 if x < width // 2 else 255 for x in range(width))
+        data = _png(width, height, 0, row * height)
+        href = "data:image/png;base64," + base64.b64encode(data).decode()
+        return ('<svg xmlns="http://www.w3.org/2000/svg" width="200pt" height="100pt" '
+                f'viewBox="0 0 200 100"><image width="200" height="100" preserveAspectRatio="none" '
+                f'href="{href}"/></svg>')
+
+    width, _, channels, pixels = _png_decode(rasterise(page(2, 1), dpi=72))
+    middle = pixels[50 * width * channels : 51 * width * channels : channels]
+    assert middle[95] == 0 and middle[104] == 255  # two crisp pixels, not a ramp between them
+    # A picture drawn smaller than its pixels is smoothed, as before.
+    assert "image-rendering" not in _pixels_shown(page(400, 200), 72)
+
+
 def test_the_same_figure_compiles_to_the_same_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Embedded font subsets must not carry the time they were made."""
 

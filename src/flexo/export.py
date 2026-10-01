@@ -93,14 +93,52 @@ def export_outputs(
 def rasterise(svg_text: str, dpi: float = 192.0) -> bytes:
     """PNG bytes of an SVG, drawn by resvg; text is best given as outlines. An SVG placed
     in it as a picture is drawn first, with the fonts (resvg draws a picture's text
-    without them, so it vanished)."""
+    without them, so it vanished); a picture much enlarged shows its pixels."""
 
     import resvg_py
 
     fonts = [str(directory) for directory in font_directories()]
     if "data:image/svg+xml;base64," in svg_text:
         svg_text = _pictures_drawn(svg_text, dpi, fonts)
+    if "<image" in svg_text:
+        svg_text = _pixels_shown(svg_text, dpi)
     return bytes(resvg_py.svg_to_bytes(svg_string=svg_text, font_dirs=fonts, dpi=dpi))
+
+
+def _pixels_shown(svg_text: str, dpi: float) -> str:
+    """Each PNG or JPEG drawn at twice its pixels or more, drawn in its pixels rather than
+    smoothed: a PDF viewer draws it so, and a 16-pixel icon or a plot's coarse image
+    (``imshow``) is then the same in the PNG as in the PDF, not a blur."""
+
+    import re
+
+    from flexo.drawing import _length
+    from flexo.pdf import _decode, _pixel_size
+
+    root = re.search(r"<svg\b[^>]*>", svg_text)
+    if root is None:
+        return svg_text
+    view = re.search(r'\bviewBox="([^"]*)"', root.group(0))
+    width = re.search(r'\bwidth="([^"]*)"', root.group(0))
+    span = [float(value) for value in re.split(r"[ ,]+", view.group(1).strip())][2] if view else 0.0
+    points = _length(width.group(1)) if width else span
+    # Device pixels per unit of the drawing, as resvg sizes the page at ``dpi``.
+    scale = points / 72.0 * dpi / span if span else dpi / 72.0
+
+    def shown(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        mime, data = _decode(match.group(1))
+        size = _pixel_size(mime, data) if mime else None
+        box = [re.search(rf'\b{name}="([\d.]+)', tag) for name in ("width", "height")]
+        if size is None or None in box or "image-rendering" in tag:
+            return tag
+        across, down = (float(found.group(1)) for found in box if found)
+        if min(across / size[0], down / size[1]) * scale < 2.0:
+            return tag
+        return tag.replace("<image", '<image image-rendering="optimizeSpeed"', 1)
+
+    pictures = r'<image\b[^>]*?href="(data:image/(?:png|jpeg);base64,[^"]+)"[^>]*>'
+    return re.sub(pictures, shown, svg_text)
 
 
 def _pictures_drawn(svg_text: str, dpi: float, fonts: list[str]) -> str:
