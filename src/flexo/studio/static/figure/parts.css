@@ -59,3 +59,20 @@ button.crumb:hover { background: var(--sunken); color: var(--ink); }
 .list-rows .pic { width: 34px; height: 34px; object-fit: contain; border-radius: 4px; background: var(--sunken); }
 .switch-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .switch-hint { color: var(--ink-3); font-size: 11.5px; line-height: 1.3; }
+
+/* Dragging a part: it is lifted and follows the pointer; a line glides to where it would
+   go, the group it would join is outlined, and its lines wait, faded, to be drawn again. */
+.fig-marks { transition: opacity 0.16s ease-out; }
+.fig-dragging .fig-marks, .fig-dragging .fig-hover, .fig-landing .fig-marks { opacity: 0; transition: none; }
+body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-select: none; }
+.fig-lifted { filter: drop-shadow(0 6px 10px rgba(30, 25, 20, 0.22)); }
+.fig-settling { filter: drop-shadow(0 3px 6px rgba(30, 25, 20, 0.16)); }
+.fig-astray { opacity: 0.5; }
+.fig-faded { opacity: 0.18; transition: opacity 0.15s ease-out; }
+[data-flexo-entity] { transition: transform 0.16s cubic-bezier(.2, .8, .2, 1); }
+.fig-dragging .fig-lifted, .fig-dragging .fig-lifted * { transition: none; }
+.fig-drop-line, .fig-drop-zone { position: absolute; left: 0; top: 0; pointer-events: none; opacity: 0;
+  transition: transform 0.12s cubic-bezier(.2, .8, .2, 1), width 0.12s, height 0.12s, opacity 0.12s; will-change: transform; }
+.fig-drop-line { z-index: 8; background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 3px var(--accent-soft); }
+.fig-drop-zone { z-index: 7; border: 1.5px dashed var(--accent-line); border-radius: 6px; background: var(--accent-soft); }
+.fig-drop-line.on, .fig-drop-zone.on { opacity: 1; }

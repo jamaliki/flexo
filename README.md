@@ -902,7 +902,11 @@ own last change and leaves others' alone.
   is chosen comes after it, a line between them. **Connect** (C) draws a line from
   one part to the next; double-click a part or a line to type its words on the
   drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
-  or titled module. The inspector on the right has each part's settings, down to
+  or titled module. A part (or a whole group) dragged on the drawing goes to another
+  place in its row or column, or into another group: it follows the pointer, a line
+  shows where it would go, and once it is let go the figure is laid out again and
+  every part slides to where it now is (Esc, or letting go off the figure, takes it
+  back). The inspector on the right has each part's settings, down to
   a plasmid's features or a plate's groups as a table; the list on the left holds
   the parts as they nest, dragged to move them. Every edit is made to the figure's
   file, which the **Source** tab shows and edits too: comments and order stay, and
