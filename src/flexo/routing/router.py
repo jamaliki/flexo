@@ -176,8 +176,12 @@ def route_figure(
             for spaced, original in zip(wires, routed, strict=True)
         ]
 
+    started = search_work()
     pins, bundles, wires, orders = attempt({})
-    _REPAIR_LIMIT[0] = search_work() + REPAIR_WORK
+    # Each repair trial routes the whole figure again: one whose routing alone costs
+    # more than the repairs may spend gets none, rather than a trial past the budget.
+    affordable = search_work() - started <= REPAIR_WORK
+    _REPAIR_LIMIT[0] = search_work() + (REPAIR_WORK if affordable else 0)
     pins, bundles, wires = _reorder_crossing_pins(
         attempt,
         separated,

@@ -571,7 +571,78 @@ def _basics() -> list[dict[str, Any]]:
             needs_file=True,
         ),
         _part("junction", "Junction", "Basics", "A point where lines meet", common=[]),
+        _cells(),
     ]
+
+
+def _cells() -> dict[str, Any]:
+    """A grid of cells: a board, a plate map, a heatmap, a number square."""
+
+    labels = ["", "numbers", "letters"]
+    return _part(
+        "cells",
+        "Cells",
+        "Basics",
+        "A grid of coloured cells: a map, a heatmap, a board",
+        {
+            "label": "Grid",
+            "properties": {
+                "grid": "A B A B\nB A B A\nA B A B",
+                "key": [{"symbol": "A", "label": "First"}, {"symbol": "B", "label": "Second"}],
+            },
+        },
+        [
+            _field(
+                "properties.grid",
+                "Grid",
+                "code",
+                hint="One row per line, one cell per word; . leaves a cell empty; "
+                "numbers are shaded on the ramp",
+            ),
+            _field(
+                "properties.key",
+                "Key",
+                "records",
+                row={"symbol": "", "label": ""},
+                columns=[
+                    _column("symbol", "Symbol", hint="The word in the grid"),
+                    _column("color", "Colour", "combo", options=list(TONES), hint="A tone or #hex"),
+                    _column("mark", "Mark", hint="A small word written in the cell"),
+                    _column("label", "Label", hint="Its name in the legend"),
+                ],
+            ),
+            _field("properties.cell", "Cell size", "number", hint="Points"),
+            _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
+            _field("properties.corner", "Corners", "number", hint="A fraction of a cell, 0 to 0.5"),
+            _field(
+                "properties.lines",
+                "Lines",
+                "combo",
+                options=["none", "ink", "muted"],
+                hint="none, ink, muted, or a #hex",
+            ),
+            _field("properties.row_labels", "Row labels", "combo", options=labels),
+            _field(
+                "properties.row_side",
+                "Row labels at",
+                "choice",
+                options=["left", "right"],
+                default="left",
+            ),
+            _field("properties.column_labels", "Column labels", "combo", options=labels),
+            _field(
+                "properties.column_side",
+                "Column labels at",
+                "choice",
+                options=["top", "bottom"],
+                default="top",
+            ),
+            _field("properties.ramp", "Ramp", "text", hint="Two #hex, low then high"),
+            _field("properties.range", "Range", "text", hint="low, high"),
+            _field("properties.values", "Write values", "bool", default=False),
+            _field("properties.legend", "Legend", "bool", default=True),
+        ],
+    )
 
 
 GROUPS = [

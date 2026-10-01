@@ -1202,3 +1202,33 @@ def test_an_authored_rail_keeps_the_trunk_where_it_asked() -> None:
     assert crossbar_x(placed) < crossbar_x(plain), "an early fraction pulls it toward the hub"
     for hint in ({"rail_at": 0.2}, {"via": "north"}):
         assert lint_compilation(compile_figure(_crossing_net_figure(**hint))).ok, hint
+
+
+def test_a_figure_whose_routing_costs_more_than_the_repairs_may_spend_gets_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each repair trial routes the whole figure again: one whose first routing alone
+    outruns ``REPAIR_WORK`` would only overrun it, so it is routed once."""
+
+    import flexo.routing.router as router
+    from flexo.routing.search import search_work
+
+    figure = Figure("rl", width="single-column")
+    with figure.module("m", label="Agent and environment", layout="column") as m:
+        agent = m.block("agent", label="Agent")
+        environment = m.block("environment", label="Environment")
+        m.connect(agent, environment, label="action $A_t$", via="east")
+        m.connect(environment, agent, label="state $S_{t+1}$", via="west")
+        m.connect(environment, agent, label="reward $R_{t+1}$", via="west")
+    style = STYLES["paper"]
+    fitted = fit_figure(measure_figure(figure.spec, style=style), style=style)
+
+    def work(budget: int) -> int:
+        monkeypatch.setattr(router, "REPAIR_WORK", budget)
+        before = search_work()
+        route_figure(fitted, style=style)
+        return search_work() - before
+
+    once = work(0)
+    assert work(10**9) > once, "this figure is one the repairs try again"
+    assert work(once - 1) == once

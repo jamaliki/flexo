@@ -156,3 +156,109 @@ def test_coloured_words_are_painted_in_their_colour() -> None:
         figure.block("b", label="Thanks to [Ada]{accent} and [Bob]{#c0392b}")
     svg = compile_figure(figure.spec).document.text
     assert 'fill="#c0392b"' in svg and 'data-flexo-fill="tone-1-stroke"' in svg
+
+
+def test_a_word_longer_than_any_line_breaks_quickly_into_pieces_that_fit() -> None:
+    import time
+
+    from flexo.units import pt
+
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    start = time.monotonic()
+    word = (TextRun("W" * 20_000),)
+    metrics = measurer.measure(word, max_width=400.0, break_words=True, balance=False)
+    assert time.monotonic() - start < 10
+    assert all(line.width <= 400.0 + 1e-6 for line in metrics.lines)
+    assert sum(len(run.text) for line in metrics.lines for run in line.runs) == 20_000
+
+
+def test_invisible_format_characters_are_never_missing() -> None:
+    from flexo.text import font_stack
+    from flexo.units import pt
+
+    stack = font_stack(TypographyStyle(family="Figtree", size=pt(20)))
+    assert stack.missing("a️ b‍ c⁠", False) == set()
+
+
+def test_a_placed_svg_may_name_its_weights() -> None:
+    from flexo.svg_resources import _css_weight
+
+    weights = [_css_weight(value, 400) for value in ("700", "bold", "normal", "lighter", None, "x")]
+    assert weights == [700, 700, 400, 300, 400, 400]
+
+
+def test_balanced_lines_never_break_a_word_that_fits_whole() -> None:
+    from flexo.units import pt
+
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    words = (TextRun("Column 1 has a longer heading than the rest"),)
+    metrics = measurer.measure(words, max_width=120, balance=True, break_words=True)
+    lines = ["".join(run.text for run in line.runs) for line in metrics.lines]
+    assert "Column" in lines[0] and all("Colum" not in line or "Column" in line for line in lines)
+
+
+def test_a_line_given_its_own_width_stays_one_line() -> None:
+    from math import nextafter
+
+    from flexo.markup import parse_label
+
+    # A width summed in another order differs in its last bits: a table's cell, given
+    # its words' width back, broke its formula between two runs (ℏ | ω).
+    measurer = TextMeasurer(TypographyStyle(family="Liberation Sans"))
+    runs = parse_label(r"$E_n / \hbar\omega$")
+    width = nextafter(measurer.measure(runs).width, 0.0)
+    assert len(measurer.measure(runs, max_width=width, balance=False).lines) == 1
+
+
+def test_a_tab_is_a_space_and_control_characters_draw_nothing() -> None:
+    from flexo.markup import parse_label
+
+    assert parse_label("a\tb\r\nc") == (TextRun("a b\nc"),)
+
+
+def test_a_fallback_face_serves_its_script_and_a_word_is_set_in_one_face() -> None:
+    from flexo.text import font_stack
+    from flexo.units import pt
+
+    stack = font_stack(TypographyStyle(family="Figtree", size=pt(20)))
+    words = stack.segments("Tiếng Việt", 400, False)
+    # Whole words, not letter by letter.
+    assert [face.family for face, _ in words] == ["IBM Plex Sans"]
+    after = stack.segments("日本語 ✓", 400, False)
+    assert after[-1] == (after[-1][0], "✓") and after[-1][0].family == "IBM Plex Sans"
+
+
+def test_chinese_and_japanese_break_between_characters_but_not_before_closing_marks() -> None:
+    from flexo.text import _cjk_units
+    from flexo.units import pt
+
+    expected = ["「テ", "ス", "ト」", "で", "す。", "GPT-4"]
+    assert _cjk_units("「テスト」です。GPT-4") == expected
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    words = (TextRun("これは日本語の文章です。「括弧」の中でも正しく改行されます。"),)
+    measured = measurer.measure(words, max_width=200).lines
+    lines = ["".join(run.text for run in line.runs) for line in measured]
+    assert len(lines) > 1
+    assert not any(line[0] in "。」、" for line in lines)
+    assert not any(line[-1] == "「" for line in lines)
+
+
+def test_thai_breaks_between_its_words_where_the_system_has_a_dictionary() -> None:
+    from flexo.text import TextMeasurer, _icu
+
+    if _icu() is None:
+        pytest.skip("no ICU on this system: Thai stays whole")
+    sentence = "ภาษาไทยเป็นภาษาที่ไม่มีการเว้นวรรคระหว่างคำ"
+    words = {"ภาษา", "ไทย", "เป็น", "ที่", "ไม่มี", "การ", "เว้น", "วรรค", "ระหว่าง", "คำ"}
+    lines = TextMeasurer(TypographyStyle())._wrap_line((TextRun(sentence),), 60.0)
+    assert len(lines) > 1
+    seen = ["".join(run.text for run in line) for line in lines]
+    assert "".join(seen) == sentence
+    for line in seen:
+        # Every line is whole words: it can be cut into the sentence's words.
+        rest = line
+        while rest:
+            longest = sorted(words, key=len, reverse=True)
+            word = next((word for word in longest if rest.startswith(word)), None)
+            assert word is not None, (line, rest)
+            rest = rest[len(word):]

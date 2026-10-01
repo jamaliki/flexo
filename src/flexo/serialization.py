@@ -353,6 +353,9 @@ def _waypoint_data(waypoint: Waypoint) -> dict[str, object]:
     return result
 
 
+_RUN_EXTRAS = ("accent", "code", "link", "color", "math", "maths")
+
+
 def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
     if not label:
         return
@@ -365,7 +368,8 @@ def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
             "weight": run.weight,
             "italic": run.italic,
             "baseline_shift": run.baseline_shift,
-            **({"accent": run.accent} if run.accent else {}),
+            # A run's formula, colour, link and code are kept: a label read back is the one written.
+            **{key: getattr(run, key) for key in _RUN_EXTRAS if getattr(run, key)},
         }
         for run in label
     ]
@@ -391,6 +395,11 @@ def _label(value: object = "") -> tuple[TextRun, ...]:
             italic=item.get("italic", False),
             baseline_shift=item.get("baseline_shift", "normal"),
             accent=item.get("accent", ""),
+            code=bool(item.get("code", False)),
+            link=item.get("link", ""),
+            color=item.get("color", ""),
+            math=item.get("math", ""),
+            maths=bool(item.get("maths", False)),
         )
         for item in value
     )

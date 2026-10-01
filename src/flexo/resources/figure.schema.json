@@ -60,7 +60,12 @@
         "weight": {"type": "integer", "minimum": 100, "maximum": 900, "default": 400},
         "italic": {"type": "boolean", "default": false},
         "baseline_shift": {"enum": ["normal", "super", "sub"], "default": "normal"},
-        "accent": {"type": "string", "default": ""}
+        "accent": {"type": "string", "default": ""},
+        "code": {"type": "boolean", "default": false},
+        "link": {"type": "string", "default": ""},
+        "color": {"type": "string", "default": ""},
+        "math": {"type": "string", "default": ""},
+        "maths": {"type": "boolean", "default": false}
       }
     },
     "label": {

@@ -284,6 +284,7 @@ SPACES = {
 
 FONT_COMMANDS = {
     "mathrm": "rm",
+    "mathdefault": "rm",  # matplotlib's: the words' upright face (its log ticks use it)
     "mathit": "it",
     "mathbf": "bf",
     "mathsf": "sf",
@@ -505,6 +506,9 @@ class Scripts:
     base: object
     sup: list | None = None
     sub: list | None = None
+    prime: str = ""
+    """Primes on the base (q' is q with ′): set at the base's size and height, the
+    subscript under them and the superscript after them, as TeX sets q'_{2i}."""
 
 
 @dataclass(slots=True)
@@ -515,6 +519,9 @@ class Operator:
     symbol: str
     named: bool = False
     limits: bool | None = None
+    body: list | None = None
+    """``\\mathop{...}``: an operator made of what it holds (``\\mathop{\\mathrm{Res}}``),
+    set as written, its limits above and below in display as any operator's."""
 
 
 @dataclass(slots=True)
@@ -609,6 +616,9 @@ class Array:
 @dataclass(slots=True)
 class Space:
     em: float
+    inline: float | None = None
+    """The width out of display style, where it differs: amsmath's ``\\pmod`` is set
+    18mu from what it follows in display and 8mu within words."""
 
 
 @dataclass(slots=True)
@@ -801,6 +811,7 @@ class _Parser:
     def scripts(self, base: object, font: str | None) -> object:
         sup: list | None = None
         sub: list | None = None
+        prime = ""
         while (token := self.peek()) is not None and token.kind == "char" and token.value in "^_'":
             self.take()
             if token.value == "'":
@@ -811,8 +822,7 @@ class _Parser:
                     self.take(skip_spaces=False)
                     primes += 1
                 # A maths font's prime is drawn raised already: it follows its letter.
-                mark = {1: "′", 2: "″", 3: "‴", 4: "⁗"}.get(primes, "′" * primes)
-                base = Group([base, Sym(mark)])
+                prime += {1: "′", 2: "″", 3: "‴", 4: "⁗"}.get(primes, "′" * primes)
                 continue
             argument = self.argument(font)
             if argument is None:
@@ -823,7 +833,7 @@ class _Parser:
                 and argument
                 and all(isinstance(item, Sym) and item.char in "′″‴⁗" for item in argument)
             ):
-                base = Group([base, *argument])  # y^{\prime}, as y'
+                prime += "".join(item.char for item in argument)  # y^{\prime}, as y'
                 continue
             if token.value == "^":
                 if sup is not None:
@@ -834,7 +844,9 @@ class _Parser:
                     self.said("a symbol has two subscripts: group them, as x_{a b}")
                 sub = [*(sub or []), *argument]
         if sup is None and sub is None:
-            return base
+            return Group([base, Sym(prime)]) if prime else base
+        if prime:
+            return Scripts(base, sup, sub, prime)
         if isinstance(base, Brace) and base.label is None:
             label = sup if base.over else sub
             if label is not None:
@@ -853,9 +865,9 @@ class _Parser:
         if token is None:
             return None
         if token.kind == "char" and token.value == "{":
-            items = self.items(stop={"}"}, font=font)
+            items = self.items(stop=set(), font=font)
             closing = self.take()
-            if closing is None or closing.value != "}":
+            if closing is None or closing.kind != "char" or closing.value != "}":
                 self.said("a { is not closed")
             return items
         if token.kind == "char" and token.value in "}&^_":
@@ -964,9 +976,10 @@ class _Parser:
 
     def char(self, char: str, font: str | None) -> object | None:
         if char == "{":
-            items = self.items(stop={"}"}, font=font)
+            # Up to the brace that closes it: an escaped \} (a brace to be drawn) is not one.
+            items = self.items(stop=set(), font=font)
             closing = self.take()
-            if closing is None or closing.value != "}":
+            if closing is None or closing.kind != "char" or closing.value != "}":
                 self.said("a { is not closed")
             return Group(items)
         if char == "}":
@@ -1157,7 +1170,7 @@ class _Parser:
             }[name]
             body = self.argument(font) or []
             if kind == OP:
-                return Operator("", named=True, limits=None) if not body else Classed(OP, body)
+                return Operator("", named=True, limits=None, body=body)
             return Classed(kind, body)
         if name in {"textcolor", "colorbox"}:
             colour = self.word_argument()
@@ -1223,25 +1236,17 @@ class _Parser:
             "leavevmode",
         }:
             return None
-        if name == "pmod":
+        if name in {"pmod", "pod", "mod"}:
+            # amsmath's: 18mu from what it follows in display, less within words; "mod"
+            # in the operators' face but an ordinary atom, 6mu from its argument.
+            mod = [Classed(ORD, [Operator("mod", named=True, limits=False)]), Space(6 / 18)]
+            if name == "mod":
+                return Group([Space(1.0, inline=12 / 18), *mod])
             body = self.argument(font) or []
-            return Group(
-                [
-                    Space(1.0),
-                    Sym("(", OPEN),
-                    Operator("mod", named=True, limits=False),
-                    Space(6 / 18),
-                    *body,
-                    Sym(")", CLOSE),
-                ]
-            )
-        if name == "pod":
-            body = self.argument(font) or []
-            return Group([Space(1.0), Sym("(", OPEN), *body, Sym(")", CLOSE)])
+            inside = [*mod, *body] if name == "pmod" else body
+            return Group([Space(1.0, inline=8 / 18), Sym("(", OPEN), *inside, Sym(")", CLOSE)])
         if name == "bmod":
             return Classed(BIN, [Operator("mod", named=True, limits=False)])
-        if name == "mod":
-            return Group([Space(1.0), Operator("mod", named=True, limits=False), Space(6 / 18)])
         if name in BINARY:
             return Sym(BINARY[name], BIN)
         if name in RELATION:
@@ -1362,8 +1367,27 @@ class _Parser:
     def chemistry(self) -> Group:
         """``\\ce{...}`` (mhchem), as chemists write it: ``\\ce{2H2 + O2 -> 2H2O}``."""
 
-        words = self.word_argument()
-        return Group(_chemistry(words))
+        return Group(_chemistry(self.raw_argument()))
+
+    def raw_argument(self) -> str:
+        """A braced argument as it was written, braces inside it kept: Fe^{3+}."""
+
+        token = self.take()
+        if token is None:
+            return ""
+        if token.value != "{" or token.kind != "char":
+            return ("\\" + token.value) if token.kind == "command" else token.value
+        words, depth = [], 0
+        while (token := self.take(skip_spaces=False)) is not None:
+            if token.kind == "char" and token.value == "{":
+                depth += 1
+            elif token.kind == "char" and token.value == "}":
+                if depth == 0:
+                    return "".join(words)
+                depth -= 1
+            words.append(("\\" + token.value) if token.kind == "command" else token.value)
+        self.said("a { is not closed")
+        return "".join(words)
 
 
 # fmt: off
@@ -1494,45 +1518,60 @@ _PREFIXES = {
 
 
 def _units(words: str) -> list:
-    """siunitx's units, upright: ``\\si{\\kilo\\gram\\per\\metre\\squared}``, ``\\si{m.s^{-1}}``."""
+    """siunitx's units, upright, as it sets them by default: ``\\per`` a negative power
+    of the unit after it (``\\joule\\per\\mole\\per\\kelvin``: J mol⁻¹ K⁻¹), powers
+    after (``\\squared``) or before (``\\square``) a unit, and units written out
+    (``m.s^{-1}``, ``m/s``) as written."""
 
-    items: list = []
+    # Each unit: [its letters, its power (as written, or a number), whether \per came first].
+    parts: list = []
     prefix = ""
+    inverse, before = False, 1
+
+    def unit(letters: str) -> None:
+        nonlocal prefix, inverse, before
+        parts.append([Group([Sym(ch, ORD, "rm") for ch in prefix + letters]), before, inverse])
+        prefix, inverse, before = "", False, 1
+
     for token in re.findall(r"\\[A-Za-z]+|\^\{?-?\d+\}?|[A-Za-zΩμÅ°%]+|[.~]|/|\S", words):
         if token.startswith("\\"):
             name = token[1:]
             if name in _PREFIXES:
                 prefix += _PREFIXES[name]
-                continue
-            if name == "per":
-                if items:
-                    items.append(Sym("/", ORD, "rm"))
-                continue
-            if name in {"squared", "cubed"}:
-                power = "2" if name == "squared" else "3"
-                if items:
-                    items[-1] = Scripts(items[-1], [Sym(power, ORD, "rm")])
-                continue
-            if name in {"square", "cubic"}:
-                continue
-            unit = _UNITS.get(name, name)
-            if items and not (isinstance(items[-1], Sym) and items[-1].char == "/"):
-                items.append(Space(3 / 18))
-            items.append(Group([Sym(ch, ORD, "rm") for ch in prefix + unit]))
-            prefix = ""
-            continue
-        if token.startswith("^"):
-            power = token.strip("^{}").replace("-", "−")
-            if items:
-                items[-1] = Scripts(items[-1], [Sym(ch, ORD, "rm") for ch in power])
-            continue
-        if token in ".~":
-            items.append(Space(3 / 18))
-            continue
-        if token == "/":
+            elif name == "per":
+                inverse = True
+            elif name in {"squared", "cubed"}:
+                if parts and isinstance(parts[-1], list):
+                    parts[-1][1] = 2 if name == "squared" else 3
+            elif name in {"square", "cubic"}:
+                before = 2 if name == "square" else 3
+            else:
+                unit(_UNITS.get(name, name))
+        elif token.startswith("^"):
+            if parts and isinstance(parts[-1], list):
+                parts[-1][1] = token.strip("^{}")
+        elif token in ".~":
+            continue  # units are spaced apart anyway
+        elif token == "/":
+            parts.append("/")
+        else:
+            unit(token)
+    items: list = []
+    for part in parts:
+        if part == "/":
             items.append(Sym("/", ORD, "rm"))
             continue
-        items.append(Group([Sym(ch, ORD, "rm") for ch in token]))
+        letters, power, per = part
+        if items and not (isinstance(items[-1], Sym) and items[-1].char == "/"):
+            items.append(Space(3 / 18))
+        exponent = str(power)
+        if per and not exponent.startswith("-"):
+            exponent = "-" + exponent
+        if exponent == "1":
+            items.append(letters)
+        else:
+            power_symbols = [Sym(ch, ORD, "rm") for ch in exponent.replace("-", "−")]
+            items.append(Scripts(letters, power_symbols))
     return items
 
 
@@ -1542,16 +1581,26 @@ def _chemistry(words: str) -> list:
 
     items: list = []
     arrows = {"<=>": "⇌", "<->": "↔", "->": "→", "<-": "←", "=": "=", "<=>>": "⇌", "<<=>": "⇌"}
-    for part in re.split(r"(\s+|<=>>|<<=>|<=>|<->|->|<-)", words):
-        if not part:
+    pattern = r"(\s+|(?:<=>>|<<=>|<=>|<->|->|<-)(?:\[[^\]]*\]){0,2})"
+    for part in re.split(pattern, words):
+        if not part or part.isspace():
             continue
-        if part.isspace():
-            continue
-        if part in arrows:
-            items.append(Sym(arrows[part], REL))
+        arrow = re.fullmatch(r"(<=>>|<<=>|<=>|<->|->|<-)((?:\[[^\]]*\]){0,2})", part)
+        if arrow:
+            labels = re.findall(r"\[([^\]]*)\]", arrow.group(2))
+            if labels:
+                # ->[\Delta][-H2O]: words over the arrow (and under it), as in TeX.
+                over = parse(labels[0])[0] if labels[0] else []
+                under = parse(labels[1])[0] if len(labels) > 1 and labels[1] else None
+                items.append(Arrow(arrows[arrow.group(1)], over=over, under=under))
+            else:
+                items.append(Sym(arrows[arrow.group(1)], REL))
             continue
         if part == "+":
             items.append(Sym("+", BIN))
+            continue
+        if part in {"v", "^"}:
+            items.append(Sym("↓" if part == "v" else "↑", ORD, "rm"))  # a precipitate, a gas
             continue
         items.append(Group(_species(part)))
     return items
@@ -1565,6 +1614,17 @@ def _species(words: str) -> list:
         items += [Sym(ch, ORD, "rm") for ch in leading.group(0)]
         items.append(Space(2 / 18))
         at = leading.end()
+    # An isotope's mass and number before its element: ^{14}_{6}C, ^{235}U.
+    pre = re.match(r"(?:\^\{([^}]*)\}|\^(\d+))?(?:_\{([^}]*)\}|_(\d+))?", words[at:])
+    if pre and pre.group(0):
+        mass = pre.group(1) or pre.group(2)
+        number = pre.group(3) or pre.group(4)
+        items.append(Scripts(
+            Group([]),
+            [Sym(c, ORD, "rm") for c in mass] if mass else None,
+            [Sym(c, ORD, "rm") for c in number] if number else None,
+        ))
+        at += pre.end()
     while at < len(words):
         char = words[at]
         if char == "^":
@@ -1742,6 +1802,8 @@ def _face(face: FontFace, weight: int) -> Face:
 
 @lru_cache(maxsize=8)
 def _math_face(family: str | None) -> Face:
+    """The maths font ``family``, if it is one (has a MATH table); else Latin Modern Math."""
+
     for name in (family, "Latin Modern Math"):
         if not name:
             continue
@@ -1759,12 +1821,27 @@ class Fonts:
     maths font, whose measures set the whole formula."""
 
     def __init__(self, typography: TypographyStyle) -> None:
-        from flexo.text import font_stack
+        from flexo.text import font_stack, maths_family
 
         self.typography = typography
         self.stack = font_stack(typography)
-        self.maths = _math_face(typography.math_family)
+        # The maths font that suits the words (Fira Math beside a sans face, Latin Modern
+        # Math beside a serif) sets the formula; Latin Modern Math draws what it lacks
+        # (Fira Math has no script or fraktur capitals).
+        self.maths = _math_face(maths_family(typography))
+        spare = _math_face("Latin Modern Math")
+        self.spare = spare if spare is not self.maths else None
         self._constants: dict[str, float] = {}
+
+    def maths_for(self, char: str) -> tuple[Face, int | None]:
+        """The maths face that has ``char``, and its glyph: the chosen one, else the spare."""
+
+        gid = self.maths.glyph(char)
+        if gid is None and self.spare is not None:
+            spare = self.spare.glyph(char)
+            if spare is not None:
+                return self.spare, spare
+        return self.maths, gid
 
     def constant(self, name: str) -> float:
         """A MATH table constant in em (a percentage for the ``*_PERCENT*`` ones)."""
@@ -1898,6 +1975,9 @@ class _Layout:
     def __init__(self, fonts: Fonts, size: float, weight: int) -> None:
         self.fonts = fonts
         self.base = size
+        # The words' weight, which \text takes. The maths is regular whatever it is, bold
+        # only where it asks (\mathbf): bold is a meaning in maths, and a maths font has
+        # no bold to set its Greek and signs in.
         self.weight = weight
         self.colour: str | None = None
         self.depth = 0
@@ -1935,8 +2015,7 @@ class _Layout:
         return box
 
     def maths_glyph(self, char: str, style: _Style) -> Box | None:
-        face = self.fonts.maths
-        gid = face.glyph(char)
+        face, gid = self.fonts.maths_for(char)
         if gid is None:
             return None
         return self.glyph(face, gid, self.size(style))
@@ -1945,14 +2024,14 @@ class _Layout:
         char, font, size = sym.char, sym.font, self.size(style)
         if font in {"cal", "scr", "bb", "frak", "sf", "tt", "sfit", "bfsf"}:
             # Alphabets the maths font carries: script, blackboard, fraktur, sans, typewriter.
-            mapped = _alphabet(char, font)
+            mapped = alphabet(char, font)
             box = self.maths_glyph(mapped, style) if mapped != char else None
             if box is not None:
                 return box
         letter = char.isascii() and char.isalpha()
         greek = "\u0370" <= char <= "\u03ff"
         if greek and font in {"bf", "bi"}:
-            box = self.maths_glyph(_alphabet(char, font), style)
+            box = self.maths_glyph(alphabet(char, font), style)
             if box is not None:
                 return box
         if (
@@ -1964,15 +2043,11 @@ class _Layout:
             italic = font in {"it", "bi"} or (
                 font is None and (letter or (greek and char.islower()))
             )
-            weight = 700 if font in {"bf", "bi"} else self.weight
+            weight = 700 if font in {"bf", "bi"} else _REGULAR
             face, slant = self.fonts.text_face(char, italic, weight)
-            if (
-                greek
-                and italic
-                and (slant or face.face.family != self.fonts.stack.families[0][0].family)
-            ):
-                # TeX's lower-case Greek is italic: the maths font's, when the words' face has
-                # none of its own (a fallback's italic θ may be drawn as ϑ).
+            if greek and italic:
+                # TeX's lower-case Greek is italic, and the maths font's own letter -- the
+                # one maths set as words has too; a text face's italic θ may be drawn as ϑ.
                 box = self.maths_glyph(_GREEK_ITALIC.get(char, char), style)
                 if box is not None:
                     return box
@@ -1984,7 +2059,7 @@ class _Layout:
         ):
             # Signs and brackets are the words' own where their faces have them, as maths
             # set as words has them; the maths font's take over where they must grow.
-            face, slant = self.fonts.text_face(char, False, self.weight)
+            face, slant = self.fonts.text_face(char, False, _REGULAR)
             gid = face.glyph(char)
             if gid is not None and not face.has_math:
                 return self.glyph(face, gid, size)
@@ -1992,16 +2067,19 @@ class _Layout:
         box = self.maths_glyph(char, style)
         if box is not None:
             return box
-        face, slant = self.fonts.text_face(char, False, self.weight)
+        face, slant = self.fonts.text_face(char, False, _REGULAR)
         gid = face.glyph(char)
         if gid is not None:
             return self.glyph(face, gid, size, slant)
         return Box(0.5 * size, 0.7 * size, 0.0)
 
-    def words(self, text: Text, style: _Style) -> Box:
+    def words(self, text: Text, style: _Style, weight: int | None = None) -> Box:
+        """Words set as text: at the words' weight around the formula (``\\text``), or
+        at ``weight`` (an operator's name, which is maths)."""
+
         size = self.size(style)
         italic = text.font == "it"
-        weight = 700 if text.font == "bf" else self.weight
+        weight = 700 if text.font == "bf" else (weight or self.weight)
         pieces: list[tuple[Box, float]] = []
         for face_spec, piece in self.fonts.stack.segments(
             text.words, weight, italic, code=text.font == "tt"
@@ -2040,7 +2118,8 @@ class _Layout:
                 style = _Style(_STYLES.index(item.style), style.cramped)
                 continue
             if isinstance(item, Space):
-                atoms.append((None, _kern(item.em * self.size(style))))
+                em = item.em if item.inline is None or style.level == 0 else item.inline
+                atoms.append((None, _kern(em * self.size(style))))
                 continue
             if isinstance(item, (Tab, NewRow, HLine, Infix)):
                 continue
@@ -2067,19 +2146,19 @@ class _Layout:
                 amount = _SPACING[last][kind]
                 if amount > 0 or (amount < 0 and style.level < 2):
                     kern = _MU[abs(amount)] * self.size(style)
-            if (
-                kind in {ORD, OPEN, CLOSE, PUNCT, INNER}
-                and placed
-                and placed[-1][0].single
-                and placed[-1][0].italic > 0
-            ):
-                # An italic letter leans into what follows: give it its italic correction.
+            if kind is not None and placed and placed[-1][0].single and placed[-1][0].italic > 0:
+                # An italic letter leans into what follows -- a sign as much as a letter --
+                # so it is given its italic correction (TeX's rule 17): f + b, not f+ b.
                 kern += placed[-1][0].italic
             placed.append((box, kern))
             if kind is not None:
                 last = kind
+        alone = len(placed) == 1
+        if len(placed) > 1 and placed[-1][0].single and placed[-1][0].italic > 0:
+            # And at the end of a list, so a closing bracket clears it: \left| f \right|.
+            placed.append((_kern(placed[-1][0].italic), 0.0))
         row = _row(placed)
-        if len(placed) == 1:
+        if alone:
             row.single = placed[0][0].single
             row.accent_at = placed[0][0].accent_at
         return row
@@ -2106,7 +2185,10 @@ class _Layout:
         if isinstance(item, Middle):
             return REL, self.delimiter(item.delimiter, 0.0, style)
         if isinstance(item, Big):
-            target = (0.0, 1.2, 1.8, 2.4, 3.0)[item.size] * self.size(style)
+            # 1.2, 1.8, 2.4 or 3 ems, as TeX's: a maths font's variants of those sizes are
+            # drawn a little under them (Latin Modern Math's 1.2 em bracket is 1.195 em,
+            # Fira Math's 3 em one 2.96), and are what LuaTeX takes, not the next size up.
+            target = 0.98 * (0.0, 1.2, 1.8, 2.4, 3.0)[item.size] * self.size(style)
             return item.kind, self.delimiter(item.delimiter, target, style, exact=True)
         if isinstance(item, Accent):
             return ORD, self.accent(item, style)
@@ -2146,7 +2228,7 @@ class _Layout:
             before = self.colour
             self.colour = ERROR_COLOUR
             try:
-                return ORD, self.words(Text(item.words, "rm"), style)
+                return ORD, self.words(Text(item.words, "rm"), style, _REGULAR)
             finally:
                 self.colour = before
         if isinstance(item, Space):
@@ -2171,9 +2253,34 @@ class _Layout:
             kind, base = ORD, Box()
         else:
             kind, base = self.atom(base_item, style)
+        if item.prime:
+            return kind, self.primed(base, item, style)
         return kind, self.attach(
             base, item.sup, item.sub, style, operator=isinstance(base_item, Operator)
         )
+
+    def primed(self, base: Box, item: Scripts, style: _Style) -> Box:
+        """A base with primes: the primes after it at its size (a maths font's prime is
+        raised already), a superscript after them, a subscript under them."""
+
+        mark = self.atom(Sym(item.prime), style)[1]
+        x = base.width + base.italic
+        marked = Box(x + mark.width, max(base.height, mark.height), max(base.depth, mark.depth))
+        marked.put(base, 0.0, 0.0)
+        marked.put(mark, x, 0.0)
+        box = self.attach(marked, item.sup, None, style) if item.sup else marked
+        if item.sub is not None:
+            sub = self.items(item.sub, style.down())
+            v = max(
+                self.c("SUBSCRIPT_SHIFT_DOWN", style),
+                sub.height - self.c("SUBSCRIPT_TOP_MAX", style),
+                0.0 if base.single
+                else base.depth + self.c("SUBSCRIPT_BASELINE_DROP_MIN", style.up()),
+            )
+            box.put(sub, base.width, -v)
+            box.depth = max(box.depth, v + sub.depth)
+            box.width = max(box.width, base.width + sub.width + self.c("SPACE_AFTER_SCRIPT", style))
+        return box
 
     def attach(
         self,
@@ -2240,14 +2347,17 @@ class _Layout:
 
     def operator(self, item: Operator, style: _Style) -> tuple[Box, bool]:
         size = self.size(style)
+        if item.body is not None:
+            box = self.items(item.body, style)
+            box.single = False
+            return box, True
         if item.named:
             if not item.symbol:
                 return Box(), False
-            box = self.words(Text(item.symbol, "rm"), style)
+            box = self.words(Text(item.symbol, "rm"), style, _REGULAR)
             box.single = False
             return box, True
-        face = self.fonts.maths
-        gid = face.glyph(item.symbol)
+        face, gid = self.fonts.maths_for(item.symbol)
         if gid is None:
             return self.symbol(Sym(item.symbol, OP), style), False
         if style.level == 0:
@@ -2386,9 +2496,8 @@ class _Layout:
         """``char`` from the maths font at least ``target`` points long (tall, or wide):
         a larger variant, or else one built from its parts."""
 
-        face = self.fonts.maths
+        face, gid = self.fonts.maths_for(char)
         size = self.size(style)
-        gid = face.glyph(char)
         if gid is None:
             box = self.symbol(Sym(char), style)
             return box
@@ -2461,14 +2570,19 @@ class _Layout:
         centred.single = False
         return centred
 
-    def fence(
-        self, left: str, body: Box, right: str, style: _Style, middles: list | None = None
-    ) -> Box:
+    def reach(self, height: float, depth: float, style: _Style, *, whole: bool = False) -> float:
+        """How tall brackets around a body of ``height`` and ``depth`` are: TeX's 90% of
+        it, falling short by at most half an em -- or all of it (``whole``), for an array
+        whose rules run to its top and foot and would stand out past shorter brackets."""
+
         axis = self.c("AXIS_HEIGHT", style)
-        reach = max(body.height - axis, body.depth + axis)
-        size = self.size(style)
-        # TeX: cover 90% of the formula, and fall short of it by at most half an em.
-        target = max(2 * reach * 0.901, 2 * reach - 0.5 * size)
+        reach = max(height - axis, depth + axis)
+        if whole:
+            return 2 * reach
+        return max(2 * reach * 0.901, 2 * reach - 0.5 * self.size(style))
+
+    def fence(self, left: str, body: Box, right: str, style: _Style, *, whole: bool = False) -> Box:
+        target = self.reach(body.height, body.depth, style, whole=whole)
         opening = self.delimiter(left, target, style)
         closing = self.delimiter(right, target, style)
         return _row([(opening, 0.0), (body, 0.0), (closing, 0.0)])
@@ -2482,15 +2596,14 @@ class _Layout:
                 pieces.append([])
             else:
                 pieces[-1].append(thing)
+        whole = any(isinstance(thing, Array) and (thing.lines or thing.bars) for thing in item.body)
         if not middles:
             body = self.items(item.body, style)
-            return self.fence(item.left, body, item.right, style)
+            return self.fence(item.left, body, item.right, style, whole=whole)
         boxes = [self.items(piece, style) for piece in pieces]
         height = max(box.height for box in boxes)
         depth = max(box.depth for box in boxes)
-        axis = self.c("AXIS_HEIGHT", style)
-        reach = max(height - axis, depth + axis)
-        target = max(2 * reach * 0.901, 2 * reach - 0.5 * self.size(style))
+        target = self.reach(height, depth, style, whole=whole)
         thick = _MU[3] * self.size(style)
         row: list[tuple[Box, float]] = [(self.delimiter(item.left, target, style), 0.0)]
         for index, box in enumerate(boxes):
@@ -2505,8 +2618,7 @@ class _Layout:
 
     def accent(self, item: Accent, style: _Style) -> Box:
         body = self.items(item.body, style.cramp())
-        face = self.fonts.maths
-        gid = face.glyph(item.mark)
+        face, gid = self.fonts.maths_for(item.mark)
         if gid is None:
             return body
         size = self.size(style)
@@ -2700,6 +2812,16 @@ class _Layout:
             strut_height, strut_depth = 0.7 * size, 0.3 * size
         heights = [max([strut_height, *(cell.height for cell in cells)]) for cells in grid]
         depths = [max([strut_depth, *(cell.depth for cell in cells)]) for cells in grid]
+        under = self.c("UNDERBAR_VERTICAL_GAP", cell_style)
+        over = self.c("OVERBAR_VERTICAL_GAP", cell_style)
+        for line in item.lines:
+            # A rule keeps the gap a bar over or under keeps from the ink beside it,
+            # where a row's scripts reach past its strut (as a maths font's may).
+            if 0 < line <= len(grid):
+                ink = max(cell.depth for cell in grid[line - 1])
+                depths[line - 1] = max(depths[line - 1], ink + under)
+            if line < len(grid):
+                heights[line] = max(heights[line], max(cell.height for cell in grid[line]) + over)
         jot = 0.3 * size if item.kind in {"aligned", "gathered"} else 0.0
         if item.kind == "cases":
             jot = 0.1 * size
@@ -2719,13 +2841,20 @@ class _Layout:
                 gaps.append(1.0 * size)
         edge = 0.5 * size if item.kind == "array" else 0.0
         columns = (item.columns or "c").replace(" ", "")
+        thickness = self.c("FRACTION_RULE_THICKNESS", cell_style)
         box = Box()
-        y = 0.0
-        tops: list[float] = []
+        # Rows hang from the top down. A rule (\hline) takes room of its own between
+        # the depth of the row above and the height of the row below, as LaTeX's array
+        # sets it, so it never strikes through a row's scripts.
+        bottom = 0.0
+        rules: list[float] = []
         for index, cells in enumerate(grid):
-            if index > 0:
-                y -= depths[index - 1] + jot + heights[index]
-            tops.append(y + heights[index])
+            gap = jot if index > 0 else 0.0
+            if index in item.lines:
+                rules.append(bottom - gap / 2.0 - thickness)
+                gap += thickness
+            y = bottom - gap - heights[index]
+            bottom = y - depths[index]
             x = edge
             for column, cell in enumerate(cells):
                 align = (
@@ -2740,13 +2869,12 @@ class _Layout:
                 )
                 box.put(cell, x + offset, y)
                 x += widths[column] + gaps[column]
+        if len(grid) in item.lines:
+            rules.append(bottom - thickness)
+            bottom -= thickness
         width = sum(widths) + sum(gaps) + 2 * edge
-        total_height = heights[0]
-        total_depth = -(y - depths[-1])
         box.width = width
-        thickness = self.c("FRACTION_RULE_THICKNESS", cell_style)
-        for line in item.lines:
-            level = tops[line] + 0.15 * size if line < len(tops) else y - depths[-1] - 0.15 * size
+        for level in rules:
             box.put(_rule(width, thickness, level, self.colour), 0.0, 0.0)
         for bar in item.bars:
             x = (
@@ -2757,16 +2885,15 @@ class _Layout:
             )
             if bar >= count:
                 x = width - edge / 2.0
-            bottom = y - depths[-1]
-            box.put(_rule(thickness, heights[0] - bottom, bottom, self.colour), x, 0.0)
+            # From the top of the array to its foot, meeting the rules across it.
+            box.put(_rule(thickness, -bottom, bottom, self.colour), x - thickness / 2.0, 0.0)
         # Centre the whole on the maths axis.
         axis = self.c("AXIS_HEIGHT", style)
-        middle = (total_height - total_depth) / 2.0
-        box.height = total_height
-        box.depth = total_depth
-        centred = box.raised(axis - middle)
+        box.depth = -bottom
+        centred = box.raised(axis - bottom / 2.0)
         if item.left or item.right:
-            return self.fence(item.left, centred, item.right, style)
+            ruled = bool(item.lines or item.bars)
+            return self.fence(item.left, centred, item.right, style, whole=ruled)
         return centred
 
     # -- the rest --
@@ -2801,11 +2928,13 @@ class _Layout:
 
 
 _SLANT = math.tan(math.radians(12.0))
+_REGULAR = 400
+"""The weight maths is set at, in bold words too (LaTeX's ``\\bfseries`` leaves it so)."""
 _WORDS_OWN = frozenset("+−=<>±×÷()[]|/!,;:.")
 """Signs set in the typography's face rather than the maths font's."""
 
 
-def _alphabet(char: str, font: str | None) -> str:
+def alphabet(char: str, font: str | None) -> str:
     if font == "bf" and char in _GREEK_BOLD:
         return _GREEK_BOLD[char]
     if font == "bi" and char in _GREEK_BOLD_ITALIC:
@@ -2868,7 +2997,8 @@ def typeset(
     weight: int = 400,
 ) -> Typeset:
     """``source`` (LaTeX maths, without its ``$``) laid out at ``size`` points, in
-    display style (a formula on its own line) or text style (one within words)."""
+    display style (a formula on its own line) or text style (one within words).
+    ``weight`` is the words', which its ``\\text`` takes: its maths is regular."""
 
     display = display or source.lstrip().startswith("\\displaystyle")
     items, problems = parse(source)

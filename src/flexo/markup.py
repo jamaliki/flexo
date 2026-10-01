@@ -40,6 +40,9 @@ from dataclasses import replace
 
 from flexo.ir.semantic import TextRun
 
+THIN = "\u202f"
+"""Maths' thin space (``\\,``, and after a comma): narrow, and no place to break a line."""
+
 SYMBOLS = {
     # Greek, lower case
     "alpha": "α",
@@ -173,7 +176,7 @@ SYMBOLS = {
     "square": "□",
     "checkmark": "✓",
     "|": "‖",
-    ",": " ",
+    ",": THIN,
     " ": " ",
     "$": "$",
     "{": "{",
@@ -189,7 +192,7 @@ ACCENTS = {"hat": "̂", "bar": "̄", "tilde": "̃", "dot": "̇"}
 OVER = {"vec": "→", "overrightarrow": "→", "overleftarrow": "←"}
 """Commands that set a mark over their whole argument, drawn by Flexo itself."""
 
-UPRIGHT = {"text", "mathrm", "operatorname"}
+UPRIGHT = {"text", "mathrm", "mathdefault", "operatorname"}
 CODE = {"texttt", "mathtt", "code"}
 """Commands whose argument is set as code, in the monospace family."""
 
@@ -214,6 +217,14 @@ Unicode placed early in its Letterlike Symbols block instead."""
 BOLD = {"mathbf", "boldsymbol"}
 
 _REPLACEMENTS = {"-": "−", "*": "∗", "'": "′"}
+_MATH_ITALIC = {
+    **{chr(0x03B1 + index): chr(0x1D6FC + index) for index in range(25)},
+    **{
+        chr(code): chr(0x1D716 + index)
+        for index, code in enumerate((0x3F5, 0x3D1, 0x3F0, 0x3D5, 0x3F1, 0x3D6))
+    },
+}
+"""Lower-case Greek and its mathematical italic letters (U+1D6FC on)."""
 BINARY = frozenset("+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆∖")
 """Symbols TeX spaces as binary operators: ``a + b``, but ``-a`` for a sign."""
 RELATIONS = frozenset("=<>≤≥≠≈≡∼≃≅∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔⟺⟹↦∣≪≫∥")
@@ -229,12 +240,18 @@ _LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?|mailto|file):[^)\s]+)\)")
 """``[words](url)``: words that link somewhere."""
 
 
+_CONTROLS = {code: None for code in range(32) if code != 10} | {9: " ", 127: None}
+
+
 def parse_label(text: str) -> tuple[TextRun, ...]:
     """The runs a string label stands for: plain text, with math between ``$``
     and code between backticks (set in the monospace family)."""
 
     if not text:
         return ()
+    # A tab in words is a space between them; other control characters (a stray \r)
+    # draw nothing -- a font has no glyph for either.
+    text = text.translate(_CONTROLS)
     if (
         "$" not in text and "`" not in text and "](" not in text and "]{" not in text
         and "\\(" not in text and "\\[" not in text
@@ -370,8 +387,9 @@ def _closing_dollar(text: str, start: int) -> int | None:
 
     As pandoc reads dollars: maths starts with no space after its ``$`` and ends
     with none before its ``$``, and that ``$`` is not followed by a digit -- so
-    "it costs $5 and $10" is two prices, not maths. Maths that is plainly TeX (a
-    command, a script, a brace) may have spaces inside: ``$ \\alpha $``.
+    "it costs $5 and $10" and "$5-$10" are prices, not maths. Maths that is plainly
+    TeX (a command, a script, a brace) may have spaces inside (``$ \\alpha $``) and a
+    digit after it: ``P2$_1$2$_1$2$_1$``, a space group.
     """
 
     index = start
@@ -381,9 +399,11 @@ def _closing_dollar(text: str, start: int) -> int | None:
             continue
         if text[index] == "$":
             inside = text[start:index]
-            if not inside or text[index + 1 : index + 2].isdigit():
+            if not inside:
                 return None
             plainly_tex = any(ch in inside.replace("\\$", "") for ch in "\\^_{")
+            if text[index + 1 : index + 2].isdigit() and not plainly_tex:
+                return None
             if (inside[0].isspace() or inside[-1].isspace()) and not plainly_tex:
                 return None
             return index
@@ -402,7 +422,7 @@ def _math(source: str, *, display: bool = False) -> list[TextRun]:
         words = "".join(run.text for run in runs).replace("\\", "").replace("\n", " ").strip()
         prefix = "\\displaystyle " if display else ""
         return [TextRun(words or source.strip(), math=prefix + source.strip())]
-    return runs
+    return [replace(run, maths=True) for run in runs]
 
 
 _LINEAR = frozenset({
@@ -423,8 +443,27 @@ def needs_layout(source: str) -> bool:
 
     if "&" in source:
         return True
-    if any(name not in _LINEAR for name in _COMMAND.findall(source)):
+    if not _paired(source):
+        # A brace not closed (x^{2), or closing none: TeX's reader says so, in words.
         return True
+    names = _COMMAND.findall(source)
+    if any(name not in _LINEAR for name in names):
+        return True
+    # An accent set as a combining mark collides with a Greek letter, or takes the letter
+    # into another face; bold Greek is no face's: TeX places and draws them. An arrow
+    # Flexo draws over one letter (\\vec{h}); over more, TeX's stretches across them.
+    if any(name in ACCENTS or name == "boldsymbol" for name in names):
+        return True
+    # A prime with a subscript (q'_{2i}): the subscript goes under the prime, not after it.
+    if re.search(r"(?:'|\\prime\}?)\s*_", source):
+        return True
+    for match in re.finditer(r"\\(?:" + "|".join(OVER) + r")\s*(?:\{([^{}]*)\}|(\S))", source):
+        if len((match.group(1) or match.group(2) or "").strip()) > 1:
+            return True
+    # A blackboard, fraktur or script alphabet as words has its capitals only.
+    for match in re.finditer(r"\\(?:mathbb|mathfrak|mathcal)\s*(?:\{([^{}]*)\}|(\S))", source):
+        if not re.fullmatch(r"[A-Z]+", (match.group(1) or match.group(2) or "").strip()):
+            return True
     # Words set upright (\mathrm{H_2O}) are read as words: their scripts need laying out.
     words = "|".join(sorted(UPRIGHT | CODE | BOLD))
     for match in re.finditer(r"\\(?:" + words + r")\s*\{([^{}]*)", source):
@@ -446,18 +485,40 @@ def needs_layout(source: str) -> bool:
     return False
 
 
+def _paired(source: str) -> bool:
+    """Whether every ``{`` in ``source`` is closed by a ``}``, escaped ones (``\\{``) aside."""
+
+    depth, index = 0, 0
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+            continue
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+        index += 1
+    return depth == 0
+
+
 def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None:
     """Append a binary operator or relation, spaced the way TeX spaces it."""
 
-    atoms = [run for run in runs if run.text != " "]
-    previous = atoms[-1].text[-1:] if atoms else ""
-    sign = symbol in BINARY and (not previous or previous in BINARY | RELATIONS | _OPENING)
+    atoms = [run for run in runs if run.text.strip()]
+    previous = atoms[-1].text.strip()[-1:] if atoms else ""
+    # After a sign, a relation, an opening or a comma, + and - are signs: (-1), a, -b.
+    sign = symbol in BINARY and (not previous or previous in BINARY | RELATIONS | _OPENING | {","})
     if sign:
         runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]
         return
     while runs and runs[-1].text == " ":
         runs.pop()
     spaced = shift == "normal" and bool(previous)
+    if spaced and atoms and atoms[-1].italic and atoms[-1].baseline_shift == "normal":
+        # An italic letter leans into the space before a sign (f + g): its correction.
+        runs.append(TextRun("\u200a", weight, False, shift))  # type: ignore[arg-type]
     if spaced:
         runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
     runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]
@@ -582,6 +643,10 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                     and name not in {"sum", "prod", "partial", "infty"}
                 )
             )
+            if italic and symbol in _MATH_ITALIC:
+                # TeX's italic Greek is the maths font's own letter, the one formulas
+                # are set in: a text face's italic θ may be drawn as ϑ.
+                symbol, italic = _MATH_ITALIC[symbol], False
             runs.append(TextRun(symbol, weight, italic, shift))  # type: ignore[arg-type]
             continue
         if character in "{}":
@@ -589,9 +654,23 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
             continue
         index += 1
         if mode == "math":
+            spaced_bar = source[index - 2 : index - 1] == " " and source[index : index + 1] == " "
+            if character == "|" and spaced_bar:
+                # A bar typed with room each side is a "given" (\\mid), spaced as a relation.
+                _operator(runs, "|", weight, shift)
+                index = _skip_spaces(source, index)
+                continue
+            if character.isspace():
+                continue  # TeX spaces maths itself; what is typed between is not a space
             character = _REPLACEMENTS.get(character, character)
             if character in BINARY | RELATIONS:
                 _operator(runs, character, weight, shift)
+                index = _skip_spaces(source, index)
+                continue
+            if character == "," and source[index:].strip():
+                # A comma in maths is followed by a thin space, as TeX sets it: (r, t).
+                runs.append(TextRun(",", weight, False, shift))  # type: ignore[arg-type]
+                runs.append(TextRun(THIN, weight, False, shift))  # type: ignore[arg-type]
                 index = _skip_spaces(source, index)
                 continue
         italic = mode == "math" and character.isascii() and character.isalpha()
@@ -649,7 +728,8 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
             result[-1].code,
             result[-1].link,
             result[-1].color,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
+            result[-1].maths,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color, run.maths):
             result[-1] = replace(result[-1], text=result[-1].text + run.text)
             continue
         result.append(run)

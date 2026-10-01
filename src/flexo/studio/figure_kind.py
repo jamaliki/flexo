@@ -57,6 +57,10 @@ Proteins: kind protein, properties {length, features: [{type: domain|region|moti
   layout: rectangular|circular, clades: [{tips: "A, B", label}], support}. The bench: kind
   wellplate {wells: 96, groups: [{wells: "A1-A12", label}]}; kind timeline {unit: day,
   events: [{at, label}], spans: [{start, end, label}]}.
+Grids: kind cells, properties {grid: "K . K\n. Y R" (one row per line, one symbol per word,
+  . empty, numbers shaded on ramp), key: [{symbol, color: tone or #hex, mark, label}], cell,
+  gap, corner, lines: ink|muted|#hex, row_labels / column_labels: numbers|letters|"a, b",
+  row_side, column_side, ramp: "#lo, #hi", range: "lo, hi", values: true}.
 edges: each {from: node or node.port, to: node or node.port, label, role, head: inhibition|
   catalysis|stimulation|necessary|modulation, arrow: reversible, back_label, cofactors: [ATP, ADP]}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group

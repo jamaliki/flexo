@@ -85,6 +85,7 @@ export function mount(studio, main) {
     idOf: (id) => id,
     box: boxOf,
     changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
+    settled: () => placeMarks(),
     reveal: (id) => {
       outlineBody.querySelector(`.tree-row[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
       if (state.tab === "source") find(id);
@@ -103,6 +104,8 @@ export function mount(studio, main) {
         const result = await studio.api("/api/act", { file: studio.file, document: studio.doc, action });
         if (studio.doc.text !== sent) continue;
         studio.change((d) => ({ ...d, text: result.document.text }), { merge });
+        // An edit made from the drawing is drawn at once: its parts are waiting to land.
+        if (action.do !== "read" && action.do !== "update") studio.requestDraw?.(0);
         return result;
       }
       return null;
@@ -148,9 +151,11 @@ export function mount(studio, main) {
     group ? h("span.fig-mark-label", {}, name) : null)));
   }
   page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
+  page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
   stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting) figure.select([]); });
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
   page.addEventListener("mousemove", (event) => {
+    if (figure.dragging) return;
     const id = figure.idAt(event);
     const where = id && boxOf(id);
     hover.hidden = !where;
@@ -329,7 +334,7 @@ export function mount(studio, main) {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
       const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
-      const accept = types.includes("image") ? "image/*,.svg" : ".pdb,.cif,.mmcif,.ent";
+      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : ".pdb,.cif,.mmcif,.ent";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
       const box = dialog({ title, body: [list, upload], actions: [
@@ -376,6 +381,7 @@ export function mount(studio, main) {
       return;
     }
     page.style.opacity = "";
+    const before = figure.landing();
     page.innerHTML = drawn.svg.replace(/^<\?xml[^>]*>\s*/, "");
     const svg = page.querySelector("svg");
     widenLines(svg);
@@ -386,6 +392,7 @@ export function mount(studio, main) {
     svg.removeAttribute("height");
     if (page.parentNode !== stage) clear(stage, page);
     fitPage();
+    figure.land(before);
   });
 
   // Someone else's change, or undo: the source follows, keeping the caret on its words.

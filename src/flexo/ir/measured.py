@@ -28,6 +28,10 @@ class TextMetrics:
     lines: tuple[MeasuredLine, ...]
     cap_height: float = 0.0
     """Height of a capital above the baseline: what the eye centres a word on."""
+    rise: float = 0.0
+    fall: float = 0.0
+    """How much a formula taller than the words opened each line, above and below its
+    words' own room (``line_height`` and ``baseline`` include them)."""
 
 
 @dataclass(frozen=True, slots=True)

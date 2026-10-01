@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 from flexo.ir.semantic import ID_PATTERN
 
@@ -211,7 +212,7 @@ class _Document:
         if self.json:
             return json.dumps(self.data, indent=2, ensure_ascii=False) + "\n"
         stream = io.StringIO()
-        self.yaml.dump(self.data, stream)
+        self.yaml.dump(_blocks(self.data), stream)
         return stream.getvalue()
 
     # -- what the file holds --
@@ -785,3 +786,23 @@ def _set(item: dict[str, Any], path: list[str], value: object) -> None:
                 del parent[key]
     else:
         trail[-1][last] = value
+
+
+def _blocks(value: Any) -> Any:
+    """``value`` with every new multi-line string written as a block (``|``).
+
+    A grid of cells or a Newick tree typed into the page reads line by line in
+    the file only as a block; a quoted string with ``\\n`` in it reads as noise.
+    Only plain strings change: what the file already held keeps the quoting it
+    was written with.
+    """
+
+    if type(value) is str and "\n" in value:
+        return LiteralScalarString(value if value.endswith("\n") else value + "\n")
+    if isinstance(value, dict):
+        for key in list(value):
+            value[key] = _blocks(value[key])
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            value[index] = _blocks(item)
+    return value

@@ -47,6 +47,12 @@ def test_brackets_grow_to_hold_what_is_inside_them() -> None:
     grown = _set(r"\left( \frac{\frac{a}{b}}{c} \right)", display=True)
     assert grown.height + grown.depth > 2 * (plain.height + plain.depth)
     assert _set(r"\Bigg( x \Bigg)").height > _set(r"\big( x \big)").height
+    # \big to \Bigg are TeX's 1.2 to 3 ems: the maths font's variants of those sizes,
+    # drawn a little under them, and not the next ones up (as LuaLaTeX sets them).
+    serif = TypographyStyle(family="Latin Modern Roman", generic="serif")
+    for command, ems in ((r"\big", 1.2), (r"\Big", 1.8), (r"\bigg", 2.4), (r"\Bigg", 3.0)):
+        formula = typeset(command + "(", serif, 20.0)
+        assert (formula.height + formula.depth) / 20.0 == pytest.approx(ems, abs=0.01), command
 
 
 def test_a_sum_takes_its_limits_above_and_below_in_display_and_beside_it_in_words() -> None:
@@ -55,6 +61,22 @@ def test_a_sum_takes_its_limits_above_and_below_in_display_and_beside_it_in_word
     assert display.height > words.height and display.width < words.width * 1.2
     # \limits and \nolimits say otherwise.
     assert _set(r"\sum\limits_{i=1}^{n} i").height > words.height
+    # An operator made with \mathop is one too: Res_{z=0} under it in display.
+    residue = r"\mathop{\mathrm{Res}}_{z=0} f"
+    beside, under = _set(residue), _set(residue, display=True)
+    assert under.width < beside.width
+    assert under.width == _set(r"\operatorname*{Res}_{z=0} f", display=True).width
+    assert _set(r"\mathop{\mathrm{Res}}\nolimits_{z=0} f", display=True).width == beside.width
+
+
+def test_a_modulus_stands_off_as_amsmath_sets_it() -> None:
+    # \pmod and \pod are 18mu from what they follow in display, 8mu within words.
+    for source in (r"a \equiv b \pmod{n}", r"a \equiv b \pod{n}"):
+        shown, inline = _set(source, display=True), _set(source)
+        assert shown.width - inline.width == pytest.approx(10 / 18 * 20)
+    # Its "mod" is upright words 6mu from the modulus, not an operator spaced more.
+    amsmath = _set(r"\mkern8mu(\mathrm{mod}\mkern6mu n)")
+    assert _set(r"\pmod{n}").width == pytest.approx(amsmath.width)
 
 
 def test_matrices_cases_and_aligned_lines_are_laid_out_in_rows() -> None:
@@ -113,6 +135,14 @@ def test_what_cannot_be_read_is_said_in_words_and_the_rest_still_drawn(
 ) -> None:
     assert said in problems_in(source)
     assert _set(source).width >= 0
+
+
+def test_a_brace_that_does_not_pair_is_said_however_simple_the_maths() -> None:
+    # x^{2 would read as words; the reader that says what is wrong reads it instead.
+    for source, said in (("x^{2", "a { is not closed"), ("x_{i}}", "a } closes no {")):
+        (run,) = [run for run in parse_label(f"then ${source}$ and") if run.math]
+        assert run.math == source and problems_in(run.math) == (said,)
+    assert not needs_layout(r"\{x\}_i") and not needs_layout("x_{i}")
 
 
 def test_no_formula_however_broken_breaks_the_setter() -> None:
@@ -179,9 +209,14 @@ def test_simple_maths_stays_words_and_the_rest_is_laid_out() -> None:
     assert (
         not needs_layout("x_t^2")
         and not needs_layout(r"\alpha \cdot \beta")
-        and not needs_layout(r"\hat{x}")
+        and not needs_layout(r"\vec{h}")
+        and not needs_layout(r"\mathbb{R}")
     )
     for source in (
+        r"\hat{x}",
+        r"\overrightarrow{AB}",
+        r"\mathfrak{g}",
+        r"\boldsymbol{\theta}",
         r"\frac{a}{b}",
         r"\sqrt{x}",
         r"e^{-E_a/RT}",
@@ -204,6 +239,16 @@ def test_dollars_read_as_pandoc_reads_them() -> None:
     assert math_spans(r"$ \alpha $") == [(0, 10)]
     assert math_spans(r"$$E = mc^2$$ and \(x\) and \[y\]") == [(0, 12), (17, 22), (27, 32)]
     assert math_spans("`echo $HOME $PATH` then $x$") == [(24, 27)]
+    assert math_spans("between $5-$10") == []
+    # Plainly TeX may be followed by a digit: a space group, P2₁2₁2₁.
+    assert math_spans("P2$_1$2$_1$2$_1$") == [(2, 6), (7, 11), (12, 16)]
+
+
+def test_matplotlibs_mathdefault_is_the_upright_face() -> None:
+    from flexo.units import pt
+
+    formula = typeset(r"\mathdefault{10^{-2}}", TypographyStyle(family="Figtree", size=pt(12)), 12)
+    assert formula.problems == () and formula.width > 0
 
 
 def test_display_maths_in_a_label_is_a_line_of_its_own() -> None:
@@ -266,3 +311,202 @@ def test_a_formula_wider_than_its_line_breaks_after_a_sign_as_tex_breaks_it() ->
     # Set side by side, the pieces are as wide as the whole.
     pieces = sum(line.width for line in narrow.lines)
     assert pieces == pytest.approx(whole.width, abs=0.5)
+
+
+def test_the_maths_font_suits_the_words_and_greek_is_its_own_everywhere() -> None:
+    from flexo.texmath import Fonts, GlyphItem
+    from flexo.text import font_stack, maths_family
+
+    serif = TypographyStyle(family="Latin Modern Roman", generic="serif")
+    assert maths_family(TYPE) == "Fira Math" and maths_family(serif) == "Latin Modern Math"
+    assert maths_family(TypographyStyle(family="Figtree", math_family="Latin Modern Math")) == (
+        "Latin Modern Math"
+    )
+    fonts = Fonts(TYPE)
+    assert fonts.maths.face.family == "Fira Math" and fonts.spare.face.family == "Latin Modern Math"
+
+    def families(source: str, typography: TypographyStyle = TYPE) -> set[str]:
+        formula = typeset(source, typography, 20.0)
+        items = formula.box.items
+        return {item.face.face.family for _, _, item in items if isinstance(item, GlyphItem)}
+
+    # Greek, signs and big operators in the maths font; letters the words' own.
+    assert families(r"\theta") == {"Fira Math"}
+    assert families(r"\sum_i x_i") == {"Fira Math", "Figtree"}
+    # A text face's italic Greek is never used, even when it has Greek (IBM Plex Sans's
+    # italic θ is drawn as ϑ).
+    assert families(r"\theta", TypographyStyle(family="IBM Plex Sans")) == {"Fira Math"}
+    # What the chosen maths font lacks comes from the spare: Fira Math has no script capitals.
+    assert families(r"\mathcal{L}") == {"Latin Modern Math"}
+    assert families(r"\theta", serif) == {"Latin Modern Math"}
+    # Maths set as words takes its Greek from the same font.
+    (theta,) = parse_label(r"$\theta$")
+    assert theta.text == "\U0001d703"
+    (face, _), *_ = font_stack(TYPE).segments(theta.text, 400, False)
+    assert face.family == "Fira Math"
+
+
+def test_code_is_set_in_the_bundled_monospace_on_every_machine() -> None:
+    from flexo.text import font_stack
+
+    (face, _), *_ = font_stack(TYPE).segments("def f(x):", 400, False, code=True)
+    assert face.family == "IBM Plex Mono" and face.bundled
+
+
+def test_escaped_braces_stay_inside_a_group() -> None:
+    from flexo.units import pt
+
+    typography = TypographyStyle(family="Figtree", size=pt(20))
+    sources = (r"E_{t\sim\{1,T\}}", r"\sqrt{\{x\}}", r"\frac{\{a\}}{2}", r"{f \in \{\sin, \cos\}}")
+    for source in sources:
+        assert typeset(source, typography, 20).problems == (), source
+    assert typeset(r"\frac{1}{2", typography, 20).problems == ("a { is not closed",)
+
+
+def test_units_are_set_as_siunitx_sets_them() -> None:
+    from flexo.texmath import Group, Scripts, Sym, _units
+
+    def shown(items: list) -> str:
+        parts = []
+        for item in items:
+            if isinstance(item, Group):
+                parts.append("".join(symbol.char for symbol in item.items))
+            elif isinstance(item, Scripts):
+                base = "".join(symbol.char for symbol in item.base.items)
+                parts.append(base + "^" + "".join(symbol.char for symbol in item.sup))
+            elif isinstance(item, Sym):
+                parts.append(item.char)
+            else:
+                parts.append(" ")
+        return "".join(parts).replace("\u2212", "-")
+
+    assert shown(_units(r"\per\mole")) == "mol^-1"
+    assert shown(_units(r"\joule\per\mole\per\kelvin")) == "J mol^-1 K^-1"
+    assert shown(_units(r"\metre\per\second\squared")) == "m s^-2"
+    assert shown(_units(r"\square\metre")) == "m^2"
+    assert shown(_units("m/s")) == "m/s"
+
+
+def test_latex_colour_names_are_drawn_in_their_colours() -> None:
+    from flexo.colour import named_colour
+    from flexo.render_common import formula_paint
+    from flexo.style import Palette
+
+    assert named_colour("red") == "#ff0000" and named_colour("red!70!black") == "#b20000"
+    assert named_colour("accent") is None
+    palette = Palette("test", {"ink": "#222222", "tone-1-stroke": "#1a5d9b"})
+    paint = formula_paint(palette)
+    assert paint("blue") == ("#0000ff", None)
+    assert paint("accent") == ("#1a5d9b", "tone-1-stroke")
+    assert paint("not-a-colour") == (None, None)
+
+
+def test_a_primes_subscript_sits_under_it_as_in_tex() -> None:
+    from flexo.markup import needs_layout
+    from flexo.texmath import GlyphItem
+    from flexo.units import pt
+
+    typography = TypographyStyle(family="Figtree", size=pt(20))
+
+    def placed(source: str) -> list[tuple[float, float]]:
+        formula = typeset(source, typography, 20)
+        return [(x, y) for x, y, item in formula.box.items if isinstance(item, GlyphItem)]
+
+    _, prime, two, _ = placed("q'_{2i}")
+    assert two[0] < prime[0] + 1.0  # the subscript starts under the prime, not after it
+    assert placed("q'_{2i}") == placed(r"q^{\prime}_{2i}")
+    assert needs_layout("q'_{2i}") and not needs_layout("f'(x)")
+
+
+def test_chemistry_reads_charges_isotopes_arrow_labels_gas_and_precipitate() -> None:
+    from flexo.texmath import Arrow, Scripts, parse
+
+    def flat(items: list) -> list:
+        out = []
+        for item in items:
+            out.append(item)
+            out += flat(getattr(item, "items", []) or [])
+        return out
+
+    sources = (
+        r"\ce{Fe^{3+} + e- -> Fe^{2+}}", r"\ce{^{14}_{6}C}", r"\ce{CaCO3 ->[\Delta] CaO + CO2 ^}",
+        r"\ce{Ag+ + Cl- -> AgCl v}",
+    )
+    for source in sources:
+        assert parse(source)[1] == [], source
+    isotope = flat(parse(r"\ce{^{14}_{6}C}")[0])
+    assert any(isinstance(item, Scripts) and item.sup and item.sub for item in isotope)
+    assert any(isinstance(item, Arrow) for item in flat(parse(r"\ce{A ->[\Delta] B}")[0]))
+    assert "↑" in str(parse(r"\ce{CO2 ^}")[0]) and "↓" in str(parse(r"\ce{AgCl v}")[0])
+
+
+def test_an_arrays_rules_run_between_its_rows_and_its_brackets_cover_them() -> None:
+    from flexo.texmath import GlyphItem, RuleItem
+
+    def ink(formula) -> tuple[list, list]:
+        """Each glyph's ink, bottom to top, and each rule's place and size."""
+
+        glyphs, rules = [], []
+        for x, y, item in formula.box.items:
+            if isinstance(item, GlyphItem):
+                _, _, bottom, top = item.face.extents(item.gid)
+                glyphs.append((y + bottom * item.size, y + top * item.size))
+            elif isinstance(item, RuleItem):
+                rules.append((x, y, item.width, item.height))
+        return glyphs, rules
+
+    for typography in (TYPE, TypographyStyle(family="Latin Modern Roman", generic="serif")):
+        # \hline takes room of its own: it strikes through no script of the row above
+        # (b_2) and touches no ink of the row below (a fraction).
+        formula = typeset(
+            r"\begin{array}{c|c} b_2 & y_j \\ \hline \frac{p}{q} & 1 \\ \hline \end{array}",
+            typography, 20.0, display=True,
+        )
+        glyphs, rules = ink(formula)
+        widest = max(width for _, _, width, _ in rules)
+        across = [(y, y + height) for _, y, width, height in rules if width == widest]
+        assert len(across) == 2
+        for low, high in across:
+            assert all(top < low - 0.5 or bottom > high + 0.5 for bottom, top in glyphs)
+        # The column rule runs the array's whole height, meeting the rule under it.
+        [(foot, tall)] = [(y, height) for _, y, width, height in rules if height > width]
+        assert foot == pytest.approx(min(low for low, _ in across))
+        # Brackets around a ruled array cover its rules, top to foot.
+        fenced = typeset(
+            r"\left[\begin{array}{cc|c} 1 & 0 & b_1 \\ 0 & 1 & b_2 \\ \hline 0 & 0 & 1"
+            r" \end{array}\right]",
+            typography, 20.0, display=True,
+        )
+        glyphs, rules = ink(fenced)
+        [(foot, tall)] = [(y, height) for _, y, width, height in rules if height > width]
+        assert min(bottom for bottom, _ in glyphs) <= foot + 1e-6
+        assert max(top for _, top in glyphs) >= foot + tall - 1e-6
+
+
+def test_maths_in_bold_words_is_regular_all_of_it() -> None:
+    # Bold is a meaning in maths (a vector), and a maths font has no bold for its Greek
+    # and signs: in bold words (a table's header) maths stays regular, as LaTeX's does.
+    from flexo.render_common import render_runs
+    from flexo.style import Palette
+    from flexo.texmath import GlyphItem
+    from flexo.text import drawn_weight
+
+    runs = parse_label(r"Energy $E_n / \hbar\omega$ and $\mathbf{v}$")
+    assert "".join(run.text for run in runs if run.maths) == "En/ℏ𝜔v"
+    assert {drawn_weight(run, 700) for run in runs if run.maths} == {400, 700}  # \mathbf asks
+    assert drawn_weight(runs[0], 700) == 700  # the words are bold
+    measurer = TextMeasurer(TYPE)
+    maths = tuple(run for run in runs if run.maths and run.weight == 400)
+    assert measurer.measure(maths, weight=700).width == measurer.measure(maths).width
+    root = ET.Element(f"{{{SVG_NS}}}svg")
+    render_runs(
+        root, "header", measurer.measure(runs, weight=700), x=0.0, y=20.0, typography=TYPE,
+        palette=Palette("test", {"ink": "#222222"}), fill_role="ink", weight=700,
+    )
+    spans = {span.text: span.get("font-weight") for span in root.iter(f"{{{SVG_NS}}}tspan")}
+    assert spans["Energy "] is None and spans["E"] == "400" and spans["v"] == "700"
+    # A formula's letters are regular too; only its words (\text) are the words' weight.
+    formula = typeset(r"\frac{x}{2} \text{ if } \xi", TYPE, 20.0, weight=700)
+    weights = [item.face.weight for _, _, item in formula.box.items if isinstance(item, GlyphItem)]
+    assert weights[:2] == [400, 400] and weights[-1] == 400  # x, 2 and ξ
+    assert set(weights[2:-1]) == {700}  # " if "
