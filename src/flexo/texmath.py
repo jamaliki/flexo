@@ -519,6 +519,9 @@ class Operator:
     symbol: str
     named: bool = False
     limits: bool | None = None
+    body: list | None = None
+    """``\\mathop{...}``: an operator made of what it holds (``\\mathop{\\mathrm{Res}}``),
+    set as written, its limits above and below in display as any operator's."""
 
 
 @dataclass(slots=True)
@@ -613,6 +616,9 @@ class Array:
 @dataclass(slots=True)
 class Space:
     em: float
+    inline: float | None = None
+    """The width out of display style, where it differs: amsmath's ``\\pmod`` is set
+    18mu from what it follows in display and 8mu within words."""
 
 
 @dataclass(slots=True)
@@ -1164,7 +1170,7 @@ class _Parser:
             }[name]
             body = self.argument(font) or []
             if kind == OP:
-                return Operator("", named=True, limits=None) if not body else Classed(OP, body)
+                return Operator("", named=True, limits=None, body=body)
             return Classed(kind, body)
         if name in {"textcolor", "colorbox"}:
             colour = self.word_argument()
@@ -1230,25 +1236,17 @@ class _Parser:
             "leavevmode",
         }:
             return None
-        if name == "pmod":
+        if name in {"pmod", "pod", "mod"}:
+            # amsmath's: 18mu from what it follows in display, less within words; "mod"
+            # in the operators' face but an ordinary atom, 6mu from its argument.
+            mod = [Classed(ORD, [Operator("mod", named=True, limits=False)]), Space(6 / 18)]
+            if name == "mod":
+                return Group([Space(1.0, inline=12 / 18), *mod])
             body = self.argument(font) or []
-            return Group(
-                [
-                    Space(1.0),
-                    Sym("(", OPEN),
-                    Operator("mod", named=True, limits=False),
-                    Space(6 / 18),
-                    *body,
-                    Sym(")", CLOSE),
-                ]
-            )
-        if name == "pod":
-            body = self.argument(font) or []
-            return Group([Space(1.0), Sym("(", OPEN), *body, Sym(")", CLOSE)])
+            inside = [*mod, *body] if name == "pmod" else body
+            return Group([Space(1.0, inline=8 / 18), Sym("(", OPEN), *inside, Sym(")", CLOSE)])
         if name == "bmod":
             return Classed(BIN, [Operator("mod", named=True, limits=False)])
-        if name == "mod":
-            return Group([Space(1.0), Operator("mod", named=True, limits=False), Space(6 / 18)])
         if name in BINARY:
             return Sym(BINARY[name], BIN)
         if name in RELATION:
@@ -2114,7 +2112,8 @@ class _Layout:
                 style = _Style(_STYLES.index(item.style), style.cramped)
                 continue
             if isinstance(item, Space):
-                atoms.append((None, _kern(item.em * self.size(style))))
+                em = item.em if item.inline is None or style.level == 0 else item.inline
+                atoms.append((None, _kern(em * self.size(style))))
                 continue
             if isinstance(item, (Tab, NewRow, HLine, Infix)):
                 continue
@@ -2339,6 +2338,10 @@ class _Layout:
 
     def operator(self, item: Operator, style: _Style) -> tuple[Box, bool]:
         size = self.size(style)
+        if item.body is not None:
+            box = self.items(item.body, style)
+            box.single = False
+            return box, True
         if item.named:
             if not item.symbol:
                 return Box(), False
