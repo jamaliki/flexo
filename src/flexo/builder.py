@@ -1343,24 +1343,10 @@ class GroupBuilder:
         says what is wrong).
         """
 
-        if isinstance(steps, str):
-            steps = [steps]
-        records: list[dict[str, Scalar]] = []
-        for step in steps:
-            if isinstance(step, str):
-                records.append({"smiles": step})
-                continue
-            record: dict[str, Scalar] = {}
-            for key, value in step.items():
-                if key == "arrows" and not isinstance(value, str):
-                    value = "; ".join(str(item) for item in value)  # type: ignore[union-attr]
-                elif key == "place":
-                    from flexo.mechanism import place_words
+        from flexo.mechanism import step_records
 
-                    value = place_words(value)
-                record[key] = value  # type: ignore[assignment]
-            records.append(record)
-        properties: dict[str, object] = {"steps": records}
+        written = [steps] if isinstance(steps, str) else steps
+        properties: dict[str, object] = {"steps": step_records(written)}
         if lone_pairs != "used":
             properties["lone_pairs"] = lone_pairs
         if charges != "circled":

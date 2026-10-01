@@ -475,3 +475,35 @@ def test_a_mechanisms_arrows_may_take_the_themes_colours() -> None:
     _, inked = _mechanism(steps, arrow_colour="muted")
     arrows = [shape for shape in inked.shapes if shape.id.startswith("m.step1.arrow")]
     assert {shape.color for shape in arrows} == {"muted-ink"}
+
+
+def test_a_figure_file_writes_a_mechanisms_arrows_and_places_as_python_does() -> None:
+    from flexo.serialization import figure_to_document, parse_figure
+
+    written = {
+        "figure": {"id": "file"},
+        "nodes": [{"id": "m", "kind": "mechanism", "properties": {"steps": [
+            {"smiles": "[OH-:1].[CH3:2][Br:3]", "arrows": ["1 -> 2", "2-3 -> 3"],
+             "place": {1: {"move": [-1, 0]}}},
+            "[CH3:2][OH:1].[Br-:3]",
+        ]}}],
+    }
+    figure = parse_figure(written)
+    (step, made) = figure.nodes[0].property("steps")
+    assert step.get("arrows") == "1 -> 2; 2-3 -> 3" and step.get("place") == "1 move -1 0"
+    assert made.get("smiles") == "[CH3:2][OH:1].[Br-:3]"
+    assert written["nodes"][0]["properties"]["steps"][0]["arrows"] == ["1 -> 2", "2-3 -> 3"]
+    # Drawn as the same mechanism written in Python is, and written back as words.
+    steps = [
+        {
+            "smiles": "[OH-:1].[CH3:2][Br:3]",
+            "arrows": ["1 -> 2", "2-3 -> 3"],
+            "place": {1: [-1, 0]},
+        },
+        "[CH3:2][OH:1].[Br-:3]",
+    ]
+    with flexo.Figure("file") as same:
+        same.root.mechanism("m", steps)
+    assert picture(figure.nodes[0], STYLES["paper"]) == picture(same.spec.nodes[0], STYLES["paper"])
+    back = figure_to_document(figure)["nodes"][0]["properties"]["steps"][0]
+    assert back["arrows"] == "1 -> 2; 2-3 -> 3"
