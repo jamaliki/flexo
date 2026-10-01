@@ -32,8 +32,7 @@ type Box = tuple[float, float, float, float]
 MINUS = "\N{MINUS SIGN}"
 
 METALS = frozenset(
-    "Sc Ti V Cr Mn Fe Co Ni Cu Zn Y Zr Nb Mo Tc Ru Rh Pd Ag Cd Hf Ta W Re Os Ir Pt Au Hg "
-    "La Ce Pr Nd Sm Eu Gd Tb Dy Ho Er Tm Yb Lu".split()
+    ["Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "La", "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu"]
 )
 """Transition metals and lanthanides: their d and f electrons are not lone pairs."""
 
