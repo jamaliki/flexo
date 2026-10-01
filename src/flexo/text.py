@@ -25,7 +25,9 @@ from flexo.ir.measured import MeasuredLine, TextMetrics
 from flexo.ir.semantic import TextRun
 from flexo.style import TypographyStyle
 
-_TOKEN_PATTERN = re.compile(r"\S+|\s+")
+NO_BREAK = "\u00a0\u2007\u202f\u2060"
+"""Spaces a line is never broken at (a no-break space, ~ in a label; maths' thin space)."""
+_TOKEN_PATTERN = re.compile(r"(?:[\u00a0\u2007\u202f\u2060]|\S)+|\s+")
 _BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
 
 SHIFTED_SIZE = 0.72
@@ -624,9 +626,12 @@ class TextMeasurer:
     ) -> tuple[tuple[TextRun, ...], ...]:
         if max_width is None or max_width <= 0.0:
             return (line,)
-        wrapped: list[tuple[TextRun, ...]] = []
-        current: list[TextRun] = []
-        current_width = 0.0
+        # Each token with its width, whether it is a space, and whether a line may break
+        # before it: after a space, between the pieces of a formula TeX breaks, or inside
+        # a word too long for any line -- never where two runs touch (a subscript, a
+        # comma after a formula, a bold word's last letter), which read as one word.
+        items: list[tuple[TextRun, float, bool, bool]] = []
+        after_space = True
         for run in line:
             if run.math:
                 # A formula wider than the line breaks where TeX would break it, after a
@@ -637,28 +642,55 @@ class TextMeasurer:
                     from flexo.texmath import breakable
 
                     pieces = breakable(run.math)
-                token_runs = [replace(run, math=piece) for piece in pieces]
-            else:
-                tokens = _TOKEN_PATTERN.findall(run.text)
-                if break_words:
-                    tokens = [
-                        piece
-                        for token in tokens
-                        for piece in self._pieces(replace(run, text=token), max_width, weight)
-                    ]
-                token_runs = [replace(run, text=token) for token in tokens]
-            for token_run in token_runs:
-                token = token_run.text
-                token_width = self._shape_run(token_run, weight)
-                is_space = token.isspace()
-                if current and not is_space and current_width + token_width > max_width:
-                    wrapped.append(_trim_and_merge(current))
-                    current = []
-                    current_width = 0.0
-                if not current and is_space:
+                for index, piece in enumerate(pieces):
+                    token_run = replace(run, math=piece)
+                    width = self._shape_run(token_run, weight)
+                    items.append((token_run, width, False, after_space or index > 0))
+                after_space = False
+                continue
+            for token in _TOKEN_PATTERN.findall(run.text):
+                if token.isspace():
+                    token_run = replace(run, text=token)
+                    items.append((token_run, self._shape_run(token_run, weight), True, True))
+                    after_space = True
                     continue
-                current.append(token_run)
-                current_width += token_width
+                word = replace(run, text=token)
+                pieces = self._pieces(word, max_width, weight) if break_words else [token]
+                for index, piece in enumerate(pieces):
+                    token_run = replace(run, text=piece)
+                    width = self._shape_run(token_run, weight)
+                    items.append((token_run, width, False, after_space or index > 0))
+                after_space = False
+        units: list[list[tuple[TextRun, float, bool, bool]]] = []
+        for item in items:
+            if item[2] or item[3] or not units or units[-1][0][2]:
+                units.append([item])
+            else:
+                units[-1].append(item)
+        wrapped: list[tuple[TextRun, ...]] = []
+        current: list[TextRun] = []
+        current_width = 0.0
+        for unit in units:
+            width = sum(item[1] for item in unit)
+            if unit[0][2]:  # a space: kept between words, dropped at the start of a line
+                if current:
+                    current.append(unit[0][0])
+                    current_width += width
+                continue
+            if current and current_width + width > max_width:
+                wrapped.append(_trim_and_merge(current))
+                current, current_width = [], 0.0
+            if width > max_width and len(unit) > 1:
+                # Runs glued into one word wider than any line: broken between them.
+                for token_run, token_width, _, _ in unit:
+                    if current and current_width + token_width > max_width:
+                        wrapped.append(_trim_and_merge(current))
+                        current, current_width = [], 0.0
+                    current.append(token_run)
+                    current_width += token_width
+                continue
+            current.extend(item[0] for item in unit)
+            current_width += width
         wrapped.append(_trim_and_merge(current))
         return tuple(wrapped)
 
