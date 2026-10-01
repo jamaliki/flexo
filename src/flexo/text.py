@@ -64,6 +64,9 @@ def _cjk_units(token: str) -> list[str]:
 """Spaces a line is never broken at (a no-break space, ~ in a label; maths' thin space)."""
 _TOKEN_PATTERN = re.compile(r"(?:[\u00a0\u2007\u202f\u2060]|\S)+|\s+")
 _BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
+_ROUNDING = 1e-6
+"""Points a line may run past its width and still fit: the same words summed in another
+order differ in their last bits, and a line given exactly its width must not break."""
 
 SHIFTED_SIZE = 0.72
 ACCENT_SIZE = 0.78
@@ -749,6 +752,7 @@ class TextMeasurer:
     ) -> tuple[tuple[TextRun, ...], ...]:
         if max_width is None or max_width <= 0.0:
             return (line,)
+        max_width += _ROUNDING
         # Each token with its width, whether it is a space, and whether a line may break
         # before it: after a space, between the pieces of a formula TeX breaks, or inside
         # a word too long for any line -- never where two runs touch (a subscript, a
