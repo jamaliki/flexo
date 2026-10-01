@@ -44,7 +44,8 @@ class Shape:
     the page colour), ``"backbone"``, ``"tick"`` and ``"leader"`` (thin, muted), or
     ``"guide"`` (dotted); ``tone`` names the colour, or none for ink. ``color``, an
     exact ``#hex`` the author asked for, paints the shape that colour instead of a
-    role, so ``flexo retheme`` leaves it as written.
+    role, so ``flexo retheme`` leaves it as written; a palette role there (``ink``,
+    ``muted-ink``, ``tone-2-stroke``) paints it by that role instead.
     """
 
     id: str

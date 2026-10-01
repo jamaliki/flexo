@@ -1325,14 +1325,19 @@ class GroupBuilder:
 
         ``steps`` is a SMILES (one structure), or a list of steps, each a SMILES or
         ``{"smiles": ..., "arrows": ..., "label": ..., "reagents": ..., "conditions": ...,
-        "arrow": "forward" | "equilibrium" | "resonance" | "none"}``. Arrows are written
+        "arrow": "forward" | "equilibrium" | "resonance" | "none", "place": ...}``; ``place``
+        puts a step's molecules where the author wants them, each named by an atom:
+        ``{5: {"move": [-1, 0.5], "turn": 30, "flip": True}}`` moves the molecule with
+        atom 5 a bond left and half a bond down from where it is laid out, turned 30
+        degrees clockwise and flipped left for right. Arrows are written
         ``"5 -> 2"`` (a lone pair on atom 5 to atom 2), ``"2=3 -> 3"`` (a bond's electrons to
         an atom), ``"1=2 -> 2-6"`` (a bond moved), ``"~>"`` for a fishhook; several at once
         as a list or separated by ``;``. Atoms are their SMILES atom maps (``[O-:5]``). A
         step with no SMILES is drawn from the arrows before it; one with a SMILES is
         checked against them. ``lone_pairs`` is ``used`` (those arrows leave), ``all`` or
         ``none``; ``charges`` ``circled`` or ``plain``; ``per_row`` how many structures
-        a row holds. The curly arrows are drawn in one ink: magenta, or ``arrow_colour``.
+        a row holds. The curly arrows are drawn in one ink: magenta, or ``arrow_colour`` --
+        a colour (``"#c0392b"``) or the theme's ``ink``, ``muted`` or ``accent``.
         ``partial`` draws a mechanism with a step that cannot be as far as that step,
         its arrows on it, rather than refusing it (``flexo.mechanism.mechanism_states``
         says what is wrong).
@@ -1349,6 +1354,10 @@ class GroupBuilder:
             for key, value in step.items():
                 if key == "arrows" and not isinstance(value, str):
                     value = "; ".join(str(item) for item in value)  # type: ignore[union-attr]
+                elif key == "place":
+                    from flexo.mechanism import place_words
+
+                    value = place_words(value)
                 record[key] = value  # type: ignore[assignment]
             records.append(record)
         properties: dict[str, object] = {"steps": records}

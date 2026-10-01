@@ -431,3 +431,47 @@ def test_a_step_that_cannot_be_is_drawn_as_far_as_it_goes_when_asked() -> None:
     assert len(panels) == 1 and problem is not None and problem.code == "mechanism.arrows"
     assert any(shape.id.startswith("m.step1.arrow") for shape in drawing.shapes)
     assert not any(shape.id.startswith("m.step2.") for shape in drawing.shapes)
+
+
+def test_a_step_puts_its_molecules_where_the_author_places_them() -> None:
+    from flexo.mechanism import mechanism_states, place_record, place_words
+
+    steps = [{"smiles": "[OH-:1].[CH3:2][Br:3]", "arrows": "1 -> 2; 2-3 -> 3"}]
+    plain, _ = mechanism_states(_mechanism(steps)[0].spec.nodes[0])
+    placed = [{**steps[0], "place": {1: {"move": [-1, 0.5]}, 2: {"turn": 90}}}]
+    moved, problem = mechanism_states(_mechanism(placed)[0].spec.nodes[0])
+    assert problem is None
+    before, after = plain[0].molecule.atoms, moved[0].molecule.atoms
+    assert (after[0].x - before[0].x, after[0].y - before[0].y) == pytest.approx((-1, 0.5))
+    # C2-Br3 turned a quarter about its middle: its bond now runs across where it ran.
+    run = (before[2].x - before[1].x, before[2].y - before[1].y)
+    turned = (after[2].x - after[1].x, after[2].y - after[1].y)
+    assert run[0] * turned[0] + run[1] * turned[1] == pytest.approx(0, abs=1e-9)
+    mirror = [{**steps[0], "place": {2: {"flip": True}}}]
+    flipped, _ = mechanism_states(_mechanism(mirror)[0].spec.nodes[0])
+    atoms = flipped[0].molecule.atoms
+    assert (atoms[2].x - atoms[1].x, atoms[2].y - atoms[1].y) == pytest.approx((-run[0], run[1]))
+    assert place_words({5: [1, 2], 6: {"turn": 30, "flip": True}}) == "5 move 1 2; 6 turn 30 flip"
+    assert place_record("5 move 1 2; 6 turn 30 flip") == {
+        "5": {"move": [1.0, 2.0]},
+        "6": {"turn": 30.0, "flip": True},
+    }
+    stale = [{**steps[0], "place": {9: [1, 0]}}]
+    with pytest.raises(FlexoError, match="atom 9, which it does not have"):
+        _mechanism(stale)
+    with pytest.raises(FlexoError, match="does not say where a molecule goes"):
+        _mechanism([{**steps[0], "place": "1 sideways"}])
+
+
+def test_a_mechanisms_arrows_may_take_the_themes_colours() -> None:
+    from flexo.compiler import compile_figure
+
+    steps = [{"smiles": ACYL, "arrows": "5 -> 2; 2=3 -> 3"}]
+    figure, drawing = _mechanism(steps, arrow_colour="accent2")
+    arrows = [shape for shape in drawing.shapes if shape.id.startswith("m.step1.arrow")]
+    assert {shape.color for shape in arrows} == {"tone-2-stroke"}
+    svg = compile_figure(figure.spec).document.text
+    assert re.search(r'id="m\.step1\.arrow0"[^>]*data-flexo-stroke="tone-2-stroke"', svg)
+    _, inked = _mechanism(steps, arrow_colour="muted")
+    arrows = [shape for shape in inked.shapes if shape.id.startswith("m.step1.arrow")]
+    assert {shape.color for shape in arrows} == {"muted-ink"}

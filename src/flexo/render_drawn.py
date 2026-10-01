@@ -106,6 +106,13 @@ def _roles(shape: Shape, palette: Palette) -> tuple[str, str, str]:
 def _paint(shape: Shape, palette: Palette) -> dict[str, object]:
     fill, stroke, line = _roles(shape, palette)
     width = shape.width
+    if shape.color is not None and not shape.color.startswith("#"):
+        # A role the author chose (the ink, an accent): painted by it, so it follows the theme.
+        if shape.paint in {"line", "backbone", "tick", "leader", "guide"}:
+            return paint_attributes(palette=palette, stroke_role=shape.color, stroke_width=width)
+        return paint_attributes(
+            palette=palette, fill_role=shape.color, stroke_role=shape.color, stroke_width=width
+        )
     if shape.color is not None:
         # The author's exact colour: painted literally, so retheming leaves it be.
         if shape.paint in {"line", "backbone", "tick", "leader", "guide"}:
