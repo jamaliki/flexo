@@ -9,7 +9,9 @@ arrow. The page draws and points; this decides:
 - ``add_arrow`` writes the arrow two clicks make -- numbering an atom in the SMILES
   that wrote it, if it has no number yet -- or asks which end of a bond makes the
   new one;
-- ``remove_arrow`` takes one away.
+- ``remove_arrow`` takes one away;
+- ``place_molecule`` moves, turns or flips one of a step's molecules from where it is
+  laid out, or puts it back.
 
 A step that cannot be is drawn all the same, its problem said: between one arrow and
 the next it usually is (the nucleophile's arrow gives carbon five bonds until the
@@ -33,9 +35,9 @@ from flexo.chemistry.molecule import Molecule, mapped_smiles
 from flexo.compiler import compile_figure
 from flexo.diagnostics import FlexoError
 from flexo.ir.semantic import FigureSpec
-from flexo.mechanism import mechanism_composed, mechanism_states
+from flexo.mechanism import mechanism_composed, mechanism_states, place_record
 from flexo.studio.figure_edit import EditError
-from flexo.themes import figure_style
+from flexo.themes import figure_palette, figure_style
 
 OPTIONS = ("lone_pairs", "charges", "arrow_colour")
 """The mechanism's own settings a sheet is drawn with."""
@@ -44,7 +46,8 @@ _BOND = {1: "-", 2: "=", 3: "#"}
 
 
 def normal_steps(steps: object) -> list[dict[str, Any]]:
-    """A mechanism's steps as the editor keeps them: each a mapping, its arrows a list."""
+    """A mechanism's steps as the editor keeps them: each a mapping, its arrows a list,
+    its ``place`` a mapping."""
 
     written = [steps] if isinstance(steps, str) else list(steps or [])  # type: ignore[call-overload]
     out = []
@@ -59,6 +62,13 @@ def normal_steps(steps: object) -> list[dict[str, Any]]:
             item["arrows"] = []
         else:
             item["arrows"] = [str(part).strip() for part in arrows if str(part).strip()]
+        if "place" in item:
+            try:
+                item["place"] = place_record(item["place"])
+            except (ValueError, IndexError, TypeError, AttributeError) as error:
+                raise EditError("a step's place is not written as the editor writes it") from error
+            if not item["place"]:
+                del item["place"]
         out.append(item)
     if not out:
         raise EditError("a mechanism needs at least one step")
@@ -71,16 +81,20 @@ def sheet(
     step: int,
     holding: Sequence[str] | None = None,
     options: Mapping[str, Any] | None = None,
+    look: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The structure ``step`` (from 0) acts on, drawn to be drawn on: ``svg``, its
+    """The structure ``step`` (from 0) acts on, drawn to be drawn on -- in ``look`` (a
+    figure's ``theme``, ``palette``, ``font``...), on its ``paper`` colour: ``svg``, its
     ``view`` (x, y, width, height, in the SVG's units), the ``bond`` length in them, its
     ``atoms`` (``index`` in the step, ``name``, ``number`` as arrows call it, ``x``,
     ``y``, its lone ``pairs`` as two dots each), its ``bonds`` (``atoms``, ``order``,
-    ``x``, ``y`` of the middle), its ``arrows`` in words, the atoms they ``name``,
-    how many structures there are (``states``), and the ``problem``, if there is one."""
+    ``x``, ``y`` of the middle), its ``molecules`` (their ``atoms``, the ``ids`` of what
+    is drawn of them, whether they are ``placed`` by hand), its ``arrows`` in words, the
+    atoms they ``name``, how many structures there are (``states``), and the
+    ``problem``, if there is one."""
 
     written = normal_steps(steps)
-    figure = _figure(written, options, only=step, holding=holding)
+    figure = _figure(written, options, only=step, holding=holding, look=look)
     node = figure.nodes[0]
     style = figure_style(figure)
     try:
@@ -96,6 +110,7 @@ def sheet(
             "bonds": [],
             "arrows": [],
             "named": [],
+            "molecules": [],
             "problem": _problem(error.diagnostics[0]),
         }
     panels = composed.panels
@@ -168,11 +183,28 @@ def sheet(
         except MechanismError as error:
             arrows.append({"text": text, "said": "", "problem": str(error)})
     named = sorted({atom for arrow in panel.arrows for atom in (*arrow.source, *arrow.target)})
+    prefix = f"{node.id}.step{chosen + 1}"
+    placed = {molecule.index_of(number) for number in panel.step.place}
+    molecules = []
+    for fragment in shown.fragments():
+        members = set(fragment)
+        ids = [
+            f"{prefix}.{part}{index}"
+            for index in fragment
+            for part in ("atom", "charge", "pair", "radical")
+        ]
+        ids += [
+            f"{prefix}.bond{number}" for number, bond in enumerate(shown.bonds) if bond.a in members
+        ]
+        originals = [back[index] for index in fragment]
+        molecules.append({"atoms": originals, "ids": ids, "placed": bool(placed & set(originals))})
     return {
         "svg": _cropped(compilation.document.text, view),
         "view": [round(value, 2) for value in view],
         "bond": round(composed.pen.bond, 3),
         "dot": round(composed.pen.dot, 3),
+        "paper": figure_palette(figure).get("canvas"),
+        "molecules": molecules,
         "states": len(panels),
         "steps": len(written),
         "step": chosen,
@@ -245,6 +277,73 @@ def add_arrow(
     return {"steps": written, "arrow": text}
 
 
+def place_molecule(
+    steps: object,
+    *,
+    step: int,
+    atom: int,
+    move: Sequence[float] | None = None,
+    turn: float = 0.0,
+    flip: bool = False,
+    reset: bool = False,
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The molecule of structure ``step`` that has ``atom`` (its index there) moved by
+    ``move`` (bond lengths, y down), turned by ``turn`` (degrees, clockwise) or flipped
+    left for right, as it is seen -- or, with ``reset``, put back where it is laid out:
+    ``{"steps"}``. The structure after the last step is placed as a new step with no
+    arrows, which draws the same."""
+
+    written = normal_steps(steps)
+    panels, _ = mechanism_states(_figure(written, options).nodes[0])
+    if not 0 <= step < len(panels):
+        raise EditError("that structure is not drawn: a step before it cannot be")
+    molecule = panels[step].molecule.copy()
+    if not 0 <= atom < len(molecule.atoms):
+        raise EditError("that atom is gone: someone changed the structure meanwhile")
+    fragment = next(group for group in molecule.fragments() if atom in group)
+    origin = max(
+        index for index in range(min(step, len(written) - 1) + 1) if written[index].get("smiles")
+    )
+    if step >= len(written):
+        written.append({"arrows": []})
+    place = place_record(written[step].get("place"))
+    key = next((name for name in place if molecule.index_of(int(name)) in fragment), None)
+    if key is None:
+        named = next(
+            (index for index in sorted(fragment) if _number(molecule, index) is not None), None
+        )
+        key = str(
+            _number(molecule, named)
+            if named is not None
+            else _numbered(written, origin, molecule, atom)
+        )
+    how = {} if reset else dict(place.get(key, {}))
+    if move is not None:
+        x, y = how.get("move", [0.0, 0.0])
+        how["move"] = [round(float(x) + float(move[0]), 2), round(float(y) + float(move[1]), 2)]
+        if how["move"] == [0.0, 0.0]:
+            del how["move"]
+    if flip:
+        # Mirrored as it is seen: a turn already made turns the other way.
+        how["flip"] = not how.get("flip")
+        if how.get("turn"):
+            how["turn"] = -float(how["turn"])
+    if turn:
+        angle = (float(how.get("turn", 0.0)) + float(turn)) % 360.0
+        how["turn"] = round(angle - 360.0 if angle > 180.0 else angle, 1)
+    how = {name: value for name, value in how.items() if value}
+    if how:
+        place[key] = how
+    else:
+        place.pop(key, None)
+    if place:
+        written[step]["place"] = place
+    else:
+        written[step].pop("place", None)
+    return {"steps": written}
+
+
 def remove_arrow(steps: object, *, step: int, index: int) -> dict[str, Any]:
     """``step`` without its arrow ``index``: ``{"steps"}``."""
 
@@ -283,6 +382,7 @@ def _figure(
     *,
     only: int | None = None,
     holding: Sequence[str] | None = None,
+    look: Mapping[str, Any] | None = None,
 ) -> FigureSpec:
     properties: dict[str, object] = {"partial": True}
     if only is not None:
@@ -292,7 +392,12 @@ def _figure(
     chosen = {
         key: value for key, value in (options or {}).items() if key in OPTIONS and value is not None
     }
-    with flexo.Figure("sheet") as figure:
+    settings = {key: value for key, value in (look or {}).items() if value is not None}
+    try:
+        figure = flexo.Figure("sheet", background=True, **settings)
+    except (ValueError, TypeError, OSError):
+        figure = flexo.Figure("sheet", background=True)  # a look flexo cannot read: its own
+    with figure:
         figure.root.mechanism("m", copy.deepcopy(steps), properties=properties, **chosen)
     return figure.spec
 

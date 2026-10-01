@@ -353,7 +353,9 @@ their `reagents` over them and `conditions` under them; `arrow` is `forward`,
 `equilibrium`, `resonance` or `none`; steps fold into rows when there are many
 (`per_row=`).
 
-The curly arrows are drawn by rule, in one ink (magenta; `arrow_colour=` for another).
+The curly arrows are drawn by rule, in one ink: magenta, unless `arrow_colour=` gives
+another -- a colour, or the theme's `ink`, `muted` or `accent` (`accent2`...), which
+follow the theme.
 An arrow carries its electrons: the lone pair (or radical) it starts from is drawn at
 its tail, in its ink, out from the atom where its bonds leave room; an arrow from a
 bond leaves square to it, a little off its middle. It goes into a bond square to it,
@@ -363,7 +365,10 @@ from beside the bond down onto it, and two half arrows making a bond meet in its
 middle from either side. Of the curves that would do, the smoothest is drawn that
 crosses no bond, no other arrow and no charge, and bends one way only; charges move
 out of the arrows' way. Other lone pairs are drawn with `lone_pairs="all"`; a radical
-is a dot.
+is a dot. A step's `place` puts its molecules where you want them, each named by one of
+its atoms: `{5: {"move": [-1, 0.5], "turn": 30, "flip": True}}` takes the molecule with
+atom 5 a bond left and half a bond down from where it is laid out, turned 30 degrees
+clockwise and flipped left for right.
 
 ### Grids of cells
 

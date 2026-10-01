@@ -22,6 +22,7 @@ plain`` for superscripts).
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 from flexo.chemistry.curly import INK, draw_arrows, tail_ways
@@ -41,6 +42,16 @@ ARROWS = ("forward", "equilibrium", "resonance", "none")
 
 
 @dataclass(slots=True)
+class Placement:
+    """Where a molecule goes from where it is laid out: flipped (left for right) and
+    turned (degrees, clockwise) about its middle, then moved (bond lengths, y down)."""
+
+    move: tuple[float, float] = (0.0, 0.0)
+    turn: float = 0.0
+    flip: bool = False
+
+
+@dataclass(slots=True)
 class Step:
     smiles: str = ""
     arrows: list[str] = field(default_factory=list)
@@ -48,6 +59,8 @@ class Step:
     reagents: str = ""
     conditions: str = ""
     arrow: str = "forward"
+    place: dict[int, Placement] = field(default_factory=dict)
+    """Molecules put where the author wants them, each named by one of its atoms."""
 
 
 @dataclass(slots=True)
@@ -88,13 +101,14 @@ def mechanism_steps(node: NodeSpec) -> list[Step]:
             "reagents",
             "conditions",
             "arrow",
+            "place",
         }
         if unknown:
             raise _fail(
                 node,
                 "steps",
                 f"Step {number} has {', '.join(sorted(unknown))}, which a step does not.",
-                "A step has smiles, arrows, label, reagents, conditions and arrow.",
+                "A step has smiles, arrows, label, reagents, conditions, arrow and place.",
             )
         arrow = str(record.get("arrow") or "forward").strip().lower()
         if arrow not in ARROWS:
@@ -120,6 +134,7 @@ def mechanism_steps(node: NodeSpec) -> list[Step]:
                 reagents=str(record.get("reagents") or ""),
                 conditions=str(record.get("conditions") or ""),
                 arrow=arrow,
+                place=_placements(node, number, record.get("place")),
             )
         )
     if not steps[0].smiles:
@@ -131,6 +146,117 @@ def mechanism_steps(node: NodeSpec) -> list[Step]:
             '"arrows": "5 -> 2; 2=3 -> 3"}.',
         )
     return steps
+
+
+def place_words(value: object) -> str:
+    """A step's ``place`` as the mechanism keeps it: ``{5: {"move": [-1, 0.5], "turn": 30,
+    "flip": True}}`` (or ``{5: [-1, 0.5]}``, only moved) written ``"5 move -1 0.5 turn 30
+    flip"``, several apart with ``;``. Words are kept as they are."""
+
+    if isinstance(value, str):
+        return value
+    parts = []
+    for atom, how in dict(value or {}).items():  # type: ignore[call-overload]
+        if isinstance(how, list | tuple):
+            how = {"move": how}
+        words = [str(atom).strip()]
+        move = how.get("move") if isinstance(how, dict) else None
+        if move:
+            words += ["move", f"{float(move[0]):g}", f"{float(move[1]):g}"]
+        if isinstance(how, dict) and how.get("turn"):
+            words += ["turn", f"{float(how['turn']):g}"]
+        if isinstance(how, dict) and how.get("flip"):
+            words.append("flip")
+        parts.append(" ".join(words))
+    return "; ".join(parts)
+
+
+def place_record(value: object) -> dict[str, dict[str, object]]:
+    """A step's ``place``, words or mapping, as a mapping a document keeps: each atom (as
+    words) to its ``move``, ``turn`` and ``flip``, the ones not used left out."""
+
+    out: dict[str, dict[str, object]] = {}
+    for part in place_words(value).replace("\n", ";").split(";"):
+        atom, how = _placement(part)
+        if atom is None:
+            continue
+        entry: dict[str, object] = {}
+        if how.move != (0.0, 0.0):
+            entry["move"] = [how.move[0], how.move[1]]
+        if how.turn:
+            entry["turn"] = how.turn
+        if how.flip:
+            entry["flip"] = True
+        out[str(atom)] = entry
+    return out
+
+
+def _placement(part: str) -> tuple[int | None, Placement]:
+    words = part.split()
+    if not words:
+        return None, Placement()
+    atom, rest, how = int(words[0]), words[1:], Placement()
+    while rest:
+        word = rest.pop(0).lower()
+        if word == "move":
+            how.move = (float(rest.pop(0)), float(rest.pop(0)))
+        elif word == "turn":
+            how.turn = float(rest.pop(0))
+        elif word == "flip":
+            how.flip = True
+        else:
+            raise ValueError(word)
+    return atom, how
+
+
+def _placements(node: NodeSpec, number: int, value: object) -> dict[int, Placement]:
+    if value is None or value == "":
+        return {}
+    if not isinstance(value, str):
+        raise _fail(
+            node,
+            "place",
+            f'Step {number}: place is written as words, such as "5 move -1 0.5 turn 30 flip".',
+        )
+    out: dict[int, Placement] = {}
+    for part in value.replace("\n", ";").split(";"):
+        try:
+            atom, how = _placement(part)
+        except (ValueError, IndexError):
+            raise _fail(
+                node,
+                "place",
+                f'Step {number}: "{part.strip()}" does not say where a molecule goes.',
+                'Write "5 move -1 0.5 turn 30 flip": the molecule with atom 5 moved a bond '
+                "left and half a bond down, turned 30 degrees clockwise, and flipped.",
+            ) from None
+        if atom is not None:
+            out[atom] = how
+    return out
+
+
+def _arrange(molecule: Molecule, place: dict[int, Placement]) -> int | None:
+    """Each molecule ``place`` names put where it says; the first atom it names that the
+    molecule does not have, if any."""
+
+    missing = None
+    fragments = molecule.fragments()
+    for number, how in place.items():
+        index = molecule.index_of(number)
+        if index is None:
+            missing = missing if missing is not None else number
+            continue
+        atoms = [molecule.atoms[i] for i in next(f for f in fragments if index in f)]
+        cx = sum(atom.x for atom in atoms) / len(atoms)
+        cy = sum(atom.y for atom in atoms) / len(atoms)
+        cos, sin = math.cos(math.radians(how.turn)), math.sin(math.radians(how.turn))
+        for atom in atoms:
+            x, y = atom.x - cx, atom.y - cy
+            if how.flip:
+                x = -x
+            atom.x = cx + x * cos - y * sin + how.move[0]
+            atom.y = cy + x * sin + y * cos + how.move[1]
+    return missing
 
 
 def mechanism_panels(node: NodeSpec) -> list[Panel]:
@@ -156,6 +282,7 @@ def mechanism_states(node: NodeSpec) -> tuple[list[Panel], Diagnostic | None]:
     held = _holding(node)
     panels: list[Panel] = []
     made: Molecule | None = None
+    noted: Diagnostic | None = None
     for number, step in enumerate(steps, start=1):
         where = f"Step {number}"
         if step.smiles:
@@ -220,6 +347,14 @@ def mechanism_states(node: NodeSpec) -> tuple[list[Panel], Diagnostic | None]:
             gather(molecule, meetings)
         else:
             gather(molecule, meetings)
+        missing = _arrange(molecule, step.place)
+        if missing is not None and noted is None:
+            noted = _said(
+                node,
+                "place",
+                f"{where} places the molecule with atom {missing}, which it does not have.",
+                f"Name the molecule by an atom it has, or leave atom {missing} out of place.",
+            )
         panels.append(Panel(molecule, arrows, step))
         if problem is not None:
             return panels, problem
@@ -227,7 +362,7 @@ def mechanism_states(node: NodeSpec) -> tuple[list[Panel], Diagnostic | None]:
             follow(molecule, made)
     if made is not None:
         panels.append(Panel(made, [], Step()))
-    return panels, None
+    return panels, noted
 
 
 def _said(node: NodeSpec, code: str, message: str, hint: str | None = None) -> Diagnostic:
@@ -486,15 +621,27 @@ def draw_panel(
 
 
 def _arrow_colour(node: NodeSpec) -> str:
-    """The one ink a mechanism's curly arrows are drawn in: magenta, or ``arrow_colour``."""
+    """The one ink a mechanism's curly arrows are drawn in: magenta, or ``arrow_colour`` --
+    a colour (``#c0392b``), or the theme's ``ink``, ``muted`` ink or ``accent``
+    (``accent2``...), which follow the theme."""
 
     value = node.property("arrow_colour")
     if value is None or value == "":
         return INK
-    text = str(value).strip()
-    if not (text.startswith("#") and len(text) in {4, 7}):
-        raise _fail(node, "arrow_colour", f'arrow_colour "{text}" is not a colour such as #d466d6.')
-    return text
+    text = str(value).strip().lower()
+    if re.fullmatch(r"#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})", text):
+        return text
+    if text in {"ink", "muted"}:
+        return {"ink": "ink", "muted": "muted-ink"}[text]
+    accent = re.fullmatch(r"accent(\d*)", text)
+    if accent:
+        return f"tone-{accent.group(1) or 1}-stroke"
+    raise _fail(
+        node,
+        "arrow_colour",
+        f'arrow_colour "{value}" is not a colour.',
+        "Give a colour such as #c0392b, or ink, muted, accent (accent2, ...) for the theme's.",
+    )
 
 
 def _shown(molecule: Molecule, arrows: list[Arrow]) -> tuple[Molecule, list[Arrow], dict[int, int]]:

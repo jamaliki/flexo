@@ -81,3 +81,26 @@ def test_a_step_drawn_on_holds_still() -> None:
         next(a for a in tidied["atoms"] if a["name"] == name) for name in ("O1", "C2")
     )
     assert math.dist((oxygen["x"], oxygen["y"]), (carbon["x"], carbon["y"])) < 3 * tidied["bond"]
+
+
+def test_a_molecule_is_moved_turned_flipped_and_put_back_where_it_is_seen() -> None:
+    from flexo.studio.mechanism_edit import place_molecule
+
+    steps = [{"smiles": SN2, "arrows": ["1 -> 2", "2-3 -> 3"]}]
+    moved = place_molecule(steps, step=0, atom=0, move=[-1, 0.5])["steps"]
+    moved = place_molecule(moved, step=0, atom=0, move=[0.25, 0])["steps"]
+    assert moved[0]["place"] == {"1": {"move": [-0.75, 0.5]}}
+    turned = place_molecule(moved, step=0, atom=2, turn=30)["steps"]  # the C2-Br3 molecule, by C2
+    assert turned[0]["place"]["2"] == {"turn": 30.0}
+    # Flipped as it is seen: the turn it had now turns the other way.
+    flipped = place_molecule(turned, step=0, atom=1, flip=True)["steps"]
+    assert flipped[0]["place"]["2"] == {"turn": -30.0, "flip": True}
+    back = place_molecule(flipped, step=0, atom=1, reset=True)["steps"]
+    assert back[0]["place"] == {"1": {"move": [-0.75, 0.5]}}
+    # What the last step makes is placed as a step of its own, with no arrows.
+    after = place_molecule(steps, step=1, atom=2, move=[1, 0])["steps"]
+    assert after[1] == {"arrows": [], "place": {"3": {"move": [1.0, 0.0]}}}
+    drawn = sheet(back, step=0)
+    assert drawn["paper"].startswith("#")
+    assert [molecule["placed"] for molecule in drawn["molecules"]] == [True, False]
+    assert "m.step1.bond0" in drawn["molecules"][1]["ids"]
