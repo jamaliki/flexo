@@ -156,3 +156,32 @@ def test_coloured_words_are_painted_in_their_colour() -> None:
         figure.block("b", label="Thanks to [Ada]{accent} and [Bob]{#c0392b}")
     svg = compile_figure(figure.spec).document.text
     assert 'fill="#c0392b"' in svg and 'data-flexo-fill="tone-1-stroke"' in svg
+
+
+def test_a_word_longer_than_any_line_breaks_quickly_into_pieces_that_fit() -> None:
+    import time
+
+    from flexo.units import pt
+
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    start = time.monotonic()
+    word = (TextRun("W" * 20_000),)
+    metrics = measurer.measure(word, max_width=400.0, break_words=True, balance=False)
+    assert time.monotonic() - start < 10
+    assert all(line.width <= 400.0 + 1e-6 for line in metrics.lines)
+    assert sum(len(run.text) for line in metrics.lines for run in line.runs) == 20_000
+
+
+def test_invisible_format_characters_are_never_missing() -> None:
+    from flexo.text import font_stack
+    from flexo.units import pt
+
+    stack = font_stack(TypographyStyle(family="Figtree", size=pt(20)))
+    assert stack.missing("a️ b‍ c⁠", False) == set()
+
+
+def test_a_placed_svg_may_name_its_weights() -> None:
+    from flexo.svg_resources import _css_weight
+
+    weights = [_css_weight(value, 400) for value in ("700", "bold", "normal", "lighter", None, "x")]
+    assert weights == [700, 700, 400, 300, 400, 400]

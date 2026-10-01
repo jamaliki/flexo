@@ -204,6 +204,16 @@ def test_dollars_read_as_pandoc_reads_them() -> None:
     assert math_spans(r"$ \alpha $") == [(0, 10)]
     assert math_spans(r"$$E = mc^2$$ and \(x\) and \[y\]") == [(0, 12), (17, 22), (27, 32)]
     assert math_spans("`echo $HOME $PATH` then $x$") == [(24, 27)]
+    assert math_spans("between $5-$10") == []
+    # Plainly TeX may be followed by a digit: a space group, P2₁2₁2₁.
+    assert math_spans("P2$_1$2$_1$2$_1$") == [(2, 6), (7, 11), (12, 16)]
+
+
+def test_matplotlibs_mathdefault_is_the_upright_face() -> None:
+    from flexo.units import pt
+
+    formula = typeset(r"\mathdefault{10^{-2}}", TypographyStyle(family="Figtree", size=pt(12)), 12)
+    assert formula.problems == () and formula.width > 0
 
 
 def test_display_maths_in_a_label_is_a_line_of_its_own() -> None:
@@ -282,10 +292,12 @@ def test_the_maths_font_suits_the_words_and_greek_is_its_own_everywhere() -> Non
 
     def families(source: str, typography: TypographyStyle = TYPE) -> set[str]:
         formula = typeset(source, typography, 20.0)
-        return {item.face.face.family for _, _, item in formula.box.items if isinstance(item, GlyphItem)}
+        items = formula.box.items
+        return {item.face.face.family for _, _, item in items if isinstance(item, GlyphItem)}
 
     # Greek, signs and big operators in the maths font; letters the words' own.
-    assert families(r"\theta") == {"Fira Math"} and families(r"\sum_i x_i") == {"Fira Math", "Figtree"}
+    assert families(r"\theta") == {"Fira Math"}
+    assert families(r"\sum_i x_i") == {"Fira Math", "Figtree"}
     # A text face's italic Greek is never used, even when it has Greek (IBM Plex Sans's
     # italic θ is drawn as ϑ).
     assert families(r"\theta", TypographyStyle(family="IBM Plex Sans")) == {"Fira Math"}
