@@ -197,6 +197,19 @@ def test_balanced_lines_never_break_a_word_that_fits_whole() -> None:
     assert "Column" in lines[0] and all("Colum" not in line or "Column" in line for line in lines)
 
 
+def test_a_line_given_its_own_width_stays_one_line() -> None:
+    from math import nextafter
+
+    from flexo.markup import parse_label
+
+    # A width summed in another order differs in its last bits: a table's cell, given
+    # its words' width back, broke its formula between two runs (ℏ | ω).
+    measurer = TextMeasurer(TypographyStyle(family="Liberation Sans"))
+    runs = parse_label(r"$E_n / \hbar\omega$")
+    width = nextafter(measurer.measure(runs).width, 0.0)
+    assert len(measurer.measure(runs, max_width=width, balance=False).lines) == 1
+
+
 def test_a_tab_is_a_space_and_control_characters_draw_nothing() -> None:
     from flexo.markup import parse_label
 
