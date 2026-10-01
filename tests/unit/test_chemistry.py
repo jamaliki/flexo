@@ -295,7 +295,7 @@ def test_a_later_step_may_bring_in_a_new_molecule_and_leave_out_a_spectator() ->
     ],
 )
 def test_each_curly_arrow_is_one_curve_crossing_no_bond_and_no_charge(steps) -> None:
-    from flexo.chemistry.curly import _bends_both_ways, _crossing
+    from flexo.chemistry.curly import _crossing, _shape
 
     _, drawing = _mechanism(steps)
     bonds = [
@@ -311,7 +311,7 @@ def test_each_curly_arrow_is_one_curve_crossing_no_bond_and_no_charge(steps) -> 
         numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", shape.d)]
         start, first, second, end = (tuple(numbers[i : i + 2]) for i in (0, 2, 4, 6))
         curve = [_cubic(start, first, second, end, step / 24) for step in range(25)]
-        assert not _bends_both_ways(curve), shape.id
+        assert _shape(curve) is not None, shape.id  # a C, or an S: never a wave
         assert not _crossing(curve, bonds), shape.id
         for x, y, radius in charges:
             assert all(math.dist(point, (x, y)) > radius for point in curve), shape.id
@@ -376,8 +376,9 @@ def _drawn(smiles: str):
     measures = units(STYLES["paper"])
     molecule = read_smiles(smiles)
     lay_out(molecule)
-    return draw_molecule(molecule, Pen(measures.u, lambda runs: measures.measure(runs)),
-                         prefix="m", pairs="all")
+    return draw_molecule(
+        molecule, Pen(measures.u, lambda runs: measures.measure(runs)), prefix="m", pairs="all"
+    )
 
 
 def test_a_metal_keeps_its_d_electrons_and_a_double_charge_is_written_after_it() -> None:
@@ -482,11 +483,22 @@ def test_a_figure_file_writes_a_mechanisms_arrows_and_places_as_python_does() ->
 
     written = {
         "figure": {"id": "file"},
-        "nodes": [{"id": "m", "kind": "mechanism", "properties": {"steps": [
-            {"smiles": "[OH-:1].[CH3:2][Br:3]", "arrows": ["1 -> 2", "2-3 -> 3"],
-             "place": {1: {"move": [-1, 0]}}},
-            "[CH3:2][OH:1].[Br-:3]",
-        ]}}],
+        "nodes": [
+            {
+                "id": "m",
+                "kind": "mechanism",
+                "properties": {
+                    "steps": [
+                        {
+                            "smiles": "[OH-:1].[CH3:2][Br:3]",
+                            "arrows": ["1 -> 2", "2-3 -> 3"],
+                            "place": {1: {"move": [-1, 0]}},
+                        },
+                        "[CH3:2][OH:1].[Br-:3]",
+                    ]
+                },
+            }
+        ],
     }
     figure = parse_figure(written)
     (step, made) = figure.nodes[0].property("steps")
@@ -536,3 +548,44 @@ def test_a_lone_pair_an_arrow_takes_faces_what_it_attacks(smiles, arrow) -> None
     toward = (there[0] - here[0], there[1] - here[1])
     cosine = (pair[0] * toward[0] + pair[1] * toward[1]) / (math.hypot(*pair) * math.hypot(*toward))
     assert cosine > 0.5  # within 60 degrees of the way to what it attacks
+
+
+@pytest.mark.parametrize(
+    "smiles, arrows",
+    [
+        ("[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]", "5 -> 2; 2=3 -> 3"),  # a carbonyl's bare carbon
+        ("C[C+:1](C)C.[OH2:3]", "3 -> 1"),  # a cation's vertex, beside its charge
+        ("[CH3:1][C:2](=[O:3])[CH3:4].[OH2+:5][H:6]", "3 -> 6; 6-5 -> 5"),  # letters
+        ("[NH2:1]C.[CH3:2][C:3](=[O:4])[CH3:5]", "1 -> 3; 3=4 -> 4"),
+    ],
+)
+def test_an_arrow_off_a_lone_pair_is_an_s_and_every_head_stops_short_of_its_atom(
+    smiles, arrows
+) -> None:
+    from flexo.chemistry.curly import HEAD_GAP, _Frame, _shape, _to_segment
+    from flexo.mechanism import mechanism_composed
+
+    figure, _ = _mechanism([{"smiles": smiles, "arrows": arrows}], partial=True)
+    composed = mechanism_composed(figure.spec.nodes[0], STYLES["paper"])
+    drawn, molecule, _ = composed.drawn[0]
+    frame = _Frame(molecule, drawn, composed.pen)
+    for number, text in enumerate(arrows.split("; ")):
+        tail, head = text.split(" -> ")
+        target = molecule.index_of(int(head.split("-")[-1]))
+        (shape,) = [item for item in drawn.shapes if item.id == f"m.step1.arrow{number}"]
+        numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", shape.d)]
+        start, first, second, end, tip = (tuple(numbers[i : i + 2]) for i in (0, 2, 4, 6, 8))
+        curve = [_cubic(start, first, second, end, step / 24) for step in range(25)] + [tip]
+        if "-" not in tail and math.dist(start, tip) > frame.bond:
+            assert _shape(curve) == "S", text  # leaves its pair and arrives the same way
+        elif "-" in tail:
+            assert _shape(curve) == "C", text  # a hook
+        # Its tip keeps the same gap off whatever the atom is drawn with.
+        boxes, lines, circles = frame.ink(target)
+        x, y = tip
+        nearest = min(
+            [math.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1)) for x0, y0, x1, y1 in boxes]
+            + [_to_segment(tip, a, b) - composed.pen.line / 2 for a, b in lines]
+            + [math.dist(tip, (cx, cy)) - radius for cx, cy, radius in circles]
+        )
+        assert HEAD_GAP * frame.bond <= nearest <= 2.5 * HEAD_GAP * frame.bond, text
