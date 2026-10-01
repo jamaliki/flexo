@@ -151,14 +151,21 @@ class FontStack:
         found is then named on the ``tspan`` that uses it, like any fallback.
         """
 
-        family = family_covering(characters)
-        if family is None:
-            return False
-        faces = family_faces(family)
-        if not faces or any(existing[0].family == faces[0].family for existing in self.families):
-            return False
-        self.families = (*self.families, faces)
-        return True
+        # A family for each script missing, not one for them all: Persian and Chinese
+        # missing together found Arial Unicode MS, which then set every later Chinese,
+        # Korean and Thai word in the deck, without bold.
+        adopted = False
+        for group in _by_script(characters):
+            family = family_covering(group) or family_covering(characters)
+            if family is None:
+                continue
+            faces = family_faces(family)
+            known = {existing[0].family for existing in self.families}
+            if not faces or faces[0].family in known:
+                continue
+            self.families = (*self.families, faces)
+            adopted = True
+        return adopted
 
     def face(self, weight: int, italic: bool, family: int = 0) -> FontFace:
         return select_face(self.families[family], weight, italic)
@@ -218,12 +225,16 @@ class FontStack:
                 else ch
                 for ch in text
             )
-        for cluster in _clusters(text):
+        clusters = _clusters(text)
+        whole = self._whole_words(clusters, faces, loaded)
+        for position, cluster in enumerate(clusters):
             if cluster.isspace():
                 if pieces:
                     pieces[-1] = (pieces[-1][0], pieces[-1][1] + cluster)
                     continue
                 choice = 0
+            elif position in whole:
+                choice = whole[position]
             else:
                 covering = [
                     index
@@ -235,10 +246,12 @@ class FontStack:
                     covering[0] if covering else 0,
                 )
                 previous = faces.index(pieces[-1][0]) if pieces else 0
-                if choice > 0 and previous > 0 and previous in covering:
+                lettered = unicodedata.category(cluster[0])[0] in "LMNP"
+                if choice > 0 and previous > 0 and previous in covering and lettered:
                     # Outside the primary face, stay in the fallback already in
                     # use: a word in another script is set in one font, not a
-                    # mixture of every font that happens to have each glyph.
+                    # mixture of every font that happens to have each glyph. A
+                    # symbol (a check mark) takes the first face that has it.
                     choice = previous
             face = faces[choice]
             if pieces and pieces[-1][0] == face:
@@ -246,6 +259,37 @@ class FontStack:
             else:
                 pieces.append((face, cluster))
         return pieces
+
+    def _whole_words(
+        self, clusters: list[str], faces: list[FontFace], loaded: list[LoadedFace]
+    ) -> dict[int, int]:
+        """The face for each cluster of a word the primary face has only part of, in one
+        script (Vietnamese, which Figtree has some letters of): the first face that has
+        all of the word, so a word is set in one face rather than letter by letter."""
+
+        chosen: dict[int, int] = {}
+        start = 0
+        for end in range(len(clusters) + 1):
+            if end < len(clusters) and not clusters[end].isspace():
+                continue
+            word = clusters[start:end]
+            start = end + 1
+            if not word or all(all(loaded[0].has(ch) for ch in cluster) for cluster in word):
+                continue
+            scripts = {
+                unicodedata.name(cluster[0], "?").split()[0]
+                for cluster in word if unicodedata.category(cluster[0]).startswith("L")
+            }
+            if len(scripts) != 1:
+                continue
+            for index in range(1, len(loaded)):
+                if all(all(loaded[index].has(ch) for ch in cluster) for cluster in word) and all(
+                    _places_marks(faces[index], cluster) for cluster in word
+                ):
+                    for offset in range(len(word)):
+                        chosen[end - len(word) + offset] = index
+                    break
+        return chosen
 
     def maths_index(self, name: str | None = None) -> int | None:
         """Where the typography's maths family (or ``name``) sits in the stack, if it has one."""
@@ -336,6 +380,22 @@ def _places_marks(face: FontFace, cluster: str) -> bool:
     return all(
         position.x_offset != 0 or position.y_offset != 0 for position in positions[1:]
     )
+
+
+def _by_script(characters: set[str]) -> list[set[str]]:
+    """``characters`` grouped by the script their Unicode names begin with (CJK, ARABIC,
+    HANGUL, THAI...); symbols with no script, each a group with what precedes it."""
+
+    import unicodedata
+
+    groups: dict[str, set[str]] = {}
+    for character in sorted(characters):
+        try:
+            script = unicodedata.name(character).split()[0]
+        except ValueError:
+            script = "?"
+        groups.setdefault(script, set()).add(character)
+    return list(groups.values())
 
 
 @cache
