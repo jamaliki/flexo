@@ -1307,6 +1307,54 @@ class GroupBuilder:
             properties["legend"] = bool(legend)
         return self.node(id, "cells", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
+    def mechanism(
+        self,
+        id: str,
+        steps: str | Sequence[str | Mapping[str, object]],
+        *,
+        label: str | tuple[TextRun, ...] = "",
+        lone_pairs: str = "used",
+        charges: str = "circled",
+        per_row: int | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A reaction mechanism: structures from SMILES and the curly arrows between them
+        (see ``flexo.mechanism``).
+
+        ``steps`` is a SMILES (one structure), or a list of steps, each a SMILES or
+        ``{"smiles": ..., "arrows": ..., "label": ..., "reagents": ..., "conditions": ...,
+        "arrow": "forward" | "equilibrium" | "resonance" | "none"}``. Arrows are written
+        ``"5 -> 2"`` (a lone pair on atom 5 to atom 2), ``"2=3 -> 3"`` (a bond's electrons to
+        an atom), ``"1=2 -> 2-6"`` (a bond moved), ``"~>"`` for a fishhook; several at once
+        as a list or separated by ``;``. Atoms are their SMILES atom maps (``[O-:5]``). A
+        step with no SMILES is drawn from the arrows before it; one with a SMILES is
+        checked against them. ``lone_pairs`` is ``used`` (those arrows leave), ``all`` or
+        ``none``; ``charges`` ``circled`` or ``plain``; ``per_row`` how many structures
+        a row holds.
+        """
+
+        if isinstance(steps, str):
+            steps = [steps]
+        records: list[dict[str, Scalar]] = []
+        for step in steps:
+            if isinstance(step, str):
+                records.append({"smiles": step})
+                continue
+            record: dict[str, Scalar] = {}
+            for key, value in step.items():
+                if key == "arrows" and not isinstance(value, str):
+                    value = "; ".join(str(item) for item in value)  # type: ignore[union-attr]
+                record[key] = value  # type: ignore[assignment]
+            records.append(record)
+        properties: dict[str, object] = {"steps": records}
+        if lone_pairs != "used":
+            properties["lone_pairs"] = lone_pairs
+        if charges != "circled":
+            properties["charges"] = charges
+        if per_row is not None:
+            properties["per_row"] = int(per_row)
+        return self.node(id, "mechanism", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
+
     def structure(
         self,
         id: str,

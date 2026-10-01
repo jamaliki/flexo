@@ -27,7 +27,8 @@ from flexo.text import TextMeasurer
 from flexo.units import pt
 
 DRAWN_KINDS = frozenset(
-    {"construct", "plasmid", "protein", "tree", "wellplate", "timeline", "structure", "cells"}
+    {"construct", "plasmid", "protein", "tree", "wellplate", "timeline", "structure", "cells",
+     "mechanism"}
 )
 
 
@@ -266,6 +267,10 @@ def _lay_out(node: NodeSpec, style: LayoutStyle) -> Picture:
         from flexo.cells import cells_drawing
 
         return cells_drawing(node, style)
+    if node.kind == "mechanism":
+        from flexo.mechanism import mechanism_drawing
+
+        return mechanism_drawing(node, style)
     from flexo.bench import bench_drawing
 
     return bench_drawing(node, style)
@@ -298,4 +303,8 @@ def drawn_tones(node: NodeSpec) -> tuple[str, ...]:
         from flexo.cells import cells_tones
 
         return cells_tones(node)
+    if node.kind == "mechanism":
+        from flexo.mechanism import mechanism_tones
+
+        return mechanism_tones(node)
     return ()
