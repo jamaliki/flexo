@@ -117,19 +117,21 @@ def test_conventions_validate_and_round_trip() -> None:
 def test_math_between_dollars_sets_scripts_italics_and_symbols() -> None:
     assert parse_label("c_{t-1}") == (TextRun("c_{t-1}"),)
     assert parse_label("$c_{t-1}$") == (
-        TextRun("c", italic=True),
-        TextRun("t", italic=True, baseline_shift="sub"),
-        TextRun("\u22121", baseline_shift="sub"),
+        TextRun("c", italic=True, maths=True),
+        TextRun("t", italic=True, baseline_shift="sub", maths=True),
+        TextRun("\u22121", baseline_shift="sub", maths=True),
     )
     assert parse_label("softmax($QK^T$)") == (
         TextRun("softmax("),
-        TextRun("QK", italic=True),
-        TextRun("T", italic=True, baseline_shift="super"),
+        TextRun("QK", italic=True, maths=True),
+        TextRun("T", italic=True, baseline_shift="super", maths=True),
         TextRun(")"),
     )
     # Italic Greek is the maths font's letter (the one formulas are set in); capitals upright.
-    assert parse_label("$\\mu$, $\\Sigma$") == (TextRun("\U0001d707, Σ"),)
-    assert parse_label("$W_{\\text{out}}$")[1] == TextRun("out", baseline_shift="sub")
+    assert parse_label("$\\mu$, $\\Sigma$") == (
+        TextRun("\U0001d707", maths=True), TextRun(", "), TextRun("Σ", maths=True),
+    )
+    assert parse_label("$W_{\\text{out}}$")[1] == TextRun("out", baseline_shift="sub", maths=True)
     # An accent is placed by TeX's layout: as a combining mark it collides in many faces.
     (accented,) = parse_label("$\\hat{x}$")
     assert accented.math == "\\hat{x}"
@@ -177,11 +179,13 @@ def test_module_takes_every_group_option() -> None:
 
 
 def test_math_alphabets_operators_and_relations() -> None:
-    assert parse_label(r"$\mathcal{L}$") == (TextRun("\u2112"),)
-    assert parse_label(r"$\mathbb{E}$") == (TextRun("\U0001d53c"),)
-    assert parse_label(r"$\log p$") == (TextRun("log "), TextRun("p", italic=True))
+    assert parse_label(r"$\mathcal{L}$") == (TextRun("\u2112", maths=True),)
+    assert parse_label(r"$\mathbb{E}$") == (TextRun("\U0001d53c", maths=True),)
+    assert parse_label(r"$\log p$") == (
+        TextRun("log ", maths=True), TextRun("p", italic=True, maths=True),
+    )
     # A relation after an italic letter: a hair space (its lean), then TeX's spacing.
-    assert parse_label(r"$x \in X$")[1] == TextRun("\u200a \u2208 ")
+    assert parse_label(r"$x \in X$")[1] == TextRun("\u200a \u2208 ", maths=True)
 
 
 @pytest.mark.parametrize(

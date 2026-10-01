@@ -422,7 +422,7 @@ def _math(source: str, *, display: bool = False) -> list[TextRun]:
         words = "".join(run.text for run in runs).replace("\\", "").replace("\n", " ").strip()
         prefix = "\\displaystyle " if display else ""
         return [TextRun(words or source.strip(), math=prefix + source.strip())]
-    return runs
+    return [replace(run, maths=True) for run in runs]
 
 
 _LINEAR = frozenset({
@@ -728,7 +728,8 @@ def _merged(runs: list[TextRun]) -> tuple[TextRun, ...]:
             result[-1].code,
             result[-1].link,
             result[-1].color,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
+            result[-1].maths,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color, run.maths):
             result[-1] = replace(result[-1], text=result[-1].text + run.text)
             continue
         result.append(run)

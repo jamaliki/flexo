@@ -353,7 +353,7 @@ def _waypoint_data(waypoint: Waypoint) -> dict[str, object]:
     return result
 
 
-_RUN_EXTRAS = ("accent", "code", "link", "color", "math")
+_RUN_EXTRAS = ("accent", "code", "link", "color", "math", "maths")
 
 
 def _put_label(result: dict[str, object], label: tuple[TextRun, ...]) -> None:
@@ -399,6 +399,7 @@ def _label(value: object = "") -> tuple[TextRun, ...]:
             link=item.get("link", ""),
             color=item.get("color", ""),
             math=item.get("math", ""),
+            maths=bool(item.get("maths", False)),
         )
         for item in value
     )

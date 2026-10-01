@@ -158,7 +158,8 @@ def render_runs(
     whichever call site remembered to loop over the runs.
 
     A run emits only what its author actually asked for: a weight other than the
-    ``TextRun`` default, ``font-style`` where it is italic,
+    ``TextRun`` default (or any, for maths set as words, which keeps its own weight
+    in a bold title), ``font-style`` where it is italic,
     ``baseline-shift`` with the reduced ``font-size`` where it is shifted, and
     ``xml:space="preserve"`` where its own text begins or ends in a space that
     XML would otherwise discard. Inheritance is the point rather than economy: a
@@ -233,7 +234,9 @@ def render_runs(
                 data__flexo__fill=run_role(run),
                 dx=number(step) if run_index in back or run_index in restore else None,
                 dy=metrics.line_height if line_index > 0 and position == 0 else None,
-                font__weight=run.weight if run.weight != DEFAULT_RUN_WEIGHT else None,
+                font__weight=(
+                    run.weight if run.weight != DEFAULT_RUN_WEIGHT or _own(run, weight) else None
+                ),
                 font__style="italic" if run.italic else None,
                 baseline__shift=(
                     number(script_shift(run.baseline_shift, run.italic, typography))
@@ -243,7 +246,7 @@ def render_runs(
                 font__size=size * SHIFTED_SIZE if shifted else None,
             )
             if run_index in marks:
-                _mark(text, run, marks[run_index][0], typography, stack, primary)
+                _mark(text, run, marks[run_index][0], typography, stack, primary, weight)
             pieces = stack.segments(run.text, drawn_weight(run, weight), run.italic, code=run.code)
             if len(pieces) == 1 and pieces[0][0].family == primary:
                 span.text = run.text
@@ -338,6 +341,7 @@ def _mark(
     typography: TypographyStyle,
     stack: FontStack,
     primary: str,
+    weight: int | None,
 ) -> None:
     """The accent over ``run``: a small upright mark, centred over it, raised."""
 
@@ -350,8 +354,16 @@ def _mark(
         font__size=typography.size.points * ACCENT_SIZE,
         font__family=face.family if face.family != primary else None,
         font__style="normal" if run.italic else None,
+        font__weight=run.weight if _own(run, weight) else None,
     )
     mark.text = run.accent
+
+
+def _own(run: TextRun, weight: int | None) -> bool:
+    """Whether ``run`` names its weight where its text object declares another: maths
+    set as words does, so a bold title's maths stays as regular as its formulas."""
+
+    return run.maths and weight is not None and weight != run.weight
 
 
 SHADOW_LAYERS = 5
