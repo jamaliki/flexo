@@ -55,6 +55,22 @@ def test_a_sum_takes_its_limits_above_and_below_in_display_and_beside_it_in_word
     assert display.height > words.height and display.width < words.width * 1.2
     # \limits and \nolimits say otherwise.
     assert _set(r"\sum\limits_{i=1}^{n} i").height > words.height
+    # An operator made with \mathop is one too: Res_{z=0} under it in display.
+    residue = r"\mathop{\mathrm{Res}}_{z=0} f"
+    beside, under = _set(residue), _set(residue, display=True)
+    assert under.width < beside.width
+    assert under.width == _set(r"\operatorname*{Res}_{z=0} f", display=True).width
+    assert _set(r"\mathop{\mathrm{Res}}\nolimits_{z=0} f", display=True).width == beside.width
+
+
+def test_a_modulus_stands_off_as_amsmath_sets_it() -> None:
+    # \pmod and \pod are 18mu from what they follow in display, 8mu within words.
+    for source in (r"a \equiv b \pmod{n}", r"a \equiv b \pod{n}"):
+        shown, inline = _set(source, display=True), _set(source)
+        assert shown.width - inline.width == pytest.approx(10 / 18 * 20)
+    # Its "mod" is upright words 6mu from the modulus, not an operator spaced more.
+    amsmath = _set(r"\mkern8mu(\mathrm{mod}\mkern6mu n)")
+    assert _set(r"\pmod{n}").width == pytest.approx(amsmath.width)
 
 
 def test_matrices_cases_and_aligned_lines_are_laid_out_in_rows() -> None:
