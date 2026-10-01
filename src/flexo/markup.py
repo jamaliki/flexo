@@ -40,6 +40,9 @@ from dataclasses import replace
 
 from flexo.ir.semantic import TextRun
 
+THIN = "\u202f"
+"""Maths' thin space (``\\,``, and after a comma): narrow, and no place to break a line."""
+
 SYMBOLS = {
     # Greek, lower case
     "alpha": "α",
@@ -173,7 +176,7 @@ SYMBOLS = {
     "square": "□",
     "checkmark": "✓",
     "|": "‖",
-    ",": " ",
+    ",": THIN,
     " ": " ",
     "$": "$",
     "{": "{",
@@ -434,8 +437,21 @@ def needs_layout(source: str) -> bool:
 
     if "&" in source:
         return True
-    if any(name not in _LINEAR for name in _COMMAND.findall(source)):
+    names = _COMMAND.findall(source)
+    if any(name not in _LINEAR for name in names):
         return True
+    # An accent set as a combining mark collides with a Greek letter, or takes the letter
+    # into another face; bold Greek is no face's: TeX places and draws them. An arrow
+    # Flexo draws over one letter (\\vec{h}); over more, TeX's stretches across them.
+    if any(name in ACCENTS or name == "boldsymbol" for name in names):
+        return True
+    for match in re.finditer(r"\\(?:" + "|".join(OVER) + r")\s*(?:\{([^{}]*)\}|(\S))", source):
+        if len((match.group(1) or match.group(2) or "").strip()) > 1:
+            return True
+    # A blackboard, fraktur or script alphabet as words has its capitals only.
+    for match in re.finditer(r"\\(?:mathbb|mathfrak|mathcal)\s*(?:\{([^{}]*)\}|(\S))", source):
+        if not re.fullmatch(r"[A-Z]+", (match.group(1) or match.group(2) or "").strip()):
+            return True
     # Words set upright (\mathrm{H_2O}) are read as words: their scripts need laying out.
     words = "|".join(sorted(UPRIGHT | CODE | BOLD))
     for match in re.finditer(r"\\(?:" + words + r")\s*\{([^{}]*)", source):
@@ -460,9 +476,10 @@ def needs_layout(source: str) -> bool:
 def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None:
     """Append a binary operator or relation, spaced the way TeX spaces it."""
 
-    atoms = [run for run in runs if run.text != " "]
-    previous = atoms[-1].text[-1:] if atoms else ""
-    sign = symbol in BINARY and (not previous or previous in BINARY | RELATIONS | _OPENING)
+    atoms = [run for run in runs if run.text.strip()]
+    previous = atoms[-1].text.strip()[-1:] if atoms else ""
+    # After a sign, a relation, an opening or a comma, + and - are signs: (-1), a, -b.
+    sign = symbol in BINARY and (not previous or previous in BINARY | RELATIONS | _OPENING | {","})
     if sign:
         runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]
         return
@@ -604,9 +621,23 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
             continue
         index += 1
         if mode == "math":
+            spaced_bar = source[index - 2 : index - 1] == " " and source[index : index + 1] == " "
+            if character == "|" and spaced_bar:
+                # A bar typed with room each side is a "given" (\\mid), spaced as a relation.
+                _operator(runs, "|", weight, shift)
+                index = _skip_spaces(source, index)
+                continue
+            if character.isspace():
+                continue  # TeX spaces maths itself; what is typed between is not a space
             character = _REPLACEMENTS.get(character, character)
             if character in BINARY | RELATIONS:
                 _operator(runs, character, weight, shift)
+                index = _skip_spaces(source, index)
+                continue
+            if character == "," and source[index:].strip():
+                # A comma in maths is followed by a thin space, as TeX sets it: (r, t).
+                runs.append(TextRun(",", weight, False, shift))  # type: ignore[arg-type]
+                runs.append(TextRun(THIN, weight, False, shift))  # type: ignore[arg-type]
                 index = _skip_spaces(source, index)
                 continue
         italic = mode == "math" and character.isascii() and character.isalpha()

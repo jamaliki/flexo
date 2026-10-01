@@ -179,9 +179,14 @@ def test_simple_maths_stays_words_and_the_rest_is_laid_out() -> None:
     assert (
         not needs_layout("x_t^2")
         and not needs_layout(r"\alpha \cdot \beta")
-        and not needs_layout(r"\hat{x}")
+        and not needs_layout(r"\vec{h}")
+        and not needs_layout(r"\mathbb{R}")
     )
     for source in (
+        r"\hat{x}",
+        r"\overrightarrow{AB}",
+        r"\mathfrak{g}",
+        r"\boldsymbol{\theta}",
         r"\frac{a}{b}",
         r"\sqrt{x}",
         r"e^{-E_a/RT}",

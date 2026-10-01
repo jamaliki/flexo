@@ -130,7 +130,9 @@ def test_math_between_dollars_sets_scripts_italics_and_symbols() -> None:
     # Italic Greek is the maths font's letter (the one formulas are set in); capitals upright.
     assert parse_label("$\\mu$, $\\Sigma$") == (TextRun("\U0001d707, Σ"),)
     assert parse_label("$W_{\\text{out}}$")[1] == TextRun("out", baseline_shift="sub")
-    assert parse_label("$\\hat{x}$") == (TextRun("x̂", italic=True),)
+    # An accent is placed by TeX's layout: as a combining mark it collides in many faces.
+    (accented,) = parse_label("$\\hat{x}$")
+    assert accented.math == "\\hat{x}"
     assert parse_label("costs \\$5 or $6") == (TextRun("costs $5 or $6"),)
 
 
@@ -138,19 +140,22 @@ def test_a_math_label_survives_serialization() -> None:
     with Figure("math") as figure, figure.module("m") as m:
         m.block("h", label="$h_t$")
         m.block("plain", label="cost: \\$5")
+        m.block("laid", label="ratio $\\frac{1}{2}$ and $\\hat{y}$, [red]{red}, [a link](https://x.org)")
     parsed = parse_figure(yaml.safe_load(dump_figure(figure.spec)))
     assert parsed.node("m.h").label == figure.spec.node("m.h").label
     assert parsed.node("m.plain").label == (TextRun("cost: $5"),)
+    # A formula laid out by TeX, a colour and a link are kept, not their words alone.
+    assert parsed.node("m.laid").label == figure.spec.node("m.laid").label
 
 
-def test_an_accent_the_primary_face_cannot_place_falls_back_with_its_letter() -> None:
+def test_an_accent_is_placed_over_its_letter_by_the_maths_layout() -> None:
     with Figure("accent") as figure, figure.module("m") as m:
-        m.text("xhat", "$\\hat{x}$")
+        m.text("xhat", "$\\hat{\\theta}$")
     root = ET.fromstring(compile_figure(figure.spec).document.text)
     label = next(item for item in root.iter() if item.get("id") == "m.xhat.label")
-    spans = [item for item in label.iter() if local_name(item.tag) == "tspan" and item.text]
-    assert ["".join(span.itertext()) for span in spans] == ["x̂"]
-    assert spans[0].get("font-family") not in (None, "Figtree")
+    # Drawn as a formula (the hat placed for the letter), not a combining mark in a face.
+    assert any(item.get("class") == "flexo-math" for item in label.iter())
+    assert not [item for item in label.iter() if local_name(item.tag) == "tspan" and item.text]
 
 
 def test_text_objects_carry_no_indentation_between_runs() -> None:
@@ -188,7 +193,7 @@ def test_math_alphabets_operators_and_relations() -> None:
         (r"$x_{t-1}$", "xt−1"),
         (r"$-y$", "−y"),
         (r"$(-1)$", "(−1)"),
-        (r"$a, -b$", "a, −b"),
+        (r"$a, -b$", "a,\u202f−b"),  # a thin space after a comma, as TeX's
         (r"$\alpha x$", "\U0001d6fcx"),
         (r"$\log p$", "log p"),
         (r"$\log(x)$", "log(x)"),
