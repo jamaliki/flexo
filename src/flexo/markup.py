@@ -443,6 +443,9 @@ def needs_layout(source: str) -> bool:
 
     if "&" in source:
         return True
+    if not _paired(source):
+        # A brace not closed (x^{2), or closing none: TeX's reader says so, in words.
+        return True
     names = _COMMAND.findall(source)
     if any(name not in _LINEAR for name in names):
         return True
@@ -480,6 +483,24 @@ def needs_layout(source: str) -> bool:
                 return True
             index += 1
     return False
+
+
+def _paired(source: str) -> bool:
+    """Whether every ``{`` in ``source`` is closed by a ``}``, escaped ones (``\\{``) aside."""
+
+    depth, index = 0, 0
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+            continue
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+        index += 1
+    return depth == 0
 
 
 def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None:

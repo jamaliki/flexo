@@ -131,6 +131,14 @@ def test_what_cannot_be_read_is_said_in_words_and_the_rest_still_drawn(
     assert _set(source).width >= 0
 
 
+def test_a_brace_that_does_not_pair_is_said_however_simple_the_maths() -> None:
+    # x^{2 would read as words; the reader that says what is wrong reads it instead.
+    for source, said in (("x^{2", "a { is not closed"), ("x_{i}}", "a } closes no {")):
+        (run,) = [run for run in parse_label(f"then ${source}$ and") if run.math]
+        assert run.math == source and problems_in(run.math) == (said,)
+    assert not needs_layout(r"\{x\}_i") and not needs_layout("x_{i}")
+
+
 def test_no_formula_however_broken_breaks_the_setter() -> None:
     pieces = [
         r"\frac",
