@@ -71,13 +71,19 @@ class Artwork:
     """Sanitized, id-prefixed ``<svg>`` markup (SVG artwork only)."""
     stamp: int = 0
     """When the file last changed (nanoseconds): its bytes are read only when wanted."""
+    upright: bool = False
+    """A JPEG to be redrawn before it is placed: turned by its EXIF orientation (a phone
+    photograph), or in CMYK, which a drawing's viewers show wrong or black."""
 
     @property
     def data_uri(self) -> str:
-        """Base64 ``data:`` URI of the original bytes (PNG and JPEG artwork only)."""
+        """Base64 ``data:`` URI of the bytes (PNG and JPEG artwork only): the file's own,
+        or, for a turned or CMYK JPEG, the photograph upright and in RGB."""
 
         if self.format not in {"png", "jpeg"}:
             return ""
+        if self.upright:
+            return _upright_uri(str(self.path), self.stamp)
         return _data_uri(str(self.path), self.stamp, self.format)
 
     @property
@@ -104,6 +110,42 @@ def picture_href(artwork: Artwork) -> str:
     if link is not None and artwork.format in {"png", "jpeg"}:
         return link(artwork)
     return artwork.data_uri
+
+
+@lru_cache(maxsize=8)
+def _upright_uri(resolved: str, stamp: int) -> str:
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # Pillow is optional: without it, the photograph as it is
+        return _data_uri(resolved, stamp, "jpeg")
+    from io import BytesIO
+
+    with Image.open(resolved) as image:
+        turned = ImageOps.exif_transpose(image).convert("RGB")
+    buffer = BytesIO()
+    turned.save(buffer, format="JPEG", quality=92)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _jpeg_orientation(segment: bytes) -> int:
+    """The EXIF orientation (1 to 8) an APP1 segment holds, or 1."""
+
+    if not segment.startswith(b"Exif\x00\x00") or len(segment) < 14:
+        return 1
+    tiff = segment[6:]
+    order = "<" if tiff[:2] == b"II" else ">"
+    try:
+        (offset,) = struct.unpack(order + "I", tiff[4:8])
+        (count,) = struct.unpack(order + "H", tiff[offset : offset + 2])
+        for entry in range(count):
+            at = offset + 2 + entry * 12
+            tag, kind, _, value = struct.unpack(order + "HHI4s", tiff[at : at + 12])
+            if tag == 0x0112 and kind == 3:
+                (orientation,) = struct.unpack(order + "H", value[:2])
+                return orientation if 1 <= orientation <= 8 else 1
+    except struct.error:
+        return 1
+    return 1
 
 
 @lru_cache(maxsize=8)
@@ -224,18 +266,24 @@ def _jpeg_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artw
 
     index = 2
     size: tuple[int, int] | None = None
+    orientation, components = 1, 3
     while data.startswith(b"\xff\xd8") and index + 9 < len(data):
         if data[index] != 0xFF:
             break
         marker = data[index + 1]
         length = struct.unpack(">H", data[index + 2 : index + 4])[0]
+        if marker == 0xE1 and orientation == 1:
+            orientation = _jpeg_orientation(data[index + 4 : index + 2 + length])
         if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
             height, width = struct.unpack(">HH", data[index + 5 : index + 9])
+            components = data[index + 9]
             size = (width, height)
             break
         index += 2 + length
     if size is None:
         raise _error("image.jpeg.invalid", node_id, path, "The file is not a readable JPEG.")
+    if orientation >= 5:  # turned a quarter: it stands the other way up
+        size = (size[1], size[0])
     scale = POINTS_PER_UNIT["px"]
     return Artwork(
         node_id,
@@ -244,6 +292,7 @@ def _jpeg_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artw
         float(size[0]) * scale,
         float(size[1]) * scale,
         stamp=stamp,
+        upright=orientation != 1 or components == 4,
     )
 
 
