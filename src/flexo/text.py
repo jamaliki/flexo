@@ -608,7 +608,9 @@ class TextMeasurer:
         wrapped = self._wrap_line(line, max_width, weight, break_words)
         if len(wrapped) < 2 or max_width is None:
             return wrapped
-        low, high = 0.0, max_width
+        # Never narrower than its widest word: evened out, a line would break a word
+        # ("Colum / n") that fits whole.
+        low, high = min(self._widest_word(line, weight), max_width), max_width
         for _ in range(12):
             middle = (low + high) / 2.0
             if len(self._wrap_line(line, middle, weight, break_words)) <= len(wrapped):
@@ -616,6 +618,25 @@ class TextMeasurer:
             else:
                 low = middle
         return self._wrap_line(line, high, weight, break_words)
+
+    def _widest_word(self, line: tuple[TextRun, ...], weight: int | None) -> float:
+        """The widest stretch of the line between spaces (runs that touch are one word)."""
+
+        widest, word = 0.0, []
+        for run in line:
+            if run.math:
+                word.append(run)
+                continue
+            for token in _TOKEN_PATTERN.findall(run.text):
+                if token.isspace() and not any(ch in NO_BREAK for ch in token):
+                    if word:
+                        widest = max(widest, self.line_width(tuple(word), weight))
+                    word = []
+                else:
+                    word.append(replace(run, text=token))
+        if word:
+            widest = max(widest, self.line_width(tuple(word), weight))
+        return widest
 
     def _wrap_line(
         self,

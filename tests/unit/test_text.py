@@ -185,3 +185,19 @@ def test_a_placed_svg_may_name_its_weights() -> None:
 
     weights = [_css_weight(value, 400) for value in ("700", "bold", "normal", "lighter", None, "x")]
     assert weights == [700, 700, 400, 300, 400, 400]
+
+
+def test_balanced_lines_never_break_a_word_that_fits_whole() -> None:
+    from flexo.units import pt
+
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    words = (TextRun("Column 1 has a longer heading than the rest"),)
+    metrics = measurer.measure(words, max_width=120, balance=True, break_words=True)
+    lines = ["".join(run.text for run in line.runs) for line in metrics.lines]
+    assert "Column" in lines[0] and all("Colum" not in line or "Column" in line for line in lines)
+
+
+def test_a_tab_is_a_space_and_control_characters_draw_nothing() -> None:
+    from flexo.markup import parse_label
+
+    assert parse_label("a\tb\r\nc") == (TextRun("a b\nc"),)
