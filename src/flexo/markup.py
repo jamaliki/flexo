@@ -240,12 +240,18 @@ _LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?|mailto|file):[^)\s]+)\)")
 """``[words](url)``: words that link somewhere."""
 
 
+_CONTROLS = {code: None for code in range(32) if code != 10} | {9: " ", 127: None}
+
+
 def parse_label(text: str) -> tuple[TextRun, ...]:
     """The runs a string label stands for: plain text, with math between ``$``
     and code between backticks (set in the monospace family)."""
 
     if not text:
         return ()
+    # A tab in words is a space between them; other control characters (a stray \r)
+    # draw nothing -- a font has no glyph for either.
+    text = text.translate(_CONTROLS)
     if (
         "$" not in text and "`" not in text and "](" not in text and "]{" not in text
         and "\\(" not in text and "\\[" not in text
