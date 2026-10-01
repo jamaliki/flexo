@@ -603,24 +603,23 @@ def draw_panel(
     colour: str = INK,
 ) -> tuple[Drawn, Molecule, dict[int, int]]:
     """One structure and its arrows: the molecule drawn once to see where everything
-    falls, which way its arrows leave their atoms and where they would go, then again
-    keeping those clear, the arrows over it. Also the molecule as drawn (hydrogens no arrow moves
-    folded back into their labels) and how its atoms are numbered in it."""
+    falls and which way its arrows leave their atoms; again with those ways kept clear
+    (the hydrogens written beside an atom go to its other side), to see where the arrows
+    would go; and, if it has charges, a last time with the charges kept off them, the
+    arrows over it. Also the molecule as drawn (hydrogens no arrow moves folded back
+    into their labels) and how its atoms are numbered in it."""
 
     molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
     marks = wedges(molecule)
-    first = draw_molecule(
-        molecule, pen, prefix=prefix, origin=origin, pairs=pairs, charges=charges, wedges=marks
-    )
+    style = {
+        "prefix": prefix,
+        "origin": origin,
+        "pairs": pairs,
+        "charges": charges,
+        "wedges": marks,
+    }
+    first = draw_molecule(molecule, pen, **style)  # type: ignore[arg-type]
     used = tail_ways(molecule, first, arrows, pen)
-    # Where the arrows would go with the charges out of their way, for the charges to keep
-    # off -- and the curves found then, kept where they still keep clear of the charges.
-    chosen: list | None = None
-    tried: list = []
-    if first.marks and arrows:
-        chosen = []
-        first.marks.clear()
-        tried = draw_arrows(molecule, first, arrows, pen, prefix=prefix, chosen=chosen)
     radicals = {
         arrow.source[0]: 0.0
         for arrow in arrows
@@ -628,19 +627,19 @@ def draw_panel(
         and len(arrow.source) == 1
         and molecule.atoms[arrow.source[0]].lone % 2
     }
-    drawn = draw_molecule(
-        molecule,
-        pen,
-        prefix=prefix,
-        origin=origin,
-        pairs=pairs,
-        used=used,
-        lone=radicals,
-        charges=charges,
-        wedges=marks,
-        avoid=tried,
-    )
-    draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour, prefer=chosen)
+    drawn = draw_molecule(molecule, pen, used=used, lone=radicals, **style)  # type: ignore[arg-type]
+    if drawn.marks and arrows:
+        # Where the arrows would go with the charges out of their way, for the charges
+        # to keep off -- and the curves found then, kept where they still keep clear.
+        chosen: list = []
+        drawn.marks.clear()
+        tried = draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, chosen=chosen)
+        drawn = draw_molecule(  # type: ignore[misc]
+            molecule, pen, used=used, lone=radicals, avoid=tried, **style
+        )
+        draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour, prefer=chosen)
+    else:
+        draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour)
     return drawn, molecule, renumber
 
 

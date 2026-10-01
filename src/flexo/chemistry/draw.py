@@ -209,6 +209,11 @@ def draw_molecule(
         for first, second in ((bond.a, bond.b), (bond.b, bond.a)):
             (x1, y1), (x2, y2) = points[first], points[second]
             drawn.atoms[first].taken.append(math.atan2(y2 - y1, x2 - x1))
+    # Where the arrows' own electrons are drawn, kept clear before anything else is put
+    # round the atom: the hydrogens written beside it go to the other side (``OH₂``
+    # facing what its pair attacks), its charge and other pairs elsewhere.
+    for index, leaving in (used or {}).items():
+        drawn.atoms[index].taken.extend(leaving)
     for index in range(len(molecule.atoms)):
         if labelled(molecule, index):
             _label(molecule, index, pen, drawn, prefix, charges)
@@ -217,8 +222,6 @@ def draw_molecule(
         style = (wedges or {}).get((bond.a, bond.b)) or (wedges or {}).get((bond.b, bond.a))
         start = bond.a if (wedges or {}).get((bond.a, bond.b)) else bond.b if style else bond.a
         _bond(molecule, bond, pen, drawn, f"{prefix}.bond{number}", found, style, start)
-    for index, leaving in (used or {}).items():
-        drawn.atoms[index].taken.extend(leaving)  # where the arrows' own electrons are drawn
     strokes = [line for stroke in avoid or [] for line in itertools.pairwise(stroke)]
     for index in range(len(molecule.atoms)):
         if charges == "circled" and molecule.charge_of(index) and (

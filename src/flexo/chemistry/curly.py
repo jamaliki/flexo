@@ -50,6 +50,10 @@ RUN = 0.22
 """How much of an arrow's end is straight, so its head sits on a line, not a bend."""
 OVERSHOOT = 0.08
 """How far past its own ends a curve may reach, as a share of the span between them."""
+CLEAR = 60.0
+"""How far, in degrees, a lone pair an arrow leaves sits from the atom's bonds and marks."""
+CLEAR_OF_WORDS = 75.0
+"""... and from the hydrogens written beside its letter, which reach further."""
 TURN_MOST = 240.0
 #: How far, in degrees, a curve may bend against its main bend: a curly arrow is one
 #: curve, never an S.
@@ -179,6 +183,55 @@ class _Frame:
             side = (-side[0], -side[1])
         return side
 
+    def facing(self, atom: int, toward: Point | None, words: bool = True) -> list[Point]:
+        """The ways a lone pair may sit for an arrow off it to set out toward ``toward``,
+        best first: as near the way to it as the atom's bonds, the hydrogens written
+        beside it, its charge and its other lone pairs leave room for -- the pair a
+        textbook draws on the side facing what it attacks, not round the back.
+        ``words=False`` leaves the hydrogens out: they are written where the pair is not."""
+
+        here = self.at[atom]
+        if toward is None:
+            return [self.outward(atom)]
+        want = math.atan2(toward[1] - here[1], toward[0] - here[0])
+        blocked: list[tuple[float, float]] = []
+        for other in self.neighbours[atom]:
+            there = self.at[other]
+            blocked.append((math.atan2(there[1] - here[1], there[0] - here[0]), CLEAR))
+        place = self.drawn.atoms[atom]
+        if words and place.label is not None and place.label_side:
+            blocked.append((0.0 if place.label_side == "right" else math.pi, CLEAR_OF_WORDS))
+        for owner, x, y, _ in self.drawn.marks:
+            if owner == atom:
+                blocked.append((math.atan2(y - here[1], x - here[0]), CLEAR))
+        for angle, _ in place.pairs:
+            blocked.append((angle, CLEAR))
+        if place.radical is not None:
+            blocked.append((place.radical[0], CLEAR))
+
+        def apart(angle: float) -> float:
+            return min(
+                (
+                    abs(math.remainder(angle - other, math.tau)) - math.radians(room)
+                    for other, room in blocked
+                ),
+                default=math.pi,
+            )
+
+        ways = [math.radians(step * 5) for step in range(72)]
+        clear = [angle for angle in ways if apart(angle) >= 0]
+        if not clear:
+            best = max(ways, key=apart)
+            return [(math.cos(best), math.sin(best))]
+        clear.sort(key=lambda angle: abs(math.remainder(angle - want, math.tau)))
+        best = clear[0]
+        chosen = [best]
+        for offset in (20, -20, 40, -40):
+            angle = best + math.radians(offset)
+            if apart(angle) >= 0:
+                chosen.append(angle)
+        return [(math.cos(angle), math.sin(angle)) for angle in chosen]
+
 
 def _box_edge(centre: Point, box, way: Point) -> float:
     left, top, right, bottom = box
@@ -231,15 +284,18 @@ def _off_bond(frame: _Frame, pair, sign: int, into: bool = False) -> End:
 
 
 def _tails(frame: _Frame, tail: dict, aim: Point | None) -> list[End]:
-    """Where the arrow may leave, best first: out of a lone pair's atom radially, past
-    its letter and its pair; or square off either side of a bond, the side facing where
-    it is going first."""
+    """Where the arrow may leave, best first: out of a lone pair's atom on the side
+    facing where it is going, as near that way as the atom leaves room, past its
+    letter and its pair; or square off either side of a bond, the side facing where it
+    is going first."""
 
     if "lp" in tail:
         atom = tail["lp"]
-        out = frame.outward(atom, aim)
         anchor = frame.at[atom]
-        return [End(_step(anchor, out, frame.edge(atom, out, ATOM_GAP) + frame.bond * PAIR), out)]
+        return [
+            End(_step(anchor, out, frame.edge(atom, out, ATOM_GAP) + frame.bond * PAIR), out)
+            for out in frame.facing(atom, aim)
+        ]
     pair = tail["bond"]
     middle = frame.midpoint(pair)
     toward = _minus(aim, middle) if aim is not None else None
@@ -691,7 +747,7 @@ def tail_ways(
         others = [n for n in arrow.target if n != atom] or list(arrow.target)
         if _closes_own(frame, arrow):
             continue  # square to its own bond, on whichever side the search takes
-        way = frame.outward(atom, frame.at[others[0]])
+        way = frame.facing(atom, frame.at[others[0]], words=False)[0]
         ways.setdefault(atom, []).append(math.atan2(way[1], way[0]))
     return ways
 
