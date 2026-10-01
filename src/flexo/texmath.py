@@ -506,6 +506,9 @@ class Scripts:
     base: object
     sup: list | None = None
     sub: list | None = None
+    prime: str = ""
+    """Primes on the base (q' is q with ′): set at the base's size and height, the
+    subscript under them and the superscript after them, as TeX sets q'_{2i}."""
 
 
 @dataclass(slots=True)
@@ -802,6 +805,7 @@ class _Parser:
     def scripts(self, base: object, font: str | None) -> object:
         sup: list | None = None
         sub: list | None = None
+        prime = ""
         while (token := self.peek()) is not None and token.kind == "char" and token.value in "^_'":
             self.take()
             if token.value == "'":
@@ -812,8 +816,7 @@ class _Parser:
                     self.take(skip_spaces=False)
                     primes += 1
                 # A maths font's prime is drawn raised already: it follows its letter.
-                mark = {1: "′", 2: "″", 3: "‴", 4: "⁗"}.get(primes, "′" * primes)
-                base = Group([base, Sym(mark)])
+                prime += {1: "′", 2: "″", 3: "‴", 4: "⁗"}.get(primes, "′" * primes)
                 continue
             argument = self.argument(font)
             if argument is None:
@@ -824,7 +827,7 @@ class _Parser:
                 and argument
                 and all(isinstance(item, Sym) and item.char in "′″‴⁗" for item in argument)
             ):
-                base = Group([base, *argument])  # y^{\prime}, as y'
+                prime += "".join(item.char for item in argument)  # y^{\prime}, as y'
                 continue
             if token.value == "^":
                 if sup is not None:
@@ -835,7 +838,9 @@ class _Parser:
                     self.said("a symbol has two subscripts: group them, as x_{a b}")
                 sub = [*(sub or []), *argument]
         if sup is None and sub is None:
-            return base
+            return Group([base, Sym(prime)]) if prime else base
+        if prime:
+            return Scripts(base, sup, sub, prime)
         if isinstance(base, Brace) and base.label is None:
             label = sup if base.over else sub
             if label is not None:
@@ -2200,9 +2205,34 @@ class _Layout:
             kind, base = ORD, Box()
         else:
             kind, base = self.atom(base_item, style)
+        if item.prime:
+            return kind, self.primed(base, item, style)
         return kind, self.attach(
             base, item.sup, item.sub, style, operator=isinstance(base_item, Operator)
         )
+
+    def primed(self, base: Box, item: Scripts, style: _Style) -> Box:
+        """A base with primes: the primes after it at its size (a maths font's prime is
+        raised already), a superscript after them, a subscript under them."""
+
+        mark = self.atom(Sym(item.prime), style)[1]
+        x = base.width + base.italic
+        marked = Box(x + mark.width, max(base.height, mark.height), max(base.depth, mark.depth))
+        marked.put(base, 0.0, 0.0)
+        marked.put(mark, x, 0.0)
+        box = self.attach(marked, item.sup, None, style) if item.sup else marked
+        if item.sub is not None:
+            sub = self.items(item.sub, style.down())
+            v = max(
+                self.c("SUBSCRIPT_SHIFT_DOWN", style),
+                sub.height - self.c("SUBSCRIPT_TOP_MAX", style),
+                0.0 if base.single
+                else base.depth + self.c("SUBSCRIPT_BASELINE_DROP_MIN", style.up()),
+            )
+            box.put(sub, base.width, -v)
+            box.depth = max(box.depth, v + sub.depth)
+            box.width = max(box.width, base.width + sub.width + self.c("SPACE_AFTER_SCRIPT", style))
+        return box
 
     def attach(
         self,
