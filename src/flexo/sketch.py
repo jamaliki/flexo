@@ -62,10 +62,21 @@ class Sketch:
     """Change it to draw the same figure with a different hand."""
 
     def __post_init__(self) -> None:
+        # Settings come from documents too: a word where a number belongs is said by name.
+        for name, low, high in (("roughness", 0, 1), ("passes", 1, 4)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(
+                    f"sketch {name} must be a number from {low} to {high}, not {value!r}"
+                )
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise ValueError(f"sketch seed must be a whole number, not {self.seed!r}")
         if not 0.0 <= float(self.roughness) <= 1.0:
             raise ValueError(f"sketch roughness must be from 0 to 1, not {self.roughness}")
         if not 1 <= int(self.passes) <= 4:
             raise ValueError(f"sketch passes must be from 1 to 4, not {self.passes}")
+        if not isinstance(self.paper, bool):
+            raise ValueError(f"sketch paper must be true or false, not {self.paper!r}")
         if self.fill not in FILLS:
             raise ValueError(
                 f'unknown sketch fill "{self.fill}"; valid values: {", ".join(FILLS)}'
