@@ -408,3 +408,46 @@ def test_chemistry_reads_charges_isotopes_arrow_labels_gas_and_precipitate() -> 
     assert any(isinstance(item, Scripts) and item.sup and item.sub for item in isotope)
     assert any(isinstance(item, Arrow) for item in flat(parse(r"\ce{A ->[\Delta] B}")[0]))
     assert "↑" in str(parse(r"\ce{CO2 ^}")[0]) and "↓" in str(parse(r"\ce{AgCl v}")[0])
+
+
+def test_an_arrays_rules_run_between_its_rows_and_its_brackets_cover_them() -> None:
+    from flexo.texmath import GlyphItem, RuleItem
+
+    def ink(formula) -> tuple[list, list]:
+        """Each glyph's ink, bottom to top, and each rule's place and size."""
+
+        glyphs, rules = [], []
+        for x, y, item in formula.box.items:
+            if isinstance(item, GlyphItem):
+                _, _, bottom, top = item.face.extents(item.gid)
+                glyphs.append((y + bottom * item.size, y + top * item.size))
+            elif isinstance(item, RuleItem):
+                rules.append((x, y, item.width, item.height))
+        return glyphs, rules
+
+    for typography in (TYPE, TypographyStyle(family="Latin Modern Roman", generic="serif")):
+        # \hline takes room of its own: it strikes through no script of the row above
+        # (b_2) and touches no ink of the row below (a fraction).
+        formula = typeset(
+            r"\begin{array}{c|c} b_2 & y_j \\ \hline \frac{p}{q} & 1 \\ \hline \end{array}",
+            typography, 20.0, display=True,
+        )
+        glyphs, rules = ink(formula)
+        widest = max(width for _, _, width, _ in rules)
+        across = [(y, y + height) for _, y, width, height in rules if width == widest]
+        assert len(across) == 2
+        for low, high in across:
+            assert all(top < low - 0.5 or bottom > high + 0.5 for bottom, top in glyphs)
+        # The column rule runs the array's whole height, meeting the rule under it.
+        [(foot, tall)] = [(y, height) for _, y, width, height in rules if height > width]
+        assert foot == pytest.approx(min(low for low, _ in across))
+        # Brackets around a ruled array cover its rules, top to foot.
+        fenced = typeset(
+            r"\left[\begin{array}{cc|c} 1 & 0 & b_1 \\ 0 & 1 & b_2 \\ \hline 0 & 0 & 1"
+            r" \end{array}\right]",
+            typography, 20.0, display=True,
+        )
+        glyphs, rules = ink(fenced)
+        [(foot, tall)] = [(y, height) for _, y, width, height in rules if height > width]
+        assert min(bottom for bottom, _ in glyphs) <= foot + 1e-6
+        assert max(top for _, top in glyphs) >= foot + tall - 1e-6

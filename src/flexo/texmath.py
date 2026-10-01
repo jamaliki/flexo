@@ -2558,14 +2558,19 @@ class _Layout:
         centred.single = False
         return centred
 
-    def fence(
-        self, left: str, body: Box, right: str, style: _Style, middles: list | None = None
-    ) -> Box:
+    def reach(self, height: float, depth: float, style: _Style, *, whole: bool = False) -> float:
+        """How tall brackets around a body of ``height`` and ``depth`` are: TeX's 90% of
+        it, falling short by at most half an em -- or all of it (``whole``), for an array
+        whose rules run to its top and foot and would stand out past shorter brackets."""
+
         axis = self.c("AXIS_HEIGHT", style)
-        reach = max(body.height - axis, body.depth + axis)
-        size = self.size(style)
-        # TeX: cover 90% of the formula, and fall short of it by at most half an em.
-        target = max(2 * reach * 0.901, 2 * reach - 0.5 * size)
+        reach = max(height - axis, depth + axis)
+        if whole:
+            return 2 * reach
+        return max(2 * reach * 0.901, 2 * reach - 0.5 * self.size(style))
+
+    def fence(self, left: str, body: Box, right: str, style: _Style, *, whole: bool = False) -> Box:
+        target = self.reach(body.height, body.depth, style, whole=whole)
         opening = self.delimiter(left, target, style)
         closing = self.delimiter(right, target, style)
         return _row([(opening, 0.0), (body, 0.0), (closing, 0.0)])
@@ -2579,15 +2584,14 @@ class _Layout:
                 pieces.append([])
             else:
                 pieces[-1].append(thing)
+        whole = any(isinstance(thing, Array) and (thing.lines or thing.bars) for thing in item.body)
         if not middles:
             body = self.items(item.body, style)
-            return self.fence(item.left, body, item.right, style)
+            return self.fence(item.left, body, item.right, style, whole=whole)
         boxes = [self.items(piece, style) for piece in pieces]
         height = max(box.height for box in boxes)
         depth = max(box.depth for box in boxes)
-        axis = self.c("AXIS_HEIGHT", style)
-        reach = max(height - axis, depth + axis)
-        target = max(2 * reach * 0.901, 2 * reach - 0.5 * self.size(style))
+        target = self.reach(height, depth, style, whole=whole)
         thick = _MU[3] * self.size(style)
         row: list[tuple[Box, float]] = [(self.delimiter(item.left, target, style), 0.0)]
         for index, box in enumerate(boxes):
@@ -2796,6 +2800,16 @@ class _Layout:
             strut_height, strut_depth = 0.7 * size, 0.3 * size
         heights = [max([strut_height, *(cell.height for cell in cells)]) for cells in grid]
         depths = [max([strut_depth, *(cell.depth for cell in cells)]) for cells in grid]
+        under = self.c("UNDERBAR_VERTICAL_GAP", cell_style)
+        over = self.c("OVERBAR_VERTICAL_GAP", cell_style)
+        for line in item.lines:
+            # A rule keeps the gap a bar over or under keeps from the ink beside it,
+            # where a row's scripts reach past its strut (as a maths font's may).
+            if 0 < line <= len(grid):
+                ink = max(cell.depth for cell in grid[line - 1])
+                depths[line - 1] = max(depths[line - 1], ink + under)
+            if line < len(grid):
+                heights[line] = max(heights[line], max(cell.height for cell in grid[line]) + over)
         jot = 0.3 * size if item.kind in {"aligned", "gathered"} else 0.0
         if item.kind == "cases":
             jot = 0.1 * size
@@ -2815,13 +2829,20 @@ class _Layout:
                 gaps.append(1.0 * size)
         edge = 0.5 * size if item.kind == "array" else 0.0
         columns = (item.columns or "c").replace(" ", "")
+        thickness = self.c("FRACTION_RULE_THICKNESS", cell_style)
         box = Box()
-        y = 0.0
-        tops: list[float] = []
+        # Rows hang from the top down. A rule (\hline) takes room of its own between
+        # the depth of the row above and the height of the row below, as LaTeX's array
+        # sets it, so it never strikes through a row's scripts.
+        bottom = 0.0
+        rules: list[float] = []
         for index, cells in enumerate(grid):
-            if index > 0:
-                y -= depths[index - 1] + jot + heights[index]
-            tops.append(y + heights[index])
+            gap = jot if index > 0 else 0.0
+            if index in item.lines:
+                rules.append(bottom - gap / 2.0 - thickness)
+                gap += thickness
+            y = bottom - gap - heights[index]
+            bottom = y - depths[index]
             x = edge
             for column, cell in enumerate(cells):
                 align = (
@@ -2836,13 +2857,12 @@ class _Layout:
                 )
                 box.put(cell, x + offset, y)
                 x += widths[column] + gaps[column]
+        if len(grid) in item.lines:
+            rules.append(bottom - thickness)
+            bottom -= thickness
         width = sum(widths) + sum(gaps) + 2 * edge
-        total_height = heights[0]
-        total_depth = -(y - depths[-1])
         box.width = width
-        thickness = self.c("FRACTION_RULE_THICKNESS", cell_style)
-        for line in item.lines:
-            level = tops[line] + 0.15 * size if line < len(tops) else y - depths[-1] - 0.15 * size
+        for level in rules:
             box.put(_rule(width, thickness, level, self.colour), 0.0, 0.0)
         for bar in item.bars:
             x = (
@@ -2853,16 +2873,15 @@ class _Layout:
             )
             if bar >= count:
                 x = width - edge / 2.0
-            bottom = y - depths[-1]
-            box.put(_rule(thickness, heights[0] - bottom, bottom, self.colour), x, 0.0)
+            # From the top of the array to its foot, meeting the rules across it.
+            box.put(_rule(thickness, -bottom, bottom, self.colour), x - thickness / 2.0, 0.0)
         # Centre the whole on the maths axis.
         axis = self.c("AXIS_HEIGHT", style)
-        middle = (total_height - total_depth) / 2.0
-        box.height = total_height
-        box.depth = total_depth
-        centred = box.raised(axis - middle)
+        box.depth = -bottom
+        centred = box.raised(axis - bottom / 2.0)
         if item.left or item.right:
-            return self.fence(item.left, centred, item.right, style)
+            ruled = bool(item.lines or item.bars)
+            return self.fence(item.left, centred, item.right, style, whole=ruled)
         return centred
 
     # -- the rest --
