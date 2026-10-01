@@ -1316,6 +1316,7 @@ class GroupBuilder:
         lone_pairs: str = "used",
         charges: str = "circled",
         per_row: int | None = None,
+        arrow_colour: str | None = None,
         **options: object,
     ) -> NodeHandle:
         """A reaction mechanism: structures from SMILES and the curly arrows between them
@@ -1330,7 +1331,7 @@ class GroupBuilder:
         step with no SMILES is drawn from the arrows before it; one with a SMILES is
         checked against them. ``lone_pairs`` is ``used`` (those arrows leave), ``all`` or
         ``none``; ``charges`` ``circled`` or ``plain``; ``per_row`` how many structures
-        a row holds.
+        a row holds. The curly arrows are drawn in one ink: magenta, or ``arrow_colour``.
         """
 
         if isinstance(steps, str):
@@ -1353,6 +1354,8 @@ class GroupBuilder:
             properties["charges"] = charges
         if per_row is not None:
             properties["per_row"] = int(per_row)
+        if arrow_colour is not None:
+            properties["arrow_colour"] = arrow_colour
         return self.node(id, "mechanism", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def structure(

@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from flexo.chemistry.curly import draw_arrows, toward
+from flexo.chemistry.curly import INK, draw_arrows, tail_ways
 from flexo.chemistry.draw import Drawn, Pen, draw_molecule
 from flexo.chemistry.electrons import Arrow, MechanismError, compare, push, read_arrow, target_bond
 from flexo.chemistry.layout import align, assemble, follow, foresee, gather
@@ -38,7 +38,6 @@ from flexo.markup import parse_label
 from flexo.style import LayoutStyle
 
 ARROWS = ("forward", "equilibrium", "resonance", "none")
-ELECTRONS_TONE = "electrons"
 
 
 @dataclass(slots=True)
@@ -203,11 +202,9 @@ def mechanism_panels(node: NodeSpec) -> list[Panel]:
 
 
 def mechanism_tones(node: NodeSpec) -> tuple[str, ...]:
-    steps = node.property("steps")
-    if isinstance(steps, tuple) and any(
-        isinstance(record, Record) and record.get("arrows") for record in steps
-    ):
-        return (ELECTRONS_TONE,)
+    """A mechanism takes no tones: its arrows have their one ink."""
+
+    del node
     return ()
 
 
@@ -222,33 +219,18 @@ def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     if charges not in {"circled", "plain"}:
         raise _fail(node, "charges", f'charges "{charges}" is neither circled nor plain.')
     panels = mechanism_panels(node)
-    tone = ELECTRONS_TONE if any(panel.arrows for panel in panels) else None
+    colour = _arrow_colour(node)
 
     def drawing(index: int, panel: Panel, origin: tuple[float, float]) -> Drawn:
-        used: dict[int, list[float]] = {}
-        lone: dict[int, float] = {}
-        for arrow in panel.arrows:
-            angle = toward(panel.molecule, arrow)
-            if angle is None:
-                continue
-            atom = arrow.source[0]
-            if arrow.electrons == 1 and panel.molecule.atoms[atom].lone % 2:
-                lone[atom] = angle
-            else:
-                used.setdefault(atom, []).append(angle)
-        molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
-        drawn = draw_molecule(
-            molecule,
+        drawn, _, _ = draw_panel(
+            panel,
             pen,
             prefix=f"{node.id}.step{index + 1}",
             origin=origin,
             pairs=pairs,
-            used={renumber[atom]: value for atom, value in used.items()},
-            lone={renumber[atom]: value for atom, value in lone.items()},
             charges=charges,
-            wedges=wedges(molecule),
+            colour=colour,
         )
-        draw_arrows(molecule, drawn, arrows, pen, prefix=f"{node.id}.step{index + 1}", tone=tone)
         return drawn
 
     # Each structure drawn once where it falls, to measure it, then where it goes.
@@ -335,6 +317,65 @@ def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         width = max(width, x)
         y += row_height + labels_room + (u * 1.4 if row_number < len(rows) - 1 else 0.0)
     return Picture(Size(width, y), tuple(shapes), tuple(words))
+
+
+def draw_panel(
+    panel: Panel,
+    pen: Pen,
+    *,
+    prefix: str,
+    origin: tuple[float, float] = (0.0, 0.0),
+    pairs: str = "used",
+    charges: str = "circled",
+    colour: str = INK,
+) -> tuple[Drawn, Molecule, dict[int, int]]:
+    """One structure and its arrows: the molecule drawn once to see where everything
+    falls, which way its arrows leave their atoms and where they would go, then again
+    keeping those clear, the arrows over it. Also the molecule as drawn (hydrogens no arrow moves
+    folded back into their labels) and how its atoms are numbered in it."""
+
+    molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
+    marks = wedges(molecule)
+    first = draw_molecule(
+        molecule, pen, prefix=prefix, origin=origin, pairs=pairs, charges=charges, wedges=marks
+    )
+    used = tail_ways(molecule, first, arrows, pen)
+    # Where the arrows would go with the charges out of their way, for the charges to keep off.
+    first.marks.clear()
+    tried = draw_arrows(molecule, first, arrows, pen, prefix=prefix)
+    radicals = {
+        arrow.source[0]: 0.0
+        for arrow in arrows
+        if arrow.electrons == 1
+        and len(arrow.source) == 1
+        and molecule.atoms[arrow.source[0]].lone % 2
+    }
+    drawn = draw_molecule(
+        molecule,
+        pen,
+        prefix=prefix,
+        origin=origin,
+        pairs=pairs,
+        used=used,
+        lone=radicals,
+        charges=charges,
+        wedges=marks,
+        avoid=tried,
+    )
+    draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour)
+    return drawn, molecule, renumber
+
+
+def _arrow_colour(node: NodeSpec) -> str:
+    """The one ink a mechanism's curly arrows are drawn in: magenta, or ``arrow_colour``."""
+
+    value = node.property("arrow_colour")
+    if value is None or value == "":
+        return INK
+    text = str(value).strip()
+    if not (text.startswith("#") and len(text) in {4, 7}):
+        raise _fail(node, "arrow_colour", f'arrow_colour "{text}" is not a colour such as #d466d6.')
+    return text
 
 
 def _shown(molecule: Molecule, arrows: list[Arrow]) -> tuple[Molecule, list[Arrow], dict[int, int]]:
