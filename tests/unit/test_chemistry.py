@@ -291,3 +291,38 @@ def test_a_cycloaddition_is_drawn_ready_to_close_its_ring() -> None:
         if not shape.id.endswith(".inner")
     ]
     assert len(main) == 6 and max(main) - min(main) < 1e-6 * max(main) + 0.05
+
+
+def _drawn(smiles: str):
+    from flexo.chemistry.draw import Pen, draw_molecule
+    from flexo.drawn import units
+
+    measures = units(STYLES["paper"])
+    molecule = read_smiles(smiles)
+    lay_out(molecule)
+    return draw_molecule(molecule, Pen(measures.u, lambda runs: measures.measure(runs)),
+                         prefix="m", pairs="all")
+
+
+def test_a_metal_keeps_its_d_electrons_and_a_double_charge_is_written_after_it() -> None:
+    iron = _drawn("[Fe-](Br)(Br)(Br)Br")
+    assert not any(".radical" in shape.id or ".pair0." in shape.id for shape in iron.shapes)
+    magnesium = _drawn("[Mg+2]")
+    (label,) = magnesium.words
+    assert "".join(run.text for run in label.runs) == "Mg2+"
+    assert label.runs[-1].baseline_shift == "super"
+    assert not any(".charge" in shape.id for shape in magnesium.shapes)
+
+
+def test_a_circled_charge_keeps_off_the_bonds_round_its_atom() -> None:
+    drawn = _drawn("C[NH2+]C(C)(C)[O-]")
+    (charge,) = [shape for shape in drawn.shapes if shape.id == "m.charge1"]
+    # The circle is "M x-r y A r r ...": its centre and radius.
+    left, y, radius = (float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", charge.d)[:3])
+    centre = (left + radius, y)
+    for lines in drawn.lines.values():
+        for (x1, y1), (x2, y2) in lines:
+            for step in range(21):
+                t = step / 20
+                point = (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
+                assert math.dist(point, centre) > radius

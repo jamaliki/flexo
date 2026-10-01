@@ -192,7 +192,9 @@ def _end(
         return end, (-across[0], -across[1])
     (x1, y1), (x2, y2) = atoms[first].point, atoms[second].point
     giver_atoms = set(arrow.source)
-    if math.hypot(x2 - x1, y2 - y1) <= 1.4 * pen.bond and len(arrow.target) == 2:
+    # Two atoms near enough to see as one place (a bond about to form, as in a
+    # cycloaddition): the arrow ends between them.
+    if math.hypot(x2 - x1, y2 - y1) <= 2.2 * pen.bond and len(arrow.target) == 2:
         middle = ((x1 + x2) / 2, (y1 + y2) / 2)
         axis = _unit(x2 - x1, y2 - y1)
         across = (-axis[1], axis[0])

@@ -31,6 +31,12 @@ type Box = tuple[float, float, float, float]
 
 MINUS = "\N{MINUS SIGN}"
 
+METALS = frozenset(
+    "Sc Ti V Cr Mn Fe Co Ni Cu Zn Y Zr Nb Mo Tc Ru Rh Pd Ag Cd Hf Ta W Re Os Ir Pt Au Hg "
+    "La Ce Pr Nd Sm Eu Gd Tb Dy Ho Er Tm Yb Lu".split()
+)
+"""Transition metals and lanthanides: their d and f electrons are not lone pairs."""
+
 
 @dataclass(frozen=True, slots=True)
 class Pen:
@@ -168,11 +174,15 @@ def draw_molecule(
         start = bond.a if (wedges or {}).get((bond.a, bond.b)) else bond.b if style else bond.a
         _bond(molecule, bond, pen, drawn, f"{prefix}.bond{number}", found, style, start)
     for index in range(len(molecule.atoms)):
-        if charges == "circled" and molecule.charge_of(index):
+        if charges == "circled" and molecule.charge_of(index) and (
+            abs(molecule.charge_of(index)) == 1 or not labelled(molecule, index)
+        ):
             _circled(molecule, index, pen, drawn, prefix)
         elif charges != "circled" and molecule.charge_of(index) and not labelled(molecule, index):
             _vertex_charge(molecule, index, pen, drawn, prefix)
     for index, atom in enumerate(molecule.atoms):
+        if atom.element in METALS:
+            continue  # a metal's d electrons are not drawn as lone pairs
         wanted = (used or {}).get(index, [])
         count = atom.lone // 2
         show = 0
@@ -279,7 +289,8 @@ def _label(
             (TextRun(str(atom.hydrogens), baseline_shift="sub"),) if atom.hydrogens > 1 else ()
         )
     charge = ()
-    if charges != "circled" and molecule.charge_of(index):
+    if molecule.charge_of(index) and (charges != "circled" or abs(molecule.charge_of(index)) > 1):
+        # A charge of two or more is written after the label, as Mg²⁺ is, circled or not.
         charge = (TextRun(_charge_text(molecule.charge_of(index)), baseline_shift="super"),)
     side = _hydrogen_side(place.taken) if hydrogens else "right"
     if (
@@ -570,43 +581,71 @@ def _radical(pen: Pen, drawn: Drawn, index: int, angle: float, identifier: str) 
 
 
 def _circled(molecule: Molecule, index: int, pen: Pen, drawn: Drawn, prefix: str) -> None:
-    """A charge in a circle, at the atom's upper right if that is free."""
+    """A charge in a circle beside its atom: at the upper right if that is clear, else
+    wherever round the atom it touches no bond and no other label."""
 
     place = drawn.atoms[index]
     radius = pen.u * 0.3
-    if place.label is not None:
-        # A label written across (OH, H₂N): the charge at its far upper corner.
-        _, top, right, _ = place.label
-        x = right + radius * 0.75  # its upper right, as HO⊖ and OH⊖ are written
-        y = top - radius * 0.15
-        place.taken.append(math.atan2(y - place.point[1], x - place.point[0]))
-    else:
-        angle = _free_angle(place.taken, -math.pi / 4)
-        place.taken.append(angle)
-        distance = _reach(place, angle, pen) + radius + pen.u * 0.06
+    u = pen.u
+    lines = [line for key, items in drawn.lines.items() for line in items]
+
+    def clash(x: float, y: float) -> float:
+        hits = 0.0
+        for line in lines:
+            if _to_segment((x, y), line) < radius + pen.line + u * 0.04:
+                hits += 1
+        for x0, y0, x1, y1 in drawn.boxes:
+            if x0 - radius < x < x1 + radius and y0 - radius < y < y1 + radius:
+                hits += 1
+        return hits
+
+    best = None
+    for degrees in range(0, 360, 15):
+        angle = math.radians(degrees)
+        distance = _edge(place, angle, pen) + radius + u * 0.07
         x = place.point[0] + math.cos(angle) * distance
         y = place.point[1] + math.sin(angle) * distance
+        clear = min(
+            (abs(math.remainder(angle - other, 2 * math.pi)) for other in place.taken),
+            default=math.pi,
+        )
+        upper_right = abs(math.remainder(angle + math.pi / 4, 2 * math.pi))
+        score = (clash(x, y), -min(clear, math.radians(60)), upper_right)
+        if best is None or score < best[0]:
+            best = (score, x, y, angle)
+    _, x, y, angle = best  # type: ignore[misc]
+    place.taken.append(angle)
     arm = radius * 0.55
-    charge = molecule.charge_of(index)
     sign = ["M", x - arm, y, "L", x + arm, y]
-    if charge > 0:
+    if molecule.charge_of(index) > 0:
         sign += ["M", x, y - arm, "L", x, y + arm]
     d = _circle(x, y, radius) + " " + path(*sign)
     drawn.shapes.append(Shape(f"{prefix}.charge{index}", d, "line", width=pen.line * 0.85))
     drawn.boxes.append((x - radius, y - radius, x + radius, y + radius))
-    if abs(charge) > 1:
-        runs = (TextRun(str(abs(charge))),)
-        metrics = pen.measure(runs)
-        drawn.words.append(
-            Words(
-                f"{prefix}.charge{index}.n",
-                runs,
-                metrics,
-                x - radius - metrics.width * 1.1,
-                y + (metrics.cap_height or pen.u * 0.7) / 2,
-                anchor="start",
-            )
-        )
+
+
+def _edge(place: Atomic, angle: float, pen: Pen) -> float:
+    """How far from an atom's centre, in ``angle``, its label (all of it: ``H₂N``) ends."""
+
+    if place.label is None:
+        return _reach(place, angle, pen)
+    left, top, right, bottom = place.label
+    cx, cy = place.point
+    cos, sin = math.cos(angle), math.sin(angle)
+    reach = []
+    if abs(cos) > 1e-9:
+        reach.append(((right if cos > 0 else left) - cx) / cos)
+    if abs(sin) > 1e-9:
+        reach.append(((bottom if sin > 0 else top) - cy) / sin)
+    return max(0.0, min(value for value in reach if value >= 0)) if reach else 0.0
+
+
+def _to_segment(point: Point, segment) -> float:
+    (x1, y1), (x2, y2) = segment
+    dx, dy = x2 - x1, y2 - y1
+    length = dx * dx + dy * dy
+    t = 0.0 if not length else max(0.0, min(1.0, ((point[0] - x1) * dx + (point[1] - y1) * dy) / length))
+    return math.dist(point, (x1 + t * dx, y1 + t * dy))
 
 
 def _vertex_charge(molecule: Molecule, index: int, pen: Pen, drawn: Drawn, prefix: str) -> None:
