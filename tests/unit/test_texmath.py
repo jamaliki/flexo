@@ -47,6 +47,12 @@ def test_brackets_grow_to_hold_what_is_inside_them() -> None:
     grown = _set(r"\left( \frac{\frac{a}{b}}{c} \right)", display=True)
     assert grown.height + grown.depth > 2 * (plain.height + plain.depth)
     assert _set(r"\Bigg( x \Bigg)").height > _set(r"\big( x \big)").height
+    # \big to \Bigg are TeX's 1.2 to 3 ems: the maths font's variants of those sizes,
+    # drawn a little under them, and not the next ones up (as LuaLaTeX sets them).
+    serif = TypographyStyle(family="Latin Modern Roman", generic="serif")
+    for command, ems in ((r"\big", 1.2), (r"\Big", 1.8), (r"\bigg", 2.4), (r"\Bigg", 3.0)):
+        formula = typeset(command + "(", serif, 20.0)
+        assert (formula.height + formula.depth) / 20.0 == pytest.approx(ems, abs=0.01), command
 
 
 def test_a_sum_takes_its_limits_above_and_below_in_display_and_beside_it_in_words() -> None:
