@@ -26,6 +26,41 @@ from flexo.ir.semantic import TextRun
 from flexo.style import TypographyStyle
 
 NO_BREAK = "\u00a0\u2007\u202f\u2060"
+_NOT_FIRST = set(
+    "、。，．・：；？！‐゠–〜～…‥ー」』）］｝〕〉》〙〛ぁぃぅぇ"  # noqa: RUF001 -- the marks themselves
+    "ぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ々〻.,!?:;)]}%"
+)
+"""What a line of Chinese or Japanese never starts with (kinsoku): closing marks, small kana."""
+_NOT_LAST = set("「『（［｛〔〈《〘〚([{")  # noqa: RUF001 -- the marks themselves
+"""What it never ends with: opening marks."""
+
+
+def _cjk(character: str) -> bool:
+    code = ord(character)
+    return (
+        0x3000 <= code <= 0x30FF or 0x3400 <= code <= 0x4DBF or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF or 0xFF00 <= code <= 0xFFEF or 0x20000 <= code <= 0x2FA1F
+    )
+
+
+def _cjk_units(token: str) -> list[str]:
+    """``token`` cut where a line of Chinese or Japanese may break: between two
+    characters, either of them Han or kana -- never before a closing mark or a small
+    kana, nor after an opening mark. Words in other scripts in it stay whole."""
+
+    if not any(_cjk(character) for character in token):
+        return [token]
+    units = [token[0]]
+    for previous, character in itertools.pairwise(token):
+        if (
+            (_cjk(previous) or _cjk(character))
+            and character not in _NOT_FIRST and previous not in _NOT_LAST
+            and not unicodedata.category(character).startswith("M")
+        ):
+            units.append(character)
+        else:
+            units[-1] += character
+    return units
 """Spaces a line is never broken at (a no-break space, ~ in a label; maths' thin space)."""
 _TOKEN_PATTERN = re.compile(r"(?:[\u00a0\u2007\u202f\u2060]|\S)+|\s+")
 _BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
@@ -692,6 +727,13 @@ class TextMeasurer:
                     if word:
                         widest = max(widest, self.line_width(tuple(word), weight))
                     word = []
+                elif len(units := _cjk_units(token)) > 1:
+                    # Each unit of Chinese or Japanese is a word of its own.
+                    for unit in units[:-1]:
+                        word.append(replace(run, text=unit))
+                        widest = max(widest, self.line_width(tuple(word), weight))
+                        word = []
+                    word.append(replace(run, text=units[-1]))
                 else:
                     word.append(replace(run, text=token))
         if word:
@@ -736,7 +778,11 @@ class TextMeasurer:
                     after_space = True
                     continue
                 word = replace(run, text=token)
-                pieces = self._pieces(word, max_width, weight) if break_words else [token]
+                units = _cjk_units(token)
+                if len(units) > 1:
+                    pieces = units  # Chinese and Japanese break between characters
+                else:
+                    pieces = self._pieces(word, max_width, weight) if break_words else [token]
                 for index, piece in enumerate(pieces):
                     token_run = replace(run, text=piece)
                     width = self._shape_run(token_run, weight)

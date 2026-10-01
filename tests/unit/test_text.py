@@ -213,3 +213,18 @@ def test_a_fallback_face_serves_its_script_and_a_word_is_set_in_one_face() -> No
     assert [face.family for face, _ in words] == ["IBM Plex Sans"]
     after = stack.segments("日本語 ✓", 400, False)
     assert after[-1] == (after[-1][0], "✓") and after[-1][0].family == "IBM Plex Sans"
+
+
+def test_chinese_and_japanese_break_between_characters_but_not_before_closing_marks() -> None:
+    from flexo.text import _cjk_units
+    from flexo.units import pt
+
+    expected = ["「テ", "ス", "ト」", "で", "す。", "GPT-4"]
+    assert _cjk_units("「テスト」です。GPT-4") == expected
+    measurer = TextMeasurer(TypographyStyle(family="Figtree", size=pt(20)))
+    words = (TextRun("これは日本語の文章です。「括弧」の中でも正しく改行されます。"),)
+    measured = measurer.measure(words, max_width=200).lines
+    lines = ["".join(run.text for run in line.runs) for line in measured]
+    assert len(lines) > 1
+    assert not any(line[0] in "。」、" for line in lines)
+    assert not any(line[-1] == "「" for line in lines)
