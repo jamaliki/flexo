@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 
 from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
@@ -112,10 +113,25 @@ def run_colour(run: TextRun, palette: Palette) -> str | None:
     role = run_role(run)
     if role is None:
         return None
-    try:
+    if role in palette.paints or not run.color:
         return palette.get(role)
-    except (KeyError, ValueError):
-        return None
+    # Not a palette role: a colour LaTeX names (red, blue!60), or none.
+    from flexo.colour import named_colour
+
+    return named_colour(run.color)
+
+
+def formula_paint(palette: Palette) -> Callable[[str], tuple[str | None, str | None]]:
+    """How the colours a formula names (``\\color{accent}``, ``red``, ``blue!60``) are
+    painted: ``(fill, role)``. A palette role keeps its name, so a retheme repaints it; a
+    colour LaTeX names is just that colour; one that names nothing leaves the words'."""
+
+    def paint(colour: str) -> tuple[str | None, str | None]:
+        run = TextRun("", color=colour)
+        role = run_role(run)
+        return run_colour(run, palette), role if role in palette.paints else None
+
+    return paint
 
 
 def render_runs(
@@ -277,9 +293,7 @@ def _with_formulas(
     )
     measurer = TextMeasurer(typography)
 
-    def paint(colour: str) -> tuple[str | None, str | None]:
-        run = TextRun("", color=colour)
-        return run_colour(run, palette) or colour, run_role(run)
+    paint = formula_paint(palette)
 
     def words(runs: tuple[TextRun, ...], pen: float, line_index: int, baseline: float) -> float:
         """A stretch of words between formulas, set as its own text object; its width."""

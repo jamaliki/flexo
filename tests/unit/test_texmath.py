@@ -316,3 +316,51 @@ def test_code_is_set_in_the_bundled_monospace_on_every_machine() -> None:
 
     (face, _), *_ = font_stack(TYPE).segments("def f(x):", 400, False, code=True)
     assert face.family == "IBM Plex Mono" and face.bundled
+
+
+def test_escaped_braces_stay_inside_a_group() -> None:
+    from flexo.units import pt
+
+    typography = TypographyStyle(family="Figtree", size=pt(20))
+    sources = (r"E_{t\sim\{1,T\}}", r"\sqrt{\{x\}}", r"\frac{\{a\}}{2}", r"{f \in \{\sin, \cos\}}")
+    for source in sources:
+        assert typeset(source, typography, 20).problems == (), source
+    assert typeset(r"\frac{1}{2", typography, 20).problems == ("a { is not closed",)
+
+
+def test_units_are_set_as_siunitx_sets_them() -> None:
+    from flexo.texmath import Group, Scripts, Sym, _units
+
+    def shown(items: list) -> str:
+        parts = []
+        for item in items:
+            if isinstance(item, Group):
+                parts.append("".join(symbol.char for symbol in item.items))
+            elif isinstance(item, Scripts):
+                base = "".join(symbol.char for symbol in item.base.items)
+                parts.append(base + "^" + "".join(symbol.char for symbol in item.sup))
+            elif isinstance(item, Sym):
+                parts.append(item.char)
+            else:
+                parts.append(" ")
+        return "".join(parts).replace("\u2212", "-")
+
+    assert shown(_units(r"\per\mole")) == "mol^-1"
+    assert shown(_units(r"\joule\per\mole\per\kelvin")) == "J mol^-1 K^-1"
+    assert shown(_units(r"\metre\per\second\squared")) == "m s^-2"
+    assert shown(_units(r"\square\metre")) == "m^2"
+    assert shown(_units("m/s")) == "m/s"
+
+
+def test_latex_colour_names_are_drawn_in_their_colours() -> None:
+    from flexo.colour import named_colour
+    from flexo.render_common import formula_paint
+    from flexo.style import Palette
+
+    assert named_colour("red") == "#ff0000" and named_colour("red!70!black") == "#b20000"
+    assert named_colour("accent") is None
+    palette = Palette("test", {"ink": "#222222", "tone-1-stroke": "#1a5d9b"})
+    paint = formula_paint(palette)
+    assert paint("blue") == ("#0000ff", None)
+    assert paint("accent") == ("#1a5d9b", "tone-1-stroke")
+    assert paint("not-a-colour") == (None, None)

@@ -229,3 +229,38 @@ def palette_colours(name: str) -> tuple[str, ...] | None:
         if key.casefold() == folded:
             return colours
     return None
+
+
+XCOLOR = {
+    # LaTeX's xcolor names, as LaTeX draws them (its green is pure green, not CSS's).
+    "red": (1.0, 0.0, 0.0), "green": (0.0, 1.0, 0.0), "blue": (0.0, 0.0, 1.0),
+    "cyan": (0.0, 1.0, 1.0), "magenta": (1.0, 0.0, 1.0), "yellow": (1.0, 1.0, 0.0),
+    "black": (0.0, 0.0, 0.0), "white": (1.0, 1.0, 1.0),
+    "gray": (0.5, 0.5, 0.5), "grey": (0.5, 0.5, 0.5),
+    "darkgray": (0.25, 0.25, 0.25), "darkgrey": (0.25, 0.25, 0.25), "lightgray": (0.75, 0.75, 0.75),
+    "lightgrey": (0.75, 0.75, 0.75), "brown": (0.75, 0.5, 0.25), "lime": (0.75, 1.0, 0.0),
+    "olive": (0.5, 0.5, 0.0), "orange": (1.0, 0.5, 0.0), "pink": (1.0, 0.75, 0.75),
+    "purple": (0.75, 0.0, 0.25), "teal": (0.0, 0.5, 0.5), "violet": (0.5, 0.0, 0.5),
+}
+
+
+def named_colour(name: str) -> str | None:
+    """A colour LaTeX names -- ``red``, or xcolor's mixes, ``red!40`` (with white) and
+    ``red!70!black`` -- as ``#rrggbb``; None when it names none."""
+
+    parts = name.strip().lower().split("!")
+    if not parts or parts[0] not in XCOLOR:
+        return None
+    rgb = XCOLOR[parts[0]]
+    rest = parts[1:]
+    while rest:
+        try:
+            share = min(max(float(rest[0]), 0.0), 100.0) / 100.0
+        except ValueError:
+            return None
+        other = XCOLOR.get(rest[1]) if len(rest) > 1 else XCOLOR["white"]
+        if other is None:
+            return None
+        rgb = tuple(share * a + (1.0 - share) * b for a, b in zip(rgb, other, strict=True))
+        rest = rest[2:]
+    return to_hex(rgb)
