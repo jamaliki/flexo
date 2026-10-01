@@ -50,6 +50,10 @@ RUN = 0.22
 """How much of an arrow's end is straight, so its head sits on a line, not a bend."""
 OVERSHOOT = 0.08
 """How far past its own ends a curve may reach, as a share of the span between them."""
+CLEAR = 60.0
+"""How far, in degrees, a lone pair an arrow leaves sits from the atom's bonds and marks."""
+CLEAR_OF_WORDS = 75.0
+"""... and from the hydrogens written beside its letter, which reach further."""
 TURN_MOST = 240.0
 #: How far, in degrees, a curve may bend against its main bend: a curly arrow is one
 #: curve, never an S.
@@ -179,6 +183,55 @@ class _Frame:
             side = (-side[0], -side[1])
         return side
 
+    def facing(self, atom: int, toward: Point | None, words: bool = True) -> list[Point]:
+        """The ways a lone pair may sit for an arrow off it to set out toward ``toward``,
+        best first: as near the way to it as the atom's bonds, the hydrogens written
+        beside it, its charge and its other lone pairs leave room for -- the pair a
+        textbook draws on the side facing what it attacks, not round the back.
+        ``words=False`` leaves the hydrogens out: they are written where the pair is not."""
+
+        here = self.at[atom]
+        if toward is None:
+            return [self.outward(atom)]
+        want = math.atan2(toward[1] - here[1], toward[0] - here[0])
+        blocked: list[tuple[float, float]] = []
+        for other in self.neighbours[atom]:
+            there = self.at[other]
+            blocked.append((math.atan2(there[1] - here[1], there[0] - here[0]), CLEAR))
+        place = self.drawn.atoms[atom]
+        if words and place.label is not None and place.label_side:
+            blocked.append((0.0 if place.label_side == "right" else math.pi, CLEAR_OF_WORDS))
+        for owner, x, y, _ in self.drawn.marks:
+            if owner == atom:
+                blocked.append((math.atan2(y - here[1], x - here[0]), CLEAR))
+        for angle, _ in place.pairs:
+            blocked.append((angle, CLEAR))
+        if place.radical is not None:
+            blocked.append((place.radical[0], CLEAR))
+
+        def apart(angle: float) -> float:
+            return min(
+                (
+                    abs(math.remainder(angle - other, math.tau)) - math.radians(room)
+                    for other, room in blocked
+                ),
+                default=math.pi,
+            )
+
+        ways = [math.radians(step * 5) for step in range(72)]
+        clear = [angle for angle in ways if apart(angle) >= 0]
+        if not clear:
+            best = max(ways, key=apart)
+            return [(math.cos(best), math.sin(best))]
+        clear.sort(key=lambda angle: abs(math.remainder(angle - want, math.tau)))
+        best = clear[0]
+        chosen = [best]
+        for offset in (20, -20, 40, -40):
+            angle = best + math.radians(offset)
+            if apart(angle) >= 0:
+                chosen.append(angle)
+        return [(math.cos(angle), math.sin(angle)) for angle in chosen]
+
 
 def _box_edge(centre: Point, box, way: Point) -> float:
     left, top, right, bottom = box
@@ -231,15 +284,18 @@ def _off_bond(frame: _Frame, pair, sign: int, into: bool = False) -> End:
 
 
 def _tails(frame: _Frame, tail: dict, aim: Point | None) -> list[End]:
-    """Where the arrow may leave, best first: out of a lone pair's atom radially, past
-    its letter and its pair; or square off either side of a bond, the side facing where
-    it is going first."""
+    """Where the arrow may leave, best first: out of a lone pair's atom on the side
+    facing where it is going, as near that way as the atom leaves room, past its
+    letter and its pair; or square off either side of a bond, the side facing where it
+    is going first."""
 
     if "lp" in tail:
         atom = tail["lp"]
-        out = frame.outward(atom, aim)
         anchor = frame.at[atom]
-        return [End(_step(anchor, out, frame.edge(atom, out, ATOM_GAP) + frame.bond * PAIR), out)]
+        return [
+            End(_step(anchor, out, frame.edge(atom, out, ATOM_GAP) + frame.bond * PAIR), out)
+            for out in frame.facing(atom, aim)
+        ]
     pair = tail["bond"]
     middle = frame.midpoint(pair)
     toward = _minus(aim, middle) if aim is not None else None
@@ -491,69 +547,147 @@ def _curl(tail: End, head: End, controls) -> float:
     return max(abs(_dot(_minus(point, tail.at), across)) for point in _along(tail, head, controls))
 
 
-def _measure(
-    frame: _Frame, tail: End, head: End, controls, close, far, bonds
-) -> tuple[float, float]:
-    """The room along a curve -- strict except near its own ends, where it must pass
-    what it joins -- and its faults, in bond lengths: crossing a bond or another arrow
-    worst, then doubling back, winding round, bending both ways. A curve with faults is
-    never drawn while one without keeps clear."""
+def _room_along(frame: _Frame, tail: End, head: End, controls, close, far, enough: float) -> float:
+    """The room along a curve -- strict except near its own ends, where it must pass what
+    it joins -- or as soon as it is known to be under ``enough``, that."""
 
-    walked = _walk(tail, head, controls)
-    faults = (
-        3.0 * _crossing(walked, bonds)
-        + _doubles_back(tail, head, walked)
-        + (sum(_turns(walked)) > TURN_MOST)
-        + _bends_both_ways(walked)
-    )
     edge = frame.bond * NEAR
     worst = math.inf
     for point in _along(tail, head, controls):
         near = math.dist(point, tail.at) < edge or math.dist(point, head.at) < edge
         worst = min(worst, _room([point], close if near else far))
-    return worst, faults * frame.bond
+        if worst < enough:
+            break
+    return worst
 
 
-def _try(frame: _Frame, pairs, close, far, bonds, wanted: float, price: float):
-    best = most = None
+def _clears(
+    frame: _Frame, tail: End, head: End, controls, close, far, bonds, wanted: float
+) -> bool:
+    """Whether a curve keeps clear -- no faults, and room all along it (as ``_best`` weighs) --
+    asked cheapest first, so that most curves are turned away after a glance."""
+
+    span = math.dist(tail.at, head.at)
+    if _curl(tail, head, controls) < span * CURL:
+        return False
+    walked = _walk(tail, head, controls)
+    if (
+        _doubles_back(tail, head, walked)
+        or sum(_turns(walked)) > TURN_MOST
+        or _bends_both_ways(walked)
+    ):
+        return False
+    edge = frame.bond * NEAR
+    for point in _along(tail, head, controls):
+        near = math.dist(point, tail.at) < edge or math.dist(point, head.at) < edge
+        if _room([point], close if near else far) < wanted:
+            return False
+    return not _crossing(walked, bonds)
+
+
+def _curves(frame: _Frame, pairs):
+    """Every curve the search tries, by how far it reaches: (key, step, tail, head,
+    controls), the key the same for the same curve however it is come to."""
+
     for step, reach in enumerate(REACHES):
-        cleared = []
         for tail, head in pairs:
             span = math.dist(tail.at, head.at)
             if span < 1e-3:
                 continue
             length = max(span * reach, frame.bond * REACH_LEAST)
-            for out, back in SHARES:
+            for share, (out, back) in enumerate(SHARES):
                 controls = _controls(tail, head, length * out, length * back)
-                room, faults = _measure(frame, tail, head, controls, close, far, bonds)
-                curl = _curl(tail, head, controls)
-                if not faults and room >= wanted and curl >= span * CURL:
-                    cleared.append((tail, head, controls))
-                    continue
-                worth = (
-                    min(room, wanted)
-                    - faults
-                    + min(curl / span, CURL) * frame.bond
-                    + min(span / frame.bond, SPAN_LEAST) * frame.bond * 0.3
-                    - step * price
-                )
-                if most is None or worth > most:
-                    best, most = (tail, head, controls), worth
-        if cleared:
-            # The smoothest of those that keep clear: drawn, not steered.
-            return (
-                min(cleared, key=lambda found: max(_turns(_walk(*found)), default=0.0)),
-                None,
-                None,
-            )
-    return None, best, most
+                yield (id(tail), id(head), step, share), step, tail, head, controls
+
+
+def _try(frame: _Frame, pairs, close, far, bonds, wanted: float, seen: dict):
+    """The smoothest curve that keeps clear, reaching no further than it must -- or None.
+    ``seen`` holds what is known of curves already tried for the same arrow."""
+
+    cleared: list = []
+    reached = None
+    for key, step, tail, head, controls in _curves(frame, pairs):
+        if reached is not None and step > reached:
+            break
+        if key not in seen:
+            seen[key] = _clears(frame, tail, head, controls, close, far, bonds, wanted)
+        if seen[key]:
+            cleared.append((tail, head, controls))
+            reached = step
+    if not cleared:
+        return None
+    # The smoothest of those that keep clear: drawn, not steered.
+    return min(cleared, key=lambda found: max(_turns(_walk(*found)), default=0.0))
+
+
+def _best(frame: _Frame, pairs, close, far, bonds, wanted: float, price: float, seen: set):
+    """When nothing keeps clear: the curve worth most, and its worth -- its room, less its
+    faults (crossing a bond or another arrow worst, then doubling back, winding round,
+    bending both ways), with its curl and span, less how far it reaches. Each curve is
+    weighed once (``seen``), and given up as soon as it cannot be worth the best so far."""
+
+    best = most = None
+    for key, step, tail, head, controls in _curves(frame, pairs):
+        if key in seen:
+            continue
+        seen.add(key)
+        span = math.dist(tail.at, head.at)
+        curl = _curl(tail, head, controls)
+        worth = (
+            min(curl / span, CURL) * frame.bond
+            + min(span / frame.bond, SPAN_LEAST) * frame.bond * 0.3
+            - step * price
+        )
+        walked = _walk(tail, head, controls)
+        worth -= frame.bond * (
+            _doubles_back(tail, head, walked)
+            + (sum(_turns(walked)) > TURN_MOST)
+            + _bends_both_ways(walked)
+        )
+        if most is not None and worth + wanted <= most:
+            continue
+        floor = -math.inf if most is None else most - worth
+        worth += min(_room_along(frame, tail, head, controls, close, far, floor), wanted)
+        if most is not None and worth <= most:
+            continue
+        if _crossing(walked, bonds):
+            worth -= 3.0 * frame.bond
+            if most is not None and worth <= most:
+                continue
+        best, most = (tail, head, controls), worth
+    return best, most
 
 
 def _segments_of(points: list[Point]):
     return [(a[0], a[1], b[0], b[1]) for a, b in itertools.pairwise(points)]
 
 
-def _draw_one(frame: _Frame, arrow: Arrow, others: list, heads: list[Point]):
+def _around(frame: _Frame, arrow: Arrow, others: list):
+    """What an arrow's curve keeps off: near its ends (``close``), along it (``far``), and
+    the bonds and other arrows it may not cross."""
+
+    own = _named(arrow)
+    around = set(own)
+    for atom in own:
+        around.update(frame.neighbours.get(atom, ()))
+    close = _obstacles(frame, around)
+    far = _obstacles(frame, own)
+    close = (close[0], close[1] + others)
+    far = (far[0], far[1] + others)
+    bonds = _obstacles(frame, set())[1] + others
+    return close, far, bonds
+
+
+def _draw_one(frame: _Frame, arrow: Arrow, others: list, heads: list[Point], prefer=None):
+    wanted = frame.bond * ROOM
+    if prefer is not None:
+        # A curve found for this arrow before (its structure drawn once already) stays,
+        # if it still keeps clear of everything here: it is not looked for again.
+        tail, head, controls = prefer
+        if all(math.dist(head.end(), h) > frame.bond * 0.1 for h in heads) and _clears(
+            frame, tail, head, controls, *_around(frame, arrow, others), wanted
+        ):
+            return prefer
     groups = _pairs(frame, arrow)
     # Two heads never land on one spot: two half arrows making a bond meet from either side.
     spaced = [
@@ -567,31 +701,31 @@ def _draw_one(frame: _Frame, arrow: Arrow, others: list, heads: list[Point]):
     groups = [group for group in spaced if group] or groups
     if not any(groups):
         return None
-    own = _named(arrow)
-    around = set(own)
-    for atom in own:
-        around.update(frame.neighbours.get(atom, ()))
-    close = _obstacles(frame, around)
-    far = _obstacles(frame, own)
-    close = (close[0], close[1] + others)
-    far = (far[0], far[1] + others)
-    bonds = _obstacles(frame, set())[1] + others
-    wanted, price = frame.bond * ROOM, frame.bond * REACH_PRICE
-    fallback = scored = None
+    close, far, bonds = _around(frame, arrow, others)
     tilted = [
         [(End(tail.at, _turn(tail.way, angle)), head) for tail, head in group for angle in TILTS]
         for group in groups
     ]
+    choices = []
     for pairs in groups + tilted:
         roomy = [
             pair for pair in pairs if math.dist(pair[0].at, pair[1].at) >= frame.bond * SPAN_LEAST
         ]
-        for choices in ([roomy] if roomy else []) + [pairs]:
-            found, best, worth = _try(frame, choices, close, far, bonds, wanted, price)
-            if found is not None:
-                return found
-            if best is not None and (scored is None or worth > scored):
-                fallback, scored = best, worth
+        choices += ([roomy] if roomy else []) + [pairs]
+    tried: dict = {}
+    for pairs in choices:
+        found = _try(frame, pairs, close, far, bonds, wanted, tried)
+        if found is not None:
+            return found
+    # Nothing keeps clear: the curve worth most of all of them.
+    fallback = scored = None
+    measured: set = set()
+    for pairs in choices:
+        best, worth = _best(
+            frame, pairs, close, far, bonds, wanted, frame.bond * REACH_PRICE, measured
+        )
+        if best is not None and (scored is None or worth > scored):
+            fallback, scored = best, worth
     return fallback
 
 
@@ -613,7 +747,7 @@ def tail_ways(
         others = [n for n in arrow.target if n != atom] or list(arrow.target)
         if _closes_own(frame, arrow):
             continue  # square to its own bond, on whichever side the search takes
-        way = frame.outward(atom, frame.at[others[0]])
+        way = frame.facing(atom, frame.at[others[0]], words=False)[0]
         ways.setdefault(atom, []).append(math.atan2(way[1], way[0]))
     return ways
 
@@ -626,9 +760,15 @@ def draw_arrows(
     *,
     prefix: str,
     colour: str = INK,
+    prefer: list | None = None,
+    chosen: list | None = None,
 ) -> list[list[Point]]:
     """Each arrow, one after another, each keeping off those already down, added to
-    ``drawn`` as one stroke and the electrons it takes. Returns the strokes drawn."""
+    ``drawn`` as one stroke and the electrons it takes. Returns the strokes drawn.
+
+    ``chosen``, given a list, is told each arrow's curve; ``prefer`` gives curves found
+    so for the same structure, kept where they still keep clear rather than looked for
+    again."""
 
     frame = _Frame(molecule, drawn, pen)
     others: list = []
@@ -637,7 +777,15 @@ def draw_arrows(
     width = max(pen.line, frame.bond * STROKE)
     tick = frame.bond * TICK
     for number, arrow in enumerate(arrows):
-        found = _draw_one(frame, arrow, others, heads)
+        found = _draw_one(
+            frame,
+            arrow,
+            others,
+            heads,
+            (prefer or [])[number] if number < len(prefer or []) else None,
+        )
+        if chosen is not None:
+            chosen.append(found)
         if found is None:
             continue
         tail, head, (first, second) = found

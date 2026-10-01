@@ -266,9 +266,13 @@ class Grid:
         finished: dict[tuple[int, int, int, int], tuple[int, int, int, int]] = {}
         finished_cost: dict[tuple[int, int, int, int], float] = {}
         work = 0
+        ceiling = _CEILING[0]
         while frontier:
             _, cost, _, ix, iy, heading, turned = pop(frontier)
             work += 1
+            if ceiling is not None and not work & 1023 and _WORK[0] + work > ceiling:
+                _WORK[0] += work
+                raise TooDear
             if turned == _DONE:
                 final, final_cost = (ix, iy, heading, 0), cost
                 final = finished[final]
@@ -312,6 +316,8 @@ class Grid:
                         estimate = total + estimate_from(xs[ix], ys[iy], turn)
                         push(frontier, (estimate, total, next(serial), ix, iy, turn, 1))
         _WORK[0] += work
+        if ceiling is not None and _WORK[0] > ceiling:
+            raise TooDear
         if final is None:
             raise RuntimeError("routing grid is disconnected")
         cells: list[tuple[int, int]] = []
@@ -328,6 +334,19 @@ type StepPrice = "callable[[Grid, int, int, int], float]"
 
 _WORK = [0]
 """Search steps taken in this process: a machine-independent measure of effort."""
+
+_CEILING: list[int | None] = [None]
+"""The search work past which a search gives up (``TooDear``), while one is set."""
+
+
+class TooDear(Exception):
+    """A search that went past the work it was allowed (``ceiling``)."""
+
+
+def ceiling(limit: int | None) -> None:
+    """Let searches run until the search work reaches ``limit`` -- or, given None, forever."""
+
+    _CEILING[0] = limit
 
 
 def search_work() -> int:

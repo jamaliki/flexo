@@ -103,6 +103,41 @@ class Drawn:
     """What is drawn beside an atom besides its label -- a circled charge -- as the atom
     it belongs to and a circle (x, y, radius), for arrows to keep off."""
 
+    def moved(self, dx: float, dy: float) -> Drawn:
+        """The same drawing ``dx``, ``dy`` along: drawn once and put where it goes, rather
+        than drawn again there."""
+
+        from dataclasses import replace
+
+        from flexo.render_drawn import _moved
+
+        def point(at: Point) -> Point:
+            return (at[0] + dx, at[1] + dy)
+
+        def box(at: Box) -> Box:
+            return (at[0] + dx, at[1] + dy, at[2] + dx, at[3] + dy)
+
+        atoms = {
+            index: Atomic(
+                point(place.point),
+                place.radius,
+                list(place.taken),
+                [(angle, point(middle)) for angle, middle in place.pairs],
+                (place.radical[0], point(place.radical[1])) if place.radical else None,
+                box(place.label) if place.label is not None else None,
+                place.label_side,
+            )
+            for index, place in self.atoms.items()
+        }
+        return Drawn(
+            [replace(shape, d=_moved(shape.d, dx, dy)) for shape in self.shapes],
+            [replace(words, x=words.x + dx, y=words.y + dy) for words in self.words],
+            atoms,
+            [box(item) for item in self.boxes],
+            {key: [(point(a), point(b)) for a, b in items] for key, items in self.lines.items()},
+            [(atom, x + dx, y + dy, radius) for atom, x, y, radius in self.marks],
+        )
+
     def bounds(self) -> Box:
         xs, ys = [], []
         for atom in self.atoms.values():
@@ -174,6 +209,11 @@ def draw_molecule(
         for first, second in ((bond.a, bond.b), (bond.b, bond.a)):
             (x1, y1), (x2, y2) = points[first], points[second]
             drawn.atoms[first].taken.append(math.atan2(y2 - y1, x2 - x1))
+    # Where the arrows' own electrons are drawn, kept clear before anything else is put
+    # round the atom: the hydrogens written beside it go to the other side (``OH₂``
+    # facing what its pair attacks), its charge and other pairs elsewhere.
+    for index, leaving in (used or {}).items():
+        drawn.atoms[index].taken.extend(leaving)
     for index in range(len(molecule.atoms)):
         if labelled(molecule, index):
             _label(molecule, index, pen, drawn, prefix, charges)
@@ -182,8 +222,6 @@ def draw_molecule(
         style = (wedges or {}).get((bond.a, bond.b)) or (wedges or {}).get((bond.b, bond.a))
         start = bond.a if (wedges or {}).get((bond.a, bond.b)) else bond.b if style else bond.a
         _bond(molecule, bond, pen, drawn, f"{prefix}.bond{number}", found, style, start)
-    for index, leaving in (used or {}).items():
-        drawn.atoms[index].taken.extend(leaving)  # where the arrows' own electrons are drawn
     strokes = [line for stroke in avoid or [] for line in itertools.pairwise(stroke)]
     for index in range(len(molecule.atoms)):
         if charges == "circled" and molecule.charge_of(index) and (
