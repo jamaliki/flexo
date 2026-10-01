@@ -91,17 +91,43 @@ def export_outputs(
 
 
 def rasterise(svg_text: str, dpi: float = 192.0) -> bytes:
-    """PNG bytes of an SVG, drawn by resvg; text is best given as outlines."""
+    """PNG bytes of an SVG, drawn by resvg; text is best given as outlines. An SVG placed
+    in it as a picture is drawn first, with the fonts (resvg draws a picture's text
+    without them, so it vanished)."""
 
     import resvg_py
 
-    return bytes(
-        resvg_py.svg_to_bytes(
-            svg_string=svg_text,
-            font_dirs=[str(directory) for directory in font_directories()],
-            dpi=dpi,
-        )
-    )
+    fonts = [str(directory) for directory in font_directories()]
+    if "data:image/svg+xml;base64," in svg_text:
+        svg_text = _pictures_drawn(svg_text, dpi, fonts)
+    return bytes(resvg_py.svg_to_bytes(svg_string=svg_text, font_dirs=fonts, dpi=dpi))
+
+
+def _pictures_drawn(svg_text: str, dpi: float, fonts: list[str]) -> str:
+    """Each SVG picture in ``svg_text`` as a PNG, at the resolution it is drawn at."""
+
+    import base64
+    import re
+
+    import resvg_py
+
+    def drawn(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        size = re.search(r'\bwidth="([\d.]+)', tag)
+        nested = base64.b64decode(match.group(2)).decode("utf-8", "replace")
+        # Twice the pixels it covers, so it stays sharp when the slide is enlarged.
+        scale = dpi / 72.0 * 2.0 * (float(size.group(1)) if size else 300.0)
+        try:
+            png = bytes(
+                resvg_py.svg_to_bytes(svg_string=nested, font_dirs=fonts, width=max(int(scale), 1))
+            )
+        except Exception:  # a picture resvg cannot draw is left as it was
+            return tag
+        encoded = "data:image/png;base64," + base64.b64encode(png).decode()
+        return tag.replace(match.group(1), encoded)
+
+    pictures = r'<image\b[^>]*?href="(data:image/svg\+xml;base64,([A-Za-z0-9+/=]+))"[^>]*>'
+    return re.sub(pictures, drawn, svg_text)
 
 
 @dataclass(frozen=True, slots=True)
