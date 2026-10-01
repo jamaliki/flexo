@@ -386,3 +386,25 @@ def test_a_primes_subscript_sits_under_it_as_in_tex() -> None:
     assert two[0] < prime[0] + 1.0  # the subscript starts under the prime, not after it
     assert placed("q'_{2i}") == placed(r"q^{\prime}_{2i}")
     assert needs_layout("q'_{2i}") and not needs_layout("f'(x)")
+
+
+def test_chemistry_reads_charges_isotopes_arrow_labels_gas_and_precipitate() -> None:
+    from flexo.texmath import Arrow, Scripts, parse
+
+    def flat(items: list) -> list:
+        out = []
+        for item in items:
+            out.append(item)
+            out += flat(getattr(item, "items", []) or [])
+        return out
+
+    sources = (
+        r"\ce{Fe^{3+} + e- -> Fe^{2+}}", r"\ce{^{14}_{6}C}", r"\ce{CaCO3 ->[\Delta] CaO + CO2 ^}",
+        r"\ce{Ag+ + Cl- -> AgCl v}",
+    )
+    for source in sources:
+        assert parse(source)[1] == [], source
+    isotope = flat(parse(r"\ce{^{14}_{6}C}")[0])
+    assert any(isinstance(item, Scripts) and item.sup and item.sub for item in isotope)
+    assert any(isinstance(item, Arrow) for item in flat(parse(r"\ce{A ->[\Delta] B}")[0]))
+    assert "↑" in str(parse(r"\ce{CO2 ^}")[0]) and "↓" in str(parse(r"\ce{AgCl v}")[0])
