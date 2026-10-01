@@ -241,3 +241,24 @@ def test_chinese_and_japanese_break_between_characters_but_not_before_closing_ma
     assert len(lines) > 1
     assert not any(line[0] in "。」、" for line in lines)
     assert not any(line[-1] == "「" for line in lines)
+
+
+def test_thai_breaks_between_its_words_where_the_system_has_a_dictionary() -> None:
+    from flexo.text import TextMeasurer, _icu
+
+    if _icu() is None:
+        pytest.skip("no ICU on this system: Thai stays whole")
+    sentence = "ภาษาไทยเป็นภาษาที่ไม่มีการเว้นวรรคระหว่างคำ"
+    words = {"ภาษา", "ไทย", "เป็น", "ที่", "ไม่มี", "การ", "เว้น", "วรรค", "ระหว่าง", "คำ"}
+    lines = TextMeasurer(TypographyStyle())._wrap_line((TextRun(sentence),), 60.0)
+    assert len(lines) > 1
+    seen = ["".join(run.text for run in line) for line in lines]
+    assert "".join(seen) == sentence
+    for line in seen:
+        # Every line is whole words: it can be cut into the sentence's words.
+        rest = line
+        while rest:
+            longest = sorted(words, key=len, reverse=True)
+            word = next((word for word in longest if rest.startswith(word)), None)
+            assert word is not None, (line, rest)
+            rest = rest[len(word):]

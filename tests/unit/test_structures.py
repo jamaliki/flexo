@@ -66,3 +66,17 @@ def test_without_mol_sketch_a_structure_says_how_to_get_it(monkeypatch) -> None:
         figure.root.structure("m", DATA / "1a7g.cif")
     with pytest.raises(flexo.FlexoError, match="needs mol-sketch"):
         compile_figure(figure.spec)
+
+
+def test_a_colour_for_a_chain_the_structure_lacks_is_said_with_the_chains_it_has() -> None:
+    from flexo.structures import _check_chains, _NoSuchChain
+
+    class Loaded:
+        def _info(self) -> dict:
+            return {"structure": {"name": "1a7g", "chains": ["E"]}}
+
+    _check_chains(Loaded(), (("E", "#d55e00"), ("SER195", "#000000"), ("SER195.E", "#111111"),
+                             ("entity:1", "#222222")))
+    with pytest.raises(_NoSuchChain, match='"A" names no chain of 1a7g') as caught:
+        _check_chains(Loaded(), (("A", "#d55e00"),))
+    assert "Its chains are E" in caught.value.hint

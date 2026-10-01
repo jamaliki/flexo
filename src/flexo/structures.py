@@ -23,6 +23,7 @@ resolution and embedded, so the editable SVG, the PDF, and the slides carry it.
 from __future__ import annotations
 
 import functools
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -178,6 +179,38 @@ def structure_png(
             "Drawing a structure needs mol-sketch.",
             hint='pip install "flexo[molecules]", or pip install path/to/mol-sketch/python.',
         ) from None
+    except _NoSuchChain as error:
+        raise _fail(node, "colors", str(error), hint=error.hint) from None
+
+
+class _NoSuchChain(ValueError):
+    """A colour for a chain the structure does not have (it would colour nothing)."""
+
+    def __init__(self, message: str, hint: str) -> None:
+        super().__init__(message)
+        self.hint = hint
+
+
+_RESIDUE = re.compile(r"[A-Za-z]{1,3}-?\d+[A-Za-z]?(\.\w+)?")
+
+
+def _check_chains(figure, colours: tuple[tuple[str, str], ...]) -> None:
+    """Say a colour given to a chain the structure does not have -- mol-sketch would
+    quietly colour nothing -- naming the chains it has."""
+
+    structure = figure._info().get("structure") or {}
+    chains = [str(chain) for chain in structure.get("chains") or ()]
+    if not chains:
+        return
+    for group, _ in colours:
+        if ":" in group or _RESIDUE.fullmatch(group) or group in chains:
+            continue
+        name = structure.get("name") or "the structure"
+        raise _NoSuchChain(
+            f'"{group}" names no chain of {name}, so its colour would show nowhere.',
+            f"Its chains are {', '.join(chains)} "
+            "(the author's chain names, as the file gives them).",
+        )
 
 
 def _theme_look(style: LayoutStyle, palette: Palette) -> str:
@@ -216,6 +249,7 @@ def _render(
 
     del stamp  # part of the cache key: an edited file draws again
     figure = ms.load(source) if Path(source).exists() else ms.fetch(source)
+    _check_chains(figure, colours)
     figure = figure.look(look)
     figure.set(
         palette={"paper": paper, **dict(roles)},

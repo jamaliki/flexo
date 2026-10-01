@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import re
 import unicodedata
@@ -43,11 +44,21 @@ def _cjk(character: str) -> bool:
     )
 
 
-def _cjk_units(token: str) -> list[str]:
-    """``token`` cut where a line of Chinese or Japanese may break: between two
-    characters, either of them Han or kana -- never before a closing mark or a small
-    kana, nor after an opening mark. Words in other scripts in it stay whole."""
+def _unspaced(character: str) -> bool:
+    """Thai, Lao, Burmese, Khmer: scripts written without spaces between words."""
 
+    code = ord(character)
+    return 0x0E00 <= code <= 0x0EFF or 0x1000 <= code <= 0x109F or 0x1780 <= code <= 0x17FF
+
+
+def _cjk_units(token: str) -> list[str]:
+    """``token`` cut where a line may break inside it: Chinese or Japanese between two
+    characters, either of them Han or kana -- never before a closing mark or a small
+    kana, nor after an opening mark; Thai, Lao, Burmese and Khmer between words, as
+    the system's dictionary finds them. Words in other scripts in it stay whole."""
+
+    if any(_unspaced(character) for character in token):
+        return _dictionary_words(token)
     if not any(_cjk(character) for character in token):
         return [token]
     units = [token[0]]
@@ -62,6 +73,73 @@ def _cjk_units(token: str) -> list[str]:
             units[-1] += character
     return units
 """Spaces a line is never broken at (a no-break space, ~ in a label; maths' thin space)."""
+
+
+def _dictionary_words(token: str) -> list[str]:
+    """``token`` cut between its words by ICU's dictionaries -- the system's own: every Mac
+    has ``libicucore``, and most Linux systems ``libicuuc`` -- or whole, without them."""
+
+    icu = _icu()
+    if icu is None:
+        return [token]
+    library, suffix = icu
+    data = token.encode("utf-16-le")
+    buffer = ctypes.create_string_buffer(data)
+    error = ctypes.c_int(0)
+    opened = getattr(library, f"ubrk_open{suffix}")
+    following = getattr(library, f"ubrk_next{suffix}")
+    closing = getattr(library, f"ubrk_close{suffix}")
+    breaker = opened(1, b"th", buffer, len(data) // 2, ctypes.byref(error))  # 1: words
+    if not breaker or error.value > 0:
+        return [token]
+    try:
+        bounds = [0]
+        while (at := following(breaker)) != -1:
+            bounds.append(at)
+    finally:
+        closing(breaker)
+    # Its bounds count UTF-16 units; a character past U+FFFF is two.
+    places, unit = {}, 0
+    for index, character in enumerate(token):
+        places[unit] = index
+        unit += 2 if ord(character) > 0xFFFF else 1
+    places[unit] = len(token)
+    cuts = [places[bound] for bound in bounds if bound in places]
+    words = [token[a:b] for a, b in itertools.pairwise(cuts) if b > a]
+    # A mark that cannot start a word (a vowel sign, a tone) stays with what it follows.
+    merged: list[str] = []
+    for word in words:
+        if merged and unicodedata.category(word[0]).startswith("M"):
+            merged[-1] += word
+        else:
+            merged.append(word)
+    return merged or [token]
+
+
+@cache
+def _icu():
+    """The system's ICU library and the suffix its names carry (``_74`` on Linux), or None."""
+
+    import ctypes.util
+
+    for name in ("/usr/lib/libicucore.dylib", ctypes.util.find_library("icuuc")):
+        if not name:
+            continue
+        try:
+            library = ctypes.CDLL(name)
+        except OSError:
+            continue
+        for suffix in ("", *(f"_{version}" for version in range(90, 49, -1))):
+            if hasattr(library, f"ubrk_open{suffix}"):
+                getattr(library, f"ubrk_open{suffix}").restype = ctypes.c_void_p
+                getattr(library, f"ubrk_open{suffix}").argtypes = [
+                    ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int32,
+                    ctypes.POINTER(ctypes.c_int),
+                ]
+                getattr(library, f"ubrk_next{suffix}").argtypes = [ctypes.c_void_p]
+                getattr(library, f"ubrk_close{suffix}").argtypes = [ctypes.c_void_p]
+                return library, suffix
+    return None
 _TOKEN_PATTERN = re.compile(r"(?:[\u00a0\u2007\u202f\u2060]|\S)+|\s+")
 _BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
 _ROUNDING = 1e-6
