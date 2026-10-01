@@ -2179,7 +2179,10 @@ class _Layout:
         if isinstance(item, Middle):
             return REL, self.delimiter(item.delimiter, 0.0, style)
         if isinstance(item, Big):
-            target = (0.0, 1.2, 1.8, 2.4, 3.0)[item.size] * self.size(style)
+            # 1.2, 1.8, 2.4 or 3 ems, as TeX's: a maths font's variants of those sizes are
+            # drawn a little under them (Latin Modern Math's 1.2 em bracket is 1.195 em,
+            # Fira Math's 3 em one 2.96), and are what LuaTeX takes, not the next size up.
+            target = 0.98 * (0.0, 1.2, 1.8, 2.4, 3.0)[item.size] * self.size(style)
             return item.kind, self.delimiter(item.delimiter, target, style, exact=True)
         if isinstance(item, Accent):
             return ORD, self.accent(item, style)
