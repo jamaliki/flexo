@@ -67,6 +67,7 @@ def parse_figure(document: object) -> FigureSpec:
     the same as ``style``.
     """
 
+    document = _written_steps(document)
     validate_document(document)
     assert isinstance(document, dict)
     figure_data = document["figure"]
@@ -125,6 +126,34 @@ def parse_figure(document: object) -> FigureSpec:
         schema_version=document.get("schema_version", 1),
     )
     return normalize_and_validate(figure)
+
+
+def _written_steps(document: object) -> object:
+    """The document with each mechanism's steps as the figure holds them: a file may write
+    a step's arrows as a list and its place as a mapping, as Python does."""
+
+    if not isinstance(document, dict) or not isinstance(document.get("nodes"), list):
+        return document
+    from flexo.mechanism import step_records
+
+    nodes = []
+    for node in document["nodes"]:
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if (
+            node_kind(node) == "mechanism"
+            and isinstance(properties, dict)
+            and "steps" in properties
+        ):
+            node = {
+                **node,
+                "properties": {**properties, "steps": step_records(properties["steps"])},
+            }
+        nodes.append(node)
+    return {**document, "nodes": nodes}
+
+
+def node_kind(node: object) -> object:
+    return node.get("kind") if isinstance(node, dict) else None
 
 
 def figure_to_document(figure: FigureSpec) -> dict[str, Any]:
