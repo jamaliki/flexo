@@ -82,6 +82,38 @@ def test_pdf_embeds_png_artwork_with_its_alpha(tmp_path: Path) -> None:
     assert b"/SMask" in data
 
 
+def _png(width: int, height: int, colour_type: int, rows: bytes) -> bytes:
+    """A PNG of 8-bit ``rows`` (each led by its filter byte), written by hand."""
+
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        check = struct.pack(">I", zlib.crc32(tag + payload))
+        return struct.pack(">I", len(payload)) + tag + payload + check
+
+    header = struct.pack(">IIBBBBB", width, height, 8, colour_type, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+            + chunk(b"IEND", b""))
+
+
+def test_pdf_parts_a_pictures_colour_from_its_alpha_pixel_for_pixel() -> None:
+    import re
+    import zlib
+
+    from flexo.pdf import _image_object, _Writer
+
+    pixels = [(index, 2 * index, 3 * index, 255 - index) for index in range(12)]
+    flat = bytes(value for pixel in pixels for value in pixel)
+    rows = b"".join(b"\x00" + flat[at : at + 16] for at in (0, 16, 32))
+    writer = _Writer("t")
+    _image_object(writer, "image/png", _png(4, 3, 6, rows))
+    streams = [re.search(rb"stream\n(.*)\nendstream", body, re.S) for body in writer.objects[1:]]
+    mask, colour = (zlib.decompress(found.group(1)) for found in streams if found)
+    assert mask == bytes(alpha for *_, alpha in pixels)
+    assert colour == bytes(value for *rgb, _ in pixels for value in rgb)
+
+
 def test_the_same_figure_compiles_to_the_same_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Embedded font subsets must not carry the time they were made."""
 

@@ -520,19 +520,17 @@ def _image_object(writer: _Writer, mime: str, data: bytes) -> int | None:
     width, height, channels, pixels = _png_pixels(data)
     colour_channels = 1 if channels in (1, 2) else 3
     alpha = channels in (2, 4)
-    colour = bytearray()
-    mask = bytearray()
-    stride = width * channels
-    for row in range(height):
-        line = pixels[row * stride : (row + 1) * stride]
-        if alpha:
-            for start in range(0, len(line), channels):
-                colour += line[start : start + colour_channels]
-                mask.append(line[start + channels - 1])
-        else:
-            colour += line
+    colour, mask = bytes(pixels), b""
+    if alpha:
+        # Colour and alpha parted by slicing, not pixel by pixel: a plot drawn as a
+        # picture has millions of pixels.
+        mask = bytes(pixels[channels - 1 :: channels])
+        parted = bytearray(len(mask) * colour_channels)
+        for channel in range(colour_channels):
+            parted[channel::colour_channels] = pixels[channel::channels]
+        colour = bytes(parted)
     smask = ""
-    if alpha and any(value != 255 for value in mask):
+    if alpha and mask.count(255) != len(mask):
         soft = writer.stream(
             bytes(mask),
             f"/Type /XObject /Subtype /Image /Width {width} /Height {height} "
