@@ -18,24 +18,28 @@ from flexo.style import LayoutStyle, Palette
 from flexo.svg import element
 from flexo.units import pt
 
-_ARGUMENTS = {"M": 2, "L": 2, "A": 7, "Z": 0}
+_ARGUMENTS = {"M": 2, "L": 2, "A": 7, "C": 6, "Z": 0}
 
 
 def _moved(d: str, dx: float, dy: float) -> str:
-    """A path of absolute M, L, A and Z commands (as ``flexo.genetics`` writes them),
-    moved by ``(dx, dy)``: only each command's end point moves."""
+    """A path of absolute M, L, A, C and Z commands (as ``flexo.genetics`` and
+    ``flexo.chemistry`` write them), moved by ``(dx, dy)``: an arc's end point moves, and
+    every point of a line or a curve."""
 
     out: list[str] = []
     command, values = "", []
-    for token in re.findall(r"[MLAZ]|-?\d+(?:\.\d+)?(?:e[-+]?\d+)?", d):
+    for token in re.findall(r"[MLACZ]|-?\d+(?:\.\d+)?(?:e[-+]?\d+)?", d):
         if token in _ARGUMENTS:
             command, values = token, []
             out.append(token)
             continue
         values.append(float(token))
         if len(values) == _ARGUMENTS[command]:
-            values[-2] += dx
-            values[-1] += dy
+            first = len(values) - 2 if command == "A" else 0  # an arc's radii stay
+            pairs = range(first, len(values), 2)
+            for at in pairs:
+                values[at] += dx
+                values[at + 1] += dy
             out.extend(_number(value) for value in values)
             values = []
     return " ".join(out)

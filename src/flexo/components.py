@@ -413,6 +413,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         ComponentDefinition("structure", Size(0.0, 0.0), _STANDARD),
         # A grid of cells (flexo.cells): a plate map, a heatmap, a number square.
         ComponentDefinition("cells", Size(0.0, 0.0), _STANDARD),
+        # A reaction mechanism (flexo.mechanism): structures and their curly arrows.
+        ComponentDefinition("mechanism", Size(0.0, 0.0), _STANDARD),
     )
 }
 

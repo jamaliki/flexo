@@ -89,6 +89,7 @@ and, unless given a label, draw nothing. Every component is a method on the grou
 | Genetics | `construct`, `plasmid` (see [Genetic designs](#genetic-designs-constructs-and-plasmids)) |
 | Proteins, trees, the bench | `protein`, `tree`, `wellplate`, `timeline` (see [Proteins, trees, plates, and timelines](#proteins-trees-plates-and-timelines)) |
 | Grids | `cells`: plate maps, heatmaps, boards, number squares (see [Grids of cells](#grids-of-cells)) |
+| Chemistry | `mechanism`: structures from SMILES and the curly arrows between them (see [Reaction mechanisms](#reaction-mechanisms)) |
 
 A label longer than 16 ems wraps into balanced lines, and a component with an
 authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
@@ -312,6 +313,43 @@ writes "Day 2", `unit="h"` "2 h".
 
 In a figure file each is a node kind -- `protein`, `tree`, `wellplate`,
 `timeline` -- with the same names under `properties`.
+
+### Reaction mechanisms
+
+```python
+figure.root.mechanism("hydrolysis", [
+    {"smiles": "[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]", "arrows": ["5 -> 2", "2=3 -> 3"],
+     "label": "acid chloride", "reagents": "NaOH", "conditions": "H$_2$O"},
+    {"arrows": ["3 -> 2", "2-4 -> 4"], "label": "tetrahedral intermediate"},
+])
+```
+
+A `mechanism` draws structures as chemists draw them and the curly arrows that join
+them. Each step is SMILES -- the molecules apart with `.`, the atoms its arrows name
+mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
+makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
+pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
+
+The arrows are not decoration: each moves electrons, and the next structure is what
+they make -- a step with no SMILES is drawn from them, its atoms where they were, the
+attacking molecule brought in beside the atom it bonds to, a leaving group set apart.
+A step written out is checked against them. An arrow that cannot be is said in words:
+carbon given ten electrons ("as a bond to it forms, another must break"), a lone pair
+that is not there, a fishhook left without its partner, a hydrogen with two bonds.
+After the last step with arrows comes what they make.
+
+Structures are laid out flat as a chemist would: rings as regular polygons, fused rings
+side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan
+and pyrrole standing on their heteroatom, a double bond keeping the side its SMILES
+gives (`F/C=C/F`), a stereocentre drawn with the wedge or hash its `@`/`@@` means. A
+cycloaddition is drawn in the shape of its product, so a diene curls s-cis. The
+proportions are the ACS document settings: bonds 1.44 label heights long, double
+bonds inside their rings, labels clipping the bonds that meet them, hydrogens on the
+side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Lone pairs are drawn
+where arrows leave them (`lone_pairs="all"` for every one); a radical is a dot.
+Reaction arrows carry their `reagents` over them and `conditions` under them; `arrow`
+is `forward`, `equilibrium`, `resonance` or `none`; steps fold into rows when there
+are many (`per_row=`). The curly arrows take the figure's first tone.
 
 ### Grids of cells
 
