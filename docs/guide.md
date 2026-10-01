@@ -679,7 +679,8 @@ An `add_norm` block has no motif; its label is the whole component.
 ## Artwork you drew yourself
 
 For content Flexo does not draw -- a molecule, a density map -- draw it as an
-`.svg` (or render it to a `.png`) and pass the file to `image`. The example
+`.svg`, a `.pdf` or an Illustrator `.ai` file (or render it to a `.png`) and pass
+the file to `image`. The example
 writes a small SVG so it runs as-is; replace `art` with the path to your own
 file.
 
@@ -706,7 +707,21 @@ An `image` is a component with four pinned ports at its side centres (`input`,
 `output`, `north`, `south`). It wires, lays out, and blocks routes like a
 block. An SVG source stays vector: Flexo nests the file's content at the
 node's bounds with its viewBox intact, so it remains selectable in an editor
-and stays vector in the PDF. A PNG or JPEG is embedded as a data URI. Artwork is
+and stays vector in the PDF. A PNG or JPEG is embedded as a data URI.
+
+**Illustrator and PDF files.** An Illustrator file is a PDF with Illustrator's
+own data beside it (unless it was saved with "Create PDF Compatible File"
+unticked, which Flexo says), and Flexo reads its artboard back as a drawing:
+paths as paths, words as the outlines of their glyphs (the file's fonts need not
+be installed), photographs as pictures. What SVG cannot say as the file does --
+a gradient, an object cut by a curved mask, a group with its own opacity -- is
+drawn by pdfium, that object alone, as a picture in its place, so the rest stays
+vectors. The reading is checked against pdfium's own drawing of the page, and
+any part that differs is drawn as a picture instead. An `.ai` file shows its
+art (Illustrator's art box); a `.pdf`, its whole page. `art.ai#2` is the second
+artboard, `paper.pdf#3` the third page. Hidden layers stay hidden. Reading needs
+`pip install "flexo[pdf]"` (pypdfium2 and Pillow); a page is read once for each
+version of its file and kept, so a figure built again does not read it again. Artwork is
 **embedded, not linked**: the editable SVG, portable SVG, and PDF each contain
 it.
 
@@ -719,8 +734,8 @@ own needs an explicit size.
 
 **Paths.** A relative path resolves against the working directory at compile
 time, so absolute paths are more reliable. A missing or unreadable file, or a
-suffix other than `.svg` or `.png`, raises `FlexoError` with a diagnostic that
-names the node and the path.
+suffix other than `.svg`, `.png`, `.jpg`, `.pdf` or `.ai`, raises `FlexoError`
+with a diagnostic that names the node and the path.
 
 **Safety checks.** Artwork is checked before it is inlined. A file is rejected
 with a diagnostic, not silently cleaned, if it contains a `<script>` element,

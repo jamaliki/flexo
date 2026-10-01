@@ -33,7 +33,7 @@ from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
 FILE_TYPES = {
-    "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"),
+    "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf", ".ai"),
     "figure": (".yaml", ".yml", ".json"),
     "python": (".py",),
     "theme": (".yaml", ".yml", ".json"),

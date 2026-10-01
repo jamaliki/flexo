@@ -36,6 +36,9 @@ from flexo.units import NUMBER_PATTERN, POINTS_PER_UNIT
 SVG_SUFFIXES = frozenset({".svg"})
 PNG_SUFFIXES = frozenset({".png"})
 JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
+PAGE_SUFFIXES = frozenset({".pdf", ".ai"})
+"""A PDF's page, and an Illustrator file's artboard (an Illustrator file is a PDF with
+Illustrator's own data beside it): read as the vectors they are (``flexo.pdfart``)."""
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -178,15 +181,16 @@ def node_artwork(spec: NodeSpec) -> Artwork:
 def load_artwork(node_id: str, source: str) -> Artwork:
     """Load ``source`` for ``node_id``. Relative paths resolve against the cwd."""
 
-    path = Path(source).expanduser()
+    path, page = _page_of(Path(source).expanduser())
     suffix = path.suffix.lower()
-    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES:
+    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES | PAGE_SUFFIXES:
         raise _error(
             "image.source.unsupported",
             node_id,
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
-            hint="Embed an .svg file for vector artwork, or a .png or .jpg file for a render.",
+            hint="Embed an .svg, .pdf or Illustrator (.ai) file for vector artwork, "
+            "or a .png or .jpg file for a render.",
         )
     if outside(path):
         raise _error(
@@ -207,7 +211,58 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             hint="Absolute paths are the reliable choice; relative ones resolve "
             "against the working directory the figure is compiled in.",
         ) from exc
+    if suffix in PAGE_SUFFIXES:
+        return _page_artwork(node_id, str(path.resolve()), page, stat.st_mtime_ns)
     return _load(node_id, str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def _page_of(path: Path) -> tuple[Path, int]:
+    """A PDF or Illustrator file and the page (artboard) of it named: ``art.ai#2`` is the
+    second artboard -- unless a file is called that."""
+
+    name, mark, number = path.name.rpartition("#")
+    if mark and number.isdigit() and int(number) >= 1 and not path.exists():
+        whole = path.with_name(name)
+        if whole.suffix.lower() in PAGE_SUFFIXES:
+            return whole, int(number)
+    return path, 1
+
+
+@lru_cache(maxsize=32)
+def _page_artwork(node_id: str, resolved: str, page: int, stamp: int) -> Artwork:
+    """A PDF's page, or an Illustrator file's artboard, as SVG artwork: its shapes and
+    words as vectors, what SVG cannot draw as it does as pictures (``flexo.pdfart``)."""
+
+    from flexo.pdfart import PdfArtError, is_pdf, read_page
+
+    path = Path(resolved)
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(1024)
+    except OSError as exc:
+        raise _error(
+            "image.source.unreadable",
+            node_id,
+            path,
+            f"Cannot read the artwork file ({exc.strerror or exc}).",
+        ) from exc
+    if not is_pdf(head):
+        if path.suffix.lower() == ".ai":
+            raise _error(
+                "image.ai.private",
+                node_id,
+                path,
+                "This Illustrator file was saved without its PDF, so only Illustrator can read it.",
+                hint='In Illustrator, choose File > Save As and tick "Create PDF Compatible File" '
+                "(or export the artboard as SVG or PDF).",
+            )
+        raise _error("image.pdf.invalid", node_id, path, "The file does not begin as a PDF does.")
+    try:
+        # An Illustrator file shows its art, as Illustrator exports it; a PDF, its page.
+        art = read_page(resolved, page, stamp, art=path.suffix.lower() == ".ai")
+    except PdfArtError as exc:
+        raise _error("image.pdf.unreadable", node_id, path, str(exc), hint=exc.hint) from None
+    return _svg_artwork(node_id, path, art.markup.encode("utf-8"))
 
 
 HEADER = 1 << 20
