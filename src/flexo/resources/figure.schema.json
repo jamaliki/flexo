@@ -64,7 +64,8 @@
         "code": {"type": "boolean", "default": false},
         "link": {"type": "string", "default": ""},
         "color": {"type": "string", "default": ""},
-        "math": {"type": "string", "default": ""}
+        "math": {"type": "string", "default": ""},
+        "maths": {"type": "boolean", "default": false}
       }
     },
     "label": {

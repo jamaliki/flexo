@@ -484,16 +484,18 @@ def drawn_weight(run: TextRun, inherited: int | None) -> int:
     ``TextRun`` default emits no ``font-weight``, so it comes out at whatever the
     ``<text>`` element around it declares; one that names a weight overrides it.
     Measuring through the same rule is what keeps a reserved band the width of
-    the words that land in it.
+    the words that land in it. Maths set as words (``TextRun.maths``) inherits
+    nothing: it is set at its own weight, as a formula is.
     """
 
-    if inherited is None or run.weight != DEFAULT_RUN_WEIGHT:
+    if inherited is None or run.weight != DEFAULT_RUN_WEIGHT or run.maths:
         return run.weight
     return inherited
 
 
 def formula_of(run: TextRun, typography: TypographyStyle, inherited: int | None = None):
-    """The formula a maths run (``TextRun.math``) is set as, at the size its words would be."""
+    """The formula a maths run (``TextRun.math``) is set as, at the size its words would be.
+    The weight of the words is its ``\\text``'s; its maths is regular whatever it is."""
 
     from flexo.texmath import typeset
 
@@ -906,7 +908,8 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
             merged[-1].code,
             merged[-1].link,
             merged[-1].color,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
+            merged[-1].maths,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color, run.maths):
             merged[-1] = replace(merged[-1], text=merged[-1].text + run.text)
         else:
             merged.append(run)

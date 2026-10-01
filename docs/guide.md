@@ -664,8 +664,9 @@ figure: a worker node inside a cluster is `cluster.module("node", label="Node 1"
 accepts styled runs like any label, for example
 `label=(TextRun("QK"), TextRun("T", baseline_shift="super"))`. Titles are set
 at the style's `title_weight`; a run with a weight other than the default 400
-keeps its own weight. `motif=False` changes only the motif: size, body, ports,
-and label stay the same.
+keeps its own weight, and maths stays regular, as LaTeX sets it in a bold
+heading (bold is a meaning in maths: `$\mathbf{v}$` asks for it). `motif=False`
+changes only the motif: size, body, ports, and label stay the same.
 
 For `attention`, `channels`, `concat`, `feature-strip`, `graph`, `image`,
 `inset`, `matrix`, and `sequence`, the motif sits below the label. The label

@@ -1975,6 +1975,9 @@ class _Layout:
     def __init__(self, fonts: Fonts, size: float, weight: int) -> None:
         self.fonts = fonts
         self.base = size
+        # The words' weight, which \text takes. The maths is regular whatever it is, bold
+        # only where it asks (\mathbf): bold is a meaning in maths, and a maths font has
+        # no bold to set its Greek and signs in.
         self.weight = weight
         self.colour: str | None = None
         self.depth = 0
@@ -2040,7 +2043,7 @@ class _Layout:
             italic = font in {"it", "bi"} or (
                 font is None and (letter or (greek and char.islower()))
             )
-            weight = 700 if font in {"bf", "bi"} else self.weight
+            weight = 700 if font in {"bf", "bi"} else _REGULAR
             face, slant = self.fonts.text_face(char, italic, weight)
             if greek and italic:
                 # TeX's lower-case Greek is italic, and the maths font's own letter -- the
@@ -2056,7 +2059,7 @@ class _Layout:
         ):
             # Signs and brackets are the words' own where their faces have them, as maths
             # set as words has them; the maths font's take over where they must grow.
-            face, slant = self.fonts.text_face(char, False, self.weight)
+            face, slant = self.fonts.text_face(char, False, _REGULAR)
             gid = face.glyph(char)
             if gid is not None and not face.has_math:
                 return self.glyph(face, gid, size)
@@ -2064,16 +2067,19 @@ class _Layout:
         box = self.maths_glyph(char, style)
         if box is not None:
             return box
-        face, slant = self.fonts.text_face(char, False, self.weight)
+        face, slant = self.fonts.text_face(char, False, _REGULAR)
         gid = face.glyph(char)
         if gid is not None:
             return self.glyph(face, gid, size, slant)
         return Box(0.5 * size, 0.7 * size, 0.0)
 
-    def words(self, text: Text, style: _Style) -> Box:
+    def words(self, text: Text, style: _Style, weight: int | None = None) -> Box:
+        """Words set as text: at the words' weight around the formula (``\\text``), or
+        at ``weight`` (an operator's name, which is maths)."""
+
         size = self.size(style)
         italic = text.font == "it"
-        weight = 700 if text.font == "bf" else self.weight
+        weight = 700 if text.font == "bf" else (weight or self.weight)
         pieces: list[tuple[Box, float]] = []
         for face_spec, piece in self.fonts.stack.segments(
             text.words, weight, italic, code=text.font == "tt"
@@ -2222,7 +2228,7 @@ class _Layout:
             before = self.colour
             self.colour = ERROR_COLOUR
             try:
-                return ORD, self.words(Text(item.words, "rm"), style)
+                return ORD, self.words(Text(item.words, "rm"), style, _REGULAR)
             finally:
                 self.colour = before
         if isinstance(item, Space):
@@ -2348,7 +2354,7 @@ class _Layout:
         if item.named:
             if not item.symbol:
                 return Box(), False
-            box = self.words(Text(item.symbol, "rm"), style)
+            box = self.words(Text(item.symbol, "rm"), style, _REGULAR)
             box.single = False
             return box, True
         face, gid = self.fonts.maths_for(item.symbol)
@@ -2922,6 +2928,8 @@ class _Layout:
 
 
 _SLANT = math.tan(math.radians(12.0))
+_REGULAR = 400
+"""The weight maths is set at, in bold words too (LaTeX's ``\\bfseries`` leaves it so)."""
 _WORDS_OWN = frozenset("+−=<>±×÷()[]|/!,;:.")
 """Signs set in the typography's face rather than the maths font's."""
 
@@ -2989,7 +2997,8 @@ def typeset(
     weight: int = 400,
 ) -> Typeset:
     """``source`` (LaTeX maths, without its ``$``) laid out at ``size`` points, in
-    display style (a formula on its own line) or text style (one within words)."""
+    display style (a formula on its own line) or text style (one within words).
+    ``weight`` is the words', which its ``\\text`` takes: its maths is regular."""
 
     display = display or source.lstrip().startswith("\\displaystyle")
     items, problems = parse(source)

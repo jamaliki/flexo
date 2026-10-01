@@ -481,3 +481,32 @@ def test_an_arrays_rules_run_between_its_rows_and_its_brackets_cover_them() -> N
         [(foot, tall)] = [(y, height) for _, y, width, height in rules if height > width]
         assert min(bottom for bottom, _ in glyphs) <= foot + 1e-6
         assert max(top for _, top in glyphs) >= foot + tall - 1e-6
+
+
+def test_maths_in_bold_words_is_regular_all_of_it() -> None:
+    # Bold is a meaning in maths (a vector), and a maths font has no bold for its Greek
+    # and signs: in bold words (a table's header) maths stays regular, as LaTeX's does.
+    from flexo.render_common import render_runs
+    from flexo.style import Palette
+    from flexo.texmath import GlyphItem
+    from flexo.text import drawn_weight
+
+    runs = parse_label(r"Energy $E_n / \hbar\omega$ and $\mathbf{v}$")
+    assert "".join(run.text for run in runs if run.maths) == "En/ℏ𝜔v"
+    assert {drawn_weight(run, 700) for run in runs if run.maths} == {400, 700}  # \mathbf asks
+    assert drawn_weight(runs[0], 700) == 700  # the words are bold
+    measurer = TextMeasurer(TYPE)
+    maths = tuple(run for run in runs if run.maths and run.weight == 400)
+    assert measurer.measure(maths, weight=700).width == measurer.measure(maths).width
+    root = ET.Element(f"{{{SVG_NS}}}svg")
+    render_runs(
+        root, "header", measurer.measure(runs, weight=700), x=0.0, y=20.0, typography=TYPE,
+        palette=Palette("test", {"ink": "#222222"}), fill_role="ink", weight=700,
+    )
+    spans = {span.text: span.get("font-weight") for span in root.iter(f"{{{SVG_NS}}}tspan")}
+    assert spans["Energy "] is None and spans["E"] == "400" and spans["v"] == "700"
+    # A formula's letters are regular too; only its words (\text) are the words' weight.
+    formula = typeset(r"\frac{x}{2} \text{ if } \xi", TYPE, 20.0, weight=700)
+    weights = [item.face.weight for _, _, item in formula.box.items if isinstance(item, GlyphItem)]
+    assert weights[:2] == [400, 400] and weights[-1] == 400  # x, 2 and ξ
+    assert set(weights[2:-1]) == {700}  # " if "
