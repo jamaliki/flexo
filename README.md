@@ -88,6 +88,8 @@ and, unless given a label, draw nothing. Every component is a method on the grou
 | Words and art | `text`, `vector`, `image`, `graph`, `inset`, `legend` |
 | Genetics | `construct`, `plasmid` (see [Genetic designs](#genetic-designs-constructs-and-plasmids)) |
 | Proteins, trees, the bench | `protein`, `tree`, `wellplate`, `timeline` (see [Proteins, trees, plates, and timelines](#proteins-trees-plates-and-timelines)) |
+| Grids | `cells`: plate maps, heatmaps, boards, number squares (see [Grids of cells](#grids-of-cells)) |
+| Chemistry | `mechanism`: structures from SMILES and the curly arrows between them (see [Reaction mechanisms](#reaction-mechanisms)) |
 
 A label longer than 16 ems wraps into balanced lines, and a component with an
 authored `width=` wraps its label to fit; `"\n"` breaks a line where you want.
@@ -311,6 +313,97 @@ writes "Day 2", `unit="h"` "2 h".
 
 In a figure file each is a node kind -- `protein`, `tree`, `wellplate`,
 `timeline` -- with the same names under `properties`.
+
+### Reaction mechanisms
+
+```python
+figure.root.mechanism("hydrolysis", [
+    {"smiles": "[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]", "arrows": ["5 -> 2", "2=3 -> 3"],
+     "label": "acid chloride", "reagents": "NaOH", "conditions": "H$_2$O"},
+    {"arrows": ["3 -> 2", "2-4 -> 4"], "label": "tetrahedral intermediate"},
+])
+```
+
+A `mechanism` draws structures as chemists draw them and the curly arrows that join
+them. Each step is SMILES -- the molecules apart with `.`, the atoms its arrows name
+mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
+makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
+pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
+
+The arrows are not decoration: each moves electrons, and the next structure is what
+they make -- a step with no SMILES is drawn from them, its atoms where they were, the
+attacking molecule brought in beside the atom it bonds to, a leaving group set apart.
+A step written out is checked against them. An arrow that cannot be is said in words:
+carbon given ten electrons ("as a bond to it forms, another must break"), a lone pair
+that is not there, a fishhook left without its partner, a hydrogen with two bonds.
+After the last step with arrows comes what they make. With `partial=True` a step that
+cannot be is drawn as far as it goes, its arrows on it, instead of refused (as it is
+between one arrow and the next while a step is drawn); `flexo.mechanism.mechanism_states`
+says what is wrong.
+
+Structures are laid out flat as a chemist would: rings as regular polygons, fused rings
+side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan
+and pyrrole standing on their heteroatom, a double bond keeping the side its SMILES
+gives (`F/C=C/F`), a stereocentre drawn with the wedge or hash its `@`/`@@` means. A
+cycloaddition is drawn in the shape of its product, so a diene curls s-cis. The
+proportions are the ACS document settings: bonds 1.44 label heights long, double
+bonds inside their rings, labels clipping the bonds that meet them, hydrogens on the
+side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Reaction arrows carry
+their `reagents` over them and `conditions` under them; `arrow` is `forward`,
+`equilibrium`, `resonance` or `none`; steps fold into rows when there are many
+(`per_row=`).
+
+The curly arrows are drawn by rule, in one ink: magenta, unless `arrow_colour=` gives
+another -- a colour, or the theme's `ink`, `muted` or `accent` (`accent2`...), which
+follow the theme.
+An arrow carries its electrons: the lone pair (or radical) it starts from is drawn at
+its tail, in its ink, out from the atom where its bonds leave room; an arrow from a
+bond leaves square to it, a little off its middle. It goes into a bond square to it,
+and into an atom along a radius -- on the side with room, facing the electrons, never
+back down the bond they leave; a pair re-forming its own atom's double bond curls
+from beside the bond down onto it, and two half arrows making a bond meet in its
+middle from either side. Of the curves that would do, the smoothest is drawn that
+crosses no bond, no other arrow and no charge, and bends one way only; charges move
+out of the arrows' way. Other lone pairs are drawn with `lone_pairs="all"`; a radical
+is a dot. A step's `place` puts its molecules where you want them, each named by one of
+its atoms: `{5: {"move": [-1, 0.5], "turn": 30, "flip": True}}` takes the molecule with
+atom 5 a bond left and half a bond down from where it is laid out, turned 30 degrees
+clockwise and flipped left for right.
+
+### Grids of cells
+
+![A plate map and a contact map (examples/cells.py)](examples/build/cells.preview.png)
+
+```python
+figure.root.cells("plate", """
+    C C D1 D1
+    C C D2 D2
+    V V .  .
+""", {"C": {"label": "Control"}, "V": {"label": "Vehicle", "mark": "v"},
+      "D1": {"label": "1 µM"}, "D2": {"label": "10 µM"}},
+    row_labels="letters", column_labels="numbers", lines="muted")
+figure.root.cells("contacts", matrix, ramp=("#fbf6ee", "#7a1f1f"), values=True)
+```
+
+`cells` draws a grid written as text, one row per line and one symbol per word
+(`.` leaves a cell empty), or given as rows of values. The key says what a
+symbol is: a `color` (a tone by name, or an exact `#hex`, painted as written and
+left alone by `flexo retheme`), a `mark` written small in the cell, and a
+`label` for the legend; a symbol the key does not name takes a tone by its
+name. Numbers are values: shaded along `ramp` (two colours, low to high) over
+`range`, and written in their cells with `values=True`. `cell` sets a cell's
+side in points, `gap` and `corner` how far inside its square it is painted and
+how round; `lines` rules the grid; `row_labels` and `column_labels` number,
+letter, or name the rows and columns, on the `row_side` and `column_side`
+asked for. In a figure file it is the node kind `cells`, the grid under
+`properties.grid` as text.
+
+![After Alfred Jensen: two number squares, painted by hand (examples/jensen.py)](examples/build/jensen.preview.png)
+
+[`examples/jensen.py`](examples/jensen.py) generates a page after Alfred
+Jensen's number squares -- rings of colour around a centre, their counts
+written around them and computed from the same rings -- and paints it with the
+sketch theme's `gouache` fill.
 
 ### Operators and words
 
@@ -636,6 +729,7 @@ type and colours:
 flexo.Figure("f", theme="sketch")                                  # the illustrated look
 flexo.Figure("f", theme="paper", sketch=True)                      # paper, drawn by hand
 flexo.Figure("f", theme="sketch", sketch={"fill": "hatch"})        # pencil hatching
+flexo.Figure("f", theme="sketch", sketch={"fill": "gouache"})      # opaque paint, brushed
 flexo.Figure("f", theme="sketch", sketch={"roughness": 0.2})       # a careful hand
 ```
 
@@ -648,7 +742,7 @@ draws the same way every time. The settings (`flexo.Sketch`) are:
 | --- | --- | --- |
 | `roughness` | `0.5` | How loose the hand is: 0 is a ruled line, 1 a quick sketch |
 | `passes` | `2` | Strokes per line: the line, then lighter strokes going back over it |
-| `fill` | `"wash"` | `"wash"` (watercolour), `"hatch"` (pencil lines), `"solid"`, or `"none"` |
+| `fill` | `"wash"` | `"wash"` (watercolour), `"hatch"` (pencil lines), `"solid"`, `"gouache"` (opaque paint with the brush's streaks and uneven density), or `"none"` |
 | `paper` | `true` | A few faint stains over the page, as on worked paper |
 | `seed` | `0` | Another number draws the same figure with a different hand |
 
@@ -808,7 +902,11 @@ own last change and leaves others' alone.
   is chosen comes after it, a line between them. **Connect** (C) draws a line from
   one part to the next; double-click a part or a line to type its words on the
   drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
-  or titled module. The inspector on the right has each part's settings, down to
+  or titled module. A part (or a whole group) dragged on the drawing goes to another
+  place in its row or column, or into another group: it follows the pointer, a line
+  shows where it would go, and once it is let go the figure is laid out again and
+  every part slides to where it now is (Esc, or letting go off the figure, takes it
+  back). The inspector on the right has each part's settings, down to
   a plasmid's features or a plate's groups as a table; the list on the left holds
   the parts as they nest, dragged to move them. Every edit is made to the figure's
   file, which the **Source** tab shows and edits too: comments and order stay, and

@@ -13,7 +13,9 @@ ink changes, after mol-sketch's stroke engine:
   arrowhead still points where it should.
 - **Fills** are one of ``"wash"`` (watercolour: translucent layers, each a
   little deformed, pooling darker at the edge), ``"hatch"`` (pencil lines at an
-  angle), ``"solid"`` (flat colour in the wobbling outline), or ``"none"``.
+  angle), ``"solid"`` (flat colour in the wobbling outline), ``"gouache"``
+  (opaque paint laid with a brush: an uneven edge, uneven density, and the
+  streaks the brush left), or ``"none"``.
 - **Paper** takes a few faint watercolour stains, so a page reads as paper.
 
 ``roughness`` is the one number that makes a hand loose or careful: 0 is a
@@ -37,8 +39,8 @@ from typing import Literal
 from flexo.colour import is_dark, mix
 from flexo.svg import local_name, number, svg_tag
 
-type Fill = Literal["wash", "hatch", "solid", "none"]
-FILLS: tuple[str, ...] = ("wash", "hatch", "solid", "none")
+type Fill = Literal["wash", "hatch", "solid", "gouache", "none"]
+FILLS: tuple[str, ...] = ("wash", "hatch", "solid", "gouache", "none")
 
 type Point = tuple[float, float]
 
@@ -52,17 +54,29 @@ class Sketch:
     passes: int = 2
     """Strokes per line: the line, then lighter strokes going back over it."""
     fill: Fill = "wash"
-    """How a box is coloured in: ``"wash"``, ``"hatch"``, ``"solid"``, or ``"none"``."""
+    """How a box is coloured in: ``"wash"``, ``"hatch"``, ``"solid"``, ``"gouache"``, or
+    ``"none"``."""
     paper: bool = True
     """Whether the page takes a few faint stains, as paper does."""
     seed: int = 0
     """Change it to draw the same figure with a different hand."""
 
     def __post_init__(self) -> None:
+        # Settings come from documents too: a word where a number belongs is said by name.
+        for name, low, high in (("roughness", 0, 1), ("passes", 1, 4)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(
+                    f"sketch {name} must be a number from {low} to {high}, not {value!r}"
+                )
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise ValueError(f"sketch seed must be a whole number, not {self.seed!r}")
         if not 0.0 <= float(self.roughness) <= 1.0:
             raise ValueError(f"sketch roughness must be from 0 to 1, not {self.roughness}")
         if not 1 <= int(self.passes) <= 4:
             raise ValueError(f"sketch passes must be from 1 to 4, not {self.passes}")
+        if not isinstance(self.paper, bool):
+            raise ValueError(f"sketch paper must be true or false, not {self.paper!r}")
         if self.fill not in FILLS:
             raise ValueError(
                 f'unknown sketch fill "{self.fill}"; valid values: {", ".join(FILLS)}'
@@ -632,8 +646,10 @@ def _sketch_shape(
     closed_any = any(closed for _, closed in outlines)
     if fill is not None and closed_any and sketch.fill != "none" and not in_marker:
         # A wash or a hatch on a mark a few points across is only noise:
-        # small cells (a vector's, a legend swatch) are filled flat.
-        hand = sketch if extent >= 14.0 else replace(sketch, fill="solid")
+        # small cells (a vector's, a legend swatch) are filled flat. A brush's
+        # texture still reads on a cell of a grid, so gouache goes smaller.
+        smallest = 6.0 if sketch.fill == "gouache" else 14.0
+        hand = sketch if extent >= smallest else replace(sketch, fill="solid")
         inserted.extend(_fills(element, outlines, fill, context, key, hand, canvas, dark, data))
     elif fill is not None and in_marker:
         # An arrowhead keeps a solid head; only its edge is redrawn below.
@@ -776,6 +792,10 @@ def _fills(
             ring.set("stroke-width", "0.6")
             ring.set("stroke-opacity", number(0.35 * opacity))
             out.append(ring)
+        elif sketch.fill == "gouache" and role != "container-fill":
+            out.extend(_gouache(points, fill, opacity, role, f"{key}.{outline_index}", sketch, rng))
+        elif sketch.fill == "gouache":
+            out.append(_filled(f"{key}.tint{outline_index}", points, fill, opacity * 0.5, role))
         elif sketch.fill == "hatch" and role == "container-fill":
             # Hatching a whole panel would bury its contents: a pale tint only.
             out.append(_filled(f"{key}.tint{outline_index}", points, fill, opacity * 0.6, role))
@@ -808,6 +828,69 @@ def _fills(
                 strokes.set("stroke-opacity", number(0.8 * opacity))
                 strokes.set("stroke-linecap", "round")
                 out.append(strokes)
+    return out
+
+
+def _gouache(
+    points: list[Point],
+    fill: str,
+    opacity: float,
+    role: str | None,
+    key: str,
+    sketch: Sketch,
+    rng: random.Random,
+) -> list[ET.Element]:
+    """Opaque paint put on with a brush: an uneven edge, uneven density, and the
+    streaks a loaded brush leaves where it was dragged across.
+
+    The body is one layer of the colour inside a deformed edge. Over it, a darker
+    layer pools off-centre and a lighter one where the brush ran thin; then the
+    strokes themselves, as broad translucent bands of a lighter and a darker mix
+    running across the shape at one angle, the way a square is painted in a few
+    passes of a flat brush.
+    """
+
+    out: list[ET.Element] = []
+    edge = 0.025 + 0.035 * sketch.roughness
+    body = _deform(points, 2, edge, rng)
+    out.append(_filled(f"{key}.gouache", body, fill, opacity, role))
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    cx, cy = (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
+    size = max(1.0, min(max(xs) - min(xs), max(ys) - min(ys)))
+    for layer, (toward, strength, alpha) in enumerate(
+        (("#000000", 0.16, 0.22), ("#ffffff", 0.18, 0.20))
+    ):
+        # Scaled and shifted so the pool stays inside the paint, never a halo past it.
+        scale = rng.uniform(0.5, 0.7)
+        dx, dy = rng.uniform(-0.1, 0.1) * size, rng.uniform(-0.1, 0.1) * size
+        pool = [(cx + dx + (x - cx) * scale, cy + dy + (y - cy) * scale) for x, y in body]
+        shade = mix(fill, toward, strength)
+        out.append(
+            _filled(f"{key}.pool{layer}", _deform(pool, 2, 0.06, rng), shade, opacity * alpha, None)
+        )
+    # The brush: bands a third to a half of a stroke wide, dragged at one angle.
+    angle = math.radians(rng.choice((0.0, 90.0)) + rng.uniform(-12.0, 12.0))
+    spacing = max(1.2, size / rng.uniform(4.5, 6.5))
+    bands = _hatch_lines(_deform(points, 1, 0.01, rng), angle, spacing)
+    for index, (a, b) in enumerate(bands):
+        wobbled = _wobble(
+            [a, b],
+            amplitude=0.35 * sketch.roughness,
+            rng=_rng(sketch.seed, key, "brush", index),
+            pinned=False,
+            overshoot=0.0,
+        )
+        streak = ET.Element(svg_tag("path"))
+        streak.set("id", f"{key}.brush{index}")
+        streak.set("d", _path_data(wobbled))
+        streak.set("fill", "none")
+        toward = "#ffffff" if index % 2 else "#000000"
+        streak.set("stroke", mix(fill, toward, rng.uniform(0.1, 0.2)))
+        streak.set("stroke-width", number(spacing * rng.uniform(0.35, 0.6)))
+        streak.set("stroke-opacity", number(opacity * rng.uniform(0.12, 0.28)))
+        streak.set("stroke-linecap", "round")
+        out.append(streak)
     return out
 
 

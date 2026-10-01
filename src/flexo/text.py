@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import re
 import unicodedata
@@ -25,8 +26,125 @@ from flexo.ir.measured import MeasuredLine, TextMetrics
 from flexo.ir.semantic import TextRun
 from flexo.style import TypographyStyle
 
-_TOKEN_PATTERN = re.compile(r"\S+|\s+")
+NO_BREAK = "\u00a0\u2007\u202f\u2060"
+_NOT_FIRST = set(
+    "、。，．・：；？！‐゠–〜～…‥ー」』）］｝〕〉》〙〛ぁぃぅぇ"  # noqa: RUF001 -- the marks themselves
+    "ぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ々〻.,!?:;)]}%"
+)
+"""What a line of Chinese or Japanese never starts with (kinsoku): closing marks, small kana."""
+_NOT_LAST = set("「『（［｛〔〈《〘〚([{")  # noqa: RUF001 -- the marks themselves
+"""What it never ends with: opening marks."""
+
+
+def _cjk(character: str) -> bool:
+    code = ord(character)
+    return (
+        0x3000 <= code <= 0x30FF or 0x3400 <= code <= 0x4DBF or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF or 0xFF00 <= code <= 0xFFEF or 0x20000 <= code <= 0x2FA1F
+    )
+
+
+def _unspaced(character: str) -> bool:
+    """Thai, Lao, Burmese, Khmer: scripts written without spaces between words."""
+
+    code = ord(character)
+    return 0x0E00 <= code <= 0x0EFF or 0x1000 <= code <= 0x109F or 0x1780 <= code <= 0x17FF
+
+
+def _cjk_units(token: str) -> list[str]:
+    """``token`` cut where a line may break inside it: Chinese or Japanese between two
+    characters, either of them Han or kana -- never before a closing mark or a small
+    kana, nor after an opening mark; Thai, Lao, Burmese and Khmer between words, as
+    the system's dictionary finds them. Words in other scripts in it stay whole."""
+
+    if any(_unspaced(character) for character in token):
+        return _dictionary_words(token)
+    if not any(_cjk(character) for character in token):
+        return [token]
+    units = [token[0]]
+    for previous, character in itertools.pairwise(token):
+        if (
+            (_cjk(previous) or _cjk(character))
+            and character not in _NOT_FIRST and previous not in _NOT_LAST
+            and not unicodedata.category(character).startswith("M")
+        ):
+            units.append(character)
+        else:
+            units[-1] += character
+    return units
+"""Spaces a line is never broken at (a no-break space, ~ in a label; maths' thin space)."""
+
+
+def _dictionary_words(token: str) -> list[str]:
+    """``token`` cut between its words by ICU's dictionaries -- the system's own: every Mac
+    has ``libicucore``, and most Linux systems ``libicuuc`` -- or whole, without them."""
+
+    icu = _icu()
+    if icu is None:
+        return [token]
+    library, suffix = icu
+    data = token.encode("utf-16-le")
+    buffer = ctypes.create_string_buffer(data)
+    error = ctypes.c_int(0)
+    opened = getattr(library, f"ubrk_open{suffix}")
+    following = getattr(library, f"ubrk_next{suffix}")
+    closing = getattr(library, f"ubrk_close{suffix}")
+    breaker = opened(1, b"th", buffer, len(data) // 2, ctypes.byref(error))  # 1: words
+    if not breaker or error.value > 0:
+        return [token]
+    try:
+        bounds = [0]
+        while (at := following(breaker)) != -1:
+            bounds.append(at)
+    finally:
+        closing(breaker)
+    # Its bounds count UTF-16 units; a character past U+FFFF is two.
+    places, unit = {}, 0
+    for index, character in enumerate(token):
+        places[unit] = index
+        unit += 2 if ord(character) > 0xFFFF else 1
+    places[unit] = len(token)
+    cuts = [places[bound] for bound in bounds if bound in places]
+    words = [token[a:b] for a, b in itertools.pairwise(cuts) if b > a]
+    # A mark that cannot start a word (a vowel sign, a tone) stays with what it follows.
+    merged: list[str] = []
+    for word in words:
+        if merged and unicodedata.category(word[0]).startswith("M"):
+            merged[-1] += word
+        else:
+            merged.append(word)
+    return merged or [token]
+
+
+@cache
+def _icu():
+    """The system's ICU library and the suffix its names carry (``_74`` on Linux), or None."""
+
+    import ctypes.util
+
+    for name in ("/usr/lib/libicucore.dylib", ctypes.util.find_library("icuuc")):
+        if not name:
+            continue
+        try:
+            library = ctypes.CDLL(name)
+        except OSError:
+            continue
+        for suffix in ("", *(f"_{version}" for version in range(90, 49, -1))):
+            if hasattr(library, f"ubrk_open{suffix}"):
+                getattr(library, f"ubrk_open{suffix}").restype = ctypes.c_void_p
+                getattr(library, f"ubrk_open{suffix}").argtypes = [
+                    ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int32,
+                    ctypes.POINTER(ctypes.c_int),
+                ]
+                getattr(library, f"ubrk_next{suffix}").argtypes = [ctypes.c_void_p]
+                getattr(library, f"ubrk_close{suffix}").argtypes = [ctypes.c_void_p]
+                return library, suffix
+    return None
+_TOKEN_PATTERN = re.compile(r"(?:[\u00a0\u2007\u202f\u2060]|\S)+|\s+")
 _BREAK_AFTER = re.compile(r"[^/\-_.?&=]+[/\-_.?&=]*|[/\-_.?&=]+")
+_ROUNDING = 1e-6
+"""Points a line may run past its width and still fit: the same words summed in another
+order differ in their last bits, and a line given exactly its width must not break."""
 
 SHIFTED_SIZE = 0.72
 ACCENT_SIZE = 0.78
@@ -80,24 +198,39 @@ class FontData:
     codepoints: frozenset[int]
 
 
-DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans", "Latin Modern Math")
+DEFAULT_FALLBACKS = ("IBM Plex Sans", "Liberation Sans", "Latin Modern Math", "Fira Math")
 """Bundled families every stack ends in, for the glyphs its own families lack.
 
 Figtree has no Greek and Latin Modern has no subscripts; Plex covers Greek and
 most of the mathematical letters a caption reaches for, Liberation Sans the
-modifier letters (``ᵀ``) Plex does not, and Latin Modern Math the rest of
-mathematics: script, blackboard and fraktur capitals, and symbols such as
-``∇`` and ``∈``. All three always resolve, so a glyph missing from the
-author's family is still measured in the face that will draw it rather than
-rejected.
+modifier letters (``ᵀ``) Plex does not, and the two maths fonts the rest of
+mathematics: its italic letters, script, blackboard and fraktur capitals, and
+symbols such as ``∇`` and ``∈`` -- the one that suits the typography first (see
+``maths_family``). All always resolve, so a glyph missing from the author's
+family is still measured in the face that will draw it rather than rejected.
 """
+
+SERIF_MATHS = "Latin Modern Math"
+SANS_MATHS = "Fira Math"
+
+
+def maths_family(typography: TypographyStyle) -> str:
+    """The maths font a typography sets its formulas in: its own (``math_family``),
+    else Latin Modern Math beside a serif face and Fira Math beside any other, so a
+    formula's Greek, signs and brackets are drawn in the manner of its words."""
+
+    if typography.math_family:
+        return typography.math_family
+    return SERIF_MATHS if typography.generic == "serif" else SANS_MATHS
 
 
 MONO_FAMILIES = (
-    "JetBrains Mono", "Fira Code", "IBM Plex Mono", "SF Mono", "Menlo", "Consolas",
+    "IBM Plex Mono", "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas",
     "DejaVu Sans Mono", "Liberation Mono", "Courier New",
 )
-"""Monospace families tried, in order, for code when a typography names none."""
+"""Monospace families tried, in order, for code when a typography names none. The
+first is bundled, so code is set alike on every machine, in the sibling of the Plex
+Sans that sets what the words' face lacks."""
 
 
 class FontStack:
@@ -112,7 +245,11 @@ class FontStack:
     def __init__(self, typography: TypographyStyle) -> None:
         self.typography = typography
         maths = (typography.math_family,) if typography.math_family else ()
-        names = (typography.family, *maths, *typography.fallbacks, *DEFAULT_FALLBACKS)
+        # The maths font that suits the words comes before the other one.
+        chosen = maths_family(typography)
+        other = SERIF_MATHS if chosen != SERIF_MATHS else SANS_MATHS
+        tail = (*DEFAULT_FALLBACKS[:2], chosen, other)
+        names = (typography.family, *maths, *typography.fallbacks, *tail)
         primary = require_family(typography.family)
         families: list[tuple[FontFace, ...]] = [primary]
         seen = {primary[0].family.casefold()}
@@ -130,14 +267,21 @@ class FontStack:
         found is then named on the ``tspan`` that uses it, like any fallback.
         """
 
-        family = family_covering(characters)
-        if family is None:
-            return False
-        faces = family_faces(family)
-        if not faces or any(existing[0].family == faces[0].family for existing in self.families):
-            return False
-        self.families = (*self.families, faces)
-        return True
+        # A family for each script missing, not one for them all: Persian and Chinese
+        # missing together found Arial Unicode MS, which then set every later Chinese,
+        # Korean and Thai word in the deck, without bold.
+        adopted = False
+        for group in _by_script(characters):
+            family = family_covering(group) or family_covering(characters)
+            if family is None:
+                continue
+            faces = family_faces(family)
+            known = {existing[0].family for existing in self.families}
+            if not faces or faces[0].family in known:
+                continue
+            self.families = (*self.families, faces)
+            adopted = True
+        return adopted
 
     def face(self, weight: int, italic: bool, family: int = 0) -> FontFace:
         return select_face(self.families[family], weight, italic)
@@ -189,8 +333,6 @@ class FontStack:
         # Italic Greek the words' face lacks is TeX's, from the maths font -- a
         # fallback's italic θ may be drawn as ϑ, which is another letter in maths.
         maths = self.maths_index()
-        if maths is None:
-            maths = self.maths_index("Latin Modern Math")
         if maths is not None and italic:
             # TeX's italic Greek is the mathematical italic alphabet of the maths font.
             text = "".join(
@@ -199,12 +341,16 @@ class FontStack:
                 else ch
                 for ch in text
             )
-        for cluster in _clusters(text):
+        clusters = _clusters(text)
+        whole = self._whole_words(clusters, faces, loaded)
+        for position, cluster in enumerate(clusters):
             if cluster.isspace():
                 if pieces:
                     pieces[-1] = (pieces[-1][0], pieces[-1][1] + cluster)
                     continue
                 choice = 0
+            elif position in whole:
+                choice = whole[position]
             else:
                 covering = [
                     index
@@ -216,10 +362,12 @@ class FontStack:
                     covering[0] if covering else 0,
                 )
                 previous = faces.index(pieces[-1][0]) if pieces else 0
-                if choice > 0 and previous > 0 and previous in covering:
+                lettered = unicodedata.category(cluster[0])[0] in "LMNP"
+                if choice > 0 and previous > 0 and previous in covering and lettered:
                     # Outside the primary face, stay in the fallback already in
                     # use: a word in another script is set in one font, not a
-                    # mixture of every font that happens to have each glyph.
+                    # mixture of every font that happens to have each glyph. A
+                    # symbol (a check mark) takes the first face that has it.
                     choice = previous
             face = faces[choice]
             if pieces and pieces[-1][0] == face:
@@ -227,6 +375,37 @@ class FontStack:
             else:
                 pieces.append((face, cluster))
         return pieces
+
+    def _whole_words(
+        self, clusters: list[str], faces: list[FontFace], loaded: list[LoadedFace]
+    ) -> dict[int, int]:
+        """The face for each cluster of a word the primary face has only part of, in one
+        script (Vietnamese, which Figtree has some letters of): the first face that has
+        all of the word, so a word is set in one face rather than letter by letter."""
+
+        chosen: dict[int, int] = {}
+        start = 0
+        for end in range(len(clusters) + 1):
+            if end < len(clusters) and not clusters[end].isspace():
+                continue
+            word = clusters[start:end]
+            start = end + 1
+            if not word or all(all(loaded[0].has(ch) for ch in cluster) for cluster in word):
+                continue
+            scripts = {
+                unicodedata.name(cluster[0], "?").split()[0]
+                for cluster in word if unicodedata.category(cluster[0]).startswith("L")
+            }
+            if len(scripts) != 1:
+                continue
+            for index in range(1, len(loaded)):
+                if all(all(loaded[index].has(ch) for ch in cluster) for cluster in word) and all(
+                    _places_marks(faces[index], cluster) for cluster in word
+                ):
+                    for offset in range(len(word)):
+                        chosen[end - len(word) + offset] = index
+                    break
+        return chosen
 
     def maths_index(self, name: str | None = None) -> int | None:
         """Where the typography's maths family (or ``name``) sits in the stack, if it has one."""
@@ -244,12 +423,30 @@ class FontStack:
         )
 
     def missing(self, text: str, italic: bool) -> set[str]:
+        """The characters of ``text`` no family here draws. Invisible format characters
+        (a variation selector after ❤, a joiner) are never missing: they draw nothing."""
+
         loaded = [load_face(self.face(400, italic, index)) for index in range(len(self.families))]
         return {
             character
             for character in text
-            if not character.isspace() and not any(item.has(character) for item in loaded)
+            if not character.isspace() and not _ignorable(character)
+            and not any(item.has(character) for item in loaded)
         }
+
+
+_IGNORABLE = (
+    # Unicode's default ignorable code points: drawn as nothing when a face lacks them.
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+def _ignorable(character: str) -> bool:
+    code = ord(character)
+    return any(low <= code <= high for low, high in _IGNORABLE)
 
 
 _MATH_ITALIC = {
@@ -301,6 +498,22 @@ def _places_marks(face: FontFace, cluster: str) -> bool:
     )
 
 
+def _by_script(characters: set[str]) -> list[set[str]]:
+    """``characters`` grouped by the script their Unicode names begin with (CJK, ARABIC,
+    HANGUL, THAI...); symbols with no script, each a group with what precedes it."""
+
+    import unicodedata
+
+    groups: dict[str, set[str]] = {}
+    for character in sorted(characters):
+        try:
+            script = unicodedata.name(character).split()[0]
+        except ValueError:
+            script = "?"
+        groups.setdefault(script, set()).add(character)
+    return list(groups.values())
+
+
 @cache
 def font_stack(typography: TypographyStyle) -> FontStack:
     return FontStack(typography)
@@ -349,16 +562,18 @@ def drawn_weight(run: TextRun, inherited: int | None) -> int:
     ``TextRun`` default emits no ``font-weight``, so it comes out at whatever the
     ``<text>`` element around it declares; one that names a weight overrides it.
     Measuring through the same rule is what keeps a reserved band the width of
-    the words that land in it.
+    the words that land in it. Maths set as words (``TextRun.maths``) inherits
+    nothing: it is set at its own weight, as a formula is.
     """
 
-    if inherited is None or run.weight != DEFAULT_RUN_WEIGHT:
+    if inherited is None or run.weight != DEFAULT_RUN_WEIGHT or run.maths:
         return run.weight
     return inherited
 
 
 def formula_of(run: TextRun, typography: TypographyStyle, inherited: int | None = None):
-    """The formula a maths run (``TextRun.math``) is set as, at the size its words would be."""
+    """The formula a maths run (``TextRun.math``) is set as, at the size its words would be.
+    The weight of the words is its ``\\text``'s; its maths is regular whatever it is."""
 
     from flexo.texmath import typeset
 
@@ -519,6 +734,8 @@ class TextMeasurer:
             line_height=line_height,
             lines=measured_lines,
             cap_height=cap,
+            rise=rise,
+            fall=fall,
         )
 
     def mark_width(self, mark: str, italic: bool = False) -> float:
@@ -569,7 +786,9 @@ class TextMeasurer:
         wrapped = self._wrap_line(line, max_width, weight, break_words)
         if len(wrapped) < 2 or max_width is None:
             return wrapped
-        low, high = 0.0, max_width
+        # Never narrower than its widest word: evened out, a line would break a word
+        # ("Colum / n") that fits whole.
+        low, high = min(self._widest_word(line, weight), max_width), max_width
         for _ in range(12):
             middle = (low + high) / 2.0
             if len(self._wrap_line(line, middle, weight, break_words)) <= len(wrapped):
@@ -577,6 +796,32 @@ class TextMeasurer:
             else:
                 low = middle
         return self._wrap_line(line, high, weight, break_words)
+
+    def _widest_word(self, line: tuple[TextRun, ...], weight: int | None) -> float:
+        """The widest stretch of the line between spaces (runs that touch are one word)."""
+
+        widest, word = 0.0, []
+        for run in line:
+            if run.math:
+                word.append(run)
+                continue
+            for token in _TOKEN_PATTERN.findall(run.text):
+                if token.isspace() and not any(ch in NO_BREAK for ch in token):
+                    if word:
+                        widest = max(widest, self.line_width(tuple(word), weight))
+                    word = []
+                elif len(units := _cjk_units(token)) > 1:
+                    # Each unit of Chinese or Japanese is a word of its own.
+                    for unit in units[:-1]:
+                        word.append(replace(run, text=unit))
+                        widest = max(widest, self.line_width(tuple(word), weight))
+                        word = []
+                    word.append(replace(run, text=units[-1]))
+                else:
+                    word.append(replace(run, text=token))
+        if word:
+            widest = max(widest, self.line_width(tuple(word), weight))
+        return widest
 
     def _wrap_line(
         self,
@@ -587,9 +832,13 @@ class TextMeasurer:
     ) -> tuple[tuple[TextRun, ...], ...]:
         if max_width is None or max_width <= 0.0:
             return (line,)
-        wrapped: list[tuple[TextRun, ...]] = []
-        current: list[TextRun] = []
-        current_width = 0.0
+        max_width += _ROUNDING
+        # Each token with its width, whether it is a space, and whether a line may break
+        # before it: after a space, between the pieces of a formula TeX breaks, or inside
+        # a word too long for any line -- never where two runs touch (a subscript, a
+        # comma after a formula, a bold word's last letter), which read as one word.
+        items: list[tuple[TextRun, float, bool, bool]] = []
+        after_space = True
         for run in line:
             if run.math:
                 # A formula wider than the line breaks where TeX would break it, after a
@@ -600,28 +849,59 @@ class TextMeasurer:
                     from flexo.texmath import breakable
 
                     pieces = breakable(run.math)
-                token_runs = [replace(run, math=piece) for piece in pieces]
-            else:
-                tokens = _TOKEN_PATTERN.findall(run.text)
-                if break_words:
-                    tokens = [
-                        piece
-                        for token in tokens
-                        for piece in self._pieces(replace(run, text=token), max_width, weight)
-                    ]
-                token_runs = [replace(run, text=token) for token in tokens]
-            for token_run in token_runs:
-                token = token_run.text
-                token_width = self._shape_run(token_run, weight)
-                is_space = token.isspace()
-                if current and not is_space and current_width + token_width > max_width:
-                    wrapped.append(_trim_and_merge(current))
-                    current = []
-                    current_width = 0.0
-                if not current and is_space:
+                for index, piece in enumerate(pieces):
+                    token_run = replace(run, math=piece)
+                    width = self._shape_run(token_run, weight)
+                    items.append((token_run, width, False, after_space or index > 0))
+                after_space = False
+                continue
+            for token in _TOKEN_PATTERN.findall(run.text):
+                if token.isspace():
+                    token_run = replace(run, text=token)
+                    items.append((token_run, self._shape_run(token_run, weight), True, True))
+                    after_space = True
                     continue
-                current.append(token_run)
-                current_width += token_width
+                word = replace(run, text=token)
+                units = _cjk_units(token)
+                if len(units) > 1:
+                    pieces = units  # Chinese and Japanese break between characters
+                else:
+                    pieces = self._pieces(word, max_width, weight) if break_words else [token]
+                for index, piece in enumerate(pieces):
+                    token_run = replace(run, text=piece)
+                    width = self._shape_run(token_run, weight)
+                    items.append((token_run, width, False, after_space or index > 0))
+                after_space = False
+        units: list[list[tuple[TextRun, float, bool, bool]]] = []
+        for item in items:
+            if item[2] or item[3] or not units or units[-1][0][2]:
+                units.append([item])
+            else:
+                units[-1].append(item)
+        wrapped: list[tuple[TextRun, ...]] = []
+        current: list[TextRun] = []
+        current_width = 0.0
+        for unit in units:
+            width = sum(item[1] for item in unit)
+            if unit[0][2]:  # a space: kept between words, dropped at the start of a line
+                if current:
+                    current.append(unit[0][0])
+                    current_width += width
+                continue
+            if current and current_width + width > max_width:
+                wrapped.append(_trim_and_merge(current))
+                current, current_width = [], 0.0
+            if width > max_width and len(unit) > 1:
+                # Runs glued into one word wider than any line: broken between them.
+                for token_run, token_width, _, _ in unit:
+                    if current and current_width + token_width > max_width:
+                        wrapped.append(_trim_and_merge(current))
+                        current, current_width = [], 0.0
+                    current.append(token_run)
+                    current_width += token_width
+                continue
+            current.extend(item[0] for item in unit)
+            current_width += width
         wrapped.append(_trim_and_merge(current))
         return tuple(wrapped)
 
@@ -635,15 +915,25 @@ class TextMeasurer:
             if self._shape_run(replace(run, text=part), weight) <= max_width:
                 pieces.append(part)
                 continue
-            current = ""
-            for character in part:
-                longer = replace(run, text=current + character)
-                if current and self._shape_run(longer, weight) > max_width:
-                    pieces.append(current)
-                    current = ""
-                current += character
-            if current:
-                pieces.append(current)
+            start = 0
+            while start < len(part):
+                # The longest piece from here that fits (a character at least): found by
+                # doubling, then halving, so a word of a million letters is not shaped
+                # a letter longer at a time.
+                def fits(count: int, start: int = start, part: str = part) -> bool:
+                    piece = replace(run, text=part[start : start + count])
+                    return self._shape_run(piece, weight) <= max_width
+
+                remaining = len(part) - start
+                good, probe = 1, 2
+                while probe <= remaining and fits(probe):
+                    good, probe = probe, probe * 2
+                bad = min(probe, remaining + 1)
+                while bad - good > 1:
+                    middle = (good + bad) // 2
+                    good, bad = (middle, bad) if fits(middle) else (good, middle)
+                pieces.append(part[start : start + good])
+                start += good
         return pieces
 
     def _validate_glyphs(self, runs: tuple[TextRun, ...]) -> None:
@@ -696,7 +986,8 @@ def _trim_and_merge(runs: list[TextRun]) -> tuple[TextRun, ...]:
             merged[-1].code,
             merged[-1].link,
             merged[-1].color,
-        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color):
+            merged[-1].maths,
+        ) == (run.weight, run.italic, run.baseline_shift, run.code, run.link, run.color, run.maths):
             merged[-1] = replace(merged[-1], text=merged[-1].text + run.text)
         else:
             merged.append(run)

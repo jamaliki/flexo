@@ -138,6 +138,10 @@ class TextRun:
     """LaTeX maths set in two dimensions (``flexo.texmath``): a fraction, a radical, a
     matrix. The run is measured and drawn as that formula, and ``text`` is only what it
     reads as in plain words. Empty for words, and for maths set as words (``x_t``)."""
+    maths: bool = False
+    """Maths set as words (``x_t``): at its own weight, not the text's around it. Bold
+    is a meaning in maths (a vector), and a maths font has no bold, so a bold heading's
+    maths stays regular -- all of it, as LaTeX sets it -- unless it asks (``\\mathbf``)."""
 
 
 @dataclass(frozen=True, slots=True)

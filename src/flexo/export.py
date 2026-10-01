@@ -91,17 +91,81 @@ def export_outputs(
 
 
 def rasterise(svg_text: str, dpi: float = 192.0) -> bytes:
-    """PNG bytes of an SVG, drawn by resvg; text is best given as outlines."""
+    """PNG bytes of an SVG, drawn by resvg; text is best given as outlines. An SVG placed
+    in it as a picture is drawn first, with the fonts (resvg draws a picture's text
+    without them, so it vanished); a picture much enlarged shows its pixels."""
 
     import resvg_py
 
-    return bytes(
-        resvg_py.svg_to_bytes(
-            svg_string=svg_text,
-            font_dirs=[str(directory) for directory in font_directories()],
-            dpi=dpi,
-        )
-    )
+    fonts = [str(directory) for directory in font_directories()]
+    if "data:image/svg+xml;base64," in svg_text:
+        svg_text = _pictures_drawn(svg_text, dpi, fonts)
+    if "<image" in svg_text:
+        svg_text = _pixels_shown(svg_text, dpi)
+    return bytes(resvg_py.svg_to_bytes(svg_string=svg_text, font_dirs=fonts, dpi=dpi))
+
+
+def _pixels_shown(svg_text: str, dpi: float) -> str:
+    """Each PNG or JPEG drawn at twice its pixels or more, drawn in its pixels rather than
+    smoothed: a PDF viewer draws it so, and a 16-pixel icon or a plot's coarse image
+    (``imshow``) is then the same in the PNG as in the PDF, not a blur."""
+
+    import re
+
+    from flexo.drawing import _length
+    from flexo.pdf import _decode, _pixel_size
+
+    root = re.search(r"<svg\b[^>]*>", svg_text)
+    if root is None:
+        return svg_text
+    view = re.search(r'\bviewBox="([^"]*)"', root.group(0))
+    width = re.search(r'\bwidth="([^"]*)"', root.group(0))
+    span = [float(value) for value in re.split(r"[ ,]+", view.group(1).strip())][2] if view else 0.0
+    points = _length(width.group(1)) if width else span
+    # Device pixels per unit of the drawing, as resvg sizes the page at ``dpi``.
+    scale = points / 72.0 * dpi / span if span else dpi / 72.0
+
+    def shown(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        mime, data = _decode(match.group(1))
+        size = _pixel_size(mime, data) if mime else None
+        box = [re.search(rf'\b{name}="([\d.]+)', tag) for name in ("width", "height")]
+        if size is None or None in box or "image-rendering" in tag:
+            return tag
+        across, down = (float(found.group(1)) for found in box if found)
+        if min(across / size[0], down / size[1]) * scale < 2.0:
+            return tag
+        return tag.replace("<image", '<image image-rendering="optimizeSpeed"', 1)
+
+    pictures = r'<image\b[^>]*?href="(data:image/(?:png|jpeg);base64,[^"]+)"[^>]*>'
+    return re.sub(pictures, shown, svg_text)
+
+
+def _pictures_drawn(svg_text: str, dpi: float, fonts: list[str]) -> str:
+    """Each SVG picture in ``svg_text`` as a PNG, at the resolution it is drawn at."""
+
+    import base64
+    import re
+
+    import resvg_py
+
+    def drawn(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        size = re.search(r'\bwidth="([\d.]+)', tag)
+        nested = base64.b64decode(match.group(2)).decode("utf-8", "replace")
+        # Twice the pixels it covers, so it stays sharp when the slide is enlarged.
+        scale = dpi / 72.0 * 2.0 * (float(size.group(1)) if size else 300.0)
+        try:
+            png = bytes(
+                resvg_py.svg_to_bytes(svg_string=nested, font_dirs=fonts, width=max(int(scale), 1))
+            )
+        except Exception:  # a picture resvg cannot draw is left as it was
+            return tag
+        encoded = "data:image/png;base64," + base64.b64encode(png).decode()
+        return tag.replace(match.group(1), encoded)
+
+    pictures = r'<image\b[^>]*?href="(data:image/svg\+xml;base64,([A-Za-z0-9+/=]+))"[^>]*>'
+    return re.sub(pictures, drawn, svg_text)
 
 
 @dataclass(frozen=True, slots=True)

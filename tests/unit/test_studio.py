@@ -770,3 +770,56 @@ def test_the_page_merges_as_the_server_does() -> None:
     merged, equal = json.loads(result.stdout)
     assert merged == [merge3(*case) for case in cases]
     assert equal == [True, True, False, False, False, False, False]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    model = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "column"}, "children": ["bench", "analysis"]},
+            {"id": "bench", "layout": {"kind": "row"}, "children": ["a", "b", "c"]},
+            {"id": "analysis", "layout": {"kind": "row"}, "children": ["d", "e"]},
+        ],
+    }
+    boxes = {
+        "root": [0, 0, 300, 130],
+        "bench": [0, 0, 300, 50],
+        "a": [10, 10, 60, 40],
+        "b": [110, 10, 160, 40],
+        "c": [210, 10, 260, 40],
+        "analysis": [0, 80, 200, 130],
+        "d": [10, 90, 60, 120],
+        "e": [110, 90, 160, 120],
+    }
+    drags = [
+        ["c", 5, 25],  # before the first of its row
+        ["c", 85, 25],  # between a and b
+        ["d", 290, 25],  # into the row above, at its end
+        ["a", 150, -20],  # out of its row, above it
+        ["e", 500, 500],  # far from the figure: nowhere
+        ["bench", 100, 25],  # a group over itself: where it is
+    ]
+    code = (
+        f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(model)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+        "  if (!place) return null;\n"
+        "  return { parent: place.parent, index: place.index, stays: stays(model, place, id) };\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        {"parent": "bench", "index": 0, "stays": False},
+        {"parent": "bench", "index": 1, "stays": False},
+        {"parent": "bench", "index": 3, "stays": False},
+        {"parent": "root", "index": 0, "stays": False},
+        None,
+        {"parent": "root", "index": 0, "stays": True},
+    ]

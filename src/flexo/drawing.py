@@ -490,21 +490,24 @@ def _transformed(item, matrix: Matrix):
         )
     if isinstance(item, Text):
         x, _ = _map(matrix, (item.x, 0.0))
-        lines = tuple(
-            Line(
-                _map(matrix, (0.0, line.baseline))[1],
-                tuple(
-                    replace(
-                        run,
-                        x=_map(matrix, (run.x, 0.0))[0],
-                        baseline=_map(matrix, (0.0, run.baseline))[1],
-                        width=run.width * scale,
-                        size=run.size * scale,
-                        shift=run.shift * scale,
-                    )
-                    for run in line.runs
-                ),
+
+        def moved(runs: tuple[Run, ...]) -> tuple[Run, ...]:
+            return tuple(
+                replace(
+                    run,
+                    x=_map(matrix, (run.x, 0.0))[0],
+                    baseline=_map(matrix, (0.0, run.baseline))[1],
+                    width=run.width * scale,
+                    size=run.size * scale,
+                    shift=run.shift * scale,
+                )
+                for run in runs
             )
+
+        # The runs in reading order move with those on the page: a right-to-left line
+        # written to a slide program is written as it reads.
+        lines = tuple(
+            Line(_map(matrix, (0.0, line.baseline))[1], moved(line.runs), moved(line.logical))
             for line in item.lines
         )
         pivot = _map(matrix, item.pivot) if item.angle else item.pivot

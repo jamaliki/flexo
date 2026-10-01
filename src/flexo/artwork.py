@@ -36,6 +36,9 @@ from flexo.units import NUMBER_PATTERN, POINTS_PER_UNIT
 SVG_SUFFIXES = frozenset({".svg"})
 PNG_SUFFIXES = frozenset({".png"})
 JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
+PAGE_SUFFIXES = frozenset({".pdf", ".ai"})
+"""A PDF's page, and an Illustrator file's artboard (an Illustrator file is a PDF with
+Illustrator's own data beside it): read as the vectors they are (``flexo.pdfart``)."""
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -71,13 +74,19 @@ class Artwork:
     """Sanitized, id-prefixed ``<svg>`` markup (SVG artwork only)."""
     stamp: int = 0
     """When the file last changed (nanoseconds): its bytes are read only when wanted."""
+    upright: bool = False
+    """A JPEG to be redrawn before it is placed: turned by its EXIF orientation (a phone
+    photograph), or in CMYK, which a drawing's viewers show wrong or black."""
 
     @property
     def data_uri(self) -> str:
-        """Base64 ``data:`` URI of the original bytes (PNG and JPEG artwork only)."""
+        """Base64 ``data:`` URI of the bytes (PNG and JPEG artwork only): the file's own,
+        or, for a turned or CMYK JPEG, the photograph upright and in RGB."""
 
         if self.format not in {"png", "jpeg"}:
             return ""
+        if self.upright:
+            return _upright_uri(str(self.path), self.stamp)
         return _data_uri(str(self.path), self.stamp, self.format)
 
     @property
@@ -104,6 +113,42 @@ def picture_href(artwork: Artwork) -> str:
     if link is not None and artwork.format in {"png", "jpeg"}:
         return link(artwork)
     return artwork.data_uri
+
+
+@lru_cache(maxsize=8)
+def _upright_uri(resolved: str, stamp: int) -> str:
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # Pillow is optional: without it, the photograph as it is
+        return _data_uri(resolved, stamp, "jpeg")
+    from io import BytesIO
+
+    with Image.open(resolved) as image:
+        turned = ImageOps.exif_transpose(image).convert("RGB")
+    buffer = BytesIO()
+    turned.save(buffer, format="JPEG", quality=92)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _jpeg_orientation(segment: bytes) -> int:
+    """The EXIF orientation (1 to 8) an APP1 segment holds, or 1."""
+
+    if not segment.startswith(b"Exif\x00\x00") or len(segment) < 14:
+        return 1
+    tiff = segment[6:]
+    order = "<" if tiff[:2] == b"II" else ">"
+    try:
+        (offset,) = struct.unpack(order + "I", tiff[4:8])
+        (count,) = struct.unpack(order + "H", tiff[offset : offset + 2])
+        for entry in range(count):
+            at = offset + 2 + entry * 12
+            tag, kind, _, value = struct.unpack(order + "HHI4s", tiff[at : at + 12])
+            if tag == 0x0112 and kind == 3:
+                (orientation,) = struct.unpack(order + "H", value[:2])
+                return orientation if 1 <= orientation <= 8 else 1
+    except struct.error:
+        return 1
+    return 1
 
 
 @lru_cache(maxsize=8)
@@ -136,15 +181,16 @@ def node_artwork(spec: NodeSpec) -> Artwork:
 def load_artwork(node_id: str, source: str) -> Artwork:
     """Load ``source`` for ``node_id``. Relative paths resolve against the cwd."""
 
-    path = Path(source).expanduser()
+    path, page = _page_of(Path(source).expanduser())
     suffix = path.suffix.lower()
-    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES:
+    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES | PAGE_SUFFIXES:
         raise _error(
             "image.source.unsupported",
             node_id,
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
-            hint="Embed an .svg file for vector artwork, or a .png or .jpg file for a render.",
+            hint="Embed an .svg, .pdf or Illustrator (.ai) file for vector artwork, "
+            "or a .png or .jpg file for a render.",
         )
     if outside(path):
         raise _error(
@@ -165,7 +211,58 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             hint="Absolute paths are the reliable choice; relative ones resolve "
             "against the working directory the figure is compiled in.",
         ) from exc
+    if suffix in PAGE_SUFFIXES:
+        return _page_artwork(node_id, str(path.resolve()), page, stat.st_mtime_ns)
     return _load(node_id, str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def _page_of(path: Path) -> tuple[Path, int]:
+    """A PDF or Illustrator file and the page (artboard) of it named: ``art.ai#2`` is the
+    second artboard -- unless a file is called that."""
+
+    name, mark, number = path.name.rpartition("#")
+    if mark and number.isdigit() and int(number) >= 1 and not path.exists():
+        whole = path.with_name(name)
+        if whole.suffix.lower() in PAGE_SUFFIXES:
+            return whole, int(number)
+    return path, 1
+
+
+@lru_cache(maxsize=32)
+def _page_artwork(node_id: str, resolved: str, page: int, stamp: int) -> Artwork:
+    """A PDF's page, or an Illustrator file's artboard, as SVG artwork: its shapes and
+    words as vectors, what SVG cannot draw as it does as pictures (``flexo.pdfart``)."""
+
+    from flexo.pdfart import PdfArtError, is_pdf, read_page
+
+    path = Path(resolved)
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(1024)
+    except OSError as exc:
+        raise _error(
+            "image.source.unreadable",
+            node_id,
+            path,
+            f"Cannot read the artwork file ({exc.strerror or exc}).",
+        ) from exc
+    if not is_pdf(head):
+        if path.suffix.lower() == ".ai":
+            raise _error(
+                "image.ai.private",
+                node_id,
+                path,
+                "This Illustrator file was saved without its PDF, so only Illustrator can read it.",
+                hint='In Illustrator, choose File > Save As and tick "Create PDF Compatible File" '
+                "(or export the artboard as SVG or PDF).",
+            )
+        raise _error("image.pdf.invalid", node_id, path, "The file does not begin as a PDF does.")
+    try:
+        # An Illustrator file shows its art, as Illustrator exports it; a PDF, its page.
+        art = read_page(resolved, page, stamp, art=path.suffix.lower() == ".ai")
+    except PdfArtError as exc:
+        raise _error("image.pdf.unreadable", node_id, path, str(exc), hint=exc.hint) from None
+    return _svg_artwork(node_id, path, art.markup.encode("utf-8"))
 
 
 HEADER = 1 << 20
@@ -224,18 +321,24 @@ def _jpeg_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artw
 
     index = 2
     size: tuple[int, int] | None = None
+    orientation, components = 1, 3
     while data.startswith(b"\xff\xd8") and index + 9 < len(data):
         if data[index] != 0xFF:
             break
         marker = data[index + 1]
         length = struct.unpack(">H", data[index + 2 : index + 4])[0]
+        if marker == 0xE1 and orientation == 1:
+            orientation = _jpeg_orientation(data[index + 4 : index + 2 + length])
         if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
             height, width = struct.unpack(">HH", data[index + 5 : index + 9])
+            components = data[index + 9]
             size = (width, height)
             break
         index += 2 + length
     if size is None:
         raise _error("image.jpeg.invalid", node_id, path, "The file is not a readable JPEG.")
+    if orientation >= 5:  # turned a quarter: it stands the other way up
+        size = (size[1], size[0])
     scale = POINTS_PER_UNIT["px"]
     return Artwork(
         node_id,
@@ -244,6 +347,7 @@ def _jpeg_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artw
         float(size[0]) * scale,
         float(size[1]) * scale,
         stamp=stamp,
+        upright=orientation != 1 or components == 4,
     )
 
 

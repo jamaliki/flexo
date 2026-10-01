@@ -279,6 +279,16 @@ def bundled_font_css(url: Callable[[int, FontFace], str]) -> str:
     return "\n".join(rules)
 
 
+def _css_weight(value: str | None, inherited: int) -> int:
+    """A CSS font weight (``700``, ``bold``, ``normal``), from an SVG anyone may have
+    written; what it does not say is the weight it inherits."""
+
+    value = (value or "").strip().lower()
+    if value.isdigit():
+        return int(value)
+    return {"normal": 400, "bold": 700, "bolder": 700, "lighter": 300}.get(value, inherited)
+
+
 def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) -> None:
     """Embed the bundled faces the figure uses, cut down to the characters it uses.
 
@@ -295,7 +305,7 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
     for item in root.iter():
         if local_name(item.tag) != "text":
             continue
-        weight = int(item.get("font-weight") or 400)
+        weight = _css_weight(item.get("font-weight"), 400)
         italic = item.get("font-style") == "italic"
         characters.update(item.text or "")
         styles.add((weight, italic))
@@ -305,7 +315,7 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
             characters.update(span.text or "")
             styles.add(
                 (
-                    int(span.get("font-weight") or weight),
+                    _css_weight(span.get("font-weight"), weight),
                     span.get("font-style", "italic" if italic else "") == "italic",
                 )
             )

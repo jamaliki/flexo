@@ -1,6 +1,6 @@
 ---
 name: flexo
-description: Make publication-quality, editable scientific figures in Python or YAML with flexo -- neural-network architectures, pipelines, flowcharts, graphical models, and biology (genetic constructs, plasmid maps, protein domain maps, phylogenetic trees, well plates, protocol timelines, pathways with SBGN arrows, molecular structures drawn by hand). Use when asked to draw or reproduce a model diagram, block diagram, flowchart, state machine, Bayesian network, pathway, construct, or any boxes-and-arrows figure for a paper, poster, or slide, or to work on figures in flexo studio.
+description: Make publication-quality, editable scientific figures in Python or YAML with flexo -- neural-network architectures, pipelines, flowcharts, graphical models, and biology (genetic constructs, plasmid maps, protein domain maps, phylogenetic trees, well plates, protocol timelines, pathways with SBGN arrows, molecular structures drawn by hand), and grids of cells (plate maps, heatmaps, generated artwork). Use when asked to draw or reproduce a model diagram, block diagram, flowchart, state machine, Bayesian network, pathway, construct, or any boxes-and-arrows figure for a paper, poster, or slide, or to work on figures in flexo studio.
 ---
 
 # Making figures with flexo
@@ -99,6 +99,15 @@ gene, per domain, per condition), and has ports where arrows belong.
   pitch=, cartoon=, sticks=, surface=, site=)`: a molecule drawn by hand by
   mol-sketch (the `molecules` extra); a chain can take the tone of its domain.
 
+**Grids**: `cells(id, grid, key, ...)` draws a grid written as text, one row per
+line and one symbol per word (`.` empty), or rows of values -- a plate map, a
+heatmap, a board. `key={"C": {"label": "Control"}, "K": "#262422", "Y": {"color":
+"#f1bf24", "mark": "з"}}`: a colour is a tone name or an exact `#hex`; a symbol
+not in the key takes a tone by its name. Numbers are shaded on
+`ramp=("#lo", "#hi")` (`values=True` writes them). `cell=`, `gap=`, `corner=`,
+`lines="muted"`, `row_labels`/`column_labels="numbers"|"letters"|[names]`,
+`row_side`, `column_side`. `examples/jensen.py` is a generated artwork with it.
+
 **Pathways and reactions**: `connect(a, b, head="inhibition")` (⊣), `"catalysis"`,
 `"stimulation"`, `"necessary"`, `"modulation"` (SBGN heads);
 `arrow="reversible"` draws ⇌ with `label=` over and `back_label=` under;
@@ -141,7 +150,8 @@ breaks a line; long labels wrap on their own.
   (hand-drawn), `classic`. `flexo themes` lists them with palettes and fonts.
 - `palette=` a name (`"Deep Sea Harvest"`) or a list of hex colours; `font=`
   any installed family. SVGs are transparent; `background=True` paints the page.
-- `sketch=True` (or `{"roughness": 0.3, "fill": "hatch"}`) draws any theme by hand.
+- `sketch=True` (or `{"roughness": 0.3, "fill": "hatch"}`) draws any theme by hand;
+  fills are `wash` (watercolour), `hatch`, `solid`, `gouache` (opaque, brushed), `none`.
 - `conventions={"branch": "dot", "merge": "plain", "arrivals": "joined",
   "lines": "straight", "pin_spread": 0.8}` sets how lines meet. `pin_spread`
   is the middle share of a side that arrows sharing it are spread over (two at
@@ -193,4 +203,5 @@ the studio reads and writes only inside the folder.
 `docs/guide.md` (every component and option), `docs/routing.md` (how lines are
 routed), `README.md` (biology components, the studio), `examples/literature.py`
 (79 figures from papers to copy from), `examples/genetics.py`,
-`examples/biology.py` and `examples/lab_figures.py` (biology to copy from).
+`examples/biology.py` and `examples/lab_figures.py` (biology to copy from),
+`examples/cells.py` and `examples/jensen.py` (grids).

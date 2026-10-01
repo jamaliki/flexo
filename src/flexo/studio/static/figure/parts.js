@@ -11,9 +11,16 @@
 //   box(id)                 where a part is drawn, in the overlay's pixels;
 //   overlay                 the positioned element the words-on-the-drawing box sits in;
 //   changed()               what is chosen, or the figure, changed: draw again;
+//   settled()               the parts have landed where they are drawn: mark them again;
+//
+// Parts are dragged on the drawing to another place in their row, column or grid,
+// or into another group (pointerdown); and an edit that moves parts lands smoothly:
+// the host takes landing() before it puts the new drawing in and gives it to land()
+// after, and each part slides from where it was to where it is.
 //   chooseFile({ title, types }), focus(where), nothing()  (the panel when nothing is chosen).
 
 import { h, clear, icon, ui, menu, popover, closeMenu, toast, readable } from "/static/studio/studio.js";
+import { dropPlace, stays } from "/static/kinds/figure/drop.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -46,6 +53,7 @@ export const GLYPHS = {
   wellplate: "M2.5 3.5h11v9h-11zM5 6h.01M8 6h.01M11 6h.01M5 10h.01M8 10h.01M11 10h.01",
   timeline: "M1.5 8h13M4 8a1 1 0 100 .1M8 8a1 1 0 100 .1M12 8a1 1 0 100 .1M4 11.5h8",
   structure: "M2 11c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
+  cells: "M2.5 2.5h3v3h-3zM9.5 2.5h3v3h-3zM6 6h3v3H6zM2.5 9.5h3v3h-3zM9.5 9.5h3v3h-3z",
   row: "M1.5 5h3.5v6H1.5zM6.25 5h3.5v6h-3.5zM11 5h3.5v6H11z",
   column: "M4.5 1.5h7v3.5h-7zM4.5 6.25h7v3.5h-7zM4.5 11h7v3.5h-7z",
   grid: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
@@ -96,7 +104,7 @@ export function figureParts(host) {
   }
   const catalog = host.catalog;
   const parts = catalog.parts;
-  const state = { model: null, selected: [], connecting: null, chain: true };
+  const state = { model: null, selected: [], connecting: null, chain: true, landing: 0, swallow: false };
 
   // -- the figure as its file writes it --
   const model = () => state.model;
@@ -137,13 +145,14 @@ export function figureParts(host) {
   // -- edits, one at a time --
   const queue = [];
   let running = false;
-  function act(action, { merge = null, select: choose = true, then = null } = {}) {
+  const LANDS = new Set(["move", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
+  function act(action, { merge = null, select: choose = true, then = null, failed = null } = {}) {
     // Typing in one field: only its latest words wait to be sent.
     if (merge) {
       const waiting = queue.findIndex((job) => job.merge === merge);
       if (waiting >= 0) queue.splice(waiting, 1);
     }
-    queue.push({ action, merge, choose, then });
+    queue.push({ action, merge, choose, then, failed });
     run();
   }
   async function run() {
@@ -157,9 +166,12 @@ export function figureParts(host) {
           result = await host.run(job.action, { merge: job.merge });
         } catch (error) {
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
+          job.failed?.();
           continue;
         }
-        if (!result) continue;
+        if (!result) { job.failed?.(); continue; }
+        // The drawing that comes after an edit that moves parts lands smoothly.
+        if (LANDS.has(job.action.do)) state.landing = Date.now();
         if (result.model) setModel(result.model);
         if (job.choose && result.select?.length) select(result.select);
         job.then?.(result);
@@ -315,6 +327,7 @@ export function figureParts(host) {
     return around(event);
   }
   function click(event) {
+    if (state.swallow) { state.swallow = false; return; }  // the end of a drag, not a click
     const id = idAt(event);
     if (state.connecting) { if (id) connectTo(id); return; }
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
@@ -329,6 +342,266 @@ export function figureParts(host) {
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
+  }
+
+  // -- dragging a part to another place --
+  // A part pressed and moved follows the pointer, lifted; a line between the parts it
+  // would go between shows where it lands, gliding as the pointer goes, the group it
+  // would join outlined and the parts either side of the line parted for it. Let go,
+  // it is moved there (the server writes it into the file) and the drawing that comes
+  // back lands smoothly (land); Esc, or letting go where it was, sends it home.
+  let drag = null;
+  const SVG = (element) => element?.ownerSVGElement || element;
+  const unitsPerPixel = (element) => 1 / ((element?.parentNode?.getScreenCTM?.() || SVG(element)?.getScreenCTM?.())?.a || 1);
+  const centre = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
+  // What is drawn of a part: a group's frame and everything it holds -- each element
+  // once, the outermost, as a framed group draws its parts inside itself.
+  function elementsOf(id) {
+    const found = [];
+    const walk = (at) => {
+      const element = host.element(at);
+      if (element) found.push(element);
+      for (const child of groupOf(at)?.children || []) walk(child);
+    };
+    walk(id);
+    return found.filter((element) => !found.some((other) => other !== element && other.contains(element)));
+  }
+  function boxOf(id, boxes) {
+    if (boxes.has(id)) return boxes.get(id);
+    let box = null;
+    // A part's drawing; a group's frame and label, if it has them, and what it holds.
+    const drawn = host.element(id)?.getBoundingClientRect();
+    if (drawn && (drawn.width || drawn.height)) box = { left: drawn.left, top: drawn.top, right: drawn.right, bottom: drawn.bottom };
+    for (const child of groupOf(id)?.children || []) {
+      const inner = boxOf(child, boxes);
+      if (!inner) continue;
+      box = box ? { left: Math.min(box.left, inner.left), top: Math.min(box.top, inner.top),
+        right: Math.max(box.right, inner.right), bottom: Math.max(box.bottom, inner.bottom) } : { ...inner };
+    }
+    boxes.set(id, box);
+    return box;
+  }
+  function inside(id, ancestor) {
+    for (let at = id; at; at = parentOf(at)?.id) if (at === ancestor) return true;
+    return false;
+  }
+
+  function pointerdown(event) {
+    if (event.button !== 0 || state.connecting || inline || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    const id = idAt(event);
+    if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
+    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
+    window.addEventListener("pointermove", dragMove);
+    window.addEventListener("pointerup", dragEnd);
+    window.addEventListener("pointercancel", dragCancel);
+    window.addEventListener("keydown", dragKey, true);
+  }
+
+  function dragStart() {
+    const id = drag.id;
+    const boxes = new Map();
+    window.getSelection?.()?.removeAllRanges();
+    // Where every part is now, and every group's room, from the drawing as it stands.
+    for (const group of model().groups) boxOf(group.id, boxes);
+    for (const node of model().nodes) boxOf(node.id, boxes);
+    const moving = elementsOf(id).map((element) => ({ element, base: element.getAttribute("transform") || "", scale: unitsPerPixel(element) }));
+    const nodes = new Set(model().nodes.filter((node) => inside(node.id, id)).map((node) => node.id));
+    const touches = (ref) => nodes.has(nodeOfRef(ref));
+    const lines = [...model().edges.filter((edge) => touches(edge.from) || touches(edge.to)),
+      ...model().nets.filter((net) => [...(net.sources || []), ...(net.targets || [])].some(touches))]
+      .map((line) => host.element(line.id)).filter((element) => element && !moving.some((item) => item.element.contains(element)));
+    const indicator = h("div.fig-drop-line");
+    const zone = h("div.fig-drop-zone");
+    host.overlay.append(zone, indicator);
+    host.overlay.classList.add("fig-dragging");
+    document.body.classList.add("fig-grabbing");
+    for (const { element } of moving) element.classList.add("fig-lifted");
+    for (const element of lines) element.classList.add("fig-faded");
+    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [] });
+    select([id], { reveal: false });
+  }
+
+  function dragMove(event) {
+    if (!drag) return;
+    drag.pointer = { x: event.clientX, y: event.clientY };
+    if (!drag.started) {
+      if (Math.hypot(event.clientX - drag.from.x, event.clientY - drag.from.y) < 4) return;
+      dragStart();
+    }
+    event.preventDefault();
+    if (!drag.frame) drag.frame = requestAnimationFrame(dragFrame);
+  }
+
+  function dragFrame() {
+    if (!drag?.started) return;
+    drag.frame = 0;
+    const { x, y } = drag.pointer;
+    const dx = x - drag.from.x, dy = y - drag.from.y;
+    for (const { element, base, scale } of drag.moving) {
+      element.setAttribute("transform", `translate(${dx * scale} ${dy * scale})${base ? ` ${base}` : ""}`);
+    }
+    const at = dropAt(drag.pointer);
+    if (!sameDrop(at, drag.at)) { drag.at = at; showDrop(at); }
+    for (const { element } of drag.moving) element.classList.toggle("fig-astray", !at);
+  }
+
+  const dropAt = (point) => dropPlace(model(), drag.boxes, point, drag.id);
+  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index : a === b);
+  const unchanged = (at, id) => stays(model(), at, id);
+
+  function showDrop(at) {
+    for (const { element } of drag.parted) element.style.transform = "";
+    drag.parted = [];
+    if (!at) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
+    const origin = host.overlay.getBoundingClientRect();
+    const room = drag.boxes.get(at.parent) || SVG(host.element(model().root))?.getBoundingClientRect();
+    const place = (node, box, extra = {}) => Object.assign(node.style, {
+      transform: `translate(${box.left - origin.left}px, ${box.top - origin.top}px)`,
+      width: `${Math.max(box.right - box.left, 0)}px`, height: `${Math.max(box.bottom - box.top, 0)}px`, ...extra });
+    const home = unchanged(at, drag.id);
+    drag.zone.classList.toggle("on", Boolean(room) && at.parent !== model().root && !home);
+    if (room) place(drag.zone, { left: room.left - 6, top: room.top - 6, right: room.right + 6, bottom: room.bottom + 6 });
+    if (at.empty || home) { drag.indicator.classList.remove("on"); return; }
+    // The line between the part it goes next to and the one beyond, if there is one.
+    const box = drag.boxes.get(at.near);
+    const beyond = at.siblings.map((child) => ({ child, box: drag.boxes.get(child) })).filter(({ child, box: other }) => child !== at.near && (at.across
+      ? (at.after ? other.left >= box.right - 1 : other.right <= box.left + 1) && other.bottom > box.top && other.top < box.bottom
+      : (at.after ? other.top >= box.bottom - 1 : other.bottom <= box.top + 1) && other.right > box.left && other.left < box.right))
+      .sort((a, b) => (at.across ? Math.abs(centre(a.box).x - centre(box).x) - Math.abs(centre(b.box).x - centre(box).x)
+        : Math.abs(centre(a.box).y - centre(box).y) - Math.abs(centre(b.box).y - centre(box).y)))[0];
+    let line;
+    if (at.across) {
+      const edge = at.after ? box.right : box.left;
+      const other = beyond ? (at.after ? beyond.box.left : beyond.box.right) : edge + (at.after ? 12 : -12);
+      const x = (edge + other) / 2;
+      const top = Math.min(box.top, beyond?.box.top ?? box.top), bottom = Math.max(box.bottom, beyond?.box.bottom ?? box.bottom);
+      line = { left: x - 1.5, right: x + 1.5, top: top - 4, bottom: bottom + 4 };
+    } else {
+      const edge = at.after ? box.bottom : box.top;
+      const other = beyond ? (at.after ? beyond.box.top : beyond.box.bottom) : edge + (at.after ? 12 : -12);
+      const y = (edge + other) / 2;
+      const left = Math.min(box.left, beyond?.box.left ?? box.left), right = Math.max(box.right, beyond?.box.right ?? box.right);
+      line = { left: left - 4, right: right + 4, top: y - 1.5, bottom: y + 1.5 };
+    }
+    place(drag.indicator, line);
+    drag.indicator.classList.add("on");
+    // The parts either side of it step apart, a little, to make room.
+    const apart = 7;
+    const nudge = (id, sign) => {
+      for (const element of elementsOf(id)) {
+        if (drag.moving.some((item) => item.element === element)) continue;
+        const shift = sign * apart * unitsPerPixel(element);
+        element.style.transform = at.across ? `translate(${shift}px, 0px)` : `translate(0px, ${shift}px)`;
+        drag.parted.push({ element });
+      }
+    };
+    nudge(at.near, at.after ? -1 : 1);
+    if (beyond) nudge(beyond.child, at.after ? 1 : -1);
+  }
+
+  function dragFinish() {
+    window.removeEventListener("pointermove", dragMove);
+    window.removeEventListener("pointerup", dragEnd);
+    window.removeEventListener("pointercancel", dragCancel);
+    window.removeEventListener("keydown", dragKey, true);
+    if (drag?.frame) cancelAnimationFrame(drag.frame);
+    const was = drag;
+    drag = null;
+    if (!was?.started) return null;
+    was.indicator.remove();
+    was.zone.remove();
+    document.body.classList.remove("fig-grabbing");
+    for (const { element } of was.parted) element.style.transform = "";
+    // A drag ends in a click on whatever is under the pointer: that click is not one.
+    state.swallow = true;
+    setTimeout(() => { state.swallow = false; }, 0);
+    return was;
+  }
+  // Home again: the part slides back to where it was drawn, the lines come back.
+  function sendHome(was) {
+    clearTimeout(was.wait);
+    host.overlay.classList.remove("fig-dragging");
+    for (const { element, base } of was.moving) {
+      const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(element.getAttribute("transform") || "");
+      if (base) element.setAttribute("transform", base);
+      else element.removeAttribute("transform");
+      element.classList.remove("fig-lifted", "fig-settling", "fig-astray");
+      if (moved) element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
+        { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+    }
+    for (const element of was.lines) element.classList.remove("fig-faded");
+  }
+  function dragEnd(event) {
+    if (drag?.started && event) drag.pointer = { x: event.clientX, y: event.clientY };
+    if (drag?.started) dragFrame();
+    const was = dragFinish();
+    if (!was) return;
+    const at = was.at;
+    if (!at || unchanged(at, was.id)) { sendHome(was); return; }
+    // It stays where it was let go until the drawing it makes comes back and lands.
+    for (const { element } of was.moving) element.classList.add("fig-settling");
+    // Should no drawing come back (nothing changed after all), it goes home on its own.
+    was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
+    act({ do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
+  }
+  function dragCancel() { const was = dragFinish(); if (was) sendHome(was); }
+  let landed = 0;
+  function dragKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragCancel();
+  }
+
+  // -- landing: the drawing after an edit, each part sliding from where it was --
+  function landing() {
+    if (drag?.started) { dragFinish(); host.overlay.classList.remove("fig-dragging"); }  // its drawing is going
+    if (!state.landing || Date.now() - state.landing > 6000 || !model()) return null;
+    const before = new Map();
+    for (const node of model().nodes) {
+      const box = host.element(node.id)?.getBoundingClientRect();
+      if (box && (box.width || box.height)) before.set(node.id, box);
+    }
+    return before;
+  }
+  function land(before) {
+    host.overlay.classList.remove("fig-dragging");
+    if (!before) return;
+    state.landing = 0;
+    const ease = "cubic-bezier(.2,.8,.2,1)";
+    // The marks of what is chosen wait for the parts to arrive, then fade in on them.
+    host.overlay.classList.add("fig-landing");
+    clearTimeout(landed);
+    landed = setTimeout(() => { host.overlay.classList.remove("fig-landing"); host.settled?.(); }, 320);
+    for (const node of model()?.nodes || []) {
+      const element = host.element(node.id);
+      if (!element) continue;
+      const now = element.getBoundingClientRect();
+      const was = before.get(node.id);
+      if (!was) {
+        // A part just made grows in where it is drawn.
+        element.style.transformBox = "fill-box";
+        element.style.transformOrigin = "center";
+        element.animate([{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "scale(1)" }], { duration: 240, easing: ease });
+        continue;
+      }
+      const dx = centre(was).x - centre(now).x, dy = centre(was).y - centre(now).y;
+      if (Math.hypot(dx, dy) < 0.5) continue;
+      const scale = unitsPerPixel(element);
+      element.animate([{ transform: `translate(${dx * scale}px, ${dy * scale}px)` }, { transform: "translate(0px, 0px)" }],
+        { duration: 300, easing: ease });
+    }
+    // Lines and frames are drawn anew for where the parts go: they come in as the parts
+    // arrive. A frame that holds its parts fades its own drawing only, not theirs.
+    const root = host.element(model()?.root);
+    const appear = (element) => element.animate([{ opacity: 0 }, { opacity: 0 }, { opacity: 1 }], { duration: 340, easing: "ease-out" });
+    for (const element of root?.querySelectorAll('[data-flexo-entity="connector"], [data-flexo-entity="net"]') || []) appear(element);
+    for (const group of root?.querySelectorAll('[data-flexo-entity="group"]') || []) {
+      for (const piece of group.children) {
+        if (piece.matches('[data-flexo-entity], [id$=".components"], [id$=".connectors"]') || piece.querySelector("[data-flexo-entity]")) continue;
+        appear(piece);
+      }
+    }
   }
 
   // -- words typed on the drawing --
@@ -547,6 +820,7 @@ export function figureParts(host) {
       h("ul.how", {},
         h("li", {}, h("b", {}, "Add"), " a part (A). With a part chosen, the new one comes after it, a line between them."),
         h("li", {}, h("b", {}, "Connect"), " (C): click where a line starts, then where it ends."),
+        h("li", {}, h("b", {}, "Drag"), " a part to another place in its row or column, or into another group; Esc takes it back."),
         h("li", {}, "Double-click a part to change its words; ⇧-click to choose several, then ", h("b", {}, "Group"), " (G).")),
       h("div.row", {}, ui.button("Add a part", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
         figure ? ui.button("The layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
@@ -756,7 +1030,9 @@ export function figureParts(host) {
     get selected() { return state.selected; },
     get connecting() { return state.connecting; },
     get inline() { return inline; },
-    setModel, select, act, update,
+    get dragging() { return Boolean(drag?.started); },
+    get justDragged() { return state.swallow; },
+    setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, hint, key, panel, wantsRoom, howTo,
     addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect,

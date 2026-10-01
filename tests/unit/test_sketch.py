@@ -94,6 +94,10 @@ def test_sketch_settings_are_checked_and_laid_over_the_theme() -> None:
         parse_sketch({"fill": "crayon"})
     with pytest.raises(ValueError, match="unknown sketch setting"):
         parse_sketch({"rough": 0.2})
+    with pytest.raises(ValueError, match="sketch roughness must be a number from 0 to 1, not 'x'"):
+        parse_sketch({"roughness": "x"})
+    with pytest.raises(ValueError, match="sketch paper must be true or false, not 'no'"):
+        parse_sketch({"paper": "no"})
     style = flexo.themes.figure_style(_figure(theme="sketch", sketch={"fill": "hatch"}).spec)
     assert style.sketch == Sketch(roughness=0.5, fill="hatch")
 
