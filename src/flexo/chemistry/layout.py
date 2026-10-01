@@ -702,7 +702,7 @@ def _in_ring(molecule: Molecule, pair) -> bool:
 
 
 def foresee(
-    molecule: Molecule, made: Molecule, meetings: list[tuple[int, int]], apart: float = 0.8
+    molecule: Molecule, made: Molecule, meetings: list[tuple[int, int]], apart: float = 0.65
 ) -> bool:
     """Lay out a step that closes a ring between its molecules (a cycloaddition) in the
     shape of what it makes -- a diene curled s-cis, as it must be to react -- its molecules
