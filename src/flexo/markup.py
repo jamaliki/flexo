@@ -445,6 +445,9 @@ def needs_layout(source: str) -> bool:
     # Flexo draws over one letter (\\vec{h}); over more, TeX's stretches across them.
     if any(name in ACCENTS or name == "boldsymbol" for name in names):
         return True
+    # A prime with a subscript (q'_{2i}): the subscript goes under the prime, not after it.
+    if re.search(r"(?:'|\\prime\}?)\s*_", source):
+        return True
     for match in re.finditer(r"\\(?:" + "|".join(OVER) + r")\s*(?:\{([^{}]*)\}|(\S))", source):
         if len((match.group(1) or match.group(2) or "").strip()) > 1:
             return True

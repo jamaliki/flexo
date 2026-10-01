@@ -369,3 +369,20 @@ def test_latex_colour_names_are_drawn_in_their_colours() -> None:
     assert paint("blue") == ("#0000ff", None)
     assert paint("accent") == ("#1a5d9b", "tone-1-stroke")
     assert paint("not-a-colour") == (None, None)
+
+
+def test_a_primes_subscript_sits_under_it_as_in_tex() -> None:
+    from flexo.markup import needs_layout
+    from flexo.texmath import GlyphItem
+    from flexo.units import pt
+
+    typography = TypographyStyle(family="Figtree", size=pt(20))
+
+    def placed(source: str) -> list[tuple[float, float]]:
+        formula = typeset(source, typography, 20)
+        return [(x, y) for x, y, item in formula.box.items if isinstance(item, GlyphItem)]
+
+    _, prime, two, _ = placed("q'_{2i}")
+    assert two[0] < prime[0] + 1.0  # the subscript starts under the prime, not after it
+    assert placed("q'_{2i}") == placed(r"q^{\prime}_{2i}")
+    assert needs_layout("q'_{2i}") and not needs_layout("f'(x)")
