@@ -201,3 +201,15 @@ def test_a_tab_is_a_space_and_control_characters_draw_nothing() -> None:
     from flexo.markup import parse_label
 
     assert parse_label("a\tb\r\nc") == (TextRun("a b\nc"),)
+
+
+def test_a_fallback_face_serves_its_script_and_a_word_is_set_in_one_face() -> None:
+    from flexo.text import font_stack
+    from flexo.units import pt
+
+    stack = font_stack(TypographyStyle(family="Figtree", size=pt(20)))
+    words = stack.segments("Tiếng Việt", 400, False)
+    # Whole words, not letter by letter.
+    assert [face.family for face, _ in words] == ["IBM Plex Sans"]
+    after = stack.segments("日本語 ✓", 400, False)
+    assert after[-1] == (after[-1][0], "✓") and after[-1][0].family == "IBM Plex Sans"
