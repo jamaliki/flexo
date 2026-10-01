@@ -1369,8 +1369,27 @@ class _Parser:
     def chemistry(self) -> Group:
         """``\\ce{...}`` (mhchem), as chemists write it: ``\\ce{2H2 + O2 -> 2H2O}``."""
 
-        words = self.word_argument()
-        return Group(_chemistry(words))
+        return Group(_chemistry(self.raw_argument()))
+
+    def raw_argument(self) -> str:
+        """A braced argument as it was written, braces inside it kept: Fe^{3+}."""
+
+        token = self.take()
+        if token is None:
+            return ""
+        if token.value != "{" or token.kind != "char":
+            return ("\\" + token.value) if token.kind == "command" else token.value
+        words, depth = [], 0
+        while (token := self.take(skip_spaces=False)) is not None:
+            if token.kind == "char" and token.value == "{":
+                depth += 1
+            elif token.kind == "char" and token.value == "}":
+                if depth == 0:
+                    return "".join(words)
+                depth -= 1
+            words.append(("\\" + token.value) if token.kind == "command" else token.value)
+        self.said("a { is not closed")
+        return "".join(words)
 
 
 # fmt: off
@@ -1564,16 +1583,26 @@ def _chemistry(words: str) -> list:
 
     items: list = []
     arrows = {"<=>": "⇌", "<->": "↔", "->": "→", "<-": "←", "=": "=", "<=>>": "⇌", "<<=>": "⇌"}
-    for part in re.split(r"(\s+|<=>>|<<=>|<=>|<->|->|<-)", words):
-        if not part:
+    pattern = r"(\s+|(?:<=>>|<<=>|<=>|<->|->|<-)(?:\[[^\]]*\]){0,2})"
+    for part in re.split(pattern, words):
+        if not part or part.isspace():
             continue
-        if part.isspace():
-            continue
-        if part in arrows:
-            items.append(Sym(arrows[part], REL))
+        arrow = re.fullmatch(r"(<=>>|<<=>|<=>|<->|->|<-)((?:\[[^\]]*\]){0,2})", part)
+        if arrow:
+            labels = re.findall(r"\[([^\]]*)\]", arrow.group(2))
+            if labels:
+                # ->[\Delta][-H2O]: words over the arrow (and under it), as in TeX.
+                over = parse(labels[0])[0] if labels[0] else []
+                under = parse(labels[1])[0] if len(labels) > 1 and labels[1] else None
+                items.append(Arrow(arrows[arrow.group(1)], over=over, under=under))
+            else:
+                items.append(Sym(arrows[arrow.group(1)], REL))
             continue
         if part == "+":
             items.append(Sym("+", BIN))
+            continue
+        if part in {"v", "^"}:
+            items.append(Sym("↓" if part == "v" else "↑", ORD, "rm"))  # a precipitate, a gas
             continue
         items.append(Group(_species(part)))
     return items
@@ -1587,6 +1616,17 @@ def _species(words: str) -> list:
         items += [Sym(ch, ORD, "rm") for ch in leading.group(0)]
         items.append(Space(2 / 18))
         at = leading.end()
+    # An isotope's mass and number before its element: ^{14}_{6}C, ^{235}U.
+    pre = re.match(r"(?:\^\{([^}]*)\}|\^(\d+))?(?:_\{([^}]*)\}|_(\d+))?", words[at:])
+    if pre and pre.group(0):
+        mass = pre.group(1) or pre.group(2)
+        number = pre.group(3) or pre.group(4)
+        items.append(Scripts(
+            Group([]),
+            [Sym(c, ORD, "rm") for c in mass] if mass else None,
+            [Sym(c, ORD, "rm") for c in number] if number else None,
+        ))
+        at += pre.end()
     while at < len(words):
         char = words[at]
         if char == "^":
