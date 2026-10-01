@@ -1,0 +1,398 @@
+"""A mechanism drawn on by pointing, as mechazyme's editor draws on one.
+
+The structure a step acts on is drawn alone, every atom and bond of it something to
+click, and two clicks -- where the electrons come from, where they go -- write an
+arrow. The page draws and points; this decides:
+
+- ``sheet`` gives the structure as SVG, with where its atoms, bonds and lone pairs
+  are, what its arrows say in words, and what is wrong, if anything;
+- ``add_arrow`` writes the arrow two clicks make -- numbering an atom in the SMILES
+  that wrote it, if it has no number yet -- or asks which end of a bond makes the
+  new one;
+- ``remove_arrow`` takes one away.
+
+A step that cannot be is drawn all the same, its problem said: between one arrow and
+the next it usually is (the nucleophile's arrow gives carbon five bonds until the
+leaving group's comes). A step being drawn on is laid out for the arrows it had when
+it was opened (``holding``), so that drawing on it does not move it.
+"""
+
+from __future__ import annotations
+
+import copy
+import math
+import re
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+import flexo
+from flexo.chemistry.curly import lone_pair_spots
+from flexo.chemistry.draw import _edge, _free_angle
+from flexo.chemistry.electrons import Arrow, MechanismError, read_arrow
+from flexo.chemistry.molecule import Molecule, mapped_smiles
+from flexo.compiler import compile_figure
+from flexo.diagnostics import FlexoError
+from flexo.ir.semantic import FigureSpec
+from flexo.mechanism import mechanism_composed, mechanism_states
+from flexo.studio.figure_edit import EditError
+from flexo.themes import figure_style
+
+OPTIONS = ("lone_pairs", "charges", "arrow_colour")
+"""The mechanism's own settings a sheet is drawn with."""
+
+_BOND = {1: "-", 2: "=", 3: "#"}
+
+
+def normal_steps(steps: object) -> list[dict[str, Any]]:
+    """A mechanism's steps as the editor keeps them: each a mapping, its arrows a list."""
+
+    written = [steps] if isinstance(steps, str) else list(steps or [])  # type: ignore[call-overload]
+    out = []
+    for step in written:
+        item = {"smiles": step} if isinstance(step, str) else dict(step or {})
+        arrows = item.get("arrows")
+        if isinstance(arrows, str):
+            item["arrows"] = [
+                part.strip() for part in arrows.replace("\n", ";").split(";") if part.strip()
+            ]
+        elif arrows is None:
+            item["arrows"] = []
+        else:
+            item["arrows"] = [str(part).strip() for part in arrows if str(part).strip()]
+        out.append(item)
+    if not out:
+        raise EditError("a mechanism needs at least one step")
+    return out
+
+
+def sheet(
+    steps: object,
+    *,
+    step: int,
+    holding: Sequence[str] | None = None,
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The structure ``step`` (from 0) acts on, drawn to be drawn on: ``svg``, its
+    ``view`` (x, y, width, height, in the SVG's units), the ``bond`` length in them, its
+    ``atoms`` (``index`` in the step, ``name``, ``number`` as arrows call it, ``x``,
+    ``y``, its lone ``pairs`` as two dots each), its ``bonds`` (``atoms``, ``order``,
+    ``x``, ``y`` of the middle), its ``arrows`` in words, the atoms they ``name``,
+    how many structures there are (``states``), and the ``problem``, if there is one."""
+
+    written = normal_steps(steps)
+    figure = _figure(written, options, only=step, holding=holding)
+    node = figure.nodes[0]
+    style = figure_style(figure)
+    try:
+        composed = mechanism_composed(node, style)
+    except FlexoError as error:
+        # Nothing to draw on: the first structure itself cannot be read.
+        return {
+            "svg": "",
+            "states": 0,
+            "steps": len(written),
+            "step": 0,
+            "atoms": [],
+            "bonds": [],
+            "arrows": [],
+            "named": [],
+            "problem": _problem(error.diagnostics[0]),
+        }
+    panels = composed.panels
+    chosen = min(max(step, 0), len(panels) - 1)
+    drawn, shown, renumber = composed.drawn[chosen]
+    panel = panels[chosen]
+    compilation = compile_figure(figure, style=style)
+    fitted = next(item for item in compilation.fitted.nodes if item.measured.spec.id == node.id)
+    size = composed.picture.size
+    dx = fitted.bounds.x + (fitted.bounds.width - size.width) / 2.0
+    dy = fitted.bounds.y + (fitted.bounds.height - size.height) / 2.0
+    # The page cut down to the structure, with room round it for arrows and pairs: by its
+    # atoms, not its arrows, so that an arrow drawn does not move it.
+    xs, ys = [], []
+    for place in drawn.atoms.values():
+        xs.append(place.point[0])
+        ys.append(place.point[1])
+        if place.label is not None:
+            xs += [place.label[0], place.label[2]]
+            ys += [place.label[1], place.label[3]]
+    room = composed.pen.bond * 1.25
+    view = (
+        min(xs) + dx - room,
+        min(ys) + dy - room,
+        max(xs) - min(xs) + 2 * room,
+        max(ys) - min(ys) + 2 * room,
+    )
+    back = {new: old for old, new in renumber.items()}
+    molecule = panel.molecule
+    ink = _arrow_points(drawn)
+    atoms = []
+    for index, place in drawn.atoms.items():
+        original = back[index]
+        atoms.append(
+            {
+                "index": original,
+                "element": molecule.atoms[original].element,
+                "name": molecule.name(original),
+                "number": _number(molecule, original),
+                "x": round(place.point[0] + dx, 2),
+                "y": round(place.point[1] + dy, 2),
+                "pairs": [
+                    [
+                        round(a[0] + dx, 2),
+                        round(a[1] + dy, 2),
+                        round(b[0] + dx, 2),
+                        round(b[1] + dy, 2),
+                    ]
+                    for a, b in lone_pair_spots(shown, drawn, composed.pen, index)
+                ],
+                "radical": bool(molecule.atoms[original].lone % 2),
+                "tag": _tag(place, composed.pen, dx, dy, ink),
+            }
+        )
+    bonds = []
+    for bond in shown.bonds:
+        (ax, ay), (bx, by) = drawn.atoms[bond.a].point, drawn.atoms[bond.b].point
+        bonds.append(
+            {
+                "atoms": [back[bond.a], back[bond.b]],
+                "order": bond.order,
+                "x": round((ax + bx) / 2 + dx, 2),
+                "y": round((ay + by) / 2 + dy, 2),
+            }
+        )
+    arrows = []
+    for text in panel.step.arrows if chosen < len(written) else []:
+        try:
+            arrows.append({"text": text, "said": said(read_arrow(text, molecule), molecule)})
+        except MechanismError as error:
+            arrows.append({"text": text, "said": "", "problem": str(error)})
+    named = sorted({atom for arrow in panel.arrows for atom in (*arrow.source, *arrow.target)})
+    return {
+        "svg": _cropped(compilation.document.text, view),
+        "view": [round(value, 2) for value in view],
+        "bond": round(composed.pen.bond, 3),
+        "dot": round(composed.pen.dot, 3),
+        "states": len(panels),
+        "steps": len(written),
+        "step": chosen,
+        "atoms": atoms,
+        "bonds": bonds,
+        "arrows": arrows,
+        "named": named,
+        "problem": _problem(composed.problem) if composed.problem is not None else None,
+    }
+
+
+def add_arrow(
+    steps: object,
+    *,
+    step: int,
+    tail: Mapping[str, Any],
+    head: Mapping[str, Any],
+    half: bool = False,
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The arrow from ``tail`` to ``head`` -- each ``{"atom": index}`` (a lone pair, or
+    the atom electrons settle on or bond to) or ``{"bond": [index, index]}`` -- written
+    into ``step``: ``{"steps", "arrow"}``. A bond's electrons sent to an atom outside it
+    make a bond from one of its ends, and which is asked: ``{"ends": [{index, name}]}``.
+    The structure after the last step takes arrows as a new step."""
+
+    written = normal_steps(steps)
+    panels, _ = mechanism_states(_figure(written, options).nodes[0])
+    if not 0 <= step < len(panels):
+        raise EditError("that structure is not drawn: a step before it cannot be")
+    molecule = panels[step].molecule.copy()
+    count = len(molecule.atoms)
+    ends = [_atoms(tail, count), _atoms(head, count)]
+    source, target = ends
+    if len(source) == 2 and molecule.bond(*source) is None:
+        raise EditError("those two atoms are not bonded")
+    if len(source) == 2 and len(target) == 1 and target[0] not in source:
+        return {"ends": [{"index": atom, "name": molecule.name(atom)} for atom in source]}
+    if len(source) == 1 and len(target) == 2:
+        if source[0] not in target:
+            raise EditError(
+                f"a lone pair on {molecule.name(source[0])} makes a bond to an atom: click the atom"
+            )
+        target = [atom for atom in target if atom != source[0]]
+    if len(source) == 1 and target == source:
+        raise EditError("the electrons go somewhere else: click where they go")
+    origin = max(
+        index for index in range(min(step, len(written) - 1) + 1) if written[index].get("smiles")
+    )
+    numbers = {atom: _numbered(written, origin, molecule, atom) for atom in {*source, *target}}
+
+    def end(atoms: list[int], first: bool) -> str:
+        if len(atoms) == 1:
+            return str(numbers[atoms[0]])
+        bond = molecule.bond(*atoms)
+        mark = _BOND[bond.order] if first and bond is not None else "-"
+        return f"{numbers[atoms[0]]}{mark}{numbers[atoms[1]]}"
+
+    text = f"{end(source, True)} {'~>' if half else '->'} {end(target, False)}"
+    try:
+        read_arrow(text, molecule)
+    except MechanismError as error:
+        raise EditError(str(error)) from None
+    if step >= len(written):
+        written.append({"arrows": [text]})
+    else:
+        if any(_same(text, other, molecule) for other in written[step]["arrows"]):
+            raise EditError("that arrow is drawn already")
+        written[step]["arrows"].append(text)
+    return {"steps": written, "arrow": text}
+
+
+def remove_arrow(steps: object, *, step: int, index: int) -> dict[str, Any]:
+    """``step`` without its arrow ``index``: ``{"steps"}``."""
+
+    written = normal_steps(steps)
+    try:
+        written[step]["arrows"].pop(index)
+    except (IndexError, KeyError) as error:
+        raise EditError("that arrow is gone: someone changed the step meanwhile") from error
+    return {"steps": written}
+
+
+def said(arrow: Arrow, molecule: Molecule) -> str:
+    """An arrow in words: "lone pair on O5 → C2", "C2=O3 bond → O3"."""
+
+    def end(atoms: tuple[int, ...], first: bool) -> str:
+        if len(atoms) == 2:
+            bond = molecule.bond(*atoms)
+            mark = _BOND.get(bond.order, "-") if bond is not None else "-"
+            return f"{molecule.name(atoms[0])}{mark}{molecule.name(atoms[1])} bond"
+        if first:
+            what = (
+                "radical"
+                if arrow.electrons == 1 and molecule.atoms[atoms[0]].lone % 2
+                else "lone pair"
+            )
+            return f"{what} on {molecule.name(atoms[0])}"
+        return molecule.name(atoms[0])
+
+    pointer = "⇀" if arrow.electrons == 1 else "→"
+    return f"{end(arrow.source, True)} {pointer} {end(arrow.target, False)}"
+
+
+def _figure(
+    steps: list[dict[str, Any]],
+    options: Mapping[str, Any] | None,
+    *,
+    only: int | None = None,
+    holding: Sequence[str] | None = None,
+) -> FigureSpec:
+    properties: dict[str, object] = {"partial": True}
+    if only is not None:
+        properties["only"] = int(only) + 1
+        if holding is not None:
+            properties["holding"] = [{"step": int(only) + 1, "arrows": "; ".join(holding)}]
+    chosen = {
+        key: value for key, value in (options or {}).items() if key in OPTIONS and value is not None
+    }
+    with flexo.Figure("sheet") as figure:
+        figure.root.mechanism("m", copy.deepcopy(steps), properties=properties, **chosen)
+    return figure.spec
+
+
+def _atoms(end: Mapping[str, Any], count: int) -> list[int]:
+    value = end.get("bond") if "bond" in end else [end.get("atom")]
+    try:
+        atoms = [int(atom) for atom in value]  # type: ignore[union-attr]
+    except (TypeError, ValueError) as error:
+        raise EditError("an arrow's end is an atom or a bond") from error
+    if (
+        not 1 <= len(atoms) <= 2
+        or len(set(atoms)) != len(atoms)
+        or not all(0 <= a < count for a in atoms)
+    ):
+        raise EditError("that atom is gone: someone changed the structure meanwhile")
+    return atoms
+
+
+def _number(molecule: Molecule, atom: int) -> int | None:
+    """What an arrow calls an atom: its map, or its place in a molecule with no maps."""
+
+    if molecule.atoms[atom].map is not None:
+        return molecule.atoms[atom].map
+    if not any(item.map is not None for item in molecule.atoms):
+        return atom + 1
+    return None
+
+
+def _numbered(steps: list[dict[str, Any]], origin: int, molecule: Molecule, atom: int) -> int:
+    """An atom's number for an arrow -- given one, in the SMILES that wrote it, if it has
+    none while others do."""
+
+    number = _number(molecule, atom)
+    if number is not None:
+        return number
+    used = [
+        int(found)
+        for step in steps
+        for found in re.findall(r":(\d+)\]", str(step.get("smiles") or ""))
+    ]
+    number = max(used, default=0) + 1
+    steps[origin]["smiles"] = mapped_smiles(str(steps[origin]["smiles"]), atom, number)
+    molecule.atoms[atom].map = number
+    return number
+
+
+def _same(text: str, other: str, molecule: Molecule) -> bool:
+    try:
+        first, second = read_arrow(text, molecule), read_arrow(other, molecule)
+    except MechanismError:
+        return False
+    return (first.source, first.target, first.electrons) == (
+        second.source,
+        second.target,
+        second.electrons,
+    )
+
+
+def _arrow_points(drawn) -> list[tuple[float, float]]:
+    """Points along the arrows drawn (their ends, and their curves' handles)."""
+
+    points = []
+    for shape in drawn.shapes:
+        if ".arrow" in shape.id:
+            numbers = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", shape.d)]
+            points += list(zip(numbers[0::2], numbers[1::2], strict=False))
+    return points
+
+
+def _tag(place, pen, dx: float, dy: float, ink: list[tuple[float, float]]) -> list[float]:
+    """Where an atom's number is written in the editor: beside it, on its freest side --
+    clear of its bonds, its marks, and the arrows near it."""
+
+    x, y = place.point
+    near = [
+        math.atan2(py - y, px - x)
+        for px, py in ink
+        if 0 < math.dist((px, py), (x, y)) < pen.bond * 0.9
+    ]
+    angle = _free_angle([*place.taken, *near], -math.pi / 4)
+    reach = _edge(place, angle, pen) + pen.bond * 0.2
+    return [
+        round(place.point[0] + math.cos(angle) * reach + dx, 2),
+        round(place.point[1] + math.sin(angle) * reach + dy, 2),
+    ]
+
+
+def _cropped(svg: str, view: tuple[float, float, float, float]) -> str:
+    """The SVG showing only ``view`` of its page."""
+
+    x, y, width, height = (f"{value:.2f}" for value in view)
+
+    def root(match: re.Match[str]) -> str:
+        tag = re.sub(r'\sviewBox="[^"]*"', f' viewBox="{x} {y} {width} {height}"', match.group(0))
+        tag = re.sub(r'\swidth="[^"]*"', f' width="{width}pt"', tag)
+        return re.sub(r'\sheight="[^"]*"', f' height="{height}pt"', tag)
+
+    return re.sub(r"<svg\b[^>]*>", root, svg, count=1)
+
+
+def _problem(diagnostic) -> dict[str, Any]:
+    return {"message": diagnostic.message, "hint": diagnostic.hint, "code": diagnostic.code}
