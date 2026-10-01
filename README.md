@@ -339,7 +339,9 @@ that is not there, a fishhook left without its partner, a hydrogen with two bond
 After the last step with arrows comes what they make. With `partial=True` a step that
 cannot be is drawn as far as it goes, its arrows on it, instead of refused (as it is
 between one arrow and the next while a step is drawn); `flexo.mechanism.mechanism_states`
-says what is wrong.
+says what is wrong. In a figure file it is the node kind `mechanism`, its steps under
+`properties.steps`, written as in Python: arrows a list or words apart with `;`, a
+step's `place` a mapping or words (`"5 move -1 0.5 turn 30"`).
 
 Structures are laid out flat as a chemist would: rings as regular polygons, fused rings
 side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan

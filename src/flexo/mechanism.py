@@ -148,6 +148,33 @@ def mechanism_steps(node: NodeSpec) -> list[Step]:
     return steps
 
 
+def step_records(steps: object) -> object:
+    """A mechanism's steps as a figure holds them, however they were written: a step that
+    is only SMILES as ``{"smiles": ...}``, its ``arrows`` (a list, or words apart with
+    ``;``) and its ``place`` (a mapping, or words) as words. Anything else is left as it
+    is, for the figure's checks to say what is wrong with it."""
+
+    if not isinstance(steps, list | tuple):
+        return steps
+    records: list[object] = []
+    for step in steps:
+        if isinstance(step, str):
+            records.append({"smiles": step})
+            continue
+        if not isinstance(step, dict):
+            records.append(step)
+            continue
+        record = {}
+        for key, value in step.items():
+            if key == "arrows" and isinstance(value, list | tuple):
+                value = "; ".join(str(item) for item in value)
+            elif key == "place" and isinstance(value, dict):
+                value = place_words(value)
+            record[key] = value
+        records.append(record)
+    return records
+
+
 def place_words(value: object) -> str:
     """A step's ``place`` as the mechanism keeps it: ``{5: {"move": [-1, 0.5], "turn": 30,
     "flip": True}}`` (or ``{5: [-1, 0.5]}``, only moved) written ``"5 move -1 0.5 turn 30
