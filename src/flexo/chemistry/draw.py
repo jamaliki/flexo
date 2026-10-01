@@ -31,9 +31,11 @@ type Box = tuple[float, float, float, float]
 
 MINUS = "\N{MINUS SIGN}"
 
-METALS = frozenset(
-    ["Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "La", "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu"]
-)
+METALS = frozenset({
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Y", "Zr", "Nb", "Mo", "Tc",
+    "Ru", "Rh", "Pd", "Ag", "Cd", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "La",
+    "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu",
+})
 """Transition metals and lanthanides: their d and f electrons are not lone pairs."""
 
 
@@ -643,7 +645,8 @@ def _to_segment(point: Point, segment) -> float:
     (x1, y1), (x2, y2) = segment
     dx, dy = x2 - x1, y2 - y1
     length = dx * dx + dy * dy
-    t = 0.0 if not length else max(0.0, min(1.0, ((point[0] - x1) * dx + (point[1] - y1) * dy) / length))
+    along = ((point[0] - x1) * dx + (point[1] - y1) * dy) / length if length else 0.0
+    t = max(0.0, min(1.0, along))
     return math.dist(point, (x1 + t * dx, y1 + t * dy))
 
 
