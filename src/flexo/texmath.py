@@ -284,6 +284,7 @@ SPACES = {
 
 FONT_COMMANDS = {
     "mathrm": "rm",
+    "mathdefault": "rm",  # matplotlib's: the words' upright face (its log ticks use it)
     "mathit": "it",
     "mathbf": "bf",
     "mathsf": "sf",

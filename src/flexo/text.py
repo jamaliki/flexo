@@ -261,12 +261,30 @@ class FontStack:
         )
 
     def missing(self, text: str, italic: bool) -> set[str]:
+        """The characters of ``text`` no family here draws. Invisible format characters
+        (a variation selector after ❤, a joiner) are never missing: they draw nothing."""
+
         loaded = [load_face(self.face(400, italic, index)) for index in range(len(self.families))]
         return {
             character
             for character in text
-            if not character.isspace() and not any(item.has(character) for item in loaded)
+            if not character.isspace() and not _ignorable(character)
+            and not any(item.has(character) for item in loaded)
         }
+
+
+_IGNORABLE = (
+    # Unicode's default ignorable code points: drawn as nothing when a face lacks them.
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+def _ignorable(character: str) -> bool:
+    code = ord(character)
+    return any(low <= code <= high for low, high in _IGNORABLE)
 
 
 _MATH_ITALIC = {
@@ -654,15 +672,25 @@ class TextMeasurer:
             if self._shape_run(replace(run, text=part), weight) <= max_width:
                 pieces.append(part)
                 continue
-            current = ""
-            for character in part:
-                longer = replace(run, text=current + character)
-                if current and self._shape_run(longer, weight) > max_width:
-                    pieces.append(current)
-                    current = ""
-                current += character
-            if current:
-                pieces.append(current)
+            start = 0
+            while start < len(part):
+                # The longest piece from here that fits (a character at least): found by
+                # doubling, then halving, so a word of a million letters is not shaped
+                # a letter longer at a time.
+                def fits(count: int, start: int = start, part: str = part) -> bool:
+                    piece = replace(run, text=part[start : start + count])
+                    return self._shape_run(piece, weight) <= max_width
+
+                remaining = len(part) - start
+                good, probe = 1, 2
+                while probe <= remaining and fits(probe):
+                    good, probe = probe, probe * 2
+                bad = min(probe, remaining + 1)
+                while bad - good > 1:
+                    middle = (good + bad) // 2
+                    good, bad = (middle, bad) if fits(middle) else (good, middle)
+                pieces.append(part[start : start + good])
+                start += good
         return pieces
 
     def _validate_glyphs(self, runs: tuple[TextRun, ...]) -> None:

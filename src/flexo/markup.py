@@ -189,7 +189,7 @@ ACCENTS = {"hat": "̂", "bar": "̄", "tilde": "̃", "dot": "̇"}
 OVER = {"vec": "→", "overrightarrow": "→", "overleftarrow": "←"}
 """Commands that set a mark over their whole argument, drawn by Flexo itself."""
 
-UPRIGHT = {"text", "mathrm", "operatorname"}
+UPRIGHT = {"text", "mathrm", "mathdefault", "operatorname"}
 CODE = {"texttt", "mathtt", "code"}
 """Commands whose argument is set as code, in the monospace family."""
 
@@ -378,8 +378,9 @@ def _closing_dollar(text: str, start: int) -> int | None:
 
     As pandoc reads dollars: maths starts with no space after its ``$`` and ends
     with none before its ``$``, and that ``$`` is not followed by a digit -- so
-    "it costs $5 and $10" is two prices, not maths. Maths that is plainly TeX (a
-    command, a script, a brace) may have spaces inside: ``$ \\alpha $``.
+    "it costs $5 and $10" and "$5-$10" are prices, not maths. Maths that is plainly
+    TeX (a command, a script, a brace) may have spaces inside (``$ \\alpha $``) and a
+    digit after it: ``P2$_1$2$_1$2$_1$``, a space group.
     """
 
     index = start
@@ -389,9 +390,11 @@ def _closing_dollar(text: str, start: int) -> int | None:
             continue
         if text[index] == "$":
             inside = text[start:index]
-            if not inside or text[index + 1 : index + 2].isdigit():
+            if not inside:
                 return None
             plainly_tex = any(ch in inside.replace("\\$", "") for ch in "\\^_{")
+            if text[index + 1 : index + 2].isdigit() and not plainly_tex:
+                return None
             if (inside[0].isspace() or inside[-1].isspace()) and not plainly_tex:
                 return None
             return index
