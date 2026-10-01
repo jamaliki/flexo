@@ -21,6 +21,7 @@ plain`` for superscripts).
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass, field
@@ -454,6 +455,7 @@ class Composed:
     problem: Diagnostic | None
 
 
+@functools.lru_cache(maxsize=32)
 def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
     """The mechanism's picture, and what is in it. With ``partial`` a step that cannot be
     is drawn and the rest left out (``problem`` says why) rather than refused; with
@@ -486,36 +488,24 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
             colour=colour,
         )
         x0, y0, x1, y1 = drawn.bounds()
-        drawn, molecule, renumber = draw_panel(
-            panels[chosen],
-            pen,
-            prefix=f"{node.id}.step{chosen + 1}",
-            origin=(-x0, -y0),
-            pairs=pairs,
-            charges=charges,
-            colour=colour,
-        )
+        drawn = drawn.moved(-x0, -y0)
         kept[chosen] = (drawn, molecule, renumber)
         picture = Picture(Size(x1 - x0, y1 - y0), tuple(drawn.shapes), tuple(drawn.words))
         return Composed(picture, kept, pen, panels, problem)
 
-    def drawing(index: int, panel: Panel, origin: tuple[float, float]) -> Drawn:
-        drawn, molecule, renumber = draw_panel(
+    # Each structure drawn once, where it falls, to measure it; then moved where it goes.
+    first: dict[int, tuple[Drawn, Molecule, dict[int, int]]] = {}
+    sizes = []
+    for index, panel in enumerate(panels):
+        first[index] = draw_panel(
             panel,
             pen,
             prefix=f"{node.id}.step{index + 1}",
-            origin=origin,
             pairs=pairs,
             charges=charges,
             colour=colour,
         )
-        kept[index] = (drawn, molecule, renumber)
-        return drawn
-
-    # Each structure drawn once where it falls, to measure it, then where it goes.
-    sizes = []
-    for index, panel in enumerate(panels):
-        x0, y0, x1, y1 = drawing(index, panel, (0.0, 0.0)).bounds()
+        x0, y0, x1, y1 = first[index][0].bounds()
         if panel.step.label:
             # A name wider than its structure widens its room, centred under it.
             wide = measures.measure(parse_label(panel.step.label), small=True).width + u * 0.6
@@ -573,7 +563,9 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
                     x += gap * 2
             x0, y0, x1, y1 = sizes[index]
             origin = (x - x0, middle - (y0 + y1) / 2.0)
-            drawn = drawing(index, panels[index], origin)
+            drawn, molecule, renumber = first[index]
+            drawn = drawn.moved(*origin)
+            kept[index] = (drawn, molecule, renumber)
             shapes += drawn.shapes
             words += drawn.words
             label = panels[index].step.label
@@ -621,9 +613,14 @@ def draw_panel(
         molecule, pen, prefix=prefix, origin=origin, pairs=pairs, charges=charges, wedges=marks
     )
     used = tail_ways(molecule, first, arrows, pen)
-    # Where the arrows would go with the charges out of their way, for the charges to keep off.
-    first.marks.clear()
-    tried = draw_arrows(molecule, first, arrows, pen, prefix=prefix)
+    # Where the arrows would go with the charges out of their way, for the charges to keep
+    # off -- and the curves found then, kept where they still keep clear of the charges.
+    chosen: list | None = None
+    tried: list = []
+    if first.marks and arrows:
+        chosen = []
+        first.marks.clear()
+        tried = draw_arrows(molecule, first, arrows, pen, prefix=prefix, chosen=chosen)
     radicals = {
         arrow.source[0]: 0.0
         for arrow in arrows
@@ -643,7 +640,7 @@ def draw_panel(
         wedges=marks,
         avoid=tried,
     )
-    draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour)
+    draw_arrows(molecule, drawn, arrows, pen, prefix=prefix, colour=colour, prefer=chosen)
     return drawn, molecule, renumber
 
 

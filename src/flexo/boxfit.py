@@ -78,6 +78,7 @@ def fit_in_box(
     largest: float | None = None,
     turn: bool = True,
     pad: float = 2.0,
+    keep: str | None = None,
 ) -> BoxFit:
     """``figure`` laid out to fill a ``width`` by ``height`` box (points).
 
@@ -85,6 +86,11 @@ def fit_in_box(
     by default): the figure is compiled at the width where they are that size
     once drawn across the box. ``largest`` caps how far it is scaled up (twice
     ``words`` by default). ``turn=False`` keeps the figure as written.
+
+    ``keep`` names a layout this returned before (its ``layout``): the figure is
+    drawn that way alone, in one compile, rather than every way being tried -- as an
+    editor draws a figure again and again while it is changed, its layout holding
+    still, and finds the best one once the changes stop.
     """
 
     spec = figure if isinstance(figure, FigureSpec) else figure.spec
@@ -107,6 +113,10 @@ def fit_in_box(
         for spacing, layout_style in ((None, None), ("tighter", tight))
         for name, variant in variants
     ]
+    if keep is not None:
+        kept = _kept(keep, candidates, width, height, most, base, pad)
+        if kept is not None:
+            return kept
     # Measuring is nearly free and routing is not: rank the layouts by the scale
     # their measured size allows (routing only adds to it, so this is an upper
     # bound), compile the written one first, and skip any that cannot win.
@@ -165,6 +175,28 @@ def fit_in_box(
             if errors <= written_errors and scale > best.scale * FOLD_GAIN:
                 best = BoxFit(compiled, scale, ink, label, base * scale, errors, layout_style)
     return best
+
+
+def _kept(keep: str, candidates, width: float, height: float, most: float, base: float, pad: float):
+    """The figure drawn in the layout ``keep`` names, if it is one of ``candidates`` (or
+    one folded), in one compile."""
+
+    folded = keep.endswith(", folded")
+    for label, candidate, layout_style in candidates:
+        if label != keep.removesuffix(", folded"):
+            continue
+        try:
+            compiled = compile_figure(
+                wrapped(candidate) if folded else candidate, style=layout_style
+            )
+        except Exception:
+            return None
+        left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
+        ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
+        scale = min(most, width / ink[2], height / ink[3])
+        errors = len(lint_compilation(compiled, style=layout_style).errors)
+        return BoxFit(compiled, scale, ink, keep, base * scale, errors, layout_style)
+    return None
 
 
 def _estimate(spec: FigureSpec, style, width: float, height: float, most: float) -> float:

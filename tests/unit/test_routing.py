@@ -1232,3 +1232,24 @@ def test_a_figure_whose_routing_costs_more_than_the_repairs_may_spend_gets_none(
     once = work(0)
     assert work(10**9) > once, "this figure is one the repairs try again"
     assert work(once - 1) == once
+
+
+def test_a_search_past_its_ceiling_gives_up_and_a_repair_trial_with_it() -> None:
+    from flexo.routing import router
+    from flexo.routing.search import TooDear, ceiling, search_work
+
+    def attempt(*_):
+        # A trial that searches on and on, as one sending a line round everything does.
+        figure = compile_figure(vertical_slice())
+        return figure
+
+    router._TRIAL_WORK[0] = 10
+    router._REPAIR_LIMIT[0] = search_work() + 1_000_000
+    assert router._trial(attempt) is None
+    ceiling(search_work() + 5)
+    try:
+        with pytest.raises(TooDear):
+            compile_figure(vertical_slice())
+    finally:
+        ceiling(None)
+    assert compile_figure(vertical_slice()).document.text  # no ceiling: routed in full

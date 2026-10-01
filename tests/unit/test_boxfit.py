@@ -95,3 +95,23 @@ def test_a_fold_that_sets_the_words_clearly_larger_is_taken() -> None:
     # As written it reaches most of the size it was meant to have; folded it reaches more.
     assert kept.words > 13 * 0.7
     assert "folded" in fit.layout and fit.words > kept.words * 1.3
+
+
+def test_a_layout_kept_while_editing_is_drawn_alone_and_as_the_fit_drew_it(monkeypatch) -> None:
+    import flexo.boxfit as boxfit
+
+    fit = flexo.fit_in_box(_stack(), 800, 200, words=12, largest=18)
+    compiles = []
+    real = boxfit.compile_figure
+
+    def counted(*args, **kwargs):
+        compiles.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(boxfit, "compile_figure", counted)
+    kept = flexo.fit_in_box(_stack(), 800, 200, words=12, largest=18, keep=fit.layout)
+    assert len(compiles) == 1 and kept.layout == fit.layout
+    assert kept.compilation.document.text == fit.compilation.document.text
+    # A layout it does not know is no layout to keep: the best is found as ever.
+    other = flexo.fit_in_box(_stack(), 800, 200, words=12, largest=18, keep="sideways")
+    assert other.layout == fit.layout
