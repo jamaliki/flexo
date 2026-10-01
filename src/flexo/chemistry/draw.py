@@ -103,6 +103,41 @@ class Drawn:
     """What is drawn beside an atom besides its label -- a circled charge -- as the atom
     it belongs to and a circle (x, y, radius), for arrows to keep off."""
 
+    def moved(self, dx: float, dy: float) -> Drawn:
+        """The same drawing ``dx``, ``dy`` along: drawn once and put where it goes, rather
+        than drawn again there."""
+
+        from dataclasses import replace
+
+        from flexo.render_drawn import _moved
+
+        def point(at: Point) -> Point:
+            return (at[0] + dx, at[1] + dy)
+
+        def box(at: Box) -> Box:
+            return (at[0] + dx, at[1] + dy, at[2] + dx, at[3] + dy)
+
+        atoms = {
+            index: Atomic(
+                point(place.point),
+                place.radius,
+                list(place.taken),
+                [(angle, point(middle)) for angle, middle in place.pairs],
+                (place.radical[0], point(place.radical[1])) if place.radical else None,
+                box(place.label) if place.label is not None else None,
+                place.label_side,
+            )
+            for index, place in self.atoms.items()
+        }
+        return Drawn(
+            [replace(shape, d=_moved(shape.d, dx, dy)) for shape in self.shapes],
+            [replace(words, x=words.x + dx, y=words.y + dy) for words in self.words],
+            atoms,
+            [box(item) for item in self.boxes],
+            {key: [(point(a), point(b)) for a, b in items] for key, items in self.lines.items()},
+            [(atom, x + dx, y + dy, radius) for atom, x, y, radius in self.marks],
+        )
+
     def bounds(self) -> Box:
         xs, ys = [], []
         for atom in self.atoms.values():

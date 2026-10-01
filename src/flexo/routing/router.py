@@ -59,7 +59,18 @@ from flexo.routing.pins import (
     plan_pins,
     title_rect,
 )
-from flexo.routing.search import EAST, NORTH, SOUTH, WEST, Grid, Zone, search_work, simplify
+from flexo.routing.search import (
+    EAST,
+    NORTH,
+    SOUTH,
+    WEST,
+    Grid,
+    TooDear,
+    Zone,
+    ceiling,
+    search_work,
+    simplify,
+)
 from flexo.routing.separate import (
     CaptionRoom,
     Terminal,
@@ -179,9 +190,13 @@ def route_figure(
     started = search_work()
     pins, bundles, wires, orders = attempt({})
     # Each repair trial routes the whole figure again: one whose routing alone costs
-    # more than the repairs may spend gets none, rather than a trial past the budget.
-    affordable = search_work() - started <= REPAIR_WORK
-    _REPAIR_LIMIT[0] = search_work() + (REPAIR_WORK if affordable else 0)
+    # more than the repairs may spend gets none, rather than a trial past the budget;
+    # and the repairs of any figure spend no more than so many routings of it.
+    first = search_work() - started
+    affordable = first <= REPAIR_WORK
+    budget = min(REPAIR_WORK, max(REPAIR_ROUTINGS * first, REPAIR_LEAST))
+    _REPAIR_LIMIT[0] = search_work() + (budget if affordable else 0)
+    _TRIAL_WORK[0] = TRIAL_ROUTINGS * max(first, TRIAL_LEAST)
     pins, bundles, wires = _reorder_crossing_pins(
         attempt,
         separated,
@@ -307,7 +322,42 @@ The trials above are capped in number, but each reroutes the whole figure, so a
 large figure that keeps crossing could spend minutes on them. Counted in search
 steps, not seconds, so a figure routes the same on every machine; the densest
 figure in the literature set spends under a million on its whole routing."""
+REPAIR_ROUTINGS = 16
+"""How many times its own first routing the crossing repairs may spend on a figure.
+
+A repair that takes a crossing out costs a few routings of the figure; across the
+examples and the literature set the dearest that helped cost 15. A crossing the
+repairs cannot take out costs far more -- a line that must come back round tried
+every way round -- so a small figure, laid out for a slide again and again as it is
+dragged into shape, would otherwise spend seconds each time on one it keeps."""
+
+REPAIR_LEAST = 20_000
+"""The least the repairs may spend, however cheap the first routing: a few trials of
+the smallest figures, whose one routing is a few hundred steps."""
+
+TRIAL_ROUTINGS = 6
+"""How many times the figure's first routing one repair trial may spend before it is
+given up. A trial that took a crossing out has cost at most about 3 (across the
+examples and the literature set); one that sends a line the long way round every
+other part can cost 30, and is never the one kept."""
+
+TRIAL_LEAST = 2_000
+"""The least a trial is allowed, however cheap the first routing."""
+
 _REPAIR_LIMIT = [0]
+_TRIAL_WORK = [0]
+
+
+def _trial(attempt, *args):
+    """``attempt(*args)`` as a repair trial: None if it searches past what a trial may."""
+
+    ceiling(min(search_work() + _TRIAL_WORK[0], _REPAIR_LIMIT[0]))
+    try:
+        return attempt(*args)
+    except TooDear:
+        return None
+    finally:
+        ceiling(None)
 
 
 def _within_budget() -> bool:
@@ -360,7 +410,9 @@ def _reorder_crossing_pins(
                     continue
                 tried.add(signature)
                 trials += 1
-                trial = attempt({**overrides, side_key: swapped})
+                trial = _trial(attempt, {**overrides, side_key: swapped})
+                if trial is None:
+                    continue
                 defects = _defects(separated(trial[2]), spacing)
                 if len(defects) < len(best):
                     overrides[side_key] = swapped
@@ -451,7 +503,9 @@ def _turn_crossing_ends(
                 tried.add((key, side))
                 trials += 1
                 chosen = {**sides, **dict.fromkeys(group, side)}
-                trial = attempt(overrides, chosen)
+                trial = _trial(attempt, overrides, chosen)
+                if trial is None:
+                    continue
                 defects = _defects(separated(trial[2]), spacing)
                 if len(defects) < len(best):
                     sides = chosen
@@ -516,7 +570,9 @@ def _try_loops(
                 tried.add(key)
                 trials += 1
                 chosen = {**sides, first: side, second: side}
-                trial = attempt(overrides, chosen)
+                trial = _trial(attempt, overrides, chosen)
+                if trial is None:
+                    continue
                 defects = _defects(separated(trial[2]), spacing)
                 if len(defects) < len(best):
                     return (chosen, trial[:3], defects), trials
