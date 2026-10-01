@@ -489,6 +489,9 @@ def _operator(runs: list[TextRun], symbol: str, weight: int, shift: str) -> None
     while runs and runs[-1].text == " ":
         runs.pop()
     spaced = shift == "normal" and bool(previous)
+    if spaced and atoms and atoms[-1].italic and atoms[-1].baseline_shift == "normal":
+        # An italic letter leans into the space before a sign (f + g): its correction.
+        runs.append(TextRun("\u200a", weight, False, shift))  # type: ignore[arg-type]
     if spaced:
         runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
     runs.append(TextRun(symbol, weight, False, shift))  # type: ignore[arg-type]

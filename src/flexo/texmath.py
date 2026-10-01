@@ -2101,19 +2101,19 @@ class _Layout:
                 amount = _SPACING[last][kind]
                 if amount > 0 or (amount < 0 and style.level < 2):
                     kern = _MU[abs(amount)] * self.size(style)
-            if (
-                kind in {ORD, OPEN, CLOSE, PUNCT, INNER}
-                and placed
-                and placed[-1][0].single
-                and placed[-1][0].italic > 0
-            ):
-                # An italic letter leans into what follows: give it its italic correction.
+            if kind is not None and placed and placed[-1][0].single and placed[-1][0].italic > 0:
+                # An italic letter leans into what follows -- a sign as much as a letter --
+                # so it is given its italic correction (TeX's rule 17): f + b, not f+ b.
                 kern += placed[-1][0].italic
             placed.append((box, kern))
             if kind is not None:
                 last = kind
+        alone = len(placed) == 1
+        if len(placed) > 1 and placed[-1][0].single and placed[-1][0].italic > 0:
+            # And at the end of a list, so a closing bracket clears it: \left| f \right|.
+            placed.append((_kern(placed[-1][0].italic), 0.0))
         row = _row(placed)
-        if len(placed) == 1:
+        if alone:
             row.single = placed[0][0].single
             row.accent_at = placed[0][0].accent_at
         return row
