@@ -402,3 +402,32 @@ def test_a_circled_charge_keeps_off_the_bonds_round_its_atom() -> None:
                 t = step / 20
                 point = (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
                 assert math.dist(point, centre) > radius
+
+
+def test_an_atom_is_given_a_map_in_its_smiles_and_nothing_else_changes() -> None:
+    from flexo.chemistry.molecule import mapped_smiles
+
+    for smiles, atom, written in [
+        ("CC(=O)Cl", 1, "C[C:9](=O)Cl"),
+        ("CC(=O)Cl", 0, "[CH3:9]C(=O)Cl"),
+        ("c1ccccc1", 2, "c1c[cH:9]ccc1"),
+        ("C[NH3+]", 1, "C[NH3+:9]"),
+    ]:
+        assert mapped_smiles(smiles, atom, 9) == written
+        before, after = read_smiles(smiles), read_smiles(written)
+        assert [(a.element, a.hydrogens, a.charge, a.lone) for a in before.atoms] == [
+            (a.element, a.hydrogens, a.charge, a.lone) for a in after.atoms
+        ]
+
+
+def test_a_step_that_cannot_be_is_drawn_as_far_as_it_goes_when_asked() -> None:
+    from flexo.mechanism import mechanism_states
+
+    half = [{"smiles": "[OH-:1].[CH3:2][Br:3]", "arrows": "1 -> 2"}, {"label": "after"}]
+    with pytest.raises(FlexoError, match="10 electrons"):
+        _mechanism(half)
+    figure, drawing = _mechanism(half, partial=True)
+    panels, problem = mechanism_states(figure.spec.nodes[0])
+    assert len(panels) == 1 and problem is not None and problem.code == "mechanism.arrows"
+    assert any(shape.id.startswith("m.step1.arrow") for shape in drawing.shapes)
+    assert not any(shape.id.startswith("m.step2.") for shape in drawing.shapes)

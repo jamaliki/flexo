@@ -262,6 +262,27 @@ def read_smiles(smiles: str) -> Molecule:
     return molecule
 
 
+def mapped_smiles(smiles: str, atom: int, number: int) -> str:
+    """``smiles`` with its atom ``atom`` (from 0, in the order it is written) given the
+    map ``number`` -- written in brackets with the hydrogens it has, as ``C`` becomes
+    ``[CH3:7]`` -- and everything else as it was."""
+
+    molecule = read_smiles(smiles)
+    reader = _Spans(smiles)
+    reader.read()
+    lead = len(smiles) - len(smiles.lstrip())
+    start, end = reader.spans[atom]
+    token = smiles[lead + start : lead + end]
+    if token.startswith("["):
+        inside = re.sub(r":\d+$", "", token[1:-1])
+        written = f"[{inside}:{number}]"
+    else:
+        count = molecule.atoms[atom].hydrogens
+        hydrogens = "" if not count else "H" if count == 1 else f"H{count}"
+        written = f"[{token}{hydrogens}:{number}]"
+    return smiles[: lead + start] + written + smiles[lead + end :]
+
+
 class _Reader:
     def __init__(self, smiles: str) -> None:
         self.text = smiles.strip()
@@ -413,6 +434,20 @@ class _Reader:
     def add(self, atom: Atom) -> int:
         self.molecule.atoms.append(atom)
         return len(self.molecule.atoms) - 1
+
+
+class _Spans(_Reader):
+    """A reader that keeps where in the words each atom is written."""
+
+    def __init__(self, smiles: str) -> None:
+        super().__init__(smiles)
+        self.spans: list[tuple[int, int]] = []
+
+    def atom(self) -> int:
+        start = self.at
+        index = super().atom()
+        self.spans.append((start, self.at))
+        return index
 
 
 def _kekulize(molecule: Molecule, smiles: str) -> None:

@@ -1317,6 +1317,7 @@ class GroupBuilder:
         charges: str = "circled",
         per_row: int | None = None,
         arrow_colour: str | None = None,
+        partial: bool = False,
         **options: object,
     ) -> NodeHandle:
         """A reaction mechanism: structures from SMILES and the curly arrows between them
@@ -1332,6 +1333,9 @@ class GroupBuilder:
         checked against them. ``lone_pairs`` is ``used`` (those arrows leave), ``all`` or
         ``none``; ``charges`` ``circled`` or ``plain``; ``per_row`` how many structures
         a row holds. The curly arrows are drawn in one ink: magenta, or ``arrow_colour``.
+        ``partial`` draws a mechanism with a step that cannot be as far as that step,
+        its arrows on it, rather than refusing it (``flexo.mechanism.mechanism_states``
+        says what is wrong).
         """
 
         if isinstance(steps, str):
@@ -1356,6 +1360,8 @@ class GroupBuilder:
             properties["per_row"] = int(per_row)
         if arrow_colour is not None:
             properties["arrow_colour"] = arrow_colour
+        if partial:
+            properties["partial"] = True
         return self.node(id, "mechanism", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def structure(

@@ -61,9 +61,7 @@ class Panel:
 
 
 def _fail(node: NodeSpec, code: str, message: str, hint: str | None = None) -> FlexoError:
-    return FlexoError(
-        Diagnostic(f"mechanism.{code}", message, entity_id=node.id, hint=hint or None)
-    )
+    return FlexoError(_said(node, code, message, hint))
 
 
 def mechanism_steps(node: NodeSpec) -> list[Step]:
@@ -136,9 +134,26 @@ def mechanism_steps(node: NodeSpec) -> list[Step]:
 
 
 def mechanism_panels(node: NodeSpec) -> list[Panel]:
-    """Each structure of the mechanism, laid out, its arrows read and checked."""
+    """Each structure of the mechanism, laid out, its arrows read and checked; a step
+    that cannot be is refused, in words."""
+
+    panels, problem = mechanism_states(node)
+    if problem is not None:
+        raise FlexoError(problem)
+    return panels
+
+
+def mechanism_states(node: NodeSpec) -> tuple[list[Panel], Diagnostic | None]:
+    """Each structure of the mechanism as far as it goes, and what stops it. A step is
+    wrong between one arrow and the next while it is drawn -- a carbon has five bonds
+    until the leaving group's arrow comes -- so the step that cannot be is kept, with
+    the arrows that read, the structures after it are not, and why is said.
+
+    A step ``holding`` names (``{"step": 2, "arrows": "..."}``) is laid out for those
+    arrows rather than its own, so that drawing on it does not move it."""
 
     steps = mechanism_steps(node)
+    held = _holding(node)
     panels: list[Panel] = []
     made: Molecule | None = None
     for number, step in enumerate(steps, start=1):
@@ -147,7 +162,10 @@ def mechanism_panels(node: NodeSpec) -> list[Panel]:
             try:
                 molecule = read_smiles(step.smiles)
             except SmilesError as error:
-                raise _fail(node, "smiles", f"{where}: {error}", error.hint) from None
+                problem = _said(node, "smiles", f"{where}: {error}", error.hint)
+                if not panels:
+                    raise FlexoError(problem) from None
+                return _ending(panels, made), problem
             if made is not None and panels and panels[-1].arrows:
                 # A step drawn by hand may leave out what takes no part, and bring in what
                 # joins: only what it says of the atoms it shares must agree.
@@ -159,14 +177,14 @@ def mechanism_panels(node: NodeSpec) -> list[Panel]:
                     if "does not draw atom" not in line and "that step" not in line
                 ]
                 if said:
-                    raise _fail(
+                    return _ending(panels, made), _said(
                         node,
                         "check",
                         f"{where} is not what step {number - 1}'s arrows make: " + " ".join(said),
                         f"Leave out step {number}'s smiles to draw what the arrows make.",
                     )
         elif made is None:
-            raise _fail(
+            return panels, _said(
                 node,
                 "smiles",
                 f"{where} has no structure, and the step before it no arrows to make one.",
@@ -174,19 +192,28 @@ def mechanism_panels(node: NodeSpec) -> list[Panel]:
             )
         else:
             molecule = made
-        try:
-            arrows = [read_arrow(text, molecule) for text in step.arrows]
-        except MechanismError as error:
-            raise _fail(node, "arrows", f"{where}: {error}", error.hint) from None
-        meetings = [pair for arrow in arrows if (pair := target_bond(arrow))]
+        problem = None
+        arrows = []
+        for text in step.arrows:
+            try:
+                arrows.append(read_arrow(text, molecule))
+            except MechanismError as error:
+                if problem is None:
+                    problem = _said(node, "arrows", f"{where}: {error}", error.hint)
         made = None
-        if arrows:
+        if arrows and problem is None:
             try:
                 made = push(molecule, arrows, step=where)
             except MechanismError as error:
-                raise _fail(node, "arrows", str(error), error.hint) from None
+                problem = _said(node, "arrows", str(error), error.hint)
+        # Laid out for what the arrows do -- or, held, for the arrows it was opened with.
+        laid, layout = arrows, made
+        if number in held:
+            laid = [arrow for text in held[number] if (arrow := _quietly(text, molecule))]
+            layout = _pushed(molecule, laid)
+        meetings = [pair for arrow in laid if (pair := target_bond(arrow))]
         if not panels:
-            if made is None or not foresee(molecule, made.copy(), meetings):
+            if layout is None or not foresee(molecule, layout.copy(), meetings):
                 assemble(molecule, meetings)
         elif step.smiles:
             align(panels[-1].molecule, molecule)
@@ -194,11 +221,51 @@ def mechanism_panels(node: NodeSpec) -> list[Panel]:
         else:
             gather(molecule, meetings)
         panels.append(Panel(molecule, arrows, step))
+        if problem is not None:
+            return panels, problem
         if made is not None:
             follow(molecule, made)
     if made is not None:
         panels.append(Panel(made, [], Step()))
-    return panels
+    return panels, None
+
+
+def _said(node: NodeSpec, code: str, message: str, hint: str | None = None) -> Diagnostic:
+    return Diagnostic(f"mechanism.{code}", message, entity_id=node.id, hint=hint or None)
+
+
+def _ending(panels: list[Panel], made: Molecule | None) -> list[Panel]:
+    """The panels so far, and what the last arrows make, when the next step is wrong."""
+
+    if made is None or not panels or not panels[-1].arrows:
+        return panels
+    return [*panels, Panel(made, [], Step())]
+
+
+def _holding(node: NodeSpec) -> dict[int, list[str]]:
+    value = node.property("holding")
+    held: dict[int, list[str]] = {}
+    for record in value if isinstance(value, tuple) else ():
+        step, arrows = record.get("step"), record.get("arrows")
+        if isinstance(step, int) and isinstance(arrows, str):
+            held[step] = [part.strip() for part in arrows.split(";") if part.strip()]
+    return held
+
+
+def _quietly(text: str, molecule: Molecule) -> Arrow | None:
+    try:
+        return read_arrow(text, molecule)
+    except MechanismError:
+        return None
+
+
+def _pushed(molecule: Molecule, arrows: list[Arrow]) -> Molecule | None:
+    if not arrows:
+        return None
+    try:
+        return push(molecule, arrows)
+    except MechanismError:
+        return None
 
 
 def mechanism_tones(node: NodeSpec) -> tuple[str, ...]:
@@ -209,6 +276,28 @@ def mechanism_tones(node: NodeSpec) -> tuple[str, ...]:
 
 
 def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
+    return mechanism_composed(node, style).picture
+
+
+@dataclass(slots=True)
+class Composed:
+    """A mechanism drawn: the picture, and each structure in it as drawn -- the molecule
+    (hydrogens no arrow moves folded into their labels), where its atoms went, and how
+    the step's atoms are numbered in it."""
+
+    picture: Picture
+    drawn: dict[int, tuple[Drawn, Molecule, dict[int, int]]]
+    pen: Pen
+    panels: list[Panel]
+    problem: Diagnostic | None
+
+
+def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
+    """The mechanism's picture, and what is in it. With ``partial`` a step that cannot be
+    is drawn and the rest left out (``problem`` says why) rather than refused; with
+    ``only`` (a structure's number, from 1) that one structure is drawn alone, as an
+    editor draws on it."""
+
     measures = units(style)
     u = measures.u
     pen = Pen(u, lambda runs: measures.measure(runs))
@@ -218,11 +307,38 @@ def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     charges = str(node.property("charges") or "circled").strip().lower()
     if charges not in {"circled", "plain"}:
         raise _fail(node, "charges", f'charges "{charges}" is neither circled nor plain.')
-    panels = mechanism_panels(node)
+    panels, problem = mechanism_states(node)
+    if problem is not None and (not node.property("partial") or not panels):
+        raise FlexoError(problem)
     colour = _arrow_colour(node)
+    kept: dict[int, tuple[Drawn, Molecule, dict[int, int]]] = {}
+    only = node.property("only")
+    if isinstance(only, int) and not isinstance(only, bool):
+        chosen = min(max(only, 1), len(panels)) - 1
+        drawn, molecule, renumber = draw_panel(
+            panels[chosen],
+            pen,
+            prefix=f"{node.id}.step{chosen + 1}",
+            pairs=pairs,
+            charges=charges,
+            colour=colour,
+        )
+        x0, y0, x1, y1 = drawn.bounds()
+        drawn, molecule, renumber = draw_panel(
+            panels[chosen],
+            pen,
+            prefix=f"{node.id}.step{chosen + 1}",
+            origin=(-x0, -y0),
+            pairs=pairs,
+            charges=charges,
+            colour=colour,
+        )
+        kept[chosen] = (drawn, molecule, renumber)
+        picture = Picture(Size(x1 - x0, y1 - y0), tuple(drawn.shapes), tuple(drawn.words))
+        return Composed(picture, kept, pen, panels, problem)
 
     def drawing(index: int, panel: Panel, origin: tuple[float, float]) -> Drawn:
-        drawn, _, _ = draw_panel(
+        drawn, molecule, renumber = draw_panel(
             panel,
             pen,
             prefix=f"{node.id}.step{index + 1}",
@@ -231,6 +347,7 @@ def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             charges=charges,
             colour=colour,
         )
+        kept[index] = (drawn, molecule, renumber)
         return drawn
 
     # Each structure drawn once where it falls, to measure it, then where it goes.
@@ -316,7 +433,9 @@ def mechanism_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             x += x1 - x0
         width = max(width, x)
         y += row_height + labels_room + (u * 1.4 if row_number < len(rows) - 1 else 0.0)
-    return Picture(Size(width, y), tuple(shapes), tuple(words))
+    return Composed(
+        Picture(Size(width, y), tuple(shapes), tuple(words)), kept, pen, panels, problem
+    )
 
 
 def draw_panel(

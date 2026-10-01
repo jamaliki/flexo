@@ -336,7 +336,10 @@ attacking molecule brought in beside the atom it bonds to, a leaving group set a
 A step written out is checked against them. An arrow that cannot be is said in words:
 carbon given ten electrons ("as a bond to it forms, another must break"), a lone pair
 that is not there, a fishhook left without its partner, a hydrogen with two bonds.
-After the last step with arrows comes what they make.
+After the last step with arrows comes what they make. With `partial=True` a step that
+cannot be is drawn as far as it goes, its arrows on it, instead of refused (as it is
+between one arrow and the next while a step is drawn); `flexo.mechanism.mechanism_states`
+says what is wrong.
 
 Structures are laid out flat as a chemist would: rings as regular polygons, fused rings
 side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan
