@@ -427,7 +427,86 @@ export function figureParts(host) {
         onclick: (event) => { stop(event); addPart(kind, { after: id, source: id }); },
       }, icon("plus")));
     }
+    // A molecule or picture chosen has a handle at each corner: dragged, it is drawn
+    // larger or smaller, and the figure is laid out round it again.
+    if (box && SIZED_PARTS.has(nodeOf(id)?.kind)) {
+      for (const corner of ["nw", "ne", "sw", "se"]) {
+        views.push(h(`span.fig-size.${corner}`, {
+          style: { left: `${corner.endsWith("w") ? box.left : box.left + box.width}px`, top: `${corner.startsWith("n") ? box.top : box.top + box.height}px` },
+          title: "Drag to size it · double-click for its own size",
+          onpointerdown: (event) => partSizeStart(event, id, corner),
+          ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
+        }));
+      }
+    }
     return views;
+  }
+
+  // -- a molecule or picture sized by its corners --
+  // It grows or shrinks about its opposite corner as the pointer goes; let go, it is
+  // given that width and height and the figure is laid out again, its parts gliding to
+  // where they go.
+  const SIZED_PARTS = new Set(["structure", "image"]);
+  let partSizing = null;
+  function partSizeStart(event, id, corner) {
+    if (event.button !== 0 || partSizing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = host.element(id);
+    const box = element?.getBoundingClientRect();
+    const unit = element?.getScreenCTM?.()?.a;
+    if (!box || !box.width || !unit) return;
+    const west = corner.endsWith("w"), north = corner.startsWith("n");
+    Object.assign(element.style, { transformBox: "fill-box", transformOrigin: `${west ? "100%" : "0"} ${north ? "100%" : "0"}`, transform: "" });
+    const tip = h("div.fig-turn-tip");
+    host.overlay.append(tip);
+    partSizing = { id, element, box, unit, tip, scale: 1, moved: false, start: { x: event.clientX, y: event.clientY },
+      anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, handle: { x: west ? box.left : box.right, y: north ? box.top : box.bottom } };
+    host.overlay.classList.add("fig-sizing");
+    window.addEventListener("pointermove", partSizeMove);
+    window.addEventListener("pointerup", partSizeEnd);
+    window.addEventListener("pointercancel", partSizeCancel);
+  }
+  function partSizeMove(event) {
+    const sizing = partSizing;
+    if (!sizing) return;
+    if (!sizing.moved && Math.hypot(event.clientX - sizing.start.x, event.clientY - sizing.start.y) < 3) return;
+    sizing.moved = true;
+    const { anchor, handle, box } = sizing;
+    const dx = handle.x - anchor.x, dy = handle.y - anchor.y;
+    let scale = ((event.clientX - anchor.x) * dx + (event.clientY - anchor.y) * dy) / (dx * dx + dy * dy || 1);
+    scale = Math.min(Math.max(scale, 24 / Math.min(box.width, box.height)), 6);
+    if (Math.abs(scale - 1) * box.width < 4) scale = 1;
+    sizing.scale = scale;
+    sizing.element.style.transform = `scale(${scale})`;
+    const outer = host.overlay.getBoundingClientRect();
+    sizing.tip.textContent = `${Math.round(scale * 100)}%`;
+    Object.assign(sizing.tip.style, { left: `${event.clientX - outer.left}px`, top: `${event.clientY - outer.top + 18}px` });
+  }
+  function partSizeFinish() {
+    const sizing = partSizing;
+    partSizing = null;
+    window.removeEventListener("pointermove", partSizeMove);
+    window.removeEventListener("pointerup", partSizeEnd);
+    window.removeEventListener("pointercancel", partSizeCancel);
+    host.overlay.classList.remove("fig-sizing");
+    sizing?.tip.remove();
+    if (sizing?.moved) { state.swallow = true; setTimeout(() => { state.swallow = false; }, 0); }
+    return sizing;
+  }
+  function partSizeEnd() {
+    const sizing = partSizeFinish();
+    if (!sizing) return;
+    if (!sizing.moved || Math.abs(sizing.scale - 1) < 0.01) { sizing.element.style.transform = ""; return; }
+    const { box, unit, scale, id, element } = sizing;
+    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round((box.width / unit) * scale), "properties.height": Math.round((box.height / unit) * scale) } },
+      { then: () => { state.landing = Date.now(); }, failed: () => { element.style.transform = ""; } });
+    // Should no new drawing come, it goes back to the size it is drawn at.
+    setTimeout(() => { if (element.isConnected) element.style.transform = ""; }, 6000);
+  }
+  function partSizeCancel() {
+    const sizing = partSizeFinish();
+    if (sizing) sizing.element.style.transform = "";
   }
 
   // -- a structure turned by dragging on it --
@@ -831,9 +910,13 @@ export function figureParts(host) {
         continue;
       }
       const dx = centre(was).x - centre(now).x, dy = centre(was).y - centre(now).y;
-      if (Math.hypot(dx, dy) < 0.5) continue;
+      // One sized in proportion (a molecule's corner dragged) grows or shrinks the rest of the way.
+      const grown = was.width / (now.width || 1);
+      const sized = Math.abs(grown - 1) > 0.02 && Math.abs(was.height / (now.height || 1) - grown) < 0.05 * grown;
+      if (Math.hypot(dx, dy) < 0.5 && !sized) continue;
       const scale = unitsPerPixel(element);
-      element.animate([{ transform: `translate(${dx * scale}px, ${dy * scale}px)` }, { transform: "translate(0px, 0px)" }],
+      if (sized) Object.assign(element.style, { transformBox: "fill-box", transformOrigin: "center" });
+      element.animate([{ transform: `translate(${dx * scale}px, ${dy * scale}px)${sized ? ` scale(${grown})` : ""}` }, { transform: `translate(0px, 0px)${sized ? " scale(1)" : ""}` }],
         { duration: 300, easing: ease });
     }
     // Lines and frames are drawn anew for where the parts go: they come in as the parts
@@ -1007,9 +1090,18 @@ export function figureParts(host) {
 
   function nodePanel(node) {
     const part = partOf(node) || { title: node.kind, fields: [], hint: "" };
-    const kinds = Object.entries(parts).filter(([kind, p]) => !p.needs_file || kind === node.kind);
+    // A part made a structure or a picture is drawn from a file: it is asked for, and
+    // the part keeps its words (under the molecule, say) and its lines.
+    const kinds = Object.entries(parts).filter(([kind, p]) => !p.unavailable || kind === node.kind);
     const retype = ui.select({ value: node.kind || "block", options: kinds.map(([kind, p]) => ({ value: kind, label: p.title })),
-      onChange: (value) => update({ type: "node", id: node.id }, { kind: value }) });
+      onChange: async (value) => {
+        const next = parts[value];
+        if (!next?.needs_file || value === node.kind) { update({ type: "node", id: node.id }, { kind: value }); return; }
+        const field = next.fields.find((item) => item.type === "file");
+        const file = await host.chooseFile({ title: `Choose the ${next.title.toLowerCase()}'s file`, types: field?.types });
+        if (!file) { retype.value = node.kind || "block"; return; }
+        update({ type: "node", id: node.id }, { kind: value, "properties.source": file });
+      } });
     const lines = model().edges.filter((edge) => nodeOfRef(edge.from) === node.id || nodeOfRef(edge.to) === node.id);
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
