@@ -129,7 +129,7 @@ export class Session {
     if (!waits.length) { done(); return; }
     Promise.allSettled(waits).then((results) => {
       const failed = results.find((result) => result.status === "rejected");
-      if (failed) toast(`Could not ${target === "before" ? "undo" : "redo"} it all: ${failed.reason?.message || failed.reason}`, { kind: "error", icon: "error", seconds: 6 });
+      if (failed) toast(`Could not ${target === "before" ? "undo" : "redo"} all changes: ${failed.reason?.message || failed.reason}`, { kind: "error", icon: "error", seconds: 6 });
       done();
     });
   }
@@ -172,7 +172,7 @@ export class Session {
       this.accept(result.version, result.document, sent);
     } catch (error) {
       this.sending = null;
-      toast(`Could not send your change to ${this.file}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+      toast(`Could not sync your changes to ${this.file}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
       setTimeout(() => this.schedulePush(), 2000);
     }
     this.emit("status");

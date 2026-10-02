@@ -26,7 +26,7 @@ export function avatar(who, { size = 24, ring = false } = {}) {
 
 export function ago(seconds) {
   const delta = Math.max(0, Date.now() / 1000 - seconds);
-  if (delta < 10) return "just now";
+  if (delta < 10) return "Just now";
   if (delta < 60) return `${Math.floor(delta)}s ago`;
   if (delta < 3600) return `${Math.floor(delta / 60)} min ago`;
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -252,7 +252,7 @@ export async function start() {
     info = await response.json();
     if (!response.ok) throw new Error(info.error || response.statusText);
   } catch (error) {
-    clear(root, h("div.fatal", {}, h("h1", {}, "The studio could not start"), h("pre", {}, String(error.message || error))));
+    clear(root, h("div.fatal", {}, h("h1", {}, "Flexo Studio couldn't start"), h("pre", {}, String(error.message || error))));
     return;
   }
   const workspace = new Workspace(info);
@@ -265,16 +265,16 @@ export async function start() {
   // -- the top bar --
   const tabs = h("nav.tabs.scroll-thin");
   const people = h("div.people");
-  const followChip = h("button.chip-toggle", { type: "button", title: "Follow agents: show what they change as they change it", onclick: () => workspace.setFollow(!workspace.follow) }, icon("target"), "Follow");
+  const followChip = h("button.chip-toggle", { type: "button", title: "Follow agents as they work", onclick: () => workspace.setFollow(!workspace.follow) }, icon("target"), "Follow");
   const activityButton = ui.button("", () => side.toggle("activity"), { kind: "ghost", icon: "activity", title: "Activity" });
   const activityCount = h("span.badge-count", { hidden: true });
   activityButton.append(activityCount);
   const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
-  const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Commands (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
+  const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
   const themeButton = ui.button("", () => {
     const order = ["auto", "light", "dark"];
     const next = order[(order.indexOf(remembered("theme", "auto")) + 1) % 3];
-    remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${next}`, { seconds: 1.5 });
+    remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${{ auto: "Auto", light: "Light", dark: "Dark" }[next]}`, { seconds: 1.5 });
   }, { kind: "ghost", title: "Appearance" });
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
   showTheme();
@@ -294,23 +294,21 @@ export async function start() {
   const undo = ui.button("", () => workspace.active?.undo(), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
   const redo = ui.button("", () => workspace.active?.redo(), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
-    { kind: "ghost", icon: "history", title: "History: go back to any point (⌥⌘Z)" });
+    { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
   const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
-
-  const lower = (text) => text.charAt(0).toLowerCase() + text.slice(1);
 
   // The document's history, newest first: each row is the document as a change left
   // it, the one it is now marked; a click goes back (or forward) to that point.
   function historyMenu(anchor, session) {
     const when = (at) => {
       const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-      return seconds < 50 ? "just now" : seconds < 3000 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds / 3600)} h`;
+      return seconds < 50 ? "Just now" : seconds < 3000 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds / 3600)} h`;
     };
     const go = (run) => () => { closeMenu(); run(); };
     const row = (entry, { now = false, undone = false, run }) => {
       const said = session.said(entry);
-      return h(`button.history-row${now ? ".now" : ""}${undone ? ".undone" : ""}`, { type: "button", onclick: go(run), title: now ? "Where it is now" : undone ? "Redo to here" : "Undo to here" },
-        h("span.history-mark"), h("span.history-text", {}, said.text || "An edit"),
+      return h(`button.history-row${now ? ".now" : ""}${undone ? ".undone" : ""}`, { type: "button", onclick: go(run), title: now ? "Current state" : undone ? "Redo to this point" : "Undo to this point" },
+        h("span.history-mark"), h("span.history-text", {}, said.text || "Edit"),
         said.place ? h("span.history-place", {}, said.place) : null, h("span.history-when", {}, when(entry.at)));
     };
     const rows = [];
@@ -320,9 +318,9 @@ export async function start() {
     for (let index = back.length - 1; index >= Math.max(0, back.length - shown); index -= 1) {
       rows.push(row(back[index], { now: index === back.length - 1, run: () => session.undo(back.length - 1 - index) }));
     }
-    if (back.length > shown) rows.push(h("div.history-more", {}, `${back.length - shown} more before these`));
-    rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo everything since it was opened" },
-      h("span.history-mark"), h("span.history-text", {}, "As it was opened")));
+    if (back.length > shown) rows.push(h("div.history-more", {}, `${back.length - shown} earlier ${back.length - shown === 1 ? "change" : "changes"} not shown`));
+    rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
+      h("span.history-mark"), h("span.history-text", {}, "Original")));
     popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
   }
 
@@ -331,9 +329,9 @@ export async function start() {
   const side = new SidePanel(workspace);
   // A folder someone else made runs none of its own Python until its person says so.
   const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
-    h("div.trust-words", {}, h("b", {}, "This folder's Python has not been run. "),
-      "A deck here draws with Python files from the folder. Run them only if you trust where the folder came from."),
-    ui.button("Trust and run", async () => {
+    h("div.trust-words", {}, h("b", {}, "Python files in this folder haven't been run. "),
+      "Decks in this folder use them to draw plots and figures. Run them only if you trust where the folder came from."),
+    ui.button("Trust and Run", async () => {
       try { await workspace.api("/api/trust", {}); }
       catch (error) { toast(`Could not trust the folder: ${error.message}`, { kind: "error", icon: "error" }); }
     }, { kind: "primary", small: true }));
@@ -396,11 +394,11 @@ export async function start() {
       },
       icon(KIND_ICONS[session.kind] || "file"),
       h("span.tab-name", {}, file.split("/").pop()),
-      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving" }) : null,
+      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving…" }) : null,
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
-    }), h("button.tab-new", { type: "button", title: "New or open…", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
+    }), h("button.tab-new", { type: "button", title: "New or open a document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
   };
 
   const renderPeople = () => {
@@ -412,7 +410,7 @@ export async function start() {
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
-      h("button.person.add", { type: "button", title: "Invite an agent", onclick: () => connectDialog(workspace) }, icon("plug")));
+      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("plug")));
     followChip.hidden = !others.some((entry) => entry.who.kind === "agent");
     followChip.classList.toggle("on", workspace.follow);
     const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
@@ -429,13 +427,13 @@ export async function start() {
     redo.disabled = !session.future.length;
     past.disabled = !session.past.length && !session.future.length;
     const last = session.past[session.past.length - 1], next = session.future[session.future.length - 1];
-    const what = (entry) => (entry && session.said(entry).text ? `: ${lower(session.said(entry).text)}` : "");
+    const what = (entry) => (entry && session.said(entry).text ? ` ${session.said(entry).text}` : "");
     undo.title = `Undo${what(last)} (⌘Z)`;
     redo.title = `Redo${what(next)} (⇧⌘Z)`;
     const state = session.state;
     status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
     status.title = session.problem || "";
-    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "the file on disk does not read: ")}` : "Saving…";
+    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "can't read the file on disk: ")}` : "Saving…";
   };
 
   const renderViews = () => {
@@ -460,17 +458,17 @@ export async function start() {
     const card = (kind, title, note, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
       h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title), h("span.start-note", {}, note)) : null;
     clear(welcome, h("div.welcome-inner", {},
-      h("h1", {}, "What are we making?"),
-      h("p.lead", {}, "Decks, figures, and their themes — edited here, by you and by any agent you invite, at the same time."),
+      h("h1", {}, "New Document"),
+      h("p.lead", {}, "Create decks, figures and themes. You and any agents you invite can edit them at the same time."),
       h("div.start-cards", {},
-        card("deck", "A deck", "Slides for a talk, with real figures", "talk.yaml"),
-        card("figure", "A figure", "A diagram flexo lays out for you", "figure.yaml"),
-        card("theme", "A theme", "Type, colour, and line for everything", "theme.yaml")),
-      workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In this folder"),
+        card("deck", "Deck", "Slides for a talk, with live figures", "talk.yaml"),
+        card("figure", "Figure", "A diagram that is laid out automatically", "figure.yaml"),
+        card("theme", "Theme", "Fonts, colours and lines for decks and figures", "theme.yaml")),
+      workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
         h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, item.file), h("span.doc-kind", {}, item.title))))) : null,
-      h("div.welcome-section", {}, h("h2", {}, "Work with an agent"),
-        h("p", {}, "Ask Claude in the panel on the right, or let Claude Code (or any MCP agent) work here. Run this once in the folder, then ask it to build something — you'll watch it happen:"),
+      h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
+        h("p", {}, "Ask Claude in the panel on the right, or connect Claude Code or another MCP agent. Run this command once in this folder, then ask the agent to make something. Its changes appear here as it works:"),
         copyable(MCP_COMMAND),
         h("p.hint-line", {}, info.folder))));
   };
@@ -531,7 +529,7 @@ function markIcon() {
 export function copyable(text) {
   const button = ui.button("", async () => {
     try { await navigator.clipboard.writeText(text); toast("Copied", { icon: "check", seconds: 1.2 }); }
-    catch { toast("Select the text and copy it", { seconds: 2 }); }
+    catch { toast("Couldn't copy. Select the text and copy it instead.", { seconds: 2 }); }
   }, { kind: "ghost", icon: "copy", small: true, title: "Copy" });
   return h("div.copyable", {}, h("code", {}, text), button);
 }
@@ -545,8 +543,8 @@ function newMenu(anchor, workspace) {
     { title: "New" },
     ...[
       { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
-      { icon: "figure", label: "Figure", hint: "A diagram flexo lays out", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
-      { icon: "theme", label: "Theme", hint: "Type, colour, and line", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+      { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
+      { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: item.file, hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
@@ -565,31 +563,32 @@ export function askName(workspace, kind, suggestion) {
     return true;
   };
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go().then((ok) => ok && box.close()); } });
-  const box = dialog({ title: `New ${kind}`, body: [ui.field("File", input, { hint: "in the studio's folder" })],
+  const kindTitle = (workspace.info.kinds || []).find((item) => item.name === kind)?.title || kind.charAt(0).toUpperCase() + kind.slice(1);
+  const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("File Name", input, { hint: "Saved in the studio folder" })],
     actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: () => { go(); } }] });
   setTimeout(() => { input.focus(); input.setSelectionRange(0, input.value.lastIndexOf(".")); }, 30);
 }
 
 export function connectDialog(workspace) {
   const name = ui.input({ value: workspace.me.name, onChange: (value) => workspace.setName(value.trim()) });
-  dialog({ title: "Work with agents", body: [
-    h("p", {}, "Any agent that speaks MCP can work in this studio: you see its edits as it makes them, where it is, and what it's doing — and you can keep editing too."),
+  dialog({ title: "Work with Agents", body: [
+    h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it's working and what it's doing, and you can keep editing at the same time."),
     h("ol.steps", {},
-      h("li", {}, "In a terminal in this folder, add the studio to Claude Code once:", copyable(MCP_COMMAND)),
-      h("li", {}, "Ask it for what you want — “make a 6-slide talk from the README with a figure of the model” — and watch it build here."),
-      h("li", {}, "Turn on ", h("b", {}, "Follow"), " to have the studio show whatever it is changing.")),
+      h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND)),
+      h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
+      h("li", {}, "Turn on ", h("b", {}, "Follow"), " to show what the agent is changing as it works.")),
     h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
-    ui.field("Your name, as others see it", name),
+    ui.field("Your Name", name, { hint: "Shown to others" }),
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
 function shortcutsDialog() {
   const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").map((key) => h("span.kbd", {}, key))));
-  dialog({ title: "Keyboard", body: [h("div.shortcuts", {},
-    row("⌘ K", "Search and commands"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo your last change"), row("⇧ ⌘ Z", "Redo"), row("⌥ ⌘ Z", "History: go back to any point"),
-    row("⌘ S", "Save now (saving is automatic)"), row("↑ ↓", "Previous / next slide"), row("Enter", "Edit the chosen part in place"),
-    row("Esc", "Let go of the chosen part"), row("⌫", "Delete the chosen part"), row("⌘ D", "Duplicate the slide"),
-    row("⌘ ⏎", "Present"), row("?", "This list"))] });
+  dialog({ title: "Keyboard Shortcuts", body: [h("div.shortcuts", {},
+    row("⌘ K", "Command palette"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo"), row("⇧ ⌘ Z", "Redo"), row("⌥ ⌘ Z", "Show history"),
+    row("⌘ S", "Save (documents also save automatically)"), row("↑ ↓", "Previous or next slide"), row("↩", "Edit the selection"),
+    row("Esc", "Deselect"), row("⌫", "Delete the selection"), row("⌘ D", "Duplicate slide"),
+    row("⌘ ↩", "Present"), row("?", "Keyboard shortcuts"))] });
 }
 
 // -- the side panel: Claude and activity --------------------------------------------
@@ -634,7 +633,7 @@ class SidePanel {
       avatar(entry.who, { size: 22 }),
       h("span.activity-text", {}, h("b", {}, entry.who?.name || "Someone"), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
         h("span.activity-where", {}, [entry.file, entry.where?.label].filter(Boolean).join(" · "))),
-      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "Nothing yet. Changes by you, Claude, and other agents appear here."));
+      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, Claude and other agents appear here."));
   }
 }
 
@@ -648,14 +647,14 @@ export function palette(workspace) {
     ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${file}`, run: () => workspace.activate(file) })),
     ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${item.file}`, hint: item.title, run: () => workspace.open(item.file) })),
     ...[
-      { icon: "deck", label: "New deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
-      { icon: "figure", label: "New figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
-      { icon: "theme", label: "New theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+      { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
+      { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
+      { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
-    { icon: "target", label: workspace.follow ? "Stop following agents" : "Follow agents", run: () => workspace.setFollow(!workspace.follow) },
-    { icon: "plug", label: "Invite an agent (MCP)", run: () => connectDialog(workspace) },
-    { icon: "keyboard", label: "Keyboard shortcuts", keys: "?", run: () => shortcutsDialog() },
+    { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
+    { icon: "plug", label: "Work with Agents…", run: () => connectDialog(workspace) },
+    { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
   ];
   const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });
   input.spellcheck = false;
@@ -683,7 +682,7 @@ export function palette(workspace) {
     index = Math.min(index, Math.max(0, shown.length - 1));
     clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
       command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),
-      command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "Nothing matches."));
+      command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
   const run = (command) => { scrim.remove(); command.run(); };

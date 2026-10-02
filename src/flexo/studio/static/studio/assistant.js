@@ -19,7 +19,7 @@ export class AssistantPanel {
     this.list = h("div.chat.scroll-thin");
     this.input = h("textarea.chat-input", { rows: 1, placeholder: "Ask Claude to make or change something…" });
     this.contextChip = h("div.chat-context");
-    this.sendButton = h("button.chat-send", { type: "button", title: "Send (Enter)", onclick: () => this.send() }, icon("send"));
+    this.sendButton = h("button.chat-send", { type: "button", title: "Send (↩)", onclick: () => this.send() }, icon("send"));
     this.includeContext = true;
     this.node = h("div.assistant", {}, this.list,
       h("div.composer", {}, this.contextChip, h("div.composer-row", {}, this.input, this.sendButton)));
@@ -51,8 +51,8 @@ export class AssistantPanel {
     const where = session?.where?.label;
     clear(this.contextChip, session && this.includeContext
       ? h("span.context-pill", {}, icon("target"), `${session.file.split("/").pop()}${where ? ` · ${where}` : ""}`,
-        h("button", { type: "button", title: "Don't send what you're looking at", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
-      : session ? h("button.context-add", { type: "button", onclick: () => { this.includeContext = true; this.renderContext(); } }, icon("plus"), "Include what you're looking at") : null);
+        h("button", { type: "button", title: "Remove context", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
+      : session ? h("button.context-add", { type: "button", onclick: () => { this.includeContext = true; this.renderContext(); } }, icon("plus"), "Add Context") : null);
   }
 
   async send(text = this.input.value.trim()) {
@@ -94,7 +94,7 @@ export class AssistantPanel {
       }
       case "error": case "stopped": {
         const turn = transcript.find((item) => item.id === event.turn);
-        if (turn) turn.parts.push(event.event === "error" ? { type: "error", text: event.text } : { type: "note", text: "Stopped." });
+        if (turn) turn.parts.push(event.event === "error" ? { type: "error", text: event.text } : { type: "note", text: "Stopped" });
         break;
       }
       case "idle": this.state.running = false; break;
@@ -107,7 +107,7 @@ export class AssistantPanel {
 
   render() {
     const state = this.state;
-    this.sendButton.title = state.running ? "Stop" : "Send (Enter)";
+    this.sendButton.title = state.running ? "Stop" : "Send (↩)";
     clear(this.sendButton, icon(state.running ? "stop" : "send"));
     this.sendButton.classList.toggle("running", Boolean(state.running));
     this.sendButton.onclick = () => (state.running && !this.input.value.trim() ? this.stop() : this.send());
@@ -115,13 +115,13 @@ export class AssistantPanel {
     if (!state.transcript.length) {
       const kind = this.workspace.active?.kind || "none";
       clear(this.list, h("div.chat-empty", {},
-        h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "works on what's open here, with you"))),
-        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, state.why || "The assistant is not available.", " You can still invite Claude Code: see ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with agents"), ".")),
+        h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "Works with you on the documents open here"))),
+        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, state.why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
         h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text)))));
       return;
     }
     clear(this.list, state.transcript.map((item) => this.itemView(item)),
-      h("div.chat-foot", {}, state.running ? null : ui.button("New conversation", () => this.workspace.api("/api/assistant/clear", {}), { kind: "ghost", small: true, icon: "refresh" })));
+      h("div.chat-foot", {}, state.running ? null : ui.button("New Conversation", () => this.workspace.api("/api/assistant/clear", {}), { kind: "ghost", small: true, icon: "refresh" })));
     this.list.scrollTop = this.list.scrollHeight;
   }
 
@@ -152,7 +152,7 @@ export class AssistantPanel {
       if (part.type === "tool") {
         return h(`div.step.${part.state}`, { title: part.error || "" },
           part.state === "running" ? h("span.spinner") : icon(part.state === "failed" ? "warning" : stepIcon(part.name)),
-          h("span", {}, part.label || part.name), part.state === "failed" ? h("span.step-error", {}, part.error ? " — couldn't" : "") : null);
+          h("span", {}, part.label || part.name), part.state === "failed" ? h("span.step-error", {}, part.error ? " — failed" : "") : null);
       }
       if (part.type === "error") return h("div.chat-error", {}, icon("error"), part.text);
       return h("div.chat-note", {}, part.text);

@@ -14,7 +14,7 @@ export function themeCard(card, { on = false, onclick, compact = false } = {}) {
       h("span.theme-tones", {}, tones)),
     h("span.theme-words", {},
       h("span.theme-name", {}, card.title || card.value),
-      card.problem ? h("span.theme-where.bad", {}, "Does not read") : card.source === "folder" ? h("span.theme-where", {}, card.value) : null));
+      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" ? h("span.theme-where", {}, card.value) : null));
 }
 
 // The themes a document may use, asked of the studio; kept a moment, as a picker opens
@@ -40,11 +40,11 @@ export function themeField(session, { value, fallback = "paper", onPick, onCusto
     const folder = cards.filter((card) => card.source === "folder");
     const grid = (list) => h("div.theme-grid", {}, list.map((card) => themeCard(card, { on: card.value === current, onclick: () => pick(card) })));
     popover(anchor, h("div.theme-picker", {},
-      h("div.menu-title", {}, "In this folder"),
-      folder.length ? grid(folder) : h("div.hint-line", {}, "No theme files here yet. ", onCustomise ? "Customise makes one from the theme in use." : ""),
-      h("div.menu-title", {}, "Built in"),
+      h("div.menu-title", {}, "In This Folder"),
+      folder.length ? grid(folder) : h("div.hint-line", {}, "No theme files in this folder. ", onCustomise ? "Click Customise to make one from the current theme." : ""),
+      h("div.menu-title", {}, "Built-In"),
       grid(cards.filter((card) => card.source === "built-in")),
-      onCustomise ? h("div.row", {}, ui.button("Customise…", () => { closeMenu(); onCustomise(current); }, { small: true, icon: "pencil", title: "Make a theme file from this theme, to change its colours, type and lines" })) : null),
+      onCustomise ? h("div.row", {}, ui.button("Customise…", () => { closeMenu(); onCustomise(current); }, { small: true, icon: "pencil", title: "Create a theme file from this theme to edit its colours, fonts and lines" })) : null),
     { className: "theme-menu" });
   };
   themesFor(session).then((cards) => {
@@ -58,14 +58,14 @@ export function themeField(session, { value, fallback = "paper", onPick, onCusto
 // For a theme file's page: the figures and decks in the folder, which of them use it,
 // and a button to use it in any or all of them.
 export function themeUses(session) {
-  const holder = h("div.theme-uses", {}, h("div.hint-line", {}, "Looking for figures and decks…"));
+  const holder = h("div.theme-uses", {}, h("div.hint-line", {}, "Loading…"));
   const render = (documents) => {
     const others = documents.filter((entry) => !entry.uses);
     const use = async (targets) => {
       try {
         const result = await session.api("/api/theme/use", { file: session.file, targets });
         render(result.documents);
-        toast(`${targets.length === 1 ? targets[0].split("/").pop() : `${targets.length} documents`} now in this theme`, { icon: "theme", seconds: 3 });
+        toast(`Theme applied to ${targets.length === 1 ? targets[0].split("/").pop() : `${targets.length} documents`}`, { icon: "theme", seconds: 3 });
       } catch (error) {
         toast(`Could not change the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
       }
@@ -74,12 +74,12 @@ export function themeUses(session) {
       documents.length ? h("div.line-list", {}, documents.map((entry) => h("div.line-row.theme-use", {},
         icon(entry.kind === "deck" ? "slide" : "figure"),
         h("button.link", { type: "button", title: `Open ${entry.file}`, onclick: () => session.workspace.open(entry.file) }, entry.file),
-        entry.uses ? h("span.chip-on", {}, icon("check"), "Uses it")
-          : ui.button("Use", () => use([entry.file]), { small: true, title: entry.theme ? `Now: ${entry.theme}` : "Now: the default theme" }))))
+        entry.uses ? h("span.chip-on", {}, icon("check"), "In Use")
+          : ui.button("Apply", () => use([entry.file]), { small: true, title: entry.theme ? `Current theme: ${entry.theme}` : "Current theme: Default" }))))
         : h("div.hint-line", {}, "No figures or decks in this folder yet."),
-      others.length > 1 ? h("div.row", {}, ui.button(`Use in all ${others.length}`, () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
+      others.length > 1 ? h("div.row", {}, ui.button(`Apply to All ${others.length}`, () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
   };
   session.api(session.url("/api/theme/uses")).then((result) => render(result.documents))
-    .catch((error) => clear(holder, h("div.hint-line", {}, `Could not list them: ${error.message}`)));
+    .catch((error) => clear(holder, h("div.hint-line", {}, `Could not list documents: ${error.message}`)));
   return holder;
 }

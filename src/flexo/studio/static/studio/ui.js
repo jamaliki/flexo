@@ -231,15 +231,15 @@ export const ui = {
     const tool = (label, title, before, after, style) =>
       h("button", { type: "button", title, style, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
     const tools = h("div.markup-tools", {},
-      tool("B", "Strong (⌘B)", "**", "**", { fontWeight: 700 }),
-      tool("I", "Emphasis (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
-      tool("$x$", "Maths (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
+      tool("B", "Bold (⌘B)", "**", "**", { fontWeight: 700 }),
+      tool("I", "Italic (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
+      tool("$x$", "Equation (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
       tool("</>", "Code", "`", "`", { fontFamily: "var(--mono)", fontSize: "11px" }),
       tool("🔗", "Link (⌘K)", "[", "](https://)"),
       colours ? h("span.sep") : null,
       colours ? tool("A", "Accent colour", "[", "]{accent}", { color: "var(--accent)", fontWeight: 700 }) : null,
-      colours ? tool("A", "Second accent", "[", "]{accent2}", { color: "#c2410c", fontWeight: 700 }) : null,
-      colours ? tool("A", "Muted", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
+      colours ? tool("A", "Second accent colour", "[", "]{accent2}", { color: "#c2410c", fontWeight: 700 }) : null,
+      colours ? tool("A", "Muted colour", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
     );
     const node = h("div.markup", {}, tools, area);
     node.area = area;
@@ -302,7 +302,7 @@ export const ui = {
     if (custom) {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
       const input = h("input", { type: "color", value: own || "#888888" });
-      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Your own colour", style: own ? { background: own } : {} }, icon("plus"), input);
+      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
       input.addEventListener("input", () => { well.style.background = input.value; choose(well, input.value); });
       node.append(well);
     }
@@ -314,11 +314,11 @@ export const ui = {
   colour({ value, onChange, title = "", key } = {}) {
     const set = HEX.test(value || "") ? value : null;
     const input = h("input", { type: "color", value: set || "#888888", "data-key": key });
-    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: set ? `${title} ${set}` : `${title}: the theme's` },
+    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: [title, set || "Default"].filter(Boolean).join(": ") },
       h("span.colour-chip", { style: set ? { background: set } : {} }), input);
     input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
     const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; onChange?.(null); },
-      { kind: "ghost", small: true, icon: "undo", title: "Back to the theme's" });
+      { kind: "ghost", small: true, icon: "undo", title: "Reset" });
     reset.hidden = !set;
     input.addEventListener("input", () => { reset.hidden = false; });
     return h("div.colour-control", {}, well, reset);
