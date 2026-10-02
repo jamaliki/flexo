@@ -252,7 +252,8 @@ export function mount(studio, main) {
 
   // -- the source --
   const gutter = h("div.code-gutter");
-  const area = h("textarea.code-area.scroll-thin", { spellcheck: false, wrap: "off" });
+  const area = h("textarea.code-area.scroll-thin", { wrap: "off" });
+  area.spellcheck = false;  // h() leaves out what is false
   area.value = studio.doc.text;
   area.addEventListener("input", () => { numbers(); studio.change((doc) => { doc.text = area.value; }, { merge: "text", quiet: true }); });
   area.addEventListener("scroll", () => { gutter.scrollTop = area.scrollTop; });

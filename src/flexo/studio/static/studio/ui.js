@@ -32,6 +32,23 @@ function append(node, children) {
   }
 }
 
+// The Mac's help while typing -- words predicted ahead in grey (taken by a space or a
+// tab), corrections, capitals -- gets in the way of labels, names and maths: no field
+// of the studio's asks for it. Spelling is left as each field has it.
+const QUIET = [["writingsuggestions", "false"], ["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"]];
+export function plainTyping(node) {
+  for (const [name, value] of QUIET) node.setAttribute(name, value);
+  return node;
+}
+const TYPED = "textarea, [contenteditable], input:not([type]), input[type=text], input[type=search], input[type=url], input[type=email]";
+if (typeof document !== "undefined") {
+  document.documentElement.setAttribute("writingsuggestions", "false");
+  // Fields made without ui (a code area, the palette's search): quietened as they are focused.
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(TYPED) && event.target.getAttribute("writingsuggestions") !== "false") plainTyping(event.target);
+  }, true);
+}
+
 export function clear(node, ...children) {
   node.replaceChildren();
   append(node, children);
@@ -154,11 +171,12 @@ export const ui = {
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
-    const node = h(`input.input${mono ? ".mono" : ""}`, { type, placeholder, spellcheck: false });
+    const node = plainTyping(h(`input.input${mono ? ".mono" : ""}`, { type, placeholder }));
+    node.spellcheck = false;  // set here: h() leaves out what is false
     if (key) node.dataset.key = key;
     node.value = value ?? "";
     if (width) node.style.width = width;
-    if (list) node.setAttribute("list", list);
+    if (list) { node.setAttribute("list", list); node.removeAttribute("autocomplete"); }  // its own suggestions stay
     if (onInput) node.addEventListener("input", () => onInput(node.value));
     if (onChange) node.addEventListener("change", () => onChange(node.value));
     return node;
@@ -179,8 +197,9 @@ export const ui = {
     return node;
   },
 
-  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, tabs = mono, key } = {}) {
-    const node = h(`textarea.textarea${mono ? ".mono" : ""}${grow ? ".grow" : ""}`, { rows, placeholder, spellcheck: !mono });
+  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, tabs = mono, key, spelling = !mono } = {}) {
+    const node = plainTyping(h(`textarea.textarea${mono ? ".mono" : ""}${grow ? ".grow" : ""}`, { rows, placeholder }));
+    node.spellcheck = Boolean(spelling);
     if (key) node.dataset.key = key;
     node.value = value ?? "";
     if (tabs) node.addEventListener("keydown", (event) => indentKeys(event, node));
@@ -197,8 +216,8 @@ export const ui = {
   },
 
   // Words in flexo markup: **strong**, *emphasis*, $maths$, `code`, [links](url), [colour]{accent}.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, tabs = false, key } = {}) {
-    const area = ui.textarea({ value, rows, placeholder, onInput, tabs, key });
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, tabs = false, key, spelling = true } = {}) {
+    const area = ui.textarea({ value, rows, placeholder, onInput, tabs, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }

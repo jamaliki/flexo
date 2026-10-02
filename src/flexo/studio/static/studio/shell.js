@@ -610,7 +610,8 @@ export function palette(workspace) {
     { icon: "plug", label: "Invite an agent (MCP)", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard shortcuts", keys: "?", run: () => shortcutsDialog() },
   ];
-  const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…", spellcheck: false });
+  const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });
+  input.spellcheck = false;
   const list = h("div.command-list.scroll-thin");
   let shown = [];
   let index = 0;

@@ -667,7 +667,8 @@ export function figureParts(host) {
     const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : groupOf(id);
     if (!item || !host.box(id)) return;
     const original = words(item.label);
-    const field = ui.markup({ value: original, rows: 1, colours: false });
+    // A label's words are names and maths, not prose: no spelling, no corrections.
+    const field = ui.markup({ value: original, rows: 1, colours: false, spelling: false });
     const box = h("div.fig-inline", {}, field,
       h("div.inline-foot", {}, h("span", {}, "Enter to keep · Esc to leave"), h("span", {}, "$maths$ · *emphasis*")));
     host.overlay.append(box);
@@ -970,7 +971,7 @@ export function figureParts(host) {
     const options = { hint: field.hint };
     switch (field.type) {
       case "markup":
-        return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, onInput: set }), options);
+        return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, spelling: false, onInput: set }), options);
       case "text":
         return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
       case "length":
