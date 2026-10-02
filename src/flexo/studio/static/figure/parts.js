@@ -275,6 +275,31 @@ export function figureParts(host) {
     if (chosen.length) act({ do: "duplicate", ids: chosen });
   }
 
+  // -- copied, and pasted (into this figure or another) --
+  // The parts and groups chosen, with what they hold and the lines between them.
+  function clip() {
+    const figure = model();
+    if (!figure) return null;
+    const chosen = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== figure.root));
+    const top = chosen.filter((id) => !chosen.some((other) => other !== id && inside(id, other)));
+    if (!top.length) return null;
+    const nodes = [], groups = [];
+    const walk = (id) => {
+      if (nodeOf(id)) { nodes.push(structuredClone(nodeOf(id))); return; }
+      const group = groupOf(id);
+      if (group) { groups.push(structuredClone(group)); (group.children || []).forEach(walk); }
+    };
+    top.forEach(walk);
+    const held = new Set(nodes.map((node) => node.id));
+    const edges = figure.edges.filter((edge) => held.has(nodeOfRef(edge.from)) && held.has(nodeOfRef(edge.to))).map((edge) => structuredClone(edge));
+    return { top, nodes, groups, edges };
+  }
+  function paste(clipped) {
+    const where = placement();
+    act({ do: "paste", top: clipped.top, nodes: clipped.nodes, groups: clipped.groups, edges: clipped.edges,
+      parent: where.parent || null, after: where.after || null });
+  }
+
   function groupMenu(anchor) {
     menu(anchor, catalog.groups.map((group) => ({ label: group.title, hint: group.hint, run: () => gather(group) })));
   }
@@ -348,7 +373,10 @@ export function figureParts(host) {
   }
   function dblclick(event) {
     const id = idAt(event);
-    if (id && typeOf(id) !== "net") openInline(id);
+    if (!id || typeOf(id) === "net") return;
+    // The part typed on is the part chosen: its panel shows beside it.
+    if (chosenOne() !== id) select([id], { reveal: false });
+    openInline(id);
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
@@ -687,10 +715,13 @@ export function figureParts(host) {
     const original = words(item.label);
     // A label's words are names and maths, not prose: no spelling, no corrections.
     const field = ui.markup({ value: original, rows: 1, colours: false, spelling: false });
-    const box = h("div.fig-inline", {}, field,
-      h("div.inline-foot", {}, h("span", {}, "Enter to keep · Esc to leave"), h("span", {}, "$maths$ · *emphasis*")));
+    // Typed where the words are, as they look there, when the part has words drawn to
+    // lie over; else in a box under it.
+    const label = host.element(`${id}.label`);
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Enter to keep · Esc to leave · $maths$ · *emphasis*" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Enter to keep · Esc to leave"), h("span", {}, "$maths$ · *emphasis*")));
     host.overlay.append(box);
-    inline = { id, kind, field: field.area, original, box };
+    inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label) };
     placeInline();
     field.area.focus();
     field.area.select();
@@ -711,11 +742,27 @@ export function figureParts(host) {
     if (!inline.box.isConnected) host.overlay.append(inline.box);
     const where = host.box(inline.id);
     if (!where) return;
-    Object.assign(inline.box.style, { left: `${where.left}px`, top: `${where.top + where.height + 6}px`, minWidth: `${Math.max(where.width, 240)}px` });
+    const label = inline.inPlace && host.element(`${inline.id}.label`);
+    if (!label) {
+      Object.assign(inline.box.style, { left: `${where.left}px`, top: `${where.top + where.height + 6}px`, minWidth: `${Math.max(where.width, 240)}px` });
+      return;
+    }
+    // Over the drawn words, in their face, size and colour; they step aside meanwhile.
+    if (inline.label !== label) { inline.label?.style.removeProperty("visibility"); label.style.visibility = "hidden"; inline.label = label; }
+    const style = getComputedStyle(label);
+    const size = parseFloat(style.fontSize) * (label.getScreenCTM()?.a || 1);
+    const outer = host.overlay.getBoundingClientRect(), drawn = label.getBoundingClientRect();
+    const width = Math.max(drawn.width + 2 * size, where.width, 120);
+    const middle = drawn.width ? drawn.left + drawn.width / 2 - outer.left : where.left + where.width / 2;
+    const top = (drawn.height ? drawn.top - outer.top : where.top + where.height / 2 - size * 0.7) - 4;
+    Object.assign(inline.box.style, { left: `${middle - width / 2}px`, top: `${top}px`, width: `${width}px`, minWidth: "" });
+    Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: style.fontFamily, fontWeight: style.fontWeight,
+      color: style.fill && style.fill !== "none" ? style.fill : "", textAlign: "center" });
   }
   function closeInline(keep) {
     if (!inline) return;
     const { id, kind, field, original, box } = inline;
+    inline.label?.style.removeProperty("visibility");
     inline = null;
     box.remove();
     if (keep && field.value !== original) update({ type: kind, id }, { label: field.value });
@@ -995,7 +1042,12 @@ export function figureParts(host) {
       return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
     };
     const shown = list.filter((field) => !field.show || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
-    return h("div.fields", {}, shown.map((field) => fieldControl(field, item, write, scope)));
+    // Fields few reach for are folded away under the rest -- open, if one of them is set.
+    const more = shown.filter((field) => field.more);
+    const set = more.some((field) => valueAt(item, field.key) !== undefined && valueAt(item, field.key) !== null && valueAt(item, field.key) !== "");
+    return h("div.fields", {}, shown.filter((field) => !field.more).map((field) => fieldControl(field, item, write, scope)),
+      more.length ? h("details.more", { open: set }, h("summary", {}, icon("chevron"), "More"),
+        h("div.inner.fields", {}, more.map((field) => fieldControl(field, item, write, scope)))) : null);
   }
 
   function fieldControl(field, item, write, scope) {
@@ -1017,6 +1069,29 @@ export function figureParts(host) {
         } }), options);
       case "code":
         return ui.field(field.label, ui.textarea({ value: value ?? "", rows: 2, mono: true, key, onInput: set }), options);
+      case "view": {
+        // A molecule turned, tilted, and framed a step at a click, as in a viewer.
+        const at = (name, fallback) => Number(valueAt(item, `properties.${name}`) ?? fallback);
+        const turn = (name, by) => {
+          const next = ((((at(name, 0) + by) % 360) + 540) % 360) - 180;
+          write({ [`properties.${name}`]: next || null }, null);
+        };
+        const zoom = (by) => {
+          const next = Math.round(at("zoom", 1) * by * 100) / 100;
+          write({ "properties.zoom": next === 1 ? null : next }, null);
+        };
+        const button = (glyphName, title, run) => ui.button("", run, { small: true, icon: glyphName, title });
+        return ui.field(field.label, h("div.view-pad", {},
+          button("left", "Turn left 30°", () => turn("yaw", -30)),
+          button("right", "Turn right 30°", () => turn("yaw", 30)),
+          button("up", "Tilt back 30°", () => turn("pitch", -30)),
+          button("down", "Tilt forward 30°", () => turn("pitch", 30)),
+          h("span.sep"),
+          button("minus", "Zoom out", () => zoom(1 / 1.25)),
+          button("plus", "Zoom in", () => zoom(1.25)),
+          h("span.sep"),
+          button("refresh", "As it was: no turn, tilt, or zoom", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
+      }
       case "integer":
       case "number":
         return ui.field(field.label, ui.number({ value: value ?? "", key, min: field.min, step: field.type === "integer" ? 1 : "any",
@@ -1131,7 +1206,7 @@ export function figureParts(host) {
     setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo,
-    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect,
+    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste,
     openInline, placeInline, closeInline,
   };
 }

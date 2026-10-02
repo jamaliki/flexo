@@ -13,9 +13,12 @@ edited:
   plasmid's features, a plate's groups, a timeline's events;
 - ``pair``: two words kept as a list of two (a reaction's cofactors);
 - ``file``: a file beside the figure, of the given ``types`` (the studio's: ``image``,
-  ``structure``).
+  ``structure``);
+- ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
+  at a time by buttons, as one turns a molecule in a viewer.
 
 A field may carry a ``default`` (what the kind does when the key is absent),
+``more`` (shown folded away, under the rest, for those who look for it),
 ``show`` (``{"key": value}`` or ``{"key": [values]}``: shown only while another key
 has that value), and ``hint``. A ``records`` field's ``row`` is what a new row
 starts as; ``"+N"`` is the last row's value and N more.
@@ -428,6 +431,7 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
+            _field("properties", "View", "view", hint="Turn, tilt, and zoom"),
             _field(
                 "properties.look",
                 "Look",
@@ -435,15 +439,24 @@ def _structure() -> dict[str, Any]:
                 options=["", *LOOKS],
                 hint="Empty: the figure's theme chooses",
             ),
-            _field("properties.sticks", "Sticks", "text", hint="resi 57+102+195"),
-            _field("properties.surface", "Surface", "text"),
-            _field("properties.site", "Site", "text"),
-            _field("properties.width", "Width", "number"),
-            _field("properties.height", "Height", "number"),
-            _field("properties.yaw", "Yaw", "number"),
-            _field("properties.pitch", "Pitch", "number"),
-            _field("properties.roll", "Roll", "number"),
-            _field("properties.zoom", "Zoom", "number"),
+            # What a person who knows mol-sketch's selections reaches for, put by.
+            _field(
+                "properties.sticks",
+                "Sticks",
+                "text",
+                hint="Residues as sticks: resi 57+102+195",
+                more=True,
+            ),
+            _field(
+                "properties.surface", "Surface", "text", hint="A surface over: chain A", more=True
+            ),
+            _field("properties.site", "Site", "text", hint="A site picked out: resi 57", more=True),
+            _field("properties.width", "Width", "number", more=True),
+            _field("properties.height", "Height", "number", more=True),
+            _field("properties.yaw", "Yaw", "number", hint="Degrees", more=True),
+            _field("properties.pitch", "Pitch", "number", hint="Degrees", more=True),
+            _field("properties.roll", "Roll", "number", hint="Degrees", more=True),
+            _field("properties.zoom", "Zoom", "number", more=True),
         ],
         needs_file=True,
         unavailable="" if ready else "needs flexo[structures,molecules]",

@@ -27,6 +27,10 @@ choose next (the part just added). An action is a mapping with a ``do``:
   (the root if not given), centred on it; ``step``: ``id`` by ``delta`` places
   among its siblings;
 - ``duplicate``: ``ids``, with the edges between them;
+- ``paste``: parts copied from a figure (this one or another) -- ``nodes``,
+  ``groups`` and ``edges`` as a file writes them, ``top`` the ones that hold the
+  rest -- put after ``after`` or in ``parent``, each with an id of its own, the
+  lines between them kept;
 - ``read``: nothing; the page asks for the figure as it is.
 
 A figure file that leaves its root group out stacks its parts in a column; the
@@ -51,7 +55,18 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from flexo.ir.semantic import ID_PATTERN
 
 STRUCTURAL = frozenset(
-    {"add", "connect", "rename", "delete", "gather", "ungroup", "move", "step", "duplicate"}
+    {
+        "add",
+        "connect",
+        "rename",
+        "delete",
+        "gather",
+        "ungroup",
+        "move",
+        "step",
+        "duplicate",
+        "paste",
+    }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
 
@@ -324,14 +339,15 @@ class _Document:
             found += self.descendants(child)
         return found
 
-    def fresh(self, base: str) -> str:
-        """An unused id made from ``base`` (a label, a kind): ``encoder``, ``encoder-2``."""
+    def fresh(self, base: str, also: set[str] | frozenset[str] = frozenset()) -> str:
+        """An unused id made from ``base`` (a label, a kind): ``encoder``, ``encoder-2``;
+        none of ``also`` either (ids given out but not yet written)."""
 
         words = re.sub(r"\$|\\[A-Za-z]+|[*_`{}]", "", str(base))
         slug = re.sub(r"[^A-Za-z0-9]+", "-", words).strip("-").lower()[:24].strip("-")
         if not slug or not slug[0].isalpha():
             slug = f"part-{slug}" if slug else "part"
-        taken = self.taken()
+        taken = self.taken() | set(also)
         candidate, number = slug, 2
         while candidate in taken:
             candidate, number = f"{slug}-{number}", number + 1
@@ -825,6 +841,57 @@ class _Document:
                     twin[side] = renamed[end] + str(edge[side])[len(end) :]
                 self.edges.append(twin)
         return made
+
+    def _paste(self, action: Mapping[str, Any]) -> list[str]:
+        def written(items: object) -> list[dict[str, Any]]:
+            return [
+                copy.deepcopy(dict(item))
+                for item in items or []  # type: ignore[union-attr]
+                if isinstance(item, Mapping) and item.get("id")
+            ]
+
+        nodes, groups = written(action.get("nodes")), written(action.get("groups"))
+        top = [str(item) for item in action.get("top") or []]
+        known = {str(item["id"]) for item in [*nodes, *groups]}
+        if not top or not set(top) <= known:
+            raise EditError("nothing to paste")
+        renamed: dict[str, str] = {}
+        for item in [*nodes, *groups]:
+            renamed[str(item["id"])] = self.fresh(str(item["id"]), set(renamed.values()))
+        for node in nodes:
+            node["id"] = renamed[str(node["id"])]
+            # The page's model lists port names where a file writes ports.
+            if isinstance(node.get("ports"), list) and all(
+                isinstance(p, str) for p in node["ports"]
+            ):
+                del node["ports"]
+            self.nodes.append(node)
+        for group in groups:
+            group["id"] = renamed[str(group["id"])]
+            group.pop("implied", None)
+            group["children"] = [
+                renamed.get(str(child), str(child)) for child in group.get("children") or []
+            ]
+            for placement in (group.get("layout") or {}).get("placements") or []:
+                placement["child"] = renamed.get(placement["child"], placement["child"])
+            self.data.setdefault("groups", []).append(group)
+        after = action.get("after")
+        for item in top:
+            self.place(renamed[item], action.get("parent"), after)
+            after = renamed[item]
+        for edge in written(action.get("edges")):
+            ends = [str(edge["from"]), str(edge["to"])]
+            heads = [
+                next((old for old in renamed if end == old or end.startswith(f"{old}.")), None)
+                for end in ends
+            ]
+            if None in heads:
+                continue  # a line to a part not copied
+            edge.pop("id", None)
+            for side, end, head in zip(("from", "to"), ends, heads, strict=True):
+                edge[side] = renamed[head] + end[len(head) :]  # type: ignore[index]
+            self.data.setdefault("edges", []).append(edge)
+        return [renamed[item] for item in top]
 
     def copy(self, identifier: str, renamed: dict[str, str]) -> str | None:
         node, group = self.node(identifier), self.group(identifier)

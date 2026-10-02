@@ -166,6 +166,29 @@ def test_a_part_goes_on_a_line_of_its_own_centred_under_a_row() -> None:
         edit(steps, do="move", id="score", line="inside")
 
 
+def test_parts_copied_from_one_figure_are_pasted_into_another_with_their_lines() -> None:
+    copied = {
+        "top": ["encoder", "y"],
+        "nodes": [
+            {"id": "encoder", "kind": "block", "label": "Encoder", "ports": ["input", "output"]},
+            {"id": "y", "kind": "text", "label": "Output"},
+        ],
+        "edges": [
+            {"id": "edge.2.encoder-to-y", "from": "encoder", "to": "y"},
+            {"from": "x", "to": "encoder"},  # to a part not copied: left behind
+        ],
+    }
+    text, chosen = edit(NEW_FIGURE, do="paste", after="x", **copied)
+    # The ids it has already are not taken again; the pasted come after x, in order.
+    assert chosen == ["encoder-2", "y-2"]
+    assert [node["id"] for node in data(text)["nodes"]] == ["x", "encoder-2", "y-2", "encoder", "y"]
+    assert ("encoder-2", "y-2") in edges(text) and ("x", "encoder-2") not in edges(text)
+    assert "ports" not in data(text)["nodes"][1]
+    compile_figure(parse(text, Path.cwd()))
+    with pytest.raises(EditError, match="nothing to paste"):
+        edit(NEW_FIGURE, do="paste", top=["gone"], nodes=[])
+
+
 def test_a_line_is_found_by_the_id_the_drawing_gives_it() -> None:
     text, _ = edit(NEW_FIGURE, do="delete", ids=["edge.2.encoder-to-y"])
     assert edges(text) == [("x", "encoder")]

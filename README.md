@@ -905,7 +905,9 @@ own last change and leaves others' alone.
   runs on to the part after it, the new one goes into that line, as a step into a
   flow chart. A **+** beside the part chosen adds the next step there at once (a
   block after a start or a decision, another structure after a structure), and the
-  words of a part just added are typed on it as soon as it is drawn. **Connect**
+  words of a part just added are typed on it as soon as it is drawn, in place, in
+  the part's own face and size. A structure is turned, tilted and zoomed by the
+  buttons in its panel. **Connect**
   (C) draws a line from one part to the next; double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (G) gathers them
   into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
