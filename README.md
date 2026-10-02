@@ -896,7 +896,8 @@ is merged with everyone else's edits, saved, and shown at once. Slides and parts
 an agent touches flash in its colour, its avatar and what it is doing ("Tightening
 slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
-own last change and leaves others' alone.
+own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
+changes in words, to go back or forward to any of them.
 
 - **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
@@ -906,8 +907,10 @@ own last change and leaves others' alone.
   flow chart. A **+** beside the part chosen adds the next step there at once (a
   block after a start or a decision, another structure after a structure), and the
   words of a part just added are typed on it as soon as it is drawn, in place, in
-  the part's own face and size. A structure is turned, tilted and zoomed by the
-  buttons in its panel. **Connect**
+  the part's own face and size. A chosen structure turns as it is dragged (or by
+  the buttons in its panel), and a structure or picture is sized by its corners;
+  a part's **Kind** may be made either, its file asked for. Right-click a part
+  for what can be done with it. **Connect**
   (C) draws a line from one part to the next; double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (G) gathers them
   into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
