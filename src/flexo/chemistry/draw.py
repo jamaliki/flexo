@@ -600,19 +600,36 @@ def _reach(place: Atomic, angle: float, pen: Pen) -> float:
 def _lone_pair(pen: Pen, drawn: Drawn, index: int, angle: float, identifier: str) -> None:
     place = drawn.atoms[index]
     place.taken.append(angle)
+    (cx, cy), dots = _pair_dots(place, angle, pen)
+    pieces = [_circle(x, y, pen.dot) for x, y in dots]
+    drawn.shapes.append(Shape(identifier, " ".join(pieces), "solid", width=pen.dot * 0.2))
+    reach = pen.dot * 1.9 + pen.dot
+    drawn.boxes.append((cx - reach, cy - reach, cx + reach, cy + reach))
+    place.pairs.append((angle, (cx, cy)))
+
+
+def _pair_dots(place: Atomic, angle: float, pen: Pen) -> tuple[Point, tuple[Point, Point]]:
+    """Where a lone pair in ``angle`` sits by its atom: its middle, and its two dots."""
+
     distance = _reach(place, angle, pen) + pen.dot * 2.2
     cx = place.point[0] + math.cos(angle) * distance
     cy = place.point[1] + math.sin(angle) * distance
-    across = (-math.sin(angle), math.cos(angle))
-    apart = pen.dot * 1.9
-    pieces = []
-    for sign in (-1, 1):
-        x, y = cx + across[0] * apart * sign, cy + across[1] * apart * sign
-        pieces.append(_circle(x, y, pen.dot))
-    drawn.shapes.append(Shape(identifier, " ".join(pieces), "solid", width=pen.dot * 0.2))
-    reach = apart + pen.dot
-    drawn.boxes.append((cx - reach, cy - reach, cx + reach, cy + reach))
-    place.pairs.append((angle, (cx, cy)))
+    across = (-math.sin(angle) * pen.dot * 1.9, math.cos(angle) * pen.dot * 1.9)
+    return (cx, cy), ((cx - across[0], cy - across[1]), (cx + across[0], cy + across[1]))
+
+
+def pair_spots(
+    molecule: Molecule, drawn: Drawn, pen: Pen, index: int, count: int
+) -> list[tuple[Point, Point]]:
+    """Where ``count`` more of an atom's lone pairs go, as the two dots of each: where a
+    drawing showing every pair puts them -- clear of its bonds, the hydrogens written
+    beside it, its charge, and the pairs already drawn there (an arrow's among them)."""
+
+    if count <= 0 or molecule.atoms[index].element in METALS:
+        return []
+    place = drawn.atoms[index]
+    taken = list(place.taken) + [angle for angle, _ in place.pairs]
+    return [_pair_dots(place, angle, pen)[1] for angle in _spread(taken, count, [])]
 
 
 def _radical(pen: Pen, drawn: Drawn, index: int, angle: float, identifier: str) -> None:

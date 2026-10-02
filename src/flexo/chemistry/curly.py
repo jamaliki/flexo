@@ -36,7 +36,7 @@ import itertools
 import math
 from dataclasses import dataclass
 
-from flexo.chemistry.draw import Drawn, Pen
+from flexo.chemistry.draw import Drawn, Pen, pair_spots
 from flexo.chemistry.electrons import Arrow
 from flexo.chemistry.molecule import Molecule
 from flexo.drawn import Shape, path
@@ -1031,6 +1031,11 @@ def _electrons(
     (atom,) = arrow.source
     single = arrow.electrons == 1 and frame.molecule.atoms[atom].lone % 2 == 1
     centre = _step(tail.at, tail.way, -frame.bond * PAIR * 0.55)
+    # Drawn now, as the atom's other marks are: what is put round it after keeps off it.
+    place = drawn.atoms[atom]
+    place.taken.append(math.atan2(tail.way[1], tail.way[0]))
+    if not single:
+        place.pairs.append((math.atan2(tail.way[1], tail.way[0]), centre))
     across = _perpendicular(tail.way)
     gap = frame.bond * PAIR_SPREAD / 2
     radius = max(pen.dot * 0.9, frame.bond * PAIR_DOT)
@@ -1075,43 +1080,13 @@ def _electrons(
 
 
 def lone_pair_spots(
-    molecule: Molecule, drawn: Drawn, pen: Pen, atom: int
+    molecule: Molecule, drawn: Drawn, pen: Pen, atom: int, given: int = 0
 ) -> list[tuple[Point, Point]]:
-    """Where an atom's lone pairs would be drawn, as the two dots of each -- for an
-    editor to show under the pointer: out from the atom where its bonds leave room,
-    apart from each other."""
+    """Where an atom's lone pairs are, as the two dots of each -- for an editor to show
+    under the pointer: those the arrows drawn have not taken (``given``), where a drawing
+    showing every pair puts them. A hydrogen has none, and none sits on its letter."""
 
-    count = molecule.atoms[atom].lone // 2
-    if count <= 0:
-        return []
-    frame = _Frame(molecule, drawn, pen)
-    anchor = frame.at[atom]
-    obstacles = _obstacles(frame, {atom})
-    gap = frame.bond * PAIR_SPREAD / 2
-    chosen: list[Point] = []
-    out = []
-    for _ in range(count):
-        best = None
-        for place in range(36):
-            angle = 2 * math.pi * place / 36
-            way = (math.cos(angle), math.sin(angle))
-            rest = frame.edge(atom, way, ATOM_GAP) + frame.bond * PAIR * 0.45
-            centre = _step(anchor, way, rest)
-            across = _perpendicular(way)
-            dots = (
-                (centre[0] + across[0] * gap, centre[1] + across[1] * gap),
-                (centre[0] - across[0] * gap, centre[1] - across[1] * gap),
-            )
-            here = _room(list(dots), obstacles)
-            for taken in chosen:
-                apart = math.degrees(math.acos(max(-1.0, min(1.0, _dot(way, taken)))))
-                if apart < 55.0:
-                    here -= frame.bond * 0.6 * (55.0 - apart) / 55.0
-            if best is None or here > best[0]:
-                best = (here, way, dots)
-        chosen.append(best[1])  # type: ignore[index]
-        out.append(best[2])  # type: ignore[index]
-    return out
+    return pair_spots(molecule, drawn, pen, atom, molecule.atoms[atom].lone // 2 - given)
 
 
 # -- vectors ----------------------------------------------------------------------------
