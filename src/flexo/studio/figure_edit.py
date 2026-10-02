@@ -22,8 +22,10 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``gather``: ``ids`` held by one group, into a new ``layout`` (row, column,
   grid) group, a titled module if ``role`` is ``module``;
 - ``ungroup``: ``id``'s children take its place;
-- ``move``: ``id`` into ``parent`` at ``index``; ``step``: ``id`` by ``delta``
-  places among its siblings;
+- ``move``: ``id`` into ``parent`` at ``index``; or, with ``line`` (``below``,
+  ``above``, ``right``, ``left``), on a line of its own beside the group ``of``
+  (the root if not given), centred on it; ``step``: ``id`` by ``delta`` places
+  among its siblings;
 - ``duplicate``: ``ids``, with the edges between them;
 - ``read``: nothing; the page asks for the figure as it is.
 
@@ -729,6 +731,10 @@ class _Document:
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
+        if action.get("line"):
+            return self.own_line(
+                identifier, str(action.get("of") or self.root), str(action["line"])
+            )
         parent_id = action.get("parent") or self.root
         if parent_id == identifier or parent_id in self.descendants(identifier):
             raise EditError("a group cannot go inside itself")
@@ -741,6 +747,52 @@ class _Document:
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
+        return [identifier]
+
+    def own_line(self, identifier: str, of: str, side: str) -> list[str]:
+        """``identifier`` on a line of its own ``side`` of the group ``of``, centred on it
+        (a result under a row of steps, to compare them). Where ``of`` is held by a group
+        running that way already, the part goes beside it there; else ``of`` keeps its
+        place and its frame, its parts go into a new group laid out as it was, and it
+        lays out that group and the part the other way, centred."""
+
+        if side not in {"below", "above", "right", "left"}:
+            raise EditError(f'no side "{side}" to put a part on')
+        if identifier == of or of in self.descendants(identifier):
+            raise EditError("a group cannot go beside itself")
+        group = self.written_root() if of == self.root else self.group(of)
+        if group is None:
+            raise EditError(f'no group "{of}"')
+        self.parent_of(identifier)  # held somewhere written, before it moves
+        way = "column" if side in {"below", "above"} else "row"
+        first = side in {"above", "left"}
+        holder = self.holder(of)
+        self.detach(identifier)
+        if holder is not None and (holder.get("layout") or {}).get("kind", "row") == way:
+            children = holder["children"]
+            at = children.index(of)
+            children.insert(at if first else at + 1, identifier)
+            return [identifier]
+        children = list(group.get("children") or [])
+        layout = dict(group.get("layout") or {})
+        # The frame stays the group's own; how its parts were laid out goes with them.
+        outer = {key: layout.pop(key) for key in list(layout) if key.startswith("padding")}
+        outer.update({key: layout.pop(key) for key in ("width", "height") if key in layout})
+        if len(children) == 1:
+            inner = children[0]
+        else:
+            inner = self.fresh("row" if way == "column" else "column")
+            self.data.setdefault("groups", []).append(
+                # Arrangement only: drawn with no frame of its own.
+                {
+                    "id": inner,
+                    "children": children,
+                    "layout": layout or {"kind": "row"},
+                    "role": "layout",
+                }
+            )
+        group["children"] = [identifier, inner] if first else [inner, identifier]
+        group["layout"] = {"kind": way, "align": "center", **outer}
         return [identifier]
 
     def _step(self, action: Mapping[str, Any]) -> list[str]:

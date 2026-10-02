@@ -84,3 +84,6 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-drop-line { z-index: 8; background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 3px var(--accent-soft); }
 .fig-drop-zone { z-index: 7; border: 1.5px dashed var(--accent-line); border-radius: 6px; background: var(--accent-soft); }
 .fig-drop-line.on, .fig-drop-zone.on { opacity: 1; }
+/* A part let go past the figure's end: the slot it lands in, on a line of its own. */
+.fig-drop-zone.own-line { border-width: 2px; }
+.fig-drop-zone.own-line::after { content: attr(data-label); position: absolute; left: 50%; top: calc(100% + 5px); transform: translateX(-50%); white-space: nowrap; font: 600 10.5px/17px var(--font); color: var(--accent); background: var(--raised); padding: 0 6px; border-radius: 4px; border: 1px solid var(--accent-line); }

@@ -132,6 +132,40 @@ def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
         edit(text, do="delete", ids=["root"])
 
 
+def test_a_part_goes_on_a_line_of_its_own_centred_under_a_row() -> None:
+    steps = (
+        "figure: {id: steps}\nnodes:\n- {id: a, label: A}\n- {id: b, label: B}\n"
+        "- {id: c, label: C}\n- {id: score, kind: decision, label: Score}\n"
+        "groups:\n- {id: root, layout: {kind: row, gap: 18pt, padding: 6pt}, "
+        "children: [a, b, c, score]}\n"
+        "edges:\n- {from: a, to: b}\n- {from: b, to: c}\n- {from: c, to: score}\n"
+        "- {from: a, to: score}\n"
+    )
+    text, chosen = edit(steps, do="move", id="score", line="below")
+    assert chosen == ["score"]
+    groups = {group["id"]: group for group in data(text)["groups"]}
+    # The root keeps its frame; its steps keep their row, with no frame of its own.
+    assert groups["root"] == {
+        "id": "root",
+        "children": ["row", "score"],
+        "layout": {"kind": "column", "align": "center", "padding": "6pt"},
+    }
+    assert groups["row"]["children"] == ["a", "b", "c"]
+    assert groups["row"]["layout"] == {"kind": "row", "gap": "18pt"}
+    assert groups["row"]["role"] == "layout"
+    compile_figure(parse(text, Path.cwd()))
+    # Over the row now: the root runs down already, so it goes in it, first.
+    text, _ = edit(text, do="move", id="a", line="above", of="row")
+    assert {group["id"]: group for group in data(text)["groups"]}["root"]["children"] == [
+        "a",
+        "row",
+        "score",
+    ]
+    compile_figure(parse(text, Path.cwd()))
+    with pytest.raises(EditError, match="no side"):
+        edit(steps, do="move", id="score", line="inside")
+
+
 def test_a_line_is_found_by_the_id_the_drawing_gives_it() -> None:
     text, _ = edit(NEW_FIGURE, do="delete", ids=["edge.2.encoder-to-y"])
     assert edges(text) == [("x", "encoder")]

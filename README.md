@@ -912,7 +912,10 @@ own last change and leaves others' alone.
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and
   every part slides to where it now is (Esc, or letting go off the figure, takes it
-  back). The inspector on the right has each part's settings, down to
+  back). A part dragged out under (or over) a figure laid out in a row goes on a line
+  of its own there, centred under the rest -- a score under the steps it compares --
+  as **Below** and **Above** in a part's panel do; beside a figure laid out in a
+  column, it takes a column of its own. The inspector on the right has each part's settings, down to
   a plasmid's features or a plate's groups as a table; the list on the left holds
   the parts as they nest, dragged to move them. Every edit is made to the figure's
   file, which the **Source** tab shows and edits too: comments and order stay, and

@@ -501,7 +501,7 @@ export function figureParts(host) {
   }
 
   const dropAt = (point) => dropPlace(model(), drag.boxes, point, drag.id);
-  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index : a === b);
+  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side : a === b);
   const unchanged = (at, id) => stays(model(), at, id);
 
   function showDrop(at) {
@@ -513,6 +513,23 @@ export function figureParts(host) {
     const place = (node, box, extra = {}) => Object.assign(node.style, {
       transform: `translate(${box.left - origin.left}px, ${box.top - origin.top}px)`,
       width: `${Math.max(box.right - box.left, 0)}px`, height: `${Math.max(box.bottom - box.top, 0)}px`, ...extra });
+    if (at.kind === "line") {
+      // A line of its own: a slot where it lands, centred past the rest of the figure.
+      const all = drag.boxes.get(model().root) || room;
+      const own = drag.boxes.get(drag.id);
+      const width = own ? own.right - own.left : 60, height = own ? own.bottom - own.top : 30;
+      const mid = centre(all), gap = 18;
+      const slot = at.side === "below" ? { left: mid.x - width / 2, top: all.bottom + gap }
+        : at.side === "above" ? { left: mid.x - width / 2, top: all.top - gap - height }
+          : at.side === "right" ? { left: all.right + gap, top: mid.y - height / 2 }
+            : { left: all.left - gap - width, top: mid.y - height / 2 };
+      place(drag.zone, { ...slot, right: slot.left + width, bottom: slot.top + height });
+      drag.zone.dataset.label = at.side === "below" || at.side === "above" ? `A line of its own, ${at.side}` : `A column of its own, ${at.side}`;
+      drag.zone.classList.add("on", "own-line");
+      drag.indicator.classList.remove("on");
+      return;
+    }
+    drag.zone.classList.remove("own-line");
     const home = unchanged(at, drag.id);
     drag.zone.classList.toggle("on", Boolean(room) && at.parent !== model().root && !home);
     if (room) place(drag.zone, { left: room.left - 6, top: room.top - 6, right: room.right + 6, bottom: room.bottom + 6 });
@@ -597,7 +614,8 @@ export function figureParts(host) {
     for (const { element } of was.moving) element.classList.add("fig-settling");
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
-    act({ do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
+    act(at.kind === "line" ? { do: "move", id: was.id, line: at.side, of: at.of }
+      : { do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
   }
   function dragCancel() { const was = dragFinish(); if (was) sendHome(was); }
   let landed = 0;
@@ -817,7 +835,22 @@ export function figureParts(host) {
         h("div.row", {},
           ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }),
           ui.button("Add after…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
+      ownLineSection(node.id),
     ];
+  }
+
+  // A part in a row put on a line of its own, under (or over) that row and centred on
+  // it: a result drawn under the steps it compares. (Dragged out beside a figure laid out
+  // in a column, a part takes a column of its own.)
+  function ownLineSection(id) {
+    const holder = parentOf(id);
+    const kind = holder?.layout?.kind || (holder?.id === model().root ? "column" : "row");
+    if (!holder || kind !== "row" || !(holder.children || []).some((child) => child !== id)) return null;
+    return h("div.section", {}, h("div.section-title", {}, "On a line of its own"),
+      h("div.row", {}, [["below", "Below", "down"], ["above", "Above", "up"]].map(([side, label, glyphName]) =>
+        ui.button(label, () => act({ do: "move", id, line: side, of: holder.id }),
+          { small: true, icon: glyphName, title: `On a line of its own ${side} the row, centred on it` }))),
+      h("div.hint-line", {}, "Or drag it out under or over the figure."));
   }
 
   function groupPanel(group) {
@@ -839,6 +872,7 @@ export function figureParts(host) {
           ui.button("", () => act({ do: "step", id: child, delta: -1 }, { select: false }), { kind: "ghost", small: true, icon: "up", title: "Earlier", disabled: index === 0 }),
           ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Later", disabled: index === count - 1 })))),
         ui.button("Add inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
+      isRoot ? null : ownLineSection(group.id),
     ];
   }
 
