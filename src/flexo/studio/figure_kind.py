@@ -143,6 +143,9 @@ class FigureKind:
 
         if action.get("do") == "structure-view":
             return {"document": document, "view": _structure_view(document, action, base)}
+        if action.get("do") == "structure-settings":
+            spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
+            return {"document": document, "settings": settings_of(spec, str(action.get("id")))}
         result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
         from flexo.studio.figure_edit import model
 
@@ -290,9 +293,10 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
                 figure[key] = str((base / value).resolve())
     for node in document.get("nodes") or []:
         properties = node.get("properties") if isinstance(node, dict) else None
-        source = properties.get("source") if isinstance(properties, dict) else None
-        if isinstance(source, str) and source and (base / source).is_file():
-            properties["source"] = str((base / source).resolve())
+        for key in ("source", "density"):
+            value = properties.get(key) if isinstance(properties, dict) else None
+            if isinstance(value, str) and value and (base / value).is_file():
+                properties[key] = str((base / value).resolve())
     return parse_figure(document)
 
 
@@ -301,6 +305,21 @@ def _structure_view(document: dict[str, Any], action: dict[str, Any], base: Path
 
     spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
     return view_of(spec, str(action.get("id")))
+
+
+def settings_of(spec, identifier: str) -> dict[str, Any]:
+    """The mol-sketch settings the structure ``identifier`` in ``spec`` is drawn with --
+    its look's, the figure's colours, and its own -- with mol-sketch's looks and palettes:
+    what the studio shows beside the settings a structure may be given."""
+
+    from flexo.structures import structure_settings
+    from flexo.studio.figure_edit import EditError
+    from flexo.themes import figure_palette, figure_style
+
+    node = next((item for item in spec.nodes if item.id == identifier), None)
+    if node is None or node.kind != "structure":
+        raise EditError(f'"{identifier}" is not a structure')
+    return structure_settings(node, figure_style(spec), figure_palette(spec))
 
 
 def view_of(spec, identifier: str) -> dict[str, Any]:

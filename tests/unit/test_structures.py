@@ -107,3 +107,48 @@ def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> N
         assert abs(max(values) + min(values)) < 0.1
     with pytest.raises(EditError, match="not a structure"):
         FigureKind().act({"text": text}, {"do": "structure-view", "id": "tag"}, tmp_path)
+
+
+def test_a_structure_takes_mol_sketch_settings_over_its_look(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.serialization import figure_to_document
+    from flexo.studio.figure_kind import FigureKind
+
+    with flexo.Figure("styled") as figure:
+        figure.root.structure(
+            "model",
+            DATA / "1a7g.cif",
+            palette="Okabe–Ito",  # noqa: RUF001
+            style={"fill": "ink colour", "line": {"width": 2.5}},
+        )
+    compiled = compile_figure(figure.spec)
+    assert 'id="model.molecule"' in compiled.document.text
+    written = figure_to_document(figure.spec)["nodes"][0]["properties"]
+    assert written["style"] == {"fill": "ink colour", "line": {"width": 2.5}}
+    # What the studio shows beside each setting: what it is drawn with.
+    text = (
+        "figure: {id: styled}\n"
+        "nodes:\n"
+        "  - id: model\n    kind: structure\n"
+        f"    properties: {{source: {DATA / '1a7g.cif'}, style: {{fill: ink colour}}}}\n"
+    )
+    settings = FigureKind().act(
+        {"text": text}, {"do": "structure-settings", "id": "model"}, tmp_path
+    )["settings"]
+    assert settings["style"]["fill"] == "ink colour"
+    assert settings["style"]["line.width"] > 0 and "Okabe–Ito" in settings["palettes"]  # noqa: RUF001
+    assert settings["look"] == "engraved-colour"
+
+
+def test_a_setting_mol_sketch_lacks_is_said_with_what_was_meant() -> None:
+    pytest.importorskip("molsketch")
+    for settings, said, hint in (
+        ({"style": {"fil": "ink"}}, '"fil" is not a field', "Did you mean fill?"),
+        ({"style": {"fill": "crayon"}}, 'fill "crayon" is not one', "watercolour"),
+        ({"palette": "Plaid"}, '"Plaid" is not one of mol-sketch', "Tableau 10"),
+    ):
+        with flexo.Figure("wrong") as figure:
+            figure.root.structure("model", DATA / "1a7g.cif", **settings)  # type: ignore[arg-type]
+        with pytest.raises(flexo.FlexoError, match=said) as caught:
+            compile_figure(figure.spec)
+        assert hint in (caught.value.diagnostics[0].hint or "")

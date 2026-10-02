@@ -11,9 +11,16 @@ watercolour, pen and ink -- as a panel of the figure:
 - ``colors`` names a colour for a chain (``"A"``), a residue (``"SER195"``), a
   subunit or an entity -- a hex colour, or one of the figure's **tones**, so the
   kinase domain on the protein map and the chain in the structure are one colour;
-- ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame it; ``cartoon``,
-  ``sticks``, and ``surface`` say what to draw (mol-sketch selections), and
-  ``site`` marks an active site.
+- ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame it, and ``pan_x`` and
+  ``pan_y`` shift it (fractions of its box); ``cartoon``, ``sticks``, and ``surface``
+  say what to draw (mol-sketch selections), and ``site`` marks an active site -- a
+  selection, or ``ligand`` for the largest ligand and what lies within ``site_within``
+  Å of it -- its residues labelled with ``site_labels``;
+- ``palette`` names one of mol-sketch's group palettes, ``density`` draws a density
+  map with it (``auto``: the map the entry was built into; an EMDB ID; or a map file),
+  and ``style`` sets any field of mol-sketch's style over the look, nested as
+  mol-sketch writes them -- ``style: {fill: ink colour, line: {width: 2}}`` (see
+  ``flexo.structure_style``).
 
 mol-sketch is an optional dependency (``pip install "flexo[molecules]"``, or the
 ``python`` folder of a mol-sketch clone). The picture is drawn at print
@@ -22,17 +29,20 @@ resolution and embedded, so the editable SVG, the PDF, and the slides carry it.
 
 from __future__ import annotations
 
+import atexit
+import difflib
 import functools
 import re
 import struct
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.drawn import Picture, Words, units
 from flexo.geometry import Side, Size
-from flexo.ir.semantic import NodeSpec, PortSpec, Record
+from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings
 from flexo.style import LayoutStyle, Palette
 
 LOOKS = (
@@ -46,6 +56,24 @@ LOOKS = (
     "assembly-cartoon",
     "assembly-surface",
 )
+
+
+@atexit.register
+def _close_engine() -> None:
+    """mol-sketch's engine, if it was started, closed as Python exits: left to be collected
+    while the interpreter shuts down, its V8 waits for ever on a thread already gone, and
+    the process never ends."""
+
+    import sys
+
+    engine_module = sys.modules.get("molsketch._engine")
+    engine = getattr(engine_module, "_engine", None)
+    if engine is None:
+        return
+    try:
+        engine.v8.close()
+    finally:
+        engine_module._engine = None  # type: ignore[union-attr]
 
 
 def _fail(node: NodeSpec, code: str, message: str, hint: str | None = None) -> FlexoError:
@@ -120,6 +148,58 @@ def structure_png(
     """The molecule, drawn by mol-sketch at ``width`` by ``height`` points, as a PNG with
     the page taken out."""
 
+    ask = _ask(node, style, palette)
+    try:
+        return _render(ask, width / height)
+    except ImportError:
+        raise _fail(
+            node,
+            "molsketch",
+            "Drawing a structure needs mol-sketch.",
+            hint='pip install "flexo[molecules]", or pip install path/to/mol-sketch/python.',
+        ) from None
+    except _Unknown as error:
+        raise _fail(node, error.code, str(error), hint=error.hint) from None
+    except _NoSuchChain as error:
+        raise _fail(node, "colors", str(error), hint=error.hint) from None
+
+
+def structure_settings(node: NodeSpec, style: LayoutStyle, palette: Palette) -> dict[str, object]:
+    """What the studio shows of a structure's mol-sketch settings: the style it is drawn
+    with -- its look's, the figure's colours, and its own settings over them -- by dotted
+    name, and mol-sketch's looks and group palettes to choose from."""
+
+    ask = _ask(node, style, palette)
+    try:
+        return _settings(ask)
+    except _Unknown as error:
+        raise _fail(node, error.code, str(error), hint=error.hint) from None
+    except _NoSuchChain as error:
+        raise _fail(node, "colors", str(error), hint=error.hint) from None
+
+
+@dataclass(frozen=True, slots=True)
+class _Ask:
+    """Everything a structure is drawn from, checked: what its drawing is kept by."""
+
+    source: str
+    stamp: float
+    look: str
+    paper: str
+    colours: tuple[tuple[str, str], ...]
+    view: tuple[tuple[str, float], ...]
+    show: tuple[tuple[str, str], ...]
+    site: str | None
+    roles: tuple[tuple[str, str], ...]
+    group_palette: str | None = None
+    style: tuple[tuple[str, object], ...] = ()
+    pan: tuple[float, float] | None = None
+    density: str | None = None
+    site_within: float | None = None
+    site_labels: bool = False
+
+
+def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     source = node.property("source")
     if not isinstance(source, str) or not source.strip():
         raise _fail(node, "source", "A structure needs a file or a PDB ID (source:).")
@@ -158,29 +238,195 @@ def structure_png(
     path = Path(source).expanduser()
     if path.exists() and outside(path):
         raise _fail(node, "source", "The structure file is outside the folder.")
-    stamp = path.stat().st_mtime if path.exists() else 0.0
-    try:
-        return _render(
-            str(path) if path.exists() else source.strip(),
-            stamp,
-            look,
-            paper,
-            tuple(colours),
-            view,
-            show,
-            None if site is None else str(site),
-            tuple(roles),
-            width / height,
-        )
-    except ImportError:
+    density = node.property("density")
+    if density is not None:
+        density = str(density).strip()
+        if Path(density).expanduser().exists() and outside(Path(density).expanduser()):
+            raise _fail(node, "density", "The map file is outside the folder.")
+    pan = (node.property("pan_x"), node.property("pan_y"))
+    within = node.property("site_within")
+    group_palette = node.property("palette")
+    return _Ask(
+        str(path) if path.exists() else source.strip(),
+        path.stat().st_mtime if path.exists() else 0.0,
+        look,
+        paper,
+        tuple(colours),
+        view,
+        show,
+        None if site is None else str(site),
+        tuple(roles),
+        None if group_palette in (None, "") else str(group_palette),
+        _style(node),
+        None if pan == (None, None) else (float(pan[0] or 0.0), float(pan[1] or 0.0)),  # type: ignore[arg-type]
+        density or None,
+        None if within is None else float(within),  # type: ignore[arg-type]
+        bool(node.property("site_labels")),
+    )
+
+
+def _style(node: NodeSpec) -> tuple[tuple[str, object], ...]:
+    """The node's own mol-sketch settings, by dotted name, their choices checked."""
+
+    from flexo.structure_style import CHOICES
+
+    value = node.property("style")
+    if value is None:
+        return ()
+    if not isinstance(value, Settings):
         raise _fail(
             node,
-            "molsketch",
-            "Drawing a structure needs mol-sketch.",
-            hint='pip install "flexo[molecules]", or pip install path/to/mol-sketch/python.',
-        ) from None
-    except _NoSuchChain as error:
-        raise _fail(node, "colors", str(error), hint=error.hint) from None
+            "style",
+            '"style" is a set of mol-sketch settings.',
+            hint="Write style: {fill: ink colour, line: {width: 2}}.",
+        )
+    for key, item in value.items:
+        choices = CHOICES.get(key)
+        if choices and item not in choices:
+            raise _fail(
+                node,
+                "style",
+                f'{key} "{item}" is not one of mol-sketch\'s.',
+                hint=", ".join(choices),
+            )
+    return value.items
+
+
+class _Unknown(ValueError):
+    """Something named that mol-sketch does not have: a setting, a palette, a map."""
+
+    def __init__(self, code: str, message: str, hint: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.hint = hint
+
+
+@functools.lru_cache(maxsize=8)
+def _loaded(source: str, stamp: float):
+    """The molecule, read once (or fetched) and copied for each way it is drawn."""
+
+    import molsketch as ms
+
+    del stamp  # part of the cache key: an edited file is read again
+    return ms.load(source) if Path(source).exists() else ms.fetch(source)
+
+
+@functools.lru_cache(maxsize=1)
+def _fields() -> frozenset[str]:
+    """Every field of mol-sketch's style, by dotted name."""
+
+    import molsketch as ms
+
+    def walk(value: dict, prefix: str) -> list[str]:
+        names = []
+        for key, item in value.items():
+            names += walk(item, f"{prefix}{key}.") if isinstance(item, dict) else [f"{prefix}{key}"]
+        return names
+
+    return frozenset(walk(ms.default_style(), ""))
+
+
+def _drawn(ask: _Ask):
+    """A mol-sketch figure set up as ``ask`` says, ready to draw or to read."""
+
+    import molsketch as ms
+
+    figure = _loaded(ask.source, ask.stamp).copy()
+    _check_chains(figure, ask.colours)
+    figure = figure.look(ask.look)
+    figure.set(
+        palette={"paper": ask.paper, **dict(ask.roles)},
+        # A scene's own captions and step labels are the app's; the figure names
+        # the panel itself.
+        **{"paper.grain": 0, "paper.wash": 0, "show.caption": False, "show.step_label": False},
+    )
+    if ask.group_palette:
+        if ask.group_palette not in ms.palettes():
+            raise _Unknown(
+                "palette",
+                f'"{ask.group_palette}" is not one of mol-sketch\'s palettes.',
+                ", ".join(ms.palettes()),
+            )
+        figure.palette(ask.group_palette)
+    if ask.style:
+        fields = _fields()
+        for key, _ in ask.style:
+            if key not in fields:
+                near = difflib.get_close_matches(key, fields, n=3)
+                raise _Unknown(
+                    "style",
+                    f'"{key}" is not a field of mol-sketch\'s style.',
+                    f"Did you mean {' or '.join(near)}?" if near else "See its docs/style.md.",
+                )
+        figure.set(
+            **{key: list(value) if isinstance(value, tuple) else value for key, value in ask.style}
+        )
+        # The paper is taken out after: it stays the figure's own.
+        figure.set(**{"palette.paper": ask.paper})
+    for group, colour in ask.colours:
+        figure.color(group, colour)
+    if ask.show:
+        figure.show(**dict(ask.show))
+    if ask.view or ask.pan:
+        figure.view(**dict(ask.view), **({"pan": ask.pan} if ask.pan else {}))
+    if ask.site == "ligand":
+        try:
+            figure.site(ligand=True, within=ask.site_within or 5.0)
+        except ValueError as error:
+            raise _Unknown("site", str(error)) from None
+    elif ask.site:
+        figure.site(ask.site)
+    if ask.density:
+        try:
+            figure.map(ask.density)
+        except (OSError, ValueError) as error:
+            raise _Unknown(
+                "density",
+                f"No map {ask.density}: {error}",
+                "auto (the map the entry was built into), an EMDB ID as EMD-11638, or a map file",
+            ) from None
+    return figure
+
+
+@functools.lru_cache(maxsize=32)
+def _render(ask: _Ask, aspect: float) -> bytes:
+    figure = _drawn(ask)
+    # mol-sketch's pen is sized for its own canvas (1920 wide): drawn at that
+    # scale and shrunk into the box, the lines keep their weight against the molecule.
+    long_side = 1200
+    size = (
+        (long_side, round(long_side / aspect))
+        if aspect >= 1
+        else (round(long_side * aspect), long_side)
+    )
+    if ask.site_labels and ask.site:
+        figure.label_site(size)
+    image = figure.render(size, scale=1.0)
+    pixels = image.to_numpy()
+    return _png(_without_paper(pixels, ask.paper))
+
+
+@functools.lru_cache(maxsize=16)
+def _settings(ask: _Ask) -> dict[str, object]:
+    import molsketch as ms
+
+    figure = _drawn(ask)
+
+    def flat(value: dict, prefix: str) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, item in value.items():
+            if isinstance(item, dict):
+                out |= flat(item, f"{prefix}{key}.")
+            else:
+                out[f"{prefix}{key}"] = item
+        return out
+
+    return {
+        "style": flat(figure.style, ""),
+        "look": ask.look,
+        "looks": ms.looks(),
+        "palettes": ms.palettes(),
+    }
 
 
 class _NoSuchChain(ValueError):
@@ -298,52 +544,6 @@ def _view(
         "chains": traces,
         "camera": {name: float(camera.get(name) or 0.0) for name in ("yaw", "pitch", "roll")},
     }
-
-
-@functools.lru_cache(maxsize=32)
-def _render(
-    source: str,
-    stamp: float,
-    look: str,
-    paper: str,
-    colours: tuple[tuple[str, str], ...],
-    view: tuple[tuple[str, float], ...],
-    show: tuple[tuple[str, str], ...],
-    site: str | None,
-    roles: tuple[tuple[str, str], ...],
-    aspect: float,
-) -> bytes:
-    import molsketch as ms
-
-    del stamp  # part of the cache key: an edited file draws again
-    figure = ms.load(source) if Path(source).exists() else ms.fetch(source)
-    _check_chains(figure, colours)
-    figure = figure.look(look)
-    figure.set(
-        palette={"paper": paper, **dict(roles)},
-        # A scene's own captions and step labels are the app's; the figure names
-        # the panel itself.
-        **{"paper.grain": 0, "paper.wash": 0, "show.caption": False, "show.step_label": False},
-    )
-    for group, colour in colours:
-        figure.color(group, colour)
-    if show:
-        figure.show(**dict(show))
-    if view:
-        figure.view(**dict(view))
-    if site:
-        figure.site(site)
-    # mol-sketch's pen is sized for its own canvas (1920 wide): drawn at that
-    # scale and shrunk into the box, the lines keep their weight against the molecule.
-    long_side = 1200
-    size = (
-        (long_side, round(long_side / aspect))
-        if aspect >= 1
-        else (round(long_side * aspect), long_side)
-    )
-    image = figure.render(size, scale=1.0)
-    pixels = image.to_numpy()
-    return _png(_without_paper(pixels, paper))
 
 
 def _without_paper(pixels, paper: str):

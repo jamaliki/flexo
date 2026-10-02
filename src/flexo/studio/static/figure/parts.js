@@ -154,6 +154,15 @@ export function figureParts(host) {
         if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Turned ${name(id)}`;
         if (all("properties.width", "properties.height")) return `Sized ${name(id)}`;
         if (all("properties.zoom")) return `Zoomed ${name(id)}`;
+        // mol-sketch's settings, by name: "Set the line width of “1A8O”".
+        const style = keys.filter((key) => key.startsWith("properties.style"));
+        if (style.length && style.length === keys.length) {
+          if (keys[0] === "properties.style" && action.values[keys[0]] === null) return `Drew ${name(id)} as its look does`;
+          return `Set the ${style.map((key) => key.replace(/^properties\.style\.?/, "").replace(/[._]/g, " ")).join(", ")} of ${name(id)}`;
+        }
+        if (all("properties.palette")) return action.values["properties.palette"] ? `Gave ${name(id)} the ${action.values["properties.palette"]} palette` : `Gave ${name(id)} its look's palette`;
+        if (all("properties.colors")) return `Coloured ${name(id)}`;
+        if (all("properties.density")) return action.values["properties.density"] ? `Drew a density map with ${name(id)}` : `Took the density map off ${name(id)}`;
         if (keys.includes("kind")) { const title = (parts[action.values.kind]?.title || "part").toLowerCase(); return `Made ${name(id)} ${/^[aeiou]/.test(title) ? "an" : "a"} ${title}`; }
         return `Changed ${name(id)}`;
       }
@@ -1430,8 +1439,125 @@ export function figureParts(host) {
           h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a file", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"));
+      case "molpalette":
+        return ui.field(field.label, groupPalette(item, value, set), options);
+      case "molsketch":
+        return styleSections(field, item, write);
       default:
         return null;
+    }
+  }
+
+  // -- a structure's mol-sketch settings --
+  // What it is drawn with -- its look's settings, the figure's colours, and its own --
+  // asked of mol-sketch once for each way it is set, so each setting shows what it is.
+  const settingsAsked = new Map();
+  function settingsOf(id) {
+    const key = JSON.stringify([id, nodeOf(id)?.properties]);
+    if (!settingsAsked.has(key)) {
+      if (settingsAsked.size > 40) settingsAsked.clear();
+      settingsAsked.set(key, host.run({ do: "structure-settings", id }, { merge: null }).then((result) => result?.settings || null).catch(() => null));
+    }
+    return settingsAsked.get(key);
+  }
+  const swatchStrip = (colours = []) => h("span.palette-strip", {}, colours.slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
+
+  // mol-sketch's group palettes, by sight: the colours residues and chains take in turn.
+  function groupPalette(item, value, set) {
+    const name = () => value || "The look's";
+    const button = h("button.palette-pick", { type: "button", disabled: true }, swatchStrip(), h("span", {}, name()), icon("chevron"));
+    settingsOf(item.id).then((settings) => {
+      const palettes = settings?.palettes || {};
+      button.disabled = !Object.keys(palettes).length;
+      button.replaceChildren(swatchStrip(palettes[value || settings?.style?.group_palette_name]), h("span", {}, name()), icon("chevron"));
+      button.onclick = () => popover(button, h("div.palette-choices", {},
+        h(`button.palette-choice${value ? "" : ".on"}`, { type: "button", onclick: () => { closeMenu(); set(null); } },
+          swatchStrip(palettes[settings?.style?.group_palette_name] || []), h("span", {}, "The look's")),
+        Object.entries(palettes).map(([option, colours]) => h(`button.palette-choice${option === value ? ".on" : ""}`, { type: "button",
+          onclick: () => { closeMenu(); set(option); } }, swatchStrip(colours), h("span", {}, option)))),
+      { className: "palette-menu" });
+    });
+    return button;
+  }
+
+  // Every section of mol-sketch's style the studio offers, folded away; one holding
+  // settings of the structure's own says how many. Each setting shows what the look
+  // (and the figure) make it until it is given its own; emptied, it is the look's again.
+  const openSections = new Set();
+  function styleSections(field, item, write) {
+    const own = {};
+    const walk = (value, prefix) => {
+      for (const [key, part] of Object.entries(value || {})) {
+        if (part && typeof part === "object" && !Array.isArray(part)) walk(part, `${prefix}${key}.`);
+        else own[`${prefix}${key}`] = part;
+      }
+    };
+    walk(item.properties?.style, "");
+    const fills = [];
+    const look = h("span.hint", {}, "Reading mol-sketch…");
+    const ownCount = Object.keys(own).length;
+    const sections = field.sections.map((section) => {
+      const count = section.fields.filter((each) => own[each.key] !== undefined).length;
+      const control = (each) => styleControl(each, own[each.key], fills,
+        (next) => write({ [`properties.style.${each.key}`]: next }, `style:${item.id}:${each.key}`));
+      // Colours as a row of wells; the rest two to a row, their hints on hover.
+      const colours = section.fields.filter((each) => each.type === "colour");
+      const rest = section.fields.filter((each) => each.type !== "colour");
+      const details = h("details.more.mol-section", { open: openSections.has(section.title) },
+        h("summary", {}, icon("chevron"), section.title, count ? h("span.count", {}, count) : null),
+        h("div.inner", {},
+          rest.length ? h("div.mol-grid", {}, rest.map(control)) : null,
+          colours.length ? h("div.mol-colours", {}, colours.map(control)) : null));
+      details.addEventListener("toggle", () => { if (details.open) openSections.add(section.title); else openSections.delete(section.title); });
+      return details;
+    });
+    settingsOf(item.id).then((settings) => {
+      if (!settings) { look.textContent = "mol-sketch could not be asked"; return; }
+      look.textContent = `Over the ${settings.look} look`;
+      for (const fill of fills) fill(settings.style || {});
+    });
+    return h("div.mol-style", {},
+      h("div.mol-style-head", {}, h("span.section-title", {}, field.label), look,
+        ownCount ? ui.button(`Back to the look (${ownCount})`, () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh" }) : null),
+      sections);
+  }
+
+  // One setting: what the look gives it shows until it has its own.
+  function styleControl(field, value, fills, set) {
+    const said = (drawn) => (drawn === null || drawn === undefined ? "" : typeof drawn === "number" ? String(Math.round(drawn * 1000) / 1000) : String(drawn));
+    const options = {};
+    const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
+    switch (field.type) {
+      case "choice": {
+        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "The look's" }, ...field.options.map((option) => ({ value: option, label: option }))],
+          onChange: (next) => set(next || null) });
+        fills.push((drawn) => { select.options[0].textContent = `The look's: ${said(drawn[field.key])}`; });
+        return titled(ui.field(field.label, select, options));
+      }
+      case "bool": {
+        const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "The look's" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
+          onChange: (next) => set(next === "" ? null : next === "on") });
+        fills.push((drawn) => { select.options[0].textContent = `The look's: ${drawn[field.key] ? "on" : "off"}`; });
+        return titled(ui.field(field.label, select, options));
+      }
+      case "integer":
+      case "number": {
+        const input = ui.number({ value: value ?? "", min: field.min, max: field.max, step: field.step ?? "any",
+          onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) });
+        fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
+        return titled(ui.field(field.label, input, options));
+      }
+      case "colour": {
+        const control = ui.colour({ value, title: field.label, onChange: set });
+        // Unset, the well shows the look's colour, faintly.
+        fills.push((drawn) => { if (value === undefined && /^#[0-9a-f]{6}$/i.test(drawn[field.key] || "")) control.querySelector(".colour-chip").style.background = drawn[field.key]; });
+        return titled(h("div.mol-colour", {}, control, h("span", {}, field.label)));
+      }
+      default: {
+        const input = ui.input({ value: value ?? "", onInput: (text) => set(text.trim() || null) });
+        fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
+        return titled(ui.field(field.label, input, options));
+      }
     }
   }
 

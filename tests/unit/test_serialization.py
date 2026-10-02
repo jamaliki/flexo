@@ -336,3 +336,25 @@ def test_a_file_with_groups_but_no_root_stacks_what_no_group_holds() -> None:
     )
     assert spec.group("root").children == ("m", "b")
     assert spec.edges[0].source.node_id == "m.a"
+
+
+def test_a_set_of_settings_is_held_flat_and_written_back_nested() -> None:
+    from flexo.ir.semantic import Settings
+
+    value = document()
+    style = {"fill": "ink colour", "line": {"width": 2, "rough": 0.5}, "map": {"levels": [0.7, 1]}}
+    value["nodes"][1]["properties"] = {"style": style}  # type: ignore[index]
+    figure = parse_figure(value)
+    held = figure.node("projection").property("style")
+    assert isinstance(held, Settings)
+    assert held.items == (
+        ("fill", "ink colour"),
+        ("line.width", 2),
+        ("line.rough", 0.5),
+        ("map.levels", (0.7, 1)),
+    )
+    assert figure_to_document(figure)["nodes"][1]["properties"]["style"] == style  # type: ignore[index]
+    assert parse_figure(yaml.safe_load(dump_figure(figure))) == figure
+    value["nodes"][1]["properties"] = {"style": {"line": {"width": {"too": {"deep": [{}]}}}}}  # type: ignore[index]
+    with pytest.raises(FlexoError):
+        parse_figure(value)

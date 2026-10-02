@@ -420,6 +420,7 @@ def _bench() -> list[dict[str, Any]]:
 
 
 def _structure() -> dict[str, Any]:
+    from flexo.structure_style import SECTIONS
     from flexo.structures import LOOKS
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
@@ -439,24 +440,66 @@ def _structure() -> dict[str, Any]:
                 options=["", *LOOKS],
                 hint="Empty: the figure's theme chooses",
             ),
-            # What a person who knows mol-sketch's selections reaches for, put by.
+            # mol-sketch's own settings: its palettes, colours of one's own, what is
+            # drawn, the site, a density map, and every field of its style.
             _field(
-                "properties.sticks",
-                "Sticks",
-                "text",
-                hint="Residues as sticks: resi 57+102+195",
-                more=True,
+                "properties.palette",
+                "Palette",
+                "molpalette",
+                hint="Colours handed to residues and chains in turn",
+            ),
+            _field(
+                "properties.colors",
+                "Colours",
+                "records",
+                row={"group": "A", "color": "#e69f00"},
+                columns=[
+                    _column("group", "Chain or residue", hint="A, SER195, entity:1, subunit:L"),
+                    _column(
+                        "color", "Colour", "combo", options=list(TONES), hint="#e69f00 or a tone"
+                    ),
+                ],
+                hint="Win over the palette and the look",
+            ),
+            _field("properties.cartoon", "Cartoon", "text", hint="As ribbons: polymer", more=True),
+            _field(
+                "properties.sticks", "Sticks", "text", hint="As sticks: resi 57+102+195", more=True
             ),
             _field(
                 "properties.surface", "Surface", "text", hint="A surface over: chain A", more=True
             ),
-            _field("properties.site", "Site", "text", hint="A site picked out: resi 57", more=True),
+            _field(
+                "properties.site",
+                "Site",
+                "text",
+                hint="Picked out: resi 57+102, or ligand for its pocket",
+                more=True,
+            ),
+            _field(
+                "properties.site_within",
+                "Pocket reach",
+                "number",
+                hint="Å round the ligand (5)",
+                more=True,
+                show={"properties.site": "ligand"},
+            ),
+            _field("properties.site_labels", "Label the site", "bool", more=True),
+            _field(
+                "properties.density",
+                "Density map",
+                "text",
+                hint="auto (the entry's), an EMDB ID, or a map file",
+                more=True,
+            ),
             _field("properties.width", "Width", "number", more=True),
             _field("properties.height", "Height", "number", more=True),
             _field("properties.yaw", "Yaw", "number", hint="Degrees", more=True),
             _field("properties.pitch", "Pitch", "number", hint="Degrees", more=True),
             _field("properties.roll", "Roll", "number", hint="Degrees", more=True),
             _field("properties.zoom", "Zoom", "number", more=True),
+            _field("properties.pan_x", "Shift across", "number", hint="Of its box", more=True),
+            _field("properties.pan_y", "Shift down", "number", hint="Of its box", more=True),
+            _field("properties.style", "Drawing", "molsketch", sections=list(SECTIONS)),
         ],
         needs_file=True,
         unavailable="" if ready else "needs flexo[structures,molecules]",

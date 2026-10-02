@@ -274,7 +274,16 @@ box; its ink is the figure's, and its helices and strands take the colours a
 protein map in the figure gives them. `colors={"A": "Kinase"}` colours a chain
 (or a residue, subunit, or entity) with a hex colour or one of the figure's
 tones; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
-`surface`, and `site` are mol-sketch selections. Install the `molecules` extra
+`surface`, and `site` are mol-sketch selections (`site="ligand"` picks out the
+largest ligand's pocket). The rest of mol-sketch is there too: `palette=` names
+one of its group palettes, `density=` draws a density map with the model
+(`"auto"`, an EMDB ID, or a map file), and `style=` sets any field of its style
+over the look, nested as mol-sketch writes them --
+`style={"fill": "ink colour", "line": {"width": 2}}`, or in a figure file
+`style: {fill: ink colour, line: {width: 2}}`; a field it does not have, or a
+choice it does not offer, is said with what was meant. In the studio, a chosen
+structure's panel shows these settings in mol-sketch's own sections, each with
+what the look gives it until it is given its own. Install the `molecules` extra
 (or `pip install path/to/mol-sketch/python`).
 
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)

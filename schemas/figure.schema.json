@@ -42,6 +42,17 @@
         }
       ]
     },
+    "settings": {
+      "description": "A set of settings, nested as written: a structure's mol-sketch style, as fill: ink colour or line: {width: 2}.",
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {"type": ["string", "number", "integer", "boolean"]},
+          {"type": "array", "items": {"type": ["string", "number", "integer", "boolean"]}},
+          {"$ref": "#/$defs/settings"}
+        ]
+      }
+    },
     "extent": {
       "oneOf": [
         {"$ref": "#/$defs/length"},
@@ -171,7 +182,8 @@
                   "type": "object",
                   "additionalProperties": {"type": ["string", "number", "integer", "boolean"]}
                 }
-              }
+              },
+              {"$ref": "#/$defs/settings"}
             ]
           },
           "default": {}

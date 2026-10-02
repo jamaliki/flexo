@@ -109,3 +109,23 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-turn-tip { position: absolute; z-index: 5; transform: translateX(-50%); pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 .fig-turning { opacity: 0.15; transition: opacity 0.12s; }
 .fig-grab { cursor: grab; }
+
+/* A structure's mol-sketch settings: sections folded away, each setting showing the look's until it has its own. */
+.mol-style { display: grid; gap: 2px; margin-top: 8px; }
+.mol-style-head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.mol-style-head .section-title { margin: 0; }
+.mol-style-head .hint { flex: 1; color: var(--ink-3); font-size: 11.5px; }
+.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
+.mol-section .colour-well.unset .colour-chip { opacity: 0.55; }
+.mol-section { padding: 7px 0 5px; border-top: 1px solid var(--line); }
+.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--ink-2); }
+.mol-section > summary::-webkit-details-marker { display: none; }
+.mol-section > summary svg { width: 14px; height: 14px; transition: transform 0.15s; }
+.mol-section[open] > summary svg { transform: rotate(90deg); }
+.mol-section > .inner { display: grid; gap: 8px; margin-top: 8px; }
+.mol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.mol-grid > .field { min-width: 0; }
+.mol-grid > .field.own > label, .mol-grid > .field.own .label { color: var(--accent); }
+.mol-colours { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
+.mol-colour { display: grid; justify-items: center; gap: 2px; width: 58px; font-size: 10.5px; color: var(--ink-3); text-align: center; }
+.mol-colour.own { color: var(--accent); }
