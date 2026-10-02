@@ -431,7 +431,7 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field("properties", "View", "view", hint="Turn, tilt, and zoom"),
+            _field("properties", "View", "view", hint="Or drag the molecule round"),
             _field(
                 "properties.look",
                 "Look",

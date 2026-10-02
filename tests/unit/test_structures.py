@@ -80,3 +80,30 @@ def test_a_colour_for_a_chain_the_structure_lacks_is_said_with_the_chains_it_has
     with pytest.raises(_NoSuchChain, match='"A" names no chain of 1a7g') as caught:
         _check_chains(Loaded(), (("A", "#d55e00"),))
     assert "Its chains are E" in caught.value.hint
+
+
+def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.studio.figure_edit import EditError
+    from flexo.studio.figure_kind import FigureKind
+
+    source = DATA / "1a7g.cif"
+    text = (
+        "figure: {id: turned}\n"
+        "nodes:\n"
+        "  - id: model\n    kind: structure\n"
+        f"    properties: {{source: {source}, yaw: 40, pitch: -10}}\n"
+        "  - {id: tag, label: E2}\n"
+    )
+    out = FigureKind().act({"text": text}, {"do": "structure-view", "id": "model"}, tmp_path)
+    assert out["document"]["text"] == text
+    view = out["view"]
+    assert view["camera"]["yaw"] == 40 and view["camera"]["pitch"] == -10
+    points = [point for chain in view["chains"] for point in chain]
+    assert len(points) > 50 and all(len(point) == 3 for point in points)
+    # Centred, so the page turns it about its middle.
+    for k in range(3):
+        values = [point[k] for point in points]
+        assert abs(max(values) + min(values)) < 0.1
+    with pytest.raises(EditError, match="not a structure"):
+        FigureKind().act({"text": text}, {"do": "structure-view", "id": "tag"}, tmp_path)

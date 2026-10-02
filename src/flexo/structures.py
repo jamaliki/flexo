@@ -232,6 +232,74 @@ def _lightness(colour: str) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+def structure_view(node: NodeSpec, style: LayoutStyle, palette: Palette) -> dict[str, object]:
+    """What the studio turns while a structure is dragged round: each chain's trace (its
+    alpha carbons, or P for nucleic acids) in mol-sketch's own frame -- its scene's, where
+    the structure already lies in its base orientation -- centred, and the turn it is drawn
+    at now (``yaw``, ``pitch``, ``roll``). Turned as mol-sketch turns it (about y by yaw,
+    then x by pitch, then z by roll; y up), the trace lies as the molecule will be drawn."""
+
+    source = node.property("source")
+    if not isinstance(source, str) or not source.strip():
+        raise _fail(node, "source", "A structure needs a file or a PDB ID (source:).")
+    look = str(node.property("look") or _theme_look(style, palette)).strip().lower()
+    if look not in LOOKS:
+        raise _fail(node, "look", f'look "{look}" is not a mol-sketch look.', hint=", ".join(LOOKS))
+    path = Path(source).expanduser()
+    if path.exists() and outside(path):
+        raise _fail(node, "source", "The structure file is outside the folder.")
+    view = tuple(
+        (name, float(value))  # type: ignore[arg-type]
+        for name in ("yaw", "pitch", "roll")
+        if (value := node.property(name)) is not None
+    )
+    stamp = path.stat().st_mtime if path.exists() else 0.0
+    return _view(str(path) if path.exists() else source.strip(), stamp, look, view)
+
+
+@functools.lru_cache(maxsize=16)
+def _view(
+    source: str, stamp: float, look: str, view: tuple[tuple[str, float], ...]
+) -> dict[str, object]:
+    import molsketch as ms
+    from molsketch._engine import engine
+
+    del stamp  # part of the cache key: an edited file is read again
+    figure = ms.load(source) if Path(source).exists() else ms.fetch(source)
+    figure = figure.look(look)
+    if view:
+        figure.view(**dict(view))
+    spec = figure._spec()
+    camera = engine().call("engineConfig", spec)["camera"]
+    # The scene's atoms are where the camera's base orientation has put them already.
+    atoms = engine().call("sceneJson", spec)["keyframes"][0]["atoms"]
+    chains: dict[str, list[tuple[int, list[float]]]] = {}
+    for atom in atoms.values():
+        if atom.get("het") or atom.get("name") not in {"CA", "P"}:
+            continue
+        chains.setdefault(str(atom.get("chain")), []).append(
+            (int(atom.get("resi", 0)), atom["pos"])
+        )
+    points = [pos for trace in chains.values() for _, pos in trace]
+    if not points:
+        return {"chains": [], "camera": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}}
+    low = [min(p[k] for p in points) for k in range(3)]
+    high = [max(p[k] for p in points) for k in range(3)]
+    centre = [(low[k] + high[k]) / 2.0 for k in range(3)]
+    step = max(1, len(points) // 900)
+    traces = [
+        [
+            [round(pos[k] - centre[k], 2) for k in range(3)]
+            for _, pos in sorted(trace, key=lambda item: item[0])[::step]
+        ]
+        for trace in chains.values()
+    ]
+    return {
+        "chains": traces,
+        "camera": {name: float(camera.get(name) or 0.0) for name in ("yaw", "pitch", "roll")},
+    }
+
+
 @functools.lru_cache(maxsize=32)
 def _render(
     source: str,

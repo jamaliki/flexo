@@ -103,6 +103,8 @@ export function mount(studio, main) {
         const sent = studio.doc.text;
         const result = await studio.api("/api/act", { file: studio.file, document: studio.doc, action });
         if (studio.doc.text !== sent) continue;
+        // A question asked of the figure (its parts, a structure's view) changes nothing.
+        if (action.do === "structure-view") return result;
         studio.change((d) => ({ ...d, text: result.document.text }), { merge });
         // An edit made from the drawing is drawn at once: its parts are waiting to land.
         if (action.do !== "read" && action.do !== "update") studio.requestDraw?.(0);

@@ -406,6 +406,9 @@ export function figureParts(host) {
     return dy * sign > 0 ? "bottom" : "top";
   }
   function markViews() {
+    // A molecule chosen may be grabbed and turned: the pointer says so over it.
+    for (const element of host.overlay.querySelectorAll(".fig-grab")) element.classList.remove("fig-grab");
+    if (nodeOf(chosenOne())?.kind === "structure") moleculeOf(chosenOne())?.classList.add("fig-grab");
     const views = marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
       left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
     group ? h("span.fig-mark-label", {}, name) : null));
@@ -425,6 +428,146 @@ export function figureParts(host) {
       }, icon("plus")));
     }
     return views;
+  }
+
+  // -- a structure turned by dragging on it --
+  // Chosen, a molecule is grabbed and turned as in a viewer: across turns it (yaw), up
+  // and down tilts it (pitch). While it turns, its chains' trace is drawn turning over
+  // it -- in mol-sketch's own frame, so it lies as the molecule will -- and once let go,
+  // the molecule is drawn at the new turn.
+  const views = new Map();
+  const moleculeOf = (id) => host.element(`${id}.molecule`);
+  function turnable(event) {
+    const id = chosenOne();
+    if (!id || nodeOf(id)?.kind !== "structure") return false;
+    const box = moleculeOf(id)?.getBoundingClientRect();
+    return Boolean(box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
+  }
+  async function viewOf(id) {
+    const node = nodeOf(id);
+    const key = JSON.stringify([id, node?.properties]);
+    if (!views.has(key)) views.set(key, host.run({ do: "structure-view", id }, { merge: null }).then((result) => result?.view || null).catch(() => null));
+    return views.get(key);
+  }
+  let turning = null;
+  function turnStart(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    const molecule = moleculeOf(id);
+    if (!molecule) return;
+    const outer = host.overlay.getBoundingClientRect(), box = molecule.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const canvas = h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
+      style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
+    const tip = h("div.fig-turn-tip", { style: { left: `${box.left - outer.left + box.width / 2}px`, top: `${box.top - outer.top + box.height + 6}px` } });
+    turning = { id, molecule, canvas, tip, from: { x: event.clientX, y: event.clientY }, by: { x: 0, y: 0 }, view: null, frame: 0, moved: false };
+    const mine = turning;
+    viewOf(id).then((view) => { if (turning === mine) { mine.view = view; turnDraw(); } });
+    window.addEventListener("pointermove", turnMove);
+    window.addEventListener("pointerup", turnEnd);
+    window.addEventListener("pointercancel", turnCancel);
+    window.addEventListener("keydown", turnKey, true);
+  }
+  const TURN = 0.5;  // degrees a pixel
+  const angle = (value) => Math.round(((((value % 360) + 540) % 360) - 180) * 10) / 10;
+  function turnAngles(turn = turning) {
+    const camera = turn.view?.camera || { yaw: 0, pitch: 0, roll: 0 };
+    return { yaw: angle(camera.yaw + turn.by.x * TURN), pitch: angle(camera.pitch + turn.by.y * TURN), roll: camera.roll || 0 };
+  }
+  function turnMove(event) {
+    if (!turning) return;
+    turning.by = { x: event.clientX - turning.from.x, y: event.clientY - turning.from.y };
+    if (!turning.moved && Math.hypot(turning.by.x, turning.by.y) < 3) return;
+    if (!turning.moved) {
+      turning.moved = true;
+      host.overlay.append(turning.canvas, turning.tip);
+      turning.molecule.classList.add("fig-turning");
+      document.body.classList.add("fig-grabbing");
+    }
+    if (!turning.frame) turning.frame = requestAnimationFrame(() => { if (turning) { turning.frame = 0; turnDraw(); } });
+  }
+  function turnDraw() {
+    const { canvas, view, tip } = turning;
+    if (!turning.moved) return;
+    const { yaw, pitch, roll } = turnAngles();
+    tip.textContent = `Turn ${Math.round(yaw)}° · tilt ${Math.round(pitch)}°`;
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!view?.chains?.length) return;
+    const [cy, sy, cp, sp, cr, sr] = [yaw, yaw, pitch, pitch, roll, roll].map((value, index) => (index % 2 ? Math.sin : Math.cos)(value * Math.PI / 180));
+    // As mol-sketch turns it: about y by yaw, x by pitch, then z by roll; y up on the page.
+    const chains = view.chains.map((chain) => chain.map(([x, y, z]) => {
+      const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
+      const y2 = cp * y - sp * z1, z2 = sp * y + cp * z1;
+      return [cr * x1 - sr * y2, -(sr * x1 + cr * y2), z2];
+    }));
+    const all = chains.flat();
+    const [left, right] = [Math.min(...all.map((p) => p[0])), Math.max(...all.map((p) => p[0]))];
+    const [top, bottom] = [Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[1]))];
+    const [near, far] = [Math.max(...all.map((p) => p[2])), Math.min(...all.map((p) => p[2]))];
+    const pad = 0.08 * Math.min(canvas.width, canvas.height);
+    const scale = Math.min((canvas.width - 2 * pad) / Math.max(right - left, 1), (canvas.height - 2 * pad) / Math.max(bottom - top, 1));
+    const at = ([x, y]) => [canvas.width / 2 + (x - (left + right) / 2) * scale, canvas.height / 2 + (y - (top + bottom) / 2) * scale];
+    const ink = getComputedStyle(host.overlay).getPropertyValue("--accent").trim() || "#3d5afe";
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    // Segments far to near, the near ones darker and thicker: the trace reads in depth.
+    const segments = chains.flatMap((chain) => chain.slice(1).map((point, index) => [chain[index], point]));
+    segments.sort((a, b) => (a[0][2] + a[1][2]) - (b[0][2] + b[1][2]));
+    const ratio = window.devicePixelRatio || 1;
+    for (const [a, b] of segments) {
+      const depth = near > far ? ((a[2] + b[2]) / 2 - far) / (near - far) : 1;
+      context.strokeStyle = ink;
+      context.globalAlpha = 0.25 + 0.75 * depth;
+      context.lineWidth = (1.2 + 2.2 * depth) * ratio;
+      context.beginPath();
+      context.moveTo(...at(a));
+      context.lineTo(...at(b));
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+  function turnFinish() {
+    window.removeEventListener("pointermove", turnMove);
+    window.removeEventListener("pointerup", turnEnd);
+    window.removeEventListener("pointercancel", turnCancel);
+    window.removeEventListener("keydown", turnKey, true);
+    document.body.classList.remove("fig-grabbing");
+    const was = turning;
+    turning = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    return was;
+  }
+  // The trace stays over the molecule until it is drawn again at its new turn.
+  function turnClear(was) {
+    was.canvas.remove();
+    was.tip.remove();
+    was.molecule.classList.remove("fig-turning");
+  }
+  function turnEnd() {
+    const was = turnFinish();
+    if (!was) return;
+    if (!was.moved || !was.view) { turnClear(was); return; }
+    // A press that turned it is not a click on it.
+    state.swallow = true;
+    setTimeout(() => { state.swallow = false; }, 0);
+    const { yaw, pitch } = turnAngles(was);
+    was.tip.textContent = "Drawing it…";
+    const values = { "properties.yaw": yaw || null, "properties.pitch": pitch || null };
+    act({ do: "update", target: { type: "node", id: was.id }, values }, { select: false, failed: () => turnClear(was) });
+    const started = Date.now();
+    const wait = () => {
+      if (moleculeOf(was.id) !== was.molecule || Date.now() - started > 8000) turnClear(was);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
+  }
+  function turnCancel() { const was = turnFinish(); if (was) turnClear(was); }
+  function turnKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    turnCancel();
   }
 
   // -- dragging a part to another place --
@@ -471,6 +614,7 @@ export function figureParts(host) {
 
   function pointerdown(event) {
     if (event.button !== 0 || state.connecting || inline || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (turnable(event)) { turnStart(event, chosenOne()); return; }
     const id = idAt(event);
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
@@ -1205,7 +1349,7 @@ export function figureParts(host) {
     get justDragged() { return state.swallow; },
     setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
     addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste,
     openInline, placeInline, closeInline,
   };

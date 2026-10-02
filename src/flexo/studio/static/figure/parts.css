@@ -97,3 +97,9 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 /* A molecule's view: turn, tilt, and zoom by steps. */
 .view-pad { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
 .view-pad .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+
+/* A molecule turned by dragging on it: its trace turns over it, the drawing faded under. */
+.fig-turn { position: absolute; z-index: 4; pointer-events: none; }
+.fig-turn-tip { position: absolute; z-index: 5; transform: translateX(-50%); pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
+.fig-turning { opacity: 0.15; transition: opacity 0.12s; }
+.fig-grab { cursor: grab; }

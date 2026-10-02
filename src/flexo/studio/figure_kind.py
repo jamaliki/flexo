@@ -141,9 +141,9 @@ class FigureKind:
 
         from flexo.studio.figure_edit import apply
 
-        result = apply(
-            document["text"], action, suffix=document.get("suffix", ".yaml"), base=base
-        )
+        if action.get("do") == "structure-view":
+            return {"document": document, "view": _structure_view(document, action, base)}
+        result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
         from flexo.studio.figure_edit import model
 
         suffix = document.get("suffix", ".yaml")
@@ -189,8 +189,9 @@ class FigureKind:
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except (yaml.YAMLError, json.JSONDecodeError) as error:
-            return Drawing([], [Message(_yaml_problem(error), "error", _yaml_line(error))],
-                           info=info)
+            return Drawing(
+                [], [Message(_yaml_problem(error), "error", _yaml_line(error))], info=info
+            )
         except FlexoError as error:
             return Drawing([], [_message(item) for item in error.diagnostics], info=info)
         except Exception as error:
@@ -293,6 +294,27 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
         if isinstance(source, str) and source and (base / source).is_file():
             properties["source"] = str((base / source).resolve())
     return parse_figure(document)
+
+
+def _structure_view(document: dict[str, Any], action: dict[str, Any], base: Path) -> Any:
+    """A structure's trace and turn, for the page to turn while it is dragged round."""
+
+    spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
+    return view_of(spec, str(action.get("id")))
+
+
+def view_of(spec, identifier: str) -> dict[str, Any]:
+    """The trace and turn of the structure ``identifier`` in ``spec``, drawn as ``spec``
+    says (its theme chooses the look): for any kind that draws figures."""
+
+    from flexo.structures import structure_view
+    from flexo.studio.figure_edit import EditError
+    from flexo.themes import figure_palette, figure_style
+
+    node = next((item for item in spec.nodes if item.id == identifier), None)
+    if node is None or node.kind != "structure":
+        raise EditError(f'"{identifier}" is not a structure')
+    return structure_view(node, figure_style(spec), figure_palette(spec))
 
 
 def _is_file(value: object) -> bool:
