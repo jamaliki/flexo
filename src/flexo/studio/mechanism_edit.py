@@ -24,6 +24,7 @@ from __future__ import annotations
 import copy
 import math
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -140,10 +141,19 @@ def sheet(
     )
     back = {new: old for old, new in renumber.items()}
     molecule = panel.molecule
+    # The pairs this step's arrows take are drawn at their tails; the rest are offered.
+    given = Counter(
+        renumber[arrow.source[0]]
+        for arrow in panel.arrows
+        if len(arrow.source) == 1 and arrow.electrons == 2
+    )
     ink = _arrow_points(drawn)
     atoms = []
     for index, place in drawn.atoms.items():
         original = back[index]
+        spots = lone_pair_spots(shown, drawn, composed.pen, index, given[index])
+        # Its number keeps off the pairs shown under the pointer, as off what is drawn.
+        middles = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in spots]
         atoms.append(
             {
                 "index": original,
@@ -159,10 +169,10 @@ def sheet(
                         round(b[0] + dx, 2),
                         round(b[1] + dy, 2),
                     ]
-                    for a, b in lone_pair_spots(shown, drawn, composed.pen, index)
+                    for a, b in spots
                 ],
                 "radical": bool(molecule.atoms[original].lone % 2),
-                "tag": _tag(place, composed.pen, dx, dy, ink),
+                "tag": _tag(place, composed.pen, dx, dy, ink + middles),
             }
         )
     bonds = []
@@ -387,6 +397,9 @@ def _figure(
     properties: dict[str, object] = {"partial": True}
     if only is not None:
         properties["only"] = int(only) + 1
+        # Every hydrogen written as an atom is there to be pointed at, moved by an arrow
+        # or not yet: none is folded back into its neighbour's label.
+        properties["hydrogens"] = "kept"
         if holding is not None:
             properties["holding"] = [{"step": int(only) + 1, "arrows": "; ".join(holding)}]
     chosen = {

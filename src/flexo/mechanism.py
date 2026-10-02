@@ -486,6 +486,7 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
             pairs=pairs,
             charges=charges,
             colour=colour,
+            fold=node.property("hydrogens") != "kept",
         )
         x0, y0, x1, y1 = drawn.bounds()
         drawn = drawn.moved(-x0, -y0)
@@ -601,15 +602,20 @@ def draw_panel(
     pairs: str = "used",
     charges: str = "circled",
     colour: str = INK,
+    fold: bool = True,
 ) -> tuple[Drawn, Molecule, dict[int, int]]:
     """One structure and its arrows: the molecule drawn once to see where everything
     falls and which way its arrows leave their atoms; again with those ways kept clear
     (the hydrogens written beside an atom go to its other side), to see where the arrows
     would go; and, if it has charges, a last time with the charges kept off them, the
     arrows over it. Also the molecule as drawn (hydrogens no arrow moves folded back
-    into their labels) and how its atoms are numbered in it."""
+    into their labels, unless ``fold`` is False) and how its atoms are numbered in it."""
 
-    molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
+    if fold:
+        molecule, arrows, renumber = _shown(panel.molecule, panel.arrows)
+    else:
+        molecule, arrows = panel.molecule, panel.arrows
+        renumber = {index: index for index in range(len(molecule.atoms))}
     marks = wedges(molecule)
     style = {
         "prefix": prefix,

@@ -20,7 +20,8 @@ def test_a_half_drawn_step_is_drawn_on_and_what_is_wrong_said() -> None:
     assert drawn["arrows"] == [{"text": "1 -> 2", "said": "lone pair on O1 → C2"}]
     assert drawn["named"] == [0, 1] and drawn["states"] == 1
     oxygen = next(atom for atom in drawn["atoms"] if atom["name"] == "O1")
-    assert oxygen["number"] == 1 and len(oxygen["pairs"]) == 3  # hydroxide's three lone pairs
+    # Hydroxide's three lone pairs: the arrow's, drawn at its tail, and two more offered.
+    assert oxygen["number"] == 1 and len(oxygen["pairs"]) == 2
     x, y, width, height = drawn["view"]
     assert all(
         x <= atom["x"] <= x + width and y <= atom["y"] <= y + height for atom in drawn["atoms"]
@@ -104,3 +105,25 @@ def test_a_molecule_is_moved_turned_flipped_and_put_back_where_it_is_seen() -> N
     assert drawn["paper"].startswith("#")
     assert [molecule["placed"] for molecule in drawn["molecules"]] == [True, False]
     assert "m.step1.bond0" in drawn["molecules"][1]["ids"]
+
+
+def test_the_lone_pairs_offered_are_an_atoms_own_clear_of_its_hydrogens() -> None:
+    acyl = "[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]"
+    drawn = sheet([{"smiles": acyl}], step=0)
+    oxygen = next(atom for atom in drawn["atoms"] if atom["name"] == "O5")
+    assert len(oxygen["pairs"]) == 3
+    # HO-: its H is written to the left. No pair sits on that side, where it would read
+    # as the hydrogen's.
+    for x1, y1, x2, y2 in oxygen["pairs"]:
+        middle = ((x1 + x2) / 2 - oxygen["x"], (y1 + y2) / 2 - oxygen["y"])
+        assert abs(math.degrees(math.atan2(middle[1], -middle[0]))) > 60, oxygen["pairs"]
+    # Once an arrow takes one of them, it is drawn at the arrow's tail and not offered.
+    taken = sheet([{"smiles": acyl, "arrows": ["5 -> 2", "2=3 -> 3"]}], step=0)
+    oxygen = next(atom for atom in taken["atoms"] if atom["name"] == "O5")
+    assert len(oxygen["pairs"]) == 2
+    # A hydrogen written as an atom is there to be pointed at before any arrow names it,
+    # and has no lone pairs to offer.
+    hydride = sheet([{"smiles": "[BH3-:1][H:2].[CH3:3][C:4](=[O:5])[CH3:6]"}], step=0)
+    (hydrogen,) = [atom for atom in hydride["atoms"] if atom["element"] == "H"]
+    assert hydrogen["name"] == "H2" and hydrogen["pairs"] == []
+    assert {tuple(bond["atoms"]) for bond in hydride["bonds"]} >= {(0, 1)}
