@@ -146,9 +146,7 @@ export function mount(studio, main) {
   new ResizeObserver(() => fitPage()).observe(stage);
 
   function placeMarks() {
-    clear(marks, figure.marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
-      left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
-    group ? h("span.fig-mark-label", {}, name) : null)));
+    clear(marks, figure.markViews());
   }
   page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
   page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });

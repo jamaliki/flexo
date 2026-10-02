@@ -47,6 +47,37 @@ def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> No
     compile_figure(parse(text, Path.cwd()))
 
 
+def test_a_part_added_into_a_chain_takes_its_place_in_the_line() -> None:
+    # Between encoder and y: encoder's line to y now runs through the new part.
+    text, _ = edit(NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
+    assert edges(text) == [("x", "encoder"), ("encoder", "mlp"), ("mlp", "y")]
+    compile_figure(parse(text, Path.cwd()))
+    # Unless asked not to; and at the end of the chain there is no line to go into.
+    text, _ = edit(
+        NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder", splice=False
+    )
+    assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("encoder", "mlp")]
+    text, _ = edit(NEW_FIGURE, do="add", kind="mlp", after="y", source="y")
+    assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("y", "mlp")]
+    # A decision's branch keeps its words on the line that leaves the decision.
+    flow = (
+        "figure: {id: flow}\nnodes:\n- {id: start, kind: terminal, label: Start}\n"
+        "- {id: check, kind: decision, label: 'Done?'}\n- {id: end, kind: terminal, label: End}\n"
+        "edges:\n- {from: start, to: check}\n- {from: check, to: end, label: 'yes'}\n"
+    )
+    text, chosen = edit(flow, do="add", kind="block", after="check", source="check")
+    lines = data(text)["edges"]
+    assert [(line["from"], line["to"], line.get("label")) for line in lines] == [
+        ("start", "check", None),
+        ("check", chosen[0], "yes"),
+        (chosen[0], "end", None),
+    ]
+    # Two lines out of a part: which one it would go into is not known, so it is only fed.
+    text, _ = edit(NEW_FIGURE, do="connect", source="encoder", target="x")
+    text, _ = edit(text, do="add", kind="mlp", after="encoder", source="encoder")
+    assert ("encoder", "y") in edges(text) and ("encoder", "mlp") in edges(text)
+
+
 def test_every_part_in_the_palette_can_be_added_and_drawn(tmp_path: Path) -> None:
     (tmp_path / "picture.svg").write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30">'

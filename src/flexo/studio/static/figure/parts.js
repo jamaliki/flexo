@@ -72,6 +72,11 @@ export function glyph(name) {
   return node;
 }
 
+// A structure's name from its file: a PDB ID in capitals, any other file by its name.
+export function fileLabel(source) {
+  const stem = String(source).split("/").pop().replace(/\.(pdb|cif|mmcif|ent)$/i, "");
+  return /^[0-9][A-Za-z0-9]{3}$/.test(stem) ? stem.toUpperCase() : stem;
+}
 export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.text ?? "").join("") : label ?? "");
 export const plain = (label) => readable(words(label));
 export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
@@ -136,6 +141,7 @@ export function figureParts(host) {
 
   function select(ids, { reveal = true } = {}) {
     state.selected = [...new Set((Array.isArray(ids) ? ids : [ids]).filter(Boolean))];
+    if (typeInto && !state.selected.includes(typeInto)) typeInto = null;
     host.changed();
     const id = state.selected[state.selected.length - 1];
     if (id && reveal) host.reveal?.(id);
@@ -235,6 +241,9 @@ export function figureParts(host) {
     setTimeout(() => search.focus(), 20);
   }
 
+  // A part added is ready for its words: they are typed on it as soon as it is drawn.
+  // One drawn from a file is named for it (a structure for its PDB ID).
+  let typeInto = null;
   async function addPart(kind, where = placement()) {
     const part = parts[kind];
     const action = { do: "add", kind, parent: where.parent || null, after: where.after || null, source: where.source || null };
@@ -243,8 +252,9 @@ export function figureParts(host) {
       const file = await host.chooseFile({ title: `Choose the ${part.title.toLowerCase()}'s file`, types: field.types });
       if (!file) return;
       action.node = { properties: { source: file } };
+      if (kind === "structure") action.node.label = fileLabel(file);
     }
-    act(action);
+    act(action, { then: (result) => { if (!part.needs_file && result.select?.length === 1) typeInto = result.select[0]; } });
   }
 
   function gather(group, where = null) {
@@ -342,6 +352,51 @@ export function figureParts(host) {
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
+  }
+
+  // The marks as the host shows them over the drawing: a frame round each part chosen,
+  // and on the one part chosen a + on the side its line leaves by, which adds the part
+  // that usually comes next there, joined to it -- into its line, as a step in a flow.
+  const AFTER = { terminal: "block", decision: "block", text: "block", junction: "block", op: "block", circle: "circle" };
+  function nextKind(node) {
+    const kind = AFTER[node.kind || "block"] || node.kind || "block";
+    return parts[kind] && !parts[kind].unavailable ? kind : "block";
+  }
+  function sideOf(id, box) {
+    const holder = parentOf(id);
+    const siblings = holder?.children || [];
+    const at = siblings.indexOf(id);
+    const line = model().edges.find((edge) => nodeOfRef(edge.from) === id);
+    const toward = line ? nodeOfRef(line.to) : siblings[at + 1] || null;
+    const away = toward ? null : siblings[at - 1] || null;
+    const other = (toward || away) && host.box(toward || away);
+    if (!other) return holder?.layout?.kind === "row" ? "right" : "bottom";
+    const dx = other.left + other.width / 2 - (box.left + box.width / 2);
+    const dy = other.top + other.height / 2 - (box.top + box.height / 2);
+    const sign = toward ? 1 : -1;
+    if (Math.abs(dx) > Math.abs(dy)) return dx * sign > 0 ? "right" : "left";
+    return dy * sign > 0 ? "bottom" : "top";
+  }
+  function markViews() {
+    const views = marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
+      left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
+    group ? h("span.fig-mark-label", {}, name) : null));
+    const id = chosenOne();
+    const box = id && nodeOf(id) && !state.connecting && !inline ? host.box(id) : null;
+    if (box) {
+      const side = sideOf(id, box);
+      const kind = nextKind(nodeOf(id));
+      const x = side === "right" ? box.left + box.width : side === "left" ? box.left : box.left + box.width / 2;
+      const y = side === "bottom" ? box.top + box.height : side === "top" ? box.top : box.top + box.height / 2;
+      const stop = (event) => event.stopPropagation();
+      views.push(h(`button.fig-next.${side}`, {
+        type: "button", style: { left: `${x}px`, top: `${y}px` },
+        title: `Add ${parts[kind].title.toLowerCase()} after ${nameOf(id)}, joined to it (A for another kind)`,
+        onpointerdown: stop, ondblclick: stop, onmousemove: stop,
+        onclick: (event) => { stop(event); addPart(kind, { after: id, source: id }); },
+      }, icon("plus")));
+    }
+    return views;
   }
 
   // -- dragging a part to another place --
@@ -627,6 +682,12 @@ export function figureParts(host) {
     field.area.addEventListener("blur", () => setTimeout(() => { if (inline?.box === box && !box.contains(document.activeElement)) closeInline(true); }, 0));
   }
   function placeInline() {
+    if (typeInto && !inline && host.box(typeInto)) {
+      // Once it has landed where it is drawn.
+      const id = typeInto;
+      typeInto = null;
+      setTimeout(() => { if (!inline && chosenOne() === id && host.box(id)) openInline(id); }, 320);
+    }
     if (!inline) return;
     if (!inline.box.isConnected) host.overlay.append(inline.box);
     const where = host.box(inline.id);
@@ -1034,7 +1095,7 @@ export function figureParts(host) {
     get justDragged() { return state.swallow; },
     setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, hint, key, panel, wantsRoom, howTo,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo,
     addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect,
     openInline, placeInline, closeInline,
   };

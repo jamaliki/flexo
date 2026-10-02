@@ -901,10 +901,14 @@ own last change and leaves others' alone.
 - **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
-  is chosen comes after it, a line between them. **Connect** (C) draws a line from
-  one part to the next; double-click a part or a line to type its words on the
-  drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
-  or titled module. A part (or a whole group) dragged on the drawing goes to another
+  is chosen comes after it, a line between them; when the chosen part's single line
+  runs on to the part after it, the new one goes into that line, as a step into a
+  flow chart. A **+** beside the part chosen adds the next step there at once (a
+  block after a start or a decision, another structure after a structure), and the
+  words of a part just added are typed on it as soon as it is drawn. **Connect**
+  (C) draws a line from one part to the next; double-click a part or a line to
+  type its words on the drawing; ⇧-click several and **Group** (G) gathers them
+  into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and
   every part slides to where it now is (Esc, or letting go off the figure, takes it

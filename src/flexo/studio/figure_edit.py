@@ -10,7 +10,9 @@ choose next (the part just added). An action is a mapping with a ``do``:
 
 - ``add``: ``kind`` (a part of ``figure_parts``), placed in ``parent`` or after
   ``after``, fed from ``source`` if given; ``node`` overrides its label and
-  properties;
+  properties. A part put after ``source`` whose one line leads on to the part now
+  after the new one goes into that line, as a step into a flow chart (``splice:
+  false`` keeps the line, and the new part only fed from ``source``);
 - ``connect``: ``source`` to ``target``, each a node or ``node.port``;
 - ``update``: ``target`` (``{"type": "node" | "edge" | "group" | "figure", "id"}``)
   and ``values``, keys as the catalogue's fields name them (``properties.length``);
@@ -71,6 +73,9 @@ def apply(
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
+        if problem and document.spliced:
+            # A part that cannot carry the line on (one with no output) is only fed.
+            return apply(text, {**action, "splice": False}, suffix=suffix, base=base)
         if problem:
             raise EditError(f"that would break the figure: {problem}")
     return {"text": result, "select": list(select)}
@@ -207,6 +212,7 @@ class _Document:
             raise EditError("the file is not a figure yet: fix it in the source first")
         self.data.setdefault("figure", {"id": "figure"})
         self.data.setdefault("nodes", [])
+        self.spliced = False
 
     def dump(self) -> str:
         if self.json:
@@ -389,8 +395,43 @@ class _Document:
         self.nodes.append(item)
         self.place(identifier, action.get("parent"), action.get("after"))
         if action.get("source"):
-            self.connect(str(action["source"]), identifier)
+            source = str(action["source"])
+            line = self.onward(source, identifier) if action.get("splice", True) else None
+            if line is None:
+                self.connect(source, identifier)
+            else:
+                # The line from source now ends at the new part (its words with it, as a
+                # decision's "yes"), and a new line carries on to where it went.
+                onward = line["to"]
+                line["to"] = self.free_input(identifier)
+                self.data["edges"].append({"from": identifier, "to": onward})
+                self.spliced = True
         return [identifier]
+
+    def onward(self, source: str, identifier: str) -> dict[str, Any] | None:
+        """The line a part just put after ``source`` goes into: ``source``'s one line,
+        when it leads to the part now right after the new one, in the same group."""
+
+        node = self.node(identifier)
+        if node is None or node.get("kind") == "attention" or self.node(source) is None:
+            return None
+        if any(
+            source in (self.node_of(str(end)) for end in net.get("sources") or [])
+            for net in self.nets
+        ):
+            return None
+        lines = [edge for edge in self.edges if self.node_of(str(edge["from"])) == source]
+        if len(lines) != 1:
+            return None
+        holder = self.holder(identifier)
+        order = list(holder.get("children") or []) if holder is not None else self.top_level()
+        if identifier not in order or self.holder(source) is not holder:
+            return None
+        at = order.index(identifier)
+        following = order[at + 1] if at + 1 < len(order) else None
+        if at == 0 or order[at - 1] != source or following != self.node_of(str(lines[0]["to"])):
+            return None
+        return lines[0]
 
     def _connect(self, action: Mapping[str, Any]) -> list[str]:
         return [self.connect(str(action["source"]), str(action["target"]))]
