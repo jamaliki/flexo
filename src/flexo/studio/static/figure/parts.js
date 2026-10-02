@@ -1367,7 +1367,7 @@ export function figureParts(host) {
       value: (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
       options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "None",
       onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
-    }), { hint: "Shapes with the same tone name share a colour" }) : null;
+    }), { hint: "Same name, same colour" }) : null;
     const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
       ui.colour({
         title: label, key: `colour:${scope}:${part}`,

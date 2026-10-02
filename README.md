@@ -918,7 +918,7 @@ changes in words, to go back or forward to any of them.
   words of a part just added are typed on it as soon as it is drawn, in place, in
   the part's own face and size. A chosen structure turns as it is dragged (or by
   the buttons in its panel), and a structure or picture is sized by its corners;
-  a part's **Kind** may be made either, its file asked for. Right-click a part
+  a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
   (C) draws a line from one part to the next; double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (G) gathers them
