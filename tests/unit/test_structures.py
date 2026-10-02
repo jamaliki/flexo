@@ -105,7 +105,7 @@ def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> N
     for k in range(3):
         values = [point[k] for point in points]
         assert abs(max(values) + min(values)) < 0.1
-    with pytest.raises(EditError, match="not a structure"):
+    with pytest.raises(EditError, match="isn't a structure"):
         FigureKind().act({"text": text}, {"do": "structure-view", "id": "tag"}, tmp_path)
 
 
@@ -152,3 +152,26 @@ def test_a_setting_mol_sketch_lacks_is_said_with_what_was_meant() -> None:
         with pytest.raises(flexo.FlexoError, match=said) as caught:
             compile_figure(figure.spec)
         assert hint in (caught.value.diagnostics[0].hint or "")
+
+
+def test_every_choice_the_studio_offers_is_shown_by_a_name_of_its_own() -> None:
+    from flexo.structure_style import CHOICES, SECTIONS
+    from flexo.studio.figure_parts import catalogue
+
+    fields = [field for section in SECTIONS for field in section["fields"]]
+    for field in fields:
+        if field["type"] == "choice":
+            # What is written stays mol-sketch's value; what is shown is named for each.
+            assert list(field["labels"]) == list(CHOICES[field["key"]]) == field["options"]
+            assert all(field["labels"].values())
+    cartoon = next(field for field in fields if field["key"] == "cartoon_color")
+    assert cartoon["labels"] == {
+        "ss": "Secondary Structure",
+        "carbon": "Carbon",
+        "rainbow": "Rainbow",
+    }
+    editor = catalogue()
+    for part in [*editor["parts"].values(), {"fields": editor["group_fields"]}]:
+        for field in [*part["fields"], *(c for f in part["fields"] for c in f.get("columns", []))]:
+            if field["type"] == "choice":
+                assert [str(option) for option in field["options"]] == list(field["labels"])

@@ -104,7 +104,7 @@ def test_gathering_writes_the_root_the_file_only_implied() -> None:
     text, chosen = edit(text, do="gather", ids=["row"], layout="row", role="module")
     module = next(group for group in data(text)["groups"] if group["id"] == chosen[0])
     assert module["role"] == "module" and module["label"] == "Module"
-    with pytest.raises(EditError, match="side by side"):
+    with pytest.raises(EditError, match="same row, column or group"):
         edit(text, do="gather", ids=["x", "encoder"], layout="column")
 
 
@@ -116,9 +116,9 @@ def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
     assert ("x", "backbone") in edges(text) and ("backbone", "y") in edges(text)
     assert data(text)["nets"][0]["targets"] == ["backbone.input", "y"]
     assert "backbone" in next(g for g in data(text)["groups"] if g["id"] == "row")["children"]
-    with pytest.raises(EditError, match="names another part"):
+    with pytest.raises(EditError, match="already in use"):
         edit(text, do="rename", id="x", to="y")
-    with pytest.raises(EditError, match="cannot name"):
+    with pytest.raises(EditError, match="can't be used as a name"):
         edit(text, do="rename", id="x", to="2x")
 
 
@@ -128,7 +128,7 @@ def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
     assert edges(text) == []
     assert [group["id"] for group in data(text)["groups"]] == ["root"]
     assert "encoder" not in data(text)["groups"][0]["children"]
-    with pytest.raises(EditError, match="cannot be deleted"):
+    with pytest.raises(EditError, match="can't be deleted"):
         edit(text, do="delete", ids=["root"])
 
 
@@ -162,7 +162,7 @@ def test_a_part_goes_on_a_line_of_its_own_centred_under_a_row() -> None:
         "score",
     ]
     compile_figure(parse(text, Path.cwd()))
-    with pytest.raises(EditError, match="no side"):
+    with pytest.raises(EditError, match="isn't a valid position"):
         edit(steps, do="move", id="score", line="inside")
 
 
@@ -202,7 +202,7 @@ def test_lines_land_where_a_part_takes_them() -> None:
     text, _ = edit(text, do="add", kind="attention", after="y", source="y")
     net = data(text)["nets"][0]
     assert net["sources"] == ["y"] and net["targets"] == [f"attention.{p}" for p in "qkv"]
-    with pytest.raises(EditError, match="connected already"):
+    with pytest.raises(EditError, match="already connected"):
         edit(text, do="connect", source="x", target="encoder")
     with pytest.raises(EditError, match="itself"):
         edit(text, do="connect", source="x", target="x")
@@ -250,7 +250,7 @@ def test_duplicating_a_group_copies_its_parts_and_the_lines_between_them() -> No
 
 
 def test_an_edit_that_would_break_the_figure_is_refused_and_one_already_broken_is_kept() -> None:
-    with pytest.raises(EditError, match="unknown figure edit"):
+    with pytest.raises(EditError, match="Unknown figure edit"):
         edit(NEW_FIGURE, do="explode")
     broken = NEW_FIGURE.replace("to: encoder", "to: nowhere")
     text, _ = edit(broken, do="add", kind="block")  # the file was broken before: made anyway
@@ -306,7 +306,7 @@ def test_the_page_asks_the_server_for_an_edit_and_gets_the_file_and_its_model(se
     status, failed = call(
         f"{base}/api/act", token, {**body, "action": {"do": "rename", "id": "x", "to": "y"}}
     )
-    assert status == 400 and "names another part" in failed["error"]
+    assert status == 400 and "already in use" in failed["error"]
     status, drawn = call(
         f"{base}/api/draw", token, {"file": "figure.yaml", "document": result["document"]}
     )

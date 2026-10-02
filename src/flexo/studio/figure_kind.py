@@ -318,7 +318,7 @@ def settings_of(spec, identifier: str) -> dict[str, Any]:
 
     node = next((item for item in spec.nodes if item.id == identifier), None)
     if node is None or node.kind != "structure":
-        raise EditError(f'"{identifier}" is not a structure')
+        raise EditError(f"“{identifier}” isn't a structure.")
     return structure_settings(node, figure_style(spec), figure_palette(spec))
 
 
@@ -332,7 +332,7 @@ def view_of(spec, identifier: str) -> dict[str, Any]:
 
     node = next((item for item in spec.nodes if item.id == identifier), None)
     if node is None or node.kind != "structure":
-        raise EditError(f'"{identifier}" is not a structure')
+        raise EditError(f"“{identifier}” isn't a structure.")
     return structure_view(node, figure_style(spec), figure_palette(spec))
 
 

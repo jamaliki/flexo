@@ -8,7 +8,8 @@ edited:
 
 - ``text``, ``markup`` (flexo's inline markup), ``code`` (monospace, several lines);
 - ``integer``, ``number``, ``length`` (``12pt``, ``4mm``), ``bool``;
-- ``choice`` (one of ``options``) and ``combo`` (usually one of ``options``);
+- ``choice`` (one of ``options``, each shown as ``labels`` names it) and ``combo``
+  (usually one of ``options``);
 - ``records``: a table of rows, each a mapping with the given ``columns`` -- a
   plasmid's features, a plate's groups, a timeline's events;
 - ``pair``: two words kept as a list of two (a reaction's cofactors);
@@ -26,6 +27,7 @@ starts as; ``"+N"`` is the last row's value and N more.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
@@ -55,11 +57,53 @@ TONES = (
 BADGES = ("frozen", "trained", "tuned")
 
 
+SMALL_WORDS = frozenset(
+    {"a", "an", "the", "and", "or", "but", "nor", "as", "at", "by", "for", "from", "in", "into"}
+    | {"like", "near", "of", "on", "onto", "over", "per", "to", "upon", "via", "with"}
+)
+"""Words title-style leaves lowercase, unless they come first or last."""
+
+WORDS = {
+    "": "None",
+    "auto": "Automatic",
+    "cds": "CDS",
+    "rbs": "RBS",
+    "tm": "TM",
+    "310-helix": "3-10 Helix",
+    "center": "Centre",
+}
+"""Values shown otherwise than title-cased."""
+
+
+def _labels(options: list[Any], special: Mapping[str, str] | None = None) -> dict[str, str]:
+    """What the studio shows for each of a choice's ``options`` (the values written to the
+    file): ``special``'s word for it, else the value in title-style (``active-site``:
+    Active Site)."""
+
+    def titled(value: str) -> str:
+        words = value.replace("-", " ").replace("_", " ").split()
+        last = len(words) - 1
+        return " ".join(
+            word if 0 < index < last and word in SMALL_WORDS else word[:1].upper() + word[1:]
+            for index, word in enumerate(words)
+        )
+
+    said = {**WORDS, **(special or {})}
+    return {str(option): said.get(str(option)) or titled(str(option)) for option in options}
+
+
 def _field(key: str, label: str, type: str, **options: Any) -> dict[str, Any]:
+    """A field; a ``choice`` field also carries ``labels``, what is shown for each option
+    (given ``labels`` say it for some)."""
+
+    if type == "choice":
+        options["labels"] = _labels(options["options"], options.get("labels"))
     return {"key": key, "label": label, "type": type, **options}
 
 
 def _column(name: str, label: str, type: str = "text", **options: Any) -> dict[str, Any]:
+    if type == "choice":
+        options["labels"] = _labels(options["options"], options.get("labels"))
     return {"name": name, "label": label, "type": type, **options}
 
 
@@ -69,12 +113,12 @@ TONE = _field(
     "Tone",
     "combo",
     options=list(TONES),
-    hint="Parts with the same tone share a colour",
+    hint="Shapes with the same tone share a colour",
 )
 BADGE = _field("properties.badge", "Badge", "choice", options=["", *BADGES])
 SHADOW = _field("shadow", "Shadow", "bool", default=False)
 SIZE = [
-    _field("width", "Width", "length", hint="Leave empty to fit the words"),
+    _field("width", "Width", "length", hint="Leave empty to fit the label"),
     _field("height", "Height", "length"),
 ]
 MOTIF = _field(
@@ -82,7 +126,7 @@ MOTIF = _field(
     "Motif",
     "bool",
     default=True,
-    hint="The drawing a kind puts under its words",
+    hint="The drawing behind the label",
 )
 COMMON = [LABEL, TONE, BADGE, SHADOW]
 
@@ -113,14 +157,20 @@ def _genetics() -> list[dict[str, Any]]:
     from flexo.genetics import _PLASMID_PARTS, PART_TYPES
 
     glyphs = sorted(set(PART_TYPES.values()))
-    strand = _column("strand", "Strand", "choice", options=["", "+", "-"])
+    strand = _column(
+        "strand",
+        "Strand",
+        "choice",
+        options=["", "+", "-"],
+        labels={"": "Default", "+": "Forward", "-": "Reverse"},
+    )
     tone = _column("tone", "Tone", "combo", options=list(TONES))
     return [
         _part(
             "construct",
             "Construct",
             "Biology",
-            "Parts on a DNA backbone, in SBOL glyphs",
+            "Genetic parts on a DNA backbone, drawn as SBOL glyphs",
             {
                 "label": "Reporter",
                 "properties": {
@@ -143,24 +193,24 @@ def _genetics() -> list[dict[str, Any]]:
                         _column("label", "Label"),
                         strand,
                         tone,
-                        _column("bp", "bp", "integer"),
-                        _column("id", "Port", hint="Name it to connect to this part"),
+                        _column("bp", "Length", "integer", hint="In base pairs"),
+                        _column("id", "Port", hint="Name to connect lines to"),
                     ],
                 ),
                 _field(
                     "properties.scale",
-                    "bp per point",
+                    "Base Pairs per Point",
                     "number",
-                    hint="Draw parts to their length in base pairs",
+                    hint="Draws parts to scale by their length",
                 ),
-                _field("properties.ticks", "Ticks", "bool", default=True),
+                _field("properties.ticks", "Show ticks", "bool", default=True),
             ],
         ),
         _part(
             "plasmid",
             "Plasmid",
             "Biology",
-            "A circular map, features placed by base pair",
+            "A circular plasmid map with features placed by base pair",
             {
                 "label": "pExample",
                 "properties": {
@@ -190,7 +240,7 @@ def _genetics() -> list[dict[str, Any]]:
                     ],
                 ),
                 _field("properties.radius", "Radius", "number"),
-                _field("properties.ticks", "Ticks", "bool", default=True),
+                _field("properties.ticks", "Show ticks", "bool", default=True),
             ],
         ),
     ]
@@ -223,7 +273,7 @@ def _proteins() -> list[dict[str, Any]]:
             "protein",
             "Protein",
             "Biology",
-            "A protein's domains, sites, and secondary structure along its length",
+            "Domains, sites and secondary structure along a protein",
             {
                 "label": "Kinase",
                 "properties": {
@@ -237,7 +287,7 @@ def _proteins() -> list[dict[str, Any]]:
                 },
             },
             [
-                _field("properties.length", "Length (residues)", "integer", min=1),
+                _field("properties.length", "Length (Residues)", "integer", min=1),
                 _field(
                     "properties.features",
                     "Features",
@@ -248,7 +298,7 @@ def _proteins() -> list[dict[str, Any]]:
                         _column("label", "Label"),
                         _column("start", "Start", "integer"),
                         _column("end", "End", "integer"),
-                        _column("at", "At", "integer", hint="A site's residue"),
+                        _column("at", "At", "integer", hint="The residue of a single site"),
                         _column("tone", "Tone", "combo", options=list(TONES)),
                         _column("id", "Port"),
                     ],
@@ -258,7 +308,7 @@ def _proteins() -> list[dict[str, Any]]:
                     "Tracks",
                     "records",
                     row={"label": "Construct"},
-                    hint="Constructs of the protein, one line each",
+                    hint="One line per construct of the protein",
                     columns=[
                         _column("label", "Label"),
                         _column("start", "Start", "integer"),
@@ -269,23 +319,23 @@ def _proteins() -> list[dict[str, Any]]:
                 ),
                 _field(
                     "properties.secondary",
-                    "Secondary structure",
+                    "Secondary Structure",
                     "code",
                     hint="DSSP letters: H helix, E strand, T turn",
                 ),
-                _field("properties.secondary_start", "It starts at", "integer", default=1),
+                _field("properties.secondary_start", "First Residue", "integer", default=1),
                 _field("properties.sequence", "Sequence", "code", hint="One-letter codes"),
-                _field("properties.sequence_start", "It starts at", "integer", default=1),
+                _field("properties.sequence_start", "First Residue", "integer", default=1),
                 _field(
                     "properties.helix",
-                    "Helices",
+                    "Helix Style",
                     "choice",
                     options=list(HELIX_STYLES),
                     default="ribbon",
                 ),
-                _field("properties.numbered", "Residue numbers", "bool", default=True),
-                _field("properties.scale", "Points per residue", "number"),
-                _field("properties.gutter", "Room for track names", "number"),
+                _field("properties.numbered", "Show residue numbers", "bool", default=True),
+                _field("properties.scale", "Points per Residue", "number"),
+                _field("properties.gutter", "Track Name Width", "number"),
             ],
         ),
     ]
@@ -300,7 +350,7 @@ def _bench() -> list[dict[str, Any]]:
             "tree",
             "Tree",
             "Biology",
-            "A phylogeny from Newick, clades coloured and named",
+            "A phylogenetic tree from Newick, with coloured, labelled clades",
             {
                 "label": "Primates",
                 "properties": {
@@ -323,15 +373,15 @@ def _bench() -> list[dict[str, Any]]:
                     "records",
                     row={"label": "Clade"},
                     columns=[
-                        _column("tips", "Tips", hint="Two tips that span the clade: A, B"),
+                        _column("tips", "Tips", hint="Two tips spanning the clade: A, B"),
                         _column("label", "Label"),
                         tone,
                     ],
                 ),
-                _field("properties.lengths", "Branch lengths", "bool", default=True),
-                _field("properties.support", "Support values", "bool", default=False),
-                _field("properties.italic", "Italic names", "bool", default=False),
-                _field("properties.scale_bar", "Scale bar", "bool", default=True),
+                _field("properties.lengths", "Show branch lengths", "bool", default=True),
+                _field("properties.support", "Show support values", "bool", default=False),
+                _field("properties.italic", "Italic tip names", "bool", default=False),
+                _field("properties.scale_bar", "Show scale bar", "bool", default=True),
                 _field("properties.depth", "Depth", "number"),
             ],
         ),
@@ -339,7 +389,7 @@ def _bench() -> list[dict[str, Any]]:
             "wellplate",
             "Plate",
             "Biology",
-            "A multiwell plate, its wells grouped by condition",
+            "A multiwell plate with wells grouped by condition",
             {
                 "label": "Plate layout",
                 "properties": {
@@ -369,7 +419,7 @@ def _bench() -> list[dict[str, Any]]:
             "timeline",
             "Timeline",
             "Biology",
-            "A protocol: events on an axis, spans under it",
+            "Protocol events on an axis, with spans below",
             {
                 "label": "Protocol",
                 "properties": {
@@ -432,13 +482,14 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field("properties", "View", "view", hint="Or drag the molecule round"),
+            _field("properties", "View", "view", hint="Or drag the molecule to rotate it"),
             _field(
                 "properties.look",
                 "Look",
                 "choice",
                 options=["", *LOOKS],
-                hint="Empty: the figure's theme chooses",
+                labels={"": "Default"},
+                hint="Default uses the figure's theme",
             ),
             # mol-sketch's own settings: its palettes, colours of one's own, what is
             # drawn, the site, a density map, and every field of its style.
@@ -446,7 +497,7 @@ def _structure() -> dict[str, Any]:
                 "properties.palette",
                 "Palette",
                 "molpalette",
-                hint="Colours handed to residues and chains in turn",
+                hint="Colours given to residues and chains in turn",
             ),
             _field(
                 "properties.colors",
@@ -454,55 +505,69 @@ def _structure() -> dict[str, Any]:
                 "records",
                 row={"group": "A", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or residue", hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain or Residue", hint="A, SER195, entity:1, subunit:L"),
                     _column(
                         "color", "Colour", "combo", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="Win over the palette and the look",
-            ),
-            _field("properties.cartoon", "Cartoon", "text", hint="As ribbons: polymer", more=True),
-            _field(
-                "properties.sticks", "Sticks", "text", hint="As sticks: resi 57+102+195", more=True
+                hint="These override the palette and the look",
             ),
             _field(
-                "properties.surface", "Surface", "text", hint="A surface over: chain A", more=True
+                "properties.cartoon", "Cartoon", "text", hint="Drawn as ribbons: polymer", more=True
+            ),
+            _field(
+                "properties.sticks",
+                "Sticks",
+                "text",
+                hint="Drawn as sticks: resi 57+102+195",
+                more=True,
+            ),
+            _field(
+                "properties.surface",
+                "Surface",
+                "text",
+                hint="Drawn as a surface: chain A",
+                more=True,
             ),
             _field(
                 "properties.site",
                 "Site",
                 "text",
-                hint="Picked out: resi 57+102, or ligand for its pocket",
+                hint="Highlighted: resi 57+102, or ligand for its pocket",
                 more=True,
             ),
             _field(
                 "properties.site_within",
-                "Pocket reach",
+                "Pocket Radius",
                 "number",
-                hint="Å round the ligand (5)",
+                hint="In ångströms around the ligand (default 5)",
                 more=True,
                 show={"properties.site": "ligand"},
             ),
-            _field("properties.site_labels", "Label the site", "bool", more=True),
+            _field("properties.site_labels", "Label site residues", "bool", more=True),
             _field(
                 "properties.density",
-                "Density map",
+                "Density Map",
                 "text",
-                hint="auto (the entry's), an EMDB ID, or a map file",
+                hint="auto for the entry's own map, an EMDB ID, or a map file",
                 more=True,
             ),
             _field("properties.width", "Width", "number", more=True),
             _field("properties.height", "Height", "number", more=True),
-            _field("properties.yaw", "Yaw", "number", hint="Degrees", more=True),
-            _field("properties.pitch", "Pitch", "number", hint="Degrees", more=True),
-            _field("properties.roll", "Roll", "number", hint="Degrees", more=True),
+            _field("properties.yaw", "Yaw", "number", hint="In degrees", more=True),
+            _field("properties.pitch", "Pitch", "number", hint="In degrees", more=True),
+            _field("properties.roll", "Roll", "number", hint="In degrees", more=True),
             _field("properties.zoom", "Zoom", "number", more=True),
-            _field("properties.pan_x", "Shift across", "number", hint="Of its box", more=True),
-            _field("properties.pan_y", "Shift down", "number", hint="Of its box", more=True),
-            _field("properties.style", "Drawing", "molsketch", sections=list(SECTIONS)),
+            _field(
+                "properties.pan_x", "Offset X", "number", hint="A fraction of the frame", more=True
+            ),
+            _field(
+                "properties.pan_y", "Offset Y", "number", hint="A fraction of the frame", more=True
+            ),
+            _field("properties.style", "Rendering", "molsketch", sections=list(SECTIONS)),
         ],
         needs_file=True,
-        unavailable="" if ready else "needs flexo[structures,molecules]",
+        unavailable="" if ready else "Requires flexo[structures,molecules]",
     )
 
 
@@ -513,28 +578,28 @@ def _learning() -> list[dict[str, Any]]:
         (
             "attention",
             "Attention",
-            "Attention, with query, key, and value ports",
+            "Attention with query, key and value ports",
             "Attention",
             [MOTIF],
         ),
-        ("add-norm", "Add & norm", "A residual sum and a normalisation", "Add + norm", []),
-        ("concat", "Concat", "Values joined side by side", "Concat", []),
-        ("tensor", "Tensor", "A tensor as a slab", "Tensor", []),
+        ("add-norm", "Add & Norm", "A residual sum followed by normalisation", "Add + norm", []),
+        ("concat", "Concat", "Values concatenated side by side", "Concat", []),
+        ("tensor", "Tensor", "A tensor drawn as a slab", "Tensor", []),
         ("matrix", "Matrix", "A grid of cells", "Matrix", [MOTIF]),
         ("graph", "Graph", "A small graph of nodes and edges", "Graph", [MOTIF]),
         ("inset", "Inset", "A molecule inset", "Molecule", [MOTIF]),
-        ("prediction", "Prediction", "What the model outputs", "Prediction", []),
+        ("prediction", "Prediction", "The output of a model", "Prediction", []),
         ("loss", "Loss", "A loss term", "Loss", []),
     ]
     parts = [
-        _part(kind, title, "Machine learning", hint, {"label": label}, fields)
+        _part(kind, title, "Machine Learning", hint, {"label": label}, fields)
         for kind, title, hint, label, fields in simple
     ]
     parts += [
         _part(
             "feature-strip",
             "Features",
-            "Machine learning",
+            "Machine Learning",
             "A strip of feature cells",
             {"label": "Features", "properties": {"cells": 6}},
             [_field("properties.cells", "Cells", "integer", min=1)],
@@ -542,16 +607,16 @@ def _learning() -> list[dict[str, Any]]:
         _part(
             "sequence",
             "Sequence",
-            "Machine learning",
-            "Tokens in a row",
+            "Machine Learning",
+            "A row of tokens",
             {"label": "Tokens", "properties": {"tokens": 7}},
             [_field("properties.tokens", "Tokens", "integer", min=1)],
         ),
         _part(
             "volume",
             "Volume",
-            "Machine learning",
-            "A feature map as a block in depth",
+            "Machine Learning",
+            "A feature map drawn as a 3D block",
             {"properties": {"channels": 16, "height": 32, "width": 32}},
             [
                 _field("properties.channels", "Channels", "integer", min=1),
@@ -571,7 +636,7 @@ def _basics() -> list[dict[str, Any]]:
             "text",
             "Text",
             "Basics",
-            "Words on their own: an input, an output, a note",
+            "Text without a box, such as an input, output or note",
             {"label": "Text"},
             common=[LABEL],
         ),
@@ -579,7 +644,7 @@ def _basics() -> list[dict[str, Any]]:
             "op",
             "Operator",
             "Basics",
-            "A sum, product, or other operator in a circle",
+            "A sum, product or other operator in a circle",
             {"properties": {"symbol": "+"}},
             [
                 _field(
@@ -608,19 +673,17 @@ def _basics() -> list[dict[str, Any]]:
         ),
         _part(
             "terminal",
-            "Start / end",
+            "Start/End",
             "Basics",
-            "A rounded terminal of a flowchart",
+            "A rounded start or end of a flowchart",
             {"label": "Start"},
         ),
-        _part(
-            "decision", "Decision", "Basics", "A diamond with a question", {"label": "Decision?"}
-        ),
+        _part("decision", "Decision", "Basics", "A diamond for a decision", {"label": "Decision?"}),
         _part(
             "image",
             "Picture",
             "Basics",
-            "A picture or drawing from a file",
+            "An image or drawing from a file",
             {"properties": {"source": ""}},
             [_field("properties.source", "File", "file", types=["image"]), *SIZE],
             common=[LABEL],
@@ -639,7 +702,7 @@ def _cells() -> dict[str, Any]:
         "cells",
         "Cells",
         "Basics",
-        "A grid of coloured cells: a map, a heatmap, a board",
+        "A grid of coloured cells, such as a plate map, heatmap or board",
         {
             "label": "Grid",
             "properties": {
@@ -652,8 +715,8 @@ def _cells() -> dict[str, Any]:
                 "properties.grid",
                 "Grid",
                 "code",
-                hint="One row per line, one cell per word; . leaves a cell empty; "
-                "numbers are shaded on the ramp",
+                hint="One row per line and one cell per word. A dot leaves a cell empty; "
+                "numbers are shaded on the ramp.",
             ),
             _field(
                 "properties.key",
@@ -661,54 +724,59 @@ def _cells() -> dict[str, Any]:
                 "records",
                 row={"symbol": "", "label": ""},
                 columns=[
-                    _column("symbol", "Symbol", hint="The word in the grid"),
+                    _column("symbol", "Symbol", hint="As written in the grid"),
                     _column("color", "Colour", "combo", options=list(TONES), hint="A tone or #hex"),
-                    _column("mark", "Mark", hint="A small word written in the cell"),
-                    _column("label", "Label", hint="Its name in the legend"),
+                    _column("mark", "Mark", hint="Short text in the cell"),
+                    _column("label", "Label", hint="Name in the legend"),
                 ],
             ),
-            _field("properties.cell", "Cell size", "number", hint="Points"),
+            _field("properties.cell", "Cell Size", "number", hint="In points"),
             _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
-            _field("properties.corner", "Corners", "number", hint="A fraction of a cell, 0 to 0.5"),
+            _field(
+                "properties.corner",
+                "Corner Radius",
+                "number",
+                hint="A fraction of a cell, 0 to 0.5",
+            ),
             _field(
                 "properties.lines",
-                "Lines",
+                "Grid Lines",
                 "combo",
                 options=["none", "ink", "muted"],
-                hint="none, ink, muted, or a #hex",
+                hint="none, ink, muted, or a hex colour",
             ),
-            _field("properties.row_labels", "Row labels", "combo", options=labels),
+            _field("properties.row_labels", "Row Labels", "combo", options=labels),
             _field(
                 "properties.row_side",
-                "Row labels at",
+                "Row Label Position",
                 "choice",
                 options=["left", "right"],
                 default="left",
             ),
-            _field("properties.column_labels", "Column labels", "combo", options=labels),
+            _field("properties.column_labels", "Column Labels", "combo", options=labels),
             _field(
                 "properties.column_side",
-                "Column labels at",
+                "Column Label Position",
                 "choice",
                 options=["top", "bottom"],
                 default="top",
             ),
-            _field("properties.ramp", "Ramp", "text", hint="Two #hex, low then high"),
-            _field("properties.range", "Range", "text", hint="low, high"),
-            _field("properties.values", "Write values", "bool", default=False),
-            _field("properties.legend", "Legend", "bool", default=True),
+            _field("properties.ramp", "Ramp", "text", hint="Two hex colours, low then high"),
+            _field("properties.range", "Range", "text", hint="Low, high"),
+            _field("properties.values", "Show values", "bool", default=False),
+            _field("properties.legend", "Show legend", "bool", default=True),
         ],
     )
 
 
 GROUPS = [
-    {"kind": "row", "title": "Row", "hint": "Parts side by side", "layout": "row"},
-    {"kind": "column", "title": "Column", "hint": "Parts one under another", "layout": "column"},
-    {"kind": "grid", "title": "Grid", "hint": "Parts in rows and columns", "layout": "grid"},
+    {"kind": "row", "title": "Row", "hint": "Shapes side by side", "layout": "row"},
+    {"kind": "column", "title": "Column", "hint": "Shapes stacked vertically", "layout": "column"},
+    {"kind": "grid", "title": "Grid", "hint": "Shapes in rows and columns", "layout": "grid"},
     {
         "kind": "module",
         "title": "Module",
-        "hint": "A titled frame around parts",
+        "hint": "A titled frame around shapes",
         "layout": "row",
         "role": "module",
     },
@@ -730,6 +798,7 @@ GROUP_FIELDS = [
         "Align",
         "choice",
         options=["auto", "start", "center", "end", "stretch", "ports"],
+        labels={"ports": "To Ports"},
         default="auto",
     ),
     _field(
@@ -745,7 +814,7 @@ GROUP_FIELDS = [
         "choice",
         options=["container", "module"],
         default="container",
-        hint="A module draws a titled frame",
+        hint="A module draws a titled frame around its shapes",
     ),
     SHADOW,
 ]
@@ -753,32 +822,40 @@ GROUP_FIELDS = [
 EDGE_FIELDS = [
     LABEL,
     _field(
-        "arrow", "Arrow", "choice", options=["end", "both", "none", "reversible"], default="end"
+        "arrow",
+        "Arrow",
+        "choice",
+        options=["end", "both", "none", "reversible"],
+        labels={"both": "Both Ends"},
+        default="end",
     ),
     _field(
         "back_label",
-        "Back label",
+        "Back Label",
         "markup",
         show={"arrow": "reversible"},
-        hint="The rate written under a reversible step",
+        hint="The rate shown under a reversible step",
     ),
     _field(
         "head",
-        "Head",
+        "Arrowhead",
         "choice",
         options=["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"],
+        labels={"necessary": "Necessary Stimulation"},
         default="arrow",
-        hint="What the head means, after SBGN",
+        hint="What the arrowhead means, as in SBGN",
         show={"arrow": ["end", "both"]},
     ),
-    _field("line", "Line", "choice", options=["solid", "dashed", "dotted"], default="solid"),
-    _field("shape", "Route", "choice", options=["auto", "orthogonal", "straight"], default="auto"),
+    _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
+    _field(
+        "shape", "Routing", "choice", options=["auto", "orthogonal", "straight"], default="auto"
+    ),
     _field(
         "cofactors",
         "Cofactors",
         "pair",
-        labels=["Taken", "Given"],
-        hint="Written on an arc beside the reaction: ATP, ADP",
+        labels=["Consumed", "Produced"],
+        hint="Shown on an arc beside the reaction: ATP, ADP",
     ),
 ]
 
@@ -808,7 +885,7 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-CATEGORIES = ("Basics", "Machine learning", "Biology")
+CATEGORIES = ("Basics", "Machine Learning", "Biology")
 
 
 def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
