@@ -217,7 +217,8 @@ export class Workspace {
       case "activity": {
         const entry = event.entry;
         const index = this.activity.findIndex((item) => item.id === entry.id);
-        if (index >= 0) this.activity[index] = entry; else { this.activity.push(entry); this.unseen += 1; }
+        // What others do is news; what you did yourself is not.
+        if (index >= 0) this.activity[index] = entry; else { this.activity.push(entry); if (entry.who?.id !== this.me.id) this.unseen += 1; }
         if (this.activity.length > 300) this.activity.shift();
         this.emit("activity", entry);
         if (this.follow && entry.who?.kind === "agent") this.goTo(entry.file, entry.where, { quiet: true });
