@@ -81,6 +81,21 @@ export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.
 export const plain = (label) => readable(words(label));
 export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
 
+// A value as a person reads it, in title case: "ink colour" and "engraved-colour" are
+// "Ink Colour" and "Engraved Colour". Short words stay small inside a title.
+const SMALL_WORDS = new Set(["a", "an", "the", "and", "or", "but", "nor", "as", "to", "of", "in", "on", "at", "by", "for",
+  "with", "from", "into", "over", "onto", "upon", "like", "near"]);
+export function titled(value) {
+  const all = String(value ?? "").replace(/(?<=[A-Za-z])[-_](?=[A-Za-z])/g, " ").trim().split(/\s+/);
+  return all.map((word, index) => (index && index < all.length - 1 && SMALL_WORDS.has(word) ? word : word.replace(/^[a-z]/, (letter) => letter.toUpperCase()))).join(" ");
+}
+// A choice's value as shown: the label the catalogue gives it, else the value in title case.
+const choiceLabel = (field, option) => field.labels?.[option] ?? titled(option);
+// A title inside a sentence: "Block" is "block", "MLP" stays "MLP".
+const inSentence = (title) => (/^[A-Z][a-z]/.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : title);
+const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
+
 // Lines are thin: each is given a wide, invisible twin to click, named for the line
 // as it is drawn (the host maps drawn ids to the figure's).
 export function widenLines(svg) {
@@ -125,49 +140,78 @@ export function figureParts(host) {
     const node = nodeOf(id);
     if (node) return plain(node.label) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
-    if (group) return plain(group.label) || (group.id === model()?.root ? "Figure" : group.layout?.kind || "group");
+    if (group) return plain(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) return `${nameOf(nodeOfRef(edge.from))} → ${nameOf(nodeOfRef(edge.to))}`;
     return id;
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
+  // What several things are called together: "Shapes", "Lines", "Groups", or "Items".
+  const isLine = (id) => Boolean(edgeOf(id) || netOf(id));
+  const pluralNoun = (ids) => (ids.every(isLine) ? "Lines" : ids.every((id) => groupOf(id)) ? "Groups" : ids.some(isLine) ? "Items" : "Shapes");
 
-  // What an edit does, in words, for the history: "Moved “Model”", "Connected “x” to “y”".
+  // What an edit does, in words, for the history: "Move “Model”", "Connect “x” to “y”".
   // (Said before it is made: the names are the parts' as they were.)
-  function said(action) {
-    const name = (id) => `“${nameOf(nodeOfRef(id))}”`;
-    const many = (ids, verb) => (ids?.length === 1 ? `${verb} ${name(ids[0])}` : `${verb} ${ids?.length || 0} parts`);
+  function said(action, merge = null) {
+    const ref = (id) => (typeOf(id) ? id : nodeOfRef(id));
+    const name = (id) => `“${nameOf(ref(id))}”`;
+    const many = (ids = [], verb) => (ids.length === 1 ? `${verb} ${isLine(ids[0]) ? "Line" : name(ids[0])}` : `${verb} ${ids.length} ${pluralNoun(ids)}`);
     switch (action.do) {
-      case "add": { const title = (parts[action.kind]?.title || "part").toLowerCase(); return `Added ${/^[aeiou]/.test(title) ? "an" : "a"} ${title}`; }
-      case "connect": return `Connected ${name(action.source)} to ${name(action.target)}`;
-      case "delete": return many(action.ids, "Deleted");
-      case "duplicate": return many(action.ids, "Duplicated");
-      case "gather": return `Grouped ${action.ids?.length || 0} parts`;
-      case "ungroup": return `Ungrouped ${name(action.id)}`;
-      case "paste": return "Pasted parts";
-      case "rename": return `Renamed ${name(action.id)}'s id to ${action.to}`;
-      case "move": case "step": return `Moved ${name(action.id)}`;
+      case "add": return "Add Shape";
+      case "connect": return `Connect ${name(action.source)} to ${name(action.target)}`;
+      case "delete": return many(action.ids, "Delete");
+      case "duplicate": return many(action.ids, "Duplicate");
+      case "gather": return action.ids?.length ? many(action.ids, "Group") : "Add Group";
+      case "ungroup": return `Ungroup ${name(action.id)}`;
+      case "paste": return "Paste Shapes";
+      case "rename": return `Change ID of ${name(action.id)}`;
+      case "move": case "step": return `Move ${name(action.id)}`;
       case "update": {
-        const id = action.target?.id, keys = Object.keys(action.values || {});
+        const target = action.target || action.targets?.[0] || {};
+        const id = target.id, values = action.values || {}, keys = Object.keys(values);
         const all = (...wanted) => keys.length && keys.every((key) => wanted.includes(key));
-        if (all("label")) return `Retyped ${name(id)}`;
-        if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Turned ${name(id)}`;
-        if (all("properties.width", "properties.height")) return `Sized ${name(id)}`;
-        if (all("properties.zoom")) return `Zoomed ${name(id)}`;
-        // mol-sketch's settings, by name: "Set the line width of “1A8O”".
+        if (all("label")) {
+          // Typed on in a field, one entry stands for it all: said by the name it had.
+          const was = plain((nodeOf(id) || groupOf(id))?.label), now = plain(values.label);
+          return !merge && was && now ? `Rename “${was}” to “${now}”` : `Edit ${name(id)}`;
+        }
+        if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.)/.test(key))) return "Change Colour";
+        if (all("properties.zoom")) return `Zoom ${name(id)}`;
+        if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Rotate ${name(id)}`;
+        if (all("properties.yaw", "properties.pitch", "properties.roll", "properties.zoom")) return `Reset View of ${name(id)}`;
+        if (all("properties.width", "properties.height")) return `Resize ${name(id)}`;
+        // mol-sketch's settings, by the setting's label: "Change Line Width".
         const style = keys.filter((key) => key.startsWith("properties.style"));
         if (style.length && style.length === keys.length) {
-          if (keys[0] === "properties.style" && action.values[keys[0]] === null) return `Drew ${name(id)} as its look does`;
-          return `Set the ${style.map((key) => key.replace(/^properties\.style\.?/, "").replace(/[._]/g, " ")).join(", ")} of ${name(id)}`;
+          if (keys[0] === "properties.style" && values[keys[0]] === null) return "Reset Rendering";
+          const label = style.length === 1 ? styleLabel(id, style[0].replace(/^properties\.style\.?/, "")) : null;
+          return label ? `Change ${titled(label)}` : "Change Rendering";
         }
-        if (all("properties.palette")) return action.values["properties.palette"] ? `Gave ${name(id)} the ${action.values["properties.palette"]} palette` : `Gave ${name(id)} its look's palette`;
-        if (all("properties.colors")) return `Coloured ${name(id)}`;
-        if (all("properties.density")) return action.values["properties.density"] ? `Drew a density map with ${name(id)}` : `Took the density map off ${name(id)}`;
-        if (keys.includes("kind")) { const title = (parts[action.values.kind]?.title || "part").toLowerCase(); return `Made ${name(id)} ${/^[aeiou]/.test(title) ? "an" : "a"} ${title}`; }
-        return `Changed ${name(id)}`;
+        if (all("properties.palette")) return "Change Palette";
+        if (all("properties.colors")) return "Change Colours";
+        if (all("properties.density")) return values["properties.density"] ? "Add Density Map" : "Remove Density Map";
+        if (keys.includes("kind")) return "Change Shape Type";
+        // One field of the inspector's, by its label: "Change Width"; a switch to show
+        // something, "Show Ticks" or "Hide Ticks".
+        const field = keys.length === 1 ? fieldOf(target, keys[0]) : null;
+        if (field?.type === "bool" && /^show /i.test(field.label)) {
+          return `${(values[keys[0]] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
+        }
+        if (field?.label) return `Change ${titled(field.label)}`;
+        return id ? `Edit ${name(id)}` : "Edit";
       }
       default: return null;
     }
+  }
+  // A field of the inspector's, and the label of one of mol-sketch's settings.
+  function fieldOf(target, key) {
+    const list = target.type === "node" ? partOf(nodeOf(target.id))?.fields : target.type === "group" ? catalog.group_fields
+      : target.type === "edge" || target.type === "net" ? catalog.edge_fields : target.type === "figure" ? catalog.figure_fields : null;
+    return (list || []).find((field) => field.key === key) || null;
+  }
+  function styleLabel(id, key) {
+    const drawing = (partOf(nodeOf(id))?.fields || []).find((field) => field.type === "molsketch");
+    return (drawing?.sections || []).flatMap((section) => section.fields).find((field) => field.key === key)?.label || null;
   }
 
   function setModel(next) {
@@ -196,7 +240,7 @@ export function figureParts(host) {
       const waiting = queue.findIndex((job) => job.merge === merge);
       if (waiting >= 0) queue.splice(waiting, 1);
     }
-    queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action) });
+    queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
     run();
   }
   async function run() {
@@ -229,15 +273,15 @@ export function figureParts(host) {
   // -- adding --
   function placement() {
     const id = chosenOne();
-    if (id && groupOf(id)) return { parent: id, text: id === model().root ? "Adds at the end of the figure" : `Adds inside ${nameOf(id)}` };
-    if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: `Adds after ${nameOf(id)}`, from: id };
-    return { text: "Adds at the end of the figure" };
+    if (id && groupOf(id)) return { parent: id, text: id === model().root ? "Adds to the end of the figure" : `Adds inside “${nameOf(id)}”` };
+    if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: `Adds after “${nameOf(id)}”`, from: id };
+    return { text: "Adds to the end of the figure" };
   }
 
   function addPalette(anchor) {
     if (!model()) return;
     const where = placement();
-    const search = ui.input({ placeholder: "Find a part…" });
+    const search = ui.input({ placeholder: "Search shapes" });
     const grid = h("div.add-grid.scroll-thin");
     const tile = (kind, part) => h(`button.add-tile${part.unavailable ? ".off" : ""}`, {
       type: "button", title: part.unavailable ? `${part.hint} (${part.unavailable})` : part.hint, disabled: Boolean(part.unavailable),
@@ -255,7 +299,7 @@ export function figureParts(host) {
         sections.push([h("div.add-head", {}, "Layout"), h("div.add-tiles", {}, groups.map((group) =>
           h("button.add-tile", { type: "button", title: group.hint, onclick: () => { closeMenu(); gather(group, where); } }, glyph(group.kind), h("span", {}, group.title))))]);
       }
-      clear(grid, sections.length ? sections : h("div.empty", {}, "No part by that name."));
+      clear(grid, sections.length ? sections : h("div.empty", {}, "No matching shapes"));
     };
     // Enter takes the best match: a title that starts with the words, then one that
     // holds them, then a description that does.
@@ -270,7 +314,7 @@ export function figureParts(host) {
     };
     search.addEventListener("input", render);
     search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); best()?.click(); } });
-    const chain = where.from ? ui.toggle({ value: state.chain, label: `Connect from ${nameOf(where.from)}`, onChange: (value) => {
+    const chain = where.from ? ui.toggle({ value: state.chain, label: `Connect from “${nameOf(where.from)}”`, onChange: (value) => {
       state.chain = value;
       where.source = value ? where.from : null;
     } }) : null;
@@ -287,7 +331,7 @@ export function figureParts(host) {
     const action = { do: "add", kind, parent: where.parent || null, after: where.after || null, source: where.source || null };
     if (part.needs_file) {
       const field = part.fields.find((item) => item.type === "file");
-      const file = await host.chooseFile({ title: `Choose the ${part.title.toLowerCase()}'s file`, types: field.types });
+      const file = await host.chooseFile({ title: `Choose ${article(part.title)} ${titled(part.title)}`, types: field.types });
       if (!file) return;
       action.node = { properties: { source: file } };
       if (kind === "structure") action.node.label = fileLabel(file);
@@ -315,19 +359,19 @@ export function figureParts(host) {
     const node = nodeOf(id), group = groupOf(id), edge = edgeOf(id);
     const isRoot = id === model()?.root;
     const items = [];
-    if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit its words", run: () => openInline(id) });
+    if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
     if (node) {
       const kind = nextKind(node);
-      items.push({ icon: "plus", label: `Add ${parts[kind].title.toLowerCase()} after it`, keys: "A", run: () => addPart(kind, { after: id, source: id }) },
-        { icon: "plus", label: "Add another kind after it…", run: () => addPalette(anchor) },
-        { icon: "right", label: "Draw a line from it", keys: "C", run: () => toggleConnect(true) });
+      items.push({ icon: "plus", label: `Add ${titled(parts[kind].title)} After${parts[kind].needs_file ? "…" : ""}`, keys: "A", run: () => addPart(kind, { after: id, source: id }) },
+        { icon: "plus", label: "Add Shape After…", run: () => addPalette(anchor) },
+        { icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
     }
     const holder = parentOf(id);
     const row = holder && (holder.layout?.kind || (holder.id === model()?.root ? "column" : "row")) === "row";
     if ((node || (group && !isRoot)) && row && (holder.children || []).some((child) => child !== id)) {
-      items.push({ icon: "down", label: "On a line of its own, below", run: () => act({ do: "move", id, line: "below", of: holder.id }) });
+      items.push({ icon: "down", label: "Move to Own Row Below", run: () => act({ do: "move", id, line: "below", of: holder.id }) });
     }
-    if (state.selected.length > 1) items.push({ icon: "layout", label: "Group the chosen parts", keys: "G", run: () => groupMenu(anchor) });
+    if (state.selected.length > 1) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
     if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
     if (node || (group && !isRoot)) items.push({ icon: "copy", label: "Duplicate", run: () => duplicate() });
     if (!isRoot) items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove() });
@@ -382,7 +426,7 @@ export function figureParts(host) {
     const connecting = state.connecting;
     if (!connecting) return null;
     return [icon("right"),
-      connecting.source ? h("span", {}, "Click the part that ", h("b", {}, nameOf(connecting.source)), " leads to") : h("span", {}, "Click the part the line starts from"),
+      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, nameOf(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
       h("span.kbd", {}, "Esc")];
   }
   function connectTo(id) {
@@ -486,7 +530,7 @@ export function figureParts(host) {
       const stop = (event) => event.stopPropagation();
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
-        title: `Add ${parts[kind].title.toLowerCase()} after ${nameOf(id)}, joined to it (A for another kind)`,
+        title: `Add a connected ${inSentence(parts[kind].title)} after “${nameOf(id)}” (A for other shapes)`,
         onpointerdown: stop, ondblclick: stop, onmousemove: stop,
         onclick: (event) => { stop(event); addPart(kind, { after: id, source: id }); },
       }, icon("plus")));
@@ -497,7 +541,7 @@ export function figureParts(host) {
       for (const corner of ["nw", "ne", "sw", "se"]) {
         views.push(h(`span.fig-size.${corner}`, {
           style: { left: `${corner.endsWith("w") ? box.left : box.left + box.width}px`, top: `${corner.startsWith("n") ? box.top : box.top + box.height}px` },
-          title: "Drag to size it · double-click for its own size",
+          title: "Drag to resize · Double-click to reset size",
           onpointerdown: (event) => partSizeStart(event, id, corner),
           ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
         }));
@@ -633,7 +677,7 @@ export function figureParts(host) {
     const { canvas, view, tip } = turning;
     if (!turning.moved) return;
     const { yaw, pitch, roll } = turnAngles();
-    tip.textContent = `Turn ${Math.round(yaw)}° · tilt ${Math.round(pitch)}°`;
+    tip.textContent = `Yaw ${Math.round(yaw)}° · Pitch ${Math.round(pitch)}°`;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
     if (!view?.chains?.length) return;
@@ -695,7 +739,7 @@ export function figureParts(host) {
     state.swallow = true;
     setTimeout(() => { state.swallow = false; }, 0);
     const { yaw, pitch } = turnAngles(was);
-    was.tip.textContent = "Drawing it…";
+    was.tip.textContent = "Rendering…";
     const values = { "properties.yaw": yaw || null, "properties.pitch": pitch || null };
     act({ do: "update", target: { type: "node", id: was.id }, values }, { select: false, failed: () => turnClear(was) });
     const started = Date.now();
@@ -839,7 +883,7 @@ export function figureParts(host) {
           : at.side === "right" ? { left: all.right + gap, top: mid.y - height / 2 }
             : { left: all.left - gap - width, top: mid.y - height / 2 };
       place(drag.zone, { ...slot, right: slot.left + width, bottom: slot.top + height });
-      drag.zone.dataset.label = at.side === "below" || at.side === "above" ? `A line of its own, ${at.side}` : `A column of its own, ${at.side}`;
+      drag.zone.dataset.label = at.side === "below" || at.side === "above" ? `New row ${at.side}` : `New column on the ${at.side}`;
       drag.zone.classList.add("on", "own-line");
       drag.indicator.classList.remove("on");
       return;
@@ -1009,8 +1053,8 @@ export function figureParts(host) {
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     const label = host.element(`${id}.label`);
-    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Enter to keep · Esc to leave · $maths$ · *emphasis*" }, field,
-      label ? null : h("div.inline-foot", {}, h("span", {}, "Enter to keep · Esc to leave"), h("span", {}, "$maths$ · *emphasis*")));
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return to save · Esc to cancel · $maths$ · *emphasis*" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Return to save · Esc to cancel"), h("span", {}, "$maths$ · *emphasis*")));
     host.overlay.append(box);
     inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label) };
     placeInline();
@@ -1102,7 +1146,7 @@ export function figureParts(host) {
   // -- the inspector's panels --
   function panel() {
     const figure = model();
-    if (!figure) return h("div.empty", {}, "The figure does not read. Its messages say where.");
+    if (!figure) return h("div.empty", {}, "The figure can't be read. See the messages for details.");
     const chosen = state.selected;
     if (chosen.length > 1) return manyPanel(chosen);
     if (!chosen.length) return host.nothing ? host.nothing() : figurePanel();
@@ -1131,8 +1175,8 @@ export function figureParts(host) {
     const siblings = holder?.children || [];
     const at = siblings.indexOf(id);
     return [
-      ui.button("", () => act({ do: "step", id, delta: -1 }), { kind: "ghost", small: true, icon: "up", title: "Earlier (⌥↑)", disabled: at <= 0 }),
-      ui.button("", () => act({ do: "step", id, delta: 1 }), { kind: "ghost", small: true, icon: "down", title: "Later (⌥↓)", disabled: at < 0 || at >= siblings.length - 1 }),
+      ui.button("", () => act({ do: "step", id, delta: -1 }), { kind: "ghost", small: true, icon: "up", title: "Move Up (⌥↑)", disabled: at <= 0 }),
+      ui.button("", () => act({ do: "step", id, delta: 1 }), { kind: "ghost", small: true, icon: "down", title: "Move Down (⌥↓)", disabled: at < 0 || at >= siblings.length - 1 }),
       ui.button("", () => duplicate([id]), { kind: "ghost", small: true, icon: "copy", title: "Duplicate (⌘D)" }),
       ui.button("", () => remove([id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" }),
     ];
@@ -1146,7 +1190,7 @@ export function figureParts(host) {
       act({ do: "rename", id, to });
     });
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } });
-    return ui.field("Id", input, { hint: type === "group" ? "" : "Lines name it" });
+    return ui.field("ID", input, { hint: type === "group" ? "" : "Used by lines" });
   }
 
   const titleBlock = (picture, name, hintText) =>
@@ -1162,7 +1206,7 @@ export function figureParts(host) {
         const next = parts[value];
         if (!next?.needs_file || value === node.kind) { update({ type: "node", id: node.id }, { kind: value }); return; }
         const field = next.fields.find((item) => item.type === "file");
-        const file = await host.chooseFile({ title: `Choose the ${next.title.toLowerCase()}'s file`, types: field?.types });
+        const file = await host.chooseFile({ title: `Choose ${article(next.title)} ${titled(next.title)}`, types: field?.types });
         if (!file) { retype.value = node.kind || "block"; return; }
         update({ type: "node", id: node.id }, { kind: value, "properties.source": file });
       } });
@@ -1171,17 +1215,17 @@ export function figureParts(host) {
       h("div.section.insp-top", {}, crumbs(node.id),
         h("div.insp-row", {}, titleBlock(glyph(node.kind || "block"), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
       colourSection([{ type: "node", id: node.id, item: node }]),
-      h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Kind", retype)),
+      h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Type", retype)),
         fields(part.fields.filter((field) => field.key !== "properties.tone"), node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length)),
         lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([edge.id]) },
-            nodeOfRef(edge.from) === node.id ? ["to ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["from ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
+            nodeOfRef(edge.from) === node.id ? ["To ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["From ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
             edge.label ? h("span.muted", {}, ` · ${plain(edge.label)}`) : null),
-          ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "close", title: "Remove the line" })))) : null,
+          ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "close", title: "Delete line" })))) : null,
         h("div.row", {},
           ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }),
-          ui.button("Add after…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
+          ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
       ownLineSection(node.id),
     ];
   }
@@ -1193,11 +1237,11 @@ export function figureParts(host) {
     const holder = parentOf(id);
     const kind = holder?.layout?.kind || (holder?.id === model().root ? "column" : "row");
     if (!holder || kind !== "row" || !(holder.children || []).some((child) => child !== id)) return null;
-    return h("div.section", {}, h("div.section-title", {}, "On a line of its own"),
+    return h("div.section", {}, h("div.section-title", {}, "Move to Own Row"),
       h("div.row", {}, [["below", "Below", "down"], ["above", "Above", "up"]].map(([side, label, glyphName]) =>
         ui.button(label, () => act({ do: "move", id, line: side, of: holder.id }),
-          { small: true, icon: glyphName, title: `On a line of its own ${side} the row, centred on it` }))),
-      h("div.hint-line", {}, "Or drag it out under or over the figure."));
+          { small: true, icon: glyphName, title: `Move to a new row ${side}, centred on this one` }))),
+      h("div.hint-line", {}, "You can also drag it below or above the figure."));
   }
 
   function groupPanel(group) {
@@ -1206,19 +1250,19 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, isRoot ? null : crumbs(group.id),
         h("div.insp-row", {},
-          titleBlock(glyph(groupGlyph(group)), isRoot ? "The figure's layout" : group.role === "module" ? "Module" : "Group",
-            `${count} part${count === 1 ? "" : "s"}, ${group.layout?.kind || "column"}`),
+          titleBlock(glyph(groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
+            `${counted(count, "shape")} · ${titled(group.layout?.kind || "column")}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
-        isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Its parts take its place" })),
+        isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
       h("div.section", {}, isRoot || group.implied ? null : idField(group.id, "group"),
         fields(catalog.group_fields, group, (values, merge) => update({ type: "group", id: group.id }, values, merge), `group:${group.id}`)),
-      h("div.section", {}, h("div.section-title", {}, "Holds", h("span.count", {}, count)),
+      h("div.section", {}, h("div.section-title", {}, "Contents", h("span.count", {}, count)),
         h("div.line-list", {}, (group.children || []).map((child, index) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([child]) }, nodeOf(child) ? glyph(nodeOf(child).kind || "block") : glyph(groupGlyph(groupOf(child) || {})), nameOf(child)),
-          ui.button("", () => act({ do: "step", id: child, delta: -1 }, { select: false }), { kind: "ghost", small: true, icon: "up", title: "Earlier", disabled: index === 0 }),
-          ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Later", disabled: index === count - 1 })))),
-        ui.button("Add inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
+          ui.button("", () => act({ do: "step", id: child, delta: -1 }, { select: false }), { kind: "ghost", small: true, icon: "up", title: "Move Up", disabled: index === 0 }),
+          ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Move Down", disabled: index === count - 1 })))),
+        ui.button("Add Shape Inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
       isRoot ? null : ownLineSection(group.id),
     ];
   }
@@ -1240,16 +1284,16 @@ export function figureParts(host) {
   function netPanel(net) {
     return [
       h("div.section.insp-top", {},
-        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching line", `${(net.sources || []).join(", ")} → ${(net.targets || []).join(", ")}`),
+        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching Line", `${(net.sources || []).join(", ")} → ${(net.targets || []).join(", ")}`),
           h("div.insp-actions", {}, ui.button("", () => remove([net.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       h("div.section", {}, fields([catalog.edge_fields[0]], net, (values, merge) => update({ type: "net", id: net.id }, values, merge), `net:${net.id}`),
-        h("div.hint-line", {}, "One value into several ports, as into attention's query, key, and value. Its ends are edited in Source.")),
+        h("div.hint-line", {}, "Connects one output to several ports, such as the query, key and value of attention. Edit its ends in Source.")),
     ];
   }
 
   function figurePanel() {
     const figure = model();
-    const counts = `${figure.nodes.length} parts · ${figure.edges.length + figure.nets.length} lines`;
+    const counts = `${counted(figure.nodes.length, "shape")} · ${counted(figure.edges.length + figure.nets.length, "line")}`;
     return [
       h("div.section.insp-top", {}, titleBlock(icon("figure"), "Figure", counts)),
       h("div.section", {}, fields(catalog.figure_fields, { figure: figure.figure }, (values, merge) => update({ type: "figure" }, values, merge), "figure")),
@@ -1259,14 +1303,14 @@ export function figureParts(host) {
 
   function howTo() {
     const figure = model();
-    return h("div.section", {}, h("div.section-title", {}, "Making it"),
+    return h("div.section", {}, h("div.section-title", {}, "Tips"),
       h("ul.how", {},
-        h("li", {}, h("b", {}, "Add"), " a part (A). With a part chosen, the new one comes after it, a line between them."),
-        h("li", {}, h("b", {}, "Connect"), " (C): click where a line starts, then where it ends."),
-        h("li", {}, h("b", {}, "Drag"), " a part to another place in its row or column, or into another group; Esc takes it back."),
-        h("li", {}, "Double-click a part to change its words; ⇧-click to choose several, then ", h("b", {}, "Group"), " (G).")),
-      h("div.row", {}, ui.button("Add a part", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
-        figure ? ui.button("The layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
+        h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one is added after it and connected to it."),
+        h("li", {}, h("b", {}, "Connect"), " (C): click the shape where the line starts, then the one where it ends."),
+        h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
+        h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G).")),
+      h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
+        figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
   }
 
   function manyPanel(ids) {
@@ -1274,12 +1318,12 @@ export function figureParts(host) {
     const colourable = ids.flatMap((id) => nodeOf(id) ? [{ type: "node", id, item: nodeOf(id) }]
       : groupOf(id) && id !== model().root && !groupOf(id).implied ? [{ type: "group", id, item: groupOf(id) }] : []);
     return [
-      h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} chosen`, ids.map(nameOf).join(", "))),
+      h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} ${pluralNoun(ids)} Selected`, ids.map(nameOf).join(", "))),
       colourable.length ? colourSection(colourable) : null,
-      h("div.section", {}, h("div.section-title", {}, "Gather them into"),
+      h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
           glyph(group.kind), h("span", {}, group.title)))),
-        gatherable ? null : h("div.hint-line", {}, "Lines cannot be gathered; choose parts."),
+        gatherable ? null : h("div.hint-line", {}, "Lines can't be grouped. Select shapes only."),
         h("div.row", {}, ui.button("Duplicate", () => duplicate(ids), { small: true, icon: "copy" }),
           ui.button("Delete", () => remove(ids), { small: true, icon: "trash", kind: "danger" }))),
     ];
@@ -1290,7 +1334,7 @@ export function figureParts(host) {
   // -- colours: a part's tone (a colour of the theme's, shared by parts with the same
   // tone), or colours of its own, which win over the tone and the theme --
 
-  const OWN = [["fill", "Fill"], ["stroke", "Outline"], ["label", "Words"]];
+  const OWN = [["fill", "Fill"], ["stroke", "Outline"], ["label", "Text"]];
   const GROUP_OWN = { fill: "Background", stroke: "Border", label: "Title" };
   const TONE_NAMES = () => Object.values(parts).flatMap((part) => part.fields).find((field) => field.key === "properties.tone")?.options.filter((name) => !/^\d+$/.test(name)) || [];
 
@@ -1313,17 +1357,17 @@ export function figureParts(host) {
       if (tone === undefined || tone === null || tone === "") return null;
       return /^\d+$/.test(String(tone)) ? String(tone) : tones?.used?.[tone] !== undefined ? String(tones.used[tone]) : `named:${tone}`;
     };
-    const chips = nodes.length && tones?.colours?.length ? ui.field("The theme's", ui.swatches({
+    const chips = nodes.length && tones?.colours?.length ? ui.field("Theme", ui.swatches({
       value: common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null,
-      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `The theme's colour ${index + 1}` })),
+      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `Theme colour ${index + 1}` })),
       onChange: (value) => paint("node", { "properties.tone": value }),
     })) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
-    const named = nodes.length ? ui.field("Tone name", ui.combo({
+    const named = nodes.length ? ui.field("Tone Name", ui.combo({
       value: (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
-      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "none",
+      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "None",
       onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
-    }), { hint: "Parts with one name share a colour" }) : null;
+    }), { hint: "Shapes with the same tone name share a colour" }) : null;
     const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
       ui.colour({
         title: label, key: `colour:${scope}:${part}`,
@@ -1332,7 +1376,7 @@ export function figureParts(host) {
       }),
       h("span", {}, nodes.length ? label : GROUP_OWN[part]))));
     return h("div.section", {}, h("div.section-title", {}, "Colour"), chips, named,
-      ui.field("Its own", own, { hint: "Win over tones and the theme" }));
+      ui.field("Custom", own, { hint: "Overrides the tone and the theme" }));
   }
 
 
@@ -1361,7 +1405,7 @@ export function figureParts(host) {
       case "text":
         return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
       case "length":
-        return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "auto", mono: true, onInput: (text) => {
+        return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "Auto", mono: true, onInput: (text) => {
           const clean = text.trim();
           if (!clean) set(null);
           else if (/^\d+(\.\d+)?$/.test(clean)) set(`${clean}pt`);
@@ -1382,20 +1426,20 @@ export function figureParts(host) {
         };
         const button = (glyphName, title, run) => ui.button("", run, { small: true, icon: glyphName, title });
         return ui.field(field.label, h("div.view-pad", {},
-          button("left", "Turn left 30°", () => turn("yaw", -30)),
-          button("right", "Turn right 30°", () => turn("yaw", 30)),
+          button("left", "Rotate left 30°", () => turn("yaw", -30)),
+          button("right", "Rotate right 30°", () => turn("yaw", 30)),
           button("up", "Tilt back 30°", () => turn("pitch", -30)),
           button("down", "Tilt forward 30°", () => turn("pitch", 30)),
           h("span.sep"),
-          button("minus", "Zoom out", () => zoom(1 / 1.25)),
-          button("plus", "Zoom in", () => zoom(1.25)),
+          button("minus", "Zoom Out", () => zoom(1 / 1.25)),
+          button("plus", "Zoom In", () => zoom(1.25)),
           h("span.sep"),
-          button("refresh", "As it was: no turn, tilt, or zoom", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
+          button("refresh", "Reset rotation and zoom", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
       }
       case "integer":
       case "number":
         return ui.field(field.label, ui.number({ value: value ?? "", key, min: field.min, step: field.type === "integer" ? 1 : "any",
-          placeholder: field.default !== undefined ? String(field.default) : "auto",
+          placeholder: field.default !== undefined ? String(field.default) : "Auto",
           onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) }), options);
       case "bool": {
         const on = value ?? field.default ?? false;
@@ -1405,7 +1449,7 @@ export function figureParts(host) {
           field.hint ? h("span.switch-hint", {}, field.hint) : null), { inline: true });
       }
       case "choice":
-        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", options: field.options.map((option) => ({ value: option, label: option === "" ? "None" : String(option) })),
+        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)) })),
           onChange: (next) => {
             const typed = field.options.find((option) => String(option) === next);
             set(typed === field.default || typed === "" ? null : typed);
@@ -1415,7 +1459,7 @@ export function figureParts(host) {
       case "palette": {
         const current = value ?? field.default;
         const strip = (name) => h("span.palette-strip", {}, (field.colours?.[name] || []).slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
-        const title = (name) => (name === field.default ? "The theme's own" : name);
+        const title = (name) => (name === field.default ? "Default" : name);
         const choose = (event) => popover(event.currentTarget, h("div.palette-choices", {},
           field.options.map((name) => h(`button.palette-choice${name === current ? ".on" : ""}`, { type: "button",
             onclick: () => { closeMenu(); set(name === field.default ? null : name); } }, strip(name), h("span", {}, title(name))))),
@@ -1436,7 +1480,7 @@ export function figureParts(host) {
       }
       case "file":
         return ui.field(field.label, h("div.row", {}, ui.input({ value: value ?? "", mono: true, key, onChange: set }),
-          h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a file", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
+          h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"));
       case "molpalette":
@@ -1464,7 +1508,7 @@ export function figureParts(host) {
 
   // mol-sketch's group palettes, by sight: the colours residues and chains take in turn.
   function groupPalette(item, value, set) {
-    const name = () => value || "The look's";
+    const name = () => value || "Default";
     const button = h("button.palette-pick", { type: "button", disabled: true }, swatchStrip(), h("span", {}, name()), icon("chevron"));
     settingsOf(item.id).then((settings) => {
       const palettes = settings?.palettes || {};
@@ -1472,7 +1516,7 @@ export function figureParts(host) {
       button.replaceChildren(swatchStrip(palettes[value || settings?.style?.group_palette_name]), h("span", {}, name()), icon("chevron"));
       button.onclick = () => popover(button, h("div.palette-choices", {},
         h(`button.palette-choice${value ? "" : ".on"}`, { type: "button", onclick: () => { closeMenu(); set(null); } },
-          swatchStrip(palettes[settings?.style?.group_palette_name] || []), h("span", {}, "The look's")),
+          swatchStrip(palettes[settings?.style?.group_palette_name] || []), h("span", {}, "Default")),
         Object.entries(palettes).map(([option, colours]) => h(`button.palette-choice${option === value ? ".on" : ""}`, { type: "button",
           onclick: () => { closeMenu(); set(option); } }, swatchStrip(colours), h("span", {}, option)))),
       { className: "palette-menu" });
@@ -1494,7 +1538,7 @@ export function figureParts(host) {
     };
     walk(item.properties?.style, "");
     const fills = [];
-    const look = h("span.hint", {}, "Reading mol-sketch…");
+    const look = h("span.hint", {}, "Loading…");
     const ownCount = Object.keys(own).length;
     const sections = field.sections.map((section) => {
       const count = section.fields.filter((each) => own[each.key] !== undefined).length;
@@ -1512,13 +1556,13 @@ export function figureParts(host) {
       return details;
     });
     settingsOf(item.id).then((settings) => {
-      if (!settings) { look.textContent = "mol-sketch could not be asked"; return; }
-      look.textContent = `Over the ${settings.look} look`;
+      if (!settings) { look.textContent = "Rendering settings unavailable"; return; }
+      look.textContent = settings.look ? `Look: ${titled(settings.look)}` : "";
       for (const fill of fills) fill(settings.style || {});
     });
     return h("div.mol-style", {},
       h("div.mol-style-head", {}, h("span.section-title", {}, field.label), look,
-        ownCount ? ui.button(`Back to the look (${ownCount})`, () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh" }) : null),
+        ownCount ? ui.button("Reset All", () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh" }) : null),
       sections);
   }
 
@@ -1529,15 +1573,15 @@ export function figureParts(host) {
     const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
     switch (field.type) {
       case "choice": {
-        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "The look's" }, ...field.options.map((option) => ({ value: option, label: option }))],
+        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option) }))],
           onChange: (next) => set(next || null) });
-        fills.push((drawn) => { select.options[0].textContent = `The look's: ${said(drawn[field.key])}`; });
+        fills.push((drawn) => { const inherited = drawn[field.key]; select.options[0].textContent = inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`; });
         return titled(ui.field(field.label, select, options));
       }
       case "bool": {
-        const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "The look's" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
+        const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "Default" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
           onChange: (next) => set(next === "" ? null : next === "on") });
-        fills.push((drawn) => { select.options[0].textContent = `The look's: ${drawn[field.key] ? "on" : "off"}`; });
+        fills.push((drawn) => { select.options[0].textContent = `Default (${drawn[field.key] ? "On" : "Off"})`; });
         return titled(ui.field(field.label, select, options));
       }
       case "integer":
@@ -1570,7 +1614,7 @@ export function figureParts(host) {
       const current = row[column.name];
       const change = (next) => { row[column.name] = next; write(); };
       if (column.type === "choice") {
-        return ui.select({ value: current ?? "", options: column.options.map((option) => ({ value: option, label: option === "" ? "–" : option })),
+        return ui.select({ value: current ?? "", options: column.options.map((option) => ({ value: option, label: column.labels?.[option] ?? (option === "" ? "–" : option) })),
           onChange: (next) => change(next || null) });
       }
       if (column.type === "integer" || column.type === "number") {
@@ -1594,9 +1638,9 @@ export function figureParts(host) {
         field.columns.map((column) => h("span.records-head", { title: column.hint || "" }, column.label)), h("span.records-head"),
         rows.map((row, index) => [
           ...field.columns.map((column) => cell(row, index, column)),
-          ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Remove the row" }),
+          ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Delete row" }),
         ]))),
-      ui.button("Add a row", () => {
+      ui.button("Add Row", () => {
         // A new row starts as the catalogue says: "+N" is the last row's value and N more.
         const last = rows[rows.length - 1];
         const fresh = {};
