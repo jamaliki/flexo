@@ -1,7 +1,7 @@
 // The studio's frame: open documents as tabs, who is here, what happened, the
 // assistant, and the command palette. A kind's editor fills a document's view.
 
-import { h, clear, icon, ui, menu, dialog, toast } from "./ui.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast } from "./ui.js";
 import { Session } from "./session.js";
 import { AssistantPanel } from "./assistant.js";
 
@@ -292,7 +292,38 @@ export async function start() {
   const status = h("div.status", {}, h("span.dot"), h("span.status-text"));
   const undo = ui.button("", () => workspace.active?.undo(), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
   const redo = ui.button("", () => workspace.active?.redo(), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
-  const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo), h("div.bar-sep"), docRight);
+  const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
+    { kind: "ghost", icon: "history", title: "History: go back to any point (⌥⌘Z)" });
+  const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+
+  const lower = (text) => text.charAt(0).toLowerCase() + text.slice(1);
+
+  // The document's history, newest first: each row is the document as a change left
+  // it, the one it is now marked; a click goes back (or forward) to that point.
+  function historyMenu(anchor, session) {
+    const when = (at) => {
+      const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+      return seconds < 50 ? "just now" : seconds < 3000 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds / 3600)} h`;
+    };
+    const go = (run) => () => { closeMenu(); run(); };
+    const row = (entry, { now = false, undone = false, run }) => {
+      const said = session.said(entry);
+      return h(`button.history-row${now ? ".now" : ""}${undone ? ".undone" : ""}`, { type: "button", onclick: go(run), title: now ? "Where it is now" : undone ? "Redo to here" : "Undo to here" },
+        h("span.history-mark"), h("span.history-text", {}, said.text || "An edit"),
+        said.place ? h("span.history-place", {}, said.place) : null, h("span.history-when", {}, when(entry.at)));
+    };
+    const rows = [];
+    const ahead = session.future, back = session.past;
+    ahead.forEach((entry, index) => rows.push(row(entry, { undone: true, run: () => session.redo(ahead.length - index) })));
+    const shown = 60;
+    for (let index = back.length - 1; index >= Math.max(0, back.length - shown); index -= 1) {
+      rows.push(row(back[index], { now: index === back.length - 1, run: () => session.undo(back.length - 1 - index) }));
+    }
+    if (back.length > shown) rows.push(h("div.history-more", {}, `${back.length - shown} more before these`));
+    rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo everything since it was opened" },
+      h("span.history-mark"), h("span.history-text", {}, "As it was opened")));
+    popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
+  }
 
   const views = h("main.views");
   const doing = h("div.doing-strip");
@@ -342,6 +373,8 @@ export async function start() {
       window.pywebview?.api?.studio_state?.({
         file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
         can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
+        undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
+        redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
       });
     }, 80);
@@ -393,6 +426,11 @@ export async function start() {
     if (!session) return;
     undo.disabled = !session.past.length;
     redo.disabled = !session.future.length;
+    past.disabled = !session.past.length && !session.future.length;
+    const last = session.past[session.past.length - 1], next = session.future[session.future.length - 1];
+    const what = (entry) => (entry && session.said(entry).text ? `: ${lower(session.said(entry).text)}` : "");
+    undo.title = `Undo${what(last)} (⌘Z)`;
+    redo.title = `Redo${what(next)} (⇧⌘Z)`;
     const state = session.state;
     status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
     status.title = session.problem || "";
@@ -458,6 +496,7 @@ export async function start() {
       session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
         (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
     }
+    else if (mod && event.altKey && event.code === "KeyZ") { event.preventDefault(); if (session && !past.disabled) historyMenu(past, session); }
     else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
     else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
     else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
@@ -546,7 +585,7 @@ export function connectDialog(workspace) {
 function shortcutsDialog() {
   const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").map((key) => h("span.kbd", {}, key))));
   dialog({ title: "Keyboard", body: [h("div.shortcuts", {},
-    row("⌘ K", "Search and commands"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo your last change"), row("⇧ ⌘ Z", "Redo"),
+    row("⌘ K", "Search and commands"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo your last change"), row("⇧ ⌘ Z", "Redo"), row("⌥ ⌘ Z", "History: go back to any point"),
     row("⌘ S", "Save now (saving is automatic)"), row("↑ ↓", "Previous / next slide"), row("Enter", "Edit the chosen part in place"),
     row("Esc", "Let go of the chosen part"), row("⌫", "Delete the chosen part"), row("⌘ D", "Duplicate the slide"),
     row("⌘ ⏎", "Present"), row("?", "This list"))] });

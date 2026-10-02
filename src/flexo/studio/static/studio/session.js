@@ -46,6 +46,10 @@ export class Session {
     this.present = null;    // a kind that presents (a deck) sets how
     this.reveal = () => {};
     this.hints = () => ({});
+    // What a change did, as its kind says it: { text, place, where } (`place` names
+    // where it was made, "Slide 3" say, and `where` is that place for the kind to go
+    // to when it is undone or redone), or words alone.
+    this.describe = () => null;
   }
 
   on(event, listener) { (this.listeners[event] ||= []).push(listener); return this; }
@@ -64,8 +68,9 @@ export class Session {
 
   // Change the document: `mutate` edits a copy in place. `merge` names a run of
   // edits (typing in one field) that undo takes back together; `quiet` says the
-  // control that made the change already shows it.
-  change(mutate, { merge = null, quiet = false } = {}) {
+  // control that made the change already shows it; `label` says what it did, for the
+  // history (else the kind's `describe` says it).
+  change(mutate, { merge = null, quiet = false, label = null } = {}) {
     const before = this.document;
     const next = structuredClone(before);
     const result = mutate(next);
@@ -73,8 +78,8 @@ export class Session {
     if (same(after, before)) return;
     const now = Date.now();
     const top = this.past[this.past.length - 1];
-    if (merge && top && this.lastMerge?.key === merge && now - this.lastMerge.at < 1500) top.after = after;
-    else this.past.push({ before, after });
+    if (merge && top && this.lastMerge?.key === merge && now - this.lastMerge.at < 1500) Object.assign(top, { after, at: now, said: null });
+    else this.past.push({ before, after, at: now, label });
     if (this.past.length > 300) this.past.shift();
     this.future = [];
     this.lastMerge = merge ? { key: merge, at: now } : null;
@@ -84,19 +89,62 @@ export class Session {
     this.requestDraw();
   }
 
-  undo() { this.travel(this.past, this.future, "before", "after"); }
-  redo() { this.travel(this.future, this.past, "after", "before"); }
-
-  travel(from, to, target, current) {
-    const entry = from.pop();
-    if (!entry) return;
-    to.push(entry);
-    // Take back this change alone: others' edits since stay.
-    this.document = merge3(entry[current], this.document, entry[target]);
+  // A change made somewhere other than this document -- a file it draws, written where
+  // it is kept -- put in its history: `apply("before" | "after")` makes it undone or done
+  // again (it may answer with a promise), and `label`, `place` and `where` say it. With
+  // the same `merge` as the change before, soon after, it joins that one when that one's
+  // `absorb(entry)` takes it.
+  record(entry, { merge = null } = {}) {
+    const now = Date.now();
+    const top = this.past[this.past.length - 1];
+    if (merge && top?.apply && top.merge === merge && now - top.at < 1500 && top.absorb?.(entry)) top.at = now;
+    else this.past.push({ ...entry, before: this.document, after: this.document, at: now, merge });
+    if (this.past.length > 300) this.past.shift();
+    this.future = [];
     this.lastMerge = null;
-    this.emit("change", { quiet: false, source: "history" });
-    this.schedulePush(0);
-    this.requestDraw(0);
+    this.emit("status");
+  }
+
+  // Undo (redo) the last `count` changes: the history's menu goes back several at once.
+  undo(count = 1) { this.travel(this.past, this.future, "before", "after", count); }
+  redo(count = 1) { this.travel(this.future, this.past, "after", "before", count); }
+
+  travel(from, to, target, current, count = 1) {
+    let entry = null;
+    const waits = [];
+    for (let step = 0; step < count && from.length; step += 1) {
+      entry = from.pop();
+      to.push(entry);
+      // Take back this change alone: others' edits since stay.
+      if (entry.apply) waits.push(Promise.resolve().then(() => entry.apply(target)));
+      else this.document = merge3(entry[current], this.document, entry[target]);
+    }
+    if (!entry) return;
+    this.lastMerge = null;
+    const done = () => {
+      this.emit("change", { quiet: false, source: "history", entry: this.said(entry) });
+      this.schedulePush(0);
+      this.requestDraw(0);
+    };
+    if (!waits.length) { done(); return; }
+    Promise.allSettled(waits).then((results) => {
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) toast(`Could not ${target === "before" ? "undo" : "redo"} it all: ${failed.reason?.message || failed.reason}`, { kind: "error", icon: "error", seconds: 6 });
+      done();
+    });
+  }
+
+  // What a change in the history did, in words, and where: its label, else as the kind
+  // describes it, and the place the kind says it was made (worked out once, when first asked).
+  said(entry) {
+    if (!entry.said && entry.apply) entry.said = { text: entry.label || "", place: entry.place, where: entry.where };
+    if (!entry.said) {
+      let told = null;
+      try { told = this.describe(entry.before, entry.after); } catch { told = null; }
+      const said = typeof told === "string" ? { text: told } : told || {};
+      entry.said = { text: entry.label || said.text || "", place: said.place, where: said.where };
+    }
+    return entry.said;
   }
 
   // -- keeping in step --

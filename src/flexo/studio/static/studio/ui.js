@@ -72,6 +72,7 @@ const ICONS = {
   "chevron-down": "M4 6l4 4 4-4",
   grip: "M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01",
   undo: "M5.5 3.5L2.5 6.5l3 3M2.5 6.5h7a3.5 3.5 0 010 7H7",
+  history: "M2.6 9.2A5.5 5.5 0 102.9 5.4M2.5 2.5v3h3M8 5v3.2l2.2 1.4",
   redo: "M10.5 3.5l3 3-3 3M13.5 6.5h-7a3.5 3.5 0 000 7H9",
   save: "M3 3h8l2 2v8H3zM5.5 3v3h4.5V3M5 13V9h6v4",
   play: "M5 3.5v9l7.5-4.5z",

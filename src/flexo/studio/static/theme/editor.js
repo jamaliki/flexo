@@ -28,6 +28,12 @@ export function mount(studio, container) {
   const effective = () => studio.info?.effective || {};
 
   // -- changing a setting --
+  // Said in the history as the setting changed: "Changed the arrow shape".
+  const NAMES = { palette: "colours", sketch: "hand-drawn look", base: "base theme" };
+  const said = (path, value) => {
+    const key = path[path.length - 1], name = NAMES[key] || key.replace(/_/g, " ");
+    return value === null || value === undefined || value === "" ? `Reset the ${name}` : `Changed the ${name}`;
+  };
   const get = (path) => path.reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), theme());
   const base = (path) => path.reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), effective());
   const set = (path, value, options = {}) => studio.change((doc) => {
@@ -42,7 +48,7 @@ export function mount(studio, container) {
       const key = path[depth - 1];
       if (parent[key] && typeof parent[key] === "object" && !Object.keys(parent[key]).length) delete parent[key];
     }
-  }, { quiet: true, merge: path.join("."), ...options });
+  }, { quiet: true, merge: path.join("."), label: said(path, value), ...options });
 
   // -- the panel --
   const form = h("div.theme-form.scroll-thin");
