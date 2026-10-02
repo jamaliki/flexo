@@ -98,14 +98,14 @@ export function mount(studio, main) {
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did
     // (someone typed, an agent wrote), it is made again on the file as it is now.
-    run: async (action, { merge }) => {
+    run: async (action, { merge, label }) => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const sent = studio.doc.text;
         const result = await studio.api("/api/act", { file: studio.file, document: studio.doc, action });
         if (studio.doc.text !== sent) continue;
         // A question asked of the figure (its parts, a structure's view) changes nothing.
         if (action.do === "structure-view") return result;
-        studio.change((d) => ({ ...d, text: result.document.text }), { merge });
+        studio.change((d) => ({ ...d, text: result.document.text }), { merge, label });
         // An edit made from the drawing is drawn at once: its parts are waiting to land.
         if (action.do !== "read" && action.do !== "update") studio.requestDraw?.(0);
         return result;

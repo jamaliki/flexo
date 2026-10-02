@@ -132,6 +132,35 @@ export function figureParts(host) {
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
 
+  // What an edit does, in words, for the history: "Moved “Model”", "Connected “x” to “y”".
+  // (Said before it is made: the names are the parts' as they were.)
+  function said(action) {
+    const name = (id) => `“${nameOf(nodeOfRef(id))}”`;
+    const many = (ids, verb) => (ids?.length === 1 ? `${verb} ${name(ids[0])}` : `${verb} ${ids?.length || 0} parts`);
+    switch (action.do) {
+      case "add": { const title = (parts[action.kind]?.title || "part").toLowerCase(); return `Added ${/^[aeiou]/.test(title) ? "an" : "a"} ${title}`; }
+      case "connect": return `Connected ${name(action.source)} to ${name(action.target)}`;
+      case "delete": return many(action.ids, "Deleted");
+      case "duplicate": return many(action.ids, "Duplicated");
+      case "gather": return `Grouped ${action.ids?.length || 0} parts`;
+      case "ungroup": return `Ungrouped ${name(action.id)}`;
+      case "paste": return "Pasted parts";
+      case "rename": return `Renamed ${name(action.id)}'s id to ${action.to}`;
+      case "move": case "step": return `Moved ${name(action.id)}`;
+      case "update": {
+        const id = action.target?.id, keys = Object.keys(action.values || {});
+        const all = (...wanted) => keys.length && keys.every((key) => wanted.includes(key));
+        if (all("label")) return `Retyped ${name(id)}`;
+        if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Turned ${name(id)}`;
+        if (all("properties.width", "properties.height")) return `Sized ${name(id)}`;
+        if (all("properties.zoom")) return `Zoomed ${name(id)}`;
+        if (keys.includes("kind")) { const title = (parts[action.values.kind]?.title || "part").toLowerCase(); return `Made ${name(id)} ${/^[aeiou]/.test(title) ? "an" : "a"} ${title}`; }
+        return `Changed ${name(id)}`;
+      }
+      default: return null;
+    }
+  }
+
   function setModel(next) {
     if (!next) return;
     state.model = next;
@@ -158,7 +187,7 @@ export function figureParts(host) {
       const waiting = queue.findIndex((job) => job.merge === merge);
       if (waiting >= 0) queue.splice(waiting, 1);
     }
-    queue.push({ action, merge, choose, then, failed });
+    queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action) });
     run();
   }
   async function run() {
@@ -169,7 +198,7 @@ export function figureParts(host) {
         const job = queue.shift();
         let result;
         try {
-          result = await host.run(job.action, { merge: job.merge });
+          result = await host.run(job.action, { merge: job.merge, label: job.label });
         } catch (error) {
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           job.failed?.();
