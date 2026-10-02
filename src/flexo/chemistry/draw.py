@@ -88,6 +88,8 @@ class Atomic:
     label: Box | None = None
     """The box of a label written across (``OH``, ``H₂N``), when it is wider than its symbol."""
     label_side: str = ""
+    ink: list[Box] = field(default_factory=list)
+    """The boxes its letters take: its label, and hydrogens written above or below it."""
 
 
 @dataclass(slots=True)
@@ -126,6 +128,7 @@ class Drawn:
                 (place.radical[0], point(place.radical[1])) if place.radical else None,
                 box(place.label) if place.label is not None else None,
                 place.label_side,
+                [box(item) for item in place.ink],
             )
             for index, place in self.atoms.items()
         }
@@ -361,6 +364,7 @@ def _label(
     drawn.boxes.append(
         (start, baseline - cap, start + metrics.width, baseline + metrics.descent * 0.3)
     )
+    place.ink.append(drawn.boxes[-1])
     if side in {"left", "right"} and hydrogens:
         place.label = (start, baseline - cap, start + metrics.width, baseline)
         place.label_side = side
@@ -374,6 +378,7 @@ def _label(
             Words(f"{prefix}.atom{index}.h", hydrogens, h_metrics, left, h_baseline, anchor="start")
         )
         drawn.boxes.append((left, h_baseline - cap, left + h_metrics.width, h_baseline))
+        place.ink.append(drawn.boxes[-1])
     direction = {"right": 0.0, "left": math.pi, "up": -math.pi / 2, "down": math.pi / 2}[side]
     if hydrogens or charge:
         place.taken.append(direction)
