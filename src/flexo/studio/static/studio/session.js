@@ -246,10 +246,11 @@ export class Session {
 
   folder() { return this.file.includes("/") ? this.file.slice(0, this.file.lastIndexOf("/") + 1) : ""; }
 
-  async exportFiles(formats) {
+  // `part` exports one part of the document by itself (a figure on a slide), if its kind can.
+  async exportFiles(formats, part = null) {
     const note = toast(h("span.row", {}, h("span.spinner"), `Exporting ${formats.join(", ").toUpperCase()}…`), { seconds: 120 });
     try {
-      const result = await this.api("/api/export", { file: this.file, document: this.document, formats });
+      const result = await this.api("/api/export", { file: this.file, document: this.document, formats, ...(part ? { part } : {}) });
       note.remove();
       const folder = this.folder();
       const links = result.files.map((file) => {

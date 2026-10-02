@@ -556,6 +556,24 @@ def test_a_folder_is_trusted_to_run_its_code_when_its_person_says(tmp_path: Path
         server.server_close()
 
 
+def test_the_studio_offers_to_make_only_the_kinds_it_was_started_with(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    server, workspace = start(tmp_path, browser=False, offered=("theme",))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        kinds = call(f"{url}/api/session", workspace.token)[1]["kinds"]
+        offered = {kind["name"]: kind["offered"] for kind in kinds}
+        assert offered["figure"] is False and offered["theme"] is True
+        # A kind not offered still opens.
+        assert call(f"{url}/api/open?file=figure.yaml", workspace.token)[0] == 200
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
 def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path: Path) -> None:
     import struct
     import zlib

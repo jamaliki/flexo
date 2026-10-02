@@ -272,10 +272,19 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/export":
             doc = workspace.open(name)
             document = data.get("document", doc.document)
+            formats = list(data.get("formats") or [])
+            # One part of the document, exported by itself (a figure on a slide).
+            part = data.get("part")
+            if part is not None and getattr(doc.kind, "export_part", None) is None:
+                self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
+                return
             with workspace.drawing, workspace.running():
-                written = doc.kind.export(
-                    document, doc.path.parent, doc.path.stem, list(data.get("formats") or [])
-                )
+                if part is not None:
+                    written = doc.kind.export_part(
+                        document, doc.path.parent, doc.path.stem, part, formats
+                    )
+                else:
+                    written = doc.kind.export(document, doc.path.parent, doc.path.stem, formats)
             self._json({"files": [workspace.relative(file) for file in written]})
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
@@ -325,7 +334,8 @@ class Handler(BaseHTTPRequestHandler):
             "address": getattr(workspace, "address", ""),
             "trusted": workspace.trusted,
             "kinds": [
-                {"name": kind.name, "title": kind.title} for kind in workspace.kinds.values()
+                {"name": kind.name, "title": kind.title, "offered": kind.name in workspace.offered}
+                for kind in workspace.kinds.values()
             ],
             "documents": workspace.documents(),
             "open": sorted(workspace.docs),
@@ -475,14 +485,16 @@ def start(
     kind: str | None = None,
     browser: bool = True,
     trusted: bool = True,
+    offered: tuple[str, ...] | None = None,
 ) -> tuple[ThreadingHTTPServer, Workspace]:
     """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``).
     Code the folder brings runs only if it is ``trusted`` (the app asks; a person who
-    starts ``flexo studio`` in a folder has chosen it)."""
+    starts ``flexo studio`` in a folder has chosen it). ``offered`` are the kinds of
+    document the page offers to make (all, if not given)."""
 
     path = Path(target or ".").resolve()
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
-    workspace = Workspace(folder, kind=kind, trusted=trusted)
+    workspace = Workspace(folder, kind=kind, trusted=trusted, offered=offered)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
     server = Server(("127.0.0.1", port), handler)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]

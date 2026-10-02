@@ -417,7 +417,7 @@ export async function start() {
 
   const welcome = h("div.welcome.scroll-thin");
   const renderWelcome = () => {
-    const kinds = info.kinds.map((kind) => kind.name);
+    const kinds = info.kinds.filter((kind) => kind.offered !== false).map((kind) => kind.name);
     const card = (kind, title, note, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
       h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title), h("span.start-note", {}, note)) : null;
     clear(welcome, h("div.welcome-inner", {},
@@ -496,13 +496,18 @@ export function copyable(text) {
   return h("div.copyable", {}, h("code", {}, text), button);
 }
 
+// Kinds the studio offers to make: all of them, unless whoever started it said fewer.
+const offers = (workspace, kind) => (workspace.info.kinds || []).some((item) => item.name === kind && item.offered !== false);
+
 function newMenu(anchor, workspace) {
   const open = workspace.documents.filter((item) => !workspace.sessions.has(item.file));
   menu(anchor, [
     { title: "New" },
-    { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", "talk.yaml") },
-    { icon: "figure", label: "Figure", hint: "A diagram flexo lays out", run: () => askName(workspace, "figure", "figure.yaml") },
-    { icon: "theme", label: "Theme", hint: "Type, colour, and line", run: () => askName(workspace, "theme", "theme.yaml") },
+    ...[
+      { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
+      { icon: "figure", label: "Figure", hint: "A diagram flexo lays out", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
+      { icon: "theme", label: "Theme", hint: "Type, colour, and line", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+    ].filter((item) => offers(workspace, item.kind)),
     ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: item.file, hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
 }
@@ -602,9 +607,11 @@ export function palette(workspace) {
     ...(session ? session.commands() : []),
     ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${file}`, run: () => workspace.activate(file) })),
     ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${item.file}`, hint: item.title, run: () => workspace.open(item.file) })),
-    { icon: "deck", label: "New deck", run: () => askName(workspace, "deck", "talk.yaml") },
-    { icon: "figure", label: "New figure", run: () => askName(workspace, "figure", "figure.yaml") },
-    { icon: "theme", label: "New theme", run: () => askName(workspace, "theme", "theme.yaml") },
+    ...[
+      { icon: "deck", label: "New deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
+      { icon: "figure", label: "New figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
+      { icon: "theme", label: "New theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+    ].filter((item) => offers(workspace, item.kind)),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop following agents" : "Follow agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "plug", label: "Invite an agent (MCP)", run: () => connectDialog(workspace) },

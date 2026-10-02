@@ -220,13 +220,23 @@ class Doc:
 class Workspace:
     """A folder being edited: its open documents, who is here, and what happened."""
 
-    def __init__(self, root: Path, *, kind: str | None = None, trusted: bool = True) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        kind: str | None = None,
+        trusted: bool = True,
+        offered: tuple[str, ...] | None = None,
+    ) -> None:
         self.root = root.resolve()
         self.trusted = trusted
         """Whether code the folder brings (a deck's plots) may run; a folder someone else
         made runs none until its person says they trust it."""
         self.on_trust: list[Any] = []
         self.kinds = kinds()
+        self.offered = tuple(offered) if offered else tuple(self.kinds)
+        """The kinds of document the page offers to make (an app for decks offers no
+        figure of its own: figures are made on slides). Any kind still opens."""
         self.default_kind = kind
         self.token = secrets.token_urlsafe(24)
         self.lock = threading.RLock()
