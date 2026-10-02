@@ -299,6 +299,32 @@ export function figureParts(host) {
     act({ do: "delete", ids: gone }, { select: false, then: () => select([]) });
   }
 
+  // What a part's right-click menu offers (the host adds cut, copy and paste): the
+  // part is chosen first, as PowerPoint chooses what is right-clicked.
+  function menuOf(id, anchor) {
+    if (!state.selected.includes(id)) select([id]);
+    const node = nodeOf(id), group = groupOf(id), edge = edgeOf(id);
+    const isRoot = id === model()?.root;
+    const items = [];
+    if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit its words", run: () => openInline(id) });
+    if (node) {
+      const kind = nextKind(node);
+      items.push({ icon: "plus", label: `Add ${parts[kind].title.toLowerCase()} after it`, keys: "A", run: () => addPart(kind, { after: id, source: id }) },
+        { icon: "plus", label: "Add another kind after it…", run: () => addPalette(anchor) },
+        { icon: "right", label: "Draw a line from it", keys: "C", run: () => toggleConnect(true) });
+    }
+    const holder = parentOf(id);
+    const row = holder && (holder.layout?.kind || (holder.id === model()?.root ? "column" : "row")) === "row";
+    if ((node || (group && !isRoot)) && row && (holder.children || []).some((child) => child !== id)) {
+      items.push({ icon: "down", label: "On a line of its own, below", run: () => act({ do: "move", id, line: "below", of: holder.id }) });
+    }
+    if (state.selected.length > 1) items.push({ icon: "layout", label: "Group the chosen parts", keys: "G", run: () => groupMenu(anchor) });
+    if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
+    if (node || (group && !isRoot)) items.push({ icon: "copy", label: "Duplicate", run: () => duplicate() });
+    if (!isRoot) items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove() });
+    return items;
+  }
+
   function duplicate(ids = state.selected) {
     const chosen = ids.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
     if (chosen.length) act({ do: "duplicate", ids: chosen });
@@ -1471,7 +1497,7 @@ export function figureParts(host) {
     setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
-    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste,
+    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf,
     openInline, placeInline, closeInline,
   };
 }
