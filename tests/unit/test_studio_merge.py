@@ -91,3 +91,64 @@ def test_one_line_of_several_changed_by_both_merges_word_by_word() -> None:
     theirs = "one\ntwo words there\nthree\n"
     assert merge3(base, ours, theirs) == "one\nfirst words there\nthree\n"
     assert merge3("a\n", "b\n", "c\n") == "c\n"
+
+
+def test_a_slide_added_beside_one_the_other_side_edited_keeps_both() -> None:
+    slides = [{"title": t, "body": [{"text": f"{t}."}]} for t in "ABCDE"]
+    base = deck(*slides)
+    ours = deck(*slides[:3], {"title": "New"}, *slides[3:])
+    theirs = deck(*slides[:3], {**slides[3], "title": "D, by Bob"}, slides[4])
+    for merged in (merge3(base, ours, theirs), merge3(base, theirs, ours)):
+        assert [s["title"] for s in merged["slides"]] == ["A", "B", "C", "New", "D, by Bob", "E"]
+
+
+def test_a_paragraph_added_beside_one_the_other_side_typed_in_keeps_both() -> None:
+    base = {"body": [{"text": "First paragraph."}, {"text": "Second paragraph."}]}
+    ours = {"body": [{"text": "First paragraph."}, {"text": "New"}, {"text": "Second paragraph."}]}
+    theirs = {"body": [{"text": "First paragraph."}, {"text": "Second paragraph. More"}]}
+    assert merge3(base, ours, theirs)["body"] == [
+        {"text": "First paragraph."},
+        {"text": "New"},
+        {"text": "Second paragraph. More"},
+    ]
+
+
+def test_a_slide_moved_while_the_other_side_types_in_it_moves_with_the_typing() -> None:
+    slides = [{"title": t, "body": [{"text": f"{t}."}]} for t in "ABCDE"]
+    base = deck(*slides)
+    ours = deck(*slides[:3], {**slides[3], "title": "D and then we typ"}, slides[4])
+    theirs = deck(slides[0], slides[1], slides[3], slides[2], slides[4])
+    for merged in (merge3(base, ours, theirs), merge3(base, theirs, ours)):
+        assert [s["title"] for s in merged["slides"]] == ["A", "B", "D and then we typ", "C", "E"]
+        assert merged["slides"][2]["body"] == [{"text": "D."}]
+
+
+def test_undo_takes_back_only_its_own_addition() -> None:
+    before = {"body": [{"text": "p0"}, {"text": "p1"}]}
+    after = {"body": [{"text": "p0"}, {"text": "Alice's"}, {"text": "p1"}]}
+    now = {"body": [{"text": "p0"}, {"text": "Alice's"}, {"text": "p1, edited by Bob"}]}
+    assert merge3(after, now, before) == {"body": [{"text": "p0"}, {"text": "p1, edited by Bob"}]}
+
+
+def test_an_item_removed_by_one_side_and_edited_by_the_other_is_kept_edited() -> None:
+    assert merge3(["a b", "c d"], ["a b"], ["a b", "c d e"]) == ["a b", "c d e"]
+    assert merge3(["a b", "c d"], ["a b", "c d e"], ["a b"]) == ["a b", "c d e"]
+
+
+def test_the_same_item_added_by_both_sides_is_kept_once() -> None:
+    assert merge3([1, 2], [1, 2, {"a": 1}], [1, 2, {"a": 1}]) == [1, 2, {"a": 1}]
+    assert merge3(["a"], ["x", "a"], ["a", "x"]) in (["x", "a"], ["a", "x"])
+
+
+def test_numbers_in_a_list_merge_place_by_place() -> None:
+    assert merge3([0.5, 0.5], [0.3, 0.5], [0.5, 0.6]) == [0.3, 0.6]
+    assert merge3([0.5, 0.5], [0.3, 0.7], [0.4, 0.6]) == [0.4, 0.6]
+
+
+def test_shapes_are_known_by_their_ids() -> None:
+    base = {"nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]}
+    ours = {"nodes": [{"id": "b", "label": "B"}, {"id": "a", "label": "A"}]}
+    theirs = {"nodes": [{"id": "a", "label": "A, renamed"}, {"id": "b", "label": "B"}]}
+    assert merge3(base, ours, theirs) == {
+        "nodes": [{"id": "b", "label": "B"}, {"id": "a", "label": "A, renamed"}]
+    }

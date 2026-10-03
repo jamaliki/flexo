@@ -1,12 +1,14 @@
 // Three-way merge of JSON documents: the page's copy of flexo/studio/merge.py.
-// merge3(base, ours, theirs) keeps what either side changed from base; words merge
-// line by line, then word by word; where both changed one thing differently, theirs wins.
+// merge3(base, ours, theirs) keeps what either side changed from base. Lists merge item
+// by item, each item known by what it was (a slide edited by one side and moved by the
+// other is the edited slide, moved); words merge line by line, then word by word; where
+// both changed one thing differently, theirs wins.
 
 export function merge3(base, ours, theirs) {
   if (same(ours, theirs) || same(base, theirs)) return ours;
   if (same(base, ours)) return theirs;
   if (isMap(ours) && isMap(theirs)) return mergeMaps(isMap(base) ? base : {}, ours, theirs);
-  if (Array.isArray(ours) && Array.isArray(theirs)) return mergeLists(Array.isArray(base) ? base : [], ours, theirs);
+  if (Array.isArray(ours) && Array.isArray(theirs)) return mergeItems(Array.isArray(base) ? base : [], ours, theirs);
   if (typeof ours === "string" && typeof theirs === "string" && typeof base === "string") return mergeText(base, ours, theirs);
   return theirs;
 }
@@ -15,6 +17,7 @@ const MISSING = Symbol("missing");
 const isMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const lines = (text) => text.match(/[^\n]*\n|[^\n]+$/g) || [];
 const WORDS = /[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu;
+const WORDS_ONLY = /[\p{L}\p{N}_]+/gu;
 
 // Two edits of words: line by line, and lines both changed word by word, so two people
 // typing in one field keep both their words. A single word (a name, a colour) is not
@@ -51,6 +54,145 @@ function mergeMaps(base, ours, theirs) {
 
 export function mergeLists(base, ours, theirs) {
   return diff3(base, ours, theirs, chunk);
+}
+
+// Two edits of a list of items, merged by the items' identities: each side's items are
+// paired with the items of base they were.
+export function mergeItems(base, ours, theirs) {
+  const toOurs = pairsOf(base, ours), toTheirs = pairsOf(base, theirs);
+  const fromOurs = new Map([...toOurs].map(([i, j]) => [j, i]));
+  const fromTheirs = new Map([...toTheirs].map(([i, k]) => [k, i]));
+  // Items both sides added alike are one item.
+  const twins = new Map(), added = new Map();
+  ours.forEach((item, j) => { if (!fromOurs.has(j)) { const k = key(item); if (!added.has(k)) added.set(k, []); added.get(k).push(j); } });
+  theirs.forEach((item, k) => { if (!fromTheirs.has(k) && added.get(key(item))?.length) twins.set(k, added.get(key(item)).shift()); });
+  const seqOurs = ours.map((_, j) => (fromOurs.has(j) ? `b:${fromOurs.get(j)}` : `o:${j}`));
+  const seqTheirs = theirs.map((_, k) => (fromTheirs.has(k) ? `b:${fromTheirs.get(k)}` : twins.has(k) ? `o:${twins.get(k)}` : `t:${k}`));
+  const content = new Map();
+  base.forEach((was, i) => {
+    const j = toOurs.get(i), k = toTheirs.get(i);
+    if (j !== undefined && k !== undefined) content.set(`b:${i}`, merge3(was, ours[j], theirs[k]));
+    else if (j !== undefined && !same(ours[j], was)) content.set(`b:${i}`, ours[j]);  // removed by them, edited by us: kept, edited
+    else if (k !== undefined && !same(theirs[k], was)) content.set(`b:${i}`, theirs[k]);
+  });
+  for (const id of seqOurs) if (id.startsWith("o:")) content.set(id, ours[Number(id.slice(2))]);
+  for (const id of seqTheirs) if (id.startsWith("t:")) content.set(id, theirs[Number(id.slice(2))]);
+  // The order: the side that moved items has its order (theirs, if both did); the other
+  // side's items not in it go after the item they followed there, after the first side's
+  // own additions at that place.
+  const moved = (seq) => {
+    const kept = seq.filter((id) => id.startsWith("b:")).map((id) => Number(id.slice(2)));
+    return kept.some((value, n) => n > 0 && value < kept[n - 1]);
+  };
+  const [first, second] = moved(seqTheirs) ? [seqTheirs, seqOurs] : [seqOurs, seqTheirs];
+  const order = first.filter((id) => content.has(id));
+  const placed = new Set(order);
+  const own = new Set(first.filter((id) => !id.startsWith("b:")));
+  let previous = null;
+  for (const id of second) {
+    if (placed.has(id)) { previous = id; continue; }
+    if (!content.has(id)) continue;
+    let at = previous !== null ? order.indexOf(previous) + 1 : 0;
+    while (at < order.length && own.has(order[at])) at++;
+    order.splice(at, 0, id);
+    placed.add(id);
+    previous = id;
+  }
+  return order.map((id) => content.get(id));
+}
+
+// How alike an item must be to an item of base to be taken for it (see alike).
+const ALIKE = 0.4;
+const movable = (item) => typeof item === "string" || (item !== null && typeof item === "object");
+
+// Which item of side each item of base became: the same item where it is in order (a
+// longest common subsequence), or moved; else, between items kept, the most alike of
+// the items changed; else, as many changed as there were, each in turn.
+function pairsOf(base, side) {
+  const keysBase = base.map(key), keysSide = side.map(key);
+  const pairs = matches(keysBase, keysSide);
+  const anchors = [...pairs].sort((a, b) => a[0] - b[0]);
+  const used = new Set(pairs.values());
+  // Moved: the same item elsewhere (a word, a slide), never a number or a flag.
+  const free = new Map();
+  side.forEach((item, j) => { if (!used.has(j) && movable(item)) { if (!free.has(keysSide[j])) free.set(keysSide[j], []); free.get(keysSide[j]).push(j); } });
+  base.forEach((item, i) => {
+    if (!pairs.has(i) && movable(item) && free.get(keysBase[i])?.length) { const j = free.get(keysBase[i]).shift(); pairs.set(i, j); used.add(j); }
+  });
+  // Changed: between two items kept in order, the most alike first, then the rest in turn.
+  const bounds = [[-1, -1], ...anchors, [base.length, side.length]];
+  for (let n = 0; n + 1 < bounds.length; n++) {
+    const [lowB, lowS] = bounds[n], [highB, highS] = bounds[n + 1];
+    let gone = [], come = [];
+    for (let i = lowB + 1; i < highB; i++) if (!pairs.has(i)) gone.push(i);
+    for (let j = lowS + 1; j < highS; j++) if (!used.has(j)) come.push(j);
+    if (!gone.length || !come.length) continue;
+    const scored = [];
+    for (const i of gone) for (const j of come) {
+      const score = alike(base[i], side[j]);
+      if (score >= ALIKE) scored.push([-score, Math.abs((i - lowB) / (highB - lowB) - (j - lowS) / (highS - lowS)), i, j]);
+    }
+    scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+    for (const [, , i, j] of scored) if (!pairs.has(i) && !used.has(j)) { pairs.set(i, j); used.add(j); }
+    gone = gone.filter((i) => !pairs.has(i));
+    come = come.filter((j) => !used.has(j));
+    if (gone.length === come.length) gone.forEach((i, m) => { if (kin(base[i], side[come[m]])) { pairs.set(i, come[m]); used.add(come[m]); } });
+  }
+  return pairs;
+}
+
+const kindOf = (item) => (typeof item === "boolean" ? "flag" : typeof item === "number" ? "number" : typeof item === "string" ? "str"
+  : item === null || item === undefined ? "none" : Array.isArray(item) ? "list" : "dict");
+
+// Whether one item could have become the other: of one kind, and a mapping with a key of
+// the other's (with an id, the same id).
+function kin(first, second) {
+  if (kindOf(first) !== kindOf(second)) return false;
+  if (isMap(first)) {
+    if (Object.hasOwn(first, "id") && Object.hasOwn(second, "id")) return same(first.id, second.id);
+    const keys = Object.keys(first);
+    return keys.some((k) => Object.hasOwn(second, k)) || !keys.length || !Object.keys(second).length;
+  }
+  return true;
+}
+
+// How alike two items are, from 0 to 1: words by the letters they share at their ends
+// and the words they share; mappings by their values, key by key (with an id, by it
+// alone); lists by their items, place by place.
+function alike(first, second) {
+  if (same(first, second)) return 1;
+  if (!kin(first, second)) return 0;
+  if (typeof first === "string") {
+    if (!first || !second) return 0.5;
+    const a = [...first], b = [...second];
+    const most = Math.min(a.length, b.length);
+    let start = 0;
+    while (start < most && a[start] === b[start]) start++;
+    let end = 0;
+    while (end < most - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+    const ends = (start + end) / ((a.length + b.length) / 2);
+    const wordsA = new Set(first.toLowerCase().match(WORDS_ONLY) || []), wordsB = new Set(second.toLowerCase().match(WORDS_ONLY) || []);
+    const union = new Set([...wordsA, ...wordsB]);
+    const shared = union.size ? [...wordsA].filter((word) => wordsB.has(word)).length / union.size : 0;
+    return Math.max(ends, shared);
+  }
+  if (isMap(first)) {
+    if (Object.hasOwn(first, "id") && Object.hasOwn(second, "id")) return 1;
+    const keys = [...new Set([...Object.keys(first), ...Object.keys(second)])].sort();  // in one order, as the server adds them
+    let total = 0;
+    for (const k of keys) {
+      if (Object.hasOwn(first, k) && Object.hasOwn(second, k)) total += same(first[k], second[k]) ? 1 : 0.25 + 0.75 * alike(first[k], second[k]);
+    }
+    return total / keys.length;
+  }
+  if (Array.isArray(first)) {
+    const longest = Math.max(first.length, second.length);
+    if (!longest) return 1;
+    let total = 0;
+    for (let n = 0; n < Math.min(first.length, second.length); n++) total += same(first[n], second[n]) ? 1 : 0.5 * alike(first[n], second[n]);
+    return total / longest;
+  }
+  return 0;
 }
 
 // The items of base both sides kept hold the merge together; between them, the side
