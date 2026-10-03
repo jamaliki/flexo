@@ -397,6 +397,10 @@ class Handler(BaseHTTPRequestHandler):
         while target.exists() and target.read_bytes() != data:
             count += 1
             target = target.with_name(f"{stem}-{count}{suffix}")
+        if not target.exists():
+            # A copy of this studio's making: taken away again if, when it closes, no
+            # document uses it (Workspace.tidy_uploads).
+            self.workspace.uploads.add(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return {"path": target.relative_to(self.workspace.path(name).parent).as_posix()}

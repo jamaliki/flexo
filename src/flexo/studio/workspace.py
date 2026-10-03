@@ -390,6 +390,9 @@ class Workspace:
         self.listeners: dict[str, Listener] = {}
         self.presence: dict[str, dict[str, Any]] = {}
         self.activity: deque[dict[str, Any]] = deque(maxlen=300)
+        self.uploads: set[Path] = set()
+        """Files this studio copied into the folder for a document (a picture dropped on a
+        slide): those no document uses when it closes are taken away again."""
         self.drawing = threading.Lock()
         self.latest: dict[str, int] = {}
         self._documents: dict[Path, tuple[float, str | None]] = {}
@@ -428,6 +431,7 @@ class Workspace:
                 self.assistant.stop()
         try:
             self.flush()
+            self.tidy_uploads()
         finally:
             with self.lock:
                 listeners = list(self.listeners.values())
@@ -436,6 +440,30 @@ class Workspace:
             for then in self.on_close:
                 with contextlib.suppress(Exception):
                     then()
+
+    def tidy_uploads(self) -> None:
+        """Take away the files this studio copied in that no document uses now (a picture
+        dropped and then undone), as Keynote keeps no media a deck no longer shows. Only
+        copies it made itself, never a file that was there before."""
+
+        with self.lock:
+            docs = list(self.docs.values())
+            uploads, self.uploads = set(self.uploads), set()
+        for upload in uploads:
+            if not upload.is_file():
+                continue
+            used = False
+            for doc in docs:
+                written = json.dumps(doc.document, ensure_ascii=False) + (doc.disk_text or "")
+                where = os.path.relpath(upload, doc.path.parent).replace(os.sep, "/")
+                if where in written or upload.name in written:
+                    used = True
+                    break
+            if not used:
+                with contextlib.suppress(OSError):
+                    upload.unlink()
+                    if upload.parent.name == "assets" and not any(upload.parent.iterdir()):
+                        upload.parent.rmdir()
 
     # -- files --
 

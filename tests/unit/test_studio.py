@@ -1392,3 +1392,18 @@ def test_an_agent_reads_a_file_that_does_not_read_as_written_and_puts_it_right(
         assert talk.read_text(encoding="utf-8") == DECK
     finally:
         workspace.close()
+
+
+def test_a_copy_the_studio_made_that_no_document_uses_goes_when_it_closes(tmp_path: Path) -> None:
+    (tmp_path / "talk.yaml").write_text(DECK.replace("Hello", "assets/kept.png"), encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    kept, undone, theirs = assets / "kept.png", assets / "undone.png", assets / "theirs.png"
+    for file in (kept, undone, theirs):
+        file.write_bytes(b"png")
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    workspace.open("talk.yaml")
+    workspace.uploads.update({kept, undone})  # copies it made; theirs was there before
+    workspace.close()
+    assert kept.is_file() and theirs.is_file() and not undone.exists()
