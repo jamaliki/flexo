@@ -3,7 +3,7 @@
 // slides, or a deck in the folder. Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus, picture, themeUses } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -150,7 +150,7 @@ export function mount(studio, container) {
     clear(form,
       section("Theme",
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
-        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
+        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
       section("Documents", uses),
       section("Colour",

@@ -6,7 +6,7 @@ import { h, clear, icon, ui, popover, closeMenu, toast } from "./ui.js";
 
 // A theme's name as a person reads it: flexo's own are named by id ("paper" is Paper);
 // a theme file's name is as its file gives it.
-const NAMES = { tikz: "TikZ" };
+const NAMES = { tikz: "TikZ", midcentury: "Mid-Century" };
 export function themeName(card) {
   const name = String(card.title || card.value || "");
   if (card.source === "folder" || /\.(ya?ml|json)$/i.test(name)) return name;
