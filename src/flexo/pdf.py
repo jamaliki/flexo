@@ -37,7 +37,7 @@ from pathlib import Path
 from flexo.colour import to_rgb
 from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
 from flexo.fonts import FontFace, hb_font, load_face
-from flexo.outline import _outline, shape
+from flexo.outline import _outline, shape, underline
 from flexo.portable import SYNTHETIC_SLANT
 
 ARTWORK_DPI = 300.0
@@ -48,6 +48,8 @@ _NAMED = {"black": "#000000", "white": "#ffffff", "transparent": None, "none": N
 _OPERATORS = {"M": "m", "L": "l", "C": "c"}
 _CAPS = {"butt": 0, "round": 1, "square": 2}
 _JOINS = {"miter": 0, "round": 1, "bevel": 2}
+_WORD_BREAKS = frozenset("-\u2010/_")
+"""What a word too long for its line is broken after: no space follows it there."""
 
 
 type Pages = str | Drawing | Sequence[str | Drawing]
@@ -443,16 +445,47 @@ class _Content:
             x, y = item.pivot
             matrix = (cos, sin, -sin, cos, x - cos * x + sin * y, y - sin * x - cos * y)
             self.ops.append("q " + " ".join(_n(value) for value in matrix) + " cm")
-        for line in item.lines:
+        for number, line in enumerate(item.lines):
             for run in line.runs:
-                if run.face is not None and run.text.strip():
-                    self.run(run)
-                    if run.link and not item.angle:
+                if run.face is None:
+                    continue
+                if not run.text.strip():
+                    # A space set as a run of its own (around a sign in maths) is still one
+                    # between the words read out.
+                    self.space(run, run.x)
+                    continue
+                self.run(run)
+                if run.link:
+                    # A link is underlined, as in the PowerPoint, so it is told from the
+                    # words around it by more than its colour.
+                    left, top, width, thickness = underline(run)
+                    self.ops.append(
+                        f"q {_rgb(_colour(run.fill) or '#000000')} rg "
+                        f"{_n(left)} {_n(top)} {_n(width)} {_n(thickness)} re f Q"
+                    )
+                    if not item.angle:
                         top, bottom = run.baseline - run.size * 0.85, run.baseline + run.size * 0.25
                         box = (run.x, self.height - bottom, run.x + run.width, self.height - top)
                         self.links.append((box, run.link))
+            written = [run for run in line.runs if run.face is not None and run.text]
+            last = written[-1].text[-1:] if written else " "
+            if number < len(item.lines) - 1 and not last.isspace() and last not in _WORD_BREAKS:
+                # Words wrapped onto the next line were parted by a space: it is read there.
+                self.space(written[-1], written[-1].x + written[-1].width)
         if item.angle:
             self.ops.append("Q")
+
+    def space(self, run: Run, x: float) -> None:
+        """A space at ``x`` on ``run``'s baseline, in its face: drawing nothing, but read
+        (and found, and copied) between the words either side."""
+
+        font = self.writer.font(run.face, run.weight)
+        gid = hb_font(run.face, run.weight).get_nominal_glyph(ord(" ")) or 0
+        cid, _ = font.use(gid, " ")
+        self.ops.append(
+            f"BT 3 Tr /{font.name} 1 Tf {_n(run.size)} 0 0 {_n(-run.size)} {_n(x)} "
+            f"{_n(run.baseline)} Tm <{cid:04X}> Tj ET"
+        )
 
     def run(self, run: Run) -> None:
         colour = _colour(run.fill) or "#000000"

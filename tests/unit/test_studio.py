@@ -677,6 +677,36 @@ def test_one_person_s_windows_are_one_person(served: tuple[str, Workspace]) -> N
     assert workspace.present() == []
 
 
+def test_a_window_whose_connection_breaks_is_gone_soon_unless_it_is_back(
+    served: tuple[str, Workspace],
+) -> None:
+    _, workspace = served
+    ada = {"id": "ada", "name": "Ada", "kind": "person"}
+    workspace.set_presence(ada, "figure.yaml", None, None)
+    # A page reconnecting a moment later: its person never left.
+    workspace.leave(workspace.listen("ada-1", ada), grace=0.2)
+    workspace.listen("ada-2", ada)
+    time.sleep(0.4)
+    assert [entry["who"]["id"] for entry in workspace.present()] == ["ada"]
+    # A window lost for good: its person goes once the grace is over.
+    workspace.leave(workspace.listeners["ada-2"], grace=0.2)
+    assert [entry["who"]["id"] for entry in workspace.present()] == ["ada"]
+    wait_for(lambda: workspace.present() == [])
+
+
+def test_a_studio_started_again_keeps_a_document_whose_file_went_meanwhile(tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path)
+    try:
+        # The page that held it asks for it as the kind it is open as: nothing is made anew.
+        doc = workspace.open("gone.yaml", "theme", held=True)
+        assert doc.kind.name == "theme" and not doc.exists
+        assert doc.problem == "gone.yaml was moved or deleted. Saving writes it again."
+        time.sleep(0.6)
+        assert not (tmp_path / "gone.yaml").exists()
+    finally:
+        workspace.close()
+
+
 def test_a_window_closing_is_gone_from_the_others_at_once(served: tuple[str, Workspace]) -> None:
     base, workspace = served
     ada = {"id": "ada", "name": "Ada", "kind": "person"}
@@ -1112,6 +1142,9 @@ def test_a_theme_is_drawn_on_samples_and_its_changes_named(tmp_path: Path) -> No
     assert kind.describe({"theme": {"name": "a"}}, document)[0]["text"] == "changed the name"
     assert kind.check({"theme": {"name": "x", "colours": []}}, tmp_path)
     assert "arrow_shape" in kind.catalog()["choices"]
+    # Its full form exported under a plain name of its own, never the theme file's.
+    [made] = kind.export(document, tmp_path, "Lab.theme", ["yaml"], into=tmp_path / "out")
+    assert made.name == "Lab full theme.yaml" and "studio-test" in made.read_text()
 
 
 def test_a_theme_file_changed_is_read_again(tmp_path: Path) -> None:
@@ -1368,6 +1401,47 @@ process.exit(0);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_undo_takes_back_only_its_own_words_while_another_types_on_after_them() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async () => new Promise(() => {}),
+};
+const opened = { file: "a.yaml", version: 1, saved: 1, exists: true };
+const session = new Session(workspace, { ...opened, document: { text: "Second paragraph." } });
+const said = { seen: [] };
+let version = 1;
+const comes = (text) => session.remote({ client: "bob", version: ++version, document: { text } });
+// Typed here, a letter at a time, one run however long; then sent.
+const type = (letter) => session.change((d) => { d.text += letter; }, { merge: "run", hold: true });
+for (const letter of " alicewords") type(letter);
+session.synced = session.document;
+// Another types on after them, a letter at a time; this run is undone half way through his.
+let theirs = session.document.text;
+for (const [n, letter] of [..." bobafter"].entries()) {
+  theirs += letter;
+  comes(theirs);
+  if (n === 3) {
+    session.undo();
+    session.synced = { text: theirs };  // as the studio has it, his letters on ours
+  }
+  said.seen.push(session.document.text);
+}
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    seen = json.loads(result.stdout)["seen"]
+    assert seen[3:] == [f"Second paragraph.{' bobafter'[:n + 1]}" for n in range(3, 9)]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_the_page_says_its_edits_wait_while_the_studio_is_out_of_reach() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
     code = FAKE_PAGE + (
@@ -1518,6 +1592,32 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["below of b", "below of root", "below of c"]
+    # A row folded onto two lines: under its first line is its second, the row's own; and
+    # a part let go over where it was drawn (a nudge) stays where it is.
+    folded = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "row"}, "children": ["a", "b", "c", "d", "e", "f"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 300, 130],
+        "a": [10, 10, 60, 40], "b": [110, 10, 160, 40], "c": [210, 10, 260, 40],
+        "d": [10, 90, 60, 120], "e": [110, 90, 160, 120], "f": [210, 90, 260, 120],
+    }
+    drags = [["e", 140, 100], ["f", 135, 80], ["a", 85, 105]]
+    code = (
+        f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(folded)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+        "  if (place.kind === 'line') return `${place.side} of ${place.of}`;\n"
+        "  return stays(model, place, id) ? 'stays' : place.index;\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == ["stays", 4, 3]
     # Level with a part in a column and off to its side: beside it; over it, still in line.
     column = {
         "root": "root",

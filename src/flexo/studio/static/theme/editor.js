@@ -3,7 +3,7 @@
 // thinks of them (colour, type, line, space). Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
+import { h, clear, icon, ui, popover, closeMenu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -129,9 +129,14 @@ export function mount(studio, container) {
       h("div.palette-chips", {}, chips,
         h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"], "Add Colour") }, icon("plus"))),
       h("div.row", {},
-        h("div.fixed", {}, ui.button("Palettes…", (event) => menu(event.currentTarget, Object.entries(catalog.palettes).map(([name, values]) => ({
-          label: name, hint: values.join(" "), run: () => write([...values]),
-        }))), { kind: "ghost", small: true, icon: "palette" })),
+        // Each palette by sight, as the deck's Palette pop-up shows them: its colours, then its
+        // name; the one the theme holds ticked.
+        h("div.fixed", {}, ui.button("Palettes…", (event) => {
+          const holds = list.map((colour) => colour.toLowerCase()).join();
+          popover(event.currentTarget, h("div.palette-choices", {}, Object.entries(catalog.palettes).map(([name, values]) =>
+            h(`button.palette-choice${values.map((colour) => colour.toLowerCase()).join() === holds ? ".on" : ""}`, { type: "button", onclick: () => { closeMenu(); write([...values]); } },
+              h("span.palette-strip", {}, values.map((colour) => h("span", { style: { background: colour } }))), h("span", {}, name)))), { className: "palette-menu" });
+        }, { kind: "ghost", small: true, icon: "palette" })),
         get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false, label: "Reset Theme Colours" }), { kind: "ghost", small: true, icon: "undo" })) : null),
       // In rows of equal chips, never one left alone on a row of its own.
       tones.length ? h("div.tones", { title: "Fill and outline colours for shapes", style: { gridTemplateColumns: `repeat(${Math.ceil(tones.length / Math.ceil(tones.length / 10))}, minmax(0, 1fr))` } },
@@ -233,7 +238,8 @@ export function mount(studio, container) {
     clear(showOn, h("span.show-on-label", {}, "Preview"), options.length > 3 ? ui.select({ value, options, onChange }) : ui.segmented({ value, options, onChange }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  studio.exports = [{ format: "yaml", label: "Full Theme…" }];
+  // A sheet first, as each of a deck's exports has, saying what the file is.
+  studio.exports = [{ format: "yaml", label: "Full Theme…", hint: "The theme with every setting written out, those it takes from its base theme too" }];
   studio.actions.append(ui.button("Export Full Theme…", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();

@@ -86,7 +86,7 @@ def _merge_words(base: str, ours: str, theirs: str, notes: list | None = None) -
             if notes is not None:
                 notes.append({"rewritten": name, "words": merged, "typed": typed.strip()})
             return merged
-    return "".join(_diff3(*words, _words_chunk))
+    return "".join(_diff3(*words, _words_chunk, spaces=True))
 
 
 _CLOSING = re.compile(r"[.,;:!?)\]}\u201d\u2019]")
@@ -170,7 +170,12 @@ def _lines_chunk(base: list, ours: list, theirs: list, notes: list | None = None
 
 def _words_chunk(base: list, ours: list, theirs: list) -> list:
     if not base:
-        return [*ours, *theirs]
+        # Words both put at one place (two people typing on at the same end): ours, then
+        # theirs, never run together into one word.
+        joins = (
+            ours and theirs and _WORDS_ONLY.fullmatch(ours[-1]) and _WORDS_ONLY.fullmatch(theirs[0])
+        )
+        return [*ours, " ", *theirs] if joins else [*ours, *theirs]
     was = "".join(base)
     # Words one side took away while the other typed among them: they go, and the typing
     # stays.
@@ -178,13 +183,24 @@ def _words_chunk(base: list, ours: list, theirs: list) -> list:
         typed = None if gone else _inserted(was, "".join(typing))
         if typed is not None:
             return [typed]
-    # Letters both typed into one word, each in one place (two people typing on at one
-    # place, where their words run together): both kept, each where it was typed.
-    mine, other = _insertion(was, "".join(ours)), _insertion(was, "".join(theirs))
-    if mine and other:
-        (first, typed), (second, more) = sorted((mine, other), key=lambda found: found[0])
-        return [was[:first] + typed + was[first:second] + more + was[second:]]
-    return list(theirs)
+    merged = _letters(was, "".join(ours), "".join(theirs))
+    return [merged] if merged is not None else list(theirs)
+
+
+def _letters(was: str, ours: str, theirs: str) -> str | None:
+    """Two changes to the same words, each in a place of its own (one typing on just after
+    what the other took away; two typing at one place), both made, letter by letter; None
+    where they overlap. At one place, letters that run on from the word before go first
+    (someone typing on in it), then the other's (ours first, if both or neither do)."""
+
+    edits = []
+    for now in (ours, theirs):
+        start, end = _ends(was, now)
+        edits.append((start, len(was) - end, now[start : len(now) - end]))
+    first, second = sorted(edits, key=lambda edit: (edit[0], edit[1], edit[2][:1].isspace()))
+    if first[1] > second[0]:
+        return None
+    return was[: first[0]] + first[2] + was[first[1] : second[0]] + second[2] + was[second[1] :]
 
 
 def _merge_dicts(base: dict, ours: dict, theirs: dict, notes: list | None = None) -> dict:
@@ -394,9 +410,18 @@ def merge_lists(base: list, ours: list, theirs: list) -> list:
     return _diff3(base, ours, theirs, _chunk)
 
 
-def _diff3(base: list, ours: list, theirs: list, both: Callable[[list, list, list], list]) -> list:
+def _diff3(
+    base: list,
+    ours: list,
+    theirs: list,
+    both: Callable[[list, list, list], list],
+    *,
+    spaces: bool = False,
+) -> list:
     """The items of ``base`` both sides kept hold the merge together; between them, the
-    side that changed something has it, and ``both`` settles what both sides changed."""
+    side that changed something has it, and ``both`` settles what both sides changed.
+    What both put at one place alike is put there once -- but, with ``spaces``, not a
+    space both typed there: two people starting words at one place, each their own."""
 
     keys_base = [_key(item) for item in base]
     to_ours = _matches(keys_base, [_key(item) for item in ours])
@@ -408,9 +433,10 @@ def _diff3(base: list, ours: list, theirs: list, both: Callable[[list, list, lis
     ]
     for ab, ao, at in [*anchors, (len(base), len(ours), len(theirs))]:
         was, mine, other = base[b:ab], ours[o:ao], theirs[t:at]
+        twin = _same(mine, other) and not (spaces and not was and "".join(mine).isspace())
         if _same(mine, was):
             result.extend(other)
-        elif _same(other, was) or _same(mine, other):
+        elif _same(other, was) or twin:
             result.extend(mine)
         else:
             result.extend(both(was, mine, other))

@@ -154,33 +154,48 @@ def fit_in_box(
     if turn and best.scale < least:
         # Smaller than the words were meant to be: fold long rows and columns onto
         # two lines, if that sets them clearly larger. Routing a folded figure is
-        # costly, so only the most promising fold is tried.
+        # costly, so only the most promising fold is tried -- and, should its lines
+        # cross, the same fold with its second line run the other way.
         folds = [
-            (f"{label}, folded", wrapped(candidate), layout_style)
+            (label, candidate, layout_style)
             for label, candidate, layout_style in candidates
             if "within" not in label
         ]
-        folds.sort(key=lambda item: -_estimate(item[1], item[2] or style, width, height, most))
-        label, candidate, layout_style = folds[0]
-        promise = _estimate(candidate, layout_style or style, width, height, most)
+        folds.sort(
+            key=lambda item: -_estimate(wrapped(item[1]), item[2] or style, width, height, most)
+        )
+        label, unfolded, layout_style = folds[0]
+        promise = _estimate(wrapped(unfolded), layout_style or style, width, height, most)
         if promise > best.scale * FOLD_GAIN:
-            try:
-                compiled = compile_figure(candidate, style=layout_style)
-            except Exception:
-                return best
-            left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
-            ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
-            scale = min(most, width / ink[2], height / ink[3])
-            errors = len(lint_compilation(compiled, style=layout_style).errors)
-            # A fold is the layout's doing, not its author's: one that makes lines cross
-            # that did not is no fold to take, however much larger its words.
-            if (
-                errors <= written_errors
-                and scale > best.scale * FOLD_GAIN
-                and _crossings(compiled, layout_style) <= _crossings(best.compilation, best.style)
-            ):
-                best = BoxFit(compiled, scale, ink, label, base * scale, errors, layout_style)
+            crossings = _crossings(best.compilation, best.style)
+            tried: list[FigureSpec] = []
+            for suffix, back in FOLDS:
+                candidate = wrapped(unfolded, back=back)
+                if candidate in tried:
+                    continue
+                tried.append(candidate)
+                try:
+                    compiled = compile_figure(candidate, style=layout_style)
+                except Exception:
+                    return best
+                left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
+                ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
+                scale = min(most, width / ink[2], height / ink[3])
+                errors = len(lint_compilation(compiled, style=layout_style).errors)
+                if errors > written_errors or scale <= best.scale * FOLD_GAIN:
+                    break
+                # A fold is the layout's doing, not its author's: one that makes lines cross
+                # that did not is no fold to take, however much larger its words.
+                if _crossings(compiled, layout_style) <= crossings:
+                    return BoxFit(
+                        compiled, scale, ink, f"{label}{suffix}", base * scale, errors, layout_style
+                    )
     return best
+
+
+FOLDS = ((", folded", None), (", folded back", True), (", folded on", False))
+"""How a layout's name says it is folded (``flexo.orient.wrapped``): as the fold
+itself has it, or with its second line made to run back, or on."""
 
 
 def _crossings(compiled: Compilation, style: LayoutStyle | None) -> int:
@@ -194,13 +209,15 @@ def _kept(keep: str, candidates, width: float, height: float, most: float, base:
     """The figure drawn in the layout ``keep`` names, if it is one of ``candidates`` (or
     one folded), in one compile."""
 
-    folded = keep.endswith(", folded")
+    suffix, back = next(
+        ((suffix, back) for suffix, back in FOLDS if keep.endswith(suffix)), ("", None)
+    )
     for label, candidate, layout_style in candidates:
-        if label != keep.removesuffix(", folded"):
+        if label != keep.removesuffix(suffix):
             continue
         try:
             compiled = compile_figure(
-                wrapped(candidate) if folded else candidate, style=layout_style
+                wrapped(candidate, back=back) if suffix else candidate, style=layout_style
             )
         except Exception:
             return None

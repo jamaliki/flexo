@@ -20,6 +20,8 @@ export function keepFocus(container, render, { undone = false } = {}) {
   const caret = key && active.isContentEditable ? caretIn(active) : null;
   const was = selection && typeof active.value === "string" ? active.value : caret ? textIn(active) : null;
   const scroll = container.scrollTop;
+  // (A field drawn again for an undo shows what is now, not what was being typed: ui.number.)
+  if (undone && key) active.undone = true;
   render();
   container.scrollTop = scroll;
   if (!key) return;
@@ -122,7 +124,18 @@ const PICTURE_STYLE = ":host{display:block;position:relative}svg{display:block;t
 export function picture(svg, hash, { natural = false } = {}) {
   const key = hash && `${natural ? "n" : "f"}:${hash}`;
   const known = key && pictures.get(key);
-  if (known) return known;
+  if (known && !known.isConnected) return known;
+  // One shown already (a slide's thumbnail, asked for again by the theme editor's preview of
+  // the deck): a copy of it, as a node is in one place at a time -- moved, the thumbnail it
+  // was taken from would go blank.
+  if (known) {
+    const copy = document.createElement("div");
+    copy.className = known.className;
+    copy.attachShadow({ mode: "open" }).append(...[...known.shadowRoot.childNodes].map((node) => node.cloneNode(true)));
+    const waiting = known.style.visibility === "hidden" && fontsLoading(copy.shadowRoot.querySelector("svg"));
+    if (waiting) { copy.style.visibility = "hidden"; waiting.then(() => { copy.style.visibility = ""; }); }
+    return copy;
+  }
   const host = document.createElement("div");
   host.className = natural ? "picture natural" : "picture";
   const root = host.attachShadow({ mode: "open" });

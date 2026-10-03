@@ -145,6 +145,26 @@ def test_parts_with_nothing_between_their_halves_fold_into_a_grid() -> None:
     compile_figure(spec)
 
 
+def test_a_fold_whose_lines_cross_is_tried_with_its_second_line_run_the_other_way() -> None:
+    # A flow chart's first step moved to a line of its own below the rest: folded as the
+    # fold would have it, its lines cross; with its second line run back, none do.
+    with Figure("assay") as figure, figure.column("steps") as steps:
+        with steps.row("row") as row:
+            purify = row.terminal("purify", label="Purify CA")
+            mix = row.block("mix", label="Mix CA with IP6", input=purify)
+            check = row.decision("check", label="Tubes formed?")
+            grids = row.terminal("grids", label="Cryo-EM grids")
+            movies = row.block("movies", label="Collect movies", input=grids)
+            motion = row.block("motion", label="Motion correction", input=movies)
+            row.block("refine", label="3D refinement", input=motion)
+        stain = steps.block("stain", label="Negative-stain EM", input=mix)
+        figure.connect(stain, check)
+        figure.connect(check, grids, label="yes")
+        figure.connect(check, mix, label="no")
+    fit = flexo.fit_in_box(figure, 864, 380, words=18, largest=24)
+    assert fit.layout.endswith(", folded back") and fit.words > 15
+
+
 def _model() -> Figure:
     """A tall column with a side input: too tall for a slide as written, not so tall
     that its words would be tiny."""

@@ -11,6 +11,8 @@ import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownReso
 import { figureParts, glyph, groupGlyph, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
+// Narrower than this (pixels), the editor folds its shapes' list away.
+const NARROW = 1000;
 
 export function mount(studio, main) {
   if (!document.querySelector('link[href="/static/kinds/figure/editor.css"]')) {
@@ -43,6 +45,16 @@ export function mount(studio, main) {
   const split = h("div.fig-split");
   const root = h("div.fig", {}, left, split, center, inspector);
   clear(main, root);
+  // In a narrow window the shapes' list folds away -- opened over the figure by its button
+  // in the bar -- and the inspector narrows: the figure keeps the room it is drawn in.
+  const listButton = ui.button("", () => root.classList.toggle("list-open"), { kind: "ghost", icon: "sidebar", title: "Shapes and Source" });
+  new ResizeObserver(() => {
+    const narrow = root.clientWidth < NARROW;
+    root.classList.toggle("narrow", narrow);
+    if (!narrow) root.classList.remove("list-open");
+    listButton.hidden = !narrow;
+  }).observe(root);
+  center.addEventListener("pointerdown", () => root.classList.remove("list-open"));
   split.addEventListener("pointerdown", (event) => {
     split.setPointerCapture(event.pointerId);
     split.classList.add("dragging");
@@ -56,7 +68,7 @@ export function mount(studio, main) {
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
-  studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  studio.tools.append(listButton, h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
   studio.exports = [{ format: "editable", label: "Editable SVG…" }, { format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
@@ -97,6 +109,8 @@ export function mount(studio, main) {
     chooseFile,
     themeField: (value, set) => themeField(studio, { value, onPick: set, onCustomise: (current) => customiseTheme(current, set) }),
     tones: () => studio.info?.tones,
+    // The figure is named as its file is.
+    name: () => String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, ""),
     addAnchor: () => addButton,
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did

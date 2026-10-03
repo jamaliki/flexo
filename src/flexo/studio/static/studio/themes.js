@@ -14,12 +14,14 @@ export function themeName(card) {
 }
 
 // A document's name as the studio shows it: without the extension of its file.
-const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+// (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
+const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
 
 export function themeCard(card, { on = false, onclick, compact = false, chevron = false } = {}) {
-  // Each tone a filled chip in its strong colour, as a palette's colours are shown: each
-  // colour once, so a theme in one ink (Print, Swiss) shows one chip, not six alike.
-  const colours = [...new Set((card.tones || []).map((tone) => String(tone.stroke || tone.fill).toLowerCase()))];
+  // The theme's own colours as filled chips, as a palette's colours are shown (else each
+  // tone's strong colour): each colour once, so a theme in one ink (Print, Swiss) shows one
+  // chip, not six alike.
+  const colours = [...new Set((card.colours?.length ? card.colours : (card.tones || []).map((tone) => tone.stroke || tone.fill)).map((colour) => String(colour).toLowerCase()))];
   const tones = colours.map((colour) => h("span", { style: { background: colour } }));
   return h(`button.theme-card${on ? ".on" : ""}${compact ? ".compact" : ""}${card.problem ? ".problem" : ""}`, {
     type: "button", title: card.problem || [card.description || themeName(card), card.source === "folder" ? card.value : ""].filter(Boolean).join("\n"), onclick,
@@ -29,7 +31,8 @@ export function themeCard(card, { on = false, onclick, compact = false, chevron 
       h("span.theme-tones", {}, tones)),
     h("span.theme-words", {},
       h("span.theme-name", {}, themeName(card)),
-      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" ? h("span.theme-where", {}, card.value.replace(/\.theme\.ya?ml$/i, "")) : null),
+      // A folder's theme says its file only when that is not its name already.
+      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" && docName(card.value) !== themeName(card) ? h("span.theme-where", {}, docName(card.value)) : null),
     chevron ? h("span.theme-chevron", {}, icon("chevron-down")) : null);
 }
 

@@ -109,11 +109,16 @@ def _built_in(name: str) -> dict[str, Any]:
 
 
 def _card(name: str) -> dict[str, Any]:
-    from flexo.themes import resolve_palette, theme
+    from flexo.themes import palette_order, resolve_palette, theme
 
     found = theme(name)
     palette = resolve_palette(name)
+    strokes = [palette.get(f"tone-{i}-stroke") for i in range(1, TONES_SHOWN + 1)]
     return {
+        # The theme's own colours, as its palette gives them (a tone's stroke is one of them
+        # set to the theme's outline lightness): what a card shows, as the Palette pop-up does
+        # -- but for a theme that draws in one ink (Print, Swiss), that ink.
+        "colours": strokes[:1] if len(set(strokes)) == 1 else palette_order(name)[:TONES_SHOWN],
         "title": found.name.split("@")[0],
         "description": found.description,
         "font": found.style.typography.family,

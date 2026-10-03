@@ -38,6 +38,11 @@ export function dropPlace(model, boxes, point, id) {
     return false;
   };
   const all = boxes.get(model.root);
+  // Let go over where it was drawn -- a nudge, a press that moved a little -- it stays.
+  const own = boxes.get(id), holder = groups.get(parent.get(id));
+  if (own && holder && point.x >= own.left && point.x <= own.right && point.y >= own.top && point.y <= own.bottom) {
+    return { parent: holder.id, index: holder.children.indexOf(id), kind: holder.layout?.kind || "column", home: true };
+  }
   const under = underPart(model, groups, boxes, point, id, inside);
   if (under) return under;
   const line = all && ownLine(model, groups.get(model.root), all, point, id);
@@ -81,11 +86,13 @@ export function dropPlace(model, boxes, point, id) {
 }
 
 // Well under a part in a row, and in line with its middle, with nothing else there (no
-// other part, no group it is not in): under that part, the two one over the other there.
+// other part, no group it is not in) and out of the row's own room: under that part, the
+// two one over the other there. (Under the first line of a row folded onto two is its
+// second: the row's own.)
 function underPart(model, groups, boxes, point, id, inside) {
   const holds = (box) => box && point.x >= box.left - 2 && point.x <= box.right + 2 && point.y >= box.top - 2 && point.y <= box.bottom + 2;
   for (const group of model.groups) {
-    if ((group.layout?.kind || "column") !== "row" || inside(group.id, id)) continue;
+    if ((group.layout?.kind || "column") !== "row" || inside(group.id, id) || holds(boxes.get(group.id))) continue;
     for (const child of group.children || []) {
       const box = boxes.get(child);
       if (child === id || groups.has(child) || !box) continue;

@@ -215,3 +215,25 @@ def test_letters_two_people_type_into_one_word_are_both_kept() -> None:
     # where it was typed, none lost to the other's.
     assert merge3("A mc", "A m4c", "A mco") == "A m4co"
     assert merge3("A m", "A m4", "A mc") == "A m4c"
+
+
+def test_undone_typing_leaves_words_typed_after_it_letter_by_letter() -> None:
+    # Words typed here, undone while another types on after them, a letter at a time: the
+    # undo takes back these words alone, and each of his letters still comes.
+    before, after = "Second paragraph.", "Second paragraph. alicewords"
+    for n in range(1, len(" bobafter") + 1):
+        theirs = " bobafter"[:n]
+        assert merge3(after, after + theirs, before) == before + theirs
+        if n > 1:
+            assert merge3(after + theirs[:-1], after + theirs, before + theirs[:-1]) == (
+                before + theirs
+            )
+
+
+def test_two_typing_at_one_end_keep_their_words_apart() -> None:
+    # Each started a word at the same place: never run together into one.
+    assert merge3("What we asked ", "What we asked a", "What we asked b") == "What we asked a b"
+    # One typing on in her word as the other's arrives after it.
+    assert merge3("What we asked a", "What we asked a b", "What we asked al") == (
+        "What we asked al b"
+    )

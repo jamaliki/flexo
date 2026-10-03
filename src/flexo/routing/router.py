@@ -276,7 +276,7 @@ def route_figure(
         edges,
         nets,
         solids=(
-            *(node.bounds for node in fitted.nodes),
+            *(rect for node in fitted.nodes for rect in caption_solids(node)),
             *(
                 rect
                 for group in fitted.groups
@@ -707,6 +707,26 @@ def _joined(a: Point, b: Point, c: Point, d: Point) -> tuple[Point, Point] | Non
         return None
     points = sorted((a, b, c, d), key=lambda point: point.x if horizontal else point.y)
     return points[0], points[-1]
+
+
+def caption_solids(node: FittedNode) -> tuple[Rect, ...]:
+    """What a caption must keep off of a component: its box -- or, for a decision's
+    diamond, the diamond in steps, so "yes" may sit in the corner beside where it starts."""
+
+    box = node.bounds
+    if node.measured.spec.kind != "decision":
+        return (box,)
+    steps = 6
+    bands = []
+    for index in range(steps):
+        # Each band as wide as the diamond at its edge nearer the middle.
+        near = min(abs(index - steps / 2.0), abs(index + 1 - steps / 2.0))
+        width = box.width * (1.0 - near / (steps / 2.0))
+        bands.append(
+            Rect(box.x + (box.width - width) / 2.0, box.y + box.height * index / steps,
+                 width, box.height / steps)
+        )
+    return tuple(bands)
 
 
 def _outline(bounds: Rect) -> tuple[Point, ...]:

@@ -130,13 +130,19 @@ def test_a_part_the_figure_named_takes_the_name_of_its_words_once_they_are_typed
     text, chosen = edit(
         text, do="update", target=target, values={"label": "3D refinement"}, name="Block"
     )
-    assert chosen == ["part-3d-refinement"]
-    assert ("encoder", "part-3d-refinement") in edges(text)
+    assert chosen == ["refinement-3d"]
+    assert ("encoder", "refinement-3d") in edges(text)
     # Named for the words it had (as a template names its parts), it follows them too.
     text, chosen = edit(
         text, do="update", target={"type": "node", "id": "x"}, values={"label": "Image"}, name="x"
     )
     assert chosen == ["image"]
+    # A long label makes an id cut between words, and not after "and".
+    text, chosen = edit(
+        text, do="update", target={"type": "node", "id": "image"}, name="Image",
+        values={"label": "Motion correction and CTF estimation"},
+    )
+    assert chosen == ["motion-correction"]
     # An id a person or an agent chose stays, whatever the words; and so does any id when
     # the words are only being typed (no name: the typing has not ended).
     text, chosen = edit(
@@ -144,9 +150,27 @@ def test_a_part_the_figure_named_takes_the_name_of_its_words_once_they_are_typed
         values={"label": "Backbone"}, name="Image encoder",
     )
     assert chosen == ["encoder"]
-    image = {"type": "node", "id": "image"}
-    text, chosen = edit(text, do="update", target=image, values={"label": "Pixels"})
-    assert chosen == ["image"]
+    motion = {"type": "node", "id": "motion-correction"}
+    text, chosen = edit(text, do="update", target=motion, values={"label": "Pixels"})
+    assert chosen == ["motion-correction"]
+
+
+def test_the_first_flow_charts_step_and_question_take_the_names_of_their_words() -> None:
+    text = (
+        "figure:\n  id: chart\nnodes:\n- id: step\n  label: Step\n"
+        "- id: check\n  kind: decision\n  label: Done?\nedges:\n- from: step\n  to: check\n"
+    )
+    step = {"type": "node", "id": "step"}
+    text, chosen = edit(
+        text, do="update", target=step, values={"label": "Mix CA with IP6"}, name="Step"
+    )
+    assert chosen == ["mix-ca-with-ip6"]
+    check = {"type": "node", "id": "check"}
+    text, chosen = edit(
+        text, do="update", target=check, values={"label": "Tubes formed?"}, name="Done?"
+    )
+    assert chosen == ["tubes-formed"]
+    assert edges(text) == [("mix-ca-with-ip6", "tubes-formed")]
 
 
 def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:

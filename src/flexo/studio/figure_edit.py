@@ -288,11 +288,35 @@ def _parts() -> dict[str, Any]:
     return catalogue()["parts"]
 
 
+MADE = {"block": frozenset({"step"}), "decision": frozenset({"check"})}
+"""Ids the studio gave parts of its own beyond their words: the first flow chart's step
+and its question, named for neither."""
+
+_SMALL = frozenset(
+    {"a", "an", "and", "the", "of", "on", "in", "at", "to", "for", "with", "or", "by"}
+)
+"""Words an id cut short does not end on."""
+
+
 def _slug(words: str) -> str:
     """An id made from words (a label, a kind): ``Encoder block`` is ``encoder-block``."""
 
     words = re.sub(r"\$|\\[A-Za-z]+|[*_`{}]", "", str(words))
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", words).strip("-").lower()[:24].strip("-")
+    pieces = [piece for piece in re.split(r"[^A-Za-z0-9]+", words.lower()) if piece]
+    # One that starts with a number reads with the number after: "3D refinement" is
+    # refinement-3d, not part-3d-refinement.
+    lead = next((at for at, piece in enumerate(pieces) if piece[0].isalpha()), None)
+    if lead:
+        pieces = pieces[lead:] + pieces[:lead]
+    # Kept short, cut between words, not inside one -- nor after "and" or "the".
+    kept: list[str] = []
+    for piece in pieces:
+        if len("-".join([*kept, piece])) > 24:
+            while len(kept) > 1 and kept[-1] in _SMALL:
+                kept.pop()
+            break
+        kept.append(piece)
+    slug = "-".join(kept) or (pieces[0][:24] if pieces else "")
     if not slug or not slug[0].isalpha():
         slug = f"part-{slug}" if slug else "part"
     return slug
@@ -678,6 +702,7 @@ class _Document:
         part = _parts().get(kind) or {}
         given = (part.get("node") or {}).get("label") or kind
         made = {_slug(was) if was else "", kind, _slug(part.get("title") or kind), _slug(given)}
+        made |= MADE.get(kind, frozenset())
         stem = re.sub(r"-\d+$", "", identifier)
         if identifier not in made and stem not in made:
             return identifier

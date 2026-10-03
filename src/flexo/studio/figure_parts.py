@@ -912,9 +912,10 @@ GROUP_FIELDS = [
         "role",
         "Frame",
         "choice",
-        options=["container", "module"],
+        options=["layout", "container", "module"],
+        labels={"layout": "None", "container": "Frame", "module": "Module"},
         default="container",
-        hint="A module draws a titled frame around its shapes",
+        hint="Whether a frame is drawn round the shapes; a module's is named for them",
     ),
     SHADOW,
 ]
@@ -964,7 +965,10 @@ EDGE_FIELDS = [
 
 def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        _field("figure.id", "Name", "text"),
+        # The figure's name is its file's; what the file calls it is kept under More.
+        _field(
+            "figure.id", "Name in File", "text", hint="What the file calls the figure", more=True
+        ),
         _field(
             "figure.style", "Theme", "theme", options=catalog.get("themes", []), default="paper"
         ),
@@ -981,6 +985,7 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             "Width",
             "combo",
             options=["single-column", "double-column", "120mm", "180mm"],
+            labels={"single-column": "Single Column", "double-column": "Double Column"},
             default="double-column",
         ),
         _field("figure.font", "Font", "combo", options=catalog.get("fonts", [])),

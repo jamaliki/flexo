@@ -15,7 +15,9 @@ import json
 import mimetypes
 import queue
 import secrets
+import select
 import signal
+import socket
 import socketserver
 import sys
 import threading
@@ -33,6 +35,9 @@ from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
+LEAVE_GRACE = 2.5
+"""Seconds a window whose connection broke is still taken as there: back by then (a page
+reconnecting), its person never left."""
 FILE_TYPES = {
     "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf", ".ai"),
     "figure": (".yaml", ".yml", ".json"),
@@ -210,7 +215,8 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/session":
             self._json(self._session())
         elif route == "/api/open":
-            doc = workspace.open(_one(query, "file"), (query.get("kind") or [None])[0])
+            held = (query.get("held") or [""])[0] == "1"
+            doc = workspace.open(_one(query, "file"), (query.get("kind") or [None])[0], held=held)
             self._json({**doc.info(), "catalog": doc.kind.catalog()})
         elif route == "/api/documents":
             self._json({"documents": workspace.documents()})
@@ -534,22 +540,41 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(b"event: hello\ndata: {}\n\n")
             self.wfile.flush()
+            quiet = 0
             while True:
                 try:
-                    event = listener.events.get(timeout=15)
+                    event = listener.events.get(timeout=1)
                 except queue.Empty:
-                    self.wfile.write(b": still here\n\n")
-                    self.wfile.flush()
+                    # A window gone without a word (crashed, killed) has closed its end:
+                    # seen within a second, not at the next heartbeat that fails.
+                    if self._hung_up():
+                        return
+                    quiet += 1
+                    if quiet >= 15:
+                        quiet = 0
+                        self.wfile.write(b": still here\n\n")
+                        self.wfile.flush()
                     continue
                 if event is None:
                     return
+                quiet = 0
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 self.wfile.write(f"data: {payload}\n\n".encode())
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
         finally:
-            self.workspace.leave(listener)
+            # A moment's break (the page reconnecting) does not make its person flicker out.
+            self.workspace.leave(listener, grace=LEAVE_GRACE)
+
+    def _hung_up(self) -> bool:
+        """Whether the page has closed its end of this connection (it sends nothing else)."""
+
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (OSError, ValueError):
+            return True
 
 
 def _one(query: dict[str, list[str]], key: str) -> str:

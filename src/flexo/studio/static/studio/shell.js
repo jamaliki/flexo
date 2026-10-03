@@ -44,7 +44,8 @@ function remembered(key, fallback) { try { return localStorage.getItem(`flexo-st
 function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`, value); } catch { /* private window */ } }
 
 // A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
-const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+// (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
+const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
 
 // The word on a document's saving: what is true of it and its file, briefly.
 function statusWords(session) {
@@ -549,7 +550,7 @@ export async function start() {
     clear(people,
       others.map((entry) => {
         const button = h("button.person", { type: "button", onclick: () => entry.file && workspace.goTo(entry.file, entry.where),
-          title: `${nameOf(entry.who)}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
+          title: `${nameOf(entry.who)}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${docName(entry.file)}` : ""}` },
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
@@ -618,13 +619,26 @@ export async function start() {
       finally { save.disabled = false; }
     };
     // The line a problem names, chosen and in view -- or, named past the last words (a bracket
-    // left open at the end), the last line with words before it.
+    // left open at the end), the last line with words before it. A bracket or quote never
+    // closed is named where the reading gave up: the line it was opened on is chosen.
+    const opened = (problem, lines, line) => {
+      const marks = /expected ',' or '\]'/.test(problem) ? ["[", "]"] : /expected ',' or '\}'/.test(problem) ? ["{", "}"]
+        : /quoted scalar|end of stream/.test(problem) ? ["\"", "'"] : null;
+      if (!marks) return line;
+      const count = (text, mark) => text.split(mark).length - 1;
+      for (let at = Math.min(line, lines.length); at >= 1; at -= 1) {
+        const text = lines[at - 1];
+        if (marks[0] === "[" || marks[0] === "{" ? count(text, marks[0]) > count(text, marks[1]) : count(text, marks[0]) % 2 || count(text, marks[1]) % 2) return at;
+      }
+      return line;
+    };
     const chooseLine = (problem) => {
       let line = Number((problem || "").match(/\bline (\d+)/)?.[1] || 0);
       if (!line || !shown) return;
       requestAnimationFrame(() => {
         const lines = area.value.split("\n");
         while (line > 1 && !(lines[line - 1] || "").trim()) line -= 1;
+        line = opened(problem || "", lines, line);
         const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
         area.focus({ preventScroll: true });
         area.setSelectionRange(start, start + (lines[line - 1] || "").length);
@@ -835,7 +849,8 @@ export function connectDialog(workspace) {
     h("ol.steps", {},
       h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND)),
       h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
-      h("li", {}, "Turn on ", h("b", {}, "Follow"), " to show what the agent is changing as it works.")),
+      // Follow shows in the top bar only once an agent is here: said so, not looked for in vain.
+      h("li", {}, "When an agent joins, turn on ", h("b", {}, "Follow"), " in the top bar to see what it is changing as it works.")),
     h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
     ui.field("Your Name", name, { hint: "Shown to others" }),
   ], actions: [{ label: "Done", kind: "primary" }] });
@@ -926,15 +941,22 @@ class SidePanel {
 export function palette(workspace) {
   if (document.querySelector(".palette")) return;
   const session = workspace.active;
+  const own = session ? session.commands() : [];
+  // Words being typed (on the slide, in a field): the Edit menu's Cut, Copy and Paste are for
+  // them, as the field's own ⌘X, ⌘C and ⌘V are (run once the palette has given the keys back).
+  const field = document.activeElement?.isContentEditable || /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "") ? document.activeElement : null;
+  const chosen = !field ? "" : field.isContentEditable ? String(getSelection()) : field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0);
+  const pasteWords = () => navigator.clipboard?.readText().then((text) => { if (text) document.execCommand("insertText", false, text); })
+    .catch(() => toast("Paste with ⌘V: the studio may not read the clipboard here.", { icon: "paste", seconds: 3 }));
+  // The document's commands first, then the studio's; places to go (a deck's slides, other
+  // documents) last, and all of them: none is left out of a long list.
   const commands = [
-    ...(session ? session.commands() : []),
-    ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${file}`, run: () => workspace.activate(file) })),
-    ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),
-    ...[
-      { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
-      { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
-      { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
-    ].filter((item) => offers(workspace, item.kind)),
+    ...own.filter((command) => !command.later),
+    ...(field ? [
+      { icon: "cut", label: "Cut", keys: "⌘X", disabled: !chosen, hint: chosen ? "" : "Choose the words first", run: () => document.execCommand("cut") },
+      { icon: "copy", label: "Copy", keys: "⌘C", disabled: !chosen, hint: chosen ? "" : "Choose the words first", run: () => document.execCommand("copy") },
+      { icon: "paste", label: "Paste", keys: "⌘V", run: pasteWords },
+    ] : []),
     // The Edit menu's, by name: greyed with nothing to undo, as the menu's are.
     ...(session ? [
       { icon: "undo", label: "Undo", keys: "⌘Z", disabled: !session.past.length, hint: session.past.length ? session.said(session.past[session.past.length - 1]).text : "Nothing to undo", run: () => workspace.command("undo") },
@@ -945,6 +967,14 @@ export function palette(workspace) {
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
+    ...[
+      { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
+      { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
+      { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+    ].filter((item) => offers(workspace, item.kind)),
+    ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${docName(file)}`, run: () => workspace.activate(file) })),
+    ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),
+    ...own.filter((command) => command.later),
   ];
   const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });
   input.spellcheck = false;
@@ -954,17 +984,19 @@ export function palette(workspace) {
   // A command is found by its name: the words typed in it, at a word's start best; each
   // word typed starting one of its words; or the first letters of its words ("ns", New
   // Slide). What it says of itself counts only for words typed whole. Lower ranks
-  // higher, and those alike keep the list's order (Export's PDF, PowerPoint, Images);
-  // null when it is not found.
+  // higher: a label starting with what is typed, then a word of it starting so, then a word
+  // holding it; those alike keep the list's order (Export's PDF, PowerPoint, Images; New
+  // Slide's layouts; what is typed in before what may be added) -- never their length. Null
+  // when it is not found.
   const wordsOf = (text) => text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const score = (command, query) => {
     const label = command.label.toLowerCase(), names = wordsOf(label), said = wordsOf((command.hint || "").toLowerCase());
     const at = label.indexOf(query);
     const starts = at === 0 || /[^\p{L}\p{N}]/u.test(label[at - 1] ?? "");
-    if (at >= 0 && starts) return -20 + at * 0.1;
+    if (at >= 0 && starts) return at === 0 ? -30 : -20;
     // Inside a word, a few letters are as often chance ("cut" in Shortcuts) as meant; more
     // ("point" in PowerPoint) are meant.
-    if (at >= 0 && query.length > 3) return -10 + at * 0.1;
+    if (at >= 0 && query.length > 3) return -10;
     const typed = wordsOf(query);
     if (typed.every((word) => names.some((name) => name.startsWith(word)))) return 0;
     if (typed.every((word) => names.some((name) => name.startsWith(word)) || said.some((name) => name.startsWith(word)))) return 10;
@@ -982,8 +1014,9 @@ export function palette(workspace) {
   };
   const render = () => {
     const query = input.value.trim().toLowerCase();
-    shown = query ? commands.map((command) => [score(command, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
-    shown = shown.slice(0, 60);
+    // A place to go (a slide) found as well as a command, after it: "slide" is New Slide first.
+    const ranked = (command) => { const found = score(command, query); return found === null ? null : found + (command.later ? 15 : 0); };
+    shown = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     index = Math.min(index, Math.max(0, shown.length - 1));
     clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
       command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),

@@ -180,18 +180,20 @@ class Doc:
             else:
                 known = self.history.get(base)
                 start = json.loads(known) if known is not None else self.document
-                merged = self._mended(merge3(start, self.document, document, notes))
+                merged = self._mended(merge3(start, self.document, document, notes), notes, start)
             others = self.author_since(base, who)
             result = self._become(merged, who, client)
         self._tell(notes, who, client, others)
         return result
 
-    def _mended(self, merged: Any) -> Any:
+    def _mended(self, merged: Any, notes: list, base: Any) -> Any:
         """Two edits merged, put right by the kind where they meet badly (a line kept to a
-        shape the other side deleted): a kind that knows how has ``mended``."""
+        shape the other side deleted; a paragraph typed in kept beside the list the other
+        side made of it): a kind that knows how has ``mended``, told the merge's ``notes``
+        (and leaving out those it settled) and its ``base``."""
 
         mend = getattr(self.kind, "mended", None)
-        return mend(merged) if mend is not None else merged
+        return mend(merged, notes, base) if mend is not None else merged
 
     def author_since(self, base: int, who: dict[str, Any]) -> dict[str, Any] | None:
         """Who other than ``who`` last changed the document since version ``base``."""
@@ -396,7 +398,7 @@ class Doc:
             self.problem = None
             base = self.on_disk if self.on_disk is not None else self.document
             notes: list = []
-            merged = self._mended(merge3(base, self.document, found, notes))
+            merged = self._mended(merge3(base, self.document, found, notes), notes, base)
             self.on_disk = found
             self.disk_text = text
             self.exists = True
@@ -668,7 +670,12 @@ class Workspace:
                 break
         return found
 
-    def open(self, name: str, kind: str | None = None) -> Doc:
+    def open(self, name: str, kind: str | None = None, *, held: bool = False) -> Doc:
+        """The document ``name``, opened if it is not (as ``kind``, if its file does not say).
+        ``held``: a page holds it already (open before the studio started again) -- a file
+        gone meanwhile is not made anew from its kind: it is moved or deleted, and the page's
+        document is written there again."""
+
         path = self.path(name)
         relative = unicodedata.normalize("NFC", self.relative(path))
         with self.lock:
@@ -688,6 +695,9 @@ class Workspace:
                 reopened = False
             if doc is None:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
+                if held and not doc.exists:
+                    doc.saved = doc.version  # nothing of its kind's own is written there
+                    doc.problem = f"{doc.name} was moved or deleted. Saving writes it again."
                 self.docs[relative] = doc
         if reopened:
             self.broadcast({"type": "reopened", "file": doc.name, "kind": doc.kind.name})
@@ -855,12 +865,23 @@ class Workspace:
             self.listeners[client] = listener
         return listener
 
-    def leave(self, listener: Listener) -> None:
+    def leave(self, listener: Listener, *, grace: float = 0.0) -> None:
+        """A window gone. Where a person is goes with their last window -- after ``grace``
+        seconds, if one is back by then (a page reconnecting), never."""
+
         with self.lock:
             if self.listeners.get(listener.client) is listener:
                 del self.listeners[listener.client]
-            # Where a person is goes with their last window.
-            person = listener.who.get("id") or listener.client
+        person = listener.who.get("id") or listener.client
+        if grace <= 0:
+            self._gone(person)
+            return
+        timer = threading.Timer(grace, self._gone, args=(person,))
+        timer.daemon = True
+        timer.start()
+
+    def _gone(self, person: str) -> None:
+        with self.lock:
             if person in self.presence and not any(
                 other.who.get("id") == person for other in self.listeners.values()
             ):

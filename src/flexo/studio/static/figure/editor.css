@@ -7,6 +7,14 @@
 .fig-split:hover, .fig-split.dragging { background: var(--accent-line); }
 .fig-center { position: relative; min-width: 0; min-height: 0; }
 .fig-inspector { border-left: 1px solid var(--line); }
+/* Narrow, the shapes' list lies over the figure while it is opened, and the inspector takes
+   less room (figure/editor.js). */
+.fig.narrow, .fig.narrow.wide { grid-template-columns: minmax(0, 1fr) 280px; }
+.fig.narrow > .fig-split { display: none; }
+.fig.narrow > .fig-center { grid-column: 1; grid-row: 1; }
+.fig.narrow > .fig-inspector { grid-column: 2; grid-row: 1; }
+.fig.narrow > .fig-left { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(272px, 80%); background: var(--panel); box-shadow: var(--shadow-2); visibility: hidden; }
+.fig.narrow.list-open > .fig-left { visibility: visible; }
 
 /* Shapes and Source: the left panel's own tabs (the studio's document tabs are .bar .tab). */
 .fig-left .tabs { display: flex; gap: 2px; }

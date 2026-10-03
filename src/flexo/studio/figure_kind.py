@@ -74,7 +74,7 @@ class FigureKind:
     title = "Figure"
     static = Path(__file__).parent / "static" / "figure"
 
-    def mended(self, document: object) -> object:
+    def mended(self, document: object, notes: list | None = None, base: object = None) -> object:
         """A figure two edits were merged into, with no line left naming a shape gone."""
 
         from flexo.studio.figure_edit import mend

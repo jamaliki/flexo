@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 
 from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
-from flexo.outline import glyph_outline, shape
+from flexo.outline import glyph_outline, shape, underline
 from flexo.svg import INKSCAPE_NS, SVG_NS, inkscape_attr, number, svg_tag
 
 SYNTHETIC_SLANT = 0.25
@@ -196,3 +196,18 @@ def _text(parent: ET.Element, text: Text) -> None:
             path = ET.SubElement(holder, svg_tag("path"), {"d": path_data(outline)})
             if run.fill != text.fill:
                 path.set("fill", run.fill)
+            if run.link:
+                # Underlined, as the slide and the PDF have it.
+                left, top, width, thickness = underline(run)
+                rule = ET.SubElement(
+                    holder,
+                    svg_tag("rect"),
+                    {
+                        "x": number(left),
+                        "y": number(top),
+                        "width": number(width),
+                        "height": number(thickness),
+                    },
+                )
+                if run.fill != text.fill:
+                    rule.set("fill", run.fill)

@@ -779,6 +779,37 @@ def test_the_panel_b_formulas_clear_both_their_run_and_their_riser() -> None:
             )
 
 
+def test_a_decisions_answers_sit_by_it_and_clear_of_every_box() -> None:
+    from flexo.orient import wrapped
+    from flexo.routing.labels import TOUCH, label_box
+
+    with Figure("assay") as figure, figure.row("steps") as row:
+        purify = row.terminal("purify", label="Purify CA")
+        mix = row.block("mix", label="Mix CA with IP6", input=purify)
+        stain = row.block("stain", label="Negative-stain EM", input=mix)
+        check = row.decision("check", label="Tubes formed?", input=stain)
+        grids = row.terminal("grids", label="Cryo-EM grids")
+        movies = row.block("movies", label="Collect movies", input=grids)
+        motion = row.block("motion", label="Motion correction", input=movies)
+        row.block("refine", label="3D refinement", input=motion)
+        figure.connect(check, grids, label="yes")
+        figure.connect(check, mix, label="no")
+    compiled = compile_figure(wrapped(figure.spec))
+    nodes = compiled.fitted.nodes
+    boxes = [node.bounds for node in nodes if node.measured.spec.kind != "decision"]
+    decision = next(node.bounds for node in nodes if node.measured.spec.id == "steps.check")
+    captions = {
+        edge.spec.label[0].text: label_box(edge.label_position, edge.label_metrics)
+        for edge in compiled.routed.edges
+        if edge.label_metrics is not None
+    }
+    # "yes" by the corner of the diamond it leaves, not a line's length away; and no
+    # caption touching a box.
+    assert _rect_gap(captions["yes"], decision) < 4.0
+    for caption in captions.values():
+        assert min(_rect_gap(caption, box) for box in boxes) >= TOUCH - 1e-6
+
+
 def _rect_gap(first: Rect, second: Rect) -> float:
     """Nearest distance between two axis-aligned rectangles, 0 if they touch."""
 

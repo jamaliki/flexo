@@ -540,6 +540,11 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
         character = source[index]
         if character in "_^" and mode == "math":
             argument, index = _argument(source, index + 1)
+            if character == "^" and argument.strip() in {"\\circ", "\\degree"}:
+                # ``^\circ`` is a degree: the degree sign, which stands high of itself, not a
+                # ring operator made small.
+                runs.append(TextRun("°", weight, False, shift))  # type: ignore[arg-type]
+                continue
             script = "sub" if character == "_" else "super"
             _read(argument, runs, shift=script, mode=mode, weight=weight)
             continue

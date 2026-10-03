@@ -224,12 +224,14 @@ def render_runs(
             run = line.runs[run_index]
             shifted = run.baseline_shift != "normal"
             step = -back.get(run_index, 0.0) + restore.get(run_index, 0.0)
-            # A link wraps its words in <a>, painted in the accent so it reads as one.
+            # A link wraps its words in <a>, painted in the accent and underlined so it
+            # reads as one by more than its colour.
             holder = element(text, "a", href=run.link) if run.link else text
             span = element(
                 holder,
                 "tspan",
                 x=x if position == 0 else None,
+                text__decoration="underline" if run.link else None,
                 fill=run_colour(run, palette),
                 data__flexo__fill=run_role(run),
                 dx=number(step) if run_index in back or run_index in restore else None,

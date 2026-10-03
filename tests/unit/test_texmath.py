@@ -521,6 +521,7 @@ def test_maths_in_bold_words_is_regular_all_of_it() -> None:
         (r"\sqrt{x^2+1}", "√(x² + 1)"),
         (r"\int_0^\infty e^{-x}\,dx", "∫₀^∞ e^(\u2212x) dx"),
         (r"\Delta G = -RT \ln K", "ΔG = \u2212RT ln K"),
+        (r"\Delta G^\circ_{298} = 37^{\circ}", "ΔG°₂₉₈ = 37°"),
         (r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "(a, b; c, d)"),
     ],
 )
@@ -528,3 +529,37 @@ def test_a_formula_reads_as_one_line_of_words(source: str, said: str) -> None:
     from flexo.texmath import linear
 
     assert linear(source) == said
+
+
+def test_a_minus_is_as_long_as_the_plus_beside_it() -> None:
+    from flexo.texmath import Box, GlyphItem, RuleItem
+
+    def ink(source: str) -> list[tuple[float, object]]:
+        def walk(box: Box, x: float) -> list[tuple[float, object]]:
+            found: list[tuple[float, object]] = []
+            for dx, _, item in box.items:
+                found += walk(item, x + dx) if isinstance(item, Box) else [(x + dx, item)]
+            return found
+
+        return walk(_set(source).box, 0.0)
+
+    # Figtree draws its minus five-sixths as long as its plus, so it read as a hyphen beside it.
+    _, (at, plus), _ = ink("a + b")
+    assert isinstance(plus, GlyphItem)
+    left, right, _, _ = plus.face.extents(plus.gid)
+    _, (bar_at, bar), _ = ink("a - b")
+    assert isinstance(bar, RuleItem)
+    assert bar.width == pytest.approx((right - left) * 20.0)
+    assert bar_at == pytest.approx(at + left * 20.0)
+
+
+def test_a_degree_written_as_a_raised_ring_is_the_degree_sign_in_words_and_in_maths() -> None:
+    from flexo.texmath import GlyphItem
+
+    # In a line of words, as on a slide: the degree sign, not a small ring operator.
+    assert "".join(run.text for run in parse_label(r"$\Delta G^\circ = -RT$")) == "ΔG° = \u2212RT"
+    # Laid out, it follows its letter on the line as a prime does, at the letter's size.
+    glyphs = [item for _, _, item in _set(r"\frac{\Delta G^\circ}{RT}").box.items]
+    glyphs = [item for item in glyphs if isinstance(item, GlyphItem)]
+    degree = next(item for item in glyphs if item.face.hb.glyph_to_string(item.gid) == "degree")
+    assert degree.size == glyphs[0].size

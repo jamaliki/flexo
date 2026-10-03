@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import zlib
 from pathlib import Path
 
 import pytest
@@ -223,10 +225,40 @@ def test_links_are_clickable_in_every_format(tmp_path: Path) -> None:
     with Figure("linked") as figure:
         figure.block("b", label="See [the paper](https://arxiv.org/abs/1706.03762)")
     outputs = flexo.build(figure, tmp_path, formats=("editable", "portable", "pdf")).outputs
-    assert '<a href="https://arxiv.org/abs/1706.03762">' in outputs.editable_svg.read_text()
-    assert 'href="https://arxiv.org/abs/1706.03762"' in outputs.portable_svg.read_text()  # type: ignore[union-attr]
+    editable = outputs.editable_svg.read_text()
+    assert '<a href="https://arxiv.org/abs/1706.03762">' in editable
+    portable = outputs.portable_svg.read_text()  # type: ignore[union-attr]
+    assert 'href="https://arxiv.org/abs/1706.03762"' in portable
     pdf = outputs.pdf.read_bytes()  # type: ignore[union-attr]
     assert b"/Subtype /Link" in pdf and b"/URI (https://arxiv.org/abs/1706.03762)" in pdf
+    # A link is underlined in every format, as the slide's PowerPoint export underlines it.
+    assert 'text-decoration="underline"' in editable
+    link = portable[portable.index("<a href") : portable.index("</a>")]
+    assert re.search(r'<rect [^>]*height="0\.5" fill="#1a5d9b"', link)
+    assert any(re.search(rb"\d re f", stream) for stream in _streams(pdf))
+
+
+def _streams(pdf: bytes) -> list[bytes]:
+    found = re.findall(rb"stream\n(.*?)\nendstream", pdf, re.S)
+    return [zlib.decompress(body) for body in found if body[:1] == b"x"]
+
+
+def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    def spaces_and_wraps(label: str) -> tuple[int, int]:
+        with Figure("wrapped") as figure:
+            figure.root.block("b", label=label, width=80)
+        pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+        wraps = pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().count("\r\n")
+        return sum(stream.count(b" 3 Tr ") for stream in _streams(pdf)), wraps
+
+    # Each soft wrap is given back its space, laid invisibly at the end of the line.
+    assert spaces_and_wraps("Hexamers") == (0, 0)
+    spaces, wraps = spaces_and_wraps("Capsid hexamers assemble across a two-fold axis to build")
+    assert wraps >= 2 and spaces == wraps
 
 
 def test_a_drawn_formula_is_found_in_a_pdf_as_the_words_it_reads_as() -> None:

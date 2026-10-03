@@ -835,6 +835,14 @@ class _Parser:
             ):
                 prime += "".join(item.char for item in argument)  # y^{\prime}, as y'
                 continue
+            if token.value == "^" and [getattr(item, "char", None) for item in argument] in (
+                ["∘"],
+                ["°"],
+            ):
+                # ``^\circ`` is a degree: the degree sign, which stands high of itself, follows
+                # its letter as a prime does, not a ring operator made small and raised.
+                prime += "°"
+                continue
             if token.value == "^":
                 if sup is not None:
                     self.said("a symbol has two superscripts: group them, as x^{a b}")
@@ -1996,6 +2004,23 @@ class _Layout:
 
     # -- glyphs --
 
+    def minus(self, face: Face, gid: int, size: float) -> Box | None:
+        """A text face's minus drawn as long as its plus's bar, as a maths font's is: a face
+        for words often draws it shorter (Figtree's is five-sixths of its plus), and it then
+        reads as a hyphen beside a plus. None where it is as long already."""
+
+        plus = face.glyph("+")
+        if plus is None:
+            return None
+        left, right, _, _ = face.extents(plus)
+        own_left, own_right, bottom, top = face.extents(gid)
+        if right - left <= own_right - own_left + 0.01 or top <= bottom:
+            return None
+        box = Box(max(face.advance(gid), face.advance(plus)) * size, top * size, 0.0, single=True)
+        bar = RuleItem((right - left) * size, (top - bottom) * size)
+        box.items.append((left * size, bottom * size, bar))
+        return box
+
     def glyph(self, face: Face, gid: int, size: float, slant: bool = False) -> Box:
         left, right, bottom, top = face.extents(gid)
         advance = face.advance(gid)
@@ -2062,6 +2087,8 @@ class _Layout:
             face, slant = self.fonts.text_face(char, False, _REGULAR)
             gid = face.glyph(char)
             if gid is not None and not face.has_math:
+                if char == "−" and (minus := self.minus(face, gid, size)) is not None:
+                    return minus
                 return self.glyph(face, gid, size)
         # Operators, relations, delimiters and the rest: the maths font's, which grow.
         box = self.maths_glyph(char, style)

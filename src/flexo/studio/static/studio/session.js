@@ -108,6 +108,9 @@ export class Session {
     // where it was made, "Slide 3" say, and `where` is that place for the kind to go
     // to when it is undone or redone), or words alone.
     this.describe = () => null;
+    // Two edits merged here, put right by the kind where they meet badly (as the studio's
+    // kinds do with theirs): told the merge's notes (it leaves out those it settles) and base.
+    this.mended = (document) => document;
     link(workspace);
   }
 
@@ -169,6 +172,10 @@ export class Session {
     // it leaves the history.
     if (joins && same(top.before, after)) { this.past.pop(); this.lastMerge = null; }
     else {
+      // Others' changes come in since the run's last edit: the run goes on in a part of its
+      // own, so that undone it takes back these edits alone -- never folding theirs in.
+      if (joins && !same(top.after, before)) top.parts = [...(top.parts || [{ before: top.before, after: top.after }]), { before, after }];
+      else if (joins && top.parts) top.parts[top.parts.length - 1].after = after;
       if (joins) Object.assign(top, { after, at: now, said: null });
       else this.past.push({ before, after, at: now, label });
       if (this.past.length > 300) this.past.shift();
@@ -241,13 +248,22 @@ export class Session {
           this.emit("status");
         });
       }
-      this.document = merge3(entry[current], this.document, entry[target]);
+      this.document = this.travelOne(entry, target, current);
       from.pop();
       to.push(entry);
       moved = entry;
     }
     if (moved) this.travelled(moved);
     return null;
+  }
+
+  // One change taken back (or made again) on the document as it is now: a run made in parts
+  // part by part, the last first (or the first first), each by itself.
+  travelOne(entry, target, current) {
+    const parts = entry.parts || [entry];
+    let document = this.document;
+    for (const part of target === "before" ? [...parts].reverse() : parts) document = merge3(part[current], document, part[target]);
+    return document;
   }
 
   travelled(entry) {
@@ -284,7 +300,7 @@ export class Session {
 
   async push() {
     if (this.sending || this.resyncing || same(this.document, this.synced)) return;
-    const sent = this.document;
+    const sent = this.document, from = this.synced;
     this.sending = sent;
     this.emit("status");
     let result = null;
@@ -315,24 +331,28 @@ export class Session {
     if (result.restarted) this.resync();
     // The file is another kind of document now: it opens again in that kind's editor.
     else if (result.reopen) this.workspace.reopen?.(this.file, result.kind);
-    else this.accept(result.version, result.document, sent, result.who);
+    else this.accept(result.version, result.document, sent, result.who, from);
     this.emit("status");
   }
 
   // The server's answer to what was sent: keep edits made since, on top of it. `who` made
   // the changes it was merged with, if others did.
-  accept(version, document, sent, who = null) {
+  accept(version, document, sent, who = null, from = null) {
     if (version < this.version) return;
     const local = this.document;
+    // What was sent came back as it went though others changed it meanwhile: theirs were the
+    // same edit (a space both typed at one place), taken as one.
+    if (who && from && same(document, sent) && same(local, sent)) this.emit("absorbed", { base: from, incoming: document, before: local, who });
     const notes = [];
-    this.document = same(local, sent) ? document : merge3(sent, document, local, notes);
+    this.document = same(local, sent) ? document : this.mended(merge3(sent, document, local, notes), notes, sent);
     this.synced = document;
     this.version = version;
     this.ownVersion = Math.max(this.ownVersion, version);
     this.exists = true;
-    this.rebase(local);
     if (!same(this.document, local)) {
-      this.emit("change", { quiet: false, source: "remote", who });
+      // (`base` and `incoming`: what was merged with what was here, for an editor to carry its
+      // caret through the same merge.)
+      this.emit("change", { quiet: false, source: "remote", who, before: local, base: sent, incoming: document, merged: true });
       this.requestDraw();
     }
     this.kept(notes, who);
@@ -347,30 +367,19 @@ export class Session {
     if (event.client === this.workspace.client && event.version <= this.version) return;
     if (event.version <= this.version) return;
     if (this.sending) { this.lastRemote = event; return; }
-    const before = this.document;
+    const before = this.document, base = this.synced, merged = !same(before, base);
     const notes = [];
-    this.document = same(before, this.synced) ? event.document : merge3(this.synced, event.document, before, notes);
+    this.document = merged ? this.mended(merge3(base, event.document, before, notes), notes, base) : event.document;
     this.synced = event.document;
     this.version = event.version;
     this.exists = true;
-    this.rebase(before);
     if (!same(before, this.document)) {
-      this.emit("change", { quiet: false, source: "remote", who: event.who, before });
+      this.emit("change", { quiet: false, source: "remote", who: event.who, before, base, incoming: event.document, merged });
       this.requestDraw();
-    }
+    } else if (merged) this.emit("absorbed", { base, incoming: event.document, before, who: event.who });
     this.kept(notes, event.who);
     if (!same(this.document, this.synced)) this.schedulePush();
     this.emit("status");
-  }
-
-  // Others' changes come in (to `previous`, the document as it was) while a run of edits is
-  // open -- typing in one place, which goes on however long its pauses: the run's step is
-  // made as if theirs had come first, so undoing the run takes back these edits, not theirs.
-  rebase(previous) {
-    const top = this.past[this.past.length - 1];
-    if (!this.lastMerge || !top || top.apply || same(previous, this.document) || !same(top.after, previous)) return;
-    top.before = merge3(top.after, this.document, top.before);
-    top.after = this.document;
   }
 
   // What a merge here kept of this page's edits against another's (`who`): something they
@@ -400,7 +409,9 @@ export class Session {
     this.lastRemote = null;
     let info;
     try {
-      info = await this.workspace.api(this.workspace.url("/api/open", { file: this.file }));
+      // As the kind it is open as, and held here: a studio started again on a folder whose
+      // file has gone meanwhile makes nothing new of it -- this page's document is written back.
+      info = await this.workspace.api(this.workspace.url("/api/open", { file: this.file, kind: this.kind, held: "1" }));
     } catch (error) {
       this.resyncing = false;
       if (unreachable(error)) lost(this.workspace);
@@ -417,7 +428,8 @@ export class Session {
     if (info.kind !== this.kind) { this.resyncing = false; this.workspace.reopen?.(this.file, info.kind); return; }
     const restarted = info.instance !== this.instance;
     const local = this.document;
-    this.document = merge3(restarted ? this.written : this.synced, info.document, local);
+    // Its file gone, a studio started again has nothing of it: this page's document stands.
+    this.document = restarted && !info.exists ? local : merge3(restarted ? this.written : this.synced, info.document, local);
     this.synced = info.document;
     this.version = info.version;
     this.instance = info.instance;

@@ -201,7 +201,7 @@ def _reads_upward(figure: FigureSpec, under: dict[str, set[str]]) -> bool:
     return score > 0
 
 
-def wrapped(figure: FigureSpec, *, longest: int = 5) -> FigureSpec:
+def wrapped(figure: FigureSpec, *, longest: int = 5, back: bool | None = None) -> FigureSpec:
     """``figure`` with each long row or column folded onto two lines.
 
     A row of ``longest`` or more parts is set on two rows, read left to right
@@ -215,7 +215,9 @@ def wrapped(figure: FigureSpec, *, longest: int = 5) -> FigureSpec:
     than the line that carries it on (a loop back, as a flow chart's "no") turns
     at the end of the first line and runs back along the second, a snake, so that
     line is a short step down and nothing crosses it. Parts with nothing between
-    the two halves (a shelf of panels) keep the columns of a grid.
+    the two halves (a shelf of panels) keep the columns of a grid. ``back`` says
+    whether a flow's second line runs back (``True``) or on (``False``) whatever
+    the fold: for a figure whose lines cross the one way and not the other.
     """
 
     import math
@@ -245,7 +247,7 @@ def wrapped(figure: FigureSpec, *, longest: int = 5) -> FigureSpec:
         across = _crossing(group.children, at, under, pairs)
         last, then = _held(first[-1:], under), _held(second[:1], under)
         on = [(source, target) for source, target in across if source in last and target in then]
-        snake = bool(on) and len(across) > len(on)
+        snake = (bool(on) and len(across) > len(on)) if back is None else back
         lines = []
         for children in (first, tuple(reversed(second)) if snake else second):
             line = _fresh(f"{group.id}.line", taken)

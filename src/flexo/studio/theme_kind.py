@@ -275,8 +275,10 @@ class ThemeKind:
         *,
         into: Path | None = None,
     ) -> list[Path]:
-        # Never the theme's own name: exported beside it, it would replace it.
-        target = (into or base / "build") / f"{stem} (full).yaml"
+        # Never the theme's own name: exported beside it, it would replace it. Named plainly,
+        # as a person would: "Order queue full theme.yaml", not "Order queue.theme (full).yaml".
+        name = stem.removesuffix(".theme") or "theme"
+        target = (into or base / "build") / f"{name} full theme.yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
         from flexo.theme_files import dump_theme
 

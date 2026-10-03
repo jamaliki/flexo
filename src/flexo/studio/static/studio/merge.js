@@ -56,7 +56,7 @@ function mergeWords(base, ours, theirs, notes = null) {
     notes?.push({ rewritten: name, words: merged, typed: typed.trim() });
     return merged;
   }
-  return diff3(...words, wordsChunk).join("");
+  return diff3(...words, wordsChunk, true).join("");
 }
 
 const CLOSING = /^[.,;:!?)\]}\u201d\u2019]/;
@@ -124,21 +124,34 @@ function inserted(wasText, nowText) {
 
 const linesChunk = (base, ours, theirs, notes) => (base.length ? [mergeWords(base.join(""), ours.join(""), theirs.join(""), notes)] : [...ours, ...theirs]);
 function wordsChunk(base, ours, theirs) {
-  if (!base.length) return [...ours, ...theirs];
+  if (!base.length) {
+    // Words both put at one place (two people typing on at the same end): ours, then theirs,
+    // never run together into one word.
+    const joins = ours.length && theirs.length && isWord(ours[ours.length - 1]) && isWord(theirs[0]);
+    return joins ? [...ours, " ", ...theirs] : [...ours, ...theirs];
+  }
   // Words one side took away while the other typed among them: they go, and the typing stays.
   for (const [gone, typing] of [[ours, theirs], [theirs, ours]]) {
     const typed = gone.length ? null : inserted(base.join(""), typing.join(""));
     if (typed !== null) return [typed];
   }
-  // Letters both typed into one word, each in one place (two people typing on at one place,
-  // where their words run together): both kept, each where it was typed.
-  const was = [...base.join("")];
-  const mine = insertion(was, [...ours.join("")]), other = insertion(was, [...theirs.join("")]);
-  if (mine && other) {
-    const [[first, typed], [second, more]] = mine[0] <= other[0] ? [mine, other] : [other, mine];
-    return [was.slice(0, first).join("") + typed + was.slice(first, second).join("") + more + was.slice(second).join("")];
-  }
-  return [...theirs];
+  const merged = letters([...base.join("")], [...ours.join("")], [...theirs.join("")]);
+  return merged !== null ? [merged] : [...theirs];
+}
+
+// Two changes to the same words (arrays of letters), each in a place of its own (one typing
+// on just after what the other took away; two typing at one place), both made, letter by
+// letter; null where they overlap. At one place, letters that run on from the word before go
+// first (someone typing on in it), then the other's (ours first, if both or neither do).
+function letters(was, ours, theirs) {
+  const edits = [ours, theirs].map((now) => {
+    const [start, end] = ends(was, now);
+    return [start, was.length - end, now.slice(start, now.length - end).join("")];
+  });
+  const spaced = (edit) => (/^\s/.test(edit[2]) ? 1 : 0);
+  const [first, second] = [...edits].sort((a, b) => a[0] - b[0] || a[1] - b[1] || spaced(a) - spaced(b));
+  if (first[1] > second[0]) return null;
+  return was.slice(0, first[0]).join("") + first[2] + was.slice(first[1], second[0]).join("") + second[2] + was.slice(second[1]).join("");
 }
 
 function mergeMaps(base, ours, theirs, notes = null) {
@@ -325,7 +338,9 @@ function alike(first, second) {
 
 // The items of base both sides kept hold the merge together; between them, the side
 // that changed something has it, and `both` settles what both sides changed.
-function diff3(base, ours, theirs, both) {
+// What both put at one place alike is put there once -- but, with `spaces`, not a space both
+// typed there: two people starting words at one place, each their own.
+function diff3(base, ours, theirs, both, spaces = false) {
   const keysBase = base.map(key);
   const toOurs = matches(keysBase, ours.map(key));
   const toTheirs = matches(keysBase, theirs.map(key));
@@ -336,8 +351,9 @@ function diff3(base, ours, theirs, both) {
   let b = 0, o = 0, t = 0;
   for (const [ab, ao, at] of anchors) {
     const was = base.slice(b, ab), mine = ours.slice(o, ao), other = theirs.slice(t, at);
+    const twin = same(mine, other) && !(spaces && !was.length && mine.length && !mine.join("").trim());
     if (same(mine, was)) result.push(...other);
-    else if (same(other, was) || same(mine, other)) result.push(...mine);
+    else if (same(other, was) || twin) result.push(...mine);
     else result.push(...both(was, mine, other));
     if (ab < base.length) result.push(ours[ao]);
     b = ab + 1; o = ao + 1; t = at + 1;

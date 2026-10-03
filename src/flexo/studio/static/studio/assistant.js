@@ -5,7 +5,8 @@
 import { h, clear, icon, ui } from "./ui.js";
 
 // A document by its name, as its tab says it: "talk", not "talk.yaml".
-const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+// (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
+const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
 
 const SUGGESTIONS = {
   deck: ["Tighten the wording on this slide", "Add a slide that explains the method with a figure", "Make the whole deck shorter and punchier"],

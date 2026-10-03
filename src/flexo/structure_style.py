@@ -340,6 +340,8 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 ("surface", "layers", "mesh", "slice"),
                 labels={"surface": "Surface", "layers": "Layers", "mesh": "Mesh", "slice": "Slice"},
             ),
+            # Left empty, the level is the one the map's depositors recommend (``placeholder``:
+            # what an empty field means, shown in it when the look gives no value of its own).
             _number(
                 "map.sigma",
                 "Sigma Level",
@@ -347,8 +349,10 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 step=0.5,
                 hint="Standard deviations above the mean",
                 unit="σ",  # noqa: RUF001
-            ),
-            _number("map.level", "Absolute Level", step=0.01, hint="In the map's units"),
+            )
+            | {"placeholder": "Recommended"},
+            _number("map.level", "Absolute Level", step=0.01, hint="In the map's units")
+            | {"placeholder": "Recommended"},
             _choice(
                 "map.finish",
                 "Finish",
@@ -384,7 +388,8 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 hint="In ångströms from the model; 0 is off",
                 unit="Å",
             ),
-            _words("map.zone", "Close-Up", "A selection, such as resi 57+102"),
+            _words("map.zone", "Close-Up", "A selection, such as resi 57+102")
+            | {"placeholder": "The whole map"},
             _choice(
                 "map.context",
                 "Rest of Map",

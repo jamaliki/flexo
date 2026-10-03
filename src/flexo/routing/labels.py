@@ -352,6 +352,10 @@ def _candidates(
     return candidates
 
 
+TOUCH = 1.0
+"""How far (points) a caption keeps from a component it would otherwise touch."""
+
+
 def _price(
     box: Rect,
     solids: list[Rect],
@@ -360,7 +364,12 @@ def _price(
     canvas: Rect,
 ) -> float:
     cost = 0.0
-    for rect in (*solids, *placed):
+    # A caption touching a box's edge reads as part of the box: it keeps a hair off.
+    near = box.inflated(TOUCH)
+    for rect in solids:
+        if rect.intersects(near, strict=True):
+            cost += OVERLAP
+    for rect in placed:
         if rect.intersects(box, strict=True):
             cost += OVERLAP
     for line in lines:

@@ -186,9 +186,12 @@ export const ui = {
       iconName ? icon(iconName) : null, label ? h("span.btn-label", {}, label) : null);
   },
 
+  // A note too long to sit beside its name on a narrow panel goes under it, from the left,
+  // rather than wrapping raggedly at the right.
   field(label, control, { hint, inline } = {}) {
+    const long = typeof label === "string" && typeof hint === "string" && label.length + hint.length > 40;
     return h(`div.field${inline ? ".inline" : ""}`, {},
-      label ? h("label.label", {}, label, hint ? h("span.hint", {}, hint) : null) : null, control);
+      label ? h("label.label", {}, label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
@@ -224,11 +227,13 @@ export const ui = {
     if (key) input.dataset.key = key;
     const shown = (number) => (number === null || number === undefined ? "" : String(number));
     // Drawn again while it is typed in (keepFocus gives it the keys back), it keeps what is
-    // typed and not yet taken; what was taken shows the value as it is now (an undo, another's
-    // change), so leaving the field never puts an older value back.
+    // being typed, until it is done (Return, or leaving it) -- another's change meanwhile
+    // does not take it away; what was only stepped to (↑, ↓) or undone (keepFocus's
+    // `undone`) shows the value as it is now, so leaving it never puts an older value back.
     const was = key && document.activeElement?.dataset?.key === key ? document.activeElement : null;
-    const typed = typeof was?.value === "string" && (was.untaken?.() ?? true) ? was.value : null;
+    const typed = typeof was?.value === "string" && !was.undone && (was.typing || (was.untaken?.() ?? true)) ? was.value : null;
     input.value = typed ?? shown(value);
+    input.typing = typed !== null && Boolean(was?.typing);
     // The field's own unit typed after the digits ("12pt", "30 °") is the number.
     const read = () => {
       let text = input.value.trim().replace(",", ".");
@@ -257,6 +262,7 @@ export const ui = {
     const entered = () => (key ? entering.get(key) : origin);
     input.addEventListener("focus", () => { if (!key) origin ??= input.value; else if (!entering.has(key)) entering.set(key, input.value); });
     const commit = () => {
+      input.typing = false;
       const parsed = read();
       if (parsed === null) { input.classList.remove("invalid"); apply(null); return; }
       if (Number.isNaN(parsed)) { input.value = shown(applied); input.classList.remove("invalid"); say("Type a number"); return; }
@@ -274,6 +280,7 @@ export const ui = {
     }, 0));
     input.addEventListener("input", () => {
       hush();
+      input.typing = true;
       const parsed = read();
       input.classList.toggle("invalid", parsed !== null && Number.isNaN(parsed));
       // On its way to "12" a "1" is out of range: taken once it is in range, or when the field is left.
@@ -281,6 +288,7 @@ export const ui = {
     });
     const stepBy = (sign, big) => {
       hush();
+      input.typing = false;
       const now = read();
       const size = Number(step) || 1;
       let from = now !== null && !Number.isNaN(now) ? now : null;
@@ -695,8 +703,26 @@ function wrap(area, before, after, onInput) {
 function indentKeys(area) {
   let leaving = false;
   area.addEventListener("blur", () => { leaving = false; });
+  // An indent is the one the lines have (their least), else four spaces, as a code editor's.
+  const unitOf = (value) => {
+    const least = Math.min(...value.split("\n").map((line) => /^( *)\S/.exec(line)?.[1].length || 0).filter(Boolean));
+    return " ".repeat(least >= 2 && least <= 8 ? least : 4);
+  };
   area.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { leaving = true; return; }
+    // Return starts the next line at this one's indent, a level in after one that opens a
+    // block (ends in ":", "{", "[" or "("), as a code editor does.
+    if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing) {
+      leaving = false;
+      const { selectionStart: start, selectionEnd: end, value } = area;
+      const before = value.slice(value.lastIndexOf("\n", start - 1) + 1, start);
+      const indent = /^[ \t]*/.exec(before)[0] + (/[:{[(]\s*$/.test(before) ? unitOf(value) : "");
+      if (!indent) return;
+      event.preventDefault();
+      area.setRangeText(`\n${indent}`, start, end, "end");
+      area.dispatchEvent(new Event("input"));
+      return;
+    }
     if (event.key !== "Tab") { if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) leaving = false; return; }
     if (event.metaKey || event.altKey) return;
     // The web view moves focus for a plain Tab only: Ctrl-Tab is moved here.
@@ -705,9 +731,7 @@ function indentKeys(area) {
     event.preventDefault();
     const { selectionStart: start, selectionEnd: end, value } = area;
     const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-    // An indent is the one the lines have (their least), else four spaces, as a code editor's.
-    const least = Math.min(...value.split("\n").map((line) => /^( *)\S/.exec(line)?.[1].length || 0).filter(Boolean));
-    const unit = " ".repeat(least >= 2 && least <= 8 ? least : 4);
+    const unit = unitOf(value);
     if (start === end && !event.shiftKey) {
       area.setRangeText(unit, start, end, "end");
     } else {
@@ -1007,15 +1031,31 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
 const toasts = () => document.querySelector(".toasts") || document.body.appendChild(h("div.toasts"));
 
 // Nothing floats over a sheet, as on a Mac: a toast lies under its backdrop, dimmed with
-// the window (studio.css), and one said while a sheet is open waits there for it to close
-// before its time starts.
+// the window (studio.css), and its time stands still while any sheet is open -- one shown a
+// moment before a sheet opened is still there when it closes.
 const sheetOpen = () => Boolean(document.querySelector(".scrim:not(.palette-scrim)"));
+// Toasts stand over the foot of the document's own room when it marks one (`data-toast-area`:
+// a deck's stage, above its notes) -- not over the notes, the inspector or a menu (studio.css)
+// -- else at the foot of the window.
+function placeToasts(box) {
+  const area = [...(document.querySelectorAll?.("[data-toast-area]") || [])].find((node) => node.offsetParent !== null);
+  const room = area?.getBoundingClientRect();
+  if (room?.width) Object.assign(box.style, { left: `${room.left + room.width / 2}px`, bottom: `${Math.max(16, innerHeight - room.bottom + 16)}px` });
+  else Object.assign(box.style, { left: "", bottom: "" });
+}
 export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}) {
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
-  toasts().append(node);
+  const box = toasts();
+  placeToasts(box);
+  box.append(node);
   const fade = () => { node.style.transition = "opacity .3s"; node.style.opacity = "0"; setTimeout(() => node.remove(), 300); };
-  const wait = () => { if (sheetOpen()) setTimeout(wait, 250); else setTimeout(fade, seconds * 1000); };
-  wait();
+  let left = seconds * 1000;
+  const tick = () => {
+    if (!node.isConnected) return;
+    if (!sheetOpen()) left -= 250;
+    if (left <= 0) fade(); else setTimeout(tick, 250);
+  };
+  setTimeout(tick, 250);
   return node;
 }
 

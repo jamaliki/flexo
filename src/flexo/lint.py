@@ -325,6 +325,7 @@ def _caption_diagnostics(compilation: Compilation) -> list[Diagnostic]:
     """A connector caption drawn over a component, another caption, or a line."""
 
     from flexo.routing.labels import label_box
+    from flexo.routing.router import caption_solids
 
     routed = compilation.routed
     captions = [
@@ -348,7 +349,8 @@ def _caption_diagnostics(compilation: Compilation) -> list[Diagnostic]:
     diagnostics = []
     for index, (owner, box) in enumerate(captions):
         for node in solids:
-            if node.bounds.intersects(box, strict=True):
+            # A decision's diamond, not the box round it: its corners are free.
+            if any(rect.intersects(box, strict=True) for rect in caption_solids(node)):
                 diagnostics.append(
                     Diagnostic(
                         "routing.caption.overlap",
