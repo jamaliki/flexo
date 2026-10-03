@@ -13,6 +13,7 @@ export function keepFocus(container, render) {
   const active = document.activeElement;
   const key = active && container.contains(active) ? active.dataset?.key : null;
   const selection = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+  const caret = key && active.isContentEditable ? caretIn(active) : null;
   const scroll = container.scrollTop;
   render();
   container.scrollTop = scroll;
@@ -20,9 +21,31 @@ export function keepFocus(container, render) {
   const again = container.querySelector(`[data-key="${CSS.escape(key)}"]`);
   if (!again) return;
   again.focus({ preventScroll: true });
+  if (caret && again.isContentEditable) caretTo(again, caret);
   if (selection && "setSelectionRange" in again) {
     try { again.setSelectionRange(...selection); } catch { /* a field without a caret */ }
   }
+}
+
+// Where the caret is in a field of rich text, as counts of characters from its start;
+// and the caret put back there in another.
+function caretIn(field) {
+  const chosen = getSelection();
+  if (!chosen.rangeCount || !field.contains(chosen.anchorNode)) return null;
+  const upTo = (node, offset) => { const range = document.createRange(); range.selectNodeContents(field); range.setEnd(node, offset); return range.toString().length; };
+  return [upTo(chosen.anchorNode, chosen.anchorOffset), upTo(chosen.focusNode, chosen.focusOffset)];
+}
+function caretTo(field, [from, to]) {
+  const at = (count) => {
+    const walker = document.createTreeWalker(field, NodeFilter.SHOW_TEXT);
+    let left = count;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return [field, field.childNodes.length];
+  };
+  getSelection().setBaseAndExtent(...at(from), ...at(to));
 }
 
 // A drawing shown small (a thumbnail, a sample): its SVG in a shadow root, so it
