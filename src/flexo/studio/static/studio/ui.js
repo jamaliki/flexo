@@ -538,10 +538,12 @@ export function mathWords(tex) {
 
 // Words in flexo markup as they read: maths as words, emphasis, links and colours as plain words.
 export function readable(markup) {
-  return String(markup ?? "").replace(/\\\$/g, "\u0000")
+  // Escaped marks (\$ \* \` \]) are the marks themselves, held aside while the rest is read.
+  const held = { "\u0000": "$", "\u0001": "*", "\u0002": "`", "\u0003": "]" };
+  return String(markup ?? "").replace(/\\\$/g, "\u0000").replace(/\\\*/g, "\u0001").replace(/\\`/g, "\u0002").replace(/\\\](?=[({])/g, "\u0003")
     .replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g, (_, a, b, c) => mathWords(a ?? b ?? c))
     .replace(/\$(?!\s)([^$]+?)(?<!\s)\$(?!\d)/g, (_, tex) => mathWords(tex))
-    .replace(/\u0000/g, "$")
     .replace(/\[([^\]]+)\]\{[^}]+\}/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\*\*|\*|`/g, "");
+    .replace(/\*\*|\*|`/g, "")
+    .replace(/[\u0000-\u0003]/g, (mark) => held[mark]);
 }
