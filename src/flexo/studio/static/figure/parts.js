@@ -1484,7 +1484,7 @@ export function figureParts(host) {
       act({ do: "rename", id, to });
     }, 0));
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } });
-    return ui.field("ID", input, { hint: type === "group" ? "The group's name in the file" : "The shape's name in the file, used by its lines" });
+    return ui.field("Name in File", input, { hint: type === "group" ? "What the file calls the group" : "What the file calls the shape; its lines name it so" });
   }
   const advanced = (...content) => h("details.more.advanced", { open: openAdvanced, ontoggle: (event) => { openAdvanced = event.currentTarget.open; } },
     h("summary", {}, icon("chevron"), "Advanced"), h("div.inner.fields", {}, content));
@@ -1666,9 +1666,10 @@ export function figureParts(host) {
     return h("div.section", {}, h("div.section-title", {}, "Tips"),
       h("ul.how", {},
         h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one is added after it and connected to it."),
-        h("li", {}, h("b", {}, "Connect"), " (C): click the shape where the line starts, then the one where it ends."),
+        h("li", {}, h("b", {}, "Connect"), " (C): the line starts at the shape selected (with none, click where it starts); then click the shape where it ends."),
         h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
-        h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule."),
+        figure.nodes.some((node) => node.kind === "structure")
+          ? h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule.") : null,
         h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G).")),
       h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
         figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));

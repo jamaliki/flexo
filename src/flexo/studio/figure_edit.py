@@ -437,6 +437,9 @@ class _Document:
         node = self.node(identifier)
         if node is None or node.get("kind") == "attention" or self.node(source) is None:
             return None
+        # A decision's lines are its branches: a part after it is a branch of its own.
+        if self.node(source).get("kind") == "decision":
+            return None
         if any(
             source in (self.node_of(str(end)) for end in net.get("sources") or [])
             for net in self.nets

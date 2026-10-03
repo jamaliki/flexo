@@ -121,7 +121,8 @@ export class AssistantPanel {
       clear(this.list, h("div.chat-empty", {},
         h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "Works with you on the documents open here"))),
         state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
-        h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text)))));
+        // What to ask: only where Claude can be asked.
+        state.available ? h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text))) : null));
       return;
     }
     clear(this.list, state.transcript.map((item) => this.itemView(item)),

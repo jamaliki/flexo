@@ -346,9 +346,11 @@ class Doc:
             self.on_disk = found
             self.disk_text = text
             self.exists = True
+            # Changed on disk by something the studio doesn't know (an editor, a script):
+            # in the activity, "Another app edited slide 3".
             who = self.workspace.agent_on(self.name) or {
                 "id": "disk",
-                "name": "The file",
+                "name": "Another app",
                 "kind": "file",
             }
             unsaved = self.saved < self.version

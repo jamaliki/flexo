@@ -425,12 +425,17 @@ export function menu(anchor, items, { align = "start" } = {}) {
   for (const item of items) {
     if (item === "-") { node.append(h("div.menu-sep")); continue; }
     if (item.title) { node.append(h("div.menu-title", {}, item.title)); continue; }
+    // `show(on)`: what the item would act on, shown while it is under the pointer or keys.
+    const shown = item.show ? { onmouseenter: () => item.show(true), onmouseleave: () => item.show(false), onfocus: () => item.show(true), onblur: () => item.show(false) } : {};
     node.append(h(`button.menu-item${item.danger ? ".danger" : ""}`, { type: "button", role: "menuitem", disabled: Boolean(item.disabled),
-      onclick: () => { closeMenu(); item.run?.(); } },
+      onclick: () => { item.show?.(false); closeMenu(); item.run?.(); }, ...shown },
       item.icon ? icon(item.icon) : null,
       h("span.menu-text", {}, h("span", {}, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
       item.keys ? h("span.kbd", {}, item.keys) : null));
   }
+  // Closed any way, nothing stays shown.
+  const showing = items.filter((item) => item?.show);
+  if (showing.length) new MutationObserver((_, watch) => { if (!node.isConnected) { showing.forEach((item) => item.show(false)); watch.disconnect(); } }).observe(document.body, { childList: true });
   return place(node, anchor, align);
 }
 

@@ -17,10 +17,18 @@ export function colourOf(who) {
   return COLOURS[hash % COLOURS.length];
 }
 
+// Who someone is, in words: "You" to themselves (whatever they are called to others),
+// else their name, else what they are.
+let selfId = null;
+export function nameOf(who) {
+  if (who?.id && who.id === selfId) return "You";
+  return who?.name || (who?.kind === "agent" ? "An agent" : "Someone");
+}
+
 export function avatar(who, { size = 24, ring = false } = {}) {
   const agent = who?.kind === "agent";
-  const initials = agent ? null : String(who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  return h("span.avatar", { title: who?.name || "", style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
+  const initials = agent ? null : String(who?.id === selfId && !who?.name ? "You" : who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return h("span.avatar", { title: nameOf(who), style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
     agent ? icon("sparkle", { weight: "1.3" }) : initials);
 }
 
@@ -69,7 +77,11 @@ export class Workspace {
     this.client = Math.random().toString(36).slice(2, 10);
     let person = remembered("person", "");
     if (!person) { person = Math.random().toString(36).slice(2, 10); remember("person", person); }
-    this.me = { id: person, name: remembered("name", "You"), kind: "person" };
+    // Unnamed, a person is "You" to themselves and "Someone" to others (once, the name "You"
+    // was given to everyone unnamed, so others were shown as "You" too).
+    const named = remembered("name", "");
+    this.me = { id: person, name: named === "You" ? "" : named, kind: "person" };
+    selfId = person;
     this.sessions = new Map();
     this.order = [];
     this.active = null;
@@ -221,7 +233,7 @@ export class Workspace {
   }
 
   setName(name) {
-    this.me = { ...this.me, name: name || "You" };
+    this.me = { ...this.me, name: name || "" };
     remember("name", this.me.name);
     this.reportFocus(this.active?.file || null, null);
   }
@@ -506,7 +518,7 @@ export async function start() {
       icon(KIND_ICONS[session.kind] || "file"),
       h("span.tab-name", {}, docName(file)),
       session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: statusWords(session) }) : null,
-      here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
+      here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: nameOf(entry.who) }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
     }), h("button.tab-new", { type: "button", title: "New or open a document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
@@ -517,7 +529,7 @@ export async function start() {
     clear(people,
       others.map((entry) => {
         const button = h("button.person", { type: "button", onclick: () => entry.file && workspace.goTo(entry.file, entry.where),
-          title: `${entry.who.name}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
+          title: `${nameOf(entry.who)}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
@@ -526,7 +538,7 @@ export async function start() {
     followChip.classList.toggle("on", workspace.follow);
     const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
     clear(doing, working.map((entry) => h("button.doing", { type: "button", onclick: () => workspace.goTo(entry.file, entry.where) },
-      avatar(entry.who, { size: 18 }), h("b", {}, entry.who.name), h("span", {}, entry.doing), h("span.pulse"))));
+      avatar(entry.who, { size: 18 }), h("b", {}, nameOf(entry.who)), h("span", {}, entry.doing), h("span.pulse"))));
     renderTabs();
   };
 
@@ -772,7 +784,7 @@ export function askName(workspace, kind, suggestion) {
 }
 
 export function connectDialog(workspace) {
-  const name = ui.input({ value: workspace.me.name, onChange: (value) => workspace.setName(value.trim()) });
+  const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
   dialog({ title: "Work with Agents", body: [
     h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it's working and what it's doing, and you can keep editing at the same time."),
     h("ol.steps", {},
@@ -846,7 +858,7 @@ class SidePanel {
     const entries = [...this.workspace.activity].reverse();
     clear(this.activityList, entries.length ? entries.map((entry) => h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
       avatar(entry.who, { size: 22 }),
-      h("span.activity-text", {}, h("b", {}, entry.who?.name || "Someone"), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
+      h("span.activity-text", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
         h("span.activity-where", {}, [entry.file && docName(entry.file), entry.where?.label].filter(Boolean).join(" · "))),
       h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, Claude and other agents appear here."));
   }
