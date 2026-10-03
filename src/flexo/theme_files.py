@@ -51,7 +51,7 @@ from typing import Any
 
 import yaml
 
-from flexo.colour import keep_order
+from flexo.colour import Written
 from flexo.conventions import Conventions, parse_conventions
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.sketch import parse_sketch
@@ -238,8 +238,7 @@ def register_theme(source: str | Path | Mapping[str, Any], *, folder: Path | Non
         page = replace(page, **{key: normalize_colour(str(value)) if value else None})
     palette = base.palette
     if "palette" in settings:
-        palette = _palette_colours(settings["palette"])
-        keep_order(palette)
+        palette = Written(_palette_colours(settings["palette"]))
     tones = base.tones
     if "tones" in settings:
         tones = tone_rule(dict(settings["tones"]))
@@ -447,8 +446,7 @@ def register_palette(
         name = str(source)
         for existing in [key for key in CUSTOM_PALETTES if key.casefold() == name.casefold()]:
             del CUSTOM_PALETTES[existing]
-        CUSTOM_PALETTES[name] = _palette_colours(list(colours))
-        keep_order(CUSTOM_PALETTES[name])
+        CUSTOM_PALETTES[name] = Written(_palette_colours(list(colours)))
         return (name,)
     path = Path(source).expanduser()
     data = _read(path)

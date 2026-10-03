@@ -919,6 +919,16 @@ def resolve_style(
     return style
 
 
+def palette_order(style_name: str, palette: str | Sequence[str] | None = None) -> list[str]:
+    """The colours theme ``style_name`` takes its tones from under ``palette``, in the
+    order it takes them: written into a theme file in this order (``Written``), they are
+    the same tones, the same colours, in the same places."""
+
+    made = theme(style_name)
+    colours = made.palette if made.fixed_palette else _palette_argument(palette, made.palette)
+    return _usable(colours, made.page)
+
+
 def resolve_palette(style_name: str, palette: str | Sequence[str] | None = None) -> Palette:
     """The paint for theme ``style_name`` under ``palette``.
 
