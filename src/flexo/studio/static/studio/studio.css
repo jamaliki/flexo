@@ -266,7 +266,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .activity-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; color: var(--ink); }
 .activity-row:hover { background: var(--sunken); }
 .activity-text { display: grid; line-height: 1.4; }
-.activity-where { color: var(--ink-3); font-size: 11.5px; font-family: var(--mono); }
+.activity-where { color: var(--ink-3); font-size: 11.5px; }
 .activity-time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .times { color: var(--ink-3); }
 
