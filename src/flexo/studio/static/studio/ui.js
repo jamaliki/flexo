@@ -373,7 +373,7 @@ export function menu(anchor, items, { align = "start" } = {}) {
   for (const item of items) {
     if (item === "-") { node.append(h("div.menu-sep")); continue; }
     if (item.title) { node.append(h("div.menu-title", {}, item.title)); continue; }
-    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}`, { type: "button", role: "menuitem",
+    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}`, { type: "button", role: "menuitem", disabled: Boolean(item.disabled),
       onclick: () => { closeMenu(); item.run?.(); } },
       item.icon ? icon(item.icon) : null,
       h("span.menu-text", {}, h("span", {}, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
@@ -382,18 +382,56 @@ export function menu(anchor, items, { align = "start" } = {}) {
   return place(node, anchor, align);
 }
 
+// Below the anchor if it fits, else above; if neither, on the roomier side, scrolling --
+// never over the button that opened it.
 function place(node, anchor, align) {
   document.body.append(node);
   const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, bottom: anchor.y, top: anchor.y };
   const width = node.offsetWidth, height = node.offsetHeight;
+  const below = innerHeight - 8 - (box.bottom + 4), above = box.top - 4 - 8;
   let left = align === "end" ? box.right - width : box.left;
   let top = box.bottom + 4;
-  if (top + height > innerHeight - 8) top = Math.max(8, box.top - height - 4);
+  if (height > below) {
+    if (height <= above) top = box.top - height - 4;
+    else if (above > below) { node.style.maxHeight = `${above}px`; top = 8; }
+    else node.style.maxHeight = `${below}px`;
+    if (height > Math.max(above, below)) node.style.overflowY = "auto";
+  }
   left = Math.min(Math.max(8, left), innerWidth - width - 8);
   Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   openMenu = node;
+  // Keys work in it at once, as in a Mac menu: arrows move, Return chooses, Esc goes back.
+  returnTo = document.activeElement;
+  node.tabIndex = -1;
+  node.classList.add("fresh");
+  node.addEventListener("pointermove", () => node.classList.remove("fresh"), { once: true });
+  node.addEventListener("keydown", menuKeys);
+  const first = node.getAttribute("role") === "menu" ? null : focusables(node)[0];
+  (first || node).focus({ preventScroll: true });
   setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
   return node;
+}
+let returnTo = null;
+
+const focusables = (node) => [...node.querySelectorAll("button:not(:disabled), input, select, textarea, [tabindex='0']")].filter((item) => item.offsetParent !== null);
+
+function menuKeys(event) {
+  const node = event.currentTarget;
+  const items = node.getAttribute("role") === "menu" ? [...node.querySelectorAll(".menu-item:not(:disabled)")] : focusables(node);
+  const at = items.indexOf(document.activeElement);
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
+  const go = (index) => { event.preventDefault(); items[(index + items.length) % items.length]?.focus({ preventScroll: true }); };
+  if (event.key === "ArrowDown" || (event.key === "ArrowRight" && !typing)) go(at + 1);
+  else if (event.key === "ArrowUp" || (event.key === "ArrowLeft" && !typing)) go(at < 0 ? -1 : at - 1);
+  else if (event.key === "Home" && !typing) go(0);
+  else if (event.key === "End" && !typing) go(-1);
+  else if (event.key === "Tab") go(at + (event.shiftKey ? -1 : 1));
+  else if (event.key.length === 1 && !typing && !event.metaKey && !event.ctrlKey && /\S/.test(event.key)) {
+    // A letter goes to the next item that starts with it.
+    const next = [...items.slice(at + 1), ...items.slice(0, at + 1)].find((item) => item.textContent.trim().toLowerCase().startsWith(event.key.toLowerCase()));
+    if (next) { event.preventDefault(); next.focus({ preventScroll: true }); }
+  }
+  event.stopPropagation();
 }
 
 function outside(event) {
@@ -405,9 +443,13 @@ document.addEventListener("keydown", (event) => {
 }, true);
 
 export function closeMenu() {
+  const had = openMenu?.contains(document.activeElement);
   openMenu?.remove();
   openMenu = null;
   document.removeEventListener("pointerdown", outside, true);
+  // Focus goes back where it was, so keys go on to what they went to before.
+  if (had && returnTo?.isConnected) returnTo.focus({ preventScroll: true });
+  returnTo = null;
 }
 
 export function dialog({ title, body, actions = [], wide = false, onClose } = {}) {

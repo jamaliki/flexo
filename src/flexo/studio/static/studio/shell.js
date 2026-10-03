@@ -291,8 +291,19 @@ export async function start() {
   const docLeft = h("div.docbar-slot");
   const docRight = h("div.docbar-slot");
   const status = h("div.status", {}, h("span.dot"), h("span.status-text"));
-  const undo = ui.button("", () => workspace.active?.undo(), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
-  const redo = ui.button("", () => workspace.active?.redo(), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
+  // Undo and redo wait for edits still on their way (a figure's typing), so they take
+  // back the latest edit, not the one before it. Text being typed that is not yet in the
+  // document (a shape's label in its editor) is undone as text, by the field itself.
+  const ownUndo = () => document.activeElement?.closest?.(".fig-inline, [data-own-undo]");
+  const travel = async (way) => {
+    const session = workspace.active;
+    if (!session) return;
+    if (ownUndo()) { document.execCommand(way); return; }
+    await session.settled?.();
+    session[way]();
+  };
+  const undo = ui.button("", () => travel("undo"), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
+  const redo = ui.button("", () => travel("redo"), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
     { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
   const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
@@ -356,8 +367,8 @@ export async function start() {
   workspace.command = (name, arg) => {
     const session = workspace.active;
     switch (name) {
-      case "undo": session?.undo(); break;
-      case "redo": session?.redo(); break;
+      case "undo": travel("undo"); break;
+      case "redo": travel("redo"); break;
       case "save":
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
@@ -507,8 +518,9 @@ export async function start() {
         (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
     }
     else if (mod && event.altKey && event.code === "KeyZ") { event.preventDefault(); if (session && !past.disabled) historyMenu(past, session); }
-    else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
-    else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
+    else if (mod && key === "z" && ownUndo()) { /* the field's own undo */ }
+    else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); travel("undo"); }
+    else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); travel("redo"); }
     else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
   });
   addEventListener("beforeunload", () => { for (const session of workspace.sessions.values()) session.push(); });

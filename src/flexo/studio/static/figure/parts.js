@@ -247,6 +247,10 @@ export function figureParts(host) {
     queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
     run();
   }
+  // When every edit sent has come back: an undo waits for the typing before it.
+  async function idle() {
+    while (running || queue.length) await new Promise((done) => setTimeout(done, 20));
+  }
   async function run() {
     if (running) return;
     running = true;
@@ -1671,7 +1675,7 @@ export function figureParts(host) {
     get inline() { return inline; },
     get dragging() { return Boolean(drag?.started); },
     get justDragged() { return state.swallow; },
-    setModel, select, act, update, pointerdown, landing, land,
+    setModel, select, act, update, idle, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
     addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf,

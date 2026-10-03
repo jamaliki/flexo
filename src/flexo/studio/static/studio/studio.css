@@ -398,7 +398,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 @keyframes pop { from { opacity: 0; transform: translateY(-3px) scale(0.98); } }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 8px; border-radius: 5px; cursor: pointer; color: var(--ink); }
-.menu-item:hover, .menu-item.active { background: var(--accent-soft); }
+.menu-item:hover, .menu-item.active, .menu-item:focus { background: var(--accent-soft); outline: none; }
+/* A menu opened under the pointer highlights nothing until the pointer moves. */
+.menu.fresh .menu-item:hover:not(:focus) { background: transparent; }
+.menu:focus { outline: none; }
 .menu-item svg { width: 16px; height: 16px; color: var(--ink-2); flex: none; }
 .menu-item .menu-text { display: grid; }
 .menu-item .menu-hint { color: var(--ink-3); font-size: 11.5px; }
