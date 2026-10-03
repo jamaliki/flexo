@@ -621,13 +621,23 @@ export function connectDialog(workspace) {
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
+// Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
+const SHORTCUTS = [
+  ["General", [["⌘ K", "Command Palette"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
+    ["⌘ S", "Save (documents also save as you work)"], ["?", "Keyboard Shortcuts"]]],
+  ["Slides", [["N", "New Slide…"], ["⇧ ⌘ N", "New Slide in the Same Layout"], ["↑ ↓", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
+    ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
+  ["Objects on a Slide", [["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
+  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥  ⇧ ⇥", "Indent or Outdent an Item"],
+    ["⇥", "Next Title, Subtitle or Cell"], ["Esc", "Done"]]],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⌫", "Delete Shape"]]],
+];
+
 function shortcutsDialog() {
-  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").map((key) => h("span.kbd", {}, key))));
-  dialog({ title: "Keyboard Shortcuts", body: [h("div.shortcuts", {},
-    row("⌘ K", "Command palette"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo"), row("⇧ ⌘ Z", "Redo"), row("⌥ ⌘ Z", "Show history"),
-    row("⌘ S", "Save (documents also save automatically)"), row("↑ ↓", "Previous or next slide"), row("↩", "Edit the selection"),
-    row("Esc", "Deselect"), row("⌫", "Delete the selection"), row("⌘ D", "Duplicate slide"),
-    row("⌘ ↩", "Present"), row("?", "Keyboard shortcuts"))] });
+  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").filter(Boolean).map((key) => h("span.kbd", {}, key))));
+  dialog({ title: "Keyboard Shortcuts", wide: true, body: [h("div.shortcut-groups", {}, SHORTCUTS.map(([title, rows]) =>
+    h("div.shortcuts", {}, h("div.section-title", {}, title), rows.map(([keys, what]) => row(keys, what)))))] });
 }
 
 // -- the side panel: Claude and activity --------------------------------------------
