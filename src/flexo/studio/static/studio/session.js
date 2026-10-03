@@ -114,6 +114,10 @@ export class Session {
 
   // -- editing --
 
+  // The next change starts a step of its own in the history, whatever its `merge`: a
+  // change of look among typing.
+  step() { this.lastMerge = null; }
+
   // Change the document: `mutate` edits a copy in place. `merge` names a run of
   // edits (typing in one field) that undo takes back together; `quiet` says the
   // control that made the change already shows it; `label` says what it did, for the
