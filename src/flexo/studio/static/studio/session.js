@@ -154,8 +154,9 @@ export class Session {
   // Change the document: `mutate` edits a copy in place. `merge` names a run of
   // edits (typing in one field) that undo takes back together; `quiet` says the
   // control that made the change already shows it; `label` says what it did, for the
-  // history (else the kind's `describe` says it).
-  change(mutate, { merge = null, quiet = false, label = null } = {}) {
+  // history (else the kind's `describe` says it); `hold` joins the run of edits however long
+  // the pauses in it (words typed in one place, from opening to done, are one step).
+  change(mutate, { merge = null, quiet = false, label = null, hold = false } = {}) {
     const before = this.document;
     const next = structuredClone(before);
     const result = mutate(next);
@@ -163,7 +164,7 @@ export class Session {
     if (same(after, before)) return;
     const now = Date.now();
     const top = this.past[this.past.length - 1];
-    const joins = merge && top && this.lastMerge?.key === merge && now - this.lastMerge.at < 1500;
+    const joins = merge && top && this.lastMerge?.key === merge && (hold || now - this.lastMerge.at < 1500);
     // A run of edits that ends where it began (a letter typed and deleted) did nothing:
     // it leaves the history.
     if (joins && same(top.before, after)) { this.past.pop(); this.lastMerge = null; }
@@ -185,10 +186,10 @@ export class Session {
   // again (it may answer with a promise), and `label`, `place` and `where` say it. With
   // the same `merge` as the change before, soon after, it joins that one when that one's
   // `absorb(entry)` takes it.
-  record(entry, { merge = null } = {}) {
+  record(entry, { merge = null, hold = false } = {}) {
     const now = Date.now();
     const top = this.past[this.past.length - 1];
-    if (merge && top?.apply && top.merge === merge && now - top.at < 1500 && top.absorb?.(entry)) top.at = now;
+    if (merge && top?.apply && top.merge === merge && (hold || now - top.at < 1500) && top.absorb?.(entry)) top.at = now;
     else this.past.push({ ...entry, before: this.document, after: this.document, at: now, merge });
     if (this.past.length > 300) this.past.shift();
     this.future = [];

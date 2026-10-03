@@ -289,7 +289,7 @@ export function figureParts(host) {
       redrawing.set(target.id, { element: moleculeOf(target.id), since: Date.now() });
     }
   }
-  function act(action, { merge = null, select: choose = true, then = null, failed = null } = {}) {
+  function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null } = {}) {
     redraws(action);
     // Typing in one field: only its latest words wait to be sent.
     if (merge) {
@@ -297,7 +297,7 @@ export function figureParts(host) {
       if (waiting >= 0) queue.splice(waiting, 1);
       if (action.do === "update") typed.set(merge, action.values);
     }
-    queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
+    queue.push({ action, merge, hold, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
     run();
   }
   // When every edit sent has come back: an undo waits for the typing before it.
@@ -312,7 +312,7 @@ export function figureParts(host) {
         const job = queue.shift();
         let result;
         try {
-          result = await host.run(job.action, { merge: job.merge, label: job.label });
+          result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label });
         } catch (error) {
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           if (job.merge) typed.delete(job.merge);
@@ -331,7 +331,7 @@ export function figureParts(host) {
       running = false;
     }
   }
-  const update = (target, values, merge = null) => act({ do: "update", target, values }, { merge, select: false });
+  const update = (target, values, merge = null, hold = false) => act({ do: "update", target, values }, { merge, hold, select: false });
 
   // -- adding --
   function placement() {
@@ -1326,7 +1326,7 @@ export function figureParts(host) {
     now.live = setTimeout(() => {
       if (inline !== now || now.field.value === now.sent) return;
       now.sent = now.field.value;
-      update({ type: now.kind, id: now.id }, { label: now.sent }, now.merge);
+      update({ type: now.kind, id: now.id }, { label: now.sent }, now.merge, true);
     }, 300);
   }
   // The word of the drawn words under a point, found in the words as written.
@@ -1420,15 +1420,27 @@ export function figureParts(host) {
     Object.assign(inline.box.style, { left: `${x(middle - width / 2)}px`, top: `${y(top)}px`, width: `${width}px`, minWidth: "" });
     Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: style.fontFamily, fontWeight: style.fontWeight,
       color: style.fill && style.fill !== "none" ? style.fill : "", textAlign: "center" });
-    // Its formatting bar sits over the part, clear of its edge and the lines that leave it --
-    // under it when there is no room above -- and over the slide, not off its edge.
+    // Wider than its shape until the drawing catches up, the words lie on the page's paper,
+    // not across the parts beside it.
+    const spills = inline.kind === "node" && width > where.width + 2;
+    inline.box.classList.toggle("spills", spills);
+    inline.box.style.background = spills ? getComputedStyle(host.overlay).backgroundColor || "" : "";
+    // Its formatting bar sits over the part, clear of its edge and the lines that leave it, or
+    // under it when that covers fewer of the parts around it or there is no room above -- and
+    // over the slide, not off its edge.
     const tools = inline.box.querySelector(".markup-tools");
     const page = host.overlay.querySelector("svg")?.getBoundingClientRect() || outer;
     if (tools) {
       Object.assign(tools.style, { marginLeft: "0px", top: "", bottom: `calc(100% + ${Math.max(8, top - part.top + 6)}px)` });
       let bar = tools.getBoundingClientRect();
-      if (bar.top < page.top - 20) {
-        const box = inline.box.getBoundingClientRect();
+      const box = inline.box.getBoundingClientRect();
+      const under = { left: bar.left, right: bar.right, top: part.bottom + 6, bottom: part.bottom + 6 + bar.height };
+      const others = (model()?.nodes || []).filter((node) => node.id !== inline.id).map((node) => host.box(node.id)).filter(Boolean)
+        .map((other) => ({ left: outer.left + other.left, top: outer.top + other.top, right: outer.left + other.left + other.width, bottom: outer.top + other.top + other.height }));
+      const covers = (rect) => others.reduce((sum, other) => sum
+        + Math.max(0, Math.min(rect.right, other.right) - Math.max(rect.left, other.left)) * Math.max(0, Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top)), 0)
+        + (rect.top < page.top - 20 || rect.bottom > page.bottom + 20 ? 1e9 : 0);
+      if (covers(under) < covers(bar)) {
         Object.assign(tools.style, { bottom: "auto", top: `calc(100% + ${Math.max(8, part.bottom - box.bottom + 6)}px)` });
         bar = tools.getBoundingClientRect();
       }
@@ -1444,7 +1456,7 @@ export function figureParts(host) {
     inline = null;
     box.remove();
     // Drawn as it was typed, the last words join that step; else one step of their own.
-    if (keep && field.value !== sent) update({ type: kind, id }, { label: field.value }, sent === original ? null : merge);
+    if (keep && field.value !== sent) update({ type: kind, id }, { label: field.value }, sent === original ? null : merge, true);
     host.settled?.();
   }
   // -- keys --
@@ -1669,8 +1681,9 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, isRoot ? null : crumbs(group.id),
         h("div.insp-row", {},
-          titleBlock(glyph(["row", "column"].includes(drawnKind(group)) ? drawnKind(group) : groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
-            `${counted(count, "shape")} · ${titled(drawnKind(group) || "column")}`),
+          titleBlock(glyph(["row", "column"].includes(writtenKind(group)) ? writtenKind(group) : groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
+            // As its Layout pop-up says it: written so (the note under it says how it is drawn).
+            `${counted(count, "shape")} · ${titled(writtenKind(group) || "column")}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
