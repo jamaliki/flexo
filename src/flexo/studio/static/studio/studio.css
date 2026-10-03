@@ -265,7 +265,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .doc-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; border: 0; background: transparent; cursor: pointer; text-align: left; color: var(--ink); }
 .doc-row:hover { background: var(--sunken); }
 .doc-row svg { width: 16px; height: 16px; color: var(--ink-3); }
-.doc-name { font-family: var(--mono); font-size: 12.5px; flex: 1; }
+.doc-name { font-size: 13px; font-weight: 500; flex: 1; text-align: left; }
 .doc-kind { color: var(--ink-3); font-size: 12px; }
 .copyable { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); margin: 6px 0; }
 .copyable code { flex: 1; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; }
