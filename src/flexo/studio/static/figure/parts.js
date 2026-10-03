@@ -1259,6 +1259,9 @@ export function figureParts(host) {
     return Object.values(colours).some(Boolean) ? colours : false;
   }
   let inline = null;
+  // Where the box the words are typed in is kept: the host's \`typing\` element, which stays
+  // as the drawing is put in again (so the keys go on through a redraw), else the overlay.
+  const typingPlace = () => host.typing || host.overlay;
   // Return or Esc ends the typing and keeps what was typed, as a Mac text field does;
   // so does clicking elsewhere. ⌘Z takes it back.
   function openInline(id, { at = null } = {}) {
@@ -1275,12 +1278,14 @@ export function figureParts(host) {
     const label = host.element(`${id}.label`);
     const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return or Esc: done · ⇧Return: new line · $maths$ · *emphasis*" }, field,
       label ? null : h("div.inline-foot", {}, h("span", {}, "Return or Esc: done · ⇧Return: new line"), h("span", {}, "$maths$ · *emphasis*")));
-    // Lines break where they are broken, as the drawing breaks them: none wrapped.
-    if (label) field.area.setAttribute("wrap", "off");
-    host.overlay.append(box);
+    // A shape's words wrap where the drawing wraps them; a line's or a group's break only
+    // where they are broken, as the drawing breaks them.
+    if (label && kind === "node") field.area.style.whiteSpace = "pre-wrap";
+    else if (label) field.area.setAttribute("wrap", "off");
+    typingPlace().append(box);
     // The handles on the part step aside while it is typed on.
     for (const handle of host.overlay.querySelectorAll(".fig-next, .fig-rotate")) handle.remove();
-    inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label) };
+    inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label), sent: original, merge: `label:${id}:${Date.now()}`, live: null };
     placeInline();
     field.area.focus();
     // Double-clicked on a word, the word is chosen, as on a Mac; else all of it.
@@ -1297,7 +1302,7 @@ export function figureParts(host) {
         if (later) area.setSelectionRange(later.start, later.end);
       }, 300);
     }
-    field.area.addEventListener("input", () => placeInline());
+    field.area.addEventListener("input", () => { placeInline(); drawSoon(); });
     field.area.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); closeInline(true); }
       if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
@@ -1308,6 +1313,19 @@ export function figureParts(host) {
       if (inline?.box !== box || box.contains(event.relatedTarget) || !document.hasFocus()) return;
       closeInline(true);
     });
+  }
+  // What is typed is drawn as it is typed, once the keys rest a moment: the part grows to
+  // hold it, as it will when the typing is done, and the box over it follows. It is all one
+  // step in the history with the typing's end.
+  function drawSoon() {
+    const now = inline;
+    if (!now?.inPlace) return;
+    clearTimeout(now.live);
+    now.live = setTimeout(() => {
+      if (inline !== now || now.field.value === now.sent) return;
+      now.sent = now.field.value;
+      update({ type: now.kind, id: now.id }, { label: now.sent }, now.merge);
+    }, 300);
   }
   // The word of the drawn words under a point, found in the words as written.
   function wordAt(label, point, written) {
@@ -1360,48 +1378,71 @@ export function figureParts(host) {
       }, early?.text != null ? 120 : 320);
     }
     if (!inline) return;
-    if (!inline.box.isConnected) host.overlay.append(inline.box);
+    const holder = typingPlace();
+    if (inline.box.parentNode !== holder) holder.append(inline.box);
     const where = host.box(inline.id);
     if (!where) return;
+    // From the window's pixels to the holder's (it may scroll), and the part where it is.
+    const frame = holder.getBoundingClientRect(), outer = host.overlay.getBoundingClientRect();
+    const x = (client) => client - frame.left + holder.scrollLeft - holder.clientLeft;
+    const y = (client) => client - frame.top + holder.scrollTop - holder.clientTop;
+    const part = { left: outer.left + where.left, top: outer.top + where.top, bottom: outer.top + where.top + where.height };
     const label = inline.inPlace && host.element(`${inline.id}.label`);
     if (!label) {
-      Object.assign(inline.box.style, { left: `${where.left}px`, top: `${where.top + where.height + 6}px`, minWidth: `${Math.max(where.width, 240)}px` });
+      Object.assign(inline.box.style, { left: `${x(part.left)}px`, top: `${y(part.bottom + 6)}px`, minWidth: `${Math.max(where.width, 240)}px` });
       return;
     }
     // Over the drawn words, in their face, size and colour; they step aside meanwhile.
     if (inline.label !== label) { inline.label?.style.removeProperty("visibility"); label.style.visibility = "hidden"; inline.label = label; }
     const style = getComputedStyle(label);
     const size = parseFloat(style.fontSize) * (label.getScreenCTM()?.a || 1);
-    const outer = host.overlay.getBoundingClientRect(), drawn = label.getBoundingClientRect();
-    // As wide as its longest line, growing as it is typed: it wraps where the drawing does.
+    const drawn = label.getBoundingClientRect();
+    // As wide as its longest line, growing as it is typed; a shape's words wrap where the
+    // drawing wraps them: as wide as they are drawn when the drawing wrapped them (more lines
+    // than were typed), else at the measure it wraps them at (16 ems).
     let longest = 0;
     if (measuring) {
       measuring.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
       longest = Math.max(...inline.field.value.split("\n").map((line) => measuring.measureText(plain(line) || " ").width));
     }
-    const width = Math.max(drawn.width, longest) + size + 12;
-    const middle = drawn.width ? drawn.left + drawn.width / 2 - outer.left : where.left + where.width / 2;
-    const top = (drawn.height ? drawn.top - outer.top : where.top + where.height / 2 - size * 0.7) - 4;
-    Object.assign(inline.box.style, { left: `${middle - width / 2}px`, top: `${top}px`, width: `${width}px`, minWidth: "" });
+    let room = Infinity;
+    if (inline.kind === "node") {
+      const lines = Math.max(1, Math.round(drawn.height / (size * 1.25)));
+      room = lines > inline.sent.split("\n").length ? drawn.width + size * 0.6 : 16 * size;
+    }
+    let width = Math.min(Math.max(drawn.width, longest), room) + size + 12;
+    // Drawn as typed, the shape holds the words: the box keeps inside it.
+    if (inline.kind === "node" && inline.field.value === inline.sent) width = Math.min(width, Math.max(where.width - 4, drawn.width + 10));
+    const middle = drawn.width ? drawn.left + drawn.width / 2 : part.left + where.width / 2;
+    const top = (drawn.height ? drawn.top : part.top + where.height / 2 - size * 0.7) - 4;
+    Object.assign(inline.box.style, { left: `${x(middle - width / 2)}px`, top: `${y(top)}px`, width: `${width}px`, minWidth: "" });
     Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: style.fontFamily, fontWeight: style.fontWeight,
       color: style.fill && style.fill !== "none" ? style.fill : "", textAlign: "center" });
-    // Its formatting bar stays over the slide, not off its edge.
+    // Its formatting bar sits over the part, clear of its edge and the lines that leave it --
+    // under it when there is no room above -- and over the slide, not off its edge.
     const tools = inline.box.querySelector(".markup-tools");
     const page = host.overlay.querySelector("svg")?.getBoundingClientRect() || outer;
     if (tools) {
-      tools.style.marginLeft = "0px";
-      const bar = tools.getBoundingClientRect();
+      Object.assign(tools.style, { marginLeft: "0px", top: "", bottom: `calc(100% + ${Math.max(8, top - part.top + 6)}px)` });
+      let bar = tools.getBoundingClientRect();
+      if (bar.top < page.top - 20) {
+        const box = inline.box.getBoundingClientRect();
+        Object.assign(tools.style, { bottom: "auto", top: `calc(100% + ${Math.max(8, part.bottom - box.bottom + 6)}px)` });
+        bar = tools.getBoundingClientRect();
+      }
       const shift = bar.left < page.left + 4 ? page.left + 4 - bar.left : bar.right > page.right - 4 ? page.right - 4 - bar.right : 0;
       tools.style.marginLeft = `${shift}px`;
     }
   }
   function closeInline(keep) {
     if (!inline) return;
-    const { id, kind, field, original, box } = inline;
+    const { id, kind, field, original, box, sent, merge } = inline;
+    clearTimeout(inline.live);
     inline.label?.style.removeProperty("visibility");
     inline = null;
     box.remove();
-    if (keep && field.value !== original) update({ type: kind, id }, { label: field.value });
+    // Drawn as it was typed, the last words join that step; else one step of their own.
+    if (keep && field.value !== sent) update({ type: kind, id }, { label: field.value }, sent === original ? null : merge);
     host.settled?.();
   }
   // -- keys --

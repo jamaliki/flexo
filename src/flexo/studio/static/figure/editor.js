@@ -81,6 +81,8 @@ export function mount(studio, main) {
   const figure = figureParts({
     catalog,
     overlay: page,
+    // The box words are typed in stays on the stage as the drawing is put in again.
+    typing: stage,
     element: elementOf,
     idOf: (id) => id,
     box: boxOf,
