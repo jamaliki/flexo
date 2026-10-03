@@ -598,7 +598,8 @@ export async function start() {
       if (!shown) return;
       save.disabled = true;
       try { await session.mend(area.value); }
-      catch (error) { said.textContent = error.message; }
+      // The words typed here, not the file (which the bar above speaks of), are what does not read.
+      catch (error) { said.textContent = /reach the studio/.test(error.message) ? error.message : `Not saved: as typed here, ${error.message.charAt(0).toLowerCase()}${error.message.slice(1)}`; }
       finally { save.disabled = false; }
     };
     area.addEventListener("input", () => { if (unread) unread.edited = true; });
