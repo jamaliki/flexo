@@ -3,6 +3,7 @@ themes, and keeps everyone editing a document -- pages, agents, the file on disk
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import re
@@ -275,7 +276,7 @@ def test_a_file_on_disk_that_does_not_read_is_not_written_over(tmp_path: Path) -
         broken = "theme: {name: lab, base: [\n"
         theme.write_text(broken, encoding="utf-8")
         wait_for(lambda: doc.held)
-        assert (doc.problem or "").startswith("lab.yaml on disk does not read: line ")
+        assert (doc.problem or "").startswith("Can't read lab.yaml: line ")
         assert doc.problem.count("lab.yaml") == 1
         # An edit made meanwhile is kept, and nothing is written over the file.
         mine = {"theme": {"name": "lab", "base": "paper", "description": "mine"}}
@@ -371,8 +372,210 @@ def test_a_file_that_does_not_read_is_not_saved_over(served: tuple[str, Workspac
     doc = workspace.open("lab.yaml")
     theme.write_text("theme: [\n", encoding="utf-8")
     status, answer = call(f"{base}/api/save", workspace.token, {"file": "lab.yaml"})
-    assert status == 409 and "does not read" in answer["error"] and doc.held
+    assert status == 409 and "Can't read lab.yaml" in answer["error"] and doc.held
     assert theme.read_text(encoding="utf-8") == "theme: [\n"
+
+
+class _Deck:
+    """A kind of document as flexo-talk's decks are: a mapping with slides."""
+
+    name, title, static = "deck", "Deck", Path(".")
+
+    def claims(self, document: object) -> bool:
+        return isinstance(document, dict) and "slides" in document and "nodes" not in document
+
+    def new(self, path: Path) -> dict:
+        return {"slides": [{"title": "A talk worth giving"}]}
+
+    def load(self, path: Path) -> dict:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise ValueError(f"{path.name} is not a deck")
+        return document
+
+    def save(self, path: Path, document: dict) -> None:
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+
+DECK = "deck: {id: talk}\nslides:\n- title: One\n  body: [{text: Hello}]\n- title: Two\n"
+TYPO = DECK.replace("[{text: Hello}]", "[unclosed\n  - bullets: [a]")
+
+
+def test_a_file_with_a_typo_opens_as_the_kind_its_keys_say_and_is_not_written(
+    tmp_path: Path,
+) -> None:
+    talk = tmp_path / "talk.yaml"
+    talk.write_text(TYPO, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    try:
+        # Never read in this studio: the keys it still shows say it is a deck, not a figure.
+        assert [item["kind"] for item in workspace.documents()] == ["deck"]
+        doc = workspace.open("talk.yaml")
+        assert doc.kind.name == "deck" and doc.unread and doc.held and doc.document == {}
+        assert (doc.problem or "").startswith("Can't read talk.yaml: line 5")
+        info = doc.info()
+        assert info["unread"] and info["source"] == TYPO and info["problem"] == doc.problem
+        # Nothing it shows is anything to change, and nothing is written over the file.
+        with pytest.raises(ValueError, match="Nothing was changed"):
+            doc.update({"slides": [{"title": "New"}]}, doc.version, PERSON)
+        assert not doc.write(again=True)
+        workspace.flush()
+        assert talk.read_text(encoding="utf-8") == TYPO
+        # Put right on disk: it opens as it reads, and is not written again.
+        listener = workspace.listen("page", PERSON)
+        talk.write_text(DECK, encoding="utf-8")
+        wait_for(lambda: not doc.unread)
+        assert doc.document == yaml.safe_load(DECK) and doc.problem is None and not doc.held
+        assert doc.saved == doc.version
+        said = [event["type"] for event in _drained(listener)]
+        assert "doc" in said and said[-1] == "saved"
+        assert talk.read_text(encoding="utf-8") == DECK
+        assert not workspace.activity  # read at last is no change anyone made
+    finally:
+        workspace.close()
+
+
+@pytest.mark.parametrize(
+    ("text", "suffix", "kind"),
+    [
+        ("# a talk\nschema_version: 1\ndeck:\n  id: t\nslides: [unclosed\n", ".yaml", "deck"),
+        ('{"deck": {"id": "t"}, "slides": [{"title": "One"}, {"title": ]}', ".json", "deck"),
+        ("figure: {id: f}\nnodes:\n  - id: a\n    label: [oops\n", ".yaml", "figure"),
+        ("theme:\n  name: lab\n  base: [\n", ".yaml", "theme"),
+        ('"slides": [\n', ".yaml", "deck"),
+        ("- one\n- two: [\n", ".yaml", None),
+        ("words: [\n", ".yaml", None),
+    ],
+)
+def test_the_kind_of_a_file_that_does_not_read_is_told_by_its_keys(
+    tmp_path: Path, text: str, suffix: str, kind: str | None
+) -> None:
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    try:
+        assert workspace.kind_of_text(text, suffix) == kind
+        (tmp_path / f"file{suffix}").write_text(text, encoding="utf-8")
+        assert workspace.kind_on_disk(tmp_path / f"file{suffix}") == kind
+    finally:
+        workspace.close()
+
+
+def test_a_file_put_right_where_the_studio_shows_it_is_written_once_it_reads(
+    served: tuple[str, Workspace],
+) -> None:
+    base, workspace = served
+    theme = workspace.root / "lab.yaml"
+    theme.write_text("theme:\n  name: lab\n  base: [\n", encoding="utf-8")
+    status, opened = call(f"{base}/api/open?file=lab.yaml", workspace.token)
+    assert status == 200 and opened["kind"] == "theme" and opened["unread"]
+    assert opened["source"] == "theme:\n  name: lab\n  base: [\n"
+    # Still wrong: said, and nothing written.
+    mend = {"file": "lab.yaml", "text": "theme:\n  name: lab\n  base: [paper\n"}
+    status, answer = call(f"{base}/api/mend", workspace.token, mend)
+    assert status == 400 and answer["error"].startswith("lab.yaml still can't be read: line ")
+    assert theme.read_text(encoding="utf-8") == "theme:\n  name: lab\n  base: [\n"
+    # Another kind's document: not written either.
+    mend["text"] = "figure: {id: f}\nnodes: []\n"
+    status, answer = call(f"{base}/api/mend", workspace.token, mend)
+    assert status == 400 and answer["error"] == "That is a figure, not a theme."
+    # Right: written as it is, and taken in.
+    mend["text"] = "theme:\n  name: lab\n  base: paper  # ours\n"
+    status, answer = call(f"{base}/api/mend", workspace.token, mend)
+    assert status == 200
+    assert theme.read_text(encoding="utf-8") == mend["text"]
+    doc = workspace.open("lab.yaml")
+    assert not doc.unread and doc.document == {"theme": {"name": "lab", "base": "paper"}}
+    status, answer = call(f"{base}/api/mend", workspace.token, mend)
+    assert status == 400 and "reads as it is" in answer["error"]
+
+
+def test_a_kind_never_writes_over_a_file_another_kind_claims(tmp_path: Path) -> None:
+    figure = tmp_path / "talk.yaml"
+    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    try:
+        doc = workspace.open("talk.yaml")
+        assert doc.kind.name == "figure"
+        listener = workspace.listen("page", PERSON)
+        # The figure's words made a deck's (put right in its Source, say): written, as asked.
+        doc.update({"text": DECK}, doc.version, PERSON)
+        workspace.flush()
+        assert figure.read_text(encoding="utf-8") == DECK
+        assert doc.held and doc.foreign == "deck"
+        assert doc.problem == "talk.yaml is a deck now, not a figure: it opens again as a deck."
+        # It is open as a deck from now on, and the pages are told to open it again.
+        again = workspace.open("talk.yaml")
+        assert again is not doc and again.kind.name == "deck"
+        assert again.document == yaml.safe_load(DECK)
+        said = _drained(listener)
+        assert {"type": "reopened", "file": "talk.yaml", "kind": "deck"} in said
+        assert any(event["type"] == "problem" and event["text"] == doc.problem for event in said)
+        # The figure editor making it a figure again (before it heard) writes nothing over it.
+        doc.update({"text": DECK + "figure: {id: myfig}\nnodes: []\n"}, doc.version, PERSON)
+        assert not doc.write(again=True)
+        workspace.flush()
+        assert figure.read_text(encoding="utf-8") == DECK
+        # A figure again on disk (another app's doing): not taken into the deck, but opened
+        # again as a figure.
+        figure.write_text(NEW_FIGURE, encoding="utf-8")
+        wait_for(lambda: workspace.docs["talk.yaml"].kind.name == "figure")
+        assert again.held and again.foreign == "figure" and again.document == yaml.safe_load(DECK)
+        assert workspace.open("talk.yaml").document == {"text": NEW_FIGURE}
+        assert {"type": "reopened", "file": "talk.yaml", "kind": "figure"} in _drained(listener)
+        assert figure.read_text(encoding="utf-8") == NEW_FIGURE
+    finally:
+        workspace.close()
+
+
+def test_an_edit_made_in_another_kind_s_editor_is_sent_back_to_open_it_again(
+    served: tuple[str, Workspace],
+) -> None:
+    base, workspace = served
+    update = {"file": "figure.yaml", "base": 1, "kind": "deck", "who": PERSON,
+              "document": {"slides": []}, "instance": workspace.instance}
+    status, answer = call(f"{base}/api/update", workspace.token, update)
+    assert status == 200 and answer == {"reopen": True, "kind": "figure"}
+    assert (workspace.root / "figure.yaml").read_text(encoding="utf-8") == NEW_FIGURE
+
+
+def test_a_studio_stopped_by_kill_writes_the_edits_it_has_taken_first(tmp_path: Path) -> None:
+    import os
+    import signal
+    import sys
+
+    from flexo.studio import sessions
+
+    figure = tmp_path / "figure.yaml"
+    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    studio = subprocess.Popen(
+        [sys.executable, "-m", "flexo.studio.server", str(figure), "--no-browser"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        found: list[dict] = []
+
+        def started() -> bool:
+            for file in sessions._folder().glob("*.json"):
+                with contextlib.suppress(OSError, ValueError):
+                    found.append(json.loads(file.read_text(encoding="utf-8")))
+            return bool(found)
+
+        wait_for(started, 20)
+        base, token = f"http://127.0.0.1:{found[0]['port']}", found[0]["token"]
+        changed = {"text": NEW_FIGURE.replace("Encoder", "Taken, then killed")}
+        update = {"file": "figure.yaml", "base": 1, "document": changed, "who": PERSON}
+        status, answer = call(f"{base}/api/update", token, update)
+        assert status == 200 and answer["version"] == 2
+        # At once: well before the studio would have written it of its own accord.
+        os.kill(studio.pid, signal.SIGTERM)
+        assert studio.wait(10) == 0, studio.stderr.read() if studio.stderr else ""
+        assert figure.read_text(encoding="utf-8") == changed["text"]
+        assert not list(sessions._folder().glob("*.json"))  # and it is off the list
+    finally:
+        if studio.poll() is None:
+            studio.kill()
 
 
 def test_a_studio_started_again_on_its_port_keeps_its_token(tmp_path: Path) -> None:
@@ -657,8 +860,9 @@ def test_a_document_of_endless_aliases_is_refused(tmp_path: Path) -> None:
     (tmp_path / "bomb.yaml").write_text("\n".join(lines) + "\n")
     workspace = Workspace(tmp_path)
     try:
-        with pytest.raises(ValueError, match="too large"):
-            workspace.open("bomb.yaml")
+        # Opened, but as nothing: why is said, and nothing is written over it.
+        doc = workspace.open("bomb.yaml")
+        assert doc.unread and doc.document == {} and "too large" in (doc.problem or "")
     finally:
         workspace.close()
 
@@ -1023,6 +1227,65 @@ process.exit(0);
     )
     assert json.loads(result.stdout) == {
         "typedAndDeleted": 0, "othersEdit": "saved", "failedUndo": [1, 0], "undone": [1, 1]
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_page_says_its_edits_wait_while_the_studio_is_out_of_reach() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const listeners = {};
+let reachable = true, draws = 0;
+const opened = {
+  file: "a.yaml", kind: "deck", version: 1, saved: 1, exists: true, document: { title: "A" },
+};
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), url: (route) => route,
+  on(event, listener) { (listeners[event] ||= []).push(listener); },
+  async api(route, body) {
+    if (!reachable) throw new TypeError("Failed to fetch");
+    if (route === "/api/draw") { draws += 1; return { pages: [], messages: [] }; }
+    return route === "/api/update" ? { version: 2, document: body.document } : opened;
+  },
+};
+const session = new Session(workspace, opened);
+workspace.sessions.set("a.yaml", session);
+const wait = (ms = 50) => new Promise((done) => setTimeout(done, ms));
+const said = {};
+reachable = false;
+listeners.online.forEach((listener) => listener(false));
+session.change((d) => { d.title = "Typed while the studio is away"; });
+await wait(200);
+said.atOnce = session.state;  // a moment's break is not worth a word
+await wait(1500);
+said.later = [session.state, session.pendingLocal];
+reachable = true;
+listeners.online.forEach((listener) => listener(true));
+await wait(300);
+said.back = [session.state, session.pendingLocal];
+session.saved(2);
+said.saved = session.state;
+// A file that has never read: nothing to draw until it reads.
+const problem = "Can't read a.yaml: line 3";
+const unread = new Session(workspace, { ...opened, unread: true, held: true, problem });
+draws = 0;
+await unread.draw();
+said.unreadDraws = [unread.state, draws];
+unread.told();
+await wait(100);
+said.readDraws = [unread.state, draws];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == {
+        "atOnce": "saving", "later": ["offline", True], "back": ["saving", False],
+        "saved": "saved", "unreadDraws": ["problem", 0], "readDraws": ["saved", 1],
     }
 
 

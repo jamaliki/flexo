@@ -15,6 +15,7 @@ import json
 import mimetypes
 import queue
 import secrets
+import signal
 import socketserver
 import sys
 import threading
@@ -259,6 +260,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Made from a version of a studio since stopped: this one counts afresh.
                 self._json({"restarted": True})
                 return
+            if data.get("kind") not in (None, doc.kind.name):
+                # Made in another kind's editor: the file has become this kind's since.
+                self._json({"reopen": True, "kind": doc.kind.name})
+                return
             # Told to the pages with the window it came from, so that window knows its own.
             client = str(data.get("client") or who["id"])
             version, document = doc.update(data["document"], int(data["base"]), who, client)
@@ -277,11 +282,23 @@ class Handler(BaseHTTPRequestHandler):
             doc = workspace.open(name)
             workspace.reread(doc)
             if doc.held:
-                self._fail(HTTPStatus.CONFLICT, doc.problem or f"{doc.name} on disk does not read")
+                self._fail(HTTPStatus.CONFLICT, doc.problem or f"Can't read {doc.name}")
                 return
-            if doc.write(again=True):
+            wrote = doc.write(again=True)
+            if wrote:
                 workspace.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            if doc.foreign:
+                # Another kind's document (now): it opens again as that kind.
+                workspace.broadcast(doc.said())
+                workspace.open(doc.name)
+                if not wrote:
+                    self._fail(HTTPStatus.CONFLICT, doc.problem or f"{doc.name} was not saved")
+                    return
             self._json({"ok": True, "saved": doc.saved})
+        elif route == "/api/mend":
+            # A file that does not read, put right by its person where the studio shows it.
+            workspace.open(name).mend(str(data.get("text", "")))
+            self._json({"ok": True})
         elif route == "/api/new":
             doc = workspace.new(name, data.get("kind", ""), data.get("data"))
             self._json({"file": doc.name})
@@ -624,6 +641,10 @@ def serve(
     print(f"  folder {workspace.root} (Ctrl+C to stop)")
     print("  agents join with: claude mcp add flexo-studio -- flexo studio mcp")
     sys.stdout.flush()
+    # Stopped as Ctrl+C stops it (a `kill`, a session ending): edits it has taken that are
+    # not yet in their files are written first.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _interrupted)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -632,6 +653,11 @@ def serve(
         workspace.close()
         sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
+
+
+def _interrupted(signum: int, frame: object) -> None:
+    signal.signal(signum, signal.SIG_DFL)  # asked again, it stops at once
+    raise KeyboardInterrupt
 
 
 def main(argv: Sequence[str] | None = None, *, kind: str | None = None) -> int:

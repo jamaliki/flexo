@@ -221,6 +221,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .doc-view { position: absolute; inset: 0; }
 .status.problem .dot { background: var(--error); }
 .status.problem { color: var(--error); }
+/* Out of reach of the studio: edits wait in the page, said plainly. */
+.status.offline .dot, .tab-dot.offline { background: var(--warn); }
+.status.offline { color: var(--ink-2); }
+/* A document never read has nothing to edit, export or present (shell.js). */
+.docbar-slot[inert] { opacity: 0.4; }
+/* A document whose file does not read: why, and its words to put right, over its editor. */
+.unread-view { grid-row: 2; grid-column: 1; z-index: 20; min-height: 0; overflow: auto; background: var(--stage); display: grid; justify-items: center; align-content: start; padding: 6vh 24px 32px; }
+.unread-view[hidden] { display: none; }
+.unread-inner { width: min(760px, 100%); display: grid; gap: 10px; }
+.unread-head { display: flex; align-items: center; gap: 10px; }
+.unread-head svg { width: 20px; height: 20px; color: var(--error); flex: none; }
+.unread-head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+.unread-said { color: var(--error); font-size: 13px; overflow-wrap: anywhere; }
+.unread-note { margin: 0; color: var(--ink-2); font-size: 13px; }
+.unread-source { height: 46vh; min-height: 200px; resize: vertical; margin-top: 4px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink); font: 12.5px/1.55 var(--mono); white-space: pre; overflow: auto; tab-size: 2; }
+.unread-foot { display: flex; justify-content: flex-end; gap: 8px; }
 
 .doing-strip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: grid; gap: 6px; z-index: 30; pointer-events: none; }
 .doing { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 99px; box-shadow: var(--shadow-2); cursor: pointer; font-size: 12.5px; color: var(--ink-2); max-width: 520px; animation: rise 0.2s ease-out; }
@@ -266,10 +282,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* the side panel */
 .side { width: 360px; border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
 .side[hidden] { display: none; }
-/* In a narrow window the side panel lies over the document rather than squeezing it. */
+/* In a narrow window the side panel lies over the document rather than squeezing it: below
+   the document's bar (its height set by shell.js), which keeps Present, Export, Undo and the
+   word on saving in reach. */
 @media (max-width: 1239px) {
   .workbench { position: relative; }
-  .side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 40; box-shadow: var(--shadow-2); }
+  .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; box-shadow: var(--shadow-2); }
 }
 .side-head { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .side-tabs { display: flex; gap: 2px; }

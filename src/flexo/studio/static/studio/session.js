@@ -19,11 +19,16 @@ const links = new WeakMap();
 function link(workspace) {
   let state = links.get(workspace);
   if (!state) {
-    state = { down: false, note: null, timer: null };
+    state = { down: false, away: false, note: null, timer: null };
     links.set(workspace, state);
     workspace.on?.("online", (up) => (up ? reached(workspace) : lost(workspace)));
   }
   return state;
+}
+
+// Each document says again whether its edits are saved: out of reach, they are not.
+function restate(workspace) {
+  for (const session of workspace.sessions?.values() || []) session.emit("status");
 }
 
 function lost(workspace) {
@@ -32,7 +37,9 @@ function lost(workspace) {
   state.down = true;
   // A moment's break (the event stream reconnecting) is not worth a word.
   state.timer = setTimeout(() => {
+    state.away = true;
     state.note = toast(h("span.row", {}, h("span.spinner"), "Can't reach the studio — reconnecting…"), { seconds: 86400 });
+    restate(workspace);
   }, 1500);
 }
 
@@ -40,9 +47,11 @@ function reached(workspace) {
   const state = link(workspace);
   if (!state.down) return;
   state.down = false;
+  state.away = false;
   clearTimeout(state.timer);
   state.note?.remove();
   state.note = null;
+  restate(workspace);
   for (const session of workspace.sessions?.values() || []) session.resync?.();
 }
 
@@ -65,6 +74,9 @@ export class Session {
     this.written = info.document;         // the document last known written to the file
     this.exists = info.exists;
     this.problem = info.problem;
+    this.held = Boolean(info.held);       // the file on disk does not read: nothing is written over it
+    this.unread = Boolean(info.unread);   // nor has it since it was opened: there is nothing to show
+    this.source = info.source ?? null;    // the file's words, while it is unread
     this.past = [];
     this.future = [];
     this.trips = [];                      // undos and redos waiting their turn
@@ -105,11 +117,32 @@ export class Session {
   get doc() { return this.document; }
   get catalogue() { return this.catalog; }
   get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending); }
-  // Saving is this page's own edits on their way to the file: others' are theirs to show.
+  // This page's own edits not yet in the file (others' are theirs to show).
+  get unsaved() { return this.pendingLocal || this.savedVersion < this.ownVersion; }
+  // Saving is those edits on their way to the file; with the studio out of reach, they
+  // wait here ("offline") until it is back.
   get state() {
     if (this.problem) return "problem";
-    if (this.pendingLocal || this.savedVersion < this.ownVersion) return "saving";
+    if (this.unsaved) return link(this.workspace).away ? "offline" : "saving";
     return "saved";
+  }
+
+  // What the studio says is wrong with the file (`text`, or nothing now): `held`, it does
+  // not read; `unread`, nor has it since it was opened, and `source` is its words.
+  told({ text = null, held = false, unread = false, source = null } = {}) {
+    const read = this.unread && !unread;
+    this.problem = text;
+    this.held = held;
+    this.unread = unread;
+    this.source = unread ? source : null;
+    this.emit("status");
+    if (read) this.requestDraw(0);  // it reads at last: there is something to draw
+  }
+
+  // Put right the words of a file that does not read: written once they read.
+  async mend(text) {
+    try { await this.workspace.api("/api/mend", { file: this.file, text }); }
+    catch (error) { throw unreachable(error) ? new Error("Can't reach the studio.") : error; }
   }
 
   // -- editing --
@@ -256,7 +289,7 @@ export class Session {
     let result = null;
     try {
       result = await this.workspace.api("/api/update", {
-        file: this.file, base: this.version, instance: this.instance, document: sent, client: this.workspace.client, who: this.workspace.me,
+        file: this.file, kind: this.kind, base: this.version, instance: this.instance, document: sent, client: this.workspace.client, who: this.workspace.me,
       });
     } catch (error) {
       this.sending = null;
@@ -279,6 +312,8 @@ export class Session {
     // The studio started again since this page last heard from it: its versions count
     // from the file anew, so the page takes in its document before sending.
     if (result.restarted) this.resync();
+    // The file is another kind of document now: it opens again in that kind's editor.
+    else if (result.reopen) this.workspace.reopen?.(this.file, result.kind);
     else this.accept(result.version, result.document, sent);
     this.emit("status");
   }
@@ -324,9 +359,8 @@ export class Session {
   saved(version) {
     this.savedVersion = Math.max(this.savedVersion, version);
     if (version >= this.version) this.written = this.synced;
-    this.problem = null;
     this.exists = true;
-    this.emit("status");
+    this.told();
   }
 
   // After the studio was out of reach: take in its document as it is now, keep this
@@ -351,6 +385,8 @@ export class Session {
       setTimeout(() => this.resync(), 200);
       return;
     }
+    // Opened again as another kind since (put right as one): its editor is that kind's.
+    if (info.kind !== this.kind) { this.resyncing = false; this.workspace.reopen?.(this.file, info.kind); return; }
     const restarted = info.instance !== this.instance;
     const local = this.document;
     this.document = merge3(restarted ? this.written : this.synced, info.document, local);
@@ -362,6 +398,9 @@ export class Session {
     if (info.saved >= info.version) this.written = info.document;
     this.exists = info.exists;
     this.problem = info.problem;
+    this.held = Boolean(info.held);
+    this.unread = Boolean(info.unread);
+    this.source = info.source ?? null;
     this.resyncing = false;
     if (!same(local, this.document)) this.emit("change", { quiet: false, source: "remote" });
     const waiting = this.lastRemote;
@@ -403,6 +442,8 @@ export class Session {
   }
 
   async drawOnce() {
+    // A file that has not read has nothing to draw (its editor says why instead).
+    if (this.unread) return;
     const version = ++this.drawVersion;
     const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
     this.emit("drawing", { version });

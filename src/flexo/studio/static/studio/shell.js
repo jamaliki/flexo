@@ -38,6 +38,18 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 // A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
 const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
 
+// The word on a document's saving: what is true of it and its file, briefly.
+function statusWords(session) {
+  const state = session.state;
+  if (state === "saved") return "Saved";
+  if (state === "saving") return "Saving…";
+  if (state === "offline") return "Not saved: can't reach the studio";
+  const problem = session.problem || "";
+  // The file on disk does not read: "Not saved" only while edits made here wait for it.
+  if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
+  return `Not saved: ${problem.replace(/^.*? could not be saved:\s*/, "")}`;
+}
+
 // Settled once every stylesheet the page has asked for has loaded (or a moment has
 // passed): an editor is shown styled, never as its bare elements.
 function stylesLoaded() {
@@ -157,6 +169,24 @@ export class Workspace {
     this.remember();
   }
 
+  // A document whose file has become another kind's (put right by hand as one): opened
+  // again in that kind's editor, in its tab's place. What its old editor held was never
+  // written over the file, and goes.
+  async reopen(file, kind) {
+    const session = this.sessions.get(file);
+    if (!session || session.kind === kind) return;
+    const place = this.order.indexOf(file), active = this.active === session;
+    session.document = session.synced;
+    this.close(file);
+    try {
+      await this.open(file, { activate: active });
+      this.order.splice(this.order.indexOf(file), 1);
+      this.order.splice(place, 0, file);
+      this.remember();
+      this.emit("status", this.sessions.get(file));
+    } catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
+  }
+
   remember() { remember(`tabs:${this.info.folder}`, JSON.stringify(this.order)); }
   rememberedTabs() { try { return JSON.parse(remembered(`tabs:${this.info.folder}`, "[]")); } catch { return []; } }
 
@@ -215,13 +245,21 @@ export class Workspace {
         session?.remote(event);
         if (session && event.client !== this.client) session.emit("remote", event);
         break;
-      case "saved": session?.saved(event.version); break;
+      case "saved":
+        session?.saved(event.version);
+        // What was wrong with the file is over (it is back, or reads again): so is its word.
+        session?.notice?.remove();
+        break;
       case "problem":
         if (session) {
-          if (session.problem !== event.text) toast(event.text, { kind: "error", icon: "error", seconds: 8 });
-          session.problem = event.text; session.emit("status");
+          if (session.problem !== event.text && event.text) {
+            session.notice?.remove();
+            session.notice = toast(event.text, { kind: "error", icon: "error", seconds: 8 });
+          }
+          session.told(event);
         }
         break;
+      case "reopened": this.reopen(event.file, event.kind); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
@@ -393,6 +431,7 @@ export async function start() {
       case "undo": travel("undo"); break;
       case "redo": travel("redo"); break;
       case "save":
+        if (session?.unread) { unread?.mend(); break; }
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
@@ -441,7 +480,12 @@ export async function start() {
   document.addEventListener("focusin", report);
   document.addEventListener("focusout", report);
   window.addEventListener("pywebviewready", report);
-  const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
+  const docHead = h("div", {}, docbar, trustBar);
+  const unreadView = h("div.unread-view.scroll-thin", { hidden: true });
+  const body = h("div.workbench", {}, h("div.center", {}, docHead, views, unreadView, doing), side.node);
+  // In a narrow window the side panel lies over the document below its bar (studio.css),
+  // so Present, Export, Undo and the word on saving stay in reach.
+  new ResizeObserver(() => body.style.setProperty("--doc-head", `${docHead.offsetHeight}px`)).observe(docHead);
   // The spinner the page opened with stays over the frame until the first document is
   // ready to show (below): then the window goes from it to the document in one step.
   const loading = root.querySelector(".loading");
@@ -458,7 +502,7 @@ export async function start() {
       },
       icon(KIND_ICONS[session.kind] || "file"),
       h("span.tab-name", {}, docName(file)),
-      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving…" }) : null,
+      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: statusWords(session) }) : null,
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
@@ -486,7 +530,7 @@ export async function start() {
   const renderStatus = () => {
     const session = workspace.active;
     docbar.hidden = !session;
-    if (!session) return;
+    if (!session) { renderUnread(null); return; }
     undo.disabled = !session.past.length;
     redo.disabled = !session.future.length;
     past.disabled = !session.past.length && !session.future.length;
@@ -495,9 +539,61 @@ export async function start() {
     undo.title = `Undo${what(last)} (⌘Z)`;
     redo.title = `Redo${what(next)} (⇧⌘Z)`;
     const state = session.state;
-    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
-    status.title = session.problem || "";
-    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "can't read the file on disk: ")}` : "Saving…";
+    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}`;
+    const words = statusWords(session);
+    status.title = state === "problem" ? session.problem || "" : state === "offline" ? "Your changes are kept here, and saved when the studio is back." : "";
+    const text = status.querySelector(".status-text");
+    if (text.textContent !== words) {
+      text.textContent = words;
+      // The bar has room again for its tools' words once a long word on saving is gone.
+      fitDocbar();
+    }
+    // A document that has never read has nothing to edit, export or present.
+    for (const slot of [docLeft, docRight]) slot.inert = session.unread;
+    renderUnread(session);
+  };
+
+  // A document whose file has not read since it was opened: its editor has nothing to show,
+  // so this says why over it, with the file's words to put right there (or in another app:
+  // it opens as soon as it reads).
+  let unread = null;
+  const renderUnread = (session) => {
+    unreadView.hidden = !session?.unread;
+    if (!session?.unread) { unread = null; return; }
+    if (unread?.session === session && unread.problem === session.problem && (unread.source === session.source || unread.edited)) return;
+    const area = h("textarea.unread-source", { autocomplete: "off", "aria-label": `${session.file}, as written`, dataset: { ownUndo: "" } });
+    area.spellcheck = false;
+    // Words the person has typed here are kept when the file changes again.
+    const kept = unread?.session === session && unread.edited;
+    area.value = kept ? unread.area.value : session.source ?? "";
+    const shown = kept || session.source != null;  // not a file too large to show
+    // What is wrong, the file named once (in the heading).
+    const said = h("div.unread-said", {}, (session.problem || "").replace(/^Can't read [^:]+: (.)/, (_, first) => first.toUpperCase()));
+    const save = ui.button("Save", () => mend(), { kind: "primary" });
+    const mend = async () => {
+      if (!shown) return;
+      save.disabled = true;
+      try { await session.mend(area.value); }
+      catch (error) { said.textContent = error.message; }
+      finally { save.disabled = false; }
+    };
+    area.addEventListener("input", () => { if (unread) unread.edited = true; });
+    clear(unreadView, h("div.unread-inner", {},
+      h("div.unread-head", {}, icon("warning"), h("h2", {}, `${session.file.split("/").pop()} can't be read`)),
+      said,
+      h("p.unread-note", {}, `Nothing has been changed in the file. Put it right ${shown ? "here and save, or " : ""}in another app: it opens as soon as it reads.`),
+      shown ? area : null,
+      shown ? h("div.unread-foot", {}, save) : null));
+    unread = { session, problem: session.problem, source: session.source, area, edited: kept, mend };
+    // The line the problem names, chosen and in view.
+    const line = Number((session.problem || "").match(/\bline (\d+)/)?.[1] || 0);
+    if (line && shown) requestAnimationFrame(() => {
+      const lines = area.value.split("\n");
+      const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(start, start + (lines[line - 1] || "").length);
+      area.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(area).lineHeight || "18"));
+    });
   };
 
   const renderViews = () => {
@@ -558,7 +654,9 @@ export async function start() {
     if (document.querySelector(".scrim, .present")) return;
     if (mod && key === "s") {
       event.preventDefault();
-      session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+      // A file that does not read is saved as it has been put right, once it reads.
+      if (session?.unread) unread?.mend();
+      else session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
         (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
     }
     else if (mod && event.altKey && event.code === "KeyZ") { event.preventDefault(); if (session && !past.disabled) historyMenu(past, session); }
@@ -567,7 +665,15 @@ export async function start() {
     else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); travel("redo"); }
     else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
   });
-  addEventListener("beforeunload", () => { for (const session of workspace.sessions.values()) session.push(); });
+  // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
+  // with it: while there are any, the browser asks first.
+  addEventListener("beforeunload", (event) => {
+    for (const session of workspace.sessions.values()) session.push();
+    if ([...workspace.sessions.values()].some((session) => session.pendingLocal)) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
 
   workspace.connect();
   renderPeople();
