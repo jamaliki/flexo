@@ -681,7 +681,9 @@ export async function start() {
     else if (mod && key === "z" && ownUndo()) { /* the field's own undo */ }
     else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); travel("undo"); }
     else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); travel("redo"); }
-    else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
+    // Once the page has had the key: a word typed into a shape on its way (a decision's
+    // "?") is the shape's.
+    else if (key === "?" && !inField(event)) setTimeout(() => { if (!event.defaultPrevented) shortcutsDialog(); });
   });
   // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
   // with it: while there are any, the browser asks first.

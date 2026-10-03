@@ -205,6 +205,8 @@ export function figureParts(host) {
         if (all("label")) {
           // Typed on in a field, one entry stands for it all: said by the name it had.
           const was = plain((nodeOf(id) || groupOf(id))?.label), now = plain(values.label);
+          // The same words in another look (a colour, code) are the label's format changed.
+          if (was && was === now) return `Format “${now}”`;
           return !merge && was && now ? `Rename “${was}” to “${now}”` : `Edit ${name(id)}`;
         }
         if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.)/.test(key))) return "Change Colour";
@@ -672,7 +674,8 @@ export function figureParts(host) {
   }
   function markViews() {
     // A line chosen is marked along its path, not by the box round it.
-    for (const twin of host.overlay.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
+    // (The lines' twins are in the drawing, not the overlay.)
+    for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
     for (const id of state.selected) if (isLine(id)) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     // A group's name tag sits over its frame -- under it, where its own title is drawn there.
     const outer = host.overlay.getBoundingClientRect();

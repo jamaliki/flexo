@@ -20,7 +20,7 @@ export function themeCard(card, { on = false, onclick, compact = false, chevron 
   // Each tone a filled chip in its strong colour, as a palette's colours are shown.
   const tones = (card.tones || []).map((tone) => h("span", { style: { background: tone.stroke || tone.fill } }));
   return h(`button.theme-card${on ? ".on" : ""}${compact ? ".compact" : ""}${card.problem ? ".problem" : ""}`, {
-    type: "button", title: card.problem || card.description || themeName(card), onclick,
+    type: "button", title: card.problem || [card.description || themeName(card), card.source === "folder" ? card.value : ""].filter(Boolean).join("\n"), onclick,
   },
     h("span.theme-page", { style: { background: card.canvas || "#fff", color: card.ink || "#222" } },
       h("span.theme-aa", { style: { fontFamily: card.font ? `"${card.font}", system-ui` : "" } }, "Aa"),

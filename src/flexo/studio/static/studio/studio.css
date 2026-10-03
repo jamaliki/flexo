@@ -718,6 +718,8 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .theme-card.compact .theme-aa { font-size: 13px; }
 .theme-card.compact .theme-tones span { width: 8px; height: 12px; border-radius: 2px; }
 .theme-card.compact .theme-name { font: var(--text-body); }
+/* A pop-up button is one line: the theme's file is in its tooltip and its menu. */
+.theme-card.compact .theme-where:not(.bad) { display: none; }
 .theme-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
 /* As tall as it needs, to the window's edge: it scrolls only when the window is too short. */
 .menu.theme-menu { width: min(460px, calc(100vw - 24px)); max-width: none; max-height: calc(100vh - 16px); overflow: auto; padding: 8px; }
