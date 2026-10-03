@@ -279,10 +279,11 @@ export const ui = {
       if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
       if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*", onInput); }
       if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
-      if (mod && event.key.toLowerCase() === "m") { event.preventDefault(); wrap(area, "$", "$", onInput); }
+      // ⌥⌘E, as Keynote's Insert › Equation: ⌘M is the Mac's Window › Minimize.
+      if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$", onInput); }
       // A field of one line (a shape's label) takes Return as done, as the label's editor on
       // the slide does; ⇧Return starts a line of its own.
-      if (rows === 1 && event.key === "Enter" && !event.shiftKey && !event.isComposing) event.preventDefault();
+      if (rows === 1 && event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); area.blur(); }
     });
     // The tools show while the field is typed in (studio.css) and are worked by the pointer,
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
