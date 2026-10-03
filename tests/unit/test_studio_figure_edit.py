@@ -167,6 +167,32 @@ def test_a_part_goes_on_a_line_of_its_own_centred_under_a_row() -> None:
         edit(steps, do="move", id="score", line="inside")
 
 
+def test_a_part_let_go_beside_one_in_a_column_goes_side_by_side_with_it() -> None:
+    column = (
+        "figure: {id: column}\nnodes:\n- {id: a, label: A}\n"
+        "- {id: cloud, kind: cloud, label: Feed}\n- {id: db, kind: database, label: Orders DB}\n"
+        "groups:\n- {id: root, layout: {kind: column}, children: [a, cloud, db]}\n"
+    )
+    text, chosen = edit(column, do="move", id="db", line="right", of="cloud")
+    assert chosen == ["db"]
+    groups = {group["id"]: group for group in data(text)["groups"]}
+    assert groups["root"]["children"] == ["a", "row"]
+    assert groups["row"] == {
+        "id": "row",
+        "children": ["cloud", "db"],
+        "layout": {"kind": "row", "align": "center"},
+        "role": "layout",
+    }
+    compile_figure(parse(text, Path.cwd()))
+    # Left of a part in that row: it runs across already, so it goes in it, first.
+    text, _ = edit(text, do="move", id="a", line="left", of="cloud")
+    groups = {group["id"]: group for group in data(text)["groups"]}
+    assert groups["root"]["children"] == ["row"]
+    assert groups["row"]["children"] == ["a", "cloud", "db"]
+    with pytest.raises(EditError, match="no group or part named"):
+        edit(column, do="move", id="db", line="right", of="gone")
+
+
 def test_parts_copied_from_one_figure_are_pasted_into_another_with_their_lines() -> None:
     copied = {
         "top": ["encoder", "y"],

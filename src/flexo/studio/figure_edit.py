@@ -777,24 +777,40 @@ class _Document:
         (a result under a row of steps, to compare them). Where ``of`` is held by a group
         running that way already, the part goes beside it there; else ``of`` keeps its
         place and its frame, its parts go into a new group laid out as it was, and it
-        lays out that group and the part the other way, centred."""
+        lays out that group and the part the other way, centred. Beside a part ``of`` (not
+        a group) running the other way, the two go into a new group of their own, where
+        ``of`` was, laid out that way."""
 
         if side not in {"below", "above", "right", "left"}:
             raise EditError(f"“{side}” isn't a valid position.")
         if identifier == of or of in self.descendants(identifier):
             raise EditError("A group can't be moved beside itself.")
         group = self.written_root() if of == self.root else self.group(of)
-        if group is None:
-            raise EditError(f"There's no group named “{of}”.")
+        if group is None and self.node(of) is None:
+            raise EditError(f"There's no group or part named “{of}”.")
         self.parent_of(identifier)  # held somewhere written, before it moves
         way = "column" if side in {"below", "above"} else "row"
         first = side in {"above", "left"}
-        holder = self.holder(of)
+        holder = self.holder(of) if group is not None else self.parent_of(of)
         self.detach(identifier)
         if holder is not None and (holder.get("layout") or {}).get("kind", "row") == way:
             children = holder["children"]
             at = children.index(of)
             children.insert(at if first else at + 1, identifier)
+            return [identifier]
+        if group is None:
+            pair = self.fresh(way)
+            self.data.setdefault("groups", []).append(
+                # Arrangement only: drawn with no frame of its own.
+                {
+                    "id": pair,
+                    "children": [identifier, of] if first else [of, identifier],
+                    "layout": {"kind": way, "align": "center"},
+                    "role": "layout",
+                }
+            )
+            children = self.parent_of(of)["children"]
+            children[children.index(of)] = pair
             return [identifier]
         children = list(group.get("children") or [])
         layout = dict(group.get("layout") or {})

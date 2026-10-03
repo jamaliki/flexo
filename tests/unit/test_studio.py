@@ -1385,6 +1385,33 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["below", "root", "above", None]
+    # Level with a part in a column and off to its side: beside it; over it, still in line.
+    column = {
+        "root": "root",
+        "groups": [{"id": "root", "layout": {"kind": "column"}, "children": ["a", "b", "c"]}],
+    }
+    boxes = {
+        "root": [0, 0, 300, 160],
+        "a": [100, 10, 200, 40],
+        "b": [130, 60, 170, 90],
+        "c": [100, 110, 200, 140],
+    }
+    drags = [["c", 230, 75], ["c", 100, 75], ["c", 175, 75], ["a", 150, 100]]
+    code = (
+        f"import {{ dropPlace }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(column)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+        "  if (!place) return null;\n"
+        "  return place.kind === 'line' ? `${place.side} of ${place.of}` : place.index;\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == ["right of b", "left of b", 1, 1]
 
 
 def test_an_agent_reads_a_file_that_does_not_read_as_written_and_puts_it_right(

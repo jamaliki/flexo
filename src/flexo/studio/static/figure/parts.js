@@ -1071,7 +1071,7 @@ export function figureParts(host) {
   }
 
   const dropAt = (point) => dropPlace(drag.drawn || model(), drag.boxes, point, drag.id);
-  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side : a === b);
+  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side && a.of === b.of : a === b);
   const unchanged = (at, id) => stays(model(), at, id);
 
   function showDrop(at) {
@@ -1084,8 +1084,9 @@ export function figureParts(host) {
       transform: `translate(${box.left - origin.left}px, ${box.top - origin.top}px)`,
       width: `${Math.max(box.right - box.left, 0)}px`, height: `${Math.max(box.bottom - box.top, 0)}px`, ...extra });
     if (at.kind === "line") {
-      // A line of its own: a slot where it lands, centred past the rest of the figure.
-      const all = drag.boxes.get(model().root) || room;
+      // A line of its own: a slot where it lands, centred past the rest of the figure -- or
+      // past the part it goes beside.
+      const all = drag.boxes.get(at.of) || drag.boxes.get(model().root) || room;
       const own = drag.boxes.get(drag.id);
       const width = own ? own.right - own.left : 60, height = own ? own.bottom - own.top : 30;
       const mid = centre(all), gap = 18;
@@ -1094,7 +1095,8 @@ export function figureParts(host) {
           : at.side === "right" ? { left: all.right + gap, top: mid.y - height / 2 }
             : { left: all.left - gap - width, top: mid.y - height / 2 };
       place(drag.zone, { ...slot, right: slot.left + width, bottom: slot.top + height });
-      drag.zone.dataset.label = at.side === "below" || at.side === "above" ? `New row ${at.side}` : `New column on the ${at.side}`;
+      drag.zone.dataset.label = at.of !== model().root ? `${{ below: "Under", above: "Over", right: "Right of", left: "Left of" }[at.side]} “${nameOf(at.of)}”`
+        : at.side === "below" || at.side === "above" ? `New row ${at.side}` : `New column on the ${at.side}`;
       drag.zone.classList.add("on", "own-line");
       drag.indicator.classList.remove("on");
       return;
@@ -1183,7 +1185,7 @@ export function figureParts(host) {
     for (const { element } of was.moving) element.classList.add("fig-settling");
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
-    if (at.kind === "line") ownLine(was.id, at.of, at.side, { failed: () => sendHome(was) });
+    if (at.kind === "line") ownLine(was.id, at.of, at.side, { failed: () => sendHome(was), drawn: was.drawn });
     else act({ do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
   }
   function dragCancel() { const was = dragFinish(); if (was) sendHome(was); }
@@ -1631,12 +1633,15 @@ export function figureParts(host) {
   // A part put on a line of its own `side` of the group `of`, as the figure is seen: one
   // drawn turned to fit the slide is first written as it is drawn, so the line goes where
   // it was asked for, under what is on screen -- one step to undo.
-  function ownLine(id, of, side, { failed = null } = {}) {
-    const turnedGroups = (model()?.groups || []).filter(turned);
+  // Let go from a drag, the groups are as they were drawn when it began (`drawn`): the part
+  // let go is still where it was let go, which would make its column look like a row.
+  function ownLine(id, of, side, { failed = null, drawn = null } = {}) {
+    const shown = (group) => (drawn ? drawn.groups.find((each) => each.id === group.id)?.layout?.kind || null : shownKind(group));
+    const turnedGroups = (model()?.groups || []).filter((group) => shown(group) && shown(group) !== writtenKind(group));
     const move = (merge = null) => act({ do: "move", id, line: side, of }, { merge, failed });
     if (!turnedGroups.length) { move(); return; }
     const merge = `as-drawn:${id}:${Date.now()}`;
-    const steps = ["row", "column"].map((kind) => ({ kind, targets: turnedGroups.filter((group) => shownKind(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
+    const steps = ["row", "column"].map((kind) => ({ kind, targets: turnedGroups.filter((group) => shown(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
       .filter((step) => step.targets.length);
     const next = (index) => {
       if (index >= steps.length) { move(merge); return; }

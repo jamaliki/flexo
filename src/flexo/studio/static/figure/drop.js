@@ -14,12 +14,15 @@
 // the part it goes next to, which side, and whether the line between them stands
 // (across a row) or lies (down a column). Under or over a figure laid out in a row
 // (beside one in a column) it is { kind: "line", side, of }: a line of its own there,
-// centred on the rest -- the server's "move" with ``line``.
+// centred on the rest -- the server's "move" with ``line``. Beside a part in a column, to
+// its left or right, it is { kind: "line", side, of: that part }: the two side by side.
 
 const MARGIN = 36;
 const PAD = 2;
 // How far under (or beside) the figure a part may be let go to start a line of its own.
 const LINE = 140;
+// How far past a part's side, level with it, a part is let go to go beside it.
+const BESIDE = 12;
 
 export function dropPlace(model, boxes, point, id) {
   const groups = new Map(model.groups.map((group) => [group.id, group]));
@@ -46,6 +49,13 @@ export function dropPlace(model, boxes, point, id) {
   const kind = group.layout?.kind || "column";
   const siblings = (group.children || []).filter((child) => child !== id && boxes.get(child));
   if (!siblings.length) return { parent: group.id, index: 0, kind, empty: true };
+  // Level with a part in a column and off to its side: beside it, the two in a row there.
+  if (kind === "column") {
+    const level = siblings.find((child) => !groups.has(child) && point.y >= boxes.get(child).top && point.y <= boxes.get(child).bottom);
+    const box = level && boxes.get(level);
+    const side = !box ? null : point.x > box.right + BESIDE ? "right" : point.x < box.left - BESIDE ? "left" : null;
+    if (side) return { kind: "line", side, of: level, parent: group.id, index: -1 };
+  }
   // Next to the part nearest the point: before or after it, across a row or down a
   // column; in a grid (or any other), across when the point is level with it.
   const distance = (box) => Math.hypot(Math.max(box.left - point.x, 0, point.x - box.right), Math.max(box.top - point.y, 0, point.y - box.bottom));
