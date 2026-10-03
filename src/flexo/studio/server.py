@@ -267,7 +267,9 @@ class Handler(BaseHTTPRequestHandler):
             # Told to the pages with the window it came from, so that window knows its own.
             client = str(data.get("client") or who["id"])
             version, document = doc.update(data["document"], int(data["base"]), who, client)
-            self._json({"version": version, "document": document})
+            # Whose changes it was merged with, for the page to name them.
+            others = doc.author_since(int(data["base"]), who)
+            self._json({"version": version, "document": document, "who": others})
         elif route == "/api/draw":
             self._json(
                 workspace.draw(

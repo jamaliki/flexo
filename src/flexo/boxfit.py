@@ -16,7 +16,7 @@ words come out largest:
   single word;
 - and, when none of those sets the words at their size, **folded**
   (``flexo.orient.wrapped``): a long row or column set on two lines, if that
-  sets them clearly larger (``FOLD_GAIN``).
+  sets them clearly larger (``FOLD_GAIN``) and makes no lines cross.
 
 It stops as soon as a layout lets the words reach ``largest``, so a figure that
 already fits costs one compile. A turned or tightened layout is only chosen when
@@ -172,9 +172,22 @@ def fit_in_box(
             ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
             scale = min(most, width / ink[2], height / ink[3])
             errors = len(lint_compilation(compiled, style=layout_style).errors)
-            if errors <= written_errors and scale > best.scale * FOLD_GAIN:
+            # A fold is the layout's doing, not its author's: one that makes lines cross
+            # that did not is no fold to take, however much larger its words.
+            if (
+                errors <= written_errors
+                and scale > best.scale * FOLD_GAIN
+                and _crossings(compiled, layout_style) <= _crossings(best.compilation, best.style)
+            ):
                 best = BoxFit(compiled, scale, ink, label, base * scale, errors, layout_style)
     return best
+
+
+def _crossings(compiled: Compilation, style: LayoutStyle | None) -> int:
+    """How many pairs of lines cross in a compiled figure."""
+
+    report = lint_compilation(compiled, style=style)
+    return sum(item.code == "routing.connector.crossing" for item in report.diagnostics)
 
 
 def _kept(keep: str, candidates, width: float, height: float, most: float, base: float, pad: float):

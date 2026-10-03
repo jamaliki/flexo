@@ -315,23 +315,27 @@ export class Session {
     if (result.restarted) this.resync();
     // The file is another kind of document now: it opens again in that kind's editor.
     else if (result.reopen) this.workspace.reopen?.(this.file, result.kind);
-    else this.accept(result.version, result.document, sent);
+    else this.accept(result.version, result.document, sent, result.who);
     this.emit("status");
   }
 
-  // The server's answer to what was sent: keep edits made since, on top of it.
-  accept(version, document, sent) {
+  // The server's answer to what was sent: keep edits made since, on top of it. `who` made
+  // the changes it was merged with, if others did.
+  accept(version, document, sent, who = null) {
     if (version < this.version) return;
     const local = this.document;
-    this.document = same(local, sent) ? document : merge3(sent, document, local);
+    const notes = [];
+    this.document = same(local, sent) ? document : merge3(sent, document, local, notes);
     this.synced = document;
     this.version = version;
     this.ownVersion = Math.max(this.ownVersion, version);
     this.exists = true;
+    this.rebase(local);
     if (!same(this.document, local)) {
-      this.emit("change", { quiet: false, source: "remote" });
+      this.emit("change", { quiet: false, source: "remote", who });
       this.requestDraw();
     }
+    this.kept(notes, who);
     const waiting = this.lastRemote;
     if (waiting && waiting.version > this.version) this.remote(waiting);
     if (!same(this.document, this.synced)) this.schedulePush();
@@ -344,16 +348,39 @@ export class Session {
     if (event.version <= this.version) return;
     if (this.sending) { this.lastRemote = event; return; }
     const before = this.document;
-    this.document = same(before, this.synced) ? event.document : merge3(this.synced, event.document, before);
+    const notes = [];
+    this.document = same(before, this.synced) ? event.document : merge3(this.synced, event.document, before, notes);
     this.synced = event.document;
     this.version = event.version;
     this.exists = true;
+    this.rebase(before);
     if (!same(before, this.document)) {
       this.emit("change", { quiet: false, source: "remote", who: event.who, before });
       this.requestDraw();
     }
+    this.kept(notes, event.who);
     if (!same(this.document, this.synced)) this.schedulePush();
     this.emit("status");
+  }
+
+  // Others' changes come in (to `previous`, the document as it was) while a run of edits is
+  // open -- typing in one place, which goes on however long its pauses: the run's step is
+  // made as if theirs had come first, so undoing the run takes back these edits, not theirs.
+  rebase(previous) {
+    const top = this.past[this.past.length - 1];
+    if (!this.lastMerge || !top || top.apply || same(previous, this.document) || !same(top.after, previous)) return;
+    top.before = merge3(top.after, this.document, top.before);
+    top.after = this.document;
+  }
+
+  // What a merge here kept of this page's edits against another's (`who`): something they
+  // deleted while it was edited here, words they wrote anew while words were typed in them
+  // here (merge.js's notes, where this page's copy is "theirs"). Said as the studio says
+  // what its merges kept (a "merged" event): { kept: item, by } or { rewritten, typed, by }.
+  kept(notes, who = null) {
+    const ours = notes.flatMap((note) => (note.kept === "theirs" ? [{ kept: note.item, by: who }]
+      : note.rewritten === "ours" ? [{ rewritten: note.words, typed: note.typed, by: who }] : []));
+    if (ours.length) this.emit("merged", { notes: ours });
   }
 
   // The file holds `version` (or the studio has stopped holding back: the file reads again).
@@ -492,9 +519,10 @@ export class Session {
   folder() { return this.file.includes("/") ? this.file.slice(0, this.file.lastIndexOf("/") + 1) : ""; }
 
   // Export, as Keynote's File › Export To does. The kind's entry for a format (in
-  // `exports`) may ask first, in a sheet: `choose`, the formats to offer for it
-  // ([{ format, label }]), and `options`, settings its export takes ([{ name, label,
-  // value }]). Then the Mac app's one save panel puts the file, or a folder of several,
+  // `exports`) asks first, in a sheet, when it has anything to say -- its `hint`, what the
+  // file will be; `choose`, the formats to offer for it ([{ format, label }]); and
+  // `options`, settings its export takes ([{ name, label, value }]) -- so each of a
+  // deck's exports (PDF…, PowerPoint…, Images…) opens a sheet, as Keynote's each do. Then the Mac app's one save panel puts the file, or a folder of several,
   // where its person says, or the browser downloads it (several files as a zip): nothing
   // is left beside the document. `part` exports one part of the document by itself (a
   // figure on a slide), if its kind can. Answers where it went, or [] if it did not.
@@ -504,7 +532,7 @@ export class Session {
     const entry = part || formats.length !== 1 ? null : this.exports.find((item) => item.format === formats[0]);
     const named = entry?.label?.replace(/…$/, "") || formats.join(", ").toUpperCase();
     const options = {};
-    if (entry?.choose?.length || entry?.options?.length) {
+    if (entry?.hint || entry?.choose?.length || entry?.options?.length) {
       let chosen = entry.format;
       for (const option of entry.options || []) options[option.name] = Boolean(option.value);
       const go = await new Promise((done) => {
@@ -512,6 +540,7 @@ export class Session {
         dialog({
           title: `Export ${named}`,
           body: [
+            entry.hint ? h("p.export-hint", {}, entry.hint.replace(/\.?$/, ".")) : null,
             entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
             ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; } })),
           ],

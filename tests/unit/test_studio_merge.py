@@ -133,6 +133,62 @@ def test_undo_takes_back_only_its_own_addition() -> None:
 def test_an_item_removed_by_one_side_and_edited_by_the_other_is_kept_edited() -> None:
     assert merge3(["a b", "c d"], ["a b"], ["a b", "c d e"]) == ["a b", "c d e"]
     assert merge3(["a b", "c d"], ["a b", "c d e"], ["a b"]) == ["a b", "c d e"]
+    # And said, for whoever was editing it.
+    base = {"body": [{"text": "P"}, {"text": "Q"}]}
+    edited = {"body": [{"text": "P, typed on"}, {"text": "Q"}]}
+    notes: list = []
+    merge3(base, edited, {"body": [{"text": "Q"}]}, notes)
+    assert notes == [{"kept": "ours", "item": {"text": "P, typed on"}}]
+    notes.clear()
+    merge3(base, {"body": [{"text": "Q"}]}, edited, notes)
+    assert notes == [{"kept": "theirs", "item": {"text": "P, typed on"}}]
+
+
+def test_words_written_anew_while_typed_in_are_kept_whole_with_the_typing_after() -> None:
+    # A sentence rewritten while words were typed after its first word: not a jumble of
+    # both, held together by their spaces, but the new sentence and the words typed.
+    base = "First paragraph written by Alice."
+    typing = "First m0 m1 m2 m3paragraph written by Alice."
+    notes: list = []
+    merged = merge3(base, typing, "A completely different sentence.", notes)
+    assert merged == "A completely different sentence. m0 m1 m2 m3"
+    assert notes == [{"rewritten": "theirs", "words": merged, "typed": "m0 m1 m2 m3"}]
+    assert merge3(base, "A completely different sentence.", typing) == merged
+    # The space typed after the last word stays, for the next.
+    assert merge3(base, "First m0 paragraph written by Alice.", "Something new.") == (
+        "Something new. m0 "
+    )
+    # The page, typing on as the merged words come back: the typing goes on after them.
+    assert (
+        merge3(
+            "First m0 m1 m2 m3 paragraph written by Alice.",
+            "A completely different sentence. m0 m1 m2 m3",
+            "First m0 m1 m2 m3 m4paragraph written by Alice.",
+        )
+        == "A completely different sentence. m0 m1 m2 m3 m4"
+    )
+    # Typed on from words kept before, the typing runs on from them.
+    assert (
+        merge3(
+            "First m0 mparagraph written by Alice.",
+            "A different sentence. m0 m",
+            "First m0 m3paragraph written by Alice.",
+        )
+        == "A different sentence. m0 m3"
+    )
+    # A line of several rewritten: the typing goes before its end.
+    assert merge3("one\ntwo three\n", "one\ntwo three four\n", "one\nfive\n") == (
+        "one\nfive four\n"
+    )
+    # A title retitled while typed on keeps both.
+    assert merge3("Title", "Title of the talk", "Heading") == "Heading of the talk"
+    # Both written anew: the newer stands, as for any words changed both ways.
+    assert merge3("one two three", "four five six", "seven eight nine") == "seven eight nine"
+
+
+def test_words_taken_away_while_typed_among_go_and_the_typing_stays() -> None:
+    assert merge3("a b c d e f", "a b e f", "a b c x d e f") == "a b x e f"
+    assert merge3("a b c d e f", "a b c x d e f", "a b e f") == "a b x e f"
 
 
 def test_the_same_item_added_by_both_sides_is_kept_once() -> None:
@@ -152,3 +208,10 @@ def test_shapes_are_known_by_their_ids() -> None:
     assert merge3(base, ours, theirs) == {
         "nodes": [{"id": "b", "label": "B"}, {"id": "a", "label": "A, renamed"}]
     }
+
+
+def test_letters_two_people_type_into_one_word_are_both_kept() -> None:
+    # Two people typing on at one place, their words run together: each letter stays
+    # where it was typed, none lost to the other's.
+    assert merge3("A mc", "A m4c", "A mco") == "A m4co"
+    assert merge3("A m", "A m4", "A mc") == "A m4c"

@@ -10,8 +10,9 @@ import { start } from "./shell.js";
 
 // Draw a form again without taking the field someone is typing in away from them. Words
 // another person added or took away before the caret move it along, so it stays where
-// its person was typing.
-export function keepFocus(container, render) {
+// its person was typing. Drawn again for an undo or a redo (`undone`), the caret goes to
+// the end of what changed -- after the words put back -- as in TextEdit.
+export function keepFocus(container, render, { undone = false } = {}) {
   const active = document.activeElement;
   const key = active && container.contains(active) ? active.dataset?.key : null;
   const selection = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
@@ -24,27 +25,37 @@ export function keepFocus(container, render) {
   const again = container.querySelector(`[data-key="${CSS.escape(key)}"]`);
   if (!again) return;
   again.focus({ preventScroll: true });
+  const follow = (now) => (at) => (undone ? changeEnd(was, now) : caretAfter(was, now, at));
   if (caret && again.isContentEditable) {
     const now = textIn(again);
-    caretTo(again, now !== was ? caret.map((at) => caretAfter(was, now, at)) : caret);
+    caretTo(again, now !== was ? caret.map(follow(now)) : caret);
   }
   if (selection && "setSelectionRange" in again) {
     const now = typeof again.value === "string" ? again.value : null;
-    const moved = was !== null && now !== null && now !== was ? selection.map((at) => caretAfter(was, now, at)) : selection;
+    const moved = was !== null && now !== null && now !== was ? selection.map(follow(now)) : selection;
     try { again.setSelectionRange(...moved); } catch { /* a field without a caret */ }
   }
 }
 
-// Where a caret at `at` in `was` is in `now`: after the words that changed, if it was.
-function caretAfter(was, now, at) {
+// How many letters `was` and `now` have alike at their start, and then at their end.
+function alikeEnds(was, now) {
   let start = 0;
   while (start < was.length && start < now.length && was[start] === now[start]) start += 1;
   let end = 0;
   while (end < was.length - start && end < now.length - start && was[was.length - 1 - end] === now[now.length - 1 - end]) end += 1;
+  return [start, end];
+}
+
+// Where a caret at `at` in `was` is in `now`: after the words that changed, if it was.
+function caretAfter(was, now, at) {
+  const [start, end] = alikeEnds(was, now);
   if (at <= start) return at;
   if (at >= was.length - end) return at + now.length - was.length;
   return now.length - end;
 }
+
+// The end of what changed from `was` to `now`, in `now`.
+const changeEnd = (was, now) => now.length - alikeEnds(was, now)[1];
 
 // The faces a drawing's words are set in, as CSS font shorthands ("italic 700 16px Figtree").
 export function drawingFonts(svg) {
@@ -119,6 +130,8 @@ export function picture(svg, hash, { natural = false } = {}) {
   const holder = document.createElement("template");
   holder.innerHTML = svg.replace(/^<\?xml[^>]*>\s*/, "");
   const drawing = holder.content.querySelector("svg");
+  // Its links are part of the picture: never a place for the keys, nor followed.
+  for (const link of holder.content.querySelectorAll("a")) { link.removeAttribute("href"); link.removeAttributeNS("http://www.w3.org/1999/xlink", "href"); }
   if (drawing && !natural) {
     drawing.removeAttribute("width");
     drawing.removeAttribute("height");

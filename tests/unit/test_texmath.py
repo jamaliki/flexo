@@ -510,3 +510,21 @@ def test_maths_in_bold_words_is_regular_all_of_it() -> None:
     weights = [item.face.weight for _, _, item in formula.box.items if isinstance(item, GlyphItem)]
     assert weights[:2] == [400, 400] and weights[-1] == 400  # x, 2 and ξ
     assert set(weights[2:-1]) == {700}  # " if "
+
+
+@pytest.mark.parametrize(
+    ("source", "said"),
+    [
+        (r"\frac{a+b}{2}", "(a + b)/2"),
+        (r"x^2 + y_i", "x² + yᵢ"),
+        (r"[\mathrm{Na^+}]_{in}", "[Na⁺]ᵢₙ"),
+        (r"\sqrt{x^2+1}", "√(x² + 1)"),
+        (r"\int_0^\infty e^{-x}\,dx", "∫₀^∞ e^(\u2212x) dx"),
+        (r"\Delta G = -RT \ln K", "ΔG = \u2212RT ln K"),
+        (r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "(a, b; c, d)"),
+    ],
+)
+def test_a_formula_reads_as_one_line_of_words(source: str, said: str) -> None:
+    from flexo.texmath import linear
+
+    assert linear(source) == said

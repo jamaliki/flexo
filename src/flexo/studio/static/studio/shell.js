@@ -56,8 +56,10 @@ function statusWords(session) {
   // The file on disk does not read: "Not saved" only while edits made here wait for it.
   if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
   // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
-  const said = problem.replace(/^.*? could not be saved:\s*/, "");
-  return session.unsaved ? `Not saved: ${said}` : said.charAt(0).toUpperCase() + said.slice(1);
+  // A reason why it could not be saved starts the sentence; a file's name keeps its spelling.
+  const why = /^.*? could not be saved:\s*/.exec(problem);
+  const said = why ? problem.slice(why[0].length) : problem;
+  return session.unsaved ? `Not saved: ${said}` : why ? said.charAt(0).toUpperCase() + said.slice(1) : said;
 }
 
 // Settled once every stylesheet the page has asked for has loaded (or a moment has
@@ -260,6 +262,10 @@ export class Workspace {
         session?.remote(event);
         if (session && event.client !== this.client) session.emit("remote", event);
         break;
+      // What the studio's merge kept for someone: told to their pages (see Doc._tell).
+      case "merged":
+        session?.emit("merged", { notes: event.notes.filter((note) => (note.to ? note.to === this.client : event.client !== this.client)) });
+        break;
       case "saved":
         session?.saved(event.version);
         // What was wrong with the file is over (it is back, or reads again): so is its word.
@@ -346,7 +352,9 @@ export async function start() {
   const activityCount = h("span.badge-count", { hidden: true });
   activityButton.append(activityCount);
   const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
-  const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
+  // Pressed, it leaves the keys where they were (words being typed, the slide list) until
+  // the palette has seen what they are on: its commands are for that.
+  const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
   // Appearance as a Mac's: Automatic, Light or Dark, the one in use ticked.
   const themeButton = ui.button("", (event) => {
     const now = remembered("theme", "auto");
@@ -464,7 +472,7 @@ export async function start() {
       // and Slide menus): "Add Picture" runs "Add Picture…".
       case "run": {
         const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
-        session?.commands().find((command) => bare(command.label) === bare(arg))?.run();
+        session?.commands().find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
         break;
       }
       case "palette": palette(workspace); break;
@@ -480,8 +488,10 @@ export async function start() {
     report();
   };
   // What the document can do now, by label: the app enables its Insert and Slide items by it.
+  // A command named for what it acts on ("Duplicate Table") is also the menu's plain one
+  // (`also`: Edit › Duplicate); one greyed is not offered.
   const doable = (session) => {
-    try { return session ? session.commands().map((command) => command.label) : []; } catch { return []; }
+    try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
   };
   let reporting = null;
   const report = () => {
@@ -600,8 +610,26 @@ export async function start() {
       save.disabled = true;
       try { await session.mend(area.value); }
       // The words typed here, not the file (which the bar above speaks of), are what does not read.
-      catch (error) { said.textContent = /reach the studio/.test(error.message) ? error.message : `Not saved: as typed here, ${error.message.charAt(0).toLowerCase()}${error.message.slice(1)}`; }
+      catch (error) {
+        said.textContent = /reach the studio/.test(error.message) ? error.message : `Not saved: as typed here, ${error.message.charAt(0).toLowerCase()}${error.message.slice(1)}`;
+        // The line it now names, chosen, as when the sheet opened.
+        chooseLine(error.message);
+      }
       finally { save.disabled = false; }
+    };
+    // The line a problem names, chosen and in view -- or, named past the last words (a bracket
+    // left open at the end), the last line with words before it.
+    const chooseLine = (problem) => {
+      let line = Number((problem || "").match(/\bline (\d+)/)?.[1] || 0);
+      if (!line || !shown) return;
+      requestAnimationFrame(() => {
+        const lines = area.value.split("\n");
+        while (line > 1 && !(lines[line - 1] || "").trim()) line -= 1;
+        const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
+        area.focus({ preventScroll: true });
+        area.setSelectionRange(start, start + (lines[line - 1] || "").length);
+        area.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(area).lineHeight || "18"));
+      });
     };
     area.addEventListener("input", () => { if (unread) unread.edited = true; });
     clear(unreadView, h("div.unread-inner", {},
@@ -611,15 +639,7 @@ export async function start() {
       shown ? area : null,
       shown ? h("div.unread-foot", {}, save) : null));
     unread = { session, problem: session.problem, source: session.source, area, edited: kept, mend };
-    // The line the problem names, chosen and in view.
-    const line = Number((session.problem || "").match(/\bline (\d+)/)?.[1] || 0);
-    if (line && shown) requestAnimationFrame(() => {
-      const lines = area.value.split("\n");
-      const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
-      area.focus({ preventScroll: true });
-      area.setSelectionRange(start, start + (lines[line - 1] || "").length);
-      area.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(area).lineHeight || "18"));
-    });
+    chooseLine(session.problem);
   };
 
   const renderViews = () => {
@@ -743,12 +763,22 @@ function markIcon() {
   return node;
 }
 
+// Copied, its button says so where it is -- a tick a moment, as a Mac's does -- not in a note
+// (which waits under a sheet it is in); not copied, its words are chosen to copy by hand.
 export function copyable(text) {
+  const code = h("code", {}, text);
   const button = ui.button("", async () => {
-    try { await navigator.clipboard.writeText(text); toast("Copied", { icon: "check", seconds: 1.2 }); }
-    catch { toast("Couldn't copy. Select the text and copy it instead.", { seconds: 2 }); }
+    try {
+      await navigator.clipboard.writeText(text);
+      clear(button, icon("check"));
+      button.title = "Copied";
+      setTimeout(() => { clear(button, icon("copy")); button.title = "Copy"; }, 1500);
+    } catch {
+      getSelection().selectAllChildren(code);
+      button.title = "Couldn't copy: the command is chosen, press ⌘C";
+    }
   }, { kind: "ghost", icon: "copy", small: true, title: "Copy" });
-  return h("div.copyable", {}, h("code", {}, text), button);
+  return h("div.copyable", {}, code, button);
 }
 
 // Kinds the studio offers to make: all of them, unless whoever started it said fewer.
@@ -820,11 +850,11 @@ const SHORTCUTS = [
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
-  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
-    ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "Indent an Item (⇧⇥: Outdent)"],
-    ["⇥", "Next Title, Text, Object or Cell"], ["Esc", "Done"]]],
+  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
+    ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
+    ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["↩", "Edit Label"], ["⌫", "Delete Shape"]]],
-  ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["4 ↩", "Go to Slide 4"],
+  ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
 
@@ -905,10 +935,12 @@ export function palette(workspace) {
       { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
       { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
-    // The Edit menu's, by name.
-    ...(session?.past.length ? [{ icon: "undo", label: "Undo", keys: "⌘Z", hint: session.said(session.past[session.past.length - 1]).text, run: () => workspace.command("undo") }] : []),
-    ...(session?.future.length ? [{ icon: "redo", label: "Redo", keys: "⇧⌘Z", hint: session.said(session.future[session.future.length - 1]).text, run: () => workspace.command("redo") }] : []),
-    ...(session?.past.length || session?.future.length ? [{ icon: "history", label: "Show History", keys: "⌥⌘Z", run: () => workspace.command("history") }] : []),
+    // The Edit menu's, by name: greyed with nothing to undo, as the menu's are.
+    ...(session ? [
+      { icon: "undo", label: "Undo", keys: "⌘Z", disabled: !session.past.length, hint: session.past.length ? session.said(session.past[session.past.length - 1]).text : "Nothing to undo", run: () => workspace.command("undo") },
+      { icon: "redo", label: "Redo", keys: "⇧⌘Z", disabled: !session.future.length, hint: session.future.length ? session.said(session.future[session.future.length - 1]).text : "Nothing to redo", run: () => workspace.command("redo") },
+      { icon: "history", label: "Show History", keys: "⌥⌘Z", disabled: !session.past.length && !session.future.length, hint: session.past.length || session.future.length ? "" : "No changes yet", run: () => workspace.command("history") },
+    ] : []),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
@@ -922,36 +954,38 @@ export function palette(workspace) {
   // A command is found by its name: the words typed in it, at a word's start best; each
   // word typed starting one of its words; or the first letters of its words ("ns", New
   // Slide). What it says of itself counts only for words typed whole. Lower ranks
-  // higher; null when it is not found.
+  // higher, and those alike keep the list's order (Export's PDF, PowerPoint, Images);
+  // null when it is not found.
   const wordsOf = (text) => text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const score = (command, query) => {
     const label = command.label.toLowerCase(), names = wordsOf(label), said = wordsOf((command.hint || "").toLowerCase());
-    const tidy = label.length * 0.01;
     const at = label.indexOf(query);
     const starts = at === 0 || /[^\p{L}\p{N}]/u.test(label[at - 1] ?? "");
-    // Inside a word, two letters are as often chance ("ns" in Columns) as meant.
-    if (at >= 0 && (starts || query.length > 2)) return (starts ? -20 : -10) + at * 0.1 + tidy;
+    if (at >= 0 && starts) return -20 + at * 0.1;
+    // Inside a word, a few letters are as often chance ("cut" in Shortcuts) as meant; more
+    // ("point" in PowerPoint) are meant.
+    if (at >= 0 && query.length > 3) return -10 + at * 0.1;
     const typed = wordsOf(query);
-    if (typed.every((word) => names.some((name) => name.startsWith(word)))) return tidy;
-    if (typed.every((word) => names.some((name) => name.startsWith(word)) || said.some((name) => name.startsWith(word)))) return 10 + tidy;
+    if (typed.every((word) => names.some((name) => name.startsWith(word)))) return 0;
+    if (typed.every((word) => names.some((name) => name.startsWith(word)) || said.some((name) => name.startsWith(word)))) return 10;
+    // The first letters of its words, in order: never letters strung across them.
+    const initials = names.map((name) => name[0]).join(""), letters = query.replace(/\s+/g, "");
+    if (letters.length < 2) return null;
     let position = 0, total = 0;
-    for (const ch of query.replace(/\s+/g, "")) {
-      let found = -1;
-      for (let k = position; k < label.length && found < 0; k += 1) {
-        if (label[k] === ch && ((k === position && position > 0) || k === 0 || /[^\p{L}\p{N}]/u.test(label[k - 1]))) found = k;
-      }
+    for (const ch of letters) {
+      const found = initials.indexOf(ch, position);
       if (found < 0) return null;
       total += found - position;
       position = found + 1;
     }
-    return 20 + total * 0.1 + tidy;
+    return 20 + total * 0.1;
   };
   const render = () => {
     const query = input.value.trim().toLowerCase();
     shown = query ? commands.map((command) => [score(command, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     shown = shown.slice(0, 60);
     index = Math.min(index, Math.max(0, shown.length - 1));
-    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
+    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
       command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),
       command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
@@ -959,12 +993,18 @@ export function palette(workspace) {
   // Closed, it gives the keys back where they were, as Spotlight does; a command run then
   // takes them where it goes.
   const before = document.activeElement;
+  // Words being typed get their words chosen back too: Bold, run from here, is for them.
+  const chosenWords = before?.isContentEditable && getSelection().rangeCount ? getSelection().getRangeAt(0).cloneRange() : null;
   const close = () => {
     scrim.remove();
     const under = [...document.querySelectorAll(".scrim")].pop();
-    if (before?.isConnected && before !== document.body && (!under || under.contains(before))) before.focus({ preventScroll: true });
+    if (before?.isConnected && before !== document.body && (!under || under.contains(before))) {
+      before.focus({ preventScroll: true });
+      if (chosenWords && before.contains(chosenWords.startContainer)) { getSelection().removeAllRanges(); getSelection().addRange(chosenWords); }
+    }
   };
-  const run = (command) => { close(); command.run(); };
+  // One greyed (Undo with nothing to undo) is shown for what it is, and does nothing.
+  const run = (command) => { if (command.disabled) return; close(); command.run(); };
   input.addEventListener("input", () => { index = 0; render(); });
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") { event.preventDefault(); index = Math.min(index + 1, shown.length - 1); mark(); }

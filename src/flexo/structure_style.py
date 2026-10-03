@@ -205,7 +205,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
         "fields": [
             _number(
                 "line.width", "Line Width", low=0, step=0.1,
-                hint="In pixels of a drawing 1920 wide", unit="px",
+                hint="On a drawing 1920 wide", unit="px",
             ),
             _number("line.rough", "Roughness", low=0, step=0.1, hint="0 is perfectly straight"),
             _whole("line.passes", "Passes", low=1, high=6, hint="More passes look more sketched"),
@@ -227,13 +227,13 @@ SECTIONS: tuple[dict[str, Any], ...] = (
         "fields": [
             _share("shading", "Shading", "How dark the shadow side is"),
             _number(
-                "view.light", "Light Angle", step=5, hint="In degrees; -125 is top left", unit="°"
+                "view.light", "Light Angle", step=5, hint="-125 is top left", unit="°"
             ),
             _number(
                 "hatch.spacing", "Hatch Spacing", low=1, step=0.5,
-                hint="In pixels of a drawing 1920 wide", unit="px",
+                hint="On a drawing 1920 wide", unit="px",
             ),
-            _number("hatch.angle", "Hatch Angle", step=5, hint="In degrees", unit="°"),
+            _number("hatch.angle", "Hatch Angle", step=5, unit="°"),
             _number("hatch.density", "Hatch Density", low=0, step=0.1),
             _share("pencil_fill", "Pencil Density", "For the Pencil fill"),
         ],
@@ -295,7 +295,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0,
                 high=90,
                 step=1,
-                hint="In degrees; 0 is flat",
+                hint="0 is flat",
                 unit="°",
             ),
             _share("view.fog", "Fog", "How much the far side fades"),
@@ -318,7 +318,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
             ),
             _number(
                 "label_size", "Label Size", low=4, step=1,
-                hint="In pixels of a drawing 1920 wide", unit="px",
+                hint="On a drawing 1920 wide", unit="px",
             ),
             _switch("show.res_labels", "Residue Labels", "A label on every residue"),
             _number(

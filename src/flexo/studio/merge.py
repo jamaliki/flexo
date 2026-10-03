@@ -8,7 +8,14 @@ item both edited is merged in turn; both sides' insertions at one place are kept
 ours first; an item one side removed and the other edited is kept, edited. Words
 merge line by line, and within a line both changed, word by word. Where both sides
 changed the same thing differently, ``theirs`` wins: the studio passes the newest
-change as ``theirs``. ``static/studio/merge.js`` is the same algorithm for the page.
+change as ``theirs``; but words one side wrote anew while the other typed in them are
+kept whole, with the other's words after them. ``static/studio/merge.js`` is the same
+algorithm for the page.
+
+``notes``, a list, if given, is told what was settled for someone: ``{"kept": side,
+"item": item}``, an item the other side removed kept for ``side`` ("ours" or
+"theirs"), who edited it; ``{"rewritten": side, "words": words, "typed": typed}``,
+words ``side`` wrote anew, kept whole, and the other's ``typed`` after them.
 """
 
 from __future__ import annotations
@@ -26,21 +33,21 @@ _SPACE = re.compile(r"\s")
 _WORDS_ONLY = re.compile(r"\w+")
 
 
-def merge3(base: Any, ours: Any, theirs: Any) -> Any:
+def merge3(base: Any, ours: Any, theirs: Any, notes: list | None = None) -> Any:
     if _same(ours, theirs) or _same(base, theirs):
         return ours
     if _same(base, ours):
         return theirs
     if isinstance(ours, dict) and isinstance(theirs, dict):
-        return _merge_dicts(base if isinstance(base, dict) else {}, ours, theirs)
+        return _merge_dicts(base if isinstance(base, dict) else {}, ours, theirs, notes)
     if isinstance(ours, list) and isinstance(theirs, list):
-        return merge_items(base if isinstance(base, list) else [], ours, theirs)
+        return merge_items(base if isinstance(base, list) else [], ours, theirs, notes)
     if isinstance(ours, str) and isinstance(theirs, str) and isinstance(base, str):
-        return merge_text(base, ours, theirs)
+        return merge_text(base, ours, theirs, notes)
     return theirs
 
 
-def merge_text(base: str, ours: str, theirs: str) -> str:
+def merge_text(base: str, ours: str, theirs: str, notes: list | None = None) -> str:
     """Two edits of words, merged as diff3 merges two edits of a file: line by line,
     and lines both changed word by word, so two people typing in one field keep both
     their words. Where both changed the same words differently, ``theirs`` wins; a
@@ -52,35 +59,142 @@ def merge_text(base: str, ours: str, theirs: str) -> str:
         return theirs
     if "\n" in base or "\n" in ours or "\n" in theirs:
         lines = [_LINES.findall(text) for text in (base, ours, theirs)]
-        return "".join(_diff3(*lines, _lines_chunk))
-    return _merge_words(base, ours, theirs)
+        return "".join(_diff3(*lines, lambda *chunk: _lines_chunk(*chunk, notes)))
+    return _merge_words(base, ours, theirs, notes)
 
 
-def _merge_words(base: str, ours: str, theirs: str) -> str:
+def _merge_words(base: str, ours: str, theirs: str, notes: list | None = None) -> str:
     if not any(_SPACE.search(text) for text in (base, ours, theirs)):
         return theirs
     words = [_WORDS.findall(text) for text in (base, ours, theirs)]
+    # Words one side wrote anew while the other typed in them would be held together only
+    # by the spaces and a stray word they share, and come out a jumble of both: they are
+    # kept whole, and the other's own words after them, in one piece. (Both written anew,
+    # the newer stands, as for any words changed both ways.)
+    for side, other, name in ((words[2], words[1], "theirs"), (words[1], words[2], "ours")):
+        if _rewritten(words[0], side) and not _rewritten(words[0], other):
+            kept, (typed, onto) = "".join(side), _typed(words[0], other)
+            # Within a line's end, and run on from the word they were typed onto, if the
+            # kept words end with it (the typing kept before, typed on).
+            body = kept.rstrip("\n")
+            end = kept[len(body) :]
+            if not typed.strip():
+                return body + ("" if body[-1:].isspace() else typed) + end
+            joined = not body or body[-1].isspace() or (onto and body.endswith(onto))
+            gap = "" if joined or _CLOSING.match(typed) else " "
+            merged = body + gap + typed + end
+            if notes is not None:
+                notes.append({"rewritten": name, "words": merged, "typed": typed.strip()})
+            return merged
     return "".join(_diff3(*words, _words_chunk))
 
 
-def _lines_chunk(base: list, ours: list, theirs: list) -> list:
+_CLOSING = re.compile(r"[.,;:!?)\]}\u201d\u2019]")
+
+
+def _rewritten(base: list[str], side: list[str]) -> bool:
+    """Whether ``side`` is words written anew over ``base``: fewer than half of base's
+    words kept, and words of its own."""
+
+    was = [token for token in base if _WORDS_ONLY.fullmatch(token)]
+    now = [token for token in side if _WORDS_ONLY.fullmatch(token)]
+    kept = len(_matches(was, now))
+    return kept * 2 < len(was) and len(now) > kept
+
+
+def _typed(base: list[str], side: list[str]) -> tuple[str, str]:
+    """What ``side`` has that ``base`` has not, in one piece: the words put in each place
+    (the letters typed into a word of base's, where they run into it, its space not typed
+    yet), and the space typed after the last, for the words to go on after it; and the
+    letters of the word the first was typed onto, if it ran on from one."""
+
+    runs: list[tuple[str, str]] = []  # each, and the words of ``side`` before it
+    b = s = 0
+    for i, j in [*sorted(_matches(base, side).items()), (len(base), len(side))]:
+        was, now = "".join(base[b:i]), "".join(side[s:j])
+        start, end = _ends(was, now)
+        if start + end < len(was):
+            start, end = 0, 0
+        run = now[start : len(now) - end]
+        if run:
+            runs.append((run, "".join(side[:s]) + now[:start]))
+        b, s = i + 1, j + 1
+    if not runs:
+        return "", ""
+    words = " ".join(run.strip() for run, _ in runs if run.strip())
+    first, before = next(((run, before) for run, before in runs if run.strip()), runs[0])
+    onto = "" if first[:1].isspace() else re.search(r"\S*$", before).group()
+    return words + re.search(r"\s*$", runs[-1][0]).group(), onto
+
+
+def _ends(was: str, now: str) -> tuple[int, int]:
+    """How many letters ``was`` and ``now`` have alike at their start, and then at their end."""
+
+    start = 0
+    while start < len(was) and start < len(now) and was[start] == now[start]:
+        start += 1
+    end = 0
+    while end < len(was) - start and end < len(now) - start and was[-1 - end] == now[-1 - end]:
+        end += 1
+    return start, end
+
+
+def _insertion(was: str, now: str) -> tuple[int, str] | None:
+    """Where in ``was`` letters were typed in one place to make ``now``, and what they were
+    (None if it was not so)."""
+
+    start, end = _ends(was, now)
+    if start + end < len(was) or len(now) == len(was):
+        return None
+    return start, now[start : len(now) - end]
+
+
+def _inserted(was: str, now: str) -> str | None:
+    """What was typed into ``was`` in one place to make ``now`` (None if it was not so),
+    with the spaces about it that ``was`` had: the words round it may go."""
+
+    found = _insertion(was, now)
+    if found is None:
+        return None
+    start, typed = found
+    lead = re.match(r"\s*", was[:start]).group() if not typed[:1].isspace() else ""
+    tail = re.search(r"\s*$", was[start:]).group() if not typed[-1:].isspace() else ""
+    return lead + typed + tail
+
+
+def _lines_chunk(base: list, ours: list, theirs: list, notes: list | None = None) -> list:
     if not base:
         return [*ours, *theirs]
-    return [_merge_words("".join(base), "".join(ours), "".join(theirs))]
+    return [_merge_words("".join(base), "".join(ours), "".join(theirs), notes)]
 
 
 def _words_chunk(base: list, ours: list, theirs: list) -> list:
-    return [*ours, *theirs] if not base else list(theirs)
+    if not base:
+        return [*ours, *theirs]
+    was = "".join(base)
+    # Words one side took away while the other typed among them: they go, and the typing
+    # stays.
+    for gone, typing in ((ours, theirs), (theirs, ours)):
+        typed = None if gone else _inserted(was, "".join(typing))
+        if typed is not None:
+            return [typed]
+    # Letters both typed into one word, each in one place (two people typing on at one
+    # place, where their words run together): both kept, each where it was typed.
+    mine, other = _insertion(was, "".join(ours)), _insertion(was, "".join(theirs))
+    if mine and other:
+        (first, typed), (second, more) = sorted((mine, other), key=lambda found: found[0])
+        return [was[:first] + typed + was[first:second] + more + was[second:]]
+    return list(theirs)
 
 
-def _merge_dicts(base: dict, ours: dict, theirs: dict) -> dict:
+def _merge_dicts(base: dict, ours: dict, theirs: dict, notes: list | None = None) -> dict:
     result: dict = {}
     for key in [*ours, *(key for key in theirs if key not in ours)]:
         was = base.get(key, _MISSING)
         mine = ours.get(key, _MISSING)
         other = theirs.get(key, _MISSING)
         if mine is not _MISSING and other is not _MISSING:
-            result[key] = merge3(None if was is _MISSING else was, mine, other)
+            result[key] = merge3(None if was is _MISSING else was, mine, other, notes)
         elif mine is not _MISSING:
             # Theirs lacks it: kept if we added it; gone if they removed it (even
             # if we changed it: theirs wins).
@@ -92,7 +206,7 @@ def _merge_dicts(base: dict, ours: dict, theirs: dict) -> dict:
     return result
 
 
-def merge_items(base: list, ours: list, theirs: list) -> list:
+def merge_items(base: list, ours: list, theirs: list, notes: list | None = None) -> list:
     """Merge two edits of a list of items by the items' identities (see the module's
     words): each side's items are paired with the items of ``base`` they were."""
 
@@ -117,11 +231,15 @@ def merge_items(base: list, ours: list, theirs: list) -> list:
     for i, was in enumerate(base):
         j, k = to_ours.get(i), to_theirs.get(i)
         if j is not None and k is not None:
-            content[("b", i)] = merge3(was, ours[j], theirs[k])
+            content[("b", i)] = merge3(was, ours[j], theirs[k], notes)
         elif j is not None and not _same(ours[j], was):
             content[("b", i)] = ours[j]  # removed by them, edited by us: kept, edited
+            if notes is not None:
+                notes.append({"kept": "ours", "item": ours[j]})
         elif k is not None and not _same(theirs[k], was):
             content[("b", i)] = theirs[k]
+            if notes is not None:
+                notes.append({"kept": "theirs", "item": theirs[k]})
     for name, j in seq_ours:
         if name == "o":
             content[("o", j)] = ours[j]

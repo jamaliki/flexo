@@ -116,22 +116,23 @@ export function mount(studio, container) {
   const paletteView = () => {
     const colours = get(["palette"]) ?? base(["palette"]) ?? [];
     const list = Array.isArray(colours) ? colours : [];
-    const write = (next) => set(["palette"], next, { quiet: false });
+    // Said in the history by the colour changed: "Change Colour 2", "Change Theme Colours".
+    const write = (next, label = "Change Theme Colours") => set(["palette"], next, { quiet: false, label });
     const chips = list.map((value, index) => {
-      const picker = h("input", { type: "color", value, oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next); } });
+      const picker = h("input", { type: "color", value, oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` }); } });
       const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, onclick: () => picker.click() }, picker,
-        h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index)); } }, icon("close")));
+        h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index), `Remove Colour ${index + 1}`); } }, icon("close")));
       return chip;
     });
     const tones = studio.info?.tones || [];
     return h("div.palette-block", {},
       h("div.palette-chips", {}, chips,
-        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"]) }, icon("plus"))),
+        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"], "Add Colour") }, icon("plus"))),
       h("div.row", {},
         h("div.fixed", {}, ui.button("Palettes…", (event) => menu(event.currentTarget, Object.entries(catalog.palettes).map(([name, values]) => ({
           label: name, hint: values.join(" "), run: () => write([...values]),
         }))), { kind: "ghost", small: true, icon: "palette" })),
-        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
+        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false, label: "Reset Theme Colours" }), { kind: "ghost", small: true, icon: "undo" })) : null),
       // In rows of equal chips, never one left alone on a row of its own.
       tones.length ? h("div.tones", { title: "Fill and outline colours for shapes", style: { gridTemplateColumns: `repeat(${Math.ceil(tones.length / Math.ceil(tones.length / 10))}, minmax(0, 1fr))` } },
         tones.map((tone) => h("span.tone", { style: { background: tone.fill, borderColor: tone.stroke, color: tone.stroke } }, "Aa"))) : null);
@@ -149,6 +150,8 @@ export function mount(studio, container) {
     const sketch = t.sketch ?? base(["sketch"]);
     clear(form,
       section("Theme",
+        // What a theme is, said once at the top, as a Mac's settings pane says what it is for.
+        h("p.theme-intro", {}, "How figures and decks look: their colours, type, lines and shapes. Each document that uses this theme changes with it."),
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
         ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),

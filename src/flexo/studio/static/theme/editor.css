@@ -3,18 +3,25 @@
 .theme { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) 400px; }
 .theme-panel { border-left: 1px solid var(--line); min-height: 0; }
 .theme-form { overflow: auto; height: 100%; padding-bottom: 60px; }
-.theme-section { gap: 8px; }
-.setting { display: grid; grid-template-columns: 124px 1fr 22px; gap: 8px; align-items: center; min-height: 32px; }
+.theme-section { gap: 12px; }
+.theme-intro { margin: 0 30px 0 0; font: var(--text-small); color: var(--ink-2); }
+/* A setting as every field of the inspector is: its name above it (its note at the right,
+   a dot after the name once it differs from the base theme), its control under it, and
+   its Reset button beside the control. */
+.setting { display: grid; grid-template-columns: minmax(0, 1fr) 22px; grid-template-areas: "label label" "control reset"; gap: 5px 8px; align-items: center; }
 /* Every row ends where the settings' controls end: the column after them holds only their
    Reset buttons, so the right edges line up down the panel. */
 .theme-section > :not(.section-title):not(.setting) { margin-right: 30px; }
-.setting-label { display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); }
-.setting-label .hint { display: none; }
-.setting-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
+.setting-label { grid-area: label; display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); margin-right: 30px; }
+.setting-label .hint { order: 2; margin-left: auto; font: var(--text-hint); color: var(--ink-3); text-align: right; }
+.setting-dot { order: 1; width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
 .setting.changed .setting-dot { background: var(--accent); }
 .setting.changed .setting-label { color: var(--ink); }
-.setting-control { min-width: 0; }
-.setting-reset { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
+.setting-control { grid-area: control; min-width: 0; }
+/* A switch is on its name's line, at its right, as in the inspector. */
+.setting:has(> .setting-control > .switch) { grid-template-columns: minmax(0, 1fr) auto 22px; grid-template-areas: "label control reset"; }
+.setting:has(> .setting-control > .switch) .setting-label { margin-right: 0; }
+.setting-reset { grid-area: reset; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
 .setting-reset:disabled { visibility: hidden; }
 .setting-reset:hover { background: var(--sunken); color: var(--ink); }
 .setting-reset svg { width: 13px; height: 13px; }

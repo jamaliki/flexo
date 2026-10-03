@@ -81,7 +81,7 @@ export function themeUses(session) {
       try {
         const result = await session.api("/api/theme/use", { file: session.file, targets });
         render(result.documents);
-        toast(`Theme applied to ${targets.length === 1 ? docName(targets[0]) : `${targets.length} documents`}`, { icon: "theme", seconds: 3 });
+        toast(targets.length === 1 ? `“${docName(targets[0])}” now uses this theme` : `${targets.length} documents now use this theme`, { icon: "theme", seconds: 3 });
       } catch (error) {
         toast(`Could not change the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
       }
@@ -91,9 +91,9 @@ export function themeUses(session) {
         icon(entry.kind === "deck" ? "deck" : "figure"),
         h("button.theme-use-name", { type: "button", title: `Open ${entry.file}`, onclick: () => session.workspace.open(entry.file) }, docName(entry.file)),
         entry.uses ? h("span.chip-on", {}, icon("check"), "In Use")
-          : ui.button("Apply", () => use([entry.file]), { small: true, title: entry.theme ? `Current theme: ${entry.theme}` : "Current theme: Default" }))))
+          : ui.button("Use", () => use([entry.file]), { small: true, title: `Use this theme in “${docName(entry.file)}” (now ${entry.theme || "the default theme"})` }))))
         : h("div.hint-line", {}, "No figures or decks in this folder yet."),
-      others.length > 1 ? h("div.row", {}, ui.button(`Apply to All ${others.length}`, () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
+      others.length > 1 ? h("div.row", {}, ui.button(`Use in All ${others.length} Documents`, () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
   };
   session.api(session.url("/api/theme/uses")).then((result) => render(result.documents))
     .catch((error) => clear(holder, h("div.hint-line", {}, `Could not list documents: ${error.message}`)));

@@ -354,7 +354,7 @@ def _failing(ask: _Ask) -> tuple:
     the page it is drawn on."""
 
     return (ask.source, ask.stamp, ask.view, ask.show, ask.site, ask.group_palette, ask.style,
-            ask.pan, ask.density, ask.site_within, ask.site_labels)
+            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent)
 
 
 def _hatched(aspect: float) -> bytes:
@@ -412,6 +412,8 @@ class _Ask:
     density: str | None = None
     site_within: float | None = None
     site_labels: bool = False
+    solvent: bool = False
+    """Whether its waters and lone ions are drawn (as small dots, floating free)."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -477,6 +479,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         density or None,
         None if within is None else float(within),  # type: ignore[arg-type]
         bool(node.property("site_labels")),
+        bool(node.property("solvent")),
     )
 
 
@@ -607,6 +610,8 @@ def _drawn(ask: _Ask):
             figure.color(group, colour)
     if ask.show:
         figure.show(**dict(ask.show))
+    if "sticks" not in dict(ask.show):
+        _solvent(figure, ask)
     if ask.view or ask.pan:
         figure.view(**dict(ask.view), **({"pan": ask.pan} if ask.pan else {}))
     if ask.site == "ligand":
@@ -626,6 +631,33 @@ def _drawn(ask: _Ask):
                 "auto (the map the entry was built into), an EMDB ID as EMD-11638, or a map file",
             ) from None
     return figure
+
+
+def _solvent(figure, ask: _Ask) -> None:
+    """Waters and lone ions (a calcium, a chloride) left out of what the look draws as
+    sticks -- they float free of the molecule as stray dots -- unless asked for."""
+
+    sticks = (figure.style.get("reps") or {}).get("sticks") or ""
+    if ask.solvent:
+        figure.show(sticks=f"({sticks}) or water" if sticks else "water")
+        return
+    ions = _ions(ask.source, ask.stamp)
+    if sticks and ions:
+        figure.show(sticks=f"({sticks}) and not resn {'+'.join(ions)}")
+
+
+@functools.lru_cache(maxsize=8)
+def _ions(source: str, stamp: float) -> tuple[str, ...]:
+    """The residues of a structure that are one atom, but for waters: its ions."""
+
+    atoms: dict[tuple[str, int, str], list[_Atom]] = {}
+    for atom in _atoms(source, stamp):
+        if atom.het and atom.element.upper() != "H" and atom.resn not in {"HOH", "WAT"}:
+            atoms.setdefault((atom.chain, atom.resi, atom.resn), []).append(atom)
+    lone = {resn for (_, _, resn), held in atoms.items() if len(held) == 1}
+    # A residue name that is one atom somewhere and more elsewhere is not an ion.
+    more = {resn for (_, _, resn), held in atoms.items() if len(held) > 1}
+    return tuple(sorted(lone - more))
 
 
 @functools.lru_cache(maxsize=32)
@@ -978,17 +1010,27 @@ def _without_paper(pixels, paper: str):
     import numpy as np
 
     text = paper.lstrip("#")
-    ground = np.array([int(text[i : i + 2], 16) for i in (0, 2, 4)], dtype=np.float64) / 255.0
-    colour = pixels[..., :3].astype(np.float64) / 255.0
-    lighter = np.where(colour > ground, (colour - ground) / np.maximum(1.0 - ground, 1e-6), 0.0)
-    darker = np.where(colour < ground, (ground - colour) / np.maximum(ground, 1e-6), 0.0)
-    alpha = np.clip(np.max(np.maximum(lighter, darker), axis=-1), 0.0, 1.0)
-    safe = np.maximum(alpha, 1e-6)[..., None]
-    restored = np.clip((colour - ground) / safe + ground, 0.0, 1.0)
-    alpha = alpha * (pixels[..., 3].astype(np.float64) / 255.0)
+    ground = np.array([int(text[i : i + 2], 16) for i in (0, 2, 4)], dtype=np.float32) / 255.0
+    # A channel's share of opacity depends on its value alone: looked up from a table of
+    # its 256, and in single precision, not worked out pixel by pixel in double -- ten
+    # times as fast on a molecule's picture (a second and more) and the same to the eye.
+    values = np.arange(256, dtype=np.float32) / 255.0
+    alpha = np.zeros(pixels.shape[:2], dtype=np.float32)
+    for channel, level in enumerate(ground):
+        lighter = (values - level) / max(1.0 - level, 1e-6)
+        darker = (level - values) / max(level, 1e-6)
+        table = np.where(values > level, lighter, np.where(values < level, darker, 0.0))
+        np.maximum(alpha, table.astype(np.float32)[pixels[..., channel]], out=alpha)
+    np.clip(alpha, 0.0, 1.0, out=alpha)
+    restored = pixels[..., :3].astype(np.float32) * np.float32(1.0 / 255.0)
+    restored -= ground
+    restored /= np.maximum(alpha, 1e-6)[..., None]
+    restored += ground
+    np.clip(restored, 0.0, 1.0, out=restored)
+    alpha *= pixels[..., 3].astype(np.float32) * np.float32(1.0 / 255.0)
     out = np.empty(pixels.shape, dtype=np.uint8)
-    out[..., :3] = np.round(restored * 255.0)
-    out[..., 3] = np.round(alpha * 255.0)
+    out[..., :3] = np.rint(restored * 255.0)
+    out[..., 3] = np.rint(alpha * 255.0)
     return out
 
 

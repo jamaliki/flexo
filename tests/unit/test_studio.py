@@ -158,7 +158,9 @@ def test_a_new_file_is_made_from_its_kind_or_given_data(served: tuple[str, Works
         f"{base}/api/new", workspace.token, {"file": "figures/a.yaml", "kind": "figure"}
     )
     assert status == 200 and made["file"] == "figures/a.yaml"
-    assert (workspace.root / "figures/a.yaml").read_text(encoding="utf-8") == NEW_FIGURE
+    # Named for its file, as a deck is.
+    made_text = NEW_FIGURE.replace("id: figure\n", "id: a\n", 1)
+    assert (workspace.root / "figures/a.yaml").read_text(encoding="utf-8") == made_text
     data = {"figure": {"id": "given"}, "nodes": [{"id": "n", "label": "N"}]}
     assert (
         call(
@@ -222,6 +224,68 @@ def test_edits_from_two_places_made_at_once_are_both_kept(tmp_path: Path) -> Non
         )
         assert version == 3
         assert "$x_0$" in merged["text"] and "\\hat{y}" in merged["text"]
+    finally:
+        workspace.close()
+
+
+def test_words_rewritten_while_typed_in_are_both_kept_and_said_to_the_typist(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        listener = workspace.listen("page-a", PERSON)
+        line = "# A flexo figure: nodes, then the edges between them. See docs/guide.md."
+        typed = NEW_FIGURE.replace(line, line.replace("figure:", "figure my words:"))
+        doc.update({"text": typed}, 1, PERSON, "page-a")
+        agent = {"id": "agent", "name": "Claude", "kind": "agent"}
+        _, merged = doc.update({"text": NEW_FIGURE.replace(line, "# Not that.")}, 1, agent, "")
+        assert merged["text"].startswith("# Not that. my words\nfigure:\n")
+        told = []
+        while not listener.events.empty():
+            event = listener.events.get()
+            if event["type"] == "merged":
+                told.append(event)
+        assert told == [
+            {
+                "type": "merged",
+                "file": "figure.yaml",
+                "client": "",
+                "notes": [
+                    {
+                        "rewritten": "# Not that. my words\n",
+                        "typed": "my words",
+                        "by": agent,
+                        "to": None,
+                    }
+                ],
+            }
+        ]
+    finally:
+        workspace.close()
+
+
+def test_what_a_merge_kept_is_told_to_whoever_it_was_kept_for(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        listener = workspace.listen("page-a", PERSON)
+        bob = {"id": "bob", "name": "Bob", "kind": "person"}
+        item = {"text": "kept"}
+        # Kept against the change's maker: the others' pages, by the maker; kept for the
+        # maker: its own window, by the others; kept for the file on disk: no page.
+        doc._tell([{"kept": "ours", "item": item}], bob, "window-b", PERSON)
+        doc._tell([{"kept": "theirs", "item": item}], bob, "window-b", PERSON)
+        doc._tell([{"kept": "theirs", "item": item}], bob, "", None)
+        told = []
+        while not listener.events.empty():
+            told.append(listener.events.get())
+        assert [event["notes"] for event in told] == [
+            [{"kept": item, "by": bob, "to": None}],
+            [{"kept": item, "by": PERSON, "to": "window-b"}],
+        ]
     finally:
         workspace.close()
 
@@ -1149,6 +1213,17 @@ def test_the_page_merges_as_the_server_does() -> None:
         ["a\n", "b\n", "c\n"],
         ["naïve café", "naïve café au lait", "très naïve café"],
         [
+            "First paragraph written by Alice.",
+            "First m0 m1 m2 m3paragraph written by Alice.",
+            "A completely different sentence.",
+        ],
+        ["First paragraph written by Alice.", "First m0 paragraph written by Alice.", "New."],
+        ["a b c d e f", "a b e f", "a b c x d e f"],
+        ["Title", "Title of the talk", "Heading"],
+        ["A m", "A m4", "A mc"],
+        ["First m0 mparagraph by Alice.", "Not that. m0 m", "First m0 m3paragraph by Alice."],
+        ["one\ntwo words here\nthree\n", "one\nfirst words here\n three\n", "one\nAll new\n"],
+        [
             {"s": [{"t": "A"}]},
             {"s": [{"t": "A"}, {"t": "Mine"}]},
             {"s": [{"t": "A"}, {"t": "Theirs"}]},
@@ -1168,14 +1243,17 @@ def test_the_page_merges_as_the_server_does() -> None:
         f"import {{ merge3, same }} from {json.dumps(script.as_uri())};\n"
         f"const cases = {json.dumps(cases)};\n"
         f"const pairs = {json.dumps(pairs)};\n"
-        "console.log(JSON.stringify([cases.map(([b, o, t]) => merge3(b, o, t)),"
-        " pairs.map(([a, b]) => same(a, b))]));\n"
+        "console.log(JSON.stringify([cases.map(([b, o, t]) => { const notes = [];"
+        " return [merge3(b, o, t, notes), notes]; }), pairs.map(([a, b]) => same(a, b))]));\n"
     )
     result = subprocess.run(
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     merged, equal = json.loads(result.stdout)
-    assert merged == [merge3(*case) for case in cases]
+    noted: list = [[] for _ in cases]
+    assert merged == [
+        [merge3(*case, notes), notes] for case, notes in zip(cases, noted, strict=True)
+    ]
     assert equal == [True, True, False, False, False, False, False]
 
 
@@ -1242,6 +1320,50 @@ process.exit(0);
     )
     assert json.loads(result.stdout) == {
         "typedAndDeleted": 0, "othersEdit": "saved", "failedUndo": [1, 0], "undone": [1, 1]
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_typing_held_in_one_place_undoes_alone_and_what_it_kept_is_said() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async () => new Promise(() => {}),
+};
+const body = (...words) => ({ body: words.map((text) => ({ text })) });
+const info = { file: "a.yaml", version: 1, saved: 1, exists: true, document: body("P", "Q") };
+const session = new Session(workspace, info);
+const said = {};
+// Words typed in one place, however long the pauses, with another's change come in
+// meanwhile: one step, and undone it takes back the typing, not their change.
+session.change((d) => { d.body[0].text = "P typed"; }, { merge: "p", hold: true });
+session.remote({ client: "other", version: 2, document: body("P", "Q, theirs") });
+session.change((d) => { d.body[0].text = "P typed on"; }, { merge: "p", hold: true });
+said.steps = session.past.length;
+session.undo();
+said.undone = session.document;
+// What they deleted while it was typed in here stays, and is said, with who did it.
+const told = [];
+session.on("merged", ({ notes }) => told.push(...notes));
+session.synced = session.document;
+session.change((d) => { d.body[0].text = "P again"; });
+session.remote({ client: "other", version: 3, who: { name: "Bob" }, document: body("Q, theirs") });
+said.kept = [session.document, told];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    kept = {"text": "P again"}
+    assert json.loads(result.stdout) == {
+        "steps": 1,
+        "undone": {"body": [{"text": "P"}, {"text": "Q, theirs"}]},
+        "kept": [{"body": [kept, {"text": "Q, theirs"}]}, [{"kept": kept, "by": {"name": "Bob"}}]],
     }
 
 
@@ -1385,6 +1507,17 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["below", "root", "above", None]
+    # Well under one part, in line with it: under that part; between parts, a row of its own.
+    drags = [["c", 135, 90], ["c", 85, 90], ["a", 235, 95]]
+    code = code.replace(
+        "return place && (place.kind === 'line' ? place.side : place.parent);",
+        "return place && (place.kind === 'line' ? `${place.side} of ${place.of}` : place.parent);",
+    ).replace(json.dumps([["c", 150, 120], ["c", 150, 55], ["c", 150, -60], ["c", 150, 400]]),
+              json.dumps(drags))
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == ["below of b", "below of root", "below of c"]
     # Level with a part in a column and off to its side: beside it; over it, still in line.
     column = {
         "root": "root",
@@ -1449,3 +1582,31 @@ def test_a_copy_the_studio_made_that_no_document_uses_goes_when_it_closes(tmp_pa
     workspace.uploads.update({kept, undone})  # copies it made; theirs was there before
     workspace.close()
     assert kept.is_file() and theirs.is_file() and not undone.exists()
+
+
+def test_a_copy_the_studio_made_goes_when_undone_and_comes_back_when_redone(tmp_path: Path) -> None:
+    (tmp_path / "talk.yaml").write_text(DECK, encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    picture, named = assets / "picture.png", assets / "named.png"
+    for file in (picture, named):
+        file.write_bytes(b"png")
+    # Another document, not open here, names one of them.
+    (tmp_path / "other.yaml").write_text("slides:\n- body: [{image: assets/named.png}]\n", "utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    try:
+        doc = workspace.open("talk.yaml")
+        plain = doc.document
+        workspace.uploads.update({picture, named})  # copies it made, not yet used
+        doc.update({**plain, "slides": [{"title": "Typed"}]}, doc.version, PERSON)
+        assert picture.is_file() and named.is_file()  # its document has yet to use it
+        pictures = [{"image": "assets/picture.png"}, {"image": "assets/named.png"}]
+        shown = {**plain, "slides": [{"body": pictures}]}
+        doc.update(shown, doc.version, PERSON)
+        doc.update(plain, doc.version, PERSON)  # undone: gone at once, but not one named elsewhere
+        assert not picture.exists() and named.is_file()
+        doc.update(shown, doc.version, PERSON)  # redone: back, as it was
+        assert picture.read_bytes() == b"png"
+    finally:
+        workspace.close()

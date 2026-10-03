@@ -108,6 +108,8 @@ class Doc:
             self.problem = f"Can't read {name}: {_unread(error, path.name)}"
         self.version = 1
         self.history: OrderedDict[int, str] = OrderedDict({1: _dumps(self.document)})
+        self.authors: OrderedDict[int, dict[str, Any]] = OrderedDict()
+        """Who made each version in the history (not the one the file was opened at)."""
         self.saved = 1 if self.exists else 0
         self.changed_at = 0.0
         self.unsaved_since = 0.0
@@ -171,14 +173,55 @@ class Doc:
                 f"{(self.problem or '').rstrip('.')}. Nothing was changed: put the file right, "
                 "and it opens as soon as it reads."
             )
+        notes: list = []
         with self.lock:
             if base == self.version:
                 merged = document
             else:
                 known = self.history.get(base)
                 start = json.loads(known) if known is not None else self.document
-                merged = merge3(start, self.document, document)
-            return self._become(merged, who, client)
+                merged = merge3(start, self.document, document, notes)
+            others = self.author_since(base, who)
+            result = self._become(merged, who, client)
+        self._tell(notes, who, client, others)
+        return result
+
+    def author_since(self, base: int, who: dict[str, Any]) -> dict[str, Any] | None:
+        """Who other than ``who`` last changed the document since version ``base``."""
+
+        with self.lock:
+            found = [
+                author
+                for version, author in self.authors.items()
+                if version > base and author.get("id") != who.get("id")
+            ]
+        return found[-1] if found else None
+
+    def _tell(
+        self, notes: list, who: dict[str, Any], client: str, others: dict[str, Any] | None
+    ) -> None:
+        """Tell the pages what a merge (merge3's ``notes``) kept for someone: what one side
+        deleted while the other was editing it, and words one side wrote anew while the
+        other typed in them. Each is told to the pages of whoever it was kept for -- the
+        window the change came from (``client``), or every other -- with who deleted or
+        rewrote it: the change's maker (``who``), or the last of the others (``others``)."""
+
+        told = []
+        for note in notes:
+            # Kept for the change's maker ("theirs" in the merge), against the others.
+            mine = note.get("kept") == "theirs" or note.get("rewritten") == "ours"
+            if mine and not client:
+                continue  # made on disk: there is no page of its own to tell
+            said = (
+                {"kept": note["item"]}
+                if "kept" in note
+                else {"rewritten": note["words"], "typed": note["typed"]}
+            )
+            told.append({**said, "by": others if mine else who, "to": client if mine else None})
+        if told:
+            self.workspace.broadcast(
+                {"type": "merged", "file": self.name, "client": client, "notes": told}
+            )
 
     def _become(
         self, merged: Any, who: dict[str, Any], client: str, *, news: bool = True
@@ -189,8 +232,11 @@ class Doc:
         self.version += 1
         self.document = merged
         self.history[self.version] = _dumps(merged)
+        self.authors[self.version] = who
         while len(self.history) > HISTORY:
             self.history.popitem(last=False)
+        while len(self.authors) > HISTORY:
+            self.authors.popitem(last=False)
         self.changed_at = time.monotonic()
         if self.saved >= self.version - 1:
             self.unsaved_since = self.changed_at
@@ -342,7 +388,8 @@ class Doc:
             self.foreign = None
             self.problem = None
             base = self.on_disk if self.on_disk is not None else self.document
-            merged = merge3(base, self.document, found)
+            notes: list = []
+            merged = merge3(base, self.document, found, notes)
             self.on_disk = found
             self.disk_text = text
             self.exists = True
@@ -355,6 +402,7 @@ class Doc:
             }
             unsaved = self.saved < self.version
             self._become(merged, who, "", news=not opened)
+            self._tell(notes, who, "", None)
             if not unsaved and _dumps(merged) == _dumps(found):
                 self.saved = self.version
             return "changed"
@@ -392,7 +440,13 @@ class Workspace:
         self.activity: deque[dict[str, Any]] = deque(maxlen=300)
         self.uploads: set[Path] = set()
         """Files this studio copied into the folder for a document (a picture dropped on a
-        slide): those no document uses when it closes are taken away again."""
+        slide): one no document uses any more is taken away (``follow_uploads``), and any
+        no document uses when it closes."""
+        self.used_uploads: set[Path] = set()
+        """The copies a document has used: one none uses now was undone or deleted."""
+        self.set_aside: dict[Path, bytes] = {}
+        """Copies taken out of the folder while the studio runs, kept to be put back if a
+        document uses one again (its picture's adding redone)."""
         self.drawing = threading.Lock()
         self.latest: dict[str, int] = {}
         self._documents: dict[Path, tuple[float, str | None]] = {}
@@ -441,6 +495,49 @@ class Workspace:
                 with contextlib.suppress(Exception):
                     then()
 
+    def follow_uploads(self) -> None:
+        """Keep the copies this studio made in step with its documents, as a document
+        changes: a copy no document uses any more (its picture's adding undone, or the
+        picture deleted) is taken out of the folder at once, and put back if one uses it
+        again (redone). A copy no document has used yet is left be -- its document is about
+        to -- and so is one any other file in the folder names (a document not open here)."""
+
+        with self.lock:
+            if not self.uploads:
+                return
+            docs = list(self.docs.values())
+            uploads = set(self.uploads)
+        written = [
+            (doc.path.parent, json.dumps(doc.document, ensure_ascii=False)) for doc in docs
+        ]
+        for upload in sorted(uploads):
+            if any(_names(upload, folder, text) for folder, text in written):
+                self.used_uploads.add(upload)
+                kept = self.set_aside.pop(upload, None)
+                if kept is not None and not upload.exists():
+                    with contextlib.suppress(OSError):
+                        upload.parent.mkdir(parents=True, exist_ok=True)
+                        upload.write_bytes(kept)
+            elif upload in self.used_uploads and upload.is_file() and upload not in self.set_aside:
+                if self._named_elsewhere(upload, {doc.path for doc in docs}):
+                    continue
+                with contextlib.suppress(OSError):
+                    self.set_aside[upload] = upload.read_bytes()
+                    upload.unlink()
+                    if upload.parent.name == "assets" and not any(upload.parent.iterdir()):
+                        upload.parent.rmdir()
+
+    def _named_elsewhere(self, upload: Path, open_files: set[Path]) -> bool:
+        """Whether a file in the folder other than an open document's names ``upload``."""
+
+        for file in walk(self.root):
+            if file in open_files or file.suffix.lower() not in WRITTEN:
+                continue
+            with contextlib.suppress(OSError, UnicodeDecodeError):
+                if _names(upload, file.parent, file.read_text(encoding="utf-8")):
+                    return True
+        return False
+
     def tidy_uploads(self) -> None:
         """Take away the files this studio copied in that no document uses now (a picture
         dropped and then undone), as Keynote keeps no media a deck no longer shows. Only
@@ -449,6 +546,7 @@ class Workspace:
         with self.lock:
             docs = list(self.docs.values())
             uploads, self.uploads = set(self.uploads), set()
+            self.set_aside.clear()
         for upload in uploads:
             if not upload.is_file():
                 continue
@@ -645,6 +743,9 @@ class Workspace:
         self, doc: Doc, before: Any, after: Any, who: dict[str, Any], client: str, *,
         news: bool = True,
     ) -> None:
+        # A picture undone goes from the folder, and one redone is back before it is drawn.
+        with contextlib.suppress(Exception):
+            self.follow_uploads()
         self.broadcast(
             {
                 "type": "doc",
@@ -934,6 +1035,17 @@ def _walk(folder: Path, depth: int):
                 yield from _walk(entry, depth - 1)
         else:
             yield entry
+
+
+WRITTEN = frozenset({".yaml", ".yml", ".json", ".py", ".md", ".txt", ".tex", ".html"})
+"""Files a person writes that may name a picture beside them."""
+
+
+def _names(upload: Path, folder: Path, text: str) -> bool:
+    """Whether ``text`` (a document in ``folder``) names ``upload``."""
+
+    where = os.path.relpath(upload, folder).replace(os.sep, "/")
+    return where in text or upload.name in text
 
 
 def walk(folder: Path, depth: int = 4):

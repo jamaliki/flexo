@@ -155,6 +155,48 @@ def test_a_structure_takes_mol_sketch_settings_over_its_look(tmp_path: Path) -> 
     assert settings["look"] == "engraved-colour"
 
 
+def test_waters_and_lone_ions_are_left_out_unless_asked_for(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.studio.figure_kind import FigureKind
+
+    # A few residues of a chain, a calcium beside them and a water: the ion and the water
+    # would float free of the ribbon as dots.
+    residues = []
+    for index, name in enumerate(("ALA", "GLY", "SER", "LEU", "VAL", "ALA")):
+        places = (("N", (0.0, 0.0)), ("CA", (1.2, 0.8)), ("C", (2.4, 0.0)), ("O", (2.4, -1.2)))
+        for atom, (dx, dy) in places:
+            serial = len(residues) + 1
+            x, y, z = 3.6 * index + dx, dy, 0.0
+            residues.append(
+                f"ATOM  {serial:5d}  {atom:<3} {name} A{index + 1:4d}    "
+                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00 10.00           {atom[0]}  "
+            )
+    residues += [
+        "HETATM  100 CA    CA A 101       6.000   5.000   0.000  1.00 10.00          CA  ",
+        "HETATM  101  O   HOH A 201       9.000  -5.000   0.000  1.00 10.00           O  ",
+    ]
+    source = tmp_path / "bound.pdb"
+    source.write_text("\n".join([*residues, "END", ""]), encoding="utf-8")
+
+    def sticks(extra: str = "") -> str:
+        text = (
+            "figure: {id: ions}\n"
+            "nodes:\n"
+            "  - id: model\n    kind: structure\n"
+            f"    properties: {{source: {source}{extra}}}\n"
+        )
+        settings = FigureKind().act(
+            {"text": text}, {"do": "structure-settings", "id": "model"}, tmp_path
+        )["settings"]
+        return settings["style"]["reps.sticks"]
+
+    hidden = sticks()
+    assert "not water" in hidden and "not resn CA" in hidden
+    # Asked for, they are drawn where they lie.
+    shown = sticks(", solvent: true")
+    assert "or water" in shown and "resn CA" not in shown
+
+
 def test_a_setting_mol_sketch_lacks_is_said_with_what_was_meant() -> None:
     pytest.importorskip("molsketch")
     for settings, said, hint in (
@@ -192,6 +234,17 @@ def test_every_choice_the_studio_offers_is_shown_by_a_name_of_its_own() -> None:
         for field in [*part["fields"], *(c for f in part["fields"] for c in f.get("columns", []))]:
             if field["type"] == "choice":
                 assert [str(option) for option in field["options"]] == list(field["labels"])
+
+
+def test_a_numbers_note_never_says_its_unit_again() -> None:
+    """A field's unit is in it ("30°", "2 px"): its note says only what the unit does not."""
+
+    from flexo.structure_style import SECTIONS
+
+    words = {"°": "degree", "px": "pixel"}
+    for field in (field for section in SECTIONS for field in section["fields"]):
+        if field.get("unit") in words:
+            assert words[field["unit"]] not in field["hint"].lower(), field["label"]
 
 
 def test_structures_drawn_at_once_make_one_engine_between_them() -> None:

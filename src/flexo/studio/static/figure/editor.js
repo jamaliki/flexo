@@ -57,7 +57,8 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
-  studio.exports = [{ format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }, { format: "editable", label: "Editable SVG…" }];
+  // In the Export menu's order, for the Mac app's File › Export To.
+  studio.exports = [{ format: "editable", label: "Editable SVG…" }, { format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
     { icon: "export", label: "Editable SVG…", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "PDF…", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
@@ -167,6 +168,7 @@ export function mount(studio, main) {
 
   // -- the outline --
   const outlineBody = h("div.tree");
+  const slug = (words) => String(words).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   function renderOutline() {
     if (state.tab !== "parts") return;
     const found = figure.model;
@@ -193,7 +195,9 @@ export function mount(studio, main) {
       } }, icon("chevron")) : h("span.tree-caret"),
       node ? glyph(node.kind || "block") : group ? glyph(groupGlyph(group)) : glyph("block"),
       h("span.tree-name", {}, isRoot ? "Layout" : figure.nameOf(id)),
-      h("span.tree-id", {}, isRoot ? "" : id));
+      // A shape is listed by its words; its id, where it says more than they do, is shown
+      // when the row is pointed at or chosen.
+      isRoot || slug(figure.nameOf(id)) === id.replace(/-\d+$/, "") ? null : h("span.tree-id.part-id", {}, id));
       outlineDrop(item, id, isRoot);
       if (!isRoot) outlineDrag(item, id);
       return [item, group && open ? children.map((child) => row(child, depth + 1)) : null];

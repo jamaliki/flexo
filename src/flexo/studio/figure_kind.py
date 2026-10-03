@@ -78,7 +78,10 @@ class FigureKind:
         return isinstance(document, dict) and ("nodes" in document or "figure" in document)
 
     def new(self, path: Path) -> dict[str, Any]:
-        return {"text": NEW_FIGURE}
+        # Named for its file, as a deck or a theme is: "Pipeline figure" is pipeline-figure.
+        from flexo.studio.figure_edit import _slug
+
+        return {"text": NEW_FIGURE.replace("  id: figure\n", f"  id: {_slug(path.stem)}\n", 1)}
 
     def adopt(self, data: dict[str, Any]) -> dict[str, Any]:
         """A parsed figure document (one written inline in a deck) as a file's words."""

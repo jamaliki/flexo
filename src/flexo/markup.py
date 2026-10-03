@@ -583,6 +583,16 @@ def _read(source: str, runs: list[TextRun], *, shift: str, mode: str, weight: in
                 continue
             if name in OPERATORS:
                 shown = {"argmax": "arg max", "argmin": "arg min"}.get(name, name)
+                atoms = [run for run in runs if run.text.strip()]
+                previous = atoms[-1].text.strip()[-1:] if atoms else ""
+                if (
+                    previous
+                    and previous not in BINARY | RELATIONS | _OPENING
+                    and not runs[-1].text.isspace()
+                ):
+                    # ``RT \ln K``: a named function is set apart from what comes before
+                    # it too, as TeX sets an operator after an ordinary or a closing atom.
+                    runs.append(TextRun(" ", weight, False, shift))  # type: ignore[arg-type]
                 runs.append(TextRun(shown, weight, False, shift))  # type: ignore[arg-type]
                 following = source[index : index + 1]
                 if following.isalnum() or following == "\\":

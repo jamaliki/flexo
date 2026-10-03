@@ -227,3 +227,60 @@ def test_links_are_clickable_in_every_format(tmp_path: Path) -> None:
     assert 'href="https://arxiv.org/abs/1706.03762"' in outputs.portable_svg.read_text()  # type: ignore[union-attr]
     pdf = outputs.pdf.read_bytes()  # type: ignore[union-attr]
     assert b"/Subtype /Link" in pdf and b"/URI (https://arxiv.org/abs/1706.03762)" in pdf
+
+
+def test_a_drawn_formula_is_found_in_a_pdf_as_the_words_it_reads_as() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("ratio") as figure:
+        figure.root.block("b", label=r"$\frac{a+b}{2}$")
+    document = pdfium.PdfDocument(pdf_bytes(compile_figure(figure.spec).document.text))
+    # Drawn as outlines, it reads, is found and is copied as its words, laid invisibly under it.
+    assert "(a + b)/2" in document[0].get_textpage().get_text_range()
+
+
+def test_a_tagged_pdf_has_headings_described_figures_and_decoration_passed_over() -> None:
+    import re
+    import zlib
+
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.drawing import Group, Shape, Text
+    from flexo.pdf import ARTIFACT, Tag, pdf_bytes
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">'
+        '<rect id="band" width="200" height="30" fill="#683476"/>'
+        '<text id="s.title" x="10" y="20" font-family="Figtree" font-size="12">A heading</text>'
+        '<g id="s.figure">'
+        '<rect id="s.figure.box" x="10" y="40" width="40" height="20" fill="#eee"/>'
+        '<text id="s.figure.label" x="12" y="54" font-family="Figtree" font-size="8">Box</text></g>'
+        '<text id="s.words" x="10" y="90" font-family="Figtree" font-size="10">Some words</text>'
+        "</svg>"
+    )
+
+    def tag(item: object, within: Tag | None) -> Tag | None:
+        if isinstance(item, Group) and item.id == "s.figure":
+            return Tag((("Figure", "s.figure"),), alt="A box")
+        if isinstance(item, Text) and item.id == "s.title":
+            return Tag((("H1", "s.title"),))
+        return ARTIFACT if isinstance(item, Shape) and within is None else None
+
+    data = pdf_bytes(svg, title="Tagged", tags=tag, language="en-GB")
+    assert b"/MarkInfo << /Marked true >>" in data and b"/StructTreeRoot" in data
+    assert b"/Lang (en-GB)" in data and b"/StructParents 0" in data
+    kinds = re.findall(rb"/Type /StructElem /S /(\w+)", data)
+    assert kinds == [b"Document", b"Sect", b"H1", b"Figure", b"P"]
+    assert b"/S /Figure" in data and b"/Alt (A box)" in data
+    def streams(pdf: bytes) -> list[bytes]:
+        found = re.findall(rb"stream\n(.*?)\nendstream", pdf, re.S)
+        return [zlib.decompress(body) for body in found if body[:1] == b"x"]
+
+    content = next(stream for stream in streams(data) if b"BDC" in stream)
+    # The band is decoration; the heading, the figure (box and label) and the words are marked.
+    assert content.count(b"/Artifact BMC") == 1 and content.count(b" BDC") == 4
+    assert pdfium.PdfDocument(data)[0].get_textpage().get_text_range().startswith("A heading")
+    # Untagged, as a figure's own PDF is: nothing of the sort.
+    untagged = pdf_bytes(svg)
+    assert b"/StructTreeRoot" not in untagged and b"BDC" not in b"".join(streams(untagged))

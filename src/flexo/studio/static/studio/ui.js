@@ -64,6 +64,8 @@ const ICONS = {
   check: "M3.5 8.5l3 3 6-7",
   trash: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5",
   copy: "M5.5 5.5h7v7h-7zM3.5 10.5v-7h7",
+  // A copy made beside it: Copy's two sheets, a plus on the front one.
+  duplicate: "M5.5 5.5h7v7h-7zM3.5 10.5v-7h7M9 7.25v3.5M7.25 9h3.5",
   up: "M8 12.5v-9M4.5 7L8 3.5 11.5 7",
   down: "M8 3.5v9M4.5 9L8 12.5 11.5 9",
   left: "M12.5 8h-9M7 4.5L3.5 8 7 11.5",
@@ -221,8 +223,11 @@ export const ui = {
     input.spellcheck = false;
     if (key) input.dataset.key = key;
     const shown = (number) => (number === null || number === undefined ? "" : String(number));
-    // Drawn again while it is typed in (keepFocus gives it the keys back), it keeps what is typed.
-    const typed = key && document.activeElement?.dataset?.key === key && typeof document.activeElement.value === "string" ? document.activeElement.value : null;
+    // Drawn again while it is typed in (keepFocus gives it the keys back), it keeps what is
+    // typed and not yet taken; what was taken shows the value as it is now (an undo, another's
+    // change), so leaving the field never puts an older value back.
+    const was = key && document.activeElement?.dataset?.key === key ? document.activeElement : null;
+    const typed = typeof was?.value === "string" && (was.untaken?.() ?? true) ? was.value : null;
     input.value = typed ?? shown(value);
     // The field's own unit typed after the digits ("12pt", "30 °") is the number.
     const read = () => {
@@ -234,6 +239,7 @@ export const ui = {
     const named = (number) => (unit ? `${number}${TIGHT_UNITS.has(unit) ? "" : " "}${unit}` : String(number));
     let applied = value ?? null;
     const apply = (number) => { if (number === applied) return; applied = number; onChange?.(number); };
+    input.untaken = () => !Object.is(read(), applied);
     const note = h("span.number-note", { role: "status", hidden: true });
     const hush = () => { note.hidden = true; if (key) noted.delete(key); };
     const say = (text, last = 4000) => {
@@ -385,8 +391,9 @@ export const ui = {
   // `icons`: a narrow pop-up showing its choice's icon (each option's `icon`), the choice's
   // name in its tooltip after `title`; `actions`: commands under the choices, after a line
   // ({ label, icon, run }), as a column's pop-up in Numbers has. `key` keeps the keys on it
-  // as the form is drawn again by the change (keepFocus).
-  select({ value, options, onChange, placeholder, unset = false, icons = false, title = "", actions = [], key } = {}) {
+  // as the form is drawn again by the change (keepFocus). `acting(on)`: what the pop-up acts
+  // on shown (a table's column) while its menu is open.
+  select({ value, options, onChange, placeholder, unset = false, icons = false, title = "", actions = [], key, acting } = {}) {
     const items = [...(placeholder !== undefined ? [{ value: "", label: placeholder }] : []),
       ...options.map((option) => (typeof option === "object" ? { ...option, value: String(option.value ?? "") } : { value: String(option), label: String(option) }))];
     const label = h("span");
@@ -406,14 +413,17 @@ export const ui = {
     };
     Object.defineProperty(node, "value", { configurable: true, get: () => current, set: (next) => { current = String(next ?? ""); fallback = false; show(); } });
     node.relabel = (choice, text) => { const item = items.find((each) => each.value === String(choice)); if (item) { item.label = text; show(); } };
-    const open = (byKey) => choices(node, actions.length ? [...items, "-", ...actions.map((action) => ({ ...action, action: true }))] : items, current, (next) => {
-      if (next === current && !fallback) return;
-      current = next;
-      fallback = false;
-      show();
-      node.dispatchEvent(new Event("change", { bubbles: true }));
-      onChange?.(next);
-    }, byKey);
+    const open = (byKey) => {
+      const opened = choices(node, actions.length ? [...items, "-", ...actions.map((action) => ({ ...action, action: true }))] : items, current, (next) => {
+        if (next === current && !fallback) return;
+        current = next;
+        fallback = false;
+        show();
+        node.dispatchEvent(new Event("change", { bubbles: true }));
+        onChange?.(next);
+      }, byKey);
+      if (acting) whileOpen(opened, acting);
+    };
     // Opened by a click, or by Space, Return or an arrow key, as a Mac's is.
     node.addEventListener("click", (event) => open(event.detail === 0));
     node.addEventListener("keydown", (event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(true); } });
@@ -695,12 +705,15 @@ function indentKeys(area) {
     event.preventDefault();
     const { selectionStart: start, selectionEnd: end, value } = area;
     const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    // An indent is the one the lines have (their least), else four spaces, as a code editor's.
+    const least = Math.min(...value.split("\n").map((line) => /^( *)\S/.exec(line)?.[1].length || 0).filter(Boolean));
+    const unit = " ".repeat(least >= 2 && least <= 8 ? least : 4);
     if (start === end && !event.shiftKey) {
-      area.setRangeText("  ", start, end, "end");
+      area.setRangeText(unit, start, end, "end");
     } else {
       const block = value.slice(lineStart, end);
       // Lines with words on them are indented; empty ones are left empty.
-      const changed = event.shiftKey ? block.replace(/^ {1,2}/gm, "") : block.replace(/^(?=.)/gm, "  ");
+      const changed = event.shiftKey ? block.replace(new RegExp(`^ {1,${unit.length}}`, "gm"), "") : block.replace(/^(?=.)/gm, unit);
       if (changed === block) return;
       area.setRangeText(changed, lineStart, end, "select");
     }
@@ -827,10 +840,10 @@ function place(node, anchor, align) {
 let returnTo = null;
 
 // A pop-up button's menu opens as a Mac's does: its chosen item over the button, the item's
-// words (or icon) where the button's are, the menu as tall as the window lets it be --
-// moved up or down as far as it must to stay in the window, and scrolled, if it is longer
-// than the window, to keep the chosen item over the button. Else (nothing chosen) it opens
-// under the button (place).
+// words (or icon) where the button's are -- a menu that would run out of the window cut at
+// its edge, scrolling there, the chosen item still over the button (moved only when that
+// would leave a row or less beside it). Else (nothing chosen) it opens under the button
+// (place).
 const OVER = ".select:not(.font-pick), .palette-pick";
 function overButton(node, anchor, box, ceiling) {
   const chosen = node.querySelector(".menu-item.checked, .palette-choice.on");
@@ -848,7 +861,13 @@ function overButton(node, anchor, box, ceiling) {
   const frame = node.getBoundingClientRect(), row = chosen.getBoundingClientRect();
   const middle = row.top - frame.top + node.scrollTop + row.height / 2;
   const want = box.top + box.height / 2;
-  const top = Math.min(Math.max(want - middle, ceiling), innerHeight - 8 - height);
+  const whole = node.scrollHeight + node.offsetHeight - node.clientHeight;
+  let top = want - middle;
+  const hidden = Math.max(0, ceiling - top);
+  top += hidden;
+  const room = innerHeight - 8 - top;
+  if (whole - hidden > room && room >= middle - hidden + row.height * 1.5) node.style.maxHeight = `${room}px`;
+  else top = Math.min(Math.max(want - middle, ceiling), innerHeight - 8 - height);
   left = Math.min(Math.max(8, left), innerWidth - width - 8);
   Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   node.scrollTop = Math.max(0, middle - (want - top));
@@ -868,6 +887,12 @@ function wholeRows(node) {
   if (bottoms[bottoms.length - 1] + end <= room + 1) return;
   const last = bottoms.filter((bottom) => bottom + end <= room + 0.5).pop();
   if (last > 0) node.style.maxHeight = `${last + end + node.offsetHeight - node.clientHeight}px`;
+}
+
+// `shown(on)` called as a menu opens, and again once it has gone, however it went.
+export function whileOpen(node, shown) {
+  shown(true);
+  new MutationObserver((_, watch) => { if (!node.isConnected) { shown(false); watch.disconnect(); } }).observe(document.body, { childList: true });
 }
 
 // A pop-up button's choices (`items`: { value, label }), the one in use ticked, under the
@@ -949,8 +974,9 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
       (items[event.shiftKey ? items.length - 1 : 0] || panel).focus();
     }
   };
-  // A sheet with a Cancel is closed by it (or Esc), as a Mac's is: no × beside its title too.
-  const cancels = actions.some((action) => action.label === "Cancel");
+  // A sheet with a Cancel or a Done is closed by it (or Esc), as a Mac's is: no × beside its
+  // title too.
+  const cancels = actions.some((action) => action.label === "Cancel" || action.label === "Done");
   const panel = h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog", "aria-modal": "true", tabIndex: -1 },
     h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), cancels ? null : ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
     h("div.dialog-body.scroll-thin", { tabIndex: -1 }, body),
@@ -980,10 +1006,16 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
 
 const toasts = () => document.querySelector(".toasts") || document.body.appendChild(h("div.toasts"));
 
+// Nothing floats over a sheet, as on a Mac: a toast lies under its backdrop, dimmed with
+// the window (studio.css), and one said while a sheet is open waits there for it to close
+// before its time starts.
+const sheetOpen = () => Boolean(document.querySelector(".scrim:not(.palette-scrim)"));
 export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}) {
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
   toasts().append(node);
-  setTimeout(() => { node.style.transition = "opacity .3s"; node.style.opacity = "0"; setTimeout(() => node.remove(), 300); }, seconds * 1000);
+  const fade = () => { node.style.transition = "opacity .3s"; node.style.opacity = "0"; setTimeout(() => node.remove(), 300); };
+  const wait = () => { if (sheetOpen()) setTimeout(wait, 250); else setTimeout(fade, seconds * 1000); };
+  wait();
   return node;
 }
 
@@ -993,14 +1025,25 @@ export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}
 const GREEK = "alpha α beta β gamma γ delta δ epsilon ϵ varepsilon ε zeta ζ eta η theta θ vartheta ϑ iota ι kappa κ lambda λ mu μ nu ν xi ξ pi π varpi ϖ rho ρ varrho ϱ sigma σ varsigma ς tau τ upsilon υ phi ϕ varphi φ chi χ psi ψ omega ω Gamma Γ Delta Δ Theta Θ Lambda Λ Xi Ξ Pi Π Sigma Σ Upsilon Υ Phi Φ Psi Ψ Omega Ω";
 const SIGNS = "cdot · times × pm ± mp ∓ div ÷ le ≤ leq ≤ ge ≥ geq ≥ ne ≠ neq ≠ approx ≈ sim ∼ simeq ≃ equiv ≡ propto ∝ in ∈ notin ∉ subset ⊂ subseteq ⊆ cup ∪ cap ∩ to → rightarrow → leftarrow ← Rightarrow ⇒ implies ⟹ iff ⟺ mapsto ↦ infty ∞ partial ∂ nabla ∇ sum Σ prod Π int ∫ oint ∮ sqrt √ mid | parallel ∥ ldots … dots … cdots ⋯ langle ⟨ rangle ⟩ forall ∀ exists ∃ neg ¬ wedge ∧ vee ∨ oplus ⊕ otimes ⊗ odot ⊙ circ ∘ ell ℓ hbar ℏ emptyset ∅ top ⊤ perp ⊥ star ⋆ ast ∗ prime ′ lVert ‖ rVert ‖ lvert | rvert | lfloor ⌊ rfloor ⌋ lceil ⌈ rceil ⌉ degree °";
 const TEX_WORDS = Object.fromEntries([...GREEK.split(" "), ...SIGNS.split(" ")].reduce((pairs, item, i, all) => (i % 2 ? pairs : [...pairs, [item, all[i + 1]]]), []));
-const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ", h: "ₕ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", p: "ₚ", s: "ₛ", t: "ₜ", i: "ᵢ", j: "ⱼ", r: "ᵣ", u: "ᵤ", v: "ᵥ" };
-const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", "⊤": "ᵀ", "′": "′", k: "ᵏ", t: "ᵗ", x: "ˣ", "*": "*" };
+const SUB = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉", "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ", h: "ₕ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", p: "ₚ", s: "ₛ", t: "ₜ", i: "ᵢ", j: "ⱼ", r: "ᵣ", u: "ᵤ", v: "ᵥ",
+  β: "ᵦ", γ: "ᵧ", ρ: "ᵨ", ϕ: "ᵩ", φ: "ᵩ", χ: "ᵪ" };
+// Every letter Unicode raises: all but q of the small ones, most capitals, a few Greek.
+const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹", "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ", T: "ᵀ", "⊤": "ᵀ", "′": "′", k: "ᵏ", t: "ᵗ", x: "ˣ", "*": "*",
+  ...Object.fromEntries([..."abcdefghjlmoprsuvwyz"].map((ch, at) => [ch, [..."ᵃᵇᶜᵈᵉᶠᵍʰʲˡᵐᵒᵖʳˢᵘᵛʷʸᶻ"][at]])),
+  ...Object.fromEntries([..."ABDEGHIJKLMNOPRUVW"].map((ch, at) => [ch, [..."ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵁⱽᵂ"][at]])),
+  α: "ᵅ", β: "ᵝ", γ: "ᵞ", δ: "ᵟ", ϵ: "ᵋ", ε: "ᵋ", θ: "ᶿ", ι: "ᶥ", ϕ: "ᵠ", φ: "ᵠ", χ: "ᵡ" };
 const ALPHABET = { mathcal: [0x1d49c, { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ" }],
   mathbb: [0x1d538, { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" }] };
 
+// A script Unicode cannot set keeps its mark: a power in brackets (e^(−x²/2)), a word
+// lowered as it is (x_eff), and one letter lowered reads as itself beside what it is on
+// (pθ, not p_θ). The marks kept are held aside (\u0005, \u0006) until the end, so they are
+// not read again as scripts.
 function script(text, table, mark) {
   const chars = [...text];
-  return chars.every((ch) => ch in table) ? chars.map((ch) => table[ch]).join("") : `${mark}${text.length > 1 ? `(${text})` : text}`;
+  if (chars.every((ch) => ch in table)) return chars.map((ch) => table[ch]).join("");
+  if (mark === "_") return chars.length === 1 ? text : `\u0005${text}`;
+  return `\u0006${chars.length > 1 ? `(${text})` : text}`;
 }
 
 // A fraction's part in brackets when it is more than one term.
@@ -1011,7 +1054,10 @@ const grouped = (tex) => { const words = mathWords(tex); return /[\s+−\-=/·×
 export function mathWords(tex) {
   let text = String(tex ?? "").replace(/\\(left|right|big|Big|bigg|Bigg)[lrm]?\b\.?/g, "")
     .replace(/\\(displaystyle|textstyle|limits|nolimits|,|;|:|!|quad|qquad)\b|\\[,;:!]/g, " ")
-    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, " ").replace(/&/g, "").replace(/\\\\/g, "; ");
+    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, " ").replace(/&/g, "").replace(/\\\\/g, "; ")
+    // Greek and signs first, so a script of one (p_{\theta}, x^{\prime}) is set as one; not
+    // a command taking an argument (\sqrt{…}, set below).
+    .replace(/\\([A-Za-z]+)(?![A-Za-z{])/g, (whole, name) => TEX_WORDS[name] ?? whole);
   for (let i = 0; i < 20; i++) {
     const before = text;
     text = text
@@ -1030,6 +1076,7 @@ export function mathWords(tex) {
     .replace(/\\([{}$%#&_|])/g, "$1")
     .replace(/_([^\s_^])/g, (_, a) => script(a, SUB, "_"))
     .replace(/\^([^\s_^])/g, (_, a) => script(a, SUP, "^"))
+    .replace(/\u0005/g, "_").replace(/\u0006/g, "^")
     .replace(/'/g, "′").replace(/-/g, "−").replace(/\s+/g, " ").trim();
 }
 

@@ -3064,6 +3064,104 @@ def breakable(source: str) -> tuple[str, ...]:
     return tuple(piece for piece in pieces if piece.strip())
 
 
+_RAISED = dict(zip("0123456789+−=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ", strict=True))
+_LOWERED = dict(
+    zip("0123456789+−=()aeoxhijklmnprstuv", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕᵢⱼₖₗₘₙₚᵣₛₜᵤᵥ", strict=True)
+)
+
+
+@lru_cache(maxsize=1024)
+def linear(source: str) -> str:
+    """A formula as one line of plain text: what it reads as where there are only words
+    -- a search, a screen reader, the words under a drawn formula in a PDF. A fraction is
+    set with a solidus, a script raised or lowered in Unicode where it has the characters
+    (``x²``, ``Na⁺``), else after a caret or an underscore (``x_in``)::
+
+        \\frac{a+b}{2}  ->  (a + b)/2
+    """
+
+    items, _ = parse(source.removeprefix("\\displaystyle").strip())
+    return " ".join(_linear(items).split()).replace("( ", "(").replace(" )", ")")
+
+
+def _linear(items: list) -> str:
+    said, before = [], None
+    for item in items:
+        kind = item.kind if isinstance(item, Sym) else None
+        if kind == BIN and before in (None, BIN, REL, OPEN, PUNCT):
+            said.append(item.char)  # a sign, not an operation, as in -x
+            before = ORD
+            continue
+        said.append(_linear_one(item))
+        before = kind if kind is not None else ORD
+    return "".join(said)
+
+
+def _grouped(items: list) -> str:
+    """Items in parentheses when an operation joins them (``(a + b)``, not ``(2)``)."""
+
+    said = " ".join(_linear(items).split())
+    return f"({said})" if " " in said or "/" in said else said
+
+
+def _scripted_text(items: list, forms: dict[str, str], mark: str) -> str:
+    said = " ".join(_linear(items).split())
+    if said and all(character in forms for character in said):
+        return "".join(forms[character] for character in said)
+    return f"{mark}{said}" if len(said) <= 1 else f"{mark}({said})"
+
+
+def _linear_one(item: object) -> str:
+    if isinstance(item, Sym):
+        if item.kind in (BIN, REL):
+            return f" {item.char} "
+        return f"{item.char} " if item.kind == PUNCT else item.char
+    if isinstance(item, Text | Mistake):
+        return item.words
+    if isinstance(item, Group | Classed | Coloured | Boxed):
+        return _linear(item.body if not isinstance(item, Group) else item.items)
+    if isinstance(item, Scripts):
+        base = _linear_one(item.base) + item.prime
+        lower = _scripted_text(item.sub, _LOWERED, "_") if item.sub else ""
+        upper = _scripted_text(item.sup, _RAISED, "^") if item.sup else ""
+        # A big operator's limits are followed by what it acts on: ∑ᵢ xᵢ.
+        after = " " if isinstance(item.base, Operator) and not item.base.named else ""
+        return base + lower + upper + after
+    if isinstance(item, Operator):
+        if item.body is not None:
+            return f" {_linear(item.body)} "
+        return f" {item.symbol} " if item.named else item.symbol
+    if isinstance(item, Fraction):
+        if not item.rule:
+            return f"{item.left}{_linear(item.numerator)}, {_linear(item.denominator)}{item.right}"
+        return f"{item.left}{_grouped(item.numerator)}/{_grouped(item.denominator)}{item.right}"
+    if isinstance(item, Radical):
+        root = {"2": "√", "3": "∛", "4": "∜"}.get(_linear(item.degree) if item.degree else "2")
+        return (root or f"{_grouped(item.degree)}√") + _grouped(item.body)
+    if isinstance(item, Fenced):
+        left, right = (mark if mark != "." else "" for mark in (item.left, item.right))
+        return f"{left}{_linear(item.body)}{right}"
+    if isinstance(item, Middle | Big):
+        return item.delimiter
+    if isinstance(item, Accent):
+        said = _linear(item.body)
+        return said + item.mark if len(said) == 1 else said
+    if isinstance(item, Line | Brace | Stack):
+        return _linear(item.base if isinstance(item, Stack) else item.body)
+    if isinstance(item, Arrow):
+        return f" {item.char} " if item.body is None else _linear(item.body)
+    if isinstance(item, Array):
+        rows = "; ".join(", ".join(_linear(cell).strip() for cell in row) for row in item.rows)
+        return f"{item.left}{rows}{item.right}"
+    if isinstance(item, Space):
+        return " " if item.em >= 0.15 else ""
+    if isinstance(item, Phantom):
+        return _linear(item.body) if item.shown else ""
+    if isinstance(item, Negated):
+        return _linear_one(item.body) + "\u0338"
+    return ""
+
+
 @lru_cache(maxsize=4096)
 def problems_in(source: str) -> tuple[str, ...]:
     """What could not be read in ``source``, in words (nothing when it reads)."""

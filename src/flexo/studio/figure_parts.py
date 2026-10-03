@@ -556,9 +556,18 @@ def _structure() -> dict[str, Any]:
                 show={"properties.site": "ligand"},
             ),
             _field("properties.site_labels", "Label site residues", "bool", more=True),
+            # Off, the waters and lone ions a crystal holds are left out: they float free of
+            # the molecule, as stray dots.
+            _field(
+                "properties.solvent",
+                "Waters and Ions",
+                "bool",
+                hint="Draw the waters and lone ions where they lie",
+                more=True,
+            ),
             _field(
                 "properties.density",
-                "Density Map",
+                "Map File",
                 "text",
                 hint="auto for the entry's own map, an EMDB ID, or a map file",
                 more=True,

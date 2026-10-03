@@ -12,17 +12,24 @@ artwork is rasterised at print resolution.
 
 ``pdf_bytes(pages)`` takes several drawings and writes one page each, sharing
 fonts between them: a slide deck is one call.
+
+A formula Flexo draws (``flexo.texmath``) is outlines, as a typesetter's are; the words it
+reads as lie under it as invisible text, so it is found, copied and read like any other.
+Given ``tags`` (a ``Tagger``), the PDF is tagged: a structure of headings, paragraphs,
+lists, tables, figures and formulas, each figure with its description, that a screen
+reader reads in order and a checker finds the words of, all else marked as decoration.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import math
 import re
 import struct
 import zlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -46,33 +53,89 @@ _JOINS = {"miter": 0, "round": 1, "bevel": 2}
 type Pages = str | Drawing | Sequence[str | Drawing]
 
 
-def write_pdf(pages: Pages, target: str | Path, *, title: str = "", author: str = "") -> Path:
+@dataclass(frozen=True, slots=True)
+class Tag:
+    """Where what an item draws stands in a tagged PDF's structure: in the elements of
+    ``path`` within its page's section, outermost first -- each a structure type and a key
+    that makes it one element (``("LI", "slide2.body.0.3")``) -- the last holding it.
+    ``alt`` describes the last (a figure, a formula); ``artifact`` marks what is drawn only
+    to be looked at (a band, a rule, a page number), which a reader passes over."""
+
+    path: tuple[tuple[str, str], ...] = ()
+    alt: str = ""
+    artifact: bool = False
+
+
+ARTIFACT = Tag(artifact=True)
+
+type Tagger = Callable[[Shape | Text | Image | Group, Tag | None], Tag | None]
+"""An item's ``Tag``, given the one it is within (``None`` at a page's top); ``None`` keeps
+that one. Words tagged by nothing are a paragraph each; anything else, decoration."""
+
+
+def write_pdf(
+    pages: Pages,
+    target: str | Path,
+    *,
+    title: str = "",
+    author: str = "",
+    tags: Tagger | None = None,
+    language: str = "",
+) -> Path:
     """Write ``pages`` (Flexo SVGs or drawings) as a PDF, one page each. ``title`` and
-    ``author`` are the file's own, as a reader's Properties show them."""
+    ``author`` are the file's own, as a reader's Properties show them; with ``tags`` it is
+    tagged (see ``Tagger``), in ``language`` (``en-GB``) where it is known."""
 
     target = Path(target)
-    target.write_bytes(pdf_bytes(pages, title=title, author=author))
+    target.write_bytes(pdf_bytes(pages, title=title, author=author, tags=tags, language=language))
     return target
 
 
-def pdf_bytes(pages: Pages, *, title: str = "", author: str = "") -> bytes:
+def pdf_bytes(
+    pages: Pages,
+    *,
+    title: str = "",
+    author: str = "",
+    tags: Tagger | None = None,
+    language: str = "",
+) -> bytes:
     if isinstance(pages, str | Drawing):
         pages = [pages]
     drawings = [read_drawing(page) if isinstance(page, str) else page for page in pages]
-    return _Writer(title, author).write(drawings)
+    return _Writer(title, author, tags, language).write(drawings)
+
+
+@dataclass(slots=True)
+class _Element:
+    """A structure element of a tagged PDF, and what it holds in reading order: elements,
+    and marked content as (page object, marked-content id)."""
+
+    kind: str
+    alt: str = ""
+    kids: list[_Element | tuple[int, int]] = field(default_factory=list)
+    keyed: dict[tuple[str, str], _Element] = field(default_factory=dict)
+    page: int | None = None
+    number: int = 0
 
 
 # -- the file ------------------------------------------------------------------------
 
 
 class _Writer:
-    def __init__(self, title: str, author: str = "") -> None:
+    def __init__(
+        self, title: str, author: str = "", tags: Tagger | None = None, language: str = ""
+    ) -> None:
         self.title = title
         self.author = author
         self.objects: list[bytes | None] = [None]  # object 0 is the free head
         self.fonts: dict[tuple[FontFace, int], _Font] = {}
         self.states: dict[tuple[float, float, str], str] = {}
         self.images: list[tuple[str, int]] = []
+        self.tags = tags
+        self.language = language
+        self.document = _Element("Document")
+        self.parents: list[list[_Element]] = []
+        """Each page's elements, by the id of the marked content each holds there."""
 
     def reserve(self) -> int:
         self.objects.append(None)
@@ -87,7 +150,9 @@ class _Writer:
 
     def stream(self, data: bytes, extra: str = "", compress: bool = True) -> int:
         if compress:
-            data = zlib.compress(data, 9)
+            # Flate at its usual level: the best (9) takes five times as long on a picture
+            # for a few hundredths smaller.
+            data = zlib.compress(data, 6)
             extra = "/Filter /FlateDecode " + extra
         head = f"<< {extra}/Length {len(data)} >>\nstream\n".encode()
         return self.add(head + data + b"\nendstream")
@@ -96,7 +161,8 @@ class _Writer:
         catalog, tree, resources = self.reserve(), self.reserve(), self.reserve()
         kids = []
         for drawing in drawings:
-            content = _Content(self, drawing.height)
+            page = self.reserve()
+            content = _Content(self, drawing.height, page)
             content.items(drawing.root.items)
             stream = self.stream(content.bytes())
             links = [
@@ -109,11 +175,16 @@ class _Writer:
                 for box, url in content.links
             ]
             annotations = f"/Annots [{' '.join(f'{n} 0 R' for n in links)}] " if links else ""
+            structure = f"/StructParents {len(self.parents)} /Tabs /S " if self.tags else ""
+            if self.tags:
+                self.parents.append(content.marked)
             kids.append(
-                self.add(
+                self.put(
+                    page,
                     f"<< /Type /Page /Parent {tree} 0 R "
-                    f"/MediaBox [0 0 {_n(drawing.width)} {_n(drawing.height)}] {annotations}"
-                    f"/Resources {resources} 0 R /Contents {stream} 0 R >>".encode()
+                    f"/MediaBox [0 0 {_n(drawing.width)} {_n(drawing.height)}] "
+                    f"{annotations}{structure}"
+                    f"/Resources {resources} 0 R /Contents {stream} 0 R >>".encode(),
                 )
             )
         fonts = " ".join(f"/{font.name} {font.embed(self)} 0 R" for font in self.fonts.values())
@@ -130,7 +201,15 @@ class _Writer:
         )
         listed = " ".join(f"{kid} 0 R" for kid in kids)
         self.put(tree, f"<< /Type /Pages /Kids [{listed}] /Count {len(kids)} >>".encode())
-        self.put(catalog, f"<< /Type /Catalog /Pages {tree} 0 R >>".encode())
+        tagged = ""
+        if self.tags:
+            tagged = (
+                f" /MarkInfo << /Marked true >> /StructTreeRoot {self._structure()} 0 R"
+                " /ViewerPreferences << /DisplayDocTitle true >>"
+            )
+            if self.language:
+                tagged += f" /Lang {_string(self.language)}"
+        self.put(catalog, f"<< /Type /Catalog /Pages {tree} 0 R{tagged} >>".encode())
         author = f" /Author {_string(self.author)}" if self.author else ""
         info = self.add(f"<< /Producer (flexo) /Title {_string(self.title)}{author} >>".encode())
         out = BytesIO()
@@ -148,6 +227,47 @@ class _Writer:
             f"startxref\n{xref}\n%%EOF\n".encode()
         )
         return out.getvalue()
+
+    def _structure(self) -> int:
+        """The structure tree's objects, and its root's number: every element, and the
+        tree that leads from each page's marked content back to its element."""
+
+        root = self.reserve()
+
+        def number(element: _Element) -> None:
+            element.number = self.reserve()
+            for kid in element.kids:
+                if isinstance(kid, _Element):
+                    number(kid)
+
+        def put(element: _Element, parent: int) -> None:
+            kids = []
+            for kid in element.kids:
+                if isinstance(kid, _Element):
+                    put(kid, element.number)
+                    kids.append(f"{kid.number} 0 R")
+                else:
+                    kids.append(f"<< /Type /MCR /Pg {kid[0]} 0 R /MCID {kid[1]} >>")
+            alt = f" /Alt {_string(element.alt)}" if element.alt else ""
+            page = f" /Pg {element.page} 0 R" if element.page is not None else ""
+            self.put(
+                element.number,
+                f"<< /Type /StructElem /S /{element.kind} /P {parent} 0 R{page}{alt} "
+                f"/K [{' '.join(kids)}] >>".encode(),
+            )
+
+        number(self.document)
+        put(self.document, root)
+        nums = " ".join(
+            f"{index} [{' '.join(f'{element.number} 0 R' for element in marked)}]"
+            for index, marked in enumerate(self.parents)
+        )
+        parents = self.add(f"<< /Nums [{nums}] >>".encode())
+        return self.put(
+            root,
+            f"<< /Type /StructTreeRoot /K [{self.document.number} 0 R] /ParentTree {parents} 0 R "
+            f"/ParentTreeNextKey {len(self.parents)} >>".encode(),
+        )
 
     def state(self, fill: float, stroke: float, blend: str) -> str:
         key = (round(fill, 4), round(stroke, 4), blend)
@@ -167,27 +287,126 @@ class _Writer:
 
 
 class _Content:
-    def __init__(self, writer: _Writer, height: float) -> None:
+    def __init__(self, writer: _Writer, height: float, page: int = 0) -> None:
         self.writer = writer
         self.height = height
+        self.page = page
         self.links: list[tuple[tuple[float, float, float, float], str]] = []
         """``(left, bottom, right, top)`` in PDF space, and the URL, of each linked run."""
         # PDF's y runs up; the drawing's runs down. Flip once, for the page.
         self.ops: list[str] = [f"1 0 0 -1 0 {_n(height)} cm"]
+        self.marked: list[_Element] = []
+        """The element each of the page's marked-content ids belongs to, in order."""
+        self.section: _Element | None = None
 
     def bytes(self) -> bytes:
         return "\n".join(self.ops).encode("latin-1")
 
-    def items(self, items) -> None:
+    def items(self, items, within: Tag | None = None) -> None:
+        tagger = self.writer.tags
+        for item in items:
+            tag = within
+            if tagger is not None:
+                tag = tagger(item, within) or within
+            if isinstance(item, Group):
+                if "data-flexo-math" in item.data:
+                    self.formula(item, tag)
+                else:
+                    self.items(item.items, tag)
+                continue
+            with self.marking(item, tag):
+                if isinstance(item, Shape):
+                    self.shape(item)
+                elif isinstance(item, Text):
+                    self.text(item)
+                elif isinstance(item, Image):
+                    self.image(item)
+
+    @contextlib.contextmanager
+    def marking(self, item: object, tag: Tag | None):
+        """What ``item`` draws, marked as content of its structure element, or as decoration:
+        words no tag places are a paragraph of their own. Unmarked in an untagged PDF."""
+
+        if self.writer.tags is None:
+            yield
+            return
+        if tag is None and isinstance(item, Text):
+            tag = Tag((("P", item.id or f"text{len(self.marked)}"),))
+        if tag is None or tag.artifact or not tag.path:
+            self.ops.append("/Artifact BMC")
+            yield
+            self.ops.append("EMC")
+            return
+        if self.section is None:
+            self.section = _Element("Sect", page=self.page)
+            self.writer.document.kids.append(self.section)
+        element = self.section
+        for depth, key in enumerate(tag.path):
+            found = element.keyed.get(key)
+            if found is None:
+                found = _Element(key[0], page=self.page)
+                element.keyed[key] = found
+                element.kids.append(found)
+            if depth == len(tag.path) - 1 and tag.alt:
+                found.alt = tag.alt
+            element = found
+        identifier = len(self.marked)
+        self.marked.append(element)
+        element.kids.append((self.page, identifier))
+        self.ops.append(f"/{element.kind} << /MCID {identifier} >> BDC")
+        yield
+        self.ops.append("EMC")
+
+    def formula(self, group: Group, tag: Tag | None) -> None:
+        """A formula drawn as outlines, with the words it reads as under it, invisible: found,
+        copied and read like any words. Its own element, a formula described by its words,
+        unless it is within words (a title's) or a figure."""
+
+        words = _formula_words(group.data.get("data-flexo-math", ""))
+        if tag is None or tag.artifact or not tag.path:
+            tag = Tag((("Formula", group.id or f"formula{len(self.marked)}"),), alt=words)
+        with self.marking(group, tag):
+            self.items_unmarked(group.items)
+            self.hidden_words(group, words)
+
+    def items_unmarked(self, items) -> None:
         for item in items:
             if isinstance(item, Group):
-                self.items(item.items)
+                self.items_unmarked(item.items)
             elif isinstance(item, Shape):
                 self.shape(item)
             elif isinstance(item, Text):
                 self.text(item)
             elif isinstance(item, Image):
                 self.image(item)
+
+    def hidden_words(self, group: Group, words: str) -> None:
+        """``words`` laid invisibly across what ``group`` draws, as wide as it is."""
+
+        from flexo.drawing import ink_bounds
+        from flexo.style import TypographyStyle
+        from flexo.text import font_stack
+
+        left, top, right, bottom = ink_bounds(Drawing(0.0, 0.0, Group(None, list(group.items))))
+        words = " ".join(words.split())
+        if not words or right <= left or bottom <= top:
+            return
+        face = font_stack(TypographyStyle()).face(400, False)
+        font = self.writer.font(face, 400)
+        loaded = hb_font(face, 400)
+        size = min(bottom - top, 1000.0)
+        upem = load_face(face).upem
+        shown, advance = [], 0.0
+        for character in words:
+            gid = loaded.get_nominal_glyph(ord(character)) or 0
+            cid, width = font.use(gid, character)
+            shown.append(f"<{cid:04X}>")
+            advance += width / upem * size
+        stretch = 100.0 * (right - left) / advance if advance > 0 else 100.0
+        self.ops.append(
+            f"BT 3 Tr /{font.name} 1 Tf {_n(stretch)} Tz {_n(size)} 0 0 {_n(-size)} {_n(left)} "
+            f"{_n(bottom - 0.2 * size)} Tm [{''.join(shown)}] TJ ET"
+        )
 
     def paint(self, paint: Paint, segments: Sequence[Segment]) -> None:
         fill = _colour(paint.fill)
@@ -304,6 +523,17 @@ class _Content:
         self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 
+def _formula_words(source: str) -> str:
+    """What a formula reads as, in words (``flexo.texmath.linear``): ``\\frac{a}{b}`` as ``a/b``."""
+
+    from flexo.texmath import linear
+
+    try:
+        return linear(source)
+    except Exception:
+        return source
+
+
 def _path(segments: Sequence[Segment]) -> str:
     parts = []
     for segment in segments:
@@ -328,13 +558,15 @@ class _Font:
     widths: dict[int, float] = field(default_factory=dict)
 
     def use(self, gid: int, text: str) -> tuple[int, float]:
-        """The subset's CID for ``gid``, and its advance in font units."""
+        """The subset's CID for ``gid``, and its advance in font units. A character the
+        face lacks (gid 0, its blank) takes a CID of its own, so it still reads as itself."""
 
-        if gid not in self.cids:
+        key = gid if gid or not text else -ord(text[0])
+        if key not in self.cids:
             cid = len(self.cids) + 1
-            self.cids[gid] = cid
+            self.cids[key] = cid
             self.widths[cid] = hb_font(self.face, self.weight).get_glyph_h_advance(gid)
-        cid = self.cids[gid]
+        cid = self.cids[key]
         if text and cid not in self.texts:
             self.texts[cid] = text
         return cid, self.widths[cid]
@@ -393,7 +625,7 @@ class _Font:
             pen = TTGlyphPen(None)
             # CFF outlines run counter-clockwise; TrueType's run clockwise.
             target = Cu2QuPen(pen, max_err=upem / 2000.0, reverse_direction=cubic)
-            _replay(_outline(self.face, self.weight, gid), target)
+            _replay(_outline(self.face, self.weight, max(gid, 0)), target)
             glyphs[f"g{cid}"] = pen.glyph()
         builder = FontBuilder(upem, isTTF=True)
         builder.setupGlyphOrder(order)

@@ -16,7 +16,8 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``connect``: ``source`` to ``target``, each a node or ``node.port``;
 - ``update``: ``target`` (``{"type": "node" | "edge" | "group" | "figure", "id"}``)
   and ``values``, keys as the catalogue's fields name them (``properties.length``);
-  an empty value removes its key;
+  an empty value removes its key; with ``name`` (the words a node had), a node's
+  new label renames it too, if its id was made from those words or its kind's;
 - ``rename``: ``id`` to ``to``, everywhere it is named;
 - ``delete``: ``ids`` of nodes, groups (with what they hold), edges, and nets;
 - ``gather``: ``ids`` held by one group, into a new ``layout`` (row, column,
@@ -203,6 +204,16 @@ def _parts() -> dict[str, Any]:
     return catalogue()["parts"]
 
 
+def _slug(words: str) -> str:
+    """An id made from words (a label, a kind): ``Encoder block`` is ``encoder-block``."""
+
+    words = re.sub(r"\$|\\[A-Za-z]+|[*_`{}]", "", str(words))
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", words).strip("-").lower()[:24].strip("-")
+    if not slug or not slug[0].isalpha():
+        slug = f"part-{slug}" if slug else "part"
+    return slug
+
+
 def _sequence_indent(text: str) -> int:
     """How far this file indents a list under a top-level key (``nodes:``)."""
 
@@ -347,10 +358,7 @@ class _Document:
         """An unused id made from ``base`` (a label, a kind): ``encoder``, ``encoder-2``;
         none of ``also`` either (ids given out but not yet written)."""
 
-        words = re.sub(r"\$|\\[A-Za-z]+|[*_`{}]", "", str(base))
-        slug = re.sub(r"[^A-Za-z0-9]+", "-", words).strip("-").lower()[:24].strip("-")
-        if not slug or not slug[0].isalpha():
-            slug = f"part-{slug}" if slug else "part"
+        slug = _slug(base)
         taken = self.taken() | set(also)
         candidate, number = slug, 2
         while candidate in taken:
@@ -540,6 +548,14 @@ class _Document:
         if item is None:
             raise EditError(f"There's no {NOUNS.get(kind, kind)} named “{identifier}”.")
         chosen = [identifier] if identifier else []
+        if kind == "node" and "name" in action and values.get("label") and "id" not in values:
+            # Words typed on a part, done: its id follows them, when it was named for the
+            # words it had (or for its kind) -- as the figure names a part it adds, never
+            # an id a person or an agent chose.
+            was, words = str(action.get("name") or ""), str(values["label"])
+            named = self.named_for(identifier, item, was, words)
+            if named != identifier:
+                values["id"] = named
         for key, value in values.items():
             if key == "id" and kind in {"node", "group"}:
                 if value and value != identifier:
@@ -568,6 +584,22 @@ class _Document:
                 elif value != "grid":
                     layout.pop("columns", None)
         return chosen
+
+    def named_for(self, identifier: str, item: Mapping[str, Any], was: str, words: str) -> str:
+        """The id for a node that had the words ``was`` and has ``words`` now: one made from
+        them, if its id was made from ``was`` or from its kind's own (``block-3``); else
+        the id it has."""
+
+        kind = str(item.get("kind") or "block")
+        part = _parts().get(kind) or {}
+        given = (part.get("node") or {}).get("label") or kind
+        made = {_slug(was) if was else "", kind, _slug(part.get("title") or kind), _slug(given)}
+        stem = re.sub(r"-\d+$", "", identifier)
+        if identifier not in made and stem not in made:
+            return identifier
+        if _slug(words) in {identifier, stem}:
+            return identifier
+        return self.fresh(words)
 
     def retype(self, item: dict[str, Any], kind: str) -> None:
         """A node made another kind: it keeps its label and tone, takes the new kind's

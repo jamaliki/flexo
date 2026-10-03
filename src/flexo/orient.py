@@ -21,7 +21,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from flexo.geometry import Side
-from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec
+from flexo.ir.semantic import FigureSpec, GroupSpec, LayoutSpec, NodeSpec, layout_connections
+from flexo.units import Length
 
 _ACROSS = {
     Side.NORTH: Side.WEST, Side.WEST: Side.NORTH, Side.SOUTH: Side.EAST, Side.EAST: Side.SOUTH
@@ -203,35 +204,121 @@ def _reads_upward(figure: FigureSpec, under: dict[str, set[str]]) -> bool:
 def wrapped(figure: FigureSpec, *, longest: int = 5) -> FigureSpec:
     """``figure`` with each long row or column folded onto two lines.
 
-    A row of ``longest`` or more parts becomes a grid of two rows, read left to
-    right and then on to the next row, as a long pipeline is set across a page;
-    a column becomes two columns, read down and then on. The parts and their
-    wiring are unchanged; only where they sit.
+    A row of ``longest`` or more parts is set on two rows, read left to right
+    and then on to the next row, as a long pipeline is set across a page; a
+    column on two columns, read down and then on. The parts and their wiring are
+    unchanged; only where they sit.
+
+    Parts wired across the fold make it a flow: it is folded, near the middle,
+    where the fewest lines cross from one line to the other, and each line keeps
+    its own spacing, so its arrows are even. One whose fold is crossed by more
+    than the line that carries it on (a loop back, as a flow chart's "no") turns
+    at the end of the first line and runs back along the second, a snake, so that
+    line is a short step down and nothing crosses it. Parts with nothing between
+    the two halves (a shelf of panels) keep the columns of a grid.
     """
 
     import math
 
-    groups = []
+    under = _nodes_under(figure)
+    pairs = [(link.source.node_id, link.target.node_id) for link in layout_connections(figure)]
+    taken = {group.id for group in figure.groups} | {node.id for node in figure.nodes}
+    groups: list[GroupSpec] = []
     for group in figure.groups:
         kind, count = group.layout.kind, len(group.children)
-        if kind in {"row", "column"} and count >= longest:
-            half = math.ceil(count / 2)
-            children = enumerate(group.children)
-            if kind == "row":
-                placements = tuple((child, n // half, n % half) for n, child in children)
-                columns = half
-            else:
-                placements = tuple((child, n % half, n // half) for n, child in children)
-                columns = 2
-            group = replace(
+        if kind not in {"row", "column"} or count < longest:
+            groups.append(group)
+            continue
+        half = math.ceil(count / 2)
+        if not _crossing(group.children, half, under, pairs):
+            groups.append(_gridded(group, half))
+            continue
+        # Folded where the fewest lines cross between the two lines, as near the middle as
+        # that allows (the earlier, of two as near): a part added at the end of a row does
+        # not move the fold, and the parts before it, unless it must.
+        at = min(
+            (at for at in (half - 1, half, half + 1) if 2 <= at <= count - 2),
+            key=lambda at: (len(_crossing(group.children, at, under, pairs)), abs(at - half), at),
+            default=half,
+        )
+        first, second = group.children[:at], group.children[at:]
+        across = _crossing(group.children, at, under, pairs)
+        last, then = _held(first[-1:], under), _held(second[:1], under)
+        on = [(source, target) for source, target in across if source in last and target in then]
+        snake = bool(on) and len(across) > len(on)
+        lines = []
+        for children in (first, tuple(reversed(second)) if snake else second):
+            line = _fresh(f"{group.id}.line", taken)
+            taken.add(line)
+            lines.append(
+                GroupSpec(
+                    line,
+                    tuple(children),
+                    LayoutSpec(
+                        kind=kind, gap=group.layout.gap, align=group.layout.align,
+                        padding=Length(0.0),
+                    ),
+                    role="layout",
+                )
+            )
+        # The second line starts under the first (or, run back, ends under its end).
+        groups.append(
+            replace(
                 group,
+                children=tuple(line.id for line in lines),
                 layout=replace(
-                    group.layout, kind="grid", columns=columns, placements=placements,
-                    width=None, height=None, reflow=None,
+                    group.layout, kind="column" if kind == "row" else "row",
+                    align="end" if snake else "start", justify="start", gap=None,
+                    row_gap=None, column_gap=None, width=None, height=None, reflow=None,
                 ),
             )
-        groups.append(group)
+        )
+        groups.extend(lines)
     return replace(figure, groups=tuple(groups))
+
+
+def _held(children: tuple[str, ...], under: dict[str, set[str]]) -> set[str]:
+    return set().union(*(under.get(child, {child}) for child in children))
+
+
+def _crossing(
+    children: tuple[str, ...], at: int, under: dict[str, set[str]], pairs: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """The connections between the parts before ``at`` and those from it on."""
+
+    ahead, behind = _held(children[:at], under), _held(children[at:], under)
+    return [
+        (source, target)
+        for source, target in pairs
+        if {source, target} & ahead and {source, target} & behind and source != target
+    ]
+
+
+def _gridded(group: GroupSpec, half: int) -> GroupSpec:
+    """A long row or column as a grid of two rows (or columns), in reading order."""
+
+    children = enumerate(group.children)
+    if group.layout.kind == "row":
+        placements = tuple((child, n // half, n % half) for n, child in children)
+        columns = half
+    else:
+        placements = tuple((child, n % half, n // half) for n, child in children)
+        columns = 2
+    return replace(
+        group,
+        layout=replace(
+            group.layout, kind="grid", columns=columns, placements=placements,
+            width=None, height=None, reflow=None,
+        ),
+    )
+
+
+def _fresh(candidate: str, taken: set[str]) -> str:
+    name, suffix = candidate, 1
+    while name in taken:
+        suffix += 1
+        name = f"{candidate}-{suffix}"
+    return name
 
 
 __all__ = ["turned", "wrapped"]

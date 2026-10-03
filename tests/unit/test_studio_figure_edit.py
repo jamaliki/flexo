@@ -123,6 +123,32 @@ def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
         edit(text, do="rename", id="x", to="2x")
 
 
+def test_a_part_the_figure_named_takes_the_name_of_its_words_once_they_are_typed() -> None:
+    text, (made,) = edit(NEW_FIGURE, do="add", kind="block", after="encoder", source="encoder")
+    assert made == "block"
+    target = {"type": "node", "id": made}
+    text, chosen = edit(
+        text, do="update", target=target, values={"label": "3D refinement"}, name="Block"
+    )
+    assert chosen == ["part-3d-refinement"]
+    assert ("encoder", "part-3d-refinement") in edges(text)
+    # Named for the words it had (as a template names its parts), it follows them too.
+    text, chosen = edit(
+        text, do="update", target={"type": "node", "id": "x"}, values={"label": "Image"}, name="x"
+    )
+    assert chosen == ["image"]
+    # An id a person or an agent chose stays, whatever the words; and so does any id when
+    # the words are only being typed (no name: the typing has not ended).
+    text, chosen = edit(
+        text, do="update", target={"type": "node", "id": "encoder"},
+        values={"label": "Backbone"}, name="Image encoder",
+    )
+    assert chosen == ["encoder"]
+    image = {"type": "node", "id": "image"}
+    text, chosen = edit(text, do="update", target=image, values={"label": "Pixels"})
+    assert chosen == ["image"]
+
+
 def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
     text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="row")
     text, _ = edit(text, do="delete", ids=["encoder"])
