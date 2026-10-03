@@ -854,6 +854,7 @@ EDGE_FIELDS = [
         default="arrow",
         hint="What the arrowhead means, as in SBGN",
         show={"arrow": ["end", "both"]},
+        more=True,  # pathways' marks: under More, open where one is set
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(
@@ -865,6 +866,7 @@ EDGE_FIELDS = [
         "pair",
         labels=["Consumed", "Produced"],
         hint="Shown on an arc beside the reaction: ATP, ADP",
+        more=True,
     ),
 ]
 
