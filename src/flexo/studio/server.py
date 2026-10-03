@@ -455,15 +455,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"path": str(made), "name": made.name, "folder": made.is_dir()})
                 aside = None  # the Mac app moves it, and clears the rest away
                 return
-            self._attachment(made)
+            self._attachment(made, aside)
         finally:
             if aside is not None:
                 shutil.rmtree(aside, ignore_errors=True)
 
-    def _attachment(self, made: Path) -> None:
-        """A file made aside, as a download: itself, or a folder of several as a zip."""
+    def _attachment(self, made: Path, aside: Path | None = None) -> None:
+        """A file made aside, as a download: itself, or a folder of several as a zip. Read,
+        what was made `aside` is cleared away before it is sent, so nothing is left once the
+        download has come."""
 
         import io
+        import shutil
         import zipfile
 
         if made.is_dir():
@@ -476,6 +479,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             data, name = made.read_bytes(), made.name
             kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if aside is not None:
+            shutil.rmtree(aside, ignore_errors=True)
         plain = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
         self.send_response(200)
         self.send_header("Content-Type", kind)
