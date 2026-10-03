@@ -578,22 +578,34 @@ function newMenu(anchor, workspace) {
 }
 
 export function askName(workspace, kind, suggestion) {
-  const taken = new Set(workspace.documents.map((item) => item.file));
-  let name = suggestion;
-  for (let n = 2; taken.has(name); n++) name = suggestion.replace(/(\.\w+)$/, `-${n}$1`);
-  const input = ui.input({ value: name, mono: true });
-  const go = async () => {
+  const taken = new Set(workspace.documents.map((item) => item.file.toLowerCase()));
+  // A name, as a Mac app asks for one: the file's extension is the studio's business.
+  const fileOf = (name) => (/\.(ya?ml|json)$/i.test(name) ? name : `${name}.yaml`);
+  const stem = suggestion.replace(/\.(ya?ml|json)$/i, "");
+  let name = stem;
+  for (let n = 2; taken.has(fileOf(name).toLowerCase()); n++) name = `${stem} ${n}`;
+  const input = ui.input({ value: name });
+  const problem = h("div.field-problem", { hidden: true });
+  // A name already used is said at once, and nothing is opened or overwritten.
+  const check = () => {
     const file = input.value.trim();
-    if (!file) return false;
-    try { await workspace.create(kind, /\.(ya?ml|json)$/i.test(file) ? file : `${file}.yaml`); }
-    catch (error) { toast(error.message, { kind: "error", icon: "error" }); }
+    const why = !file ? "Enter a name." : /[/\\:]/.test(file) ? "A name can't contain / \\ or :."
+      : taken.has(fileOf(file).toLowerCase()) ? `“${file}” is already used in this folder. Choose a different name.` : "";
+    problem.textContent = why;
+    problem.hidden = !why;
+    return !why;
+  };
+  input.addEventListener("input", () => { if (!problem.hidden) check(); });
+  const go = () => {
+    if (!check()) { input.focus(); return false; }
+    workspace.create(kind, fileOf(input.value.trim())).catch((error) => toast(error.message, { kind: "error", icon: "error" }));
     return true;
   };
-  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go().then((ok) => ok && box.close()); } });
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); if (go()) box.close(); } });
   const kindTitle = (workspace.info.kinds || []).find((item) => item.name === kind)?.title || kind.charAt(0).toUpperCase() + kind.slice(1);
-  const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("File Name", input, { hint: "Saved in the studio folder" })],
-    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: () => { go(); } }] });
-  setTimeout(() => { input.focus(); input.setSelectionRange(0, input.value.lastIndexOf(".")); }, 30);
+  const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("Name", input, { hint: "Saved in this folder" }), problem],
+    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: go }] });
+  setTimeout(() => { input.focus(); input.select(); }, 30);
 }
 
 export function connectDialog(workspace) {
