@@ -398,6 +398,13 @@ export async function start() {
         break;
       case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
       case "present": session?.present?.(); break;
+      // One of the document's own commands, by the label reported below (the app's Insert
+      // and Slide menus): "Add Picture" runs "Add Picture…".
+      case "run": {
+        const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
+        session?.commands().find((command) => bare(command.label) === bare(arg))?.run();
+        break;
+      }
       case "palette": palette(workspace); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
@@ -407,6 +414,10 @@ export async function start() {
       case "shortcuts": shortcutsDialog(); break;
       default: break;
     }
+  };
+  // What the document can do now, by label: the app enables its Insert and Slide items by it.
+  const doable = (session) => {
+    try { return session ? session.commands().map((command) => command.label) : []; } catch { return []; }
   };
   let reporting = null;
   const report = () => {
@@ -420,10 +431,15 @@ export async function start() {
         undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
+        commands: doable(session),
       });
     }, 80);
   };
-  for (const event of ["status", "active", "opened", "closed", "documents"]) workspace.on(event, report);
+  // A slide or part chosen changes what can be done; so does a field taking the keys
+  // (⌘D is then the field's).
+  for (const event of ["status", "active", "opened", "closed", "documents", "focus"]) workspace.on(event, report);
+  document.addEventListener("focusin", report);
+  document.addEventListener("focusout", report);
   window.addEventListener("pywebviewready", report);
   const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
   // The spinner the page opened with stays over the frame until the first document is
