@@ -204,18 +204,47 @@ export const ui = {
     return node;
   },
 
-  number({ value, placeholder = "", onChange, min, max, step = "any", key } = {}) {
-    const node = h("input.input", { type: "number", placeholder, step });
-    if (key) node.dataset.key = key;
-    if (min !== undefined) node.min = min;
-    if (max !== undefined) node.max = max;
-    node.value = value ?? "";
-    node.addEventListener("input", () => {
-      const text = node.value.trim();
-      const parsed = text === "" ? null : Number(text);
-      node.classList.toggle("invalid", parsed !== null && Number.isNaN(parsed));
+  // A number, as every number field in the studio is drawn (numberBox): ↑ and ↓, or its
+  // steppers, go a step at a time, ⇧ ten. Empty is null: the default, said by `placeholder`.
+  number({ value, placeholder = "", onChange, min, max, step = "any", key, unit } = {}) {
+    const input = plainTyping(h("input.input", { type: "text", placeholder }));
+    input.inputMode = "decimal";
+    input.spellcheck = false;
+    if (key) input.dataset.key = key;
+    input.value = value ?? "";
+    const read = () => { const text = input.value.trim().replace(",", "."); return text === "" ? null : Number(text); };
+    input.addEventListener("input", () => {
+      const parsed = read();
+      input.classList.toggle("invalid", parsed !== null && Number.isNaN(parsed));
       if (parsed === null || !Number.isNaN(parsed)) onChange?.(parsed);
     });
+    const stepBy = (sign, big) => {
+      const now = read();
+      const from = now !== null && !Number.isNaN(now) ? now : Number.isFinite(parseFloat(input.placeholder)) ? parseFloat(input.placeholder) : (min ?? 0);
+      let next = Math.round((from + sign * (Number(step) || 1) * (big ? 10 : 1)) * 1e6) / 1e6;
+      if (min !== undefined) next = Math.max(min, next);
+      if (max !== undefined) next = Math.min(max, next);
+      input.value = String(next);
+      input.dispatchEvent(new Event("input"));
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey);
+    });
+    return ui.numberBox(input, { unit, step: stepBy });
+  },
+
+  // A number field's box, as a Mac's: the digits to the right, the unit after them, and
+  // steppers at its end (`step(sign, big)`). The figure's typed numbers are drawn in it too.
+  numberBox(input, { unit, step } = {}) {
+    const stepper = (sign, title) => h("button.stepper", { type: "button", tabIndex: -1, title,
+      onmousedown: (event) => event.preventDefault(), onclick: (event) => step(sign, event.shiftKey) }, icon("chevron-down"));
+    const node = h("div.number-field", {}, input, unit ? h("span.unit", {}, unit) : null,
+      step ? h("span.steppers", {}, stepper(1, "Increase (↑)"), stepper(-1, "Decrease (↓)")) : null);
+    // A click in the box beside the digits types in it.
+    node.addEventListener("mousedown", (event) => { if (event.target === node || event.target.classList?.contains("unit")) { event.preventDefault(); input.focus(); } });
+    node.input = input;
     return node;
   },
 
@@ -239,6 +268,8 @@ export const ui = {
   },
 
   // Words in flexo markup: **strong**, *emphasis*, $maths$, `code`, [links](url), [colour]{accent}.
+  // `colours`: the theme's ({ accent, accent2, muted, ink } as colours) offered in its format bar,
+  // true for the studio's own as stand-ins, or false for none.
   markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, key, spelling = true } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
@@ -255,40 +286,144 @@ export const ui = {
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
     const tool = (label, title, before, after, style) =>
       h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
+    // As the slide's words' format bar (richtext.js) has them, in its order and its look.
+    const palette = colours === true ? { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)", ink: "var(--ink)" } : colours || {};
+    const swatch = (name, title) => (palette[name] ? tool(h("span.rt-swatch", { style: { background: palette[name] } }), title, "[", `]{${name}}`) : null);
     const tools = h("div.markup-tools", {},
-      tool("B", "Bold (⌘B)", "**", "**", { fontWeight: 700 }),
-      tool("I", "Italic (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
-      tool("$x$", "Equation (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
-      tool("</>", "Code", "`", "`", { fontFamily: "var(--mono)", fontSize: "11px" }),
+      tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**"),
+      tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*"),
+      tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
+      tool(h("span.tool-maths", {}, "∑"), "Equation (⌘M)", "$", "$"),
       tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
-      colours ? h("span.sep") : null,
-      colours ? tool("A", "Accent colour", "[", "]{accent}", { color: "var(--accent)", fontWeight: 700 }) : null,
-      colours ? tool("A", "Second accent colour", "[", "]{accent2}", { color: "var(--accent-2)", fontWeight: 700 }) : null,
-      colours ? tool("A", "Muted colour", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
-    );
+      swatch("accent", "Accent"), swatch("accent2", "Accent 2"), swatch("muted", "Muted"), swatch("ink", "Default colour"));
     const node = h("div.markup", {}, tools, area);
     node.area = area;
     return node;
   },
 
-  select({ value, options, onChange, placeholder } = {}) {
-    const node = h("select.select");
-    if (placeholder !== undefined) node.append(h("option", { value: "" }, placeholder));
-    for (const option of options) {
-      const item = typeof option === "object" ? option : { value: option, label: String(option) };
-      node.append(h("option", { value: item.value }, item.label));
-    }
-    node.value = value ?? "";
-    node.addEventListener("change", () => onChange?.(node.value));
+  // A pop-up button, as a Mac's: what is chosen, and the choices in a menu under it, the
+  // one in use ticked. It answers to `value` as a <select> does, and `relabel(value, label)`
+  // renames a choice. A choice left as its default -- "" ("Default (On)", "None"), or
+  // `unset`, the value shown being the default's -- reads in grey, as a placeholder does.
+  select({ value, options, onChange, placeholder, unset = false } = {}) {
+    const items = [...(placeholder !== undefined ? [{ value: "", label: placeholder }] : []),
+      ...options.map((option) => (typeof option === "object" ? { ...option, value: String(option.value ?? "") } : { value: String(option), label: String(option) }))];
+    const label = h("span");
+    const node = h("button.select", { type: "button", "aria-haspopup": "menu" }, label, icon("chevron-down"));
+    let current = String(value ?? "");
+    let fallback = unset;
+    const show = () => {
+      const item = items.find((each) => each.value === current);
+      label.textContent = item ? item.label : current;
+      node.classList.toggle("default", current === "" || fallback);
+    };
+    Object.defineProperty(node, "value", { configurable: true, get: () => current, set: (next) => { current = String(next ?? ""); fallback = false; show(); } });
+    node.relabel = (choice, text) => { const item = items.find((each) => each.value === String(choice)); if (item) { item.label = text; show(); } };
+    const open = (byKey) => choices(node, items, current, (next) => {
+      if (next === current && !fallback) return;
+      current = next;
+      fallback = false;
+      show();
+      node.dispatchEvent(new Event("change", { bubbles: true }));
+      onChange?.(next);
+    }, byKey);
+    // Opened by a click, or by Space, Return or an arrow key, as a Mac's is.
+    node.addEventListener("click", (event) => open(event.detail === 0));
+    node.addEventListener("keydown", (event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(true); } });
+    show();
     return node;
   },
 
-  // A text input offering suggestions, for values that are usually but not always from a list.
+  // A combo box, as a Mac's: words typed, for values usually but not always from a list,
+  // or one of the list chosen from the menu its button opens under the field (⌥↓ too).
   combo({ value, options = [], placeholder = "", onChange, mono, key } = {}) {
-    const id = `list-${Math.random().toString(36).slice(2)}`;
-    const list = h("datalist", { id }, options.map((option) => h("option", { value: option })));
-    const input = ui.input({ value, placeholder, mono, list: id, key, onInput: (text) => onChange?.(text) });
-    return h("div", { style: { display: "contents" } }, input, list);
+    const input = ui.input({ value, placeholder, mono, key, onInput: (text) => onChange?.(text) });
+    const node = h("div.combo", {}, input);
+    const button = h("button.combo-open", { type: "button", tabIndex: -1, title: "Show Choices", disabled: !options.length,
+      onmousedown: (event) => event.preventDefault(),
+      onclick: () => choices(node, options.map((option) => ({ value: String(option), label: String(option) })), input.value, (next) => {
+        input.value = next;
+        onChange?.(next);
+        setTimeout(() => input.focus(), 0);
+      }) }, icon("chevron-down"));
+    input.addEventListener("keydown", (event) => { if (event.altKey && event.key === "ArrowDown") { event.preventDefault(); button.click(); } });
+    node.append(button);
+    node.input = input;
+    return node;
+  },
+
+  // A font, from a pop-up button: its menu lists the fonts there are, each name in its own
+  // face, and typing finds one -- or names one not listed. Empty is `placeholder`.
+  font({ value, options = [], placeholder = "Default", onChange, key } = {}) {
+    const label = h("span");
+    const node = h("button.select.font-pick", { type: "button", "aria-haspopup": "menu", title: "Choose a Font" }, label, icon("chevron-down"));
+    if (key) node.dataset.key = key;
+    let current = value || "";
+    const show = () => { label.textContent = current || placeholder; node.classList.toggle("default", !current); };
+    const pick = (next) => {
+      closeMenu();
+      if (next === current) return;
+      current = next;
+      show();
+      onChange?.(next);
+    };
+    const open = () => {
+      const search = plainTyping(h("input.input.font-search", { type: "search", placeholder: "Search Fonts" }));
+      search.spellcheck = false;
+      const list = h("div.font-list", { role: "menu" });
+      const item = (name, text, face) => h(`button.menu-item${name === current ? ".checked" : ""}`, { type: "button", role: "menuitemradio", "aria-checked": String(name === current), onclick: () => pick(name) },
+        h("span.menu-tick", {}, name === current ? icon("check") : null),
+        h("span.menu-text", {}, h("span", { style: face ? { fontFamily: `"${name}", var(--font)` } : {} }, text)));
+      const render = () => {
+        const typed = search.value.trim();
+        const query = typed.toLowerCase();
+        clear(list,
+          query ? null : item("", placeholder),
+          options.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
+          typed && !options.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);
+      };
+      search.addEventListener("input", render);
+      search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); list.querySelector(".menu-item")?.click(); } });
+      render();
+      // The search field has the keys: ↓ goes into the list.
+      popover(node, [search, list], { className: "font-menu" });
+      list.querySelector(".checked")?.scrollIntoView({ block: "nearest" });
+    };
+    node.addEventListener("click", open);
+    node.addEventListener("keydown", (event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(); } });
+    show();
+    return node;
+  },
+
+  // A table's cell, typed in where it is: its words wrap, its row growing to hold them, and
+  // they read as the slide sets them (strong, emphatic, code, maths) while it is not typed
+  // in. It takes what an input given to h() does -- `value`, `dataset`, `oninput`,
+  // `onpaste` -- and answers to `value`. Return goes to the cell under it.
+  cell({ value = "", dataset, ...events } = {}) {
+    const area = plainTyping(h("textarea.cell-area", { rows: 1, ...events }));
+    area.spellcheck = false;
+    if (dataset) Object.assign(area.dataset, dataset);
+    area.value = value ?? "";
+    // The words under the field give the cell its size: as typed while it is typed in (unseen,
+    // the field over them), else as the slide sets them.
+    const view = h("div.cell-view", { "aria-hidden": "true" });
+    const show = () => clear(view, document.activeElement === area ? `${area.value}\u200b` : area.value ? markupNodes(area.value) : "\u200b");
+    const node = h("div.cell-edit", {}, area, view);
+    Object.defineProperty(node, "value", { configurable: true, get: () => area.value, set: (text) => { area.value = text ?? ""; show(); } });
+    area.addEventListener("input", show);
+    area.addEventListener("focus", show);
+    area.addEventListener("blur", show);
+    area.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      // As in a spreadsheet: the cell under it, its words chosen, ready to type over.
+      const cell = node.closest("td");
+      const next = cell?.parentElement?.nextElementSibling?.children[cell.cellIndex]?.querySelector("textarea");
+      next?.focus();
+      next?.select();
+    });
+    show();
+    return node;
   },
 
   toggle({ value, label, onChange } = {}) {
@@ -414,6 +549,7 @@ function nextField(from, step) {
 // -- popovers -------------------------------------------------------------------------
 
 let openMenu = null;
+let openAnchor = null;
 
 // A floating panel beside `anchor` (an element, or a point {x, y}), closed by a click elsewhere.
 export function popover(anchor, content, { align = "start", className = "" } = {}) {
@@ -422,18 +558,22 @@ export function popover(anchor, content, { align = "start", className = "" } = {
   return place(node, anchor, align);
 }
 
-export function menu(anchor, items, { align = "start" } = {}) {
+// `checked` on items: a pop-up's choices, the one in use ticked, as a Mac's menu ticks it.
+export function menu(anchor, items, { align = "start", className = "" } = {}) {
   closeMenu();
-  const node = h("div.menu", { role: "menu" });
+  const node = h(`div.menu${className ? `.${className}` : ""}`, { role: "menu" });
+  const ticks = items.some((item) => item?.checked !== undefined);
   for (const item of items) {
     if (item === "-") { node.append(h("div.menu-sep")); continue; }
     if (item.title) { node.append(h("div.menu-title", {}, item.title)); continue; }
     // `show(on)`: what the item would act on, shown while it is under the pointer or keys.
     const shown = item.show ? { onmouseenter: () => item.show(true), onmouseleave: () => item.show(false), onfocus: () => item.show(true), onblur: () => item.show(false) } : {};
-    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}`, { type: "button", role: "menuitem", disabled: Boolean(item.disabled),
+    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}${item.checked ? ".checked" : ""}`, { type: "button", role: ticks ? "menuitemradio" : "menuitem",
+      "aria-checked": ticks ? String(Boolean(item.checked)) : undefined, disabled: Boolean(item.disabled),
       onclick: () => { item.show?.(false); closeMenu(); item.run?.(); }, ...shown },
+      ticks ? h("span.menu-tick", {}, item.checked ? icon("check") : null) : null,
       item.icon ? icon(item.icon) : null,
-      h("span.menu-text", {}, h("span", {}, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
+      h("span.menu-text", {}, h("span", { style: item.style }, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
       item.keys ? h("span.kbd", {}, item.keys) : null));
   }
   // Closed any way, nothing stays shown.
@@ -442,17 +582,26 @@ export function menu(anchor, items, { align = "start" } = {}) {
   return place(node, anchor, align);
 }
 
-// Below the anchor if it fits, else above; if neither, on the roomier side, scrolling --
-// never over the button that opened it. A menu at a point (a context menu) opens there and
-// moves up as far as it must to show every item, as on a Mac; only one taller than the
-// window scrolls.
+// Pop-up buttons: their menus are at least as wide as they are, as a Mac's are.
+const POPUPS = ".select, .palette-pick, .type-pick, .theme-card.compact, .combo";
+// Room enough under a button for a menu to scroll there, rather than open over it.
+const ROOM = 240;
+
+// Under its button, where it fits, or scrolling there while a fair part of it does; else
+// above, if it fits; else on the roomier side, scrolling -- never over the button that
+// opened it, nor over the window's top bar, and a scrolling list ending on a whole row. A
+// menu at a point (a context menu) opens there and moves up as far as it must to show every
+// item, as on a Mac; only one taller than the window scrolls.
 function place(node, anchor, align) {
   const point = !anchor.getBoundingClientRect;
   if (point) node.style.maxHeight = `${innerHeight - 16}px`;
+  else if (anchor.matches?.(POPUPS)) node.style.minWidth = `${anchor.getBoundingClientRect().width}px`;
   document.body.append(node);
   const box = point ? { left: anchor.x, right: anchor.x, bottom: anchor.y, top: anchor.y } : anchor.getBoundingClientRect();
   const width = node.offsetWidth, height = node.offsetHeight;
-  const below = innerHeight - 8 - (box.bottom + 4), above = box.top - 4 - 8;
+  const bar = point ? null : document.querySelector(".studio > .bar")?.getBoundingClientRect();
+  const ceiling = Math.max(8, bar?.height ? bar.bottom + 4 : 8);
+  const below = innerHeight - 8 - (box.bottom + 4), above = box.top - 4 - ceiling;
   let left = align === "end" ? box.right - width : box.left;
   let top = box.bottom + 4;
   if (point) {
@@ -460,26 +609,63 @@ function place(node, anchor, align) {
     // Too near the right edge, it opens to the left of the pointer.
     if (left + width > innerWidth - 8 && box.left - width >= 8) left = box.left - width;
   } else if (height > below) {
-    if (height <= above) top = box.top - height - 4;
-    else if (above > below) { node.style.maxHeight = `${above}px`; top = 8; }
+    if (below >= ROOM) node.style.maxHeight = `${below}px`;
+    else if (height <= above) top = null;
+    else if (above > below) { node.style.maxHeight = `${above}px`; top = null; }
     else node.style.maxHeight = `${below}px`;
-    if (height > Math.max(above, below)) node.style.overflowY = "auto";
+    if (height > Math.max(above, below) || below >= ROOM) node.style.overflowY = "auto";
   }
+  if (!point) wholeRows(node);
+  // Over its button, it ends just above it.
+  if (top === null) top = box.top - 4 - node.offsetHeight;
   left = Math.min(Math.max(8, left), innerWidth - width - 8);
   Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   openMenu = node;
+  // The button that opened it shows it is open, as a Mac's pop-up button does.
+  openAnchor = point ? null : anchor;
+  openAnchor?.classList?.add("menu-open");
   // Keys work in it at once, as in a Mac menu: arrows move, Return chooses, Esc goes back.
   returnTo = document.activeElement;
   node.tabIndex = -1;
   node.classList.add("fresh");
   node.addEventListener("pointermove", () => node.classList.remove("fresh"), { once: true });
   node.addEventListener("keydown", menuKeys);
-  const first = node.getAttribute("role") === "menu" ? null : focusables(node)[0];
+  // A panel's first field has the keys -- or, with none, its choice in use, as a Mac's pop-up
+  // menu opens on the item chosen; else its first button.
+  const items = node.getAttribute("role") === "menu" ? [] : focusables(node);
+  const first = items.find((item) => item.matches("input, textarea")) || items.find((item) => item.matches(".on, .checked")) || items[0];
   (first || node).focus({ preventScroll: true });
+  if (first?.matches(".on, .checked")) first.scrollIntoView({ block: "nearest" });
   setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
   return node;
 }
 let returnTo = null;
+
+// A list that scrolls ends on a whole row, not on a row cut by the window's edge: the menu
+// (or the list in it, under a search field) shows as many whole rows as fit.
+function wholeRows(node) {
+  const list = node.querySelector(".font-list") || node;
+  const rows = list.querySelectorAll(".menu-item, .palette-choice");
+  if (rows.length < 2) return;
+  const top = node.getBoundingClientRect().top, room = node.clientHeight;
+  const first = rows[0].getBoundingClientRect(), step = rows[1].getBoundingClientRect().top - first.top;
+  const end = parseFloat(getComputedStyle(node).paddingBottom) || 0;
+  if (step <= 0 || rows[rows.length - 1].getBoundingClientRect().bottom - top + end <= room + 1) return;
+  const start = first.top - top, gap = step - first.height;
+  const fit = Math.floor((room - start - end + gap) / step);
+  if (fit > 0) node.style.maxHeight = `${start + fit * step - gap + end}px`;
+}
+
+// A pop-up button's choices (`items`: { value, label }), the one in use ticked, under the
+// button; `pick(value)` takes the one chosen. Opened by a key, the one in use has the keys.
+function choices(anchor, items, current, pick, byKey = false) {
+  const node = menu(anchor, items.map((item) => (item === "-" ? "-" : { label: item.label, checked: item.value === current, disabled: item.disabled, style: item.style, run: () => pick(item.value) })),
+    { className: "choice-menu" });
+  const chosen = node.querySelector(".menu-item.checked");
+  chosen?.scrollIntoView({ block: "nearest" });
+  if (byKey) (chosen || node.querySelector(".menu-item:not(:disabled)"))?.focus({ preventScroll: true });
+  return node;
+}
 
 const focusables = (node) => [...node.querySelectorAll("button:not(:disabled), input, select, textarea, [tabindex='0']")].filter((item) => item.offsetParent !== null);
 
@@ -515,6 +701,8 @@ export function closeMenu() {
   const had = openMenu?.contains(document.activeElement);
   openMenu?.remove();
   openMenu = null;
+  openAnchor?.classList?.remove("menu-open");
+  openAnchor = null;
   document.removeEventListener("pointerdown", outside, true);
   // Focus goes back where it was, so keys go on to what they went to before.
   if (had && returnTo?.isConnected) returnTo.focus({ preventScroll: true });
@@ -626,6 +814,30 @@ export function mathWords(tex) {
     .replace(/_([^\s_^])/g, (_, a) => script(a, SUB, "_"))
     .replace(/\^([^\s_^])/g, (_, a) => script(a, SUP, "^"))
     .replace(/'/g, "′").replace(/-/g, "−").replace(/\s+/g, " ").trim();
+}
+
+// Words in flexo markup set as they read on a slide: strong, emphatic, code and maths (as
+// words) as such, links and colours as their words in a colour; the marks themselves gone.
+const MARKS = /\\([$*`\]\\])|\*\*(.+?)\*\*|\*(?!\s)(.+?)\*|`([^`]+)`|\$\$([\s\S]+?)\$\$|\$(?!\s)([^$]+?)(?<!\s)\$(?!\d)|\[([^\]]+)\]\([^)]*\)|\[([^\]]+)\]\{([^}]*)\}/g;
+const ROLE_COLOURS = { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)" };
+export function markupNodes(markup) {
+  const text = String(markup ?? "");
+  const nodes = [];
+  let at = 0;
+  for (const match of text.matchAll(MARKS)) {
+    const [whole, mark, strong, emphatic, code, shown, maths, linked, coloured, colour] = match;
+    if (match.index > at) nodes.push(text.slice(at, match.index));
+    if (mark !== undefined) nodes.push(mark);
+    else if (strong !== undefined) nodes.push(h("b", {}, markupNodes(strong)));
+    else if (emphatic !== undefined) nodes.push(h("i", {}, markupNodes(emphatic)));
+    else if (code !== undefined) nodes.push(h("code", {}, code));
+    else if (shown !== undefined || maths !== undefined) nodes.push(h("span.maths", {}, mathWords(shown ?? maths)));
+    else if (linked !== undefined) nodes.push(h("u", {}, markupNodes(linked)));
+    else nodes.push(h("span", { style: { color: ROLE_COLOURS[colour] || (HEX.test(colour) ? colour : "") } }, markupNodes(coloured)));
+    at = match.index + whole.length;
+  }
+  if (at < text.length) nodes.push(text.slice(at));
+  return nodes;
 }
 
 // Words in flexo markup as they read: maths as words, emphasis, links and colours as plain words.

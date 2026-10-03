@@ -816,7 +816,18 @@ const SHORTCUTS = [
 ];
 
 function shortcutsDialog() {
-  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").filter(Boolean).map((key) => h("span.kbd", {}, key))));
+  // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
+  // them, and keys given side by side ("↑ ↓", "Home End") are each a keycap of their own.
+  const chords = (keys) => {
+    const out = [];
+    let held = "";
+    for (const key of keys.split(" ").filter(Boolean)) {
+      if (/^[⌘⇧⌥⌃]$/.test(key)) held += key;
+      else out.push(held + key);
+    }
+    return out;
+  };
+  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span.shortcut-keys", {}, chords(keys).map((chord) => h("span.kbd", {}, chord))));
   dialog({ title: "Keyboard Shortcuts", wide: true, body: [h("div.shortcut-groups", {}, SHORTCUTS.map(([title, rows]) =>
     h("div.shortcuts", {}, h("div.section-title", {}, title), rows.map(([keys, what]) => row(keys, what)))))] });
 }

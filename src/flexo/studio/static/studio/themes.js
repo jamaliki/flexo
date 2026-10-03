@@ -17,7 +17,8 @@ export function themeName(card) {
 const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
 
 export function themeCard(card, { on = false, onclick, compact = false, chevron = false } = {}) {
-  const tones = (card.tones || []).map((tone) => h("span", { style: { background: tone.fill, borderColor: tone.stroke } }));
+  // Each tone a filled chip in its strong colour, as a palette's colours are shown.
+  const tones = (card.tones || []).map((tone) => h("span", { style: { background: tone.stroke || tone.fill } }));
   return h(`button.theme-card${on ? ".on" : ""}${compact ? ".compact" : ""}${card.problem ? ".problem" : ""}`, {
     type: "button", title: card.problem || card.description || themeName(card), onclick,
   },

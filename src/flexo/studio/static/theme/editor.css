@@ -8,21 +8,18 @@
 /* Every row ends where the settings' controls end: the column after them holds only their
    Reset buttons, so the right edges line up down the panel. */
 .theme-section > :not(.section-title):not(.setting) { margin-right: 30px; }
-.setting-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.setting-label { display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); }
 .setting-label .hint { display: none; }
 .setting-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
 .setting.changed .setting-dot { background: var(--accent); }
-.setting.changed .setting-label { color: var(--ink); font-weight: 560; }
+.setting.changed .setting-label { color: var(--ink); }
 .setting-control { min-width: 0; }
 .setting-reset { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
 .setting-reset:disabled { visibility: hidden; }
 .setting-reset:hover { background: var(--sunken); color: var(--ink); }
 .setting-reset svg { width: 13px; height: 13px; }
-.setting-group-label { font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; }
-.setting-group-label .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.unit-input { position: relative; }
-.unit-input .input { padding-right: 30px; }
-.unit { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 11.5px; pointer-events: none; }
+.setting-group-label { font: var(--text-label); color: var(--ink); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; }
+.setting-group-label .hint { font: var(--text-hint); color: var(--ink-3); }
 .colour-field { display: flex; align-items: center; gap: 8px; }
 .colour-field input[type=color] { width: 0; height: 0; opacity: 0; position: absolute; pointer-events: none; }
 .colour-swatch { width: 28px; height: 28px; border-radius: 7px; box-shadow: var(--chip-ring); cursor: pointer; flex: none; }
@@ -38,7 +35,7 @@
 .palette-add:hover { border-color: var(--accent); color: var(--accent); }
 .palette-add svg { width: 16px; height: 16px; }
 .tones { display: flex; gap: 5px; flex-wrap: wrap; }
-.tone { width: 40px; height: 26px; border-radius: 6px; border: 1.5px solid; display: grid; place-items: center; font-size: 11px; font-weight: 650; }
+.tone { width: 40px; height: 26px; border-radius: 6px; border: 1.5px solid; display: grid; place-items: center; font: 600 11px var(--font); }
 .arrow-choices { display: flex; gap: 4px; }
 .arrow-choice { flex: 1; height: 30px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink-2); cursor: pointer; display: grid; place-items: center; }
 .arrow-choice svg { width: 26px; height: 18px; }
@@ -57,4 +54,4 @@
 .theme-messages { position: absolute; left: 16px; right: 16px; bottom: 16px; }
 .show-on { display: flex; align-items: center; gap: 8px; }
 .show-on .segmented { width: auto; }
-.show-on-label { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.show-on-label { font: var(--text-small); color: var(--ink-3); white-space: nowrap; }

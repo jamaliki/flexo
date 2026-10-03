@@ -50,6 +50,15 @@
   --radius: 8px;
   --radius-s: 6px;
   --bar: 48px;
+  /* The inspector's type, one scale of three sizes and two weights, as Keynote's: a section's
+     title, a setting's name, what a control holds, a small control's words, and a hint. */
+  --text-title: 600 13px/1.35 var(--font);
+  --text-label: 600 12px/1.35 var(--font);
+  --text-body: 400 13px/1.4 var(--font);
+  --text-small: 400 12px/1.35 var(--font);
+  --text-hint: 400 11px/1.4 var(--font);
+  /* A menu's tick, drawn as the check icon (ui.js), for marks made in CSS. */
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   color-scheme: light;
 }
 
@@ -276,8 +285,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .folder-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 .shortcuts { display: grid; gap: 2px; align-content: start; }
 .shortcut-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; }
-.shortcut { display: flex; justify-content: space-between; padding: 6px 2px; border-bottom: 1px solid var(--line); }
-.shortcut .kbd { margin-left: 4px; }
+.shortcut { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); }
+.shortcut-keys { display: flex; gap: 4px; flex: none; }
+.shortcut .kbd { color: var(--ink-2); }
 
 /* the side panel */
 .side { width: 360px; border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
@@ -411,7 +421,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--ink-2); }
 .btn.ghost:hover { background: var(--sunken); color: var(--ink); }
 .btn.danger:hover { color: var(--error); }
-.btn.small { height: 24px; padding: 0 7px; font-size: 12px; }
+.btn.small { height: 24px; padding: 0 7px; font: var(--text-small); }
 .btn.icon { width: 30px; padding: 0; }
 .btn.icon.small { width: 24px; }
 .btn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
@@ -420,52 +430,108 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn:disabled:hover { border-color: var(--line-strong); }
 .btn.ghost:not(.on):disabled:hover { background: transparent; border-color: transparent; color: var(--ink-2); }
 .btn.primary:disabled:hover { border-color: var(--accent); filter: none; }
-.kbd { font: 11px var(--mono); color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+/* A shortcut as a Mac menu shows it: one keycap for the chord (⇧⌘N), in the system's face,
+   its modifiers as large as its letters. */
+.kbd { display: inline-block; font: var(--text-small); letter-spacing: 0.06em; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; min-width: 20px; text-align: center; white-space: nowrap; }
 
-.input, .textarea, .select {
+.input, .textarea {
   width: 100%; min-width: 0; border: 1px solid var(--line-strong); background: var(--raised);
   border-radius: var(--radius-s); padding: 5px 8px; outline: none; transition: border-color 0.12s, box-shadow 0.12s;
 }
-.input, .select { height: 30px; }
-.input:hover, .textarea:hover, .select:hover { border-color: var(--ink-3); }
-.input:focus, .textarea:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.input { height: 30px; }
+.input:hover, .textarea:hover { border-color: var(--ink-3); }
+.input:focus, .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
 .input.invalid { border-color: var(--error); }
 .textarea { resize: vertical; line-height: 1.5; display: block; }
 .textarea.mono, .input.mono { font-family: var(--mono); font-size: 12px; }
 .textarea.grow { resize: none; overflow: hidden; }
-.select { appearance: none; padding-right: 26px; cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' fill='none' stroke='%238c867d' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 6px center; background-size: 16px; }
 .input::placeholder, .textarea::placeholder { color: var(--ink-3); }
+
+/* A pop-up button, as a Mac's: what is chosen and a chevron, its menu opening under it
+   (ui.select and ui.font, a palette, a shape's type, the theme). A choice left as its
+   default reads as an empty field's placeholder does: in grey. */
+.select, .palette-pick, .type-pick {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 30px; padding: 0 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); color: var(--ink);
+  font: var(--text-body); text-align: left; cursor: pointer; outline: none; transition: border-color 0.12s, box-shadow 0.12s;
+}
+.select:hover, .palette-pick:hover:not(:disabled), .type-pick:hover { border-color: var(--ink-3); }
+.select:focus-visible, .palette-pick:focus-visible, .type-pick:focus-visible, .select.menu-open, .palette-pick.menu-open, .type-pick.menu-open, .combo.menu-open > .input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.select > span, .palette-pick > span:not(.palette-strip), .type-pick > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select > svg, .palette-pick > svg:last-child, .type-pick > svg:last-child { width: 14px; height: 14px; flex: none; color: var(--ink-3); }
+.select.default > span { color: var(--ink-3); }
+.palette-pick:disabled { cursor: default; opacity: 0.6; }
+
+/* A number: its digits to the right with its unit after them, quietly, and steppers at its
+   end, as a Mac's number field (ui.number, and the figure's own in parts.js). */
+.number-field { display: flex; align-items: center; height: 30px; min-width: 0; width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); transition: border-color 0.12s, box-shadow 0.12s; }
+.number-field:hover { border-color: var(--ink-3); }
+.number-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.number-field:has(.invalid) { border-color: var(--error); }
+.number-field > .input { flex: 1; height: 100%; min-width: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; padding: 0 0 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
+.number-field > .input:focus { box-shadow: none; }
+.number-field > .unit { flex: none; padding-left: 3px; font: var(--text-hint); color: var(--ink-3); pointer-events: none; }
+/* The unit sits on the digits' line, not centred beside them. */
+.number-field > .input, .number-field > .unit { align-self: baseline; }
+/* A unit after a default that is a word ("Auto") would read as part of it. */
+.number-field > .input:placeholder-shown:is([placeholder=""], [placeholder="Auto"], [placeholder="None"], [placeholder="Default"]) + .unit { display: none; }
+.number-field .steppers { flex: none; display: grid; grid-template-rows: 1fr 1fr; width: 14px; height: 22px; margin: 0 4px 0 6px; opacity: 0.6; }
+.number-field:hover .steppers, .number-field:focus-within .steppers { opacity: 1; }
+.number-field .stepper { display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.number-field .stepper:hover { background: var(--sunken); color: var(--ink); }
+.number-field .stepper svg { width: 10px; height: 10px; }
+.number-field .stepper:first-child svg { transform: rotate(180deg); }
+
+/* A table's cell (ui.cell): its words, under a field laid over them, give it its size --
+   as typed while it is typed in, else as the slide sets them. */
+.cell-edit { position: relative; min-width: 0; }
+.cell-area, .cell-view { padding: 5px 7px; font: var(--text-body); white-space: pre-wrap; overflow-wrap: break-word; }
+.cell-area { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; background: transparent; outline: none; resize: none; overflow: hidden; color: transparent; caret-color: var(--ink); }
+.cell-area:focus { color: var(--ink); background: var(--accent-soft); }
+.cell-view { color: var(--ink); pointer-events: none; }
+.cell-area:focus + .cell-view { visibility: hidden; }
+.cell-view code { font: 0.9em var(--mono); }
+.cell-view .maths { font-family: "Fira Math", "Latin Modern Math", Georgia, serif; }
+
+/* A combo box: words typed, or chosen from the menu its button opens (ui.combo). */
+.combo { position: relative; display: flex; min-width: 0; width: 100%; }
+.combo > .input { padding-right: 28px; }
+/* Its button set off from the words by a hairline, as a Mac's combo box has it: words are typed here. */
+.combo-open { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 26px; display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0 5px 5px 0; background: transparent; color: var(--ink-3); cursor: pointer; }
+.combo-open:disabled { display: none; }
+.combo-open:hover { color: var(--ink); background: var(--sunken); }
+.combo-open svg { width: 14px; height: 14px; }
 
 .field { display: grid; gap: 5px; }
 /* What is wrong with what was typed, said under the field: in red, or amber for a warning
    (the thing is still drawn). Here, not in a kind's sheet, as dialogs say it too. */
 .field-stack { display: grid; gap: 4px; }
-.field-problem { display: flex; gap: 6px; align-items: flex-start; color: var(--error); font-size: 12px; line-height: 1.4; }
+.field-problem { display: flex; gap: 6px; align-items: flex-start; color: var(--error); font: var(--text-small); }
 .field-problem[hidden] { display: none; }
 .field-problem svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
 .field-problem .spinner { flex: none; margin-top: 1px; }
-.field-problem.warning { color: var(--warn); font-size: 11.5px; }
+.field-problem.warning { color: var(--warn); }
 .dialog-body > .field-problem { margin-top: -8px; }
-.field > .label { font-size: 11.5px; font-weight: 560; color: var(--ink-2); display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 1px; }
-.field > .label .hint { font-weight: 400; color: var(--ink-3); margin-left: auto; text-align: right; }
+.field > .label { font: var(--text-label); color: var(--ink-2); display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 1px; }
+.field > .label .hint { font: var(--text-hint); color: var(--ink-3); margin-left: auto; text-align: right; }
 /* A field half a row wide says its hint under it, where it has the room: the fields beside
    each other keep their labels and boxes in line. */
 .grid2 > .field, .mol-grid > .field { align-content: start; }
 .grid2 > .field > .label, .mol-grid > .field > .label { display: contents; }
-.grid2 > .field > .label .hint, .mol-grid > .field > .label .hint { order: 1; margin: -2px 0 0; text-align: left; font-size: 11px; line-height: 1.35; }
+.grid2 > .field > .label .hint, .mol-grid > .field > .label .hint { order: 1; margin: -2px 0 0; text-align: left; }
 .field.inline { grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > * { flex: 1; min-width: 0; }
 .row > .fixed { flex: none; }
-/* Switches in a row keep their words on one line, and go under one another when they don't fit. */
-.row:has(> .switch) { flex-wrap: wrap; column-gap: 20px; row-gap: 10px; }
-.row > .switch { flex: none; white-space: nowrap; }
+/* Switches given together go under one another, each a row of its own. */
+.row:has(> .switch) { flex-direction: column; align-items: stretch; row-gap: 10px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: var(--ink-2); }
+/* A switch as in the Mac's settings: its setting's name at the left (as a field's is named),
+   the switch at the right edge. */
+.switch { position: relative; display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between; gap: 12px; min-height: 20px; cursor: pointer; user-select: none; font: var(--text-label); color: var(--ink-2); }
+.switch > span:not(.track) { min-width: 0; }
 /* Its checkbox unseen but there, so Tab reaches the switch and Space turns it, as on a Mac. */
 .switch input { position: absolute; left: 0; top: 50%; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
 .switch input:focus-visible + .track { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
@@ -475,9 +541,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .switch input:checked + .track::after { transform: translateX(12px); }
 
 .segmented { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--seg-track); gap: 2px; width: 100%; }
-.segmented button { flex: 1; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 12px; font-weight: 520; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 6px; white-space: nowrap; }
+.segmented button { flex: 1; height: 24px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); cursor: pointer; font: var(--text-small); display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 6px; white-space: nowrap; }
 .segmented button:hover { color: var(--ink); }
-.segmented button.on { background: var(--seg-on); color: var(--ink); box-shadow: var(--seg-shadow); font-weight: 580; }
+.segmented button.on { background: var(--seg-on); color: var(--ink); box-shadow: var(--seg-shadow); }
 .segmented svg { width: 14px; height: 14px; }
 
 .markup { position: relative; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); transition: border-color 0.12s, box-shadow 0.12s; }
@@ -486,16 +552,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .markup .textarea { border: 0; box-shadow: none !important; background: transparent; }
 /* Its tools show while it is typed in, over the end of the label above it: nothing moves as
    they come and go, and an idle field is a plain box like any other. */
-.markup-tools { position: absolute; z-index: 3; right: -1px; bottom: calc(100% + 4px); display: flex; align-items: center; gap: 1px; padding: 1px; border-radius: 7px; background: var(--raised); box-shadow: var(--shadow-1), 0 0 0 1px var(--line-strong); white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
+.markup-tools { position: absolute; z-index: 3; right: -1px; bottom: calc(100% + 4px); white-space: nowrap; opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
 .markup:focus-within .markup-tools { opacity: 1; visibility: visible; transition: opacity 0.12s; }
-.markup-tools button { display: inline-grid; place-items: center; height: 22px; min-width: 24px; border: 0; background: transparent; color: var(--ink-2); border-radius: 5px; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 5px; }
-.markup-tools button:hover { background: var(--sunken); color: var(--ink); }
-.markup-tools button svg { width: 14px; height: 14px; }
-.markup-tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 4px 3px; }
+/* A text's format bar, the same wherever words are typed: a field's here, a slide's words'
+   (.rt-bar, richtext.js) and a figure's labels'. */
+.markup-tools, .rt-bar { display: flex; align-items: center; gap: 1px; padding: 3px; border-radius: 8px; background: var(--raised); box-shadow: var(--shadow-2), 0 0 0 1px var(--line); }
+.markup-tools button, .rt-bar button { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; font: var(--text-body); line-height: 1; }
+.markup-tools button:hover, .rt-bar button:hover { background: var(--sunken); }
+.markup-tools button svg, .rt-bar button svg { width: 14px; height: 14px; }
+.markup-tools .tool-code, .rt-bar .tool-code { font: 11px var(--mono); }
+.markup-tools .tool-maths, .rt-bar .tool-maths { font-family: Georgia, serif; }
+/* Over a field in a panel, the same bar a little smaller: it covers only the label above the field. */
+.panel .markup > .markup-tools { padding: 1px; }
+.panel .markup > .markup-tools button { height: 22px; min-width: 24px; padding: 0 5px; }
+/* The theme's colours, as round chips. */
+.rt-swatch { display: block; width: 13px; height: 13px; border-radius: 50%; box-shadow: var(--chip-ring); }
 
-.swatches { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-.swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line-strong); cursor: pointer; padding: 0; position: relative; }
-.swatch.on { box-shadow: 0 0 0 2px var(--accent); }
+/* Colours to choose from: filled chips with a hairline edge, the chosen one ringed. */
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 0; box-shadow: var(--chip-ring); cursor: pointer; padding: 0; position: relative; }
+.swatch.on { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
 .swatch.none { background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
 
 /* -- popovers, dialogs, toasts -- */
@@ -515,6 +591,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .menu-item .menu-text { display: grid; }
 .menu-item .menu-hint { color: var(--ink-3); font-size: 11.5px; }
 .menu-item .kbd { margin-left: auto; }
+/* A pop-up's choices: the one in use ticked, the others in line with it. */
+.menu-tick { flex: none; display: grid; place-items: center; width: 14px; margin-right: -4px; }
+.menu-item .menu-tick svg { width: 14px; height: 14px; color: var(--ink); }
+.menu.choice-menu .menu-item { padding-left: 4px; }
+/* The fonts: searched in the field at the top, the list under it scrolling, not the field. */
+.menu.font-menu { display: flex; flex-direction: column; gap: 4px; overflow: hidden; width: 280px; max-height: min(440px, 70vh); }
+.menu.font-menu .font-search { flex: none; height: 28px; }
+.font-list { display: grid; align-content: start; min-height: 0; overflow: auto; }
+.font-list .menu-item { padding-left: 4px; }
+.font-list .menu-text > span { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-sep { height: 1px; background: var(--line); margin: 5px 4px; }
 .menu.history-menu { min-width: 280px; max-width: 380px; }
 .history { display: grid; }
@@ -564,8 +650,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .panel-title { font-size: 11.5px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
 .panel-body { overflow: auto; min-height: 0; flex: 1; }
 .section { padding: 14px; border-bottom: 1px solid var(--line); display: grid; gap: 12px; }
-.section-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 620; color: var(--ink); }
-.section-title .count { color: var(--ink-3); font-weight: 500; }
+.section-title { display: flex; align-items: center; gap: 8px; font: var(--text-title); color: var(--ink); }
+.section-title .count { color: var(--ink-3); font-weight: 400; }
 .empty { color: var(--ink-3); text-align: center; padding: 20px 12px; font-size: 12.5px; }
 
 .stage { position: absolute; inset: 0; overflow: auto; background-color: var(--stage);
@@ -596,15 +682,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .docbar-title svg { width: 15px; height: 15px; }
 
 /* -- building blocks every kind's editor uses, here so none depends on another's sheet -- */
-.hint-line { color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
-details.more > summary { cursor: pointer; font-weight: 600; font-size: 12px; color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 6px; }
+.hint-line { color: var(--ink-3); font: var(--text-hint); }
+details.more > summary { cursor: pointer; font: var(--text-label); color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 6px; }
 details.more > summary::-webkit-details-marker { display: none; }
 details.more > summary svg { width: 14px; height: 14px; flex: none; transition: transform 0.15s; }
 details.more[open] > summary svg { transform: rotate(90deg); }
 details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .slider { display: flex; align-items: center; gap: 10px; }
 .slider input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
-.slider .value { width: 38px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; }
+.slider .value { width: 38px; text-align: right; font: var(--text-small); font-variant-numeric: tabular-nums; color: var(--ink-2); }
 /* A file chooser's list of files. */
 .dialog .list-rows { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
 .dialog .list-rows .pic { width: 34px; height: 34px; object-fit: contain; border-radius: 4px; background: var(--sunken); }
@@ -617,21 +703,24 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .theme-page { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 40px; padding: 0 8px; border-radius: 5px; box-shadow: var(--chip-ring); overflow: hidden; }
 .theme-aa { font-size: 17px; font-weight: 600; line-height: 1; }
 .theme-tones { display: flex; gap: 3px; }
-.theme-tones span { width: 11px; height: 18px; border-radius: 3px; border: 1.5px solid transparent; }
+/* The theme's colours as filled chips, as a palette's are. */
+.theme-tones span { width: 11px; height: 18px; border-radius: 3px; box-shadow: var(--chip-ring); }
 .theme-words { display: grid; min-width: 0; padding: 0 2px; }
-.theme-name { font-size: 12px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-name { font: var(--text-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-where { font: 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-where.bad { color: var(--danger, #c0392b); font-family: inherit; }
 /* The theme in use, as a pop-up button: its sample, its name, and a chevron inside it. */
-.theme-card.compact { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: none; align-items: center; column-gap: 8px; flex: 1; }
-.theme-chevron { display: grid; place-items: center; width: 18px; color: var(--ink-3); }
+.theme-card.compact { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: none; align-items: center; column-gap: 8px; flex: 1; height: 30px; padding: 2px 8px 2px 2px; border-radius: var(--radius-s); }
+.theme-card.compact:focus-visible, .theme-card.compact.menu-open { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.theme-chevron { display: grid; place-items: center; width: 14px; color: var(--ink-3); }
 .theme-chevron svg { width: 14px; height: 14px; }
-.theme-card:hover .theme-chevron { color: var(--ink); }
-.theme-card.compact .theme-page { height: 30px; padding: 0 6px; }
-.theme-card.compact .theme-aa { font-size: 14px; }
-.theme-card.compact .theme-tones span { width: 7px; height: 14px; }
+.theme-card.compact .theme-page { height: 24px; padding: 0 6px; border-radius: 4px; }
+.theme-card.compact .theme-aa { font-size: 13px; }
+.theme-card.compact .theme-tones span { width: 8px; height: 12px; border-radius: 2px; }
+.theme-card.compact .theme-name { font: var(--text-body); }
 .theme-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.menu.theme-menu { width: min(460px, calc(100vw - 24px)); max-width: none; max-height: min(560px, calc(100vh - 40px)); overflow: auto; padding: 8px; }
+/* As tall as it needs, to the window's edge: it scrolls only when the window is too short. */
+.menu.theme-menu { width: min(460px, calc(100vw - 24px)); max-width: none; max-height: calc(100vh - 16px); overflow: auto; padding: 8px; }
 .theme-picker { display: grid; gap: 8px; }
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
 /* A theme file's page: the folder's figures and decks, each with Apply or In Use. */
@@ -642,7 +731,7 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .theme-use .theme-use-name { flex: 1; min-width: 0; border: 0; background: transparent; padding: 4px 0; text-align: left; color: var(--ink); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .theme-use .theme-use-name:hover { color: var(--accent); }
 .theme-uses > .row > .btn { flex: none; }
-.chip-on { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--accent); white-space: nowrap; }
+.chip-on { display: inline-flex; align-items: center; gap: 3px; font: var(--text-small); color: var(--accent); white-space: nowrap; }
 .chip-on svg { width: 12px; height: 12px; }
 
 /* -- a thing's own colours -- */
@@ -656,26 +745,25 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .swatch.custom.on svg { display: none; }
 .own-colours { display: flex; gap: 14px; }
 .own-colour { display: grid; justify-items: center; gap: 3px; }
-.own-colour > span { font-size: 11px; color: var(--ink-3); }
+.own-colour > span { font: var(--text-hint); color: var(--ink-3); }
 .own-colour .colour-control { position: relative; }
 .own-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
 
 /* -- palettes, chosen by sight -- */
 .palette-strip { display: inline-flex; gap: 2px; }
 .palette-strip span { width: 12px; height: 14px; border-radius: 3px; box-shadow: var(--chip-ring); }
-.palette-pick { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; }
-.palette-pick > span:not(.palette-strip) { flex: 1; font-size: 12.5px; }
-.palette-pick:hover { border-color: var(--ink-3); }
-.palette-pick svg { width: 14px; height: 14px; color: var(--ink-3); }
 /* A pop-up button's chevron points down, as the theme's does. */
 .palette-pick > svg:last-child { transform: rotate(90deg); }
-.menu.palette-menu { max-width: 340px; }
+.menu.palette-menu { max-width: none; }
 .palette-choices { display: grid; gap: 2px; }
-.palette-choice { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12.5px; }
+.palette-choice { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 4px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: var(--text-body); }
+/* The palette in use is ticked, as a pop-up menu's choice is. */
+.palette-choice::before { content: ""; flex: none; width: 14px; height: 14px; margin-right: -4px; }
+.palette-choice.on::before { background: currentColor; -webkit-mask: var(--tick) center / 14px no-repeat; mask: var(--tick) center / 14px no-repeat; }
 .palette-choice:hover { background: var(--accent-soft); }
 /* Just opened, nothing is lit under a pointer that has not moved. */
 .menu.fresh .palette-choice:hover:not(:focus) { background: transparent; }
-.palette-choice.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
 
 /* -- a folder not yet trusted to run its Python -- */
 .trust-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--warn-soft); border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }

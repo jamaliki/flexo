@@ -80,10 +80,8 @@ export function mount(studio, container) {
     const given = get(path);
     const shown = base(path);
     const parse = (text) => (text == null ? null : parseFloat(String(text)));
-    return row(label, path, h("div.unit-input", {},
-      ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."),
-        onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }),
-      h("span.unit", {}, unit)), { hint });
+    return row(label, path, ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."), unit,
+      onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }), { hint });
   };
 
   const number = (label, path, { step = 0.05, min, max, hint } = {}) => row(label, path,
@@ -162,7 +160,7 @@ export function mount(studio, container) {
         h("div.setting-group-label", {}, "Page"),
         Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key]))),
       section("Type",
-        row("Font", ["font"], ui.combo({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "", key: "font", onChange: (value) => set(["font"], value || null) })),
+        row("Font", ["font"], ui.font({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "Default", key: "font", onChange: (value) => set(["font"], value || null, { quiet: false }) })),
         length("Font Size", ["type", "size"], { step: 0.5 }),
         choice("Label Weight", ["type", "label_weight"], WEIGHTS),
         choice("Title Weight", ["type", "title_weight"], WEIGHTS),

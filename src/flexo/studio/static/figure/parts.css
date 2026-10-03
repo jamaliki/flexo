@@ -63,12 +63,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* Just opened, nothing is lit under a pointer that has not moved: a second click chooses nothing. */
 .menu.fresh .add-tile:hover:not(:focus) { background: transparent; border-color: transparent; color: var(--ink-2); }
 .menu.fresh .add-tile:hover:not(:focus) .glyph { color: var(--ink-2); }
-/* The shape's type: the palette of shapes opens from it. */
-.type-pick { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; font-size: 12.5px; }
-.type-pick:hover { border-color: var(--ink-3); }
-.type-pick > span { flex: 1; }
-.type-pick > svg:last-child { width: 14px; height: 14px; color: var(--ink-3); }
-.insp-problem { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font-size: 12px; line-height: 1.45; }
+/* The shape's type is a pop-up button (.type-pick, studio.css): the palette of shapes opens from it. */
+.insp-problem { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font: var(--text-small); }
 .insp-problem svg { width: 14px; height: 14px; flex: none; color: var(--warn); margin-top: 1px; }
 /* A field's problem (.field-problem, .field-stack) is styled in studio.css: dialogs say them too. */
 .records-warnings { display: grid; gap: 3px; }
@@ -76,19 +72,12 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .hint-line.turned { display: flex; gap: 6px; align-items: flex-start; }
 .hint-line.turned svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
 details.advanced > .inner { margin-top: 10px; }
-/* A number typed: its unit after it, steppers at its end. */
-.typed-number { position: relative; display: flex; align-items: center; min-width: 0; }
-.typed-number .input { flex: 1; min-width: 0; padding-right: 34px; }
-.typed-number .unit { position: absolute; right: 22px; top: 50%; transform: translateY(-50%); font-size: 11.5px; color: var(--ink-3); pointer-events: none; }
-.typed-number .steppers { position: absolute; right: 3px; top: 3px; bottom: 3px; display: grid; grid-template-rows: 1fr 1fr; width: 16px; opacity: 0.55; }
-.typed-number:hover .steppers, .typed-number:focus-within .steppers { opacity: 1; }
-.typed-number .stepper { display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--ink-2); cursor: pointer; }
-.typed-number .stepper:hover { background: var(--sunken); color: var(--ink); }
-.typed-number .stepper svg { width: 10px; height: 10px; }
-.typed-number .stepper:first-child svg { transform: rotate(180deg); }
-.records-table .typed-number .input { padding-right: 20px; }
-.records-table .typed-number .unit { display: none; }
-.records-table .typed-number .steppers { right: 2px; width: 13px; }
+/* A number typed is a number field as any other (.number-field, studio.css); in a table's
+   cell, a smaller one. */
+.records-table .number-field { height: 26px; }
+.records-table .number-field > .input { height: 100%; padding-left: 6px; }
+.records-table .number-field .unit { display: none; }
+.records-table .number-field .steppers { margin: 0 2px 0 3px; width: 12px; height: 20px; }
 .records-table .cell.with-pick, .records-table .cell.with-well { display: flex; align-items: center; gap: 3px; min-width: 0; }
 .records-table .cell.with-pick .input, .records-table .cell.with-well .input { flex: 1; }
 .cell-pick { flex: none; display: grid; place-items: center; width: 20px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--raised); color: var(--ink-2); cursor: pointer; }
@@ -103,32 +92,39 @@ details.advanced > .inner { margin-top: 10px; }
 .insp-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .insp-title > svg { width: 30px; height: 30px; padding: 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); flex: none; box-sizing: border-box; }
 .insp-words { min-width: 0; }
-.insp-name { font-weight: 640; font-size: 13.5px; }
-.insp-hint { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.insp-name { font: var(--text-title); }
+.insp-hint { color: var(--ink-3); font: var(--text-hint); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .insp-actions { display: flex; gap: 1px; flex: none; }
-.fig .crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 12px; color: var(--ink-3); }
+.fig .crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font: var(--text-small); color: var(--ink-3); }
 .fig .crumbs svg { width: 11px; height: 11px; }
 .fig .crumb { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 2px 4px; border-radius: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fig button.crumb:hover { background: var(--sunken); color: var(--ink); }
-.fig .crumb.here { color: var(--ink); font-weight: 560; cursor: default; }
+.fig .crumb.here { color: var(--ink); font-weight: 600; cursor: default; }
 .fields { display: grid; gap: 12px; }
-.how { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.how { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font: var(--text-small); line-height: 1.45; }
+.how b { font-weight: 600; }
 .line-list { display: grid; gap: 1px; }
 .line-row { display: flex; align-items: center; gap: 2px; }
 .line-row .link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; border: 0; background: transparent; text-align: left; padding: 4px 6px; border-radius: 5px; cursor: pointer; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .line-row .link:hover { background: var(--sunken); color: var(--ink); }
 .line-row .link .glyph { color: var(--ink-3); }
 .line-row .muted { color: var(--ink-3); }
+.line-row b, .insp-problem b { font-weight: 600; }
 .records-scroll { overflow-x: auto; margin: 0 -2px; padding: 0 2px 2px; }
 .records-table { display: grid; gap: 3px; align-items: center; min-width: 100%; }
-.records-head { font-size: 10.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.records-table .input, .records-table .select { height: 26px; font-size: 12px; padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
-.records-table .select { padding-right: 18px; background-position: right 4px center; }
+.records-head { font: var(--text-hint); color: var(--ink-3); padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.records-table .input, .records-table .select { height: 26px; font: var(--text-small); padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
+.records-table .select { gap: 2px; padding-right: 3px; }
 .records-table .cell { display: contents; }
 .field.records { gap: 6px; }
 .field.records > .btn { justify-self: start; }
-.switch-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.switch-hint { color: var(--ink-3); font-size: 11.5px; line-height: 1.3; }
+/* A switch's setting, as the Mac's settings set one out: its name at the left, the switch at
+   the right edge, its hint under its name. */
+.field.inline:has(> .switch-row) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 1px; }
+.field.inline > .switch-row { display: contents; }
+.field.inline > .switch-row > .switch { grid-column: 2; grid-row: 1; }
+.field.inline > .switch-row > .switch-hint { grid-column: 1; grid-row: 2; }
+.switch-hint { color: var(--ink-3); font: var(--text-hint); }
 
 /* Dragging a part: it is lifted and follows the pointer; a line glides to where it would
    go, the group it would join is outlined, and its lines wait, faded, to be drawn again. */
@@ -163,11 +159,11 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .mol-style { display: grid; gap: 2px; margin-top: 8px; }
 .mol-style-head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .mol-style-head .section-title { margin: 0; }
-.mol-style-head .hint { flex: 1; color: var(--ink-3); font-size: 11.5px; }
-.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
+.mol-style-head .hint { flex: 1; color: var(--ink-3); font: var(--text-hint); }
+.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: var(--text-hint); }
 .mol-section .colour-well.unset .colour-chip { opacity: 0.55; }
 .mol-section { padding: 7px 0 5px; border-top: 1px solid var(--line); }
-.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--ink-2); }
+.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); }
 .mol-section > summary::-webkit-details-marker { display: none; }
 .mol-section > summary svg { width: 14px; height: 14px; transition: transform 0.15s; }
 .mol-section[open] > summary svg { transform: rotate(90deg); }
@@ -176,5 +172,5 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .mol-grid > .field { min-width: 0; }
 .mol-grid > .field.own > label, .mol-grid > .field.own .label { color: var(--accent); }
 .mol-colours { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
-.mol-colour { display: grid; justify-items: center; gap: 2px; width: 58px; font-size: 10.5px; color: var(--ink-3); text-align: center; }
+.mol-colour { display: grid; justify-items: center; gap: 2px; width: 58px; font: var(--text-hint); color: var(--ink-3); text-align: center; }
 .mol-colour.own { color: var(--accent); }

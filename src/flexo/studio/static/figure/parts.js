@@ -1241,6 +1241,13 @@ export function figureParts(host) {
   }
 
   // -- words typed on the drawing --
+  // The colours a label's words may take, as the figure paints them: its first two tones'
+  // strong colours for the accents ([words]{accent}, {accent2}), the theme's muted and ink.
+  function labelColours() {
+    const tones = host.tones?.()?.colours || [], palette = host.palette?.() || {};
+    const colours = { accent: tones[0]?.stroke, accent2: tones[1]?.stroke, muted: palette.muted, ink: palette.ink };
+    return Object.values(colours).some(Boolean) ? colours : false;
+  }
   let inline = null;
   // Return or Esc ends the typing and keeps what was typed, as a Mac text field does;
   // so does clicking elsewhere. ⌘Z takes it back.
@@ -1251,7 +1258,8 @@ export function figureParts(host) {
     if (!item || !host.box(id)) return;
     const original = words(item.label);
     // A label's words are names and maths, not prose: no spelling, no corrections.
-    const field = ui.markup({ value: original, rows: 1, colours: false, spelling: false });
+    // Its format bar is the slide's words': the theme's colours too.
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), spelling: false });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     const label = host.element(`${id}.label`);
@@ -1729,7 +1737,8 @@ export function figureParts(host) {
     };
     const chips = nodes.length && tones?.colours?.length ? ui.field("Theme", ui.swatches({
       value: common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null,
-      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `Theme colour ${index + 1}` })),
+      // Each tone as a filled chip in its strong colour, as a palette's colours are shown.
+      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.stroke, title: `Theme colour ${index + 1}` })),
       onChange: (value) => paint("node", { "properties.tone": value }),
     })) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
@@ -1776,7 +1785,7 @@ export function figureParts(host) {
       case "markup": {
         // Return is done, as on the drawing (the words are chosen, ready to type over);
         // ⇧Return starts a new line.
-        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, colours: false, spelling: false, onInput: set });
+        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, colours: labelColours(), spelling: false, onInput: set });
         control.area.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); control.area.select(); }
         });
@@ -1838,12 +1847,16 @@ export function figureParts(host) {
           field.hint ? h("span.switch-hint", {}, field.hint) : null), { inline: true });
       }
       case "choice":
-        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)) })),
+        // Left as it is by default, the choice reads in grey, as an empty field's placeholder does.
+        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", unset: value === undefined || value === null,
+          options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)) })),
           onChange: (next) => {
             const typed = field.options.find((option) => String(option) === next);
             set(typed === field.default || typed === "" ? null : typed);
           } }), options);
       case "combo":
+        // A font is chosen from the fonts, each shown in its face.
+        if (/(^|\.)font$/.test(field.key)) return ui.field(field.label, ui.font({ value: value ?? "", options: field.options.map(String), placeholder: field.default || "Default", onChange: (next) => set(next || null) }), options);
         return ui.field(field.label, ui.combo({ value: typing(key) ?? value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
       case "palette": {
         const current = value ?? field.default;
@@ -1900,8 +1913,8 @@ export function figureParts(host) {
   }
   function typedField({ value, key, placeholder = "", number = null, length = false, mono = false, say = true, onCommit }) {
     const shown = typing(key) ?? (drafts.has(key) ? drafts.get(key) : value === undefined || value === null ? "" : String(value));
-    const input = ui.input({ value: shown, key, placeholder, mono: mono || length });
-    if (number) input.inputMode = "decimal";
+    const input = ui.input({ value: shown, key, placeholder, mono });
+    if (number || length) input.inputMode = "decimal";
     const read = (text) => {
       const clean = String(text ?? "").trim();
       if (length) {
@@ -1957,6 +1970,19 @@ export function figureParts(host) {
       pending.set(key, setTimeout(() => send(parsed, text), wait));
     };
     const stepBy = (sign, big) => {
+      // A length steps in its own unit (points, if it has none), one at a time; left to fit
+      // its words ("Auto"), it has none to step from.
+      if (length) {
+        const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(input.value.trim());
+        if (!found) return;
+        const next = Math.max(0, Math.round((Number(found[1]) + sign * (big ? 10 : 1)) * 1e6) / 1e6);
+        input.value = `${next}${(found[2] || "pt").toLowerCase()}`;
+        drafts.set(key, input.value);
+        touched.add(key);
+        said(false);
+        later(input.value, input.value, 300);
+        return;
+      }
       const now = read(input.value);
       const from = typeof now === "number" && !Number.isNaN(now) ? now : Number(input.placeholder) || number.min || 0;
       const by = (Number(number.step) || 1) * (big ? 10 : 1);
@@ -1981,7 +2007,7 @@ export function figureParts(host) {
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") { event.preventDefault(); finish(); input.select(); }
       else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(); input.blur(); }
-      else if (number && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
+      else if ((number || length) && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
     });
     // Only leaving the field ends the typing: a field drawn again under the keys (which a
     // web view says is a blur) is still being typed in.
@@ -1989,10 +2015,10 @@ export function figureParts(host) {
       if (typing(key) === null && (touched.has(key) || pending.has(key) || drafts.has(key))) finish();
     }, 0));
     if (!number && !length) return input;
-    const step = (sign, title) => h("button.stepper", { type: "button", tabIndex: -1, title, onmousedown: (event) => event.preventDefault(),
-      onclick: (event) => stepBy(sign, event.shiftKey) }, icon("chevron-down"));
-    const control = number ? h("div.typed-number", {}, input, number.unit ? h("span.unit", {}, number.unit) : null,
-      h("span.steppers", {}, step(1, "Increase (↑)"), step(-1, "Decrease (↓)"))) : input;
+    // Drawn as every number field in the studio is (ui.numberBox): digits to the right, the
+    // unit after them, steppers at the end.
+    const control = ui.numberBox(input, { unit: number?.unit, step: stepBy });
+    control.classList.add("typed-number");
     const node = note ? h("div.field-stack", {}, control, note) : control;
     node.input = input;
     return node;
@@ -2103,13 +2129,13 @@ export function figureParts(host) {
       case "choice": {
         const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option) }))],
           onChange: (next) => set(next || null) });
-        fills.push((drawn) => { const inherited = drawn[field.key]; select.options[0].textContent = inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`; });
+        fills.push((drawn) => { const inherited = drawn[field.key]; select.relabel("", inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`); });
         return titled(ui.field(field.label, select, options));
       }
       case "bool": {
         const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "Default" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
           onChange: (next) => set(next === "" ? null : next === "on") });
-        fills.push((drawn) => { select.options[0].textContent = `Default (${drawn[field.key] ? "On" : "Off"})`; });
+        fills.push((drawn) => { select.relabel("", `Default (${drawn[field.key] ? "On" : "Off"})`); });
         return titled(ui.field(field.label, select, options));
       }
       case "integer":
