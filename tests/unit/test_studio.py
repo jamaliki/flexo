@@ -1370,3 +1370,25 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["below", "root", "above", None]
+
+
+def test_an_agent_reads_a_file_that_does_not_read_as_written_and_puts_it_right(
+    tmp_path: Path,
+) -> None:
+    from flexo.studio.agent import Tools
+
+    talk = tmp_path / "talk.yaml"
+    talk.write_text(TYPO, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
+    try:
+        tools = Tools(workspace, {"id": "agent", "name": "Claude"})
+        said, failed = tools.call("read_document", {"file": "talk.yaml"})
+        assert not failed and TYPO in said[0]["text"] and "Can't read talk.yaml" in said[0]["text"]
+        said, failed = tools.call("write_document", {"file": "talk.yaml", "text": DECK})
+        assert not failed, said
+        doc = workspace.open("talk.yaml")
+        assert not doc.unread and doc.document == yaml.safe_load(DECK)
+        assert talk.read_text(encoding="utf-8") == DECK
+    finally:
+        workspace.close()
