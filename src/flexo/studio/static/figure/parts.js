@@ -1404,6 +1404,14 @@ export function figureParts(host) {
       remove();
       return true;
     }
+    // Tab goes from one shape to the next (⇧Tab back), as Keynote's goes from object to object.
+    if (event.key === "Tab" && state.selected.length && state.model?.nodes?.length) {
+      event.preventDefault();
+      const ids = state.model.nodes.map((node) => node.id);
+      const at = ids.indexOf(state.selected[state.selected.length - 1]);
+      select([ids[at < 0 ? 0 : (at + (event.shiftKey ? -1 : 1) + ids.length) % ids.length]]);
+      return true;
+    }
     if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       const id = chosenOne();
       if (!id) return false;
