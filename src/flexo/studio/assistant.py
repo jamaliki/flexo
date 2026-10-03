@@ -162,7 +162,11 @@ class Assistant:
                 message = _explain(error)
                 turn["parts"].append({"type": "error", "text": message})
                 self._send({"event": "error", "turn": turn["id"], "text": message})
-            self.workspace.set_presence(WHO, None, None, "")
+            # Done: shown as lately at work where it worked, and not at all if it did nothing.
+            if any(part.get("type") == "tool" for part in turn["parts"]):
+                self.workspace.set_presence(WHO, None, None, "")
+            else:
+                self.workspace.absent(WHO)
 
     def _converse(self, turn: dict[str, Any]) -> None:
         client = self._client()

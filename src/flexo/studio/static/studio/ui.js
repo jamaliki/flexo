@@ -255,7 +255,9 @@ export const ui = {
       if (parsed === null) { input.classList.remove("invalid"); apply(null); return; }
       if (Number.isNaN(parsed)) { input.value = shown(applied); input.classList.remove("invalid"); say("Type a number"); return; }
       const kept = clamp(parsed);
-      if (kept !== parsed) { input.value = String(kept); say(kept === min ? `The smallest is ${named(min)}` : `The largest is ${named(max)}`); }
+      // Shown as the number alone ("24pt" typed is 24, its unit said after it).
+      input.value = shown(kept);
+      if (kept !== parsed) say(kept === min ? `The smallest is ${named(min)}` : `The largest is ${named(max)}`);
       apply(kept);
     };
     input.addEventListener("blur", () => setTimeout(() => {
@@ -799,6 +801,10 @@ function place(node, anchor, align) {
     left = Math.min(Math.max(8, left), innerWidth - width - 8);
     Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   }
+  // A menu that scrolls says there is more below, as a Mac's shows its arrow there.
+  const more = () => node.classList.toggle("more-below", node.scrollTop + node.clientHeight < node.scrollHeight - 6);
+  more();
+  node.addEventListener("scroll", more, { passive: true });
   openMenu = node;
   // The button that opened it shows it is open, as a Mac's pop-up button does.
   openAnchor = point ? null : anchor;

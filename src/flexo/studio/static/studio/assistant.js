@@ -4,6 +4,9 @@
 
 import { h, clear, icon, ui } from "./ui.js";
 
+// A document by its name, as its tab says it: "talk", not "talk.yaml".
+const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+
 const SUGGESTIONS = {
   deck: ["Tighten the wording on this slide", "Add a slide that explains the method with a figure", "Make the whole deck shorter and punchier"],
   figure: ["Group the encoder's parts", "Add a decoder after the encoder", "Label the arrows"],
@@ -50,12 +53,13 @@ export class AssistantPanel {
     const session = this.workspace.active;
     const where = session?.where?.label;
     clear(this.contextChip, session && this.includeContext
-      ? h("span.context-pill", {}, icon("target"), `${session.file.split("/").pop()}${where ? ` · ${where}` : ""}`,
+      ? h("span.context-pill", {}, icon("target"), `${docName(session.file)}${where ? ` · ${where}` : ""}`,
         h("button", { type: "button", title: "Remove context", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
       : session ? h("button.context-add", { type: "button", onclick: () => { this.includeContext = true; this.renderContext(); } }, icon("plus"), "Add Context") : null);
   }
 
   async send(text = this.input.value.trim()) {
+    if (!this.state.available) return;
     if (this.state.running && !text) { this.stop(); return; }
     if (!text) return;
     this.input.value = "";
@@ -108,6 +112,10 @@ export class AssistantPanel {
   render() {
     const state = this.state;
     this.sendButton.title = state.running ? "Stop" : "Send (↩)";
+    // Where Claude can't be asked, nothing offers to send: the note above says why.
+    this.input.disabled = !state.available && !state.running;
+    this.sendButton.disabled = !state.available && !state.running;
+    this.input.placeholder = state.available || state.running ? "Ask Claude to make or change something…" : "Claude isn't available here";
     clear(this.sendButton, icon(state.running ? "stop" : "send"));
     this.sendButton.classList.toggle("running", Boolean(state.running));
     this.sendButton.onclick = () => (state.running && !this.input.value.trim() ? this.stop() : this.send());
@@ -132,7 +140,7 @@ export class AssistantPanel {
 
   itemView(item) {
     if (item.role === "user") {
-      const where = item.context?.file ? [item.context.file.split("/").pop(), item.context.where?.label].filter(Boolean).join(" · ") : "";
+      const where = item.context?.file ? [docName(item.context.file), item.context.where?.label].filter(Boolean).join(" · ") : "";
       return h("div.msg.user", {}, h("div.bubble", {}, item.text), where ? h("div.msg-context", {}, icon("target"), where) : null);
     }
     const node = h("div.msg.claude");

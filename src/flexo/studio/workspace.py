@@ -708,6 +708,16 @@ class Workspace:
             self.presence[key] = entry
         self.broadcast({"type": "presence", "presence": self.present()})
 
+    def absent(self, who: dict[str, Any]) -> None:
+        """``who`` is no longer here: an agent whose turn did nothing in the documents is
+        not shown at work in them afterwards."""
+
+        key = who.get("id") or who.get("name", "someone")
+        with self.lock:
+            gone = self.presence.pop(key, None)
+        if gone is not None:
+            self.broadcast({"type": "presence", "presence": self.present()})
+
     def agent_on(self, file: str) -> dict[str, Any] | None:
         """The agent most recently at work on ``file``, if one is (its edits on disk are its)."""
 

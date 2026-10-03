@@ -29,7 +29,7 @@ export function themeCard(card, { on = false, onclick, compact = false, chevron 
       h("span.theme-tones", {}, tones)),
     h("span.theme-words", {},
       h("span.theme-name", {}, themeName(card)),
-      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" ? h("span.theme-where", {}, card.value) : null),
+      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" ? h("span.theme-where", {}, card.value.replace(/\.theme\.ya?ml$/i, "")) : null),
     chevron ? h("span.theme-chevron", {}, icon("chevron-down")) : null);
 }
 

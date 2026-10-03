@@ -763,7 +763,7 @@ function newMenu(anchor, workspace) {
       { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
       { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
-    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: item.file, hint: item.title, run: () => workspace.open(item.file) }))] : []),
+    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), hint: [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · "), run: () => workspace.open(item.file) }))] : []),
   ]);
 }
 
@@ -899,7 +899,7 @@ export function palette(workspace) {
   const commands = [
     ...(session ? session.commands() : []),
     ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${file}`, run: () => workspace.activate(file) })),
-    ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${item.file}`, hint: item.title, run: () => workspace.open(item.file) })),
+    ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),
     ...[
       { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
       { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },

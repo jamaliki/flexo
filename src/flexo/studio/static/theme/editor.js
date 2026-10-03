@@ -218,14 +218,16 @@ export function mount(studio, container) {
   const renderShowOn = () => {
     const decks = studio.workspace.documents.filter((item) => item.kind === "deck");
     const options = [...catalog.specimens.map((item) => ({ value: item.name, label: item.title })),
-      ...(catalog.specimens.some((item) => item.name === "slides") ? decks.map((item) => ({ value: `deck:${item.file}`, label: item.file.split("/").pop() })) : [])];
+      ...(catalog.specimens.some((item) => item.name === "slides") ? decks.map((item) => ({ value: `deck:${item.file}`, label: item.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "") })) : [])];
     const value = specimen.deck ? `deck:${specimen.deck}` : specimen.name;
-    clear(showOn, h("span.show-on-label", {}, "Preview"), ui.segmented({ value, options, onChange: (next) => {
+    const onChange = (next) => {
       specimen = next.startsWith("deck:") ? { name: "slides", deck: next.slice(5) } : { name: next };
       pages = [];
       renderStage();
       studio.requestDraw(0);
-    } }));
+    };
+    // A few, side by side; more (a folder of decks), a pop-up, which keeps to its width.
+    clear(showOn, h("span.show-on-label", {}, "Preview"), options.length > 3 ? ui.select({ value, options, onChange }) : ui.segmented({ value, options, onChange }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
   studio.exports = [{ format: "yaml", label: "Full Theme…" }];

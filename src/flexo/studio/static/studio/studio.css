@@ -28,6 +28,8 @@
   --selection: rgba(123, 140, 255, 0.45);
   /* A colour chip's hairline edge, so a chip the colour of the panel still shows. */
   --chip-ring: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+  /* A small swatch on a bar: its edge plain whatever its colour. */
+  --chip-ring-strong: inset 0 0 0 1px rgba(0, 0, 0, 0.24);
   /* A segmented control: the chosen segment a raised pill on a tinted track. */
   --seg-track: rgba(35, 30, 25, 0.075);
   --seg-on: #ffffff;
@@ -84,6 +86,7 @@
     --focus-halo: rgba(123, 140, 255, 0.32);
     --selection: rgba(123, 140, 255, 0.45);
     --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+    --chip-ring-strong: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
     --seg-track: #141518;
     --seg-on: #3a3c42;
     --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
@@ -124,6 +127,7 @@
   --focus-halo: rgba(123, 140, 255, 0.32);
   --selection: rgba(123, 140, 255, 0.45);
   --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  --chip-ring-strong: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
   --seg-track: #141518;
   --seg-on: #3a3c42;
   --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
@@ -298,7 +302,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    stays in view. */
 @media (max-width: 1239px) {
   .workbench { position: relative; }
-  .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; width: 340px; box-shadow: var(--shadow-2); }
+  .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; width: 300px; box-shadow: var(--shadow-2); }
 }
 .side-head { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .side-tabs { display: flex; gap: 2px; }
@@ -369,6 +373,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chat-send { width: 30px; height: 30px; border-radius: 8px; border: 0; background: var(--claude); color: #fff; cursor: pointer; display: grid; place-items: center; flex: none; }
 .chat-send svg { width: 15px; height: 15px; }
 .chat-send.running { background: var(--ink); }
+.chat-send:disabled { background: var(--line-strong); cursor: default; }
+.chat-input:disabled { cursor: default; }
+.chat-input:disabled::placeholder { color: var(--ink-3); }
 
 /* the command palette: at a fixed height, as Spotlight is, so its field never moves as the
    results under it grow and shrink; the page behind is only dimmed a little. */
@@ -579,7 +586,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .panel .markup > .markup-tools { padding: 1px; }
 .panel .markup > .markup-tools button { height: 22px; min-width: 24px; padding: 0 5px; }
 /* The theme's colours, as round chips. */
-.rt-swatch { display: block; width: 13px; height: 13px; border-radius: 50%; box-shadow: var(--chip-ring); }
+.rt-swatch { display: block; width: 13px; height: 13px; border-radius: 50%; box-shadow: var(--chip-ring-strong); }
 
 /* Colours to choose from: filled chips with a hairline edge, the chosen one ringed. */
 .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -602,6 +609,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius);
   box-shadow: var(--shadow-2); padding: 5px; animation: pop 0.12s ease-out;
 }
+/* More below: a fade and an arrow at its foot, over the last row shown. */
+.menu.more-below::after { content: ""; position: sticky; bottom: -5px; display: block; height: 26px; margin: -26px -5px -5px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center bottom 3px / 12px no-repeat, linear-gradient(to bottom, transparent, var(--raised) 65%); }
 @keyframes pop { from { opacity: 0; transform: translateY(-3px) scale(0.98); } }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 8px; border-radius: 5px; cursor: pointer; color: var(--ink); }
 .menu-item:hover, .menu-item.active, .menu-item:focus { background: var(--accent-soft); outline: none; }
@@ -743,7 +753,7 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .theme-tones span { width: 11px; height: 18px; border-radius: 3px; box-shadow: var(--chip-ring); }
 .theme-words { display: grid; min-width: 0; padding: 0 2px; }
 .theme-name { font: var(--text-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.theme-where { font: 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.theme-where { font: var(--text-hint); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-where.bad { color: var(--danger, #c0392b); font-family: inherit; }
 /* The theme in use, as a pop-up button: its sample, its name, and a chevron inside it. */
 .theme-card.compact { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: none; align-items: center; column-gap: 8px; flex: 1; height: 30px; padding: 2px 8px 2px 2px; border-radius: var(--radius-s); }
