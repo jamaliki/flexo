@@ -461,17 +461,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .select > span, .palette-pick > span:not(.palette-strip), .type-pick > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select > svg, .palette-pick > svg:last-child, .type-pick > svg:last-child { width: 14px; height: 14px; flex: none; color: var(--ink-3); }
 .select.default > span { color: var(--ink-3); }
+/* A pop-up as narrow as its icon: what it is set to is in its tooltip and its menu. */
+.select.icon-select { width: auto; gap: 2px; padding: 0 4px 0 6px; }
+.select.icon-select > span { flex: none; display: grid; place-items: center; overflow: visible; }
+.select.icon-select > span svg { width: 15px; height: 15px; }
 .palette-pick:disabled { cursor: default; opacity: 0.6; }
 
 /* A number: its digits to the right with its unit after them, quietly, and steppers at its
    end, as a Mac's number field (ui.number, and the figure's own in parts.js). */
-.number-field { display: flex; align-items: center; height: 30px; min-width: 0; width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); transition: border-color 0.12s, box-shadow 0.12s; }
+.number-field { position: relative; display: flex; align-items: center; height: 30px; min-width: 0; width: 100%; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); transition: border-color 0.12s, box-shadow 0.12s; }
 .number-field:hover { border-color: var(--ink-3); }
 .number-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
 .number-field:has(.invalid) { border-color: var(--error); }
 .number-field > .input { flex: 1; height: 100%; min-width: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; padding: 0 0 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
 .number-field > .input:focus { box-shadow: none; }
 .number-field > .unit { flex: none; padding-left: 3px; font: var(--text-hint); color: var(--ink-3); pointer-events: none; }
+/* A sign that is part of the number ("30°", "0.4×") is set against its digits, in their face:
+   read as the number's, never as a button to clear the field. */
+.number-field > .unit.tight { padding-left: 0; font: var(--text-body); color: var(--ink); }
+.number-field > .input:placeholder-shown + .unit.tight { color: var(--ink-3); }
 /* The unit sits on the digits' line, not centred beside them. */
 .number-field > .input, .number-field > .unit { align-self: baseline; }
 /* A unit after a default that is a word ("Auto") would read as part of it. */
@@ -482,6 +490,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .number-field .stepper:hover { background: var(--sunken); color: var(--ink); }
 .number-field .stepper svg { width: 10px; height: 10px; }
 .number-field .stepper:first-child svg { transform: rotate(180deg); }
+/* What was done to a number typed out of range, or put back, said under it a moment, over
+   what is below rather than moving it. */
+.number-note { position: absolute; z-index: 6; top: calc(100% + 4px); right: 0; max-width: 260px; width: max-content; padding: 4px 8px; border-radius: var(--radius-s);
+  background: var(--raised); color: var(--error); font: var(--text-small); box-shadow: var(--shadow-2), 0 0 0 1px var(--line); pointer-events: none; animation: pop 0.12s ease-out; }
 
 /* A table's cell (ui.cell): its words, under a field laid over them, give it its size --
    as typed while it is typed in, else as the slide sets them. */
@@ -574,6 +586,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .swatch { width: 22px; height: 22px; border-radius: 50%; border: 0; box-shadow: var(--chip-ring); cursor: pointer; padding: 0; position: relative; }
 .swatch.on { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
 .swatch.none { background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
+/* The chosen one is ticked as well as ringed; the one with the keys has the focus's soft glow,
+   not a ring like the chosen one's. */
+.swatch.on::after { content: ""; position: absolute; inset: 0; background: var(--tick-ink, #fff); -webkit-mask: var(--tick) center / 13px no-repeat; mask: var(--tick) center / 13px no-repeat; pointer-events: none; }
+.swatch.light, .swatch.none { --tick-ink: rgba(0, 0, 0, 0.72); }
+.swatch:focus-visible, .swatch.custom:has(input:focus-visible) { outline: none; box-shadow: var(--chip-ring), 0 0 0 4px var(--focus-ring); }
+.swatch.on:focus-visible, .swatch.custom.on:has(input:focus-visible) { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent), 0 0 0 8px var(--focus-halo); }
+/* A segment with the keys is ringed apart from the chosen one's raised pill. */
+.segmented button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
 
 /* -- popovers, dialogs, toasts -- */
 
@@ -592,6 +612,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .menu-item .menu-text { display: grid; }
 .menu-item .menu-hint { color: var(--ink-3); font-size: 11.5px; }
 .menu-item .kbd { margin-left: auto; }
+/* A menu's shortcut as a Mac menu shows it: unboxed, in the menu's grey, at its right edge
+   (keycaps are for the Keyboard Shortcuts sheet and the palette). */
+.menu .menu-item .kbd { border: 0; padding: 0 0 0 16px; min-width: 0; text-align: right; color: var(--ink-3); }
+/* An item that can't be chosen now reads in grey, its icon and shortcut too, as a Mac's does. */
+.menu-item:disabled { color: var(--ink-3); cursor: default; }
+.menu-item:disabled:hover { background: transparent; }
+.menu-item:disabled svg, .menu-item:disabled .kbd { opacity: 0.55; }
 /* A pop-up's choices: the one in use ticked, the others in line with it. */
 .menu-tick { flex: none; display: grid; place-items: center; width: 14px; margin-right: -4px; }
 .menu-item .menu-tick svg { width: 14px; height: 14px; color: var(--ink); }
@@ -623,7 +650,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* A dialog stands clear of the foot of the window, where toasts show over the dimmed page:
    what it says (Copied, a download failed) is read without covering its buttons. */
-.scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 18, 15, 0.35); display: grid; place-items: center; padding: 24px 16px 72px; animation: fade 0.15s; backdrop-filter: blur(2px); }
+/* The window behind is dimmed, not blurred, as behind a Mac's sheet. */
+.scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 18, 15, 0.35); display: grid; place-items: center; padding: 24px 16px 72px; animation: fade 0.15s; }
 @keyframes fade { from { opacity: 0; } }
 .dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 96px); display: flex; flex-direction: column; background: var(--panel); border-radius: 12px; box-shadow: var(--shadow-2); border: 1px solid var(--line); animation: pop 0.15s ease-out; }
 .dialog:focus, .dialog-body:focus { outline: none; }
@@ -632,6 +660,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog-title { font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
 .dialog-body { padding: 6px 16px 16px; overflow: auto; display: grid; gap: 14px; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+/* In a sheet a setting is a checkbox before its words, as a Mac's sheet has it (a switch is a
+   settings window's): its box ticked when on. */
+.dialog .switch { flex-direction: row; justify-content: flex-start; gap: 8px; font: var(--text-body); color: var(--ink); }
+.dialog .switch .track { width: 14px; height: 14px; border-radius: 4px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-strong), var(--shadow-1); }
+.dialog .switch .track::after { display: none; }
+.dialog .switch input:checked + .track { background: var(--accent); box-shadow: none; }
+.dialog .switch input:checked + .track::before { content: ""; position: absolute; inset: 0; background: var(--accent-ink); -webkit-mask: var(--tick) center / 11px no-repeat; mask: var(--tick) center / 11px no-repeat; }
 
 .toasts { position: fixed; z-index: 70; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; background: var(--toast); color: var(--toast-ink); border: 1px solid var(--toast-line); padding: 8px 12px; border-radius: var(--radius); box-shadow: var(--shadow-2); animation: rise 0.18s ease-out; max-width: min(640px, 90vw); }
@@ -764,6 +799,12 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .palette-choice::before { content: ""; flex: none; width: 14px; height: 14px; margin-right: -4px; }
 .palette-choice.on::before { background: currentColor; -webkit-mask: var(--tick) center / 14px no-repeat; mask: var(--tick) center / 14px no-repeat; }
 .palette-choice:hover { background: var(--accent-soft); }
+/* The palettes' chips in a column as wide as the longest strip, so the names after them line
+   up (a strip of five, of six and of eight alike). */
+@supports (grid-template-columns: subgrid) {
+  .palette-choices { grid-template-columns: auto auto minmax(0, 1fr); column-gap: 10px; }
+  .palette-choice { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+}
 /* Just opened, nothing is lit under a pointer that has not moved. */
 .menu.fresh .palette-choice:hover:not(:focus) { background: transparent; }
 

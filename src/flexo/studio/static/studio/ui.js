@@ -87,6 +87,9 @@ const ICONS = {
   moon: "M13 9.5A5.5 5.5 0 016.5 3a5.5 5.5 0 106.5 6.5z",
   eye: "M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM8 6a2 2 0 100 4 2 2 0 000-4z",
   text: "M3 4h10M3 8h10M3 12h6",
+  "align-left": "M3 4h10M3 8h6.5M3 12h8.5",
+  "align-centre": "M3 4h10M4.75 8h6.5M3.75 12h8.5",
+  "align-right": "M3 4h10M6.5 8h6.5M4.5 12h8.5",
   heading: "M4 3v10M12 3v10M4 8h8",
   list: "M6 4h7M6 8h7M6 12h7M3 4h.01M3 8h.01M3 12h.01",
   numbered: "M7 4h6M7 8h6M7 12h6M3 3v3M2.5 9.5h1.5l-1.5 2.5H4",
@@ -205,43 +208,112 @@ export const ui = {
   },
 
   // A number, as every number field in the studio is drawn (numberBox): ↑ and ↓, or its
-  // steppers, go a step at a time, ⇧ ten. Empty is null: the default, said by `placeholder`.
-  number({ value, placeholder = "", onChange, min, max, step = "any", key, unit } = {}) {
+  // steppers, go a step at a time, ⇧ ten. Left to its default, it steps from the value in
+  // use -- `current()`, what is drawn, else the default its placeholder says, else `start`
+  // -- never from the bottom of its range. What is typed is taken as it reads as a number
+  // in range; when the field is left (or Return), a number out of range is set to the end it
+  // passed and words that are not a number are put back, each said under the field a
+  // moment. Esc puts back what the field held when it was entered, as a Mac field's Cancel
+  // does. Empty is null: the default, said by `placeholder`.
+  number({ value, placeholder = "", onChange, min, max, step = "any", key, unit, current, start } = {}) {
     const input = plainTyping(h("input.input", { type: "text", placeholder }));
     input.inputMode = "decimal";
     input.spellcheck = false;
     if (key) input.dataset.key = key;
-    input.value = value ?? "";
-    const read = () => { const text = input.value.trim().replace(",", "."); return text === "" ? null : Number(text); };
+    const shown = (number) => (number === null || number === undefined ? "" : String(number));
+    // Drawn again while it is typed in (keepFocus gives it the keys back), it keeps what is typed.
+    const typed = key && document.activeElement?.dataset?.key === key && typeof document.activeElement.value === "string" ? document.activeElement.value : null;
+    input.value = typed ?? shown(value);
+    // The field's own unit typed after the digits ("12pt", "30 °") is the number.
+    const read = () => {
+      let text = input.value.trim().replace(",", ".");
+      if (unit && text.toLowerCase().endsWith(unit.toLowerCase())) text = text.slice(0, -unit.length).trim();
+      return text === "" ? null : Number(text);
+    };
+    const clamp = (number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, number));
+    const named = (number) => (unit ? `${number}${TIGHT_UNITS.has(unit) ? "" : " "}${unit}` : String(number));
+    let applied = value ?? null;
+    const apply = (number) => { if (number === applied) return; applied = number; onChange?.(number); };
+    const note = h("span.number-note", { role: "status", hidden: true });
+    const hush = () => { note.hidden = true; if (key) noted.delete(key); };
+    const say = (text, last = 4000) => {
+      note.textContent = text;
+      note.hidden = false;
+      // Kept by its field's key: a form drawn again by the change still says it.
+      if (key) noted.set(key, { text, until: Date.now() + last });
+      clearTimeout(note.timer);
+      note.timer = setTimeout(hush, last);
+    };
+    const said = key && noted.get(key);
+    if (said && said.until > Date.now()) say(said.text, said.until - Date.now());
+    // What it held when it was entered, kept by its key across the form being drawn again.
+    let origin = null;
+    const entered = () => (key ? entering.get(key) : origin);
+    input.addEventListener("focus", () => { if (!key) origin ??= input.value; else if (!entering.has(key)) entering.set(key, input.value); });
+    const commit = () => {
+      const parsed = read();
+      if (parsed === null) { input.classList.remove("invalid"); apply(null); return; }
+      if (Number.isNaN(parsed)) { input.value = shown(applied); input.classList.remove("invalid"); say("Type a number"); return; }
+      const kept = clamp(parsed);
+      if (kept !== parsed) { input.value = String(kept); say(kept === min ? `The smallest is ${named(min)}` : `The largest is ${named(max)}`); }
+      apply(kept);
+    };
+    input.addEventListener("blur", () => setTimeout(() => {
+      // Drawn again under the keys, it is still being typed in.
+      if (key && document.activeElement?.dataset?.key === key) return;
+      if (input.isConnected) commit();
+      if (key) entering.delete(key); else origin = null;
+    }, 0));
     input.addEventListener("input", () => {
+      hush();
       const parsed = read();
       input.classList.toggle("invalid", parsed !== null && Number.isNaN(parsed));
-      if (parsed === null || !Number.isNaN(parsed)) onChange?.(parsed);
+      // On its way to "12" a "1" is out of range: taken once it is in range, or when the field is left.
+      if (parsed === null || (!Number.isNaN(parsed) && clamp(parsed) === parsed)) apply(parsed);
     });
     const stepBy = (sign, big) => {
+      hush();
       const now = read();
-      const from = now !== null && !Number.isNaN(now) ? now : Number.isFinite(parseFloat(input.placeholder)) ? parseFloat(input.placeholder) : (min ?? 0);
-      let next = Math.round((from + sign * (Number(step) || 1) * (big ? 10 : 1)) * 1e6) / 1e6;
-      if (min !== undefined) next = Math.max(min, next);
-      if (max !== undefined) next = Math.min(max, next);
+      const size = Number(step) || 1;
+      let from = now !== null && !Number.isNaN(now) ? now : null;
+      if (from === null) {
+        const using = current?.();
+        const said = parseFloat(input.placeholder);
+        from = Number.isFinite(using) ? Math.round(using / size) * size : Number.isFinite(said) ? said : start ?? Math.max(min ?? 0, 0);
+      }
+      const next = clamp(Math.round((from + sign * size * (big ? 10 : 1)) * 1e6) / 1e6);
       input.value = String(next);
-      input.dispatchEvent(new Event("input"));
+      input.classList.remove("invalid");
+      apply(next);
     };
     input.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      event.preventDefault();
-      stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey);
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
+      else if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); commit(); input.select(); }
+      else if (event.key === "Escape") {
+        const was = entered();
+        if (was === null || was === undefined || was === input.value) return;
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = was;
+        input.classList.remove("invalid");
+        hush();
+        const parsed = read();
+        apply(parsed === null || Number.isNaN(parsed) ? null : parsed);
+        input.select();
+      }
     });
-    return ui.numberBox(input, { unit, step: stepBy });
+    return ui.numberBox(input, { unit, step: stepBy, note });
   },
 
-  // A number field's box, as a Mac's: the digits to the right, the unit after them, and
-  // steppers at its end (`step(sign, big)`). The figure's typed numbers are drawn in it too.
-  numberBox(input, { unit, step } = {}) {
+  // A number field's box, as a Mac's: the digits to the right, the unit after them ("12 pt",
+  // "30°"), and steppers at its end (`step(sign, big)`). The figure's typed numbers are drawn
+  // in it too. `note`: what it says under itself (ui.number).
+  numberBox(input, { unit, step, note } = {}) {
     const stepper = (sign, title) => h("button.stepper", { type: "button", tabIndex: -1, title,
       onmousedown: (event) => event.preventDefault(), onclick: (event) => step(sign, event.shiftKey) }, icon("chevron-down"));
-    const node = h("div.number-field", {}, input, unit ? h("span.unit", {}, unit) : null,
-      step ? h("span.steppers", {}, stepper(1, "Increase (↑)"), stepper(-1, "Decrease (↓)")) : null);
+    // A sign that is part of the number ("30°", "0.4×") sits against its digits, in their ink.
+    const node = h("div.number-field", {}, input, unit ? h(`span.unit${TIGHT_UNITS.has(unit) ? ".tight" : ""}`, {}, unit) : null,
+      step ? h("span.steppers", {}, stepper(1, "Increase (↑)"), stepper(-1, "Decrease (↓)")) : null, note || null);
     // A click in the box beside the digits types in it.
     node.addEventListener("mousedown", (event) => { if (event.target === node || event.target.classList?.contains("unit")) { event.preventDefault(); input.focus(); } });
     node.input = input;
@@ -296,7 +368,7 @@ export const ui = {
       emphasis ? tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**") : null,
       emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
       tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
-      tool(h("span.tool-maths", {}, "∑"), "Equation (⌘M)", "$", "$"),
+      tool(h("span.tool-maths", {}, "∑"), "Equation (⌥⌘E)", "$", "$"),
       tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
       swatch("accent", "Accent"), swatch("accent2", "Accent 2"), swatch("muted", "Muted"), swatch("ink", "Default colour"));
     const node = h("div.markup", {}, tools, area);
@@ -308,21 +380,31 @@ export const ui = {
   // one in use ticked. It answers to `value` as a <select> does, and `relabel(value, label)`
   // renames a choice. A choice left as its default -- "" ("Default (On)", "None"), or
   // `unset`, the value shown being the default's -- reads in grey, as a placeholder does.
-  select({ value, options, onChange, placeholder, unset = false } = {}) {
+  // `icons`: a narrow pop-up showing its choice's icon (each option's `icon`), the choice's
+  // name in its tooltip after `title`; `actions`: commands under the choices, after a line
+  // ({ label, icon, run }), as a column's pop-up in Numbers has. `key` keeps the keys on it
+  // as the form is drawn again by the change (keepFocus).
+  select({ value, options, onChange, placeholder, unset = false, icons = false, title = "", actions = [], key } = {}) {
     const items = [...(placeholder !== undefined ? [{ value: "", label: placeholder }] : []),
       ...options.map((option) => (typeof option === "object" ? { ...option, value: String(option.value ?? "") } : { value: String(option), label: String(option) }))];
     const label = h("span");
-    const node = h("button.select", { type: "button", "aria-haspopup": "menu" }, label, icon("chevron-down"));
+    const node = h(`button.select${icons ? ".icon-select" : ""}`, { type: "button", "aria-haspopup": "menu" }, label, icon("chevron-down"));
+    if (key) node.dataset.key = key;
     let current = String(value ?? "");
     let fallback = unset;
     const show = () => {
       const item = items.find((each) => each.value === current);
-      label.textContent = item ? item.label : current;
+      const words = item ? item.label : current;
+      if (icons) {
+        clear(label, icon(item?.icon || "more"));
+        node.title = [title, words].filter(Boolean).join(": ");
+        node.setAttribute("aria-label", node.title);
+      } else label.textContent = words;
       node.classList.toggle("default", current === "" || fallback);
     };
     Object.defineProperty(node, "value", { configurable: true, get: () => current, set: (next) => { current = String(next ?? ""); fallback = false; show(); } });
     node.relabel = (choice, text) => { const item = items.find((each) => each.value === String(choice)); if (item) { item.label = text; show(); } };
-    const open = (byKey) => choices(node, items, current, (next) => {
+    const open = (byKey) => choices(node, actions.length ? [...items, "-", ...actions.map((action) => ({ ...action, action: true }))] : items, current, (next) => {
       if (next === current && !fallback) return;
       current = next;
       fallback = false;
@@ -429,46 +511,71 @@ export const ui = {
     return node;
   },
 
-  toggle({ value, label, onChange } = {}) {
+  // `key`: the form drawn again by the change keeps the keys on it (keepFocus); by default
+  // its words name it.
+  toggle({ value, label, onChange, key } = {}) {
     const box = h("input", { type: "checkbox" });
     box.checked = Boolean(value);
+    if (key || label) box.dataset.key = key || `switch:${label}`;
     box.addEventListener("change", () => onChange?.(box.checked));
     return h("label.switch", {}, box, h("span.track"), label ? h("span", {}, label) : null);
   },
 
-  segmented({ value, options, onChange } = {}) {
+  // Segments, one chosen, as a Mac's segmented control: one stop for Tab, the arrow keys
+  // going from segment to segment and Space choosing, the keys staying on it as the form is
+  // drawn again by the change (its `key`, by default its choices).
+  segmented({ value, options, onChange, key } = {}) {
+    const items = options.map((option) => (typeof option === "object" ? option : { value: option, label: String(option) }));
     const node = h("div.segmented", { role: "radiogroup" });
-    const buttons = options.map((option) => {
-      const item = typeof option === "object" ? option : { value: option, label: String(option) };
-      const button = h("button", { type: "button", title: item.title || item.label, class: item.value === value ? "on" : "",
-        onclick: () => { buttons.forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(item.value); } },
-        item.icon ? icon(item.icon) : null, item.label ?? null);
+    const buttons = items.map((item) => {
+      const button = h("button", { type: "button", role: "radio", "aria-checked": String(item.value === value), title: item.title || item.label, class: item.value === value ? "on" : "",
+        onclick: () => {
+          buttons.forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-checked", "false"); });
+          button.classList.add("on");
+          button.setAttribute("aria-checked", "true");
+          keys.mark(button);
+          onChange?.(item.value);
+        } },
+      item.icon ? icon(item.icon) : null, item.label ?? null);
       return button;
     });
     node.append(...buttons);
+    const keys = roving(node, () => buttons, key || `segments:${items.map((item) => item.value).join("|")}`);
     return node;
   },
 
-  // Colours to choose from; `custom` adds one more, any colour, from the system's picker.
-  swatches({ value, colours, onChange, none = true, custom = false } = {}) {
-    const node = h("div.swatches");
+  // Colours to choose from; `custom` adds one more, any colour, from the system's picker. A
+  // row of them is one stop for Tab, as a segmented control is; the chosen one is ticked,
+  // the one with the keys ringed with the focus's glow.
+  swatches({ value, colours, onChange, none = true, custom = false, key } = {}) {
+    const node = h("div.swatches", { role: "radiogroup" });
     const all = [...(none ? [{ value: null, colour: null, title: "None" }] : []), ...colours];
-    const choose = (button, next) => { node.querySelectorAll(".swatch").forEach((b) => b.classList.remove("on")); button.classList.add("on"); onChange?.(next); };
+    const choose = (button, next) => {
+      node.querySelectorAll(".swatch").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-checked", "false"); });
+      button.classList.add("on");
+      button.setAttribute("aria-checked", "true");
+      keys.mark(button.matches("label") ? button.querySelector("input") : button);
+      onChange?.(next);
+    };
     const buttons = all.map((item) => {
-      const button = h("button.swatch", { type: "button", title: item.title || item.value || "None",
-        class: [item.value === (value ?? null) ? "on" : "", item.colour ? "" : "none"].join(" "),
+      const chosen = item.value === (value ?? null);
+      const button = h("button.swatch", { type: "button", role: "radio", "aria-checked": String(chosen), title: item.title || item.value || "None",
+        class: [chosen ? "on" : "", item.colour ? "" : "none", item.colour && light(item.colour) ? "light" : ""].join(" "),
         style: item.colour ? { background: item.colour, ...(item.border ? { borderColor: item.border } : {}) } : {},
         onclick: () => choose(button, item.value) });
       return button;
     });
     node.append(...buttons);
+    let well = null;
     if (custom) {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
-      const input = h("input", { type: "color", value: own || "#888888" });
-      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
-      input.addEventListener("input", () => { well.style.background = input.value; choose(well, input.value); });
+      const input = h("input", { type: "color", value: own || "#888888", title: "Custom colour" });
+      well = h(`label.swatch.custom${own ? ".on" : ""}${own && light(own) ? ".light" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
+      input.addEventListener("input", () => { well.style.background = input.value; well.classList.toggle("light", light(input.value)); choose(well, input.value); });
       node.append(well);
     }
+    const keys = roving(node, () => [...buttons, ...(well ? [well.querySelector("input")] : [])],
+      key || `swatches:${all.map((item) => item.value).join("|")}`);
     return node;
   },
 
@@ -489,6 +596,72 @@ export const ui = {
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
+// A colour light enough that a mark on it is drawn dark.
+function light(colour) {
+  if (!HEX.test(colour || "")) return false;
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+}
+
+// A group of controls that is one stop for Tab, as a Mac's segmented control, a row of
+// colours or a grid of layouts is: Tab comes to the chosen one (else the first), and the
+// arrow keys go from one to the next within it -- ↑ and ↓ to the row above or below where
+// they lie in rows -- Space or Return working the one with the keys. `key` goes with the
+// one Tab comes to, so a form drawn again keeps the keys on it (keepFocus). Answers
+// `mark(item)`: the one Tab comes to now.
+export function roving(group, items = () => [...group.children], key = null) {
+  const list = () => items().filter((item) => item && !item.disabled);
+  const mark = (chosen) => {
+    for (const item of list()) {
+      item.tabIndex = item === chosen ? 0 : -1;
+      if (key) { if (item === chosen) item.dataset.key = key; else delete item.dataset.key; }
+    }
+  };
+  const all = list();
+  // (A custom colour's well is a label round its field: the field has the keys.)
+  mark(all.find((item) => item.matches(".on, .checked, [aria-checked=true]") || (item.matches("input") && item.parentElement?.matches(".on"))) || all[0]);
+  group.addEventListener("focusin", (event) => { if (list().includes(event.target)) mark(event.target); });
+  group.addEventListener("keydown", (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const each = list();
+    const at = each.indexOf(document.activeElement);
+    if (at < 0) return;
+    let next;
+    if (event.key === "ArrowLeft") next = each[at - 1];
+    else if (event.key === "ArrowRight") next = each[at + 1];
+    else if (event.key === "Home") next = each[0];
+    else if (event.key === "End") next = each[each.length - 1];
+    else if (event.key === "ArrowUp" || event.key === "ArrowDown") next = across(each, at, event.key === "ArrowDown" ? 1 : -1);
+    else return;
+    // The arrows are the group's: not the slide's (moving what is chosen), nor a menu's.
+    event.preventDefault();
+    event.stopPropagation();
+    if (next) { mark(next); next.focus(); }
+  });
+  return { mark };
+}
+
+// The one in the row above or below (`way` -1 or 1), nearest across; in a single row, the
+// one before or after, as a Mac's radio buttons go.
+function across(items, at, way) {
+  const boxes = items.map((item) => item.getBoundingClientRect());
+  const here = boxes[at];
+  if (new Set(boxes.map((box) => Math.round(box.top))).size === 1) return items[at + way] || null;
+  const beyond = boxes.map((box, index) => ({ box, index })).filter(({ box }) => (way > 0 ? box.top >= here.bottom - 2 : box.bottom <= here.top + 2));
+  if (!beyond.length) return null;
+  const row = way > 0 ? Math.min(...beyond.map(({ box }) => box.top)) : Math.max(...beyond.map(({ box }) => box.top));
+  const middle = (box) => box.left + box.width / 2;
+  const nearest = beyond.filter(({ box }) => Math.abs(box.top - row) < 2)
+    .sort((a, b) => Math.abs(middle(a.box) - middle(here)) - Math.abs(middle(b.box) - middle(here)))[0];
+  return items[nearest.index];
+}
+ui.roving = roving;
+
+// Units written against their digits, as a Mac writes them: "30°", "0.4×", "50%".
+const TIGHT_UNITS = new Set(["°", "×", "%", "′", "″"]);
+// What each number field (by its key) held when it was entered, and what it says under itself.
+const entering = new Map();
+const noted = new Map();
 
 function fit(area) {
   area.style.height = "auto";
@@ -590,9 +763,10 @@ const POPUPS = ".select, .palette-pick, .type-pick, .theme-card.compact, .combo"
 // Room enough under a button for a menu to scroll there, rather than open over it.
 const ROOM = 240;
 
-// Under its button, where it fits, or scrolling there while a fair part of it does; else
-// above, if it fits; else on the roomier side, scrolling -- never over the button that
-// opened it, nor over the window's top bar, and a scrolling list ending on a whole row. A
+// A pop-up's menu over its button (overButton). Any other: under its button, where it fits,
+// or scrolling there while a fair part of it does; else above, if it fits; else on the
+// roomier side, scrolling -- never over the button that opened it, nor over the window's
+// top bar, and a scrolling list ending on a whole row. A
 // menu at a point (a context menu) opens there and moves up as far as it must to show every
 // item, as on a Mac; only one taller than the window scrolls.
 function place(node, anchor, align) {
@@ -605,24 +779,26 @@ function place(node, anchor, align) {
   const bar = point ? null : document.querySelector(".studio > .bar")?.getBoundingClientRect();
   const ceiling = Math.max(8, bar?.height ? bar.bottom + 4 : 8);
   const below = innerHeight - 8 - (box.bottom + 4), above = box.top - 4 - ceiling;
-  let left = align === "end" ? box.right - width : box.left;
-  let top = box.bottom + 4;
-  if (point) {
-    top = Math.max(8, Math.min(top, innerHeight - 8 - height));
-    // Too near the right edge, it opens to the left of the pointer.
-    if (left + width > innerWidth - 8 && box.left - width >= 8) left = box.left - width;
-  } else if (height > below) {
-    if (below >= ROOM) node.style.maxHeight = `${below}px`;
-    else if (height <= above) top = null;
-    else if (above > below) { node.style.maxHeight = `${above}px`; top = null; }
-    else node.style.maxHeight = `${below}px`;
-    if (height > Math.max(above, below) || below >= ROOM) node.style.overflowY = "auto";
+  if (point || !anchor.matches?.(OVER) || !overButton(node, anchor, box, ceiling)) {
+    let left = align === "end" ? box.right - width : box.left;
+    let top = box.bottom + 4;
+    if (point) {
+      top = Math.max(8, Math.min(top, innerHeight - 8 - height));
+      // Too near the right edge, it opens to the left of the pointer.
+      if (left + width > innerWidth - 8 && box.left - width >= 8) left = box.left - width;
+    } else if (height > below) {
+      if (below >= ROOM) node.style.maxHeight = `${below}px`;
+      else if (height <= above) top = null;
+      else if (above > below) { node.style.maxHeight = `${above}px`; top = null; }
+      else node.style.maxHeight = `${below}px`;
+      if (height > Math.max(above, below) || below >= ROOM) node.style.overflowY = "auto";
+    }
+    if (!point) wholeRows(node);
+    // Over its button, it ends just above it.
+    if (top === null) top = box.top - 4 - node.offsetHeight;
+    left = Math.min(Math.max(8, left), innerWidth - width - 8);
+    Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   }
-  if (!point) wholeRows(node);
-  // Over its button, it ends just above it.
-  if (top === null) top = box.top - 4 - node.offsetHeight;
-  left = Math.min(Math.max(8, left), innerWidth - width - 8);
-  Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
   openMenu = node;
   // The button that opened it shows it is open, as a Mac's pop-up button does.
   openAnchor = point ? null : anchor;
@@ -644,25 +820,55 @@ function place(node, anchor, align) {
 }
 let returnTo = null;
 
+// A pop-up button's menu opens as a Mac's does: its chosen item over the button, the item's
+// words (or icon) where the button's are, the menu as tall as the window lets it be --
+// moved up or down as far as it must to stay in the window, and scrolled, if it is longer
+// than the window, to keep the chosen item over the button. Else (nothing chosen) it opens
+// under the button (place).
+const OVER = ".select:not(.font-pick), .palette-pick";
+function overButton(node, anchor, box, ceiling) {
+  const chosen = node.querySelector(".menu-item.checked, .palette-choice.on");
+  if (!chosen) return false;
+  const icons = anchor.matches(".icon-select");
+  const label = anchor.querySelector(":scope > span:not(.palette-strip)");
+  const words = icons ? chosen.querySelector(":scope > svg") : chosen.querySelector(".menu-text") || chosen.querySelector(":scope > span:not(.palette-strip)");
+  const shift = label && words ? (words.getBoundingClientRect().left - node.getBoundingClientRect().left) - (label.getBoundingClientRect().left - box.left) : 0;
+  let left = box.left - shift;
+  // As wide as the button at least, from where it starts to the button's end.
+  node.style.minWidth = `${Math.max(box.width, box.right - left)}px`;
+  node.style.maxHeight = `${innerHeight - 8 - ceiling}px`;
+  node.style.overflowY = "auto";
+  const width = node.offsetWidth, height = node.offsetHeight;
+  const frame = node.getBoundingClientRect(), row = chosen.getBoundingClientRect();
+  const middle = row.top - frame.top + node.scrollTop + row.height / 2;
+  const want = box.top + box.height / 2;
+  const top = Math.min(Math.max(want - middle, ceiling), innerHeight - 8 - height);
+  left = Math.min(Math.max(8, left), innerWidth - width - 8);
+  Object.assign(node.style, { left: `${left}px`, top: `${top}px` });
+  node.scrollTop = Math.max(0, middle - (want - top));
+  return true;
+}
+
 // A list that scrolls ends on a whole row, not on a row cut by the window's edge: the menu
-// (or the list in it, under a search field) shows as many whole rows as fit.
+// (or the list in it, under a search field) shows as many whole rows as fit, rows of two
+// lines (a hint under a name) and lines between them as they are.
 function wholeRows(node) {
   const list = node.querySelector(".font-list") || node;
-  const rows = list.querySelectorAll(".menu-item, .palette-choice");
+  const rows = [...list.querySelectorAll(".menu-item, .palette-choice")];
   if (rows.length < 2) return;
-  const top = node.getBoundingClientRect().top, room = node.clientHeight;
-  const first = rows[0].getBoundingClientRect(), step = rows[1].getBoundingClientRect().top - first.top;
+  const top = node.getBoundingClientRect().top + node.clientTop, room = node.clientHeight;
   const end = parseFloat(getComputedStyle(node).paddingBottom) || 0;
-  if (step <= 0 || rows[rows.length - 1].getBoundingClientRect().bottom - top + end <= room + 1) return;
-  const start = first.top - top, gap = step - first.height;
-  const fit = Math.floor((room - start - end + gap) / step);
-  if (fit > 0) node.style.maxHeight = `${start + fit * step - gap + end}px`;
+  const bottoms = rows.map((row) => row.getBoundingClientRect().bottom - top);
+  if (bottoms[bottoms.length - 1] + end <= room + 1) return;
+  const last = bottoms.filter((bottom) => bottom + end <= room + 0.5).pop();
+  if (last > 0) node.style.maxHeight = `${last + end + node.offsetHeight - node.clientHeight}px`;
 }
 
 // A pop-up button's choices (`items`: { value, label }), the one in use ticked, under the
 // button; `pick(value)` takes the one chosen. Opened by a key, the one in use has the keys.
 function choices(anchor, items, current, pick, byKey = false) {
-  const node = menu(anchor, items.map((item) => (item === "-" ? "-" : { label: item.label, checked: item.value === current, disabled: item.disabled, style: item.style, run: () => pick(item.value) })),
+  const node = menu(anchor, items.map((item) => (item === "-" ? "-" : item.action ? { label: item.label, icon: item.icon, checked: false, disabled: item.disabled, show: item.show, run: item.run }
+    : { label: item.label, icon: item.icon, checked: item.value === current, disabled: item.disabled, style: item.style, run: () => pick(item.value) })),
     { className: "choice-menu" });
   const chosen = node.querySelector(".menu-item.checked");
   chosen?.scrollIntoView({ block: "nearest" });
@@ -737,8 +943,10 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
       (items[event.shiftKey ? items.length - 1 : 0] || panel).focus();
     }
   };
+  // A sheet with a Cancel is closed by it (or Esc), as a Mac's is: no × beside its title too.
+  const cancels = actions.some((action) => action.label === "Cancel");
   const panel = h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog", "aria-modal": "true", tabIndex: -1 },
-    h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
+    h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), cancels ? null : ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
     h("div.dialog-body.scroll-thin", { tabIndex: -1 }, body),
     // Actions `aside` (Upload…, New Folder…) stand at the left, as in a Mac's open panel;
     // Cancel and the default at the right.

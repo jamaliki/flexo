@@ -17,8 +17,10 @@ export function themeName(card) {
 const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
 
 export function themeCard(card, { on = false, onclick, compact = false, chevron = false } = {}) {
-  // Each tone a filled chip in its strong colour, as a palette's colours are shown.
-  const tones = (card.tones || []).map((tone) => h("span", { style: { background: tone.stroke || tone.fill } }));
+  // Each tone a filled chip in its strong colour, as a palette's colours are shown: each
+  // colour once, so a theme in one ink (Print, Swiss) shows one chip, not six alike.
+  const colours = [...new Set((card.tones || []).map((tone) => String(tone.stroke || tone.fill).toLowerCase()))];
+  const tones = colours.map((colour) => h("span", { style: { background: colour } }));
   return h(`button.theme-card${on ? ".on" : ""}${compact ? ".compact" : ""}${card.problem ? ".problem" : ""}`, {
     type: "button", title: card.problem || [card.description || themeName(card), card.source === "folder" ? card.value : ""].filter(Boolean).join("\n"), onclick,
   },

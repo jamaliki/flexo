@@ -150,6 +150,13 @@ function throttled(run, ms = 100) {
   return (...args) => { waiting = args; if (!timer) fire(); };
 }
 
+// What this person left as they left it (the tips folded away), kept in the page's storage;
+// a page without storage forgets.
+function remembered(name) { try { return localStorage.getItem(`flexo.figure.${name}`); } catch { return null; } }
+function remember(name, value) { try { localStorage.setItem(`flexo.figure.${name}`, value); } catch { /* none kept */ } }
+// The tips counted as shown once a page, not at each drawing of the panel.
+let tipsCounted = false;
+
 export function figureParts(host) {
   if (!document.querySelector('link[href="/static/kinds/figure/parts.css"]')) {
     document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/parts.css" }));
@@ -1680,16 +1687,24 @@ export function figureParts(host) {
     ];
   }
 
+  // The tips fold away: open the first few times a figure is edited, then closed -- or as
+  // their person last left them, as a Mac's disclosure triangle remembers.
   function howTo() {
     const figure = model();
-    return h("div.section", {}, h("div.section-title", {}, "Tips"),
-      h("ul.how", {},
+    const kept = remembered("tips");
+    if (!kept && !tipsCounted) { tipsCounted = true; remember("tips-shown", String((Number(remembered("tips-shown")) || 0) + 1)); }
+    const open = kept ? kept === "open" : (Number(remembered("tips-shown")) || 0) <= 3;
+    const tips = h("details.more.tips", { open },
+      h("summary", { onclick: (event) => { const shown = event.currentTarget.parentElement; setTimeout(() => remember("tips", shown.open ? "open" : "closed"), 0); } },
+        icon("chevron"), "Tips"),
+      h("div.inner", {}, h("ul.how", {},
         h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one is added after it and connected to it."),
         h("li", {}, h("b", {}, "Connect"), " (C): the line starts at the shape selected (with none, click where it starts); then click the shape where it ends."),
         h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
         figure.nodes.some((node) => node.kind === "structure")
           ? h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule.") : null,
-        h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G).")),
+        h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G)."))));
+    return h("div.section", {}, tips,
       h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
         figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
   }
@@ -1738,10 +1753,16 @@ export function figureParts(host) {
       if (tone === undefined || tone === null || tone === "") return null;
       return /^\d+$/.test(String(tone)) ? String(tone) : tones?.used?.[tone] !== undefined ? String(tones.used[tone]) : `named:${tone}`;
     };
-    const chips = nodes.length && tones?.colours?.length ? ui.field("Theme", ui.swatches({
-      value: common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null,
+    const toneNow = common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null;
+    // A palette of five fills eight tones by going round again: each colour is offered once
+    // (by its first tone), as the slide's colour rows offer it -- and the one in use, always.
+    const seen = new Set();
+    const offered = (tones?.colours || []).map((colour, index) => ({ value: String(index + 1), colour: colour.stroke, title: `Theme colour ${index + 1}` }))
+      .filter((item) => item.value === toneNow || !seen.has(String(item.colour).toLowerCase()) && seen.add(String(item.colour).toLowerCase()));
+    const chips = nodes.length && offered.length ? ui.field("Theme", ui.swatches({
+      value: toneNow,
       // Each tone as a filled chip in its strong colour, as a palette's colours are shown.
-      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.stroke, title: `Theme colour ${index + 1}` })),
+      colours: offered,
       onChange: (value) => paint("node", { "properties.tone": value }),
     })) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
@@ -1808,9 +1829,16 @@ export function figureParts(host) {
         });
         return ui.field(field.label, h("div.field-stack", {}, control, note), options);
       }
-      case "length":
-        // Sent once it reads as a length, as typed; written out ("120pt") when the field is left.
-        return ui.field(field.label, typedField({ value, key, placeholder: "Auto", length: true, onCommit: set }), options);
+      case "length": {
+        // Sent once it reads as a length, as typed. ↑ and ↓ from "Auto" go from the size the
+        // shape is drawn at.
+        const drawn = item?.id && nodeOf(item.id) && (field.key === "width" || field.key === "height") ? () => {
+          const element = host.element?.(item.id);
+          const box = element?.getBoundingClientRect(), scale = element?.getScreenCTM?.()?.a;
+          return box?.width && scale ? (field.key === "width" ? box.width : box.height) / scale : null;
+        } : null;
+        return ui.field(field.label, typedField({ value, key, placeholder: "Auto", length: true, current: drawn, onCommit: set }), options);
+      }
       case "code":
         // Letters of a sequence and the like, not code to indent: Tab goes on to the next field.
         return ui.field(field.label, ui.textarea({ value: typing(key) ?? value ?? "", rows: 2, mono: true, key, onInput: set }), options);
@@ -1914,16 +1942,22 @@ export function figureParts(host) {
     const at = document.activeElement;
     return key && at?.dataset?.key === key && typeof at.value === "string" ? at.value : null;
   }
-  function typedField({ value, key, placeholder = "", number = null, length = false, mono = false, say = true, onCommit }) {
-    const shown = typing(key) ?? (drafts.has(key) ? drafts.get(key) : value === undefined || value === null ? "" : String(value));
+  // A length as the file has it ("120pt", "4cm"): its number, and its unit (points if none).
+  const LENGTH = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i;
+  const lengthParts = (text) => { const found = LENGTH.exec(String(text ?? "").trim()); return found ? [String(Number(found[1])), (found[2] || "pt").toLowerCase()] : null; };
+  function typedField({ value, key, placeholder = "", number = null, length = false, mono = false, say = true, current = null, onCommit }) {
+    // A length shows its number, and its unit after it as every number field's is ("120 pt"):
+    // a number typed is in that unit; another unit may be typed after it.
+    let lengthUnit = (length && lengthParts(value)?.[1]) || "pt";
+    const written = value === undefined || value === null ? "" : length && lengthParts(value) ? lengthParts(value)[0] : String(value);
+    const shown = typing(key) ?? (drafts.has(key) ? drafts.get(key) : written);
     const input = ui.input({ value: shown, key, placeholder, mono });
     if (number || length) input.inputMode = "decimal";
     const read = (text) => {
       const clean = String(text ?? "").trim();
       if (length) {
-        // A bare number is in points, as the file has it.
-        const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(clean);
-        return !clean ? null : found ? `${Number(found[1])}${(found[2] || "pt").toLowerCase()}` : NaN;
+        const found = LENGTH.exec(clean);
+        return !clean ? null : found ? `${Number(found[1])}${(found[2] || lengthUnit).toLowerCase()}` : NaN;
       }
       if (!number) return clean || null;
       const bare = clean.replace(/\s*(Å|°|×|σ|px|pt|%)$/u, "").replace(",", ".");
@@ -1964,30 +1998,45 @@ export function figureParts(host) {
         if (number.max !== undefined) parsed = Math.min(number.max, parsed);
         if (read(input.value) !== parsed) input.value = String(parsed);
       }
-      if (length && parsed !== null && input.value.trim() !== parsed) input.value = parsed;
+      if (length && parsed !== null) { [input.value, lengthUnit] = lengthParts(parsed); showUnit(); }
       said(false);
       send(parsed, drafts.get(key));
     };
+    // The unit after the digits, unless one is typed in with them.
+    let unitMark = null;
+    function showUnit() {
+      if (!unitMark || !length) return;
+      unitMark.textContent = lengthUnit;
+      unitMark.hidden = /[a-z]/i.test(input.value);
+    }
     const later = (parsed, text, wait) => {
       clearTimeout(pending.get(key));
       pending.set(key, setTimeout(() => send(parsed, text), wait));
     };
     const stepBy = (sign, big) => {
       // A length steps in its own unit (points, if it has none), one at a time; left to fit
-      // its words ("Auto"), it has none to step from.
+      // its words ("Auto"), from the size it is drawn at, if that is known.
       if (length) {
-        const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(input.value.trim());
-        if (!found) return;
-        const next = Math.max(0, Math.round((Number(found[1]) + sign * (big ? 10 : 1)) * 1e6) / 1e6);
-        input.value = `${next}${(found[2] || "pt").toLowerCase()}`;
+        const found = LENGTH.exec(input.value.trim());
+        const drawn = found ? null : current?.();
+        if (!found && !Number.isFinite(drawn)) return;
+        if (found?.[2]) lengthUnit = found[2].toLowerCase();
+        const from = found ? Number(found[1]) : Math.round(drawn);
+        const next = Math.max(0, Math.round((from + sign * (big ? 10 : 1)) * 1e6) / 1e6);
+        input.value = String(next);
+        showUnit();
         drafts.set(key, input.value);
         touched.add(key);
         said(false);
-        later(input.value, input.value, 300);
+        later(`${next}${lengthUnit}`, input.value, 300);
         return;
       }
+      // Left to its default, it steps from the default it says; with none said, from what is
+      // in use, else from nothing -- never from the bottom of its range.
       const now = read(input.value);
-      const from = typeof now === "number" && !Number.isNaN(now) ? now : Number(input.placeholder) || number.min || 0;
+      const placed = parseFloat(input.placeholder);
+      const using = Number.isFinite(placed) ? placed : current?.();
+      const from = typeof now === "number" && !Number.isNaN(now) ? now : Number.isFinite(using) ? using : Math.max(number.min ?? 0, 0);
       const by = (Number(number.step) || 1) * (big ? 10 : 1);
       let next = Math.round((from + sign * by) * 1e6) / 1e6;
       if (number.min !== undefined) next = Math.max(number.min, next);
@@ -1999,6 +2048,7 @@ export function figureParts(host) {
       later(next, input.value, 300);
     };
     input.addEventListener("input", () => {
+      showUnit();
       drafts.set(key, input.value);
       touched.add(key);
       const parsed = read(input.value);
@@ -2020,8 +2070,10 @@ export function figureParts(host) {
     if (!number && !length) return input;
     // Drawn as every number field in the studio is (ui.numberBox): digits to the right, the
     // unit after them, steppers at the end.
-    const control = ui.numberBox(input, { unit: number?.unit, step: stepBy });
+    const control = ui.numberBox(input, { unit: length ? lengthUnit : number?.unit, step: stepBy });
     control.classList.add("typed-number");
+    unitMark = control.querySelector(".unit");
+    showUnit();
     const node = note ? h("div.field-stack", {}, control, note) : control;
     node.input = input;
     return node;

@@ -105,10 +105,11 @@ export function mount(studio, container) {
   const colour = (label, path) => {
     const value = get(path) ?? base(path);
     const picker = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
-      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; set(path, picker.value); } });
-    const swatch = h("span.colour-swatch", { style: { background: value || "transparent" }, onclick: () => picker.click() });
+      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
+    // No colour is the hatched chip every "None" is drawn as.
+    const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", onclick: () => picker.click() });
     const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
-      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; set(path, text); } else if (!text) set(path, null); } });
+      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; swatch.classList.remove("none"); set(path, text); } else if (!text) set(path, null); } });
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
   };
 
@@ -131,7 +132,8 @@ export function mount(studio, container) {
           label: name, hint: values.join(" "), run: () => write([...values]),
         }))), { kind: "ghost", small: true, icon: "palette" })),
         get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
-      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes" },
+      // In rows of equal chips, never one left alone on a row of its own.
+      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes", style: { gridTemplateColumns: `repeat(${Math.ceil(tones.length / Math.ceil(tones.length / 10))}, minmax(0, 1fr))` } },
         tones.map((tone) => h("span.tone", { style: { background: tone.fill, borderColor: tone.stroke, color: tone.stroke } }, "Aa"))) : null);
   };
 
@@ -147,7 +149,7 @@ export function mount(studio, container) {
     const sketch = t.sketch ?? base(["sketch"]);
     clear(form,
       section("Theme",
-        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
+        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
         ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
       section("Documents", uses),
@@ -190,7 +192,8 @@ export function mount(studio, container) {
         choice("Line Style", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right Angles", straight: "Straight" } }),
         choice("Branch Style", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
         choice("Merge Style", ["conventions", "merge"], catalog.conventions.merge || []),
-        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), label: "Draw by hand", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
+        // Named once, by its row, as every switch in the panel is.
+        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), key: "sketch", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
         sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
       h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>

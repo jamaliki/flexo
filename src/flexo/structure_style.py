@@ -341,10 +341,14 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 labels={"surface": "Surface", "layers": "Layers", "mesh": "Mesh", "slice": "Slice"},
             ),
             _number(
-                "map.sigma", "Level", low=0, step=0.5, hint="Standard deviations above the mean",
+                "map.sigma",
+                "Sigma Level",
+                low=0,
+                step=0.5,
+                hint="Standard deviations above the mean",
                 unit="σ",  # noqa: RUF001
             ),
-            _number("map.level", "Level", step=0.01, hint="In the map's units"),
+            _number("map.level", "Absolute Level", step=0.01, hint="In the map's units"),
             _choice(
                 "map.finish",
                 "Finish",

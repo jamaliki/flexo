@@ -565,9 +565,9 @@ def _structure() -> dict[str, Any]:
             ),
             _field("properties.width", "Width", "number", more=True),
             _field("properties.height", "Height", "number", more=True),
-            _field("properties.yaw", "Yaw", "number", hint="In degrees", more=True),
-            _field("properties.pitch", "Pitch", "number", hint="In degrees", more=True),
-            _field("properties.roll", "Roll", "number", hint="In degrees", more=True),
+            _field("properties.yaw", "Yaw", "number", unit="°", more=True),
+            _field("properties.pitch", "Pitch", "number", unit="°", more=True),
+            _field("properties.roll", "Roll", "number", unit="°", more=True),
             _field("properties.zoom", "Zoom", "number", more=True),
             _field(
                 "properties.pan_x", "Offset X", "number", hint="A fraction of the frame", more=True
@@ -765,7 +765,7 @@ def _cells() -> dict[str, Any]:
                     _column("label", "Label", hint="Name in the legend"),
                 ],
             ),
-            _field("properties.cell", "Cell Size", "number", hint="In points"),
+            _field("properties.cell", "Cell Size", "number", unit="pt"),
             _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
             _field(
                 "properties.corner",
