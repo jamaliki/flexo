@@ -141,6 +141,26 @@ function pairsOf(base, side) {
   return pairs;
 }
 
+// Where each item of `before` is in `after` (its index, or -1 if it is gone): paired as
+// a merge pairs them, then, for one moved and changed at once (a paragraph moved while
+// someone typed in it), the most alike of those left, wherever it went.
+export function follows(before, after) {
+  const pairs = pairsOf(before, after);
+  const used = new Set(pairs.values());
+  const scored = [];
+  before.forEach((item, i) => {
+    if (pairs.has(i)) return;
+    after.forEach((other, j) => {
+      if (used.has(j)) return;
+      const score = alike(item, other);
+      if (score >= ALIKE) scored.push([score, i, j]);
+    });
+  });
+  scored.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2] - b[2]);
+  for (const [, i, j] of scored) if (!pairs.has(i) && !used.has(j)) { pairs.set(i, j); used.add(j); }
+  return before.map((_, i) => (pairs.has(i) ? pairs.get(i) : -1));
+}
+
 const kindOf = (item) => (typeof item === "boolean" ? "flag" : typeof item === "number" ? "number" : typeof item === "string" ? "str"
   : item === null || item === undefined ? "none" : Array.isArray(item) ? "list" : "dict");
 

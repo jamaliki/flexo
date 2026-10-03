@@ -958,7 +958,7 @@ export function palette(workspace) {
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") { event.preventDefault(); index = Math.min(index + 1, shown.length - 1); mark(); }
     else if (event.key === "ArrowUp") { event.preventDefault(); index = Math.max(index - 1, 0); mark(); }
-    else if (event.key === "Enter") { event.preventDefault(); if (shown[index]) run(shown[index]); }
+    else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); if (shown[index]) run(shown[index]); }
     else if (event.key === "Escape") { event.preventDefault(); close(); }
     // Its one field holds the keys: Tab goes nowhere behind it.
     else if (event.key === "Tab") event.preventDefault();
