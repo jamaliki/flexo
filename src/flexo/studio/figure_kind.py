@@ -146,6 +146,8 @@ class FigureKind:
         if action.get("do") == "structure-settings":
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
             return {"document": document, "settings": settings_of(spec, str(action.get("id")))}
+        if action.get("do") == "structure-fetch":
+            return {"document": document, "id": fetched(str(action.get("id") or ""))}
         result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
         from flexo.studio.figure_edit import model
 
@@ -211,7 +213,8 @@ class FigureKind:
             spec.id, compilation.document.text, label=spec.id, extra={"outline": outline(spec)}
         )
         files = [base / value for value in (spec.style, spec.palette) if _is_file(value)]
-        return Drawing([page], [_message(item) for item in report.diagnostics], files, info)
+        said = [*report.diagnostics, *structure_problems(spec)]
+        return Drawing([page], [_message(item) for item in said], files, info)
 
     def export(
         self,
@@ -332,6 +335,31 @@ def settings_of(spec, identifier: str) -> dict[str, Any]:
     if node is None or node.kind != "structure":
         raise EditError(f"“{identifier}” isn't a structure.")
     return structure_settings(node, figure_style(spec), figure_palette(spec))
+
+
+def fetched(pdb_id: str) -> str:
+    """A PDB entry downloaded before a structure is made of it: its ID, or an EditError
+    saying why it couldn't be (for any kind that draws figures)."""
+
+    from flexo.structures import fetch_structure
+    from flexo.studio.figure_edit import EditError
+
+    try:
+        return fetch_structure(pdb_id)
+    except ValueError as error:
+        raise EditError(str(error)) from None
+
+
+def structure_problems(spec) -> list[Any]:
+    """What keeps each structure in ``spec`` from being drawn as written, as warnings: the
+    figure is drawn all the same, a structure that can't be had as a panel saying why."""
+
+    from flexo.structures import structure_problem
+    from flexo.themes import figure_style
+
+    style = figure_style(spec)
+    found = [structure_problem(node, style) for node in spec.nodes if node.kind == "structure"]
+    return [item for item in found if item is not None]
 
 
 def view_of(spec, identifier: str) -> dict[str, Any]:

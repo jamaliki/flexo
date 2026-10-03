@@ -118,6 +118,31 @@ export function widenLines(svg) {
   }
 }
 
+// Where words are typed: a key there is the field's.
+const TYPING = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
+const typingIn = (node) => Boolean(node?.closest?.(TYPING));
+let lastTyped = 0;
+if (typeof document !== "undefined") {
+  document.addEventListener("input", (event) => { if (typingIn(event.target)) lastTyped = Date.now(); }, true);
+  // A click ends the typing: what is chosen then is chosen to act on.
+  document.addEventListener("pointerdown", () => { lastTyped = 0; }, true);
+}
+
+// At most one call every `ms`, and always the last: a colour dragged in the picker is
+// sent as it goes, not at every step.
+function throttled(run, ms = 100) {
+  let waiting = null, timer = 0;
+  const fire = () => {
+    timer = 0;
+    if (!waiting) return;
+    const args = waiting;
+    waiting = null;
+    run(...args);
+    timer = setTimeout(fire, ms);
+  };
+  return (...args) => { waiting = args; if (!timer) fire(); };
+}
+
 export function figureParts(host) {
   if (!document.querySelector('link[href="/static/kinds/figure/parts.css"]')) {
     document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/parts.css" }));
@@ -237,7 +262,19 @@ export function figureParts(host) {
   // left before the latest keys must not put older words back in the field.
   const typed = new Map();
   const LANDS = new Set(["move", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
+  // A molecule changed is drawn again by mol-sketch, which takes a moment: a small
+  // spinner shows on it meanwhile, until its new drawing is in.
+  const redrawing = new Map();
+  function redraws(action) {
+    if (action.do !== "update") return;
+    for (const target of action.targets || [action.target]) {
+      if (target?.type !== "node" || nodeOf(target.id)?.kind !== "structure") continue;
+      if (Object.keys(action.values || {}).every((key) => key === "label")) continue;
+      redrawing.set(target.id, { element: moleculeOf(target.id), since: Date.now() });
+    }
+  }
   function act(action, { merge = null, select: choose = true, then = null, failed = null } = {}) {
+    redraws(action);
     // Typing in one field: only its latest words wait to be sent.
     if (merge) {
       const waiting = queue.findIndex((job) => job.merge === merge);
@@ -288,14 +325,17 @@ export function figureParts(host) {
     return { text: "Adds to the end of the figure" };
   }
 
-  function addPalette(anchor) {
+  // The palette of shapes, grouped and searchable: to add one, or (`change`, a part) to
+  // make a part another kind of shape.
+  function addPalette(anchor, { change = null } = {}) {
     if (!model()) return;
-    const where = placement();
+    const where = change ? null : placement();
     const search = ui.input({ placeholder: "Search shapes" });
     const grid = h("div.add-grid.scroll-thin");
-    const tile = (kind, part) => h(`button.add-tile${part.unavailable ? ".off" : ""}`, {
+    const current = change ? change.kind || "block" : null;
+    const tile = (kind, part) => h(`button.add-tile${part.unavailable ? ".off" : ""}${kind === current ? ".on" : ""}`, {
       type: "button", title: part.unavailable ? `${part.hint} (${part.unavailable})` : part.hint, disabled: Boolean(part.unavailable),
-      onclick: () => { closeMenu(); addPart(kind, where); },
+      onclick: () => { closeMenu(); if (change) retype(change, kind); else addPart(kind, where); },
     }, glyph(kind), h("span", {}, part.title));
     const render = () => {
       const query = search.value.trim().toLowerCase();
@@ -304,7 +344,7 @@ export function figureParts(host) {
         const found = Object.entries(parts).filter(([, part]) => part.category === category && matches(part));
         return found.length ? [h("div.add-head", {}, category), h("div.add-tiles", {}, found.map(([kind, part]) => tile(kind, part)))] : null;
       }).filter(Boolean);
-      const groups = catalog.groups.filter((group) => !query || `${group.title} ${group.hint}`.toLowerCase().includes(query));
+      const groups = change ? [] : catalog.groups.filter((group) => !query || `${group.title} ${group.hint}`.toLowerCase().includes(query));
       if (groups.length) {
         sections.push([h("div.add-head", {}, "Layout"), h("div.add-tiles", {}, groups.map((group) =>
           h("button.add-tile", { type: "button", title: group.hint, onclick: () => { closeMenu(); gather(group, where); } }, glyph(group.kind), h("span", {}, group.title))))]);
@@ -324,13 +364,30 @@ export function figureParts(host) {
     };
     search.addEventListener("input", render);
     search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); best()?.click(); } });
-    const chain = where.from ? ui.toggle({ value: state.chain, label: `Connect from “${nameOf(where.from)}”`, onChange: (value) => {
+    const chain = where?.from ? ui.toggle({ value: state.chain, label: `Connect from “${nameOf(where.from)}”`, onChange: (value) => {
       state.chain = value;
       where.source = value ? where.from : null;
     } }) : null;
     render();
-    popover(anchor, h("div.add-palette", {}, search, h("div.add-where", {}, icon("info"), h("span", {}, where.text)), chain, grid), { className: "add-menu" });
+    const said = change ? `Changes “${nameOf(change.id)}” to another shape. Its text and lines stay.` : where.text;
+    const node = popover(onScreen(anchor), h("div.add-palette", {}, search, h("div.add-where", {}, icon("info"), h("span", {}, said)), chain, grid), { className: "add-menu" });
+    // Kept to the room there is beside its button: the shapes scroll, not the palette.
+    const room = parseFloat(node.style.maxHeight);
+    if (room) {
+      grid.style.maxHeight = `${Math.max(120, grid.clientHeight - (node.scrollHeight - room))}px`;
+      node.style.overflowY = "";
+    }
     setTimeout(() => search.focus(), 20);
+  }
+  // Where a menu opens: by its button -- or, the button hidden, by what is chosen.
+  function onScreen(anchor) {
+    const box = anchor?.getBoundingClientRect?.();
+    if (!box || box.width || box.height) return anchor;
+    const id = state.selected[state.selected.length - 1];
+    const at = id && host.element(id)?.getBoundingClientRect();
+    if (at?.width) return { x: at.left, y: at.bottom + 8 };
+    const root = host.element(model()?.root)?.getBoundingClientRect();
+    return root?.width ? { x: root.left, y: root.top + 12 } : { x: innerWidth / 2 - 196, y: 120 };
   }
 
   // A part added is ready for its words: they are typed on it as soon as it is drawn.
@@ -356,10 +413,11 @@ export function figureParts(host) {
           parent: chosen.length ? null : at.parent || null, after: chosen.length ? null : at.after || null });
   }
 
-  function remove(ids = state.selected) {
+  // `keep`: what stays chosen after (a shape whose line was deleted from its list).
+  function remove(ids = state.selected, keep = []) {
     const gone = ids.filter((id) => id !== model()?.root);
     if (!gone.length) return;
-    act({ do: "delete", ids: gone }, { select: false, then: () => select([]) });
+    act({ do: "delete", ids: gone }, { select: false, then: () => select(keep.filter((id) => typeOf(id) && !gone.includes(id)), { reveal: false }) });
   }
 
   // What a part's right-click menu offers (the host adds cut, copy and paste): the
@@ -372,14 +430,16 @@ export function figureParts(host) {
     if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
     if (node) {
       const kind = nextKind(node);
-      items.push({ icon: "plus", label: `Add ${titled(parts[kind].title)} After${parts[kind].needs_file ? "…" : ""}`, keys: "A", run: () => addPart(kind, { after: id, source: id }) },
-        { icon: "plus", label: "Add Shape After…", run: () => addPalette(anchor) },
+      // A opens the palette of shapes, to add after the shape chosen: it is that item's key.
+      items.push({ icon: "plus", label: `Add ${titled(parts[kind].title)} After${parts[kind].needs_file ? "…" : ""}`, run: () => addPart(kind, { after: id, source: id }) },
+        { icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) },
         { icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
     }
     const holder = parentOf(id);
-    const row = holder && (holder.layout?.kind || (holder.id === model()?.root ? "column" : "row")) === "row";
+    // As drawn: a column turned to fit the slide is a row on screen.
+    const row = holder && drawnKind(holder) === "row";
     if ((node || (group && !isRoot)) && row && (holder.children || []).some((child) => child !== id)) {
-      items.push({ icon: "down", label: "Move to Own Row Below", run: () => act({ do: "move", id, line: "below", of: holder.id }) });
+      items.push({ icon: "down", label: "Move to Own Row Below", run: () => ownLine(id, holder.id, "below") });
     }
     if (state.selected.length > 1) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
     if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
@@ -468,11 +528,19 @@ export function figureParts(host) {
     return null;
   }
   // Pieces drawn inside a part carry ids of their own: the part is what is chosen.
+  // A press acted on later (once the figure's parts are known) may find the drawing it
+  // was on replaced: it is what is under the pointer now.
+  function targetOf(event) {
+    if (event.target?.isConnected !== false) return event.target;
+    const svg = host.overlay.querySelector("svg");
+    return document.elementsFromPoint(event.clientX, event.clientY).find((hit) => svg?.contains(hit)) || host.overlay;
+  }
   function idAt(event) {
-    const line = event.target.closest?.("[data-hit-for]");
+    const target = targetOf(event);
+    const line = target?.closest?.("[data-hit-for]");
     const lineId = line && host.idOf(line.dataset.hitFor);
     if (lineId && typeOf(lineId)) return lineId;
-    for (let at = event.target; at && at !== host.overlay; at = at.parentElement) {
+    for (let at = target; at && at !== host.overlay; at = at.parentElement) {
       if (!at.matches?.("[data-flexo-entity][id]")) continue;
       const id = host.idOf(at.id);
       if (id && typeOf(id)) return id;
@@ -494,7 +562,7 @@ export function figureParts(host) {
     if (!id || typeOf(id) === "net") return;
     // The part typed on is the part chosen: its panel shows beside it.
     if (chosenOne() !== id) select([id], { reveal: false });
-    openInline(id);
+    openInline(id, { at: { x: event.clientX, y: event.clientY } });
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
@@ -503,41 +571,89 @@ export function figureParts(host) {
   // The marks as the host shows them over the drawing: a frame round each part chosen,
   // and on the one part chosen a + on the side its line leaves by, which adds the part
   // that usually comes next there, joined to it -- into its line, as a step in a flow.
+  // What usually comes next: a box after a start, a decision, a structure or a picture
+  // (a step that needs no file to be chosen first).
   const AFTER = { terminal: "block", decision: "block", text: "block", junction: "block", op: "block", circle: "circle" };
   function nextKind(node) {
     const kind = AFTER[node.kind || "block"] || node.kind || "block";
-    return parts[kind] && !parts[kind].unavailable ? kind : "block";
+    return parts[kind] && !parts[kind].unavailable && !parts[kind].needs_file ? kind : "block";
   }
+  // The side the flow goes on by: along the part's row or column as drawn, else toward
+  // where its line goes.
   function sideOf(id, box) {
     const holder = parentOf(id);
-    const siblings = holder?.children || [];
-    const at = siblings.indexOf(id);
+    const way = holder && (holder.children || []).length > 1 ? shownKind(holder) : null;
+    if (way) return way === "row" ? "right" : "bottom";
     const line = model().edges.find((edge) => nodeOfRef(edge.from) === id);
-    const toward = line ? nodeOfRef(line.to) : siblings[at + 1] || null;
-    const away = toward ? null : siblings[at - 1] || null;
-    const other = (toward || away) && host.box(toward || away);
-    if (!other) return holder?.layout?.kind === "row" ? "right" : "bottom";
+    const other = line && host.box(nodeOfRef(line.to));
+    if (!other) return drawnKind(holder) === "row" ? "right" : "bottom";
     const dx = other.left + other.width / 2 - (box.left + box.width / 2);
     const dy = other.top + other.height / 2 - (box.top + box.height / 2);
-    const sign = toward ? 1 : -1;
-    if (Math.abs(dx) > Math.abs(dy)) return dx * sign > 0 ? "right" : "left";
-    return dy * sign > 0 ? "bottom" : "top";
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+    return dy > 0 ? "bottom" : "top";
+  }
+  // Whether a + centred at (x, y), in the page's pixels, would cover something drawn: a
+  // line, a label, another shape, the page's edge. What holds the part (a group's frame,
+  // the slide) is not in the way.
+  const PLUS = 18;
+  function clearAt(x, y, own) {
+    const svg = host.overlay.querySelector("svg");
+    const whole = svg?.getBoundingClientRect();
+    if (!whole || !own) return true;
+    if (x < whole.left + 12 || x > whole.right - 12 || y < whole.top + 12 || y > whole.bottom - 12) return false;
+    const mine = own.getBoundingClientRect();
+    for (const [dx, dy] of [[0, 0], [11, 0], [-11, 0], [0, 11], [0, -11], [8, 8], [-8, 8], [8, -8], [-8, -8]]) {
+      for (const hit of document.elementsFromPoint(x + dx, y + dy)) {
+        if (hit === svg || !svg.contains(hit) || own.contains(hit) || /^(g|svg|defs|clipPath)$/i.test(hit.tagName)) continue;
+        const box = hit.getBoundingClientRect();
+        if (box.left <= mine.left + 1 && box.right >= mine.right - 1 && box.top <= mine.top + 1 && box.bottom >= mine.bottom - 1) continue;
+        return false;
+      }
+    }
+    return true;
+  }
+  // The + in clear space on the side the flow goes on -- slid along that side, or else
+  // on another, if a line or a label is there.
+  function plusPlace(id, box) {
+    const flow = sideOf(id, box);
+    const sides = [flow, ...["right", "bottom", "left", "top"].filter((side) => side !== flow)];
+    const outer = host.overlay.getBoundingClientRect();
+    const own = host.element(id);
+    const at = (side, shift) => ({
+      side,
+      x: side === "right" ? box.left + box.width + PLUS : side === "left" ? box.left - PLUS : box.left + box.width / 2 + shift,
+      y: side === "bottom" ? box.top + box.height + PLUS : side === "top" ? box.top - PLUS : box.top + box.height / 2 + shift,
+    });
+    for (const side of sides) {
+      const along = side === "right" || side === "left" ? box.height : box.width;
+      for (const share of [0, 0.25, -0.25, 0.4, -0.4]) {
+        const place = at(side, share * along);
+        if (clearAt(outer.left + place.x, outer.top + place.y, own)) return place;
+      }
+    }
+    return at(flow, 0);
   }
   function markViews() {
-    // A molecule chosen may be grabbed and turned: the pointer says so over it.
-    for (const element of host.overlay.querySelectorAll(".fig-grab")) element.classList.remove("fig-grab");
-    if (nodeOf(chosenOne())?.kind === "structure") moleculeOf(chosenOne())?.classList.add("fig-grab");
-    const views = marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
+    // A line chosen is marked along its path, not by the box round it.
+    for (const twin of host.overlay.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
+    for (const id of state.selected) if (isLine(id)) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
+    // A group's name tag sits over its frame -- under it, where its own title is drawn there.
+    const outer = host.overlay.getBoundingClientRect();
+    const tagClear = (id, box) => {
+      const own = host.element(`${id}.label`)?.getBoundingClientRect();
+      if (!own?.width) return true;
+      const top = outer.top + box.top - 20, bottom = outer.top + box.top + 2;
+      return own.bottom < top || own.top > bottom;
+    };
+    const views = marks().filter((mark) => !isLine(mark.id)).map(({ id, box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
       left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
-    group ? h("span.fig-mark-label", {}, name) : null));
+    group ? h(`span.fig-mark-label${tagClear(id, box) ? "" : ".below"}`, {}, name) : null));
     const id = chosenOne();
     const box = id && nodeOf(id) && !state.connecting && !inline ? host.box(id) : null;
+    const stop = (event) => event.stopPropagation();
     if (box) {
-      const side = sideOf(id, box);
+      const { side, x, y } = plusPlace(id, box);
       const kind = nextKind(nodeOf(id));
-      const x = side === "right" ? box.left + box.width : side === "left" ? box.left : box.left + box.width / 2;
-      const y = side === "bottom" ? box.top + box.height : side === "top" ? box.top : box.top + box.height / 2;
-      const stop = (event) => event.stopPropagation();
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: `Add a connected ${inSentence(parts[kind].title)} after “${nameOf(id)}” (A for other shapes)`,
@@ -545,12 +661,36 @@ export function figureParts(host) {
         onclick: (event) => { stop(event); addPart(kind, { after: id, source: id }); },
       }, icon("plus")));
     }
+    // A molecule chosen is moved by dragging, like any part; it is turned by its handle
+    // (or by ⌥-dragging it).
+    const molecule = box && nodeOf(id)?.kind === "structure" ? moleculeOf(id)?.getBoundingClientRect() : null;
+    if (molecule?.width) {
+      views.push(h("button.fig-rotate", {
+        type: "button", title: "Drag to rotate the molecule (or ⌥-drag it)",
+        style: { left: `${molecule.right - outer.left - 13}px`, top: `${molecule.top - outer.top + 13}px` },
+        onpointerdown: (event) => { if (event.button === 0) turnStart(event, id); }, ondblclick: stop, onclick: stop,
+      }, icon("refresh")));
+    }
+    // Molecules being drawn again: a spinner on each, until its new drawing is in.
+    for (const [id, { element, since }] of redrawing) {
+      const now = moleculeOf(id);
+      if (!now || now !== element || Date.now() - since > 20000) { redrawing.delete(id); continue; }
+      const at = now.getBoundingClientRect();
+      views.push(h("div.fig-redrawing", { title: "Drawing…", style: { left: `${at.left - outer.left + 10}px`, top: `${at.top - outer.top + 10}px` } }, h("span.spinner")));
+    }
     // A molecule or picture chosen has a handle at each corner: dragged, it is drawn
-    // larger or smaller, and the figure is laid out round it again.
+    // larger or smaller, and the figure is laid out round it again. Where the figure's own
+    // handle is at the same corner, the part's steps inside it.
     if (box && SIZED_PARTS.has(nodeOf(id)?.kind)) {
+      const theirs = [...host.overlay.querySelectorAll(".size-handle")].map((handle) => handle.getBoundingClientRect()).filter((rect) => rect.width);
       for (const corner of ["nw", "ne", "sw", "se"]) {
+        let left = corner.endsWith("w") ? box.left : box.left + box.width, top = corner.startsWith("n") ? box.top : box.top + box.height;
+        if (theirs.some((rect) => Math.hypot(rect.left + rect.width / 2 - outer.left - left, rect.top + rect.height / 2 - outer.top - top) < 14)) {
+          left += corner.endsWith("w") ? 12 : -12;
+          top += corner.startsWith("n") ? 12 : -12;
+        }
         views.push(h(`span.fig-size.${corner}`, {
-          style: { left: `${corner.endsWith("w") ? box.left : box.left + box.width}px`, top: `${corner.startsWith("n") ? box.top : box.top + box.height}px` },
+          style: { left: `${left}px`, top: `${top}px` },
           title: "Drag to resize · Double-click to reset size",
           onpointerdown: (event) => partSizeStart(event, id, corner),
           ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
@@ -558,6 +698,16 @@ export function figureParts(host) {
       }
     }
     return views;
+  }
+
+  // A press that dragged, turned or sized something ends in a click on whatever the
+  // pointer was let go over -- the slide's margin, say, which would choose nothing: that
+  // click is not one, wherever it lands.
+  function swallowClick() {
+    state.swallow = true;
+    const stop = (event) => { event.stopPropagation(); event.preventDefault(); };
+    window.addEventListener("click", stop, { capture: true, once: true });
+    setTimeout(() => { state.swallow = false; window.removeEventListener("click", stop, { capture: true }); }, 0);
   }
 
   // -- a molecule or picture sized by its corners --
@@ -609,7 +759,7 @@ export function figureParts(host) {
     window.removeEventListener("pointercancel", partSizeCancel);
     host.overlay.classList.remove("fig-sizing");
     sizing?.tip.remove();
-    if (sizing?.moved) { state.swallow = true; setTimeout(() => { state.swallow = false; }, 0); }
+    if (sizing?.moved) swallowClick();
     return sizing;
   }
   function partSizeEnd() {
@@ -634,9 +784,11 @@ export function figureParts(host) {
   // the molecule is drawn at the new turn.
   const views = new Map();
   const moleculeOf = (id) => host.element(`${id}.molecule`);
+  // A press that turns the molecule chosen: ⌥ held, over the molecule. (Pressed
+  // without, it is moved like any part.)
   function turnable(event) {
     const id = chosenOne();
-    if (!id || nodeOf(id)?.kind !== "structure") return false;
+    if (!event.altKey || !id || nodeOf(id)?.kind !== "structure") return false;
     const box = moleculeOf(id)?.getBoundingClientRect();
     return Boolean(box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
   }
@@ -746,8 +898,7 @@ export function figureParts(host) {
     if (!was) return;
     if (!was.moved || !was.view) { turnClear(was); return; }
     // A press that turned it is not a click on it.
-    state.swallow = true;
-    setTimeout(() => { state.swallow = false; }, 0);
+    swallowClick();
     const { yaw, pitch } = turnAngles(was);
     was.tip.textContent = "Rendering…";
     const values = { "properties.yaw": yaw || null, "properties.pitch": pitch || null };
@@ -810,8 +961,9 @@ export function figureParts(host) {
   }
 
   function pointerdown(event) {
-    if (event.button !== 0 || state.connecting || inline || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.button !== 0 || state.connecting || inline) return;
     if (turnable(event)) { turnStart(event, chosenOne()); return; }
+    if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     const id = idAt(event);
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
@@ -841,7 +993,9 @@ export function figureParts(host) {
     document.body.classList.add("fig-grabbing");
     for (const { element } of moving) element.classList.add("fig-lifted");
     for (const element of lines) element.classList.add("fig-faded");
-    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [] });
+    // Where it may go, by the way each row and column is drawn (turned to fit, or not).
+    const drawn = { ...model(), groups: model().groups.map((group) => (shownKind(group) ? { ...group, layout: { ...(group.layout || {}), kind: shownKind(group) } } : group)) };
+    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn });
     select([id], { reveal: false });
   }
 
@@ -869,7 +1023,7 @@ export function figureParts(host) {
     for (const { element } of drag.moving) element.classList.toggle("fig-astray", !at);
   }
 
-  const dropAt = (point) => dropPlace(model(), drag.boxes, point, drag.id);
+  const dropAt = (point) => dropPlace(drag.drawn || model(), drag.boxes, point, drag.id);
   const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side : a === b);
   const unchanged = (at, id) => stays(model(), at, id);
 
@@ -954,8 +1108,7 @@ export function figureParts(host) {
     document.body.classList.remove("fig-grabbing");
     for (const { element } of was.parted) element.style.transform = "";
     // A drag ends in a click on whatever is under the pointer: that click is not one.
-    state.swallow = true;
-    setTimeout(() => { state.swallow = false; }, 0);
+    swallowClick();
     return was;
   }
   // Home again: the part slides back to where it was drawn, the lines come back.
@@ -983,8 +1136,8 @@ export function figureParts(host) {
     for (const { element } of was.moving) element.classList.add("fig-settling");
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
-    act(at.kind === "line" ? { do: "move", id: was.id, line: at.side, of: at.of }
-      : { do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
+    if (at.kind === "line") ownLine(was.id, at.of, at.side, { failed: () => sendHome(was) });
+    else act({ do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
   }
   function dragCancel() { const was = dragFinish(); if (was) sendHome(was); }
   let landed = 0;
@@ -1052,7 +1205,9 @@ export function figureParts(host) {
 
   // -- words typed on the drawing --
   let inline = null;
-  function openInline(id) {
+  // Return or Esc ends the typing and keeps what was typed, as a Mac text field does;
+  // so does clicking elsewhere. ⌘Z takes it back.
+  function openInline(id, { at = null } = {}) {
     closeInline(false);
     const kind = typeOf(id);
     const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : groupOf(id);
@@ -1063,19 +1218,73 @@ export function figureParts(host) {
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     const label = host.element(`${id}.label`);
-    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return to save · Esc to cancel · $maths$ · *emphasis*" }, field,
-      label ? null : h("div.inline-foot", {}, h("span", {}, "Return to save · Esc to cancel"), h("span", {}, "$maths$ · *emphasis*")));
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return or Esc: done · ⇧Return: new line · $maths$ · *emphasis*" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Return or Esc: done · ⇧Return: new line"), h("span", {}, "$maths$ · *emphasis*")));
+    // Lines break where they are broken, as the drawing breaks them: none wrapped.
+    if (label) field.area.setAttribute("wrap", "off");
     host.overlay.append(box);
+    // The handles on the part step aside while it is typed on.
+    for (const handle of host.overlay.querySelectorAll(".fig-next, .fig-rotate")) handle.remove();
     inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label) };
     placeInline();
     field.area.focus();
-    field.area.select();
+    // Double-clicked on a word, the word is chosen, as on a Mac; else all of it.
+    const word = at && label ? wordAt(label, at, field.area.value) : null;
+    if (word) field.area.setSelectionRange(word.start, word.end);
+    else field.area.select();
+    // The figure just chosen by that double-click may still be settling where it is drawn:
+    // the word is looked for again once it has, unless typing has begun.
+    if (!word && at && label) {
+      setTimeout(() => {
+        const area = field.area;
+        if (inline?.field !== area || area.selectionStart !== 0 || area.selectionEnd !== area.value.length || area.value !== original) return;
+        const later = wordAt(host.element(`${id}.label`) || label, at, area.value);
+        if (later) area.setSelectionRange(later.start, later.end);
+      }, 300);
+    }
+    field.area.addEventListener("input", () => placeInline());
     field.area.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); closeInline(true); }
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeInline(false); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeInline(true); }
     });
-    field.area.addEventListener("blur", () => setTimeout(() => { if (inline?.box === box && !box.contains(document.activeElement)) closeInline(true); }, 0));
+    // Left for anywhere else (the slide, another slide, the panel), what was typed is kept
+    // -- at once, before what was clicked acts. Not when only the window was left.
+    field.area.addEventListener("blur", (event) => {
+      if (inline?.box !== box || box.contains(event.relatedTarget) || !document.hasFocus()) return;
+      closeInline(true);
+    });
   }
+  // The word of the drawn words under a point, found in the words as written.
+  function wordAt(label, point, written) {
+    const texts = label.matches("text") ? [label] : [...label.querySelectorAll("text")];
+    let before = "", hit = null;
+    for (const text of texts) {
+      const box = text.getBoundingClientRect();
+      const inside = point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+      if (inside && !hit && text.getCharNumAtPosition && text.getScreenCTM()) {
+        const local = new DOMPoint(point.x, point.y).matrixTransform(text.getScreenCTM().inverse());
+        const index = text.getCharNumAtPosition(local);
+        const content = text.textContent || "";
+        if (index >= 0 && /[\p{L}\p{N}]/u.test(content[index] || "")) {
+          let start = index, end = index + 1;
+          while (start > 0 && /[\p{L}\p{N}'’-]/u.test(content[start - 1])) start -= 1;
+          while (end < content.length && /[\p{L}\p{N}'’-]/u.test(content[end])) end += 1;
+          hit = { word: content.slice(start, end), before: before + content.slice(0, start) };
+        }
+      }
+      before += `${text.textContent || ""} `;
+    }
+    if (!hit) return null;
+    // The same word, as often as it came before, in what is written.
+    const occurrence = hit.before.split(hit.word).length - 1;
+    let from = -1;
+    for (let n = 0; n <= occurrence; n += 1) {
+      from = written.indexOf(hit.word, from + 1);
+      if (from < 0) return null;
+    }
+    return { start: from, end: from + hit.word.length };
+  }
+  const measuring = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
   function placeInline() {
     if (typeInto && !inline && host.box(typeInto)) {
       // Once it has landed where it is drawn.
@@ -1097,12 +1306,27 @@ export function figureParts(host) {
     const style = getComputedStyle(label);
     const size = parseFloat(style.fontSize) * (label.getScreenCTM()?.a || 1);
     const outer = host.overlay.getBoundingClientRect(), drawn = label.getBoundingClientRect();
-    const width = Math.max(drawn.width + 2 * size, where.width, 120);
+    // As wide as its longest line, growing as it is typed: it wraps where the drawing does.
+    let longest = 0;
+    if (measuring) {
+      measuring.font = `${style.fontWeight} ${size}px ${style.fontFamily}`;
+      longest = Math.max(...inline.field.value.split("\n").map((line) => measuring.measureText(plain(line) || " ").width));
+    }
+    const width = Math.max(drawn.width, longest) + size + 12;
     const middle = drawn.width ? drawn.left + drawn.width / 2 - outer.left : where.left + where.width / 2;
     const top = (drawn.height ? drawn.top - outer.top : where.top + where.height / 2 - size * 0.7) - 4;
     Object.assign(inline.box.style, { left: `${middle - width / 2}px`, top: `${top}px`, width: `${width}px`, minWidth: "" });
     Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: style.fontFamily, fontWeight: style.fontWeight,
       color: style.fill && style.fill !== "none" ? style.fill : "", textAlign: "center" });
+    // Its formatting bar stays over the slide, not off its edge.
+    const tools = inline.box.querySelector(".markup-tools");
+    const page = host.overlay.querySelector("svg")?.getBoundingClientRect() || outer;
+    if (tools) {
+      tools.style.marginLeft = "0px";
+      const bar = tools.getBoundingClientRect();
+      const shift = bar.left < page.left + 4 ? page.left + 4 - bar.left : bar.right > page.right - 4 ? page.right - 4 - bar.right : 0;
+      tools.style.marginLeft = `${shift}px`;
+    }
   }
   function closeInline(keep) {
     if (!inline) return;
@@ -1111,11 +1335,17 @@ export function figureParts(host) {
     inline = null;
     box.remove();
     if (keep && field.value !== original) update({ type: kind, id }, { label: field.value });
+    host.settled?.();
   }
-
   // -- keys --
   // Answers whether it took the key: the host does what it does with the rest.
   function key(event) {
+    // A key typed in a field is the field's: nothing on the drawing acts on it.
+    if (typingIn(event.target) || typingIn(document.activeElement)) return true;
+    // Nor one typed just after, should the field have been drawn again under the keys
+    // (the figure came back from the server): ⌫ deletes words, never the part.
+    if ((event.key === "Backspace" || event.key === "Delete") && Date.now() - lastTyped < 1500
+        && (!document.activeElement || document.activeElement === document.body)) { event.preventDefault(); return true; }
     const mod = event.metaKey || event.ctrlKey;
     if (event.key === "Escape") {
       if (state.connecting) { toggleConnect(false); return true; }
@@ -1192,6 +1422,7 @@ export function figureParts(host) {
     ];
   }
 
+  // A part's ID is what lines and the file name it by: kept, but out of the way.
   function idField(id, type) {
     const input = ui.input({ value: id, mono: true, key: `id:${id}` });
     input.addEventListener("change", () => {
@@ -1200,44 +1431,98 @@ export function figureParts(host) {
       act({ do: "rename", id, to });
     });
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } });
-    return ui.field("ID", input, { hint: type === "group" ? "" : "Used by lines" });
+    return ui.field("ID", input, { hint: type === "group" ? "The group's name in the file" : "The shape's name in the file, used by its lines" });
   }
+  const advanced = (...content) => h("details.more.advanced", { open: openAdvanced, ontoggle: (event) => { openAdvanced = event.currentTarget.open; } },
+    h("summary", {}, icon("chevron"), "Advanced"), h("div.inner.fields", {}, content));
+  let openAdvanced = false;
 
   const titleBlock = (picture, name, hintText) =>
     h("div.insp-title", {}, picture, h("div.insp-words", {}, h("div.insp-name", {}, name), hintText ? h("div.insp-hint", {}, hintText) : null));
 
+  // A part made another kind of shape keeps its words and its lines; one drawn from a
+  // file (a structure, a picture) asks for the file first.
+  async function retype(node, kind) {
+    const next = parts[kind];
+    if (!next || kind === (node.kind || "block")) return;
+    if (!next.needs_file) { update({ type: "node", id: node.id }, { kind }); return; }
+    const field = next.fields.find((item) => item.type === "file");
+    const file = await host.chooseFile({ title: `Choose ${article(next.title)} ${titled(next.title)}`, types: field?.types });
+    if (file) update({ type: "node", id: node.id }, { kind, "properties.source": file });
+  }
+
   function nodePanel(node) {
     const part = partOf(node) || { title: node.kind, fields: [], hint: "" };
-    // A part made a structure or a picture is drawn from a file: it is asked for, and
-    // the part keeps its words (under the molecule, say) and its lines.
-    const kinds = Object.entries(parts).filter(([kind, p]) => !p.unavailable || kind === node.kind);
-    const retype = ui.select({ value: node.kind || "block", options: kinds.map(([kind, p]) => ({ value: kind, label: p.title })),
-      onChange: async (value) => {
-        const next = parts[value];
-        if (!next?.needs_file || value === node.kind) { update({ type: "node", id: node.id }, { kind: value }); return; }
-        const field = next.fields.find((item) => item.type === "file");
-        const file = await host.chooseFile({ title: `Choose ${article(next.title)} ${titled(next.title)}`, types: field?.types });
-        if (!file) { retype.value = node.kind || "block"; return; }
-        update({ type: "node", id: node.id }, { kind: value, "properties.source": file });
-      } });
+    const kind = node.kind || "block";
+    const type = h("button.type-pick", { type: "button", title: "Change the shape's type", onclick: (event) => addPalette(event.currentTarget, { change: node }) },
+      glyph(kind), h("span", {}, parts[kind]?.title || titled(kind)), icon("chevron-down"));
     const lines = model().edges.filter((edge) => nodeOfRef(edge.from) === node.id || nodeOfRef(edge.to) === node.id);
+    const shown = part.fields.filter((field) => field.key !== "properties.tone");
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
-        h("div.insp-row", {}, titleBlock(glyph(node.kind || "block"), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
+        h("div.insp-row", {}, titleBlock(glyph(kind), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
+      kind === "structure" ? structureProblem(node) : null,
       colourSection([{ type: "node", id: node.id, item: node }]),
-      h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Type", retype)),
-        fields(part.fields.filter((field) => field.key !== "properties.tone"), node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
+      h("div.section", {}, ui.field("Type", type),
+        fields(shown, node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length)),
         lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([edge.id]) },
             nodeOfRef(edge.from) === node.id ? ["To ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["From ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
             edge.label ? h("span.muted", {}, ` · ${plain(edge.label)}`) : null),
-          ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "close", title: "Delete line" })))) : null,
+          // The line goes; the shape stays chosen.
+          ui.button("", () => remove([edge.id], [node.id]), { kind: "ghost", small: true, icon: "close", title: "Delete Line" })))) : null,
         h("div.row", {},
           ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }),
           ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
       ownLineSection(node.id),
+      h("div.section", {}, advanced(idField(node.id, "node"))),
     ];
+  }
+
+  // What keeps a structure from being drawn as written, said where it is edited.
+  function structureProblem(node) {
+    const box = h("div.insp-problem");
+    const section = h("div.section", { hidden: true }, box);
+    settingsOf(node.id).then((settings) => {
+      if (!settings?.problem) return;
+      clear(box, icon("warning"), h("div", {}, h("b", {}, settings.problem), " ", settings.reason || ""));
+      section.hidden = false;
+    });
+    return section;
+  }
+
+  // -- which way a row or column is drawn --
+  // A figure fitted to a slide may be drawn turned, a column as a row: commands and
+  // panels go by what is on screen, and are written as the figure has it.
+  const writtenKind = (group) => group?.layout?.kind || (group?.id === model()?.root ? "column" : "row");
+  // The way its parts lie on screen, when there are two to tell by.
+  function shownKind(group) {
+    if (!group || !["row", "column"].includes(writtenKind(group))) return null;
+    const boxes = new Map();
+    const middles = (group.children || []).map((child) => boxOf(child, boxes)).filter(Boolean).map(centre);
+    if (middles.length < 2) return null;
+    const across = Math.max(...middles.map((at) => at.x)) - Math.min(...middles.map((at) => at.x));
+    const down = Math.max(...middles.map((at) => at.y)) - Math.min(...middles.map((at) => at.y));
+    return across > down ? "row" : "column";
+  }
+  const drawnKind = (group) => shownKind(group) || writtenKind(group);
+  const turned = (group) => Boolean(shownKind(group)) && shownKind(group) !== writtenKind(group);
+  // A part put on a line of its own `side` of the group `of`, as the figure is seen: one
+  // drawn turned to fit the slide is first written as it is drawn, so the line goes where
+  // it was asked for, under what is on screen -- one step to undo.
+  function ownLine(id, of, side, { failed = null } = {}) {
+    const turnedGroups = (model()?.groups || []).filter(turned);
+    const move = (merge = null) => act({ do: "move", id, line: side, of }, { merge, failed });
+    if (!turnedGroups.length) { move(); return; }
+    const merge = `as-drawn:${id}:${Date.now()}`;
+    const steps = ["row", "column"].map((kind) => ({ kind, targets: turnedGroups.filter((group) => shownKind(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
+      .filter((step) => step.targets.length);
+    const next = (index) => {
+      if (index >= steps.length) { move(merge); return; }
+      act({ do: "update", targets: steps[index].targets, values: { "layout.kind": steps[index].kind } }, { merge, select: false, failed, then: () => next(index + 1) });
+    };
+    next(0);
   }
 
   // A part in a row put on a line of its own, under (or over) that row and centred on
@@ -1245,11 +1530,10 @@ export function figureParts(host) {
   // in a column, a part takes a column of its own.)
   function ownLineSection(id) {
     const holder = parentOf(id);
-    const kind = holder?.layout?.kind || (holder?.id === model().root ? "column" : "row");
-    if (!holder || kind !== "row" || !(holder.children || []).some((child) => child !== id)) return null;
+    if (!holder || drawnKind(holder) !== "row" || !(holder.children || []).some((child) => child !== id)) return null;
     return h("div.section", {}, h("div.section-title", {}, "Move to Own Row"),
       h("div.row", {}, [["below", "Below", "down"], ["above", "Above", "up"]].map(([side, label, glyphName]) =>
-        ui.button(label, () => act({ do: "move", id, line: side, of: holder.id }),
+        ui.button(label, () => ownLine(id, holder.id, side),
           { small: true, icon: glyphName, title: `Move to a new row ${side}, centred on this one` }))),
       h("div.hint-line", {}, "You can also drag it below or above the figure."));
   }
@@ -1260,12 +1544,13 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, isRoot ? null : crumbs(group.id),
         h("div.insp-row", {},
-          titleBlock(glyph(groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
-            `${counted(count, "shape")} · ${titled(group.layout?.kind || "column")}`),
+          titleBlock(glyph(["row", "column"].includes(drawnKind(group)) ? drawnKind(group) : groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
+            `${counted(count, "shape")} · ${titled(drawnKind(group) || "column")}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
-      h("div.section", {}, isRoot || group.implied ? null : idField(group.id, "group"),
+      h("div.section", {},
+        turned(group) ? h("div.hint-line.turned", {}, icon("info"), `Drawn as a ${drawnKind(group)} to fit the slide; written as a ${writtenKind(group)}.`) : null,
         fields(catalog.group_fields, group, (values, merge) => update({ type: "group", id: group.id }, values, merge), `group:${group.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Contents", h("span.count", {}, count)),
         h("div.line-list", {}, (group.children || []).map((child, index) => h("div.line-row", {},
@@ -1274,14 +1559,26 @@ export function figureParts(host) {
           ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Move Down", disabled: index === count - 1 })))),
         ui.button("Add Shape Inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
       isRoot ? null : ownLineSection(group.id),
+      isRoot || group.implied ? null : h("div.section", {}, advanced(idField(group.id, "group"))),
     ];
   }
 
   function edgePanel(edge) {
-    const options = model().nodes.flatMap((node) => [node.id, ...(node.ports || []).map((port) => `${node.id}.${port}`)]);
-    const end = (key) => ui.combo({ value: edge[key], options, mono: true, key: `edge:${edge.id}:${key}`, onChange: (text) => {
-      if (options.includes(text) && text !== edge[key]) act({ do: "update", target: { type: "edge", id: edge.id }, values: { [key]: text } }, { select: false, then: () => select([]) });
-    } });
+    // Its ends by the shapes' names (and ports'), as they are seen; their IDs are the file's.
+    const options = model().nodes.flatMap((node) => [{ value: node.id, label: nameOf(node.id) },
+      ...(node.ports || []).map((port) => ({ value: `${node.id}.${port}`, label: `${nameOf(node.id)} · ${titled(port)}` }))]);
+    const end = (key) => {
+      const known = options.some((option) => option.value === edge[key]);
+      return ui.select({ value: edge[key], options: known ? options : [{ value: edge[key], label: edge[key] }, ...options], onChange: (value) => {
+        if (value === edge[key]) return;
+        // The line, named by its ends, is chosen again by them.
+        const other = key === "from" ? "to" : "from";
+        act({ do: "update", target: { type: "edge", id: edge.id }, values: { [key]: value } }, { select: false, then: () => {
+          const now = model().edges.find((item) => item[key] === value && item[other] === edge[other]);
+          select(now ? [now.id] : [], { reveal: false });
+        } });
+      } });
+    };
     return [
       h("div.section.insp-top", {}, host.crumbs ? h("div.crumbs", {}, host.crumbs(), icon("chevron"), h("span.crumb.here", {}, "Line")) : null,
         h("div.insp-row", {}, titleBlock(glyph("edge"), "Line", nameOf(edge.id)),
@@ -1294,7 +1591,7 @@ export function figureParts(host) {
   function netPanel(net) {
     return [
       h("div.section.insp-top", {},
-        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching Line", `${(net.sources || []).join(", ")} → ${(net.targets || []).join(", ")}`),
+        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching Line", `${(net.sources || []).map((ref) => nameOf(nodeOfRef(ref))).join(", ")} → ${(net.targets || []).map((ref) => nameOf(nodeOfRef(ref))).join(", ")}`),
           h("div.insp-actions", {}, ui.button("", () => remove([net.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       h("div.section", {}, fields([catalog.edge_fields[0]], net, (values, merge) => update({ type: "net", id: net.id }, values, merge), `net:${net.id}`),
         h("div.hint-line", {}, "Connects one output to several ports, such as the query, key and value of attention. Edit its ends in Source.")),
@@ -1318,6 +1615,7 @@ export function figureParts(host) {
         h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one is added after it and connected to it."),
         h("li", {}, h("b", {}, "Connect"), " (C): click the shape where the line starts, then the one where it ends."),
         h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
+        h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule."),
         h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G).")),
       h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
         figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
@@ -1382,7 +1680,7 @@ export function figureParts(host) {
       ui.colour({
         title: label, key: `colour:${scope}:${part}`,
         value: common((target) => target.type === "node" ? target.item.properties?.[`paint-${part}`] : target.item.paint?.[part]),
-        onChange: (value) => { paint("node", { [`properties.paint-${part}`]: value }); paint("group", { [`paint.${part}`]: value }); },
+        onChange: (value) => paced(`colour:${scope}:${part}`, () => { paint("node", { [`properties.paint-${part}`]: value }); paint("group", { [`paint.${part}`]: value }); }),
       }),
       h("span", {}, nodes.length ? label : GROUP_OWN[part]))));
     return h("div.section", {}, h("div.section-title", {}, "Colour"), chips, named,
@@ -1413,8 +1711,20 @@ export function figureParts(host) {
     switch (field.type) {
       case "markup":
         return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, spelling: false, onInput: set }), options);
-      case "text":
-        return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
+      case "text": {
+        if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
+        // A structure's selection is sent once typed, and said when it selects nothing.
+        const control = typedField({ value, key, onCommit: set });
+        const note = h("div.field-problem", { hidden: true });
+        settingsOf(item.id).then((settings) => {
+          const said = settings?.selections?.[field.key];
+          if (!said || drafts.has(key)) return;
+          clear(note, icon("warning"), h("span", {}, said));
+          note.hidden = false;
+          control.classList.add("invalid");
+        });
+        return ui.field(field.label, h("div.field-stack", {}, control, note), options);
+      }
       case "length":
         return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "Auto", mono: true, onInput: (text) => {
           const clean = text.trim();
@@ -1449,9 +1759,9 @@ export function figureParts(host) {
       }
       case "integer":
       case "number":
-        return ui.field(field.label, ui.number({ value: value ?? "", key, min: field.min, step: field.type === "integer" ? 1 : "any",
-          placeholder: field.default !== undefined ? String(field.default) : "Auto",
-          onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) }), options);
+        return ui.field(field.label, typedField({ value, key, placeholder: field.default !== undefined ? String(field.default) : "Auto",
+          number: { min: field.min, max: field.max, step: field.step ?? (field.type === "integer" ? 1 : undefined), integer: field.type === "integer", unit: field.unit },
+          onCommit: set }), options);
       case "bool": {
         const on = value ?? field.default ?? false;
         // A switch's hint is said beside it: the label column is narrow.
@@ -1493,7 +1803,7 @@ export function figureParts(host) {
         return ui.field(field.label, h("div.row", {}, ui.input({ value: value ?? "", mono: true, key, onChange: set }),
           h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
-        return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"));
+        return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":
         return ui.field(field.label, groupPalette(item, value, set), options);
       case "molsketch":
@@ -1501,6 +1811,96 @@ export function figureParts(host) {
       default:
         return null;
     }
+  }
+
+  // -- words and numbers typed in a field, sent once they are whole --
+  // A number is sent on Return, when the field is left, or after a pause: "3.5" is sent as
+  // 3.5, not as 3 and then 3.5. Esc ends the typing as Return does, as in a Mac field. ↑
+  // and ↓ (and the steppers beside it) go a step at a time, ⇧ ten. What is typed and not
+  // sent yet stays in the field should the panel be drawn again meanwhile.
+  const drafts = new Map();
+  const PAUSE = 700;
+  function typedField({ value, key, placeholder = "", number = null, mono = false, onCommit }) {
+    const shown = drafts.has(key) ? drafts.get(key) : value === undefined || value === null ? "" : String(value);
+    const input = ui.input({ value: shown, key, placeholder, mono });
+    if (number) input.inputMode = "decimal";
+    const read = (text) => {
+      const clean = String(text ?? "").trim();
+      if (!number) return clean || null;
+      const bare = clean.replace(/\s*(Å|°|×|σ|px|pt|%)$/u, "").replace(",", ".");
+      if (!bare) return null;
+      const parsed = Number(bare);
+      return Number.isFinite(parsed) ? parsed : NaN;
+    };
+    const within = (parsed) => parsed === null || typeof parsed === "string"
+      || (!Number.isNaN(parsed) && (number.min === undefined || parsed >= number.min) && (number.max === undefined || parsed <= number.max));
+    let sent = read(value);
+    let timer = 0;
+    const send = (parsed, text) => {
+      clearTimeout(timer);
+      timer = 0;
+      if (drafts.get(key) === text) drafts.delete(key);
+      if (parsed === sent) return;
+      sent = parsed;
+      onCommit(parsed);
+    };
+    const whole = (parsed) => (number?.integer && typeof parsed === "number" ? Math.round(parsed) : parsed);
+    const finish = () => {
+      let parsed = read(input.value);
+      if (Number.isNaN(parsed)) { input.classList.add("invalid"); return; }
+      if (number && parsed !== null) {
+        parsed = whole(parsed);
+        if (number.min !== undefined) parsed = Math.max(number.min, parsed);
+        if (number.max !== undefined) parsed = Math.min(number.max, parsed);
+        if (read(input.value) !== parsed) input.value = String(parsed);
+      }
+      input.classList.remove("invalid");
+      send(parsed, drafts.get(key));
+    };
+    const stepBy = (sign, big) => {
+      const now = read(input.value);
+      const from = typeof now === "number" && !Number.isNaN(now) ? now : Number(input.placeholder) || number.min || 0;
+      const by = (Number(number.step) || 1) * (big ? 10 : 1);
+      let next = Math.round((from + sign * by) * 1e6) / 1e6;
+      if (number.min !== undefined) next = Math.max(number.min, next);
+      if (number.max !== undefined) next = Math.min(number.max, next);
+      input.value = String(next);
+      drafts.set(key, input.value);
+      input.classList.remove("invalid");
+      clearTimeout(timer);
+      const text = input.value;
+      timer = setTimeout(() => send(next, text), 300);
+    };
+    input.addEventListener("input", () => {
+      drafts.set(key, input.value);
+      const parsed = read(input.value);
+      input.classList.toggle("invalid", Number.isNaN(parsed));
+      clearTimeout(timer);
+      timer = 0;
+      const text = input.value;
+      if (within(parsed)) timer = setTimeout(() => send(whole(parsed), text), PAUSE);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); finish(); input.select(); }
+      else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(); input.blur(); }
+      else if (number && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
+    });
+    input.addEventListener("blur", () => { if (timer || drafts.has(key)) finish(); });
+    if (!number) return input;
+    const step = (sign, title) => h("button.stepper", { type: "button", tabIndex: -1, title, onmousedown: (event) => event.preventDefault(),
+      onclick: (event) => stepBy(sign, event.shiftKey) }, icon("chevron-down"));
+    const node = h("div.typed-number", {}, input, number.unit ? h("span.unit", {}, number.unit) : null,
+      h("span.steppers", {}, step(1, "Increase (↑)"), step(-1, "Decrease (↓)")));
+    node.input = input;
+    return node;
+  }
+
+  // A colour dragged in the system's picker changes at every step: it is sent as it goes,
+  // at most every tenth of a second, and its last colour always.
+  const pacers = new Map();
+  function paced(key, run) {
+    if (!pacers.has(key)) pacers.set(key, throttled((next) => next(), 100));
+    pacers.get(key)(run);
   }
 
   // -- a structure's mol-sketch settings --
@@ -1551,10 +1951,17 @@ export function figureParts(host) {
     const fills = [];
     const look = h("span.hint", {}, "Loading…");
     const ownCount = Object.keys(own).length;
+    // Chains and residues given colours of their own are drawn in them, over these.
+    const coloured = (item.properties?.colors || []).some((row) => row?.group && row?.color);
     const sections = field.sections.map((section) => {
       const count = section.fields.filter((each) => own[each.key] !== undefined).length;
-      const control = (each) => styleControl(each, own[each.key], fills,
-        (next) => write({ [`properties.style.${each.key}`]: next }, `style:${item.id}:${each.key}`));
+      const control = (each) => {
+        const merge = `style:${item.id}:${each.key}`;
+        const waiting = typed.get(merge);
+        const shown = waiting && `properties.style.${each.key}` in waiting ? waiting[`properties.style.${each.key}`] ?? undefined : own[each.key];
+        const send = (next) => write({ [`properties.style.${each.key}`]: next }, merge);
+        return styleControl(each, shown, fills, each.type === "colour" ? (next) => paced(merge, () => send(next)) : send, merge);
+      };
       // Colours as a row of wells; the rest two to a row, their hints on hover.
       const colours = section.fields.filter((each) => each.type === "colour");
       const rest = section.fields.filter((each) => each.type !== "colour");
@@ -1562,12 +1969,19 @@ export function figureParts(host) {
         h("summary", {}, icon("chevron"), section.title, count ? h("span.count", {}, count) : null),
         h("div.inner", {},
           rest.length ? h("div.mol-grid", {}, rest.map(control)) : null,
-          colours.length ? h("div.mol-colours", {}, colours.map(control)) : null));
+          colours.length ? h("div.mol-colours", {}, colours.map(control)) : null,
+          coloured && colours.some((each) => each.key.startsWith("palette.")) ? h("div.hint-line", {},
+            "Chains and residues given a colour under Colours are drawn in it; these colours show where none is given.") : null));
       details.addEventListener("toggle", () => { if (details.open) openSections.add(section.title); else openSections.delete(section.title); });
+      // A section for one way of drawing (engraved ribbons) shows while it is drawn that way.
+      if (section.show && !count) {
+        details.hidden = true;
+        fills.push((drawn) => { details.hidden = !Object.entries(section.show).every(([key, wanted]) => drawn[key] === wanted); });
+      }
       return details;
     });
     settingsOf(item.id).then((settings) => {
-      if (!settings) { look.textContent = "Rendering settings unavailable"; return; }
+      if (!settings || settings.problem && !settings.style) { look.textContent = "Rendering settings unavailable"; return; }
       look.textContent = settings.look ? `Look: ${titled(settings.look)}` : "";
       for (const fill of fills) fill(settings.style || {});
     });
@@ -1578,7 +1992,7 @@ export function figureParts(host) {
   }
 
   // One setting: what the look gives it shows until it has its own.
-  function styleControl(field, value, fills, set) {
+  function styleControl(field, value, fills, set, key) {
     const said = (drawn) => (drawn === null || drawn === undefined ? "" : typeof drawn === "number" ? String(Math.round(drawn * 1000) / 1000) : String(drawn));
     const options = {};
     const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
@@ -1597,29 +2011,34 @@ export function figureParts(host) {
       }
       case "integer":
       case "number": {
-        const input = ui.number({ value: value ?? "", min: field.min, max: field.max, step: field.step ?? "any",
-          onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) });
-        fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
-        return titled(ui.field(field.label, input, options));
+        const control = typedField({ value, key, onCommit: set,
+          number: { min: field.min, max: field.max, step: field.step, integer: field.type === "integer", unit: field.unit } });
+        fills.push((drawn) => { control.input.placeholder = said(drawn[field.key]); });
+        return titled(ui.field(field.label, control, options));
       }
       case "colour": {
-        const control = ui.colour({ value, title: field.label, onChange: set });
+        const control = ui.colour({ value, title: field.label, onChange: set, key });
         // Unset, the well shows the look's colour, faintly.
         fills.push((drawn) => { if (value === undefined && /^#[0-9a-f]{6}$/i.test(drawn[field.key] || "")) control.querySelector(".colour-chip").style.background = drawn[field.key]; });
         return titled(h("div.mol-colour", {}, control, h("span", {}, field.label)));
       }
       default: {
-        const input = ui.input({ value: value ?? "", onInput: (text) => set(text.trim() || null) });
+        const input = typedField({ value, key, onCommit: set });
         fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
         return titled(ui.field(field.label, input, options));
       }
     }
   }
 
-  // A table of records: a plasmid's features, a plate's groups, a timeline's events.
-  function recordsControl(field, value, set, key, length) {
+  // A table of records: a plasmid's features, a plate's groups, a timeline's events, a
+  // structure's colours (each chain from a menu of the molecule's, each colour in a well).
+  const COLOURS = ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"];
+  const RESIDUE = /^[A-Za-z]{1,3}-?\d+[A-Za-z]?(\.\w+)?$/;
+  function recordsControl(field, value, set, key, length, item = null) {
     const rows = value.map((row) => ({ ...(row && typeof row === "object" ? row : {}) }));
     const write = () => set(rows.map((row) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== "" && v !== null && v !== undefined))));
+    const chains = item?.kind === "structure" ? settingsOf(item.id).then((settings) => settings?.chains || []) : Promise.resolve([]);
+    const warnings = h("div.records-warnings");
     const cell = (row, index, column) => {
       const cellKey = `${key}:${index}:${column.name}`;
       const current = row[column.name];
@@ -1629,10 +2048,30 @@ export function figureParts(host) {
           onChange: (next) => change(next || null) });
       }
       if (column.type === "integer" || column.type === "number") {
-        return ui.number({ value: current ?? "", key: cellKey, step: column.type === "integer" ? 1 : "any",
-          onChange: (number) => change(number === null ? null : column.type === "integer" ? Math.round(number) : number) });
+        return typedField({ value: current, key: cellKey, number: { step: column.type === "integer" ? 1 : undefined, integer: column.type === "integer" },
+          onCommit: (number) => change(number) });
       }
       const input = ui.input({ value: current ?? "", key: cellKey, placeholder: column.hint || "", onInput: (text) => change(text) });
+      if (column.type === "chain") {
+        // One of the molecule's chains from the menu; a residue or the like typed.
+        const pick = h("button.cell-pick", { type: "button", tabIndex: -1, title: "Choose a chain", onclick: async (event) => {
+          const anchor = event.currentTarget;
+          const found = await chains;
+          menu(anchor, found.length ? found.map((chain) => ({ label: `Chain ${chain}`, run: () => { input.value = chain; change(chain); } }))
+            : [{ label: "No chains found", disabled: true }]);
+        } }, icon("chevron-down"));
+        return h("div.cell.with-pick", {}, input, pick);
+      }
+      if (column.type === "colour") {
+        // A well for a colour of one's own; a tone of the figure's typed by name.
+        const hex = /^#[0-9a-f]{6}$/i.test(current || "") ? current : null;
+        const well = h("input.cell-well", { type: "color", value: hex || "#888888", title: "Choose a colour", tabIndex: -1 });
+        if (!hex) well.classList.add("unset");
+        well.addEventListener("input", () => { well.classList.remove("unset"); input.value = well.value; paced(cellKey, () => change(well.value)); });
+        const id = `opts-${Math.random().toString(36).slice(2)}`;
+        input.setAttribute("list", id);
+        return h("div.cell.with-well", {}, well, input, h("datalist", { id }, (column.options || []).map((option) => h("option", { value: option }))));
+      }
       if (column.type !== "combo") return input;
       const id = `opts-${Math.random().toString(36).slice(2)}`;
       input.setAttribute("list", id);
@@ -1640,19 +2079,42 @@ export function figureParts(host) {
     };
     const width = (column) => (column.type === "integer" || column.type === "number" ? "minmax(52px, .7fr)"
       : column.type === "choice" ? "minmax(92px, 1.2fr)"
-        : column.name === "label" || column.name === "tips" ? "minmax(80px, 1.6fr)" : "minmax(56px, 1fr)");
+        : column.type === "colour" ? "minmax(96px, 1.3fr)"
+          : column.name === "label" || column.name === "tips" ? "minmax(80px, 1.6fr)" : "minmax(56px, 1fr)");
     const template = `${field.columns.map(width).join(" ")} 24px`;
+    const table = h("div.records-table", { style: { gridTemplateColumns: template } },
+      field.columns.map((column) => h("span.records-head", { title: column.hint || "" }, column.label)), h("span.records-head"),
+      rows.map((row, index) => [
+        ...field.columns.map((column) => cell(row, index, column)),
+        ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Delete Row" }),
+      ]));
+    // A row naming a chain the molecule lacks is said on it: it colours nothing, the rest is drawn.
+    const chainColumn = field.columns.findIndex((column) => column.type === "chain");
+    if (chainColumn >= 0) {
+      chains.then((found) => {
+        if (!found.length) return;
+        const name = fileLabel(item?.properties?.source || "") || "the structure";
+        const said = [];
+        rows.forEach((row, index) => {
+          const group = String(row[field.columns[chainColumn].name] ?? "").trim();
+          const typing = drafts.has(`${key}:${index}:${field.columns[chainColumn].name}`);
+          const input = table.querySelector(`[data-key="${CSS.escape(`${key}:${index}:${field.columns[chainColumn].name}`)}"]`);
+          const wrong = group && !typing && !group.includes(":") && !RESIDUE.test(group) && !found.includes(group);
+          input?.classList.toggle("invalid", Boolean(wrong));
+          if (!group) said.push(`Row ${index + 1} names no chain yet: it colours nothing.`);
+          else if (wrong) said.push(`Row ${index + 1}: ${name} has no chain “${group}”, so it colours nothing. Its chains are ${found.join(", ")}.`);
+        });
+        clear(warnings, said.map((text) => h("div.field-problem", {}, icon("warning"), h("span", {}, text))));
+      });
+    }
     return h("div.field.records", {},
       h("label.label", {}, field.label, h("span.hint", {}, `${rows.length}`)),
       field.hint ? h("div.hint-line", {}, field.hint) : null,
-      h("div.records-scroll.scroll-thin", {}, h("div.records-table", { style: { gridTemplateColumns: template } },
-        field.columns.map((column) => h("span.records-head", { title: column.hint || "" }, column.label)), h("span.records-head"),
-        rows.map((row, index) => [
-          ...field.columns.map((column) => cell(row, index, column)),
-          ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Delete row" }),
-        ]))),
-      ui.button("Add Row", () => {
-        // A new row starts as the catalogue says: "+N" is the last row's value and N more.
+      h("div.records-scroll.scroll-thin", {}, table),
+      warnings,
+      ui.button("Add Row", async () => {
+        // A new row starts as the catalogue says: "+N" is the last row's value and N more,
+        // "@chain" a chain of the molecule's that no row names yet.
         const last = rows[rows.length - 1];
         const fresh = {};
         for (const [name, start] of Object.entries(field.row || { label: "New" })) {
@@ -1661,6 +2123,14 @@ export function figureParts(host) {
             const next = typeof last?.[name] === "number" ? last[name] + step : typeof last?.at === "number" ? last.at + step : step;
             // Positions stay on the molecule: a new domain past the end is drawn at it.
             fresh[name] = typeof length === "number" ? Math.min(next, length) : next;
+          } else if (start === "@chain") {
+            const found = await chains;
+            const named = new Set(rows.map((row) => String(row[name] ?? "")));
+            fresh[name] = found.find((chain) => !named.has(chain)) ?? found[0] ?? "";
+          } else if (typeof start === "string" && /^#[0-9a-f]{6}$/i.test(start)) {
+            // A colour not taken yet, so each row is told apart.
+            const taken = new Set(rows.map((row) => String(row[name] ?? "").toLowerCase()));
+            fresh[name] = [start, ...COLOURS].find((colour) => !taken.has(colour.toLowerCase())) || start;
           } else if (start !== "") fresh[name] = start;
         }
         rows.push(fresh);

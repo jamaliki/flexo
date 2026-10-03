@@ -18,11 +18,16 @@ edited:
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
   at a time by buttons, as one turns a molecule in a viewer.
 
+A ``records`` column is edited as a field of the same type is, or as a ``chain`` (one of
+the structure's chains, offered from a menu; residues and the like typed) or a ``colour``
+(a colour well, or one of ``options``, a tone, typed).
+
 A field may carry a ``default`` (what the kind does when the key is absent),
 ``more`` (shown folded away, under the rest, for those who look for it),
 ``show`` (``{"key": value}`` or ``{"key": [values]}``: shown only while another key
 has that value), and ``hint``. A ``records`` field's ``row`` is what a new row
-starts as; ``"+N"`` is the last row's value and N more.
+starts as; ``"+N"`` is the last row's value and N more, and ``"@chain"`` a chain of the
+structure's that no row names yet.
 """
 
 from __future__ import annotations
@@ -482,7 +487,9 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field("properties", "View", "view", hint="Or drag the molecule to rotate it"),
+            _field(
+                "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
+            ),
             _field(
                 "properties.look",
                 "Look",
@@ -503,14 +510,16 @@ def _structure() -> dict[str, Any]:
                 "properties.colors",
                 "Colours",
                 "records",
-                row={"group": "A", "color": "#e69f00"},
+                # A new row colours a chain the structure has that no row colours yet.
+                row={"group": "@chain", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or Residue", hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain or Residue", "chain",
+                            hint="A, SER195, entity:1, subunit:L"),
                     _column(
-                        "color", "Colour", "combo", options=list(TONES), hint="#e69f00 or a tone"
+                        "color", "Colour", "colour", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="These override the palette and the look",
+                hint="These override the palette, the look and its colours (such as Helices)",
             ),
             _field(
                 "properties.cartoon", "Cartoon", "text", hint="Drawn as ribbons: polymer", more=True
