@@ -1027,7 +1027,7 @@ def test_a_theme_is_drawn_on_samples_and_its_changes_named(tmp_path: Path) -> No
         "theme": {"name": "studio-test", "base": "paper", "palette": ["#8b1e3f", "#1d4e89"]}
     }
     drawing = kind.draw(document, tmp_path, {})
-    assert [page.id for page in drawing.pages] == ["sample", "slice"]
+    assert [page.id for page in drawing.pages] == ["sample", "system"]
     assert drawing.info["effective"]["palette"][:2] == ["#8b1e3f", "#1d4e89"]
     assert drawing.info["tones"][0]["stroke"].startswith("#")
     assert kind.describe({"theme": {"name": "a"}}, document)[0]["text"] == "changed the name"

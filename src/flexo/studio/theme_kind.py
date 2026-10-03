@@ -26,19 +26,58 @@ BUDGET = 0.5
 SAMPLE = {
     "figure": {"id": "sample", "width": "single-column"},
     "nodes": [
-        {"id": "x", "kind": "text", "label": "Input $x$"},
-        {"id": "encoder", "label": "Encoder", "properties": {"tone": "encoder"}},
-        {"id": "attention", "label": "Attention", "properties": {"tone": "attention"}},
-        {"id": "head", "label": "Head", "properties": {"tone": "head"}},
-        {"id": "y", "kind": "text", "label": r"Output $\hat{y}$"},
+        {"id": "request", "kind": "text", "label": "Request $r$"},
+        {"id": "api", "label": "API", "properties": {"tone": "1"}},
+        {"id": "queue", "kind": "queue", "label": "Queue", "properties": {"tone": "2"}},
+        {"id": "worker", "label": "Worker", "properties": {"tone": "3"}},
+        {"id": "store", "kind": "database", "label": "Store", "properties": {"tone": "4"}},
     ],
     "edges": [
-        {"from": "x", "to": "encoder"},
-        {"from": "encoder", "to": "attention"},
-        {"from": "attention", "to": "head"},
-        {"from": "head", "to": "y"},
+        {"from": "request", "to": "api"},
+        {"from": "api", "to": "queue"},
+        {"from": "queue", "to": "worker"},
+        {"from": "worker", "to": "store"},
     ],
 }
+"""A theme's first sample: a pipeline, its steps in the theme's first tones."""
+
+SYSTEM = {
+    "figure": {"id": "system", "width": "double-column"},
+    "nodes": [
+        {"id": "person", "kind": "person", "label": "Customer"},
+        {"id": "web", "label": "Web app", "properties": {"tone": "1"}},
+        {"id": "phone", "label": "Phone app", "properties": {"tone": "1"}},
+        {"id": "api", "kind": "server", "label": "API", "properties": {"tone": "2"}},
+        {"id": "queue", "kind": "queue", "label": "Orders", "properties": {"tone": "3"}},
+        {"id": "worker", "label": "Worker", "properties": {"tone": "3"}},
+        {"id": "db", "kind": "database", "label": "Database", "properties": {"tone": "4"}},
+    ],
+    "groups": [
+        {
+            "id": "root",
+            "role": "canvas",
+            "layout": {"kind": "row"},
+            "children": ["person", "apps", "backend"],
+        },
+        {"id": "apps", "label": "Apps", "layout": {"kind": "column"}, "children": ["web", "phone"]},
+        {
+            "id": "backend",
+            "label": "Backend",
+            "layout": {"kind": "row"},
+            "children": ["api", "queue", "worker", "db"],
+        },
+    ],
+    "edges": [
+        {"from": "person", "to": "web"},
+        {"from": "person", "to": "phone"},
+        {"from": "web", "to": "api", "label": "HTTPS"},
+        {"from": "phone", "to": "api"},
+        {"from": "api", "to": "queue"},
+        {"from": "queue", "to": "worker"},
+        {"from": "worker", "to": "db"},
+    ],
+}
+"""Its second: a system, with groups, labelled lines and the software shapes."""
 
 
 class ThemeKind:
@@ -186,8 +225,8 @@ class ThemeKind:
         messages: list[Message] = []
         if specimen == "figures":
             makers = [
-                ("sample", "A model", lambda: _sample(name)),
-                ("slice", "A paper figure", lambda: _gallery(name)),
+                ("sample", "A pipeline", lambda: _sample(name, SAMPLE)),
+                ("system", "A system", lambda: _sample(name, SYSTEM)),
             ]
         else:
             provider = _specimens().get(specimen)
@@ -288,23 +327,14 @@ def _tones(name: str) -> list[dict[str, str]]:
     return tones
 
 
-def _sample(name: str) -> str:
+def _sample(name: str, sample: dict[str, Any]) -> str:
     from dataclasses import replace
 
     from flexo.compiler import compile_figure
     from flexo.serialization import parse_figure
 
-    spec = replace(parse_figure(copy.deepcopy(SAMPLE)), style=name)
+    spec = replace(parse_figure(copy.deepcopy(sample)), style=name)
     return compile_figure(spec).document.text
-
-
-def _gallery(name: str) -> str:
-    from dataclasses import replace
-
-    from flexo.compiler import compile_figure
-    from flexo.gallery import gallery_figure
-
-    return compile_figure(replace(gallery_figure("vertical-slice"), style=name)).document.text
 
 
 def _specimens() -> dict[str, Any]:
