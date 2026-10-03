@@ -165,7 +165,7 @@ export const ui = {
   button(label, onClick, { kind = "", icon: iconName, title, small, disabled, id } = {}) {
     const classes = ["btn", kind, small ? "small" : "", !label ? "icon" : ""].filter(Boolean).join(" ");
     return h("button", { class: classes, type: "button", title, disabled, id, onclick: onClick },
-      iconName ? icon(iconName) : null, label || null);
+      iconName ? icon(iconName) : null, label ? h("span.btn-label", {}, label) : null);
   },
 
   field(label, control, { hint, inline } = {}) {

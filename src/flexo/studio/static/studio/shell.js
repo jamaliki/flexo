@@ -296,6 +296,17 @@ export async function start() {
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
     { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
   const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+  // Too wide for the window (or beside the side panel), the bar shows its tools as icons
+  // alone, and then its other buttons too, rather than run off the edge.
+  const crowded = () => [docbar, docLeft, docRight].some((node) => node.scrollWidth > node.clientWidth + 1);
+  const fitDocbar = () => {
+    docbar.classList.remove("compact", "tight");
+    if (!crowded()) return;
+    docbar.classList.add("compact");
+    if (crowded()) docbar.classList.add("tight");
+  };
+  const fitting = new ResizeObserver(fitDocbar);
+  for (const node of [docbar, docLeft, docRight]) fitting.observe(node);
 
   // The document's history, newest first: each row is the document as a change left
   // it, the one it is now marked; a click goes back (or forward) to that point.

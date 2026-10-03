@@ -103,7 +103,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* -- the frame -- */
 
-.studio { display: grid; grid-template-rows: var(--bar) 1fr; height: 100%; }
+.studio { display: grid; grid-template-rows: var(--bar) 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }
 .bar {
   display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px;
   background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0;
@@ -153,8 +153,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn { position: relative; }
 
 /* the document bar and the workbench */
-.workbench { display: grid; grid-template-columns: 1fr auto; min-height: 0; }
-.center { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; position: relative; }
+.workbench { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.center { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; position: relative; }
+/* A document bar too wide for the window gives up its tools' labels, then all its words (shell.js). */
+.docbar .btn:not(.icon) { padding: 0 8px; gap: 5px; }
+.docbar.compact .docbar-slot:first-child .btn:not(.keep-label) .btn-label { display: none; }
+.docbar.compact .docbar-slot:first-child .btn:not(.keep-label) { padding: 0 7px; }
+.docbar.tight .btn-label, .docbar.tight .status-text, .docbar.tight .bar-label { display: none; }
+.docbar.tight .status:not(.problem) { min-width: 0; }
 .docbar { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
 .docbar-slot, .docbar-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .docbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; flex: none; }
@@ -201,6 +207,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* the side panel */
 .side { width: 360px; border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
 .side[hidden] { display: none; }
+/* In a narrow window the side panel lies over the document rather than squeezing it. */
+@media (max-width: 1239px) {
+  .workbench { position: relative; }
+  .side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 40; box-shadow: var(--shadow-2); }
+}
 .side-head { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .side-tabs { display: flex; gap: 2px; }
 .side-tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 0; background: transparent; border-radius: 6px; padding: 0 10px; color: var(--ink-3); cursor: pointer; font-weight: 580; }
@@ -289,6 +300,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .status { color: var(--ink-3); font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .status .status-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+/* "Saving…" and "Saved" take the same room, so nothing beside them shifts as a change saves. */
+.status:not(.problem) { min-width: 66px; }
 .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
 .status.dirty .dot { background: var(--warn); }
 .status.saved .dot { background: var(--ok); }
