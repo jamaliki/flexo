@@ -546,8 +546,10 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
   const panel = h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog", "aria-modal": "true", tabIndex: -1 },
     h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
     h("div.dialog-body.scroll-thin", { tabIndex: -1 }, body),
-    actions.length ? h("div.dialog-foot", {}, actions.map((action) =>
-      ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || "" }))) : null);
+    // Actions `aside` (Upload…, New Folder…) stand at the left, as in a Mac's open panel;
+    // Cancel and the default at the right.
+    actions.length ? h("div.dialog-foot", {}, [...actions.filter((action) => action.aside), ...(actions.some((action) => action.aside) ? [h("div.spacer")] : []), ...actions.filter((action) => !action.aside)].map((action) =>
+      action.label === undefined ? action : ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || "" }))) : null);
   // Tab from its last control goes to its first, ⇧Tab from its first to its last. A Tab
   // a field took (indenting code) is the field's.
   panel.addEventListener("keydown", (event) => {
