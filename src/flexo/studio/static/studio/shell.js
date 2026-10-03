@@ -38,8 +38,12 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 export class Workspace {
   constructor(info) {
     this.info = info;
+    // This window; and the person, the same in each of their windows and after a reload,
+    // so they keep their colour and are never shown to themselves as someone else.
     this.client = Math.random().toString(36).slice(2, 10);
-    this.me = { id: this.client, name: remembered("name", "You"), kind: "person" };
+    let person = remembered("person", "");
+    if (!person) { person = Math.random().toString(36).slice(2, 10); remember("person", person); }
+    this.me = { id: person, name: remembered("name", "You"), kind: "person" };
     this.sessions = new Map();
     this.order = [];
     this.active = null;
@@ -160,11 +164,11 @@ export class Workspace {
   }
 
   presenceOn(file) {
-    return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.client);
+    return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.me.id);
   }
 
   others() {
-    return this.presence.filter((entry) => entry.who.id !== this.client);
+    return this.presence.filter((entry) => entry.who.id !== this.me.id);
   }
 
   setName(name) {
