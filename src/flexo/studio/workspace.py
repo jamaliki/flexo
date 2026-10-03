@@ -749,6 +749,15 @@ class Workspace:
                 del self.presence[person]
         self.broadcast({"type": "presence", "presence": self.present()})
 
+    def depart(self, client: str) -> None:
+        """A page that closes says so: whoever it was is gone from the others' windows at
+        once, not when the next heartbeat finds its connection dead."""
+
+        with self.lock:
+            listener = self.listeners.get(client)
+        if listener is not None:
+            self.leave(listener)
+
     def broadcast(self, event: dict[str, Any]) -> None:
         with self.lock:
             listeners = list(self.listeners.values())

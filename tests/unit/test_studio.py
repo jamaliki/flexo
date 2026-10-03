@@ -613,6 +613,21 @@ def test_one_person_s_windows_are_one_person(served: tuple[str, Workspace]) -> N
     assert workspace.present() == []
 
 
+def test_a_window_closing_is_gone_from_the_others_at_once(served: tuple[str, Workspace]) -> None:
+    base, workspace = served
+    ada = {"id": "ada", "name": "Ada", "kind": "person"}
+    bo = {"id": "bo", "name": "Bo", "kind": "person"}
+    workspace.listen("ada-window", ada)
+    watching = workspace.listen("bo-window", bo)
+    workspace.set_presence(ada, "figure.yaml", None, None)
+    _drained(watching)
+    # The page's beacon as it closes, not a heartbeat that finds its connection dead.
+    assert call(f"{base}/api/leave", workspace.token, {"client": "ada-window"})[0] == 200
+    assert workspace.present() == []
+    events = _drained(watching)
+    assert any(event["type"] == "presence" and event["presence"] == [] for event in events)
+
+
 def _drained(listener) -> list[dict]:
     events = []
     while not listener.events.empty():

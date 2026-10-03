@@ -325,6 +325,9 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/presence":
             workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
             self._json({"ok": True})
+        elif route == "/api/leave":
+            workspace.depart(str(data.get("client") or ""))
+            self._json({"ok": True})
         elif route == "/api/agent/call":
             tools = _agent_tools(workspace, data.get("who") or {})
             content, failed = tools.call(str(data.get("name")), data.get("input") or {})

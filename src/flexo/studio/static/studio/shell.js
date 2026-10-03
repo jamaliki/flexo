@@ -344,10 +344,12 @@ export async function start() {
   activityButton.append(activityCount);
   const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
   const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
-  const themeButton = ui.button("", () => {
-    const order = ["auto", "light", "dark"];
-    const next = order[(order.indexOf(remembered("theme", "auto")) + 1) % 3];
-    remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${{ auto: "Auto", light: "Light", dark: "Dark" }[next]}`, { seconds: 1.5 });
+  // Appearance as a Mac's: Automatic, Light or Dark, the one in use ticked.
+  const themeButton = ui.button("", (event) => {
+    const now = remembered("theme", "auto");
+    const choose = (value) => () => { remember("theme", value); applyTheme(value); showTheme(); };
+    menu(event.currentTarget, [{ title: "Appearance" },
+      ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, label]) => ({ label, checked: now === value, run: choose(value) }))], { align: "end" });
   }, { kind: "ghost", title: "Appearance" });
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "appearance"));
   showTheme();
@@ -420,6 +422,8 @@ export async function start() {
     rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
       h("span.history-mark"), h("span.history-text", {}, "Original")));
     popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
+    // The keys start at where the document is now, not at the newest change undone.
+    requestAnimationFrame(() => document.querySelector(".history-menu .history-row.now")?.focus({ preventScroll: false }));
   }
 
   const views = h("main.views");
@@ -524,7 +528,7 @@ export async function start() {
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: nameOf(entry.who) }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
-    }), h("button.tab-new", { type: "button", title: "New or open a document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
+    }), h("button.tab-new", { type: "button", title: "New Document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
   };
 
   const renderPeople = () => {
@@ -687,6 +691,8 @@ export async function start() {
   });
   // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
   // with it: while there are any, the browser asks first.
+  // A window closing tells the studio, so the others see it go at once.
+  addEventListener("pagehide", () => { navigator.sendBeacon?.(workspace.url("/api/leave"), JSON.stringify({ client: workspace.client })); });
   addEventListener("beforeunload", (event) => {
     for (const session of workspace.sessions.values()) session.push();
     if ([...workspace.sessions.values()].some((session) => session.pendingLocal)) {
