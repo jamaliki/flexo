@@ -368,6 +368,9 @@ export async function start() {
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
     { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
   const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+  // A toolbar button clicked does not take the keys, as a Mac toolbar's doesn't: they stay
+  // with the document (Delete deletes what is chosen, not the button's next press).
+  docbar.addEventListener("mousedown", (event) => { if (event.target.closest("button") && !event.target.closest("input, select, textarea")) event.preventDefault(); });
   // Too wide for the window (or beside the side panel), the bar shows its tools as icons
   // alone, and then its other buttons too, rather than run off the edge.
   const crowded = () => [docbar, docLeft, docRight].some((node) => node.scrollWidth > node.clientWidth + 1);
@@ -784,14 +787,15 @@ export function connectDialog(workspace) {
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
 const SHORTCUTS = [
   ["General", [["⌘ K", "Command Palette"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
-    ["⌘ S", "Save (documents also save as you work)"], ["?", "Keyboard Shortcuts"]]],
-  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
+    ["⌘ S", "Save (documents also save as you work)"], ["⌥ ⌘ I", "Go to the Inspector (Esc: back)"], ["?", "Keyboard Shortcuts"]]],
+  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
+    ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
-  ["Objects on a Slide", [["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
+  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
-  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥  ⇧ ⇥", "Indent or Outdent an Item"],
+  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "Indent an Item (⇧⇥: Outdent)"],
     ["⇥", "Next Title, Subtitle or Cell"], ["Esc", "Done"]]],
-  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⌫", "Delete Shape"]]],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["↩", "Edit Label"], ["⌫", "Delete Shape"]]],
   ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["4 ↩", "Go to Slide 4"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
