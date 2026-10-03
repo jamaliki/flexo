@@ -229,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             body, kind = pictures.shown(path)
             self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
-            name, person = (query.get("name") or ["You"])[0], (query.get("person") or [""])[0]
+            name, person = (query.get("name") or [""])[0], (query.get("person") or [""])[0]
             self._events(_one(query, "client"), name, person)
         elif route == "/api/themes":
             from flexo.studio import theming
@@ -554,7 +554,8 @@ def _person(data: dict[str, Any]) -> dict[str, Any]:
 
     who = data.get("who") or {}
     person = str(who.get("id") or data.get("client") or "someone")
-    return {"id": person, "name": str(who.get("name") or "You"), "kind": "person"}
+    # Unnamed, a person has no name: each page calls them You to themselves, Someone to others.
+    return {"id": person, "name": str(who.get("name") or ""), "kind": "person"}
 
 
 def _made(into: Path, stem: str) -> Path:

@@ -187,8 +187,8 @@ class Tools:
         for entry in workspace.focus_of_people():
             if entry.get("file"):
                 where = f", {_where(entry.get('where'))}" if entry.get("where") else ""
-                name = entry["who"].get("name") or "You"
-                who = "The person in the studio" if name == "You" else name
+                name = entry["who"].get("name") or ""
+                who = "Someone in the studio" if name in {"", "You"} else name
                 lines.append(f"{who} is looking at {entry['file']}{where}.")
         return [_text("\n".join(lines))]
 
