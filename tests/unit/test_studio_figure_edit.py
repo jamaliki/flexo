@@ -339,3 +339,12 @@ def test_reading_changes_nothing_and_a_figure_inside_another_document_is_edited_
     assert [node["id"] for node in made["data"]["nodes"]] == ["x", "backbone", "y"]
     assert [node["id"] for node in made["model"]["nodes"]] == ["x", "backbone", "y"]
     assert inline["nodes"][1]["id"] == "encoder"
+
+
+def test_a_word_yaml_could_read_as_a_flag_or_number_stays_a_word() -> None:
+    from flexo.studio.figure_edit import apply_to_data
+
+    data = {"figure": {"id": "f"}, "nodes": [{"id": "a", "label": "A"}]}
+    for word in ("Yes", "no", "Off", "on", "12", "null"):
+        action = {"do": "update", "target": {"type": "node", "id": "a"}, "values": {"label": word}}
+        assert apply_to_data(data, action)["data"]["nodes"][0]["label"] == word
