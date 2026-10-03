@@ -469,6 +469,8 @@ export async function start() {
       case "shortcuts": shortcutsDialog(); break;
       default: break;
     }
+    // What a command did may change what can be done (Show Speaker Notes is then Hide).
+    report();
   };
   // What the document can do now, by label: the app enables its Insert and Slide items by it.
   const doable = (session) => {
