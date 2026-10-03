@@ -632,6 +632,8 @@ const SHORTCUTS = [
   ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥  ⇧ ⇥", "Indent or Outdent an Item"],
     ["⇥", "Next Title, Subtitle or Cell"], ["Esc", "Done"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⌫", "Delete Shape"]]],
+  ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["4 ↩", "Go to Slide 4"],
+    ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
 
 function shortcutsDialog() {
