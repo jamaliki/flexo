@@ -393,6 +393,10 @@ export function figureParts(host) {
   // A part added is ready for its words: they are typed on it as soon as it is drawn.
   // One drawn from a file is named for it (a structure for its PDB ID).
   let typeInto = null;
+  // Keys typed while it is on its way (the server adds it, the page draws it) are its words,
+  // kept for its editor: "Cache" typed at once is its label, not Connect and Add Shape, and
+  // ⌫ takes back a letter, never deletes a part.
+  let early = null;
   async function addPart(kind, where = placement()) {
     const part = parts[kind];
     const action = { do: "add", kind, parent: where.parent || null, after: where.after || null, source: where.source || null };
@@ -403,7 +407,32 @@ export function figureParts(host) {
       action.node = { properties: { source: file } };
       if (kind === "structure") action.node.label = fileLabel(file);
     }
-    act(action, { then: (result) => { if (!part.needs_file && result.select?.length === 1) typeInto = result.select[0]; } });
+    const mine = part.needs_file ? null : { text: null, done: false };
+    early = mine;
+    // Should it never be drawn, the keys are the page's again.
+    if (mine) setTimeout(() => { if (early === mine) early = null; }, 5000);
+    act(action, {
+      then: (result) => {
+        if (!part.needs_file && result.select?.length === 1) typeInto = result.select[0];
+        else if (early === mine) early = null;
+      },
+      failed: () => { if (early === mine) early = null; },
+    });
+  }
+  // A key typed while a part just added waits for its editor: answers whether it took it.
+  function earlyKey(event) {
+    if (!early || event.metaKey || event.ctrlKey || event.isComposing) return false;
+    const key = event.key;
+    if (key === "Tab" || (key.startsWith("F") && key.length > 1)) return false;
+    event.preventDefault();
+    if (key === "Escape") { early = null; typeInto = null; }
+    else if (key === "Enter" && event.shiftKey) early.text = `${early.text ?? ""}\n`;
+    // Return ends the typing once its editor opens (and, with nothing typed, opens it, as it would).
+    else if (key === "Enter") { if (early.text !== null) early.done = true; }
+    // Nothing typed yet: the label, chosen whole in its editor, is taken away.
+    else if (key === "Backspace" || key === "Delete") early.text = early.text === null ? "" : [...early.text].slice(0, -1).join("");
+    else if (key.length === 1 || [...key].length === 1) early.text = `${early.text ?? ""}${key}`;
+    return true;
   }
 
   function gather(group, where = null) {
@@ -1244,8 +1273,8 @@ export function figureParts(host) {
     }
     field.area.addEventListener("input", () => placeInline());
     field.area.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); closeInline(true); }
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeInline(true); }
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); closeInline(true); }
+      if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
     });
     // Left for anywhere else (the slide, another slide, the panel), what was typed is kept
     // -- at once, before what was clicked acts. Not when only the window was left.
@@ -1287,10 +1316,22 @@ export function figureParts(host) {
   const measuring = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
   function placeInline() {
     if (typeInto && !inline && host.box(typeInto)) {
-      // Once it has landed where it is drawn.
+      // Once it has landed where it is drawn; sooner when words typed are waiting for it.
       const id = typeInto;
       typeInto = null;
-      setTimeout(() => { if (!inline && chosenOne() === id && host.box(id)) openInline(id); }, 320);
+      setTimeout(() => {
+        const waiting = early;
+        early = null;
+        if (inline || chosenOne() !== id || !host.box(id)) return;
+        openInline(id);
+        if (inline?.id !== id || !waiting) return;
+        if (waiting.text !== null) {
+          inline.field.value = waiting.text;
+          inline.field.setSelectionRange(waiting.text.length, waiting.text.length);
+          inline.field.dispatchEvent(new Event("input"));
+        }
+        if (waiting.done) closeInline(true);
+      }, early?.text != null ? 120 : 320);
     }
     if (!inline) return;
     if (!inline.box.isConnected) host.overlay.append(inline.box);
@@ -1342,6 +1383,7 @@ export function figureParts(host) {
   function key(event) {
     // A key typed in a field is the field's: nothing on the drawing acts on it.
     if (typingIn(event.target) || typingIn(document.activeElement)) return true;
+    if (earlyKey(event)) return true;
     // Nor one typed just after, should the field have been drawn again under the keys
     // (the figure came back from the server): ⌫ deletes words, never the part.
     if ((event.key === "Backspace" || event.key === "Delete") && Date.now() - lastTyped < 1500
@@ -1424,12 +1466,15 @@ export function figureParts(host) {
 
   // A part's ID is what lines and the file name it by: kept, but out of the way.
   function idField(id, type) {
-    const input = ui.input({ value: id, mono: true, key: `id:${id}` });
-    input.addEventListener("change", () => {
+    const input = ui.input({ value: typing(`id:${id}`) ?? id, mono: true, key: `id:${id}` });
+    // Renamed once the field is left: not as the panel is drawn again under the keys, which a
+    // web view says is a change too.
+    input.addEventListener("change", () => setTimeout(() => {
+      if (typing(`id:${id}`) !== null) return;
       const to = input.value.trim();
       if (!to || to === id) { input.value = id; return; }
       act({ do: "rename", id, to });
-    });
+    }, 0));
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } });
     return ui.field("ID", input, { hint: type === "group" ? "The group's name in the file" : "The shape's name in the file, used by its lines" });
   }
@@ -1671,9 +1716,11 @@ export function figureParts(host) {
       onChange: (value) => paint("node", { "properties.tone": value }),
     })) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
+    // Sent as it is typed; the words in the field stay the person's while they type.
+    const toneKey = `colour:${scope}:tone`;
     const named = nodes.length ? ui.field("Tone Name", ui.combo({
-      value: (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
-      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "None",
+      value: typing(toneKey) ?? (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
+      options: TONE_NAMES(), key: toneKey, placeholder: "None",
       onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
     }), { hint: "Same name, same colour" }) : null;
     const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
@@ -1709,16 +1756,23 @@ export function figureParts(host) {
     const set = (next) => write({ [field.key]: next }, key);
     const options = { hint: field.hint };
     switch (field.type) {
-      case "markup":
-        return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, spelling: false, onInput: set }), options);
+      case "markup": {
+        // Return is done, as on the drawing (the words are chosen, ready to type over);
+        // ⇧Return starts a new line.
+        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, colours: false, spelling: false, onInput: set });
+        control.area.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); control.area.select(); }
+        });
+        return ui.field(field.label, control, options);
+      }
       case "text": {
-        if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
+        if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, onInput: set }), options);
         // A structure's selection is sent once typed, and said when it selects nothing.
         const control = typedField({ value, key, onCommit: set });
-        const note = h("div.field-problem", { hidden: true });
+        const note = h("div.field-problem.warning", { hidden: true });
         settingsOf(item.id).then((settings) => {
           const said = settings?.selections?.[field.key];
-          if (!said || drafts.has(key)) return;
+          if (!said || drafts.has(key) || typing(key) !== null) return;
           clear(note, icon("warning"), h("span", {}, said));
           note.hidden = false;
           control.classList.add("invalid");
@@ -1726,14 +1780,11 @@ export function figureParts(host) {
         return ui.field(field.label, h("div.field-stack", {}, control, note), options);
       }
       case "length":
-        return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "Auto", mono: true, onInput: (text) => {
-          const clean = text.trim();
-          if (!clean) set(null);
-          else if (/^\d+(\.\d+)?$/.test(clean)) set(`${clean}pt`);
-          else if (/^\d+(\.\d+)?\s*(pt|mm|cm|in|px)$/.test(clean)) set(clean);
-        } }), options);
+        // Sent once it reads as a length, as typed; written out ("120pt") when the field is left.
+        return ui.field(field.label, typedField({ value, key, placeholder: "Auto", length: true, onCommit: set }), options);
       case "code":
-        return ui.field(field.label, ui.textarea({ value: value ?? "", rows: 2, mono: true, key, onInput: set }), options);
+        // Letters of a sequence and the like, not code to indent: Tab goes on to the next field.
+        return ui.field(field.label, ui.textarea({ value: typing(key) ?? value ?? "", rows: 2, mono: true, key, onInput: set }), options);
       case "view": {
         // A molecule turned, tilted, and framed a step at a click, as in a viewer.
         const at = (name, fallback) => Number(valueAt(item, `properties.${name}`) ?? fallback);
@@ -1776,7 +1827,7 @@ export function figureParts(host) {
             set(typed === field.default || typed === "" ? null : typed);
           } }), options);
       case "combo":
-        return ui.field(field.label, ui.combo({ value: value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
+        return ui.field(field.label, ui.combo({ value: typing(key) ?? value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
       case "palette": {
         const current = value ?? field.default;
         const strip = (name) => h("span.palette-strip", {}, (field.colours?.[name] || []).slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
@@ -1790,17 +1841,17 @@ export function figureParts(host) {
       case "theme":
         // A host that can show themes by sight does; otherwise, their names.
         return ui.field(field.label, host.themeField ? host.themeField(value, set)
-          : ui.combo({ value: value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
+          : ui.combo({ value: typing(key) ?? value ?? "", options: field.options.map(String), key, placeholder: field.default ?? "", onChange: set }), options);
       case "pair": {
         const pair = Array.isArray(value) ? [...value] : ["", ""];
-        const half = (index) => ui.input({ value: pair[index] ?? "", key: `${key}:${index}`, placeholder: field.labels?.[index], onInput: (text) => {
+        const half = (index) => ui.input({ value: typing(`${key}:${index}`) ?? pair[index] ?? "", key: `${key}:${index}`, placeholder: field.labels?.[index], onInput: (text) => {
           pair[index] = text;
           set(pair.some((part) => part) ? pair.map((part) => part ?? "") : null);
         } });
         return ui.field(field.label, h("div.grid2", {}, half(0), half(1)), options);
       }
       case "file":
-        return ui.field(field.label, h("div.row", {}, ui.input({ value: value ?? "", mono: true, key, onChange: set }),
+        return ui.field(field.label, h("div.row", {}, ui.input({ value: typing(key) ?? value ?? "", mono: true, key, onChange: set }),
           h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
@@ -1816,16 +1867,31 @@ export function figureParts(host) {
   // -- words and numbers typed in a field, sent once they are whole --
   // A number is sent on Return, when the field is left, or after a pause: "3.5" is sent as
   // 3.5, not as 3 and then 3.5. Esc ends the typing as Return does, as in a Mac field. ↑
-  // and ↓ (and the steppers beside it) go a step at a time, ⇧ ten. What is typed and not
-  // sent yet stays in the field should the panel be drawn again meanwhile.
+  // and ↓ (and the steppers beside it) go a step at a time, ⇧ ten. What is typed is never
+  // changed while it is typed: a panel drawn again meanwhile shows it as it is, and it is
+  // written out (a length's "pt", a number kept in range) only when the typing ends. Words
+  // that don't read as a number or a length are kept, said under the field, and not sent.
   const drafts = new Map();
+  const pending = new Map();
+  const unread = new Set();
+  const touched = new Set();
   const PAUSE = 700;
-  function typedField({ value, key, placeholder = "", number = null, mono = false, onCommit }) {
-    const shown = drafts.has(key) ? drafts.get(key) : value === undefined || value === null ? "" : String(value);
-    const input = ui.input({ value: shown, key, placeholder, mono });
+  // The words in the field with this key, if it is the one being typed in.
+  function typing(key) {
+    const at = document.activeElement;
+    return key && at?.dataset?.key === key && typeof at.value === "string" ? at.value : null;
+  }
+  function typedField({ value, key, placeholder = "", number = null, length = false, mono = false, say = true, onCommit }) {
+    const shown = typing(key) ?? (drafts.has(key) ? drafts.get(key) : value === undefined || value === null ? "" : String(value));
+    const input = ui.input({ value: shown, key, placeholder, mono: mono || length });
     if (number) input.inputMode = "decimal";
     const read = (text) => {
       const clean = String(text ?? "").trim();
+      if (length) {
+        // A bare number is in points, as the file has it.
+        const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(clean);
+        return !clean ? null : found ? `${Number(found[1])}${(found[2] || "pt").toLowerCase()}` : NaN;
+      }
       if (!number) return clean || null;
       const bare = clean.replace(/\s*(Å|°|×|σ|px|pt|%)$/u, "").replace(",", ".");
       if (!bare) return null;
@@ -1834,11 +1900,21 @@ export function figureParts(host) {
     };
     const within = (parsed) => parsed === null || typeof parsed === "string"
       || (!Number.isNaN(parsed) && (number.min === undefined || parsed >= number.min) && (number.max === undefined || parsed <= number.max));
+    const why = length ? "Not saved: type a length, such as 120, 120pt or 4cm."
+      : number?.integer ? "Not saved: type a whole number, such as 3." : "Not saved: type a number, such as 1.5.";
+    const note = say && (number || length) ? h("div.field-problem", { hidden: true }, icon("warning"), h("span", {}, why)) : null;
+    // Said once the typing ends (not at each key on the way to "12mm"), and gone once it reads.
+    const said = (bad) => {
+      input.classList.toggle("invalid", bad);
+      if (!bad) unread.delete(key); else unread.add(key);
+      if (note) note.hidden = !bad;
+      if (!say) input.title = bad ? why : "";
+    };
+    if (unread.has(key) && Number.isNaN(read(shown))) said(true);
     let sent = read(value);
-    let timer = 0;
     const send = (parsed, text) => {
-      clearTimeout(timer);
-      timer = 0;
+      clearTimeout(pending.get(key));
+      pending.delete(key);
       if (drafts.get(key) === text) drafts.delete(key);
       if (parsed === sent) return;
       sent = parsed;
@@ -1846,16 +1922,22 @@ export function figureParts(host) {
     };
     const whole = (parsed) => (number?.integer && typeof parsed === "number" ? Math.round(parsed) : parsed);
     const finish = () => {
+      touched.delete(key);
       let parsed = read(input.value);
-      if (Number.isNaN(parsed)) { input.classList.add("invalid"); return; }
+      if (Number.isNaN(parsed)) { clearTimeout(pending.get(key)); pending.delete(key); said(true); return; }
       if (number && parsed !== null) {
         parsed = whole(parsed);
         if (number.min !== undefined) parsed = Math.max(number.min, parsed);
         if (number.max !== undefined) parsed = Math.min(number.max, parsed);
         if (read(input.value) !== parsed) input.value = String(parsed);
       }
-      input.classList.remove("invalid");
+      if (length && parsed !== null && input.value.trim() !== parsed) input.value = parsed;
+      said(false);
       send(parsed, drafts.get(key));
+    };
+    const later = (parsed, text, wait) => {
+      clearTimeout(pending.get(key));
+      pending.set(key, setTimeout(() => send(parsed, text), wait));
     };
     const stepBy = (sign, big) => {
       const now = read(input.value);
@@ -1866,31 +1948,35 @@ export function figureParts(host) {
       if (number.max !== undefined) next = Math.min(number.max, next);
       input.value = String(next);
       drafts.set(key, input.value);
-      input.classList.remove("invalid");
-      clearTimeout(timer);
-      const text = input.value;
-      timer = setTimeout(() => send(next, text), 300);
+      touched.add(key);
+      said(false);
+      later(next, input.value, 300);
     };
     input.addEventListener("input", () => {
       drafts.set(key, input.value);
+      touched.add(key);
       const parsed = read(input.value);
-      input.classList.toggle("invalid", Number.isNaN(parsed));
-      clearTimeout(timer);
-      timer = 0;
-      const text = input.value;
-      if (within(parsed)) timer = setTimeout(() => send(whole(parsed), text), PAUSE);
+      if (Number.isNaN(parsed)) input.classList.add("invalid"); else said(false);
+      clearTimeout(pending.get(key));
+      pending.delete(key);
+      if (within(parsed)) later(whole(parsed), input.value, PAUSE);
     });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") { event.preventDefault(); finish(); input.select(); }
       else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(); input.blur(); }
       else if (number && (event.key === "ArrowUp" || event.key === "ArrowDown")) { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
     });
-    input.addEventListener("blur", () => { if (timer || drafts.has(key)) finish(); });
-    if (!number) return input;
+    // Only leaving the field ends the typing: a field drawn again under the keys (which a
+    // web view says is a blur) is still being typed in.
+    input.addEventListener("blur", () => setTimeout(() => {
+      if (typing(key) === null && (touched.has(key) || pending.has(key) || drafts.has(key))) finish();
+    }, 0));
+    if (!number && !length) return input;
     const step = (sign, title) => h("button.stepper", { type: "button", tabIndex: -1, title, onmousedown: (event) => event.preventDefault(),
       onclick: (event) => stepBy(sign, event.shiftKey) }, icon("chevron-down"));
-    const node = h("div.typed-number", {}, input, number.unit ? h("span.unit", {}, number.unit) : null,
-      h("span.steppers", {}, step(1, "Increase (↑)"), step(-1, "Decrease (↓)")));
+    const control = number ? h("div.typed-number", {}, input, number.unit ? h("span.unit", {}, number.unit) : null,
+      h("span.steppers", {}, step(1, "Increase (↑)"), step(-1, "Decrease (↓)"))) : input;
+    const node = note ? h("div.field-stack", {}, control, note) : control;
     node.input = input;
     return node;
   }
@@ -2048,10 +2134,11 @@ export function figureParts(host) {
           onChange: (next) => change(next || null) });
       }
       if (column.type === "integer" || column.type === "number") {
-        return typedField({ value: current, key: cellKey, number: { step: column.type === "integer" ? 1 : undefined, integer: column.type === "integer" },
+        // A cell has no room under it to say what is wrong: its tooltip does.
+        return typedField({ value: current, key: cellKey, say: false, number: { step: column.type === "integer" ? 1 : undefined, integer: column.type === "integer" },
           onCommit: (number) => change(number) });
       }
-      const input = ui.input({ value: current ?? "", key: cellKey, placeholder: column.hint || "", onInput: (text) => change(text) });
+      const input = ui.input({ value: typing(cellKey) ?? current ?? "", key: cellKey, placeholder: column.hint || "", onInput: (text) => change(text) });
       if (column.type === "chain") {
         // One of the molecule's chains from the menu; a residue or the like typed.
         const pick = h("button.cell-pick", { type: "button", tabIndex: -1, title: "Choose a chain", onclick: async (event) => {
@@ -2097,14 +2184,14 @@ export function figureParts(host) {
         const said = [];
         rows.forEach((row, index) => {
           const group = String(row[field.columns[chainColumn].name] ?? "").trim();
-          const typing = drafts.has(`${key}:${index}:${field.columns[chainColumn].name}`);
+          const busy = typing(`${key}:${index}:${field.columns[chainColumn].name}`) !== null;
           const input = table.querySelector(`[data-key="${CSS.escape(`${key}:${index}:${field.columns[chainColumn].name}`)}"]`);
-          const wrong = group && !typing && !group.includes(":") && !RESIDUE.test(group) && !found.includes(group);
+          const wrong = group && !busy && !group.includes(":") && !RESIDUE.test(group) && !found.includes(group);
           input?.classList.toggle("invalid", Boolean(wrong));
           if (!group) said.push(`Row ${index + 1} names no chain yet: it colours nothing.`);
           else if (wrong) said.push(`Row ${index + 1}: ${name} has no chain “${group}”, so it colours nothing. Its chains are ${found.join(", ")}.`);
         });
-        clear(warnings, said.map((text) => h("div.field-problem", {}, icon("warning"), h("span", {}, text))));
+        clear(warnings, said.map((text) => h("div.field-problem.warning", {}, icon("warning"), h("span", {}, text))));
       });
     }
     return h("div.field.records", {},

@@ -1,6 +1,6 @@
-// The theme editor: a theme's settings on the left, grouped as a designer thinks of
-// them (colour, type, line, space), and samples drawn in it on the right -- figures,
-// slides, or a deck in the folder. Only what differs from the base theme is
+// The theme editor: samples drawn in a theme -- figures, slides, or a deck in the folder
+// -- and its settings on the right, where a deck's inspector is, grouped as a designer
+// thinks of them (colour, type, line, space). Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
 import { h, clear, icon, ui, menu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
@@ -65,7 +65,7 @@ export function mount(studio, container) {
   const form = h("div.theme-form.scroll-thin");
   const stage = h("div.stage.theme-stage.scroll-thin");
   const note = h("div.messages.theme-messages");
-  const root = h("div.theme", {}, h("section.panel.theme-panel", {}, form), h("section.theme-right", {}, stage, note));
+  const root = h("div.theme", {}, h("section.theme-right", {}, stage, note), h("section.panel.theme-panel", {}, form));
   clear(container, root);
 
   const row = (label, path, control, { hint } = {}) => {

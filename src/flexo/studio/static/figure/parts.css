@@ -18,9 +18,9 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-mark-label { position: absolute; top: -19px; left: -2px; background: var(--accent); color: var(--accent-ink); font: 600 10.5px/17px var(--font); padding: 0 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; }
 .fig-mark-label.below { top: auto; bottom: -19px; border-radius: 0 4px 4px 4px; }
 /* The chosen part's next step: a + just outside the side its line leaves by. */
-.fig-next { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--raised); background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-2); cursor: pointer; opacity: 0.88; transition: opacity 0.1s, transform 0.1s; }
+.fig-next { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--raised); background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-2); cursor: pointer; opacity: 0.88; transition: opacity 0.1s; }
 .fig-next svg { width: 13px; height: 13px; }
-.fig-next:hover { opacity: 1; transform: scale(1.12); }
+.fig-next:hover { opacity: 1; }
 /* A molecule chosen is turned by its handle (or by ⌥-dragging it); dragged, it moves. */
 .fig-rotate { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--accent-line); background: var(--raised); color: var(--accent); box-shadow: var(--shadow-2); cursor: grab; touch-action: none; }
 .fig-rotate svg { width: 13px; height: 13px; }
@@ -63,17 +63,14 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* Just opened, nothing is lit under a pointer that has not moved: a second click chooses nothing. */
 .menu.fresh .add-tile:hover:not(:focus) { background: transparent; border-color: transparent; color: var(--ink-2); }
 .menu.fresh .add-tile:hover:not(:focus) .glyph { color: var(--ink-2); }
-.menu.fresh .palette-choice:hover:not(:focus) { background: transparent; }
 /* The shape's type: the palette of shapes opens from it. */
 .type-pick { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; font-size: 12.5px; }
 .type-pick:hover { border-color: var(--ink-3); }
 .type-pick > span { flex: 1; }
 .type-pick > svg:last-child { width: 14px; height: 14px; color: var(--ink-3); }
 .insp-problem { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font-size: 12px; line-height: 1.45; }
-.insp-problem svg, .field-problem svg { width: 14px; height: 14px; flex: none; color: var(--warn); margin-top: 1px; }
-.field-stack { display: grid; gap: 4px; }
-.field-problem { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; line-height: 1.4; color: var(--warn); }
-.field-problem[hidden] { display: none; }
+.insp-problem svg { width: 14px; height: 14px; flex: none; color: var(--warn); margin-top: 1px; }
+/* A field's problem (.field-problem, .field-stack) is styled in studio.css: dialogs say them too. */
 .records-warnings { display: grid; gap: 3px; }
 .records-warnings:empty { display: none; }
 .hint-line.turned { display: flex; gap: 6px; align-items: flex-start; }
@@ -99,7 +96,7 @@ details.advanced > .inner { margin-top: 10px; }
 .cell-pick svg { width: 12px; height: 12px; }
 .cell-well { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; box-shadow: 0 0 0 1px var(--line-strong); background: transparent; cursor: pointer; overflow: hidden; }
 .cell-well::-webkit-color-swatch-wrapper { padding: 0; }
-.cell-well::-webkit-color-swatch { border: 0; border-radius: 4px; }
+.cell-well::-webkit-color-swatch { border: 0; border-radius: 4px; box-shadow: var(--chip-ring); }
 .cell-well.unset { opacity: 0.35; }
 .insp-top { gap: 10px; }
 .insp-row { display: flex; align-items: flex-start; gap: 8px; }

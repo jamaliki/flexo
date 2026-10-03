@@ -194,7 +194,13 @@ export const ui = {
     if (width) node.style.width = width;
     if (list) { node.setAttribute("list", list); node.removeAttribute("autocomplete"); }  // its own suggestions stay
     if (onInput) node.addEventListener("input", () => onInput(node.value));
-    if (onChange) node.addEventListener("change", () => onChange(node.value));
+    // A web view says a field taken away while it is typed in has changed: a form drawn
+    // again under the keys gives the person the field back (keepFocus), and only leaving it
+    // is a change.
+    if (onChange) node.addEventListener("change", () => {
+      if (!key) { onChange(node.value); return; }
+      setTimeout(() => { if (document.activeElement?.dataset?.key !== key) onChange(node.value); }, 0);
+    });
     return node;
   },
 
@@ -213,12 +219,13 @@ export const ui = {
     return node;
   },
 
-  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, tabs = mono, key, spelling = !mono } = {}) {
+  // `indent`: Tab indents, for code and YAML; in any other field Tab goes on to the next.
+  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, indent = false, key, spelling = !mono } = {}) {
     const node = plainTyping(h(`textarea.textarea${mono ? ".mono" : ""}${grow ? ".grow" : ""}`, { rows, placeholder }));
     node.spellcheck = Boolean(spelling);
     if (key) node.dataset.key = key;
     node.value = value ?? "";
-    if (tabs) node.addEventListener("keydown", (event) => indentKeys(event, node));
+    if (indent) ui.indent(node);
     node.addEventListener("input", () => { if (grow) fit(node); onInput?.(node.value); });
     if (grow) {
       requestAnimationFrame(() => fit(node));
@@ -232,8 +239,8 @@ export const ui = {
   },
 
   // Words in flexo markup: **strong**, *emphasis*, $maths$, `code`, [links](url), [colour]{accent}.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, tabs = false, key, spelling = true } = {}) {
-    const area = ui.textarea({ value, rows, placeholder, onInput, tabs, key, spelling });
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, key, spelling = true } = {}) {
+    const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
@@ -356,19 +363,49 @@ function wrap(area, before, after, onInput) {
   area.focus();
 }
 
-function indentKeys(event, area) {
-  if (event.key !== "Tab") return;
-  event.preventDefault();
-  const { selectionStart: start, selectionEnd: end, value } = area;
-  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-  if (start === end && !event.shiftKey) {
-    area.setRangeText("  ", start, end, "end");
-  } else {
-    const block = value.slice(lineStart, end);
-    const changed = event.shiftKey ? block.replace(/^ {1,2}/gm, "") : block.replace(/^/gm, "  ");
-    area.setRangeText(changed, lineStart, end, "select");
-  }
-  area.dispatchEvent(new Event("input"));
+// Tab indents a code editor's lines and ⇧Tab outdents them, as in a Mac code editor;
+// Ctrl-Tab, or Esc and then Tab, goes on to the next field instead. A Tab with nothing to
+// indent or outdent changes nothing.
+function indentKeys(area) {
+  let leaving = false;
+  area.addEventListener("blur", () => { leaving = false; });
+  area.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { leaving = true; return; }
+    if (event.key !== "Tab") { if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) leaving = false; return; }
+    if (event.metaKey || event.altKey) return;
+    // The web view moves focus for a plain Tab only: Ctrl-Tab is moved here.
+    if (event.ctrlKey) { event.preventDefault(); leaving = false; nextField(area, event.shiftKey ? -1 : 1); return; }
+    if (leaving) { leaving = false; return; }
+    event.preventDefault();
+    const { selectionStart: start, selectionEnd: end, value } = area;
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    if (start === end && !event.shiftKey) {
+      area.setRangeText("  ", start, end, "end");
+    } else {
+      const block = value.slice(lineStart, end);
+      // Lines with words on them are indented; empty ones are left empty.
+      const changed = event.shiftKey ? block.replace(/^ {1,2}/gm, "") : block.replace(/^(?=.)/gm, "  ");
+      if (changed === block) return;
+      area.setRangeText(changed, lineStart, end, "select");
+    }
+    area.dispatchEvent(new Event("input"));
+  });
+  return area;
+}
+ui.indent = indentKeys;
+
+// What Tab goes to, in order: within an open dialog, only its own.
+export function tabbables(root = document) {
+  return [...root.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]")].filter((node) =>
+    !node.disabled && (node.tabIndex >= 0 || (node.isContentEditable && node.getAttribute("tabindex") !== "-1"))
+    && !(node.isContentEditable && node.parentElement?.isContentEditable) && node.type !== "hidden"
+    && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden" && !node.closest("[inert]"));
+}
+
+function nextField(from, step) {
+  const items = tabbables(from.closest(".dialog") || document);
+  const at = items.indexOf(from);
+  items[(at + step + items.length) % items.length]?.focus();
 }
 
 // -- popovers -------------------------------------------------------------------------
@@ -398,15 +435,23 @@ export function menu(anchor, items, { align = "start" } = {}) {
 }
 
 // Below the anchor if it fits, else above; if neither, on the roomier side, scrolling --
-// never over the button that opened it.
+// never over the button that opened it. A menu at a point (a context menu) opens there and
+// moves up as far as it must to show every item, as on a Mac; only one taller than the
+// window scrolls.
 function place(node, anchor, align) {
+  const point = !anchor.getBoundingClientRect;
+  if (point) node.style.maxHeight = `${innerHeight - 16}px`;
   document.body.append(node);
-  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, bottom: anchor.y, top: anchor.y };
+  const box = point ? { left: anchor.x, right: anchor.x, bottom: anchor.y, top: anchor.y } : anchor.getBoundingClientRect();
   const width = node.offsetWidth, height = node.offsetHeight;
   const below = innerHeight - 8 - (box.bottom + 4), above = box.top - 4 - 8;
   let left = align === "end" ? box.right - width : box.left;
   let top = box.bottom + 4;
-  if (height > below) {
+  if (point) {
+    top = Math.max(8, Math.min(top, innerHeight - 8 - height));
+    // Too near the right edge, it opens to the left of the pointer.
+    if (left + width > innerWidth - 8 && box.left - width >= 8) left = box.left - width;
+  } else if (height > below) {
     if (height <= above) top = box.top - height - 4;
     else if (above > below) { node.style.maxHeight = `${above}px`; top = 8; }
     else node.style.maxHeight = `${below}px`;
@@ -453,8 +498,9 @@ function outside(event) {
   if (openMenu && !openMenu.contains(event.target)) closeMenu();
 }
 
+// Esc closes the menu and only the menu: not the dialog it was opened from, too.
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && openMenu) { event.stopPropagation(); closeMenu(); }
+  if (event.key === "Escape" && openMenu) { event.stopImmediatePropagation(); closeMenu(); }
 }, true);
 
 export function closeMenu() {
@@ -467,17 +513,53 @@ export function closeMenu() {
   returnTo = null;
 }
 
+// A dialog holds the keys while it is open, as a Mac sheet does: Tab goes round its own
+// controls, never to the page behind, and when it closes, focus goes back where it was.
 export function dialog({ title, body, actions = [], wide = false, onClose } = {}) {
-  const close = () => { scrim.remove(); document.removeEventListener("keydown", keys, true); onClose?.(); };
-  const keys = (event) => { if (event.key === "Escape") { event.stopPropagation(); close(); } };
-  const scrim = h("div.scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } },
-    h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog" },
-      h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
-      h("div.dialog-body.scroll-thin", {}, body),
-      actions.length ? h("div.dialog-foot", {}, actions.map((action) =>
-        ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || "" }))) : null));
+  const before = document.activeElement;
+  let open = true;
+  const close = () => {
+    if (!open) return;
+    open = false;
+    scrim.remove();
+    document.removeEventListener("keydown", keys, true);
+    const under = [...document.querySelectorAll(".scrim")].pop();
+    if (before?.isConnected && before !== document.body && (!under || under.contains(before))) before.focus({ preventScroll: true });
+    onClose?.();
+  };
+  const topmost = () => [...document.querySelectorAll(".scrim")].pop() === scrim;
+  const keys = (event) => {
+    if (!topmost()) return;
+    if (event.key === "Escape") { event.stopPropagation(); close(); }
+    // Keys from outside it (focus left on the page) come into it; a menu opened from it keeps its own.
+    else if (event.key === "Tab" && !panel.contains(document.activeElement) && !document.activeElement?.closest?.(".menu")) {
+      event.preventDefault();
+      const items = tabbables(panel);
+      (items[event.shiftKey ? items.length - 1 : 0] || panel).focus();
+    }
+  };
+  const panel = h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog", "aria-modal": "true", tabIndex: -1 },
+    h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
+    h("div.dialog-body.scroll-thin", { tabIndex: -1 }, body),
+    actions.length ? h("div.dialog-foot", {}, actions.map((action) =>
+      ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || "" }))) : null);
+  // Tab from its last control goes to its first, ⇧Tab from its first to its last. A Tab
+  // a field took (indenting code) is the field's.
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab" || event.defaultPrevented || event.metaKey || event.altKey || event.ctrlKey) return;
+    const items = tabbables(panel);
+    const at = items.indexOf(document.activeElement);
+    const end = event.shiftKey ? at <= 0 : at === items.length - 1 || at < 0;
+    if (!end) return;
+    event.preventDefault();
+    (items[event.shiftKey ? items.length - 1 : 0] || panel).focus();
+  });
+  const scrim = h("div.scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } }, panel);
   document.addEventListener("keydown", keys, true);
   document.body.append(scrim);
+  // The dialog has the keys at once (Esc, Tab, and the arrows scroll what it says); a caller
+  // that wants a field focused focuses it.
+  panel.querySelector(".dialog-body").focus({ preventScroll: true });
   return { close };
 }
 

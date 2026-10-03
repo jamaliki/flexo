@@ -535,7 +535,8 @@ export async function start() {
       h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
         h("p", {}, "Ask Claude in the panel on the right, or connect Claude Code or another MCP agent. Run this command once in this folder, then ask the agent to make something. Its changes appear here as it works:"),
         copyable(MCP_COMMAND),
-        h("p.hint-line", {}, info.folder))));
+        // Which folder "this folder" is, said as such.
+        h("p.hint-line.folder-line", { title: info.folder }, icon("folder"), h("span", {}, "This folder: ", h("span.folder-path", {}, homeShort(info.folder)))))));
   };
 
   workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
@@ -595,6 +596,9 @@ export async function start() {
 function inField(event) {
   return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "") || Boolean(event.target?.isContentEditable);
 }
+
+// A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
+const homeShort = (folder) => String(folder || "").replace(/\/+$/, "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 
 function markIcon() {
   const node = icon("info");
@@ -786,15 +790,25 @@ export function palette(workspace) {
       command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
-  const run = (command) => { scrim.remove(); command.run(); };
+  // Closed, it gives the keys back where they were, as Spotlight does; a command run then
+  // takes them where it goes.
+  const before = document.activeElement;
+  const close = () => {
+    scrim.remove();
+    const under = [...document.querySelectorAll(".scrim")].pop();
+    if (before?.isConnected && before !== document.body && (!under || under.contains(before))) before.focus({ preventScroll: true });
+  };
+  const run = (command) => { close(); command.run(); };
   input.addEventListener("input", () => { index = 0; render(); });
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") { event.preventDefault(); index = Math.min(index + 1, shown.length - 1); mark(); }
     else if (event.key === "ArrowUp") { event.preventDefault(); index = Math.max(index - 1, 0); mark(); }
     else if (event.key === "Enter") { event.preventDefault(); if (shown[index]) run(shown[index]); }
-    else if (event.key === "Escape") { event.preventDefault(); scrim.remove(); }
+    else if (event.key === "Escape") { event.preventDefault(); close(); }
+    // Its one field holds the keys: Tab goes nowhere behind it.
+    else if (event.key === "Tab") event.preventDefault();
   });
-  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) scrim.remove(); } },
+  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } },
     h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list));
   document.body.append(scrim);
   render();

@@ -259,18 +259,8 @@ export function mount(studio, main) {
   area.value = studio.doc.text;
   area.addEventListener("input", () => { numbers(); studio.change((doc) => { doc.text = area.value; }, { merge: "text", quiet: true }); });
   area.addEventListener("scroll", () => { gutter.scrollTop = area.scrollTop; });
-  area.addEventListener("keydown", (event) => {
-    if (event.key !== "Tab") return;
-    event.preventDefault();
-    const { selectionStart: start, selectionEnd: end, value } = area;
-    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-    if (start === end && !event.shiftKey) area.setRangeText("  ", start, end, "end");
-    else {
-      const block = value.slice(lineStart, end);
-      area.setRangeText(event.shiftKey ? block.replace(/^ {1,2}/gm, "") : block.replace(/^/gm, "  "), lineStart, end, "select");
-    }
-    area.dispatchEvent(new Event("input"));
-  });
+  // Tab indents the YAML; Ctrl-Tab, or Esc and then Tab, goes on (ui.js).
+  ui.indent(area);
   const code = h("div.code", {}, gutter, area);
   function numbers() {
     const count = area.value.split("\n").length;

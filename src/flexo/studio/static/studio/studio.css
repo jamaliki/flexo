@@ -23,6 +23,11 @@
   /* Keyboard focus, as on a Mac: a soft ring of the accent, clear against any panel. */
   --focus-ring: rgba(61, 90, 254, 0.7);
   --focus-halo: rgba(61, 90, 254, 0.28);
+  /* Selected words: a light blue seen through, clear on the panels and on any slide (white
+     paper, a navy band), the words on it still easy to read. */
+  --selection: rgba(123, 140, 255, 0.45);
+  /* A colour chip's hairline edge, so a chip the colour of the panel still shows. */
+  --chip-ring: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
   /* A segmented control: the chosen segment a raised pill on a tinted track. */
   --seg-track: rgba(35, 30, 25, 0.075);
   --seg-on: #ffffff;
@@ -68,6 +73,8 @@
     --accent-2: #f0895e;
     --focus-ring: rgba(123, 140, 255, 0.75);
     --focus-halo: rgba(123, 140, 255, 0.32);
+    --selection: rgba(123, 140, 255, 0.45);
+    --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
     --seg-track: #141518;
     --seg-on: #3a3c42;
     --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
@@ -106,6 +113,8 @@
   --accent-2: #f0895e;
   --focus-ring: rgba(123, 140, 255, 0.75);
   --focus-halo: rgba(123, 140, 255, 0.32);
+  --selection: rgba(123, 140, 255, 0.45);
+  --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
   --seg-track: #141518;
   --seg-on: #3a3c42;
   --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
@@ -135,7 +144,7 @@ body {
   overflow: hidden;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
-::selection { background: var(--accent-soft); }
+::selection { background: var(--selection); }
 :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 
 /* -- the frame -- */
@@ -227,8 +236,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .welcome .lead { margin: -10px 0 4px; color: var(--ink-2); font-size: 15px; }
 .welcome p { margin: 0 0 10px; color: var(--ink-2); }
 .start-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.start-card { display: grid; gap: 6px; align-content: start; justify-items: start; text-align: left; padding: 18px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--raised); cursor: pointer; box-shadow: var(--shadow-1); transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
-.start-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-2); }
+.start-card { display: grid; gap: 6px; align-content: start; justify-items: start; text-align: left; padding: 18px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--raised); cursor: pointer; box-shadow: var(--shadow-1); transition: border-color 0.12s, background 0.12s; }
+/* Under the pointer a card is outlined, as a Mac control is lit: it doesn't move. */
+.start-card:hover { border-color: var(--accent); }
+.start-card:active { background: var(--sunken); }
 .start-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 6px; }
 .start-icon svg { width: 20px; height: 20px; }
 .start-title { font-weight: 640; font-size: 14px; }
@@ -243,6 +254,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .copyable { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); margin: 6px 0; }
 .copyable code { flex: 1; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 10px; color: var(--ink-2); }
+.folder-line { display: flex; align-items: center; gap: 6px; margin: 0; min-width: 0; }
+.folder-line svg { width: 14px; height: 14px; flex: none; }
+.folder-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 .shortcuts { display: grid; gap: 2px; align-content: start; }
 .shortcut-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; }
 .shortcut { display: flex; justify-content: space-between; padding: 6px 2px; border-bottom: 1px solid var(--line); }
@@ -326,13 +341,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chat-send svg { width: 15px; height: 15px; }
 .chat-send.running { background: var(--ink); }
 
-/* the command palette */
-.palette-scrim { align-items: start; padding-top: 12vh; }
+/* the command palette: at a fixed height, as Spotlight is, so its field never moves as the
+   results under it grow and shrink; the page behind is only dimmed a little. */
+.scrim.palette-scrim { place-items: start center; padding: 20vh 16px 0; background: rgba(20, 18, 15, 0.12); backdrop-filter: none; }
 .palette { width: min(620px, calc(100vw - 32px)); background: var(--raised); border-radius: 12px; box-shadow: var(--shadow-2); border: 1px solid var(--line-strong); overflow: hidden; animation: pop 0.12s ease-out; }
 .palette-head { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .palette-head svg { width: 17px; height: 17px; color: var(--ink-3); }
 .palette-input { flex: 1; height: 48px; border: 0; outline: none; background: transparent; font-size: 15px; }
-.command-list { max-height: 50vh; overflow: auto; padding: 6px; display: grid; }
+.command-list { max-height: min(50vh, calc(80vh - 120px)); overflow: auto; padding: 6px; display: grid; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: 8px; font-weight: 600; letter-spacing: -0.01em; }
 .brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
 .brand-mark svg { width: 14px; height: 14px; }
@@ -366,7 +382,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-shadow: var(--shadow-1); transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .btn:hover { border-color: var(--ink-3); }
-.btn:active { transform: translateY(0.5px); }
+/* Pressed, a button darkens, as a Mac button does: it doesn't move. */
+.btn:active:not(:disabled) { background: var(--sunken); }
+.btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(0.92); }
+.btn.claude-button:active:not(:disabled) { background: var(--claude); filter: brightness(0.92); }
+.btn.ghost:active:not(:disabled) { background: var(--line); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { filter: brightness(1.06); }
@@ -382,7 +402,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn:disabled:hover { border-color: var(--line-strong); }
 .btn.ghost:not(.on):disabled:hover { background: transparent; border-color: transparent; color: var(--ink-2); }
 .btn.primary:disabled:hover { border-color: var(--accent); filter: none; }
-.btn:disabled:active { transform: none; }
 .kbd { font: 11px var(--mono); color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 
 .input, .textarea, .select {
@@ -402,7 +421,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .input::placeholder, .textarea::placeholder { color: var(--ink-3); }
 
 .field { display: grid; gap: 5px; }
-.field-problem { color: var(--error); font-size: 12px; line-height: 1.4; margin-top: 6px; }
+/* What is wrong with what was typed, said under the field: in red, or amber for a warning
+   (the thing is still drawn). Here, not in a kind's sheet, as dialogs say it too. */
+.field-stack { display: grid; gap: 4px; }
+.field-problem { display: flex; gap: 6px; align-items: flex-start; color: var(--error); font-size: 12px; line-height: 1.4; }
+.field-problem[hidden] { display: none; }
+.field-problem svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+.field-problem .spinner { flex: none; margin-top: 1px; }
+.field-problem.warning { color: var(--warn); font-size: 11.5px; }
+.dialog-body > .field-problem { margin-top: -8px; }
 .field > .label { font-size: 11.5px; font-weight: 560; color: var(--ink-2); display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 1px; }
 .field > .label .hint { font-weight: 400; color: var(--ink-3); margin-left: auto; text-align: right; }
 /* A field half a row wide says its hint under it, where it has the room: the fields beside
@@ -420,8 +447,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: var(--ink-2); }
-.switch input { display: none; }
+.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: var(--ink-2); }
+/* Its checkbox unseen but there, so Tab reaches the switch and Space turns it, as on a Mac. */
+.switch input { position: absolute; left: 0; top: 50%; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.switch input:focus-visible + .track { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .switch .track { width: 28px; height: 16px; border-radius: 99px; background: var(--line-strong); position: relative; transition: background 0.15s; flex: none; }
 .switch .track::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); transition: transform 0.15s; }
 .switch input:checked + .track { background: var(--accent); }
@@ -467,8 +496,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .menu-item svg { width: 16px; height: 16px; color: var(--ink-2); flex: none; }
 .menu-item .menu-text { display: grid; }
 .menu-item .menu-hint { color: var(--ink-3); font-size: 11.5px; }
-.menu-item.danger { color: var(--error); }
-.menu-item.danger svg { color: var(--error); }
 .menu-item .kbd { margin-left: auto; }
 .menu-sep { height: 1px; background: var(--line); margin: 5px 4px; }
 .menu.history-menu { min-width: 280px; max-width: 380px; }
@@ -487,9 +514,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .history-more { color: var(--ink-3); font-size: 11.5px; padding: 4px 8px 4px 23px; }
 .menu-title { font-size: 11px; font-weight: 600; color: var(--ink-3); padding: 6px 8px 3px; text-transform: uppercase; letter-spacing: 0.04em; }
 
-.scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 18, 15, 0.35); display: grid; place-items: center; animation: fade 0.15s; backdrop-filter: blur(2px); }
+/* A dialog stands clear of the foot of the window, where toasts show over the dimmed page:
+   what it says (Copied, a download failed) is read without covering its buttons. */
+.scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 18, 15, 0.35); display: grid; place-items: center; padding: 24px 16px 72px; animation: fade 0.15s; backdrop-filter: blur(2px); }
 @keyframes fade { from { opacity: 0; } }
-.dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; background: var(--panel); border-radius: 12px; box-shadow: var(--shadow-2); border: 1px solid var(--line); animation: pop 0.15s ease-out; }
+.dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 96px); display: flex; flex-direction: column; background: var(--panel); border-radius: 12px; box-shadow: var(--shadow-2); border: 1px solid var(--line); animation: pop 0.15s ease-out; }
+.dialog:focus, .dialog-body:focus { outline: none; }
 .dialog.wide { width: min(860px, calc(100vw - 32px)); }
 .dialog-head { display: flex; align-items: center; padding: 14px 16px 10px; gap: 10px; }
 .dialog-title { font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
@@ -564,7 +594,7 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .theme-card:hover { border-color: var(--ink-3); }
 .theme-card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .theme-card.problem { opacity: 0.6; }
-.theme-page { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 40px; padding: 0 8px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); overflow: hidden; }
+.theme-page { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 40px; padding: 0 8px; border-radius: 5px; box-shadow: var(--chip-ring); overflow: hidden; }
 .theme-aa { font-size: 17px; font-weight: 600; line-height: 1; }
 .theme-tones { display: flex; gap: 3px; }
 .theme-tones span { width: 11px; height: 18px; border-radius: 3px; border: 1.5px solid transparent; }
@@ -598,7 +628,7 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 /* -- a thing's own colours -- */
 .colour-control { display: inline-flex; align-items: center; gap: 2px; }
 .colour-well { position: relative; width: 30px; height: 22px; border-radius: 5px; box-shadow: 0 0 0 1px var(--line-strong); cursor: pointer; overflow: hidden; display: block; }
-.colour-well .colour-chip { position: absolute; inset: 0; }
+.colour-well .colour-chip { position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--chip-ring); }
 .colour-well.unset .colour-chip { background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
 .colour-well input, .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; padding: 0; border: 0; }
 .swatch.custom { display: grid; place-items: center; overflow: hidden; background: conic-gradient(#e0474c, #e8b23a, #5aa85c, #3b82c4, #8e6cc4, #e0474c); color: #fff; }
@@ -612,7 +642,7 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 
 /* -- palettes, chosen by sight -- */
 .palette-strip { display: inline-flex; gap: 2px; }
-.palette-strip span { width: 12px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.palette-strip span { width: 12px; height: 14px; border-radius: 3px; box-shadow: var(--chip-ring); }
 .palette-pick { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; text-align: left; }
 .palette-pick > span:not(.palette-strip) { flex: 1; font-size: 12.5px; }
 .palette-pick:hover { border-color: var(--ink-3); }
@@ -623,6 +653,8 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .palette-choices { display: grid; gap: 2px; }
 .palette-choice { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font-size: 12.5px; }
 .palette-choice:hover { background: var(--accent-soft); }
+/* Just opened, nothing is lit under a pointer that has not moved. */
+.menu.fresh .palette-choice:hover:not(:focus) { background: transparent; }
 .palette-choice.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
 
 /* -- a folder not yet trusted to run its Python -- */
