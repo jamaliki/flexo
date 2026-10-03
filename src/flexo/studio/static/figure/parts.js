@@ -233,12 +233,16 @@ export function figureParts(host) {
   // -- edits, one at a time --
   const queue = [];
   let running = false;
+  // What is typed in a field, until the figure that holds it comes back: a figure that
+  // left before the latest keys must not put older words back in the field.
+  const typed = new Map();
   const LANDS = new Set(["move", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
   function act(action, { merge = null, select: choose = true, then = null, failed = null } = {}) {
     // Typing in one field: only its latest words wait to be sent.
     if (merge) {
       const waiting = queue.findIndex((job) => job.merge === merge);
       if (waiting >= 0) queue.splice(waiting, 1);
+      if (action.do === "update") typed.set(merge, action.values);
     }
     queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
     run();
@@ -254,12 +258,14 @@ export function figureParts(host) {
           result = await host.run(job.action, { merge: job.merge, label: job.label });
         } catch (error) {
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
+          if (job.merge) typed.delete(job.merge);
           job.failed?.();
           continue;
         }
-        if (!result) { job.failed?.(); continue; }
+        if (!result) { if (job.merge) typed.delete(job.merge); job.failed?.(); continue; }
         // The drawing that comes after an edit that moves parts lands smoothly.
         if (LANDS.has(job.action.do)) state.landing = Date.now();
+        if (job.merge && !queue.some((next) => next.merge === job.merge)) typed.delete(job.merge);
         if (result.model) setModel(result.model);
         if (job.choose && result.select?.length) select(result.select);
         job.then?.(result);
@@ -1396,7 +1402,8 @@ export function figureParts(host) {
 
   function fieldControl(field, item, write, scope) {
     const key = `${scope}:${field.key}`;
-    const value = valueAt(item, field.key);
+    const waiting = typed.get(key);
+    const value = waiting && field.key in waiting ? waiting[field.key] : valueAt(item, field.key);
     const set = (next) => write({ [field.key]: next }, key);
     const options = { hint: field.hint };
     switch (field.type) {
