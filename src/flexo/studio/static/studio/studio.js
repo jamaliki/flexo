@@ -7,6 +7,7 @@ export { merge3, same } from "./merge.js";
 export { avatar, colourOf, ago, copyable, nameOf } from "./shell.js";
 export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes.js";
 import { start } from "./shell.js";
+export { ownResources } from "./drawings.js";
 
 // Draw a form again without taking the field someone is typing in away from them. Words
 // another person added or took away before the caret move it along, so it stays where

@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
@@ -417,7 +417,7 @@ export function mount(studio, main) {
     page.style.opacity = "";
     const before = figure.landing();
     page.innerHTML = drawn.svg.replace(/^<\?xml[^>]*>\s*/, "");
-    const svg = page.querySelector("svg");
+    const svg = ownResources(page.querySelector("svg"));
     widenLines(svg);
     page.append(hover, marks);
     const view = svg.viewBox.baseVal;
