@@ -419,7 +419,7 @@ function menuKeys(event) {
   const node = event.currentTarget;
   const items = node.getAttribute("role") === "menu" ? [...node.querySelectorAll(".menu-item:not(:disabled)")] : focusables(node);
   const at = items.indexOf(document.activeElement);
-  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "") || Boolean(document.activeElement?.isContentEditable);
   const go = (index) => { event.preventDefault(); items[(index + items.length) % items.length]?.focus({ preventScroll: true }); };
   if (event.key === "ArrowDown" || (event.key === "ArrowRight" && !typing)) go(at + 1);
   else if (event.key === "ArrowUp" || (event.key === "ArrowLeft" && !typing)) go(at < 0 ? -1 : at - 1);

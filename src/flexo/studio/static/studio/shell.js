@@ -539,7 +539,7 @@ export async function start() {
 }
 
 function inField(event) {
-  return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "");
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "") || Boolean(event.target?.isContentEditable);
 }
 
 function markIcon() {
