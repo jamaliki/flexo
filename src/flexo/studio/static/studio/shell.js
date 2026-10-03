@@ -445,6 +445,7 @@ export async function start() {
     switch (name) {
       case "undo": travel("undo"); break;
       case "redo": travel("redo"); break;
+      case "history": if (session && !past.disabled) historyMenu(past, session); break;
       case "save":
         if (session?.unread) { unread?.mend(); break; }
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
@@ -878,6 +879,10 @@ export function palette(workspace) {
       { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
       { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
+    // The Edit menu's, by name.
+    ...(session?.past.length ? [{ icon: "undo", label: "Undo", keys: "⌘Z", hint: session.said(session.past[session.past.length - 1]).text, run: () => workspace.command("undo") }] : []),
+    ...(session?.future.length ? [{ icon: "redo", label: "Redo", keys: "⇧⌘Z", hint: session.said(session.future[session.future.length - 1]).text, run: () => workspace.command("redo") }] : []),
+    ...(session?.past.length || session?.future.length ? [{ icon: "history", label: "Show History", keys: "⌥⌘Z", run: () => workspace.command("history") }] : []),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
@@ -888,23 +893,36 @@ export function palette(workspace) {
   const list = h("div.command-list.scroll-thin");
   let shown = [];
   let index = 0;
-  // Letters of the query in order, closer together and nearer the start ranking higher;
-  // null when they are not all there.
-  const score = (label, query) => {
-    const text = label.toLowerCase();
+  // A command is found by its name: the words typed in it, at a word's start best; each
+  // word typed starting one of its words; or the first letters of its words ("ns", New
+  // Slide). What it says of itself counts only for words typed whole. Lower ranks
+  // higher; null when it is not found.
+  const wordsOf = (text) => text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const score = (command, query) => {
+    const label = command.label.toLowerCase(), names = wordsOf(label), said = wordsOf((command.hint || "").toLowerCase());
+    const tidy = label.length * 0.01;
+    const at = label.indexOf(query);
+    const starts = at === 0 || /[^\p{L}\p{N}]/u.test(label[at - 1] ?? "");
+    // Inside a word, two letters are as often chance ("ns" in Columns) as meant.
+    if (at >= 0 && (starts || query.length > 2)) return (starts ? -20 : -10) + at * 0.1 + tidy;
+    const typed = wordsOf(query);
+    if (typed.every((word) => names.some((name) => name.startsWith(word)))) return tidy;
+    if (typed.every((word) => names.some((name) => name.startsWith(word)) || said.some((name) => name.startsWith(word)))) return 10 + tidy;
     let position = 0, total = 0;
-    for (const ch of query) {
-      const found = text.indexOf(ch, position);
+    for (const ch of query.replace(/\s+/g, "")) {
+      let found = -1;
+      for (let k = position; k < label.length && found < 0; k += 1) {
+        if (label[k] === ch && ((k === position && position > 0) || k === 0 || /[^\p{L}\p{N}]/u.test(label[k - 1]))) found = k;
+      }
       if (found < 0) return null;
       total += found - position;
       position = found + 1;
     }
-    const whole = text.indexOf(query);
-    return total + (whole >= 0 ? -20 + whole * 0.1 : 0) + text.length * 0.01;
+    return 20 + total * 0.1 + tidy;
   };
   const render = () => {
     const query = input.value.trim().toLowerCase();
-    shown = query ? commands.map((command) => [score(`${command.label} ${command.hint || ""}`, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
+    shown = query ? commands.map((command) => [score(command, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     shown = shown.slice(0, 60);
     index = Math.min(index, Math.max(0, shown.length - 1));
     clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
