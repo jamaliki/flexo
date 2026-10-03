@@ -231,6 +231,8 @@ def _routing_diagnostics(
             "reversible": 2.0 * head,
             "none": 0.0,
         }[edge.spec.arrow]
+        # Where a drawn shape's outline lies inside its box, the shaft reaches it.
+        reserved -= sum(edge.outline_depth)
         if edge.joined_at is None and abs(center_length - shaft_length - reserved) > 1e-5:
             diagnostics.append(
                 Diagnostic(

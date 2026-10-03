@@ -17,9 +17,11 @@ from flexo.components import (
     volume_geometry,
 )
 from flexo.drawn import DRAWN_KINDS
+from flexo.geometry import Rect
 from flexo.ir.fitted import FittedNode
 from flexo.ir.semantic import NodeSpec
 from flexo.render_common import (
+    SHADOW_LAYERS,
     base_rect,
     paint_attributes,
     paint_override,
@@ -27,6 +29,7 @@ from flexo.render_common import (
     soft_shadow,
 )
 from flexo.render_scientific import render_scientific
+from flexo.shapes import SHAPE_KINDS, label_area, outline
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, number
 
@@ -59,7 +62,9 @@ def render_node(
         icon = badge_icon(str(spec.property("badge")))
         draw_icon(group, spec.id, icon, centre.x, centre.y, radius)
         return group
-    if spec.kind not in {"label", "spacer", "text"}:
+    if spec.kind in SHAPE_KINDS:
+        _shape(group, node, style, palette)
+    elif spec.kind not in {"label", "spacer", "text"}:
         # Behind the body, so the box's own fill hides all but the ring.
         if spec.shadow:
             soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
@@ -376,6 +381,118 @@ def _terminal(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette:
 
     body = base_rect(parent, node, style, palette)
     body.set("rx", number(node.bounds.height / 2.0))
+
+
+def _shape(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A shape drawn from its outline (``flexo.shapes``): a cylinder, a cloud, a page.
+
+    The body is one closed path in the component's fill and stroke; what is drawn
+    over it -- a lid's rim, a server's rack units, a queue's slots -- is stroked
+    in the same ink, so a tone, an author's paint, or a dark theme recolours the
+    whole shape together. Each part is its own path, so every editor (and
+    PowerPoint) opens it as a shape it can change.
+    """
+
+    spec = node.measured.spec
+    drawn = outline(spec.kind, node.bounds, node.measured.label, style)
+    stroke = style.stroke_width.points
+    fill, ink = paint_override(spec, "fill"), paint_override(spec, "stroke")
+    if spec.shadow:
+        _outline_shadow(parent, spec.id, spec.kind, node, style, palette)
+    element(
+        parent,
+        "path",
+        id=f"{spec.id}.body",
+        d=drawn.body,
+        stroke__linejoin="round",
+        **paint_attributes(
+            palette=palette,
+            fill_role="block-fill",
+            stroke_role="block-stroke",
+            stroke_width=stroke,
+            fill=fill,
+            stroke=ink,
+        ),
+    )
+    if drawn.cells:
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.cells",
+            d=drawn.cells,
+            fill__opacity=0.35,
+            **paint_attributes(palette=palette, fill_role="block-motif", fill=ink),
+        )
+    if drawn.lines:
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.lines",
+            d=drawn.lines,
+            stroke__linecap="round",
+            **paint_attributes(
+                palette=palette, stroke_role="block-stroke", stroke_width=stroke, stroke=ink
+            ),
+        )
+    if drawn.marks:
+        element(
+            parent,
+            "path",
+            id=f"{spec.id}.marks",
+            d=drawn.marks,
+            **paint_attributes(palette=palette, fill_role="block-motif", fill=ink),
+        )
+
+
+def _outline_shadow(
+    parent: ET.Element,
+    entity_id: str,
+    kind: str,
+    node: FittedNode,
+    style: LayoutStyle,
+    palette: Palette,
+) -> None:
+    """A shape's drop shadow: its own outline, offset down and right.
+
+    ``soft_shadow`` stacks rounded rectangles, which behind a cylinder or a cloud
+    would show their corners. This draws the outline itself instead -- solid for a
+    hard shadow, or as the same five faint layers, each spread by a stroke as wide
+    as its reach -- so the shadow is the shape's, and still plain vector paths.
+    """
+
+    bounds = node.bounds
+    hard = style.shadow_style == "hard"
+    offset = style.shadow_offset.points if hard else max(
+        style.shadow_offset.points, style.shadow_spread.points
+    )
+    moved = Rect(bounds.x + offset, bounds.y + offset, bounds.width, bounds.height)
+    data = outline(kind, moved, node.measured.label, style).body
+    group = element(parent, "g", id=f"{entity_id}.shadow")
+    if hard:
+        element(
+            group,
+            "path",
+            d=data,
+            opacity=min(1.0, style.shadow_opacity),
+            **paint_attributes(palette=palette, fill_role="shadow"),
+        )
+        return
+    spread = style.shadow_spread.points
+    if spread <= 0.0 or style.shadow_opacity <= 0.0:
+        return
+    layer_opacity = 1.0 - (1.0 - style.shadow_opacity) ** (1.0 / SHADOW_LAYERS)
+    for index in range(SHADOW_LAYERS):
+        reach = spread * (SHADOW_LAYERS - index) / SHADOW_LAYERS
+        element(
+            group,
+            "path",
+            d=data,
+            opacity=layer_opacity,
+            stroke__linejoin="round",
+            **paint_attributes(
+                palette=palette, fill_role="shadow", stroke_role="shadow", stroke_width=2.0 * reach
+            ),
+        )
 
 
 SHADED_OPACITY = 0.2
@@ -759,6 +876,9 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
     spec = node.measured.spec
     if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
+    if spec.kind in SHAPE_KINDS:
+        # Centred in the room the outline leaves: under a lid, over a wavy foot.
+        bounds = label_area(spec.kind, bounds, metrics, style)
     if metrics.cap_height > 0.0 and metrics.lines:
         # Centred the way the eye reads it: from the top of the first line's
         # capitals to the last baseline, not the font's line box -- which in a
@@ -793,7 +913,11 @@ def _render_label(
         parent,
         f"{spec.id}.label",
         node.measured.label,
-        x=node.bounds.center.x,
+        x=(
+            label_area(spec.kind, node.bounds, node.measured.label, style).center.x
+            if spec.kind in SHAPE_KINDS
+            else node.bounds.center.x
+        ),
         y=_label_baseline(node, style),
         typography=style.typography,
         palette=palette,

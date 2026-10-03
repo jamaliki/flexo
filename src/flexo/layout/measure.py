@@ -17,6 +17,7 @@ from flexo.layout.flow import lower_flows
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.routing.aside import writing_room
+from flexo.shapes import CLOUD_MEASURE, SHAPE_KINDS, label_room
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
@@ -264,6 +265,7 @@ WRAPPED_KINDS = frozenset(
         "inset",
         "feature-strip",
         "sequence",
+        *SHAPE_KINDS,
     }
 )
 """Kinds whose box is sized round their label, so a long label wraps instead."""
@@ -275,7 +277,12 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
     if node.kind not in WRAPPED_KINDS:
         return None
     if node.width is not None and not isinstance(node.width, CellSpan):
-        return max(1.0, style.resolve_extent(node.width).points - 2.0 * style.padding_x.points)
+        width = style.resolve_extent(node.width).points
+        if node.kind in SHAPE_KINDS:
+            return label_room(node.kind, width, style)
+        return max(1.0, width - 2.0 * style.padding_x.points)
+    if node.kind == "cloud":
+        return CLOUD_MEASURE * style.typography.size.points
     return style.label_measure * style.typography.size.points
 
 

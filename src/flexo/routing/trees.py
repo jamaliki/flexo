@@ -26,10 +26,13 @@ from flexo.routing.ink import (
     rail_label_position,
     shorten_end,
     shorten_start,
+    stretch_end,
+    stretch_start,
 )
 from flexo.routing.pins import Bundle, End, Member, Pin
 from flexo.routing.search import simplify
 from flexo.routing.separate import Wire
+from flexo.shapes import SHAPE_KINDS, ink_depth
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer
 
@@ -583,12 +586,14 @@ def straight_edge(
     if (first.x, first.y) > (second.x, second.y):
         offset = -offset
     shift = Point(-dy / length * offset, dx / length * offset)
-    start = _outline_along(source, first.translated(shift.x, shift.y), (dx, dy))
-    end = _outline_along(target, second.translated(shift.x, shift.y), (-dx, -dy))
+    start = _outline_along(source, first.translated(shift.x, shift.y), (dx, dy), style)
+    end = _outline_along(target, second.translated(shift.x, shift.y), (-dx, -dy), style)
     return replace(routed_edge(edge, (start, end), style, measurer), straight=True)
 
 
-def _outline_along(node: FittedNode, origin: Point, direction: tuple[float, float]) -> Point:
+def _outline_along(
+    node: FittedNode, origin: Point, direction: tuple[float, float], style: LayoutStyle
+) -> Point:
     """Where the ray from ``origin`` (inside ``node``) along ``direction`` leaves its outline."""
 
     bounds = node.bounds
@@ -626,4 +631,75 @@ def _outline_along(node: FittedNode, origin: Point, direction: tuple[float, floa
     if abs(dy) > 1e-9:
         limits.append(((bounds.bottom if dy > 0 else bounds.top) - origin.y) / dy)
     t = min(limits)
-    return Point(origin.x + dx * t, origin.y + dy * t)
+    edge = Point(origin.x + dx * t, origin.y + dy * t)
+    # A drawn shape's outline lies inside its box: back along the ray to it.
+    depth = _depth(node, edge, (-dx, -dy), style)
+    return Point(edge.x - dx * depth, edge.y - dy * depth)
+
+
+# -- shapes' outlines --------------------------------------------------------------
+
+
+def _depth(
+    node: FittedNode, point: Point, inward: tuple[float, float], style: LayoutStyle
+) -> float:
+    """How far into ``node`` from ``point`` on its box, going ``inward``, its outline is."""
+
+    spec = node.measured.spec
+    if spec.kind not in SHAPE_KINDS:
+        return 0.0
+    return ink_depth(spec.kind, node.bounds, node.measured.label, style, point, inward)
+
+
+def _end_depth(
+    node: FittedNode, line: tuple[Point, ...], style: LayoutStyle, *, at_start: bool
+) -> float:
+    """How much further than a line's pin, at one end, its shape's outline lies."""
+
+    if len(line) < 2:
+        return 0.0
+    end, previous = (line[0], line[1]) if at_start else (line[-1], line[-2])
+    return _depth(node, end, (end.x - previous.x, end.y - previous.y), style)
+
+
+def reach_outlines(edge: RoutedEdge, fitted: FittedFigure, style: LayoutStyle) -> RoutedEdge:
+    """``edge`` with its shaft carried on to the outline of a shape at either end.
+
+    The router pins a line to its component's box. A box is its own outline, but
+    a cylinder's lid, a cloud's bumps, or a parallelogram's slanted side is not:
+    the ink is carried on, the way it was going, until it meets the shape -- an
+    arrowhead still ``connector_standoff`` short of it, an undirected line
+    touching it. The centerline, which lint and routing read, stays pin to pin.
+    """
+
+    if edge.straight or len(edge.centerline) < 2:
+        return edge
+    line = edge.centerline
+    start = _end_depth(fitted.node(edge.spec.source.node_id), line, style, at_start=True)
+    end = (
+        0.0
+        if edge.joined_at is not None
+        else _end_depth(fitted.node(edge.spec.target.node_id), line, style, at_start=False)
+    )
+    if not start and not end:
+        return edge
+    shaft = stretch_start(stretch_end(edge.shaft, end), start)
+    return replace(edge, shaft=shaft, outline_depth=(start, end))
+
+
+def net_reach_outlines(net: RoutedNet, fitted: FittedFigure, style: LayoutStyle) -> RoutedNet:
+    """``net`` with each stem's shaft carried on to its shape's outline (see above)."""
+
+    def reached(stem: RoutedStem, *, source: bool) -> RoutedStem:
+        node = fitted.node(stem.port.node_id)
+        depth = _end_depth(node, stem.centerline, style, at_start=source)
+        if not depth:
+            return stem
+        shaft = stretch_start(stem.shaft, depth) if source else stretch_end(stem.shaft, depth)
+        return replace(stem, shaft=shaft)
+
+    return replace(
+        net,
+        source_stems=tuple(reached(stem, source=True) for stem in net.source_stems),
+        target_stems=tuple(reached(stem, source=False) for stem in net.target_stems),
+    )

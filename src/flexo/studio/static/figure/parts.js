@@ -30,6 +30,13 @@ export const GLYPHS = {
   circle: "M8 3a5 5 0 100 10A5 5 0 008 3z",
   terminal: "M5 4.5h6a3.5 3.5 0 010 7H5a3.5 3.5 0 010-7z",
   decision: "M8 2.5L13.5 8 8 13.5 2.5 8z",
+  io: "M5.5 4.5h8.5l-3.5 7H2z",
+  database: "M3 4.5c0-1.1 2.2-2 5-2s5 .9 5 2v7c0 1.1-2.2 2-5 2s-5-.9-5-2zM3 4.5c0 1.1 2.2 2 5 2s5-.9 5-2",
+  server: "M2.5 2h11v4.5h-11zM2.5 7.75h11v2.75h-11zM2.5 11.75h11v2.75h-11zM11 9.1h.01M11 13.1h.01",
+  cloud: "M4.5 12.5a3 3 0 01-.5-5.96 4 4 0 017.6-1.04 3.25 3.25 0 01.9 7z",
+  queue: "M1.5 5h13v6h-13zM8.5 5v6M10.5 5v6M12.5 5v6",
+  document: "M3.5 2.5h9v8.5c-2.2-.9-3.2.3-4.5 1.3s-2.6 1.4-4.5.4z",
+  person: "M8 2.5a2.25 2.25 0 100 4.5 2.25 2.25 0 000-4.5zM3.5 13.5V12A3.5 3.5 0 017 8.5h2a3.5 3.5 0 013.5 3.5v1.5z",
   image: "M2.5 3.5h11v9h-11zM2.5 11l3.5-3.5 3 3 2-2 2.5 2.5",
   junction: "M8 6.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM2 8h4.5M9.5 8H14",
   mlp: "M2.5 4.5h11v7h-11zM5.5 8h.01M8 8h.01M10.5 8h.01",
@@ -339,7 +346,8 @@ export function figureParts(host) {
     }, glyph(kind), h("span", {}, part.title));
     const render = () => {
       const query = search.value.trim().toLowerCase();
-      const matches = (part) => !query || `${part.title} ${part.hint} ${part.kind}`.toLowerCase().includes(query);
+      // By its title, its hint, or any other name it goes by ("cylinder", "DB").
+      const matches = (part) => !query || `${part.title} ${part.hint} ${part.kind} ${(part.words || []).join(" ")}`.toLowerCase().includes(query);
       const sections = catalog.categories.map((category) => {
         const found = Object.entries(parts).filter(([, part]) => part.category === category && matches(part));
         return found.length ? [h("div.add-head", {}, category), h("div.add-tiles", {}, found.map(([kind, part]) => tile(kind, part)))] : null;
@@ -602,7 +610,7 @@ export function figureParts(host) {
   // that usually comes next there, joined to it -- into its line, as a step in a flow.
   // What usually comes next: a box after a start, a decision, a structure or a picture
   // (a step that needs no file to be chosen first).
-  const AFTER = { terminal: "block", decision: "block", text: "block", junction: "block", op: "block", circle: "circle" };
+  const AFTER = { terminal: "block", decision: "block", io: "block", text: "block", junction: "block", op: "block", circle: "circle" };
   function nextKind(node) {
     const kind = AFTER[node.kind || "block"] || node.kind || "block";
     return parts[kind] && !parts[kind].unavailable && !parts[kind].needs_file ? kind : "block";

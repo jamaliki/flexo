@@ -27,7 +27,9 @@ with flexo.Figure("attention-flow", width="double-column") as figure:
 Component factories share two wiring keywords: `input=` takes one upstream
 value and `inputs=` takes several. They work on `node` and on `block`, `circle`,
 `image`, `inset`, `graph`, `matrix`, `sequence`, `tensor`, `feature_strip`,
-`vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`, and `loss`.
+`vector`, `channels`, `add_norm`, `mlp`, `cnn`, `prediction`, `loss`, and the
+flowchart and software shapes (`decision`, `terminal`, `io`, `database`, `server`,
+`cloud`, `queue`, `document`, `person`).
 
 - One source connects to the component's `input` port.
 - Several sources connect to `input1`, `input2`, ... when the component has
@@ -242,6 +244,11 @@ The rules:
   join on a bus and enter as one arrow.
 - **A circle or a diamond takes one line per corner**, the line in line with it
   first, then the nearest.
+- **A drawn shape's lines meet its outline.** A pin sits on the shape's box, as
+  every pin does, and the line's ink carries on to where the shape is drawn: down
+  to a database's lid, into an `io`'s slanted side, up to a document's wavy foot,
+  across to a cloud's puffs. A person keeps its pins at the middle of each side:
+  its shoulders, the top of its head, and under its name.
 - **A loop (`connect(a, a)`) goes on the emptiest side.**
 - **Two pins facing each other across a gap are aligned** when both boxes allow
   it and the straight line between them is clear, so the arrow is straight.

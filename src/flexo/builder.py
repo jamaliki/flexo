@@ -2297,6 +2297,53 @@ class GroupBuilder:
 
         return self.node(id, "terminal", label=label, **options)
 
+    def io(self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any) -> NodeHandle:
+        """A flowchart input or output: a parallelogram, for data read or written."""
+
+        return self.node(id, "io", label=label, **options)
+
+    def database(
+        self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
+    ) -> NodeHandle:
+        """A database, a cache, any store: a cylinder with its label below the lid.
+
+        A line from above meets the lid where it is drawn, not the corner of the
+        box round it (see ``flexo.shapes``).
+        """
+
+        return self.node(id, "database", label=label, **options)
+
+    def server(self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any) -> NodeHandle:
+        """A server, a host, a machine: a box over two slim rack units with their lights."""
+
+        return self.node(id, "server", label=label, **options)
+
+    def cloud(self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any) -> NodeHandle:
+        """The internet, a network, a provider: a cloud with its label among the puffs."""
+
+        return self.node(id, "cloud", label=label, **options)
+
+    def queue(self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any) -> NodeHandle:
+        """A message queue, a buffer, a stream: a box whose end is divided into slots."""
+
+        return self.node(id, "queue", label=label, **options)
+
+    def document(
+        self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any
+    ) -> NodeHandle:
+        """A file or a report: a page with a wavy foot, the flowchart's document."""
+
+        return self.node(id, "document", label=label, **options)
+
+    def person(self, id: str, label: str | tuple[TextRun, ...] = "", **options: Any) -> NodeHandle:
+        """A user, a client, an actor: a head and shoulders with the label under them.
+
+        Lines meet its shoulders from either side, its head from above, and its
+        name from below.
+        """
+
+        return self.node(id, "person", label=label, **options)
+
     def add(
         self,
         id: str,

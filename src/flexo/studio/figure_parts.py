@@ -2,7 +2,9 @@
 
 The studio's figure page builds its insert palette and its inspector from this
 catalogue, so a kind added to flexo is offered by adding an entry here -- the
-page has no form of its own for any kind. A field names the key it edits in the
+page has no form of its own for any kind. A part's ``words`` are what else people
+call it ("cylinder", "storage" and "DB" for a database), which the palette's search
+finds it by as well as by its title and hint. A field names the key it edits in the
 figure file (``label``, ``properties.length``, ``layout.gap``) and how it is
 edited:
 
@@ -640,7 +642,15 @@ def _learning() -> list[dict[str, Any]]:
 
 def _basics() -> list[dict[str, Any]]:
     return [
-        _part("block", "Block", "Basics", "A labelled box", {"label": "Block"}, SIZE),
+        _part(
+            "block",
+            "Block",
+            "Basics",
+            "A labelled box, such as a step of a process",
+            {"label": "Block"},
+            SIZE,
+            words=["process", "step", "task", "action", "activity", "rectangle", "box"],
+        ),
         _part(
             "text",
             "Text",
@@ -686,8 +696,24 @@ def _basics() -> list[dict[str, Any]]:
             "Basics",
             "A rounded start or end of a flowchart",
             {"label": "Start"},
+            words=["start", "end", "begin", "stop", "terminator", "terminal", "pill", "flowchart"],
         ),
-        _part("decision", "Decision", "Basics", "A diamond for a decision", {"label": "Decision?"}),
+        _part(
+            "decision",
+            "Decision",
+            "Basics",
+            "A diamond for a decision",
+            {"label": "Decision?"},
+            words=["if", "branch", "condition", "choice", "question", "yes/no", "diamond"],
+        ),
+        _part(
+            "io",
+            "Input/Output",
+            "Basics",
+            "A parallelogram for data a flowchart reads or writes",
+            {"label": "Input"},
+            words=["input", "output", "i/o", "io", "data", "read", "write", "parallelogram"],
+        ),
         _part(
             "image",
             "Picture",
@@ -776,6 +802,62 @@ def _cells() -> dict[str, Any]:
             _field("properties.legend", "Show legend", "bool", default=True),
         ],
     )
+
+
+def _software() -> list[dict[str, Any]]:
+    """The shapes of an architecture diagram (``flexo.shapes``), each found by the
+    words people search for it by."""
+
+    return [
+        _part(
+            "database",
+            "Database",
+            "Software",
+            "A cylinder for a database, cache or other store",
+            {"label": "Database"},
+            words=["cylinder", "storage", "store", "cache", "db", "sql", "table", "disk", "data"],
+        ),
+        _part(
+            "server",
+            "Server",
+            "Software",
+            "A server: a host, machine or computer",
+            {"label": "Server"},
+            words=["computer", "host", "machine", "rack", "node", "service", "instance", "vm"],
+        ),
+        _part(
+            "cloud",
+            "Cloud",
+            "Software",
+            "A cloud for the internet or a network",
+            {"label": "Internet"},
+            words=["internet", "network", "web", "online", "provider"],
+        ),
+        _part(
+            "queue",
+            "Queue",
+            "Software",
+            "A message queue, buffer or stream",
+            {"label": "Queue"},
+            words=["message queue", "buffer", "stream", "topic", "bus", "pipe", "fifo", "jobs"],
+        ),
+        _part(
+            "document",
+            "Document",
+            "Software",
+            "A page with a wavy foot: a file or report",
+            {"label": "Document"},
+            words=["file", "report", "page", "paper", "log", "flowchart"],
+        ),
+        _part(
+            "person",
+            "Person",
+            "Software",
+            "A person with the label under it: a user, client or actor",
+            {"label": "User"},
+            words=["user", "client", "actor", "people", "customer", "human", "account", "role"],
+        ),
+    ]
 
 
 GROUPS = [
@@ -896,13 +978,21 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-CATEGORIES = ("Basics", "Machine Learning", "Biology")
+CATEGORIES = ("Basics", "Software", "Machine Learning", "Biology")
 
 
 def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
     """The editor's catalogue: parts by category, groups, and the fields of each thing."""
 
-    parts = [*_basics(), *_learning(), *_genetics(), *_proteins(), *_bench(), _structure()]
+    parts = [
+        *_basics(),
+        *_software(),
+        *_learning(),
+        *_genetics(),
+        *_proteins(),
+        *_bench(),
+        _structure(),
+    ]
     return {
         "categories": list(CATEGORIES),
         "parts": {part["kind"]: part for part in parts},

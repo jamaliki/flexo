@@ -85,7 +85,9 @@ layers left to right.
 Beyond `block` and `text`, Flexo knows the parts papers draw: `attention`,
 `mlp`, `add_norm`, `add` and `multiply` (circles with the sign in them),
 `circle`, `decision`, `terminal`, `loss`, `concat`, `tensor`, `vector`, and
-more (see the [guide](guide.md)). Each kind is coloured as a kind.
+more (see the [guide](guide.md)); flowcharts and software diagrams have `io`,
+`database`, `server`, `cloud`, `queue`, `document`, and `person`. Each kind is
+coloured as a kind.
 
 ```python
 # step: kinds
