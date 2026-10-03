@@ -72,9 +72,29 @@ export function glyph(name) {
   return node;
 }
 
+// A structure's name from its file: a PDB ID in capitals, any other file by its name.
+export function fileLabel(source) {
+  const stem = String(source).split("/").pop().replace(/\.(pdb|cif|mmcif|ent)$/i, "");
+  return /^[0-9][A-Za-z0-9]{3}$/.test(stem) ? stem.toUpperCase() : stem;
+}
 export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.text ?? "").join("") : label ?? "");
 export const plain = (label) => readable(words(label));
 export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
+
+// A value as a person reads it, in title case: "ink colour" and "engraved-colour" are
+// "Ink Colour" and "Engraved Colour". Short words stay small inside a title.
+const SMALL_WORDS = new Set(["a", "an", "the", "and", "or", "but", "nor", "as", "to", "of", "in", "on", "at", "by", "for",
+  "with", "from", "into", "over", "onto", "upon", "like", "near"]);
+export function titled(value) {
+  const all = String(value ?? "").replace(/(?<=[A-Za-z])[-_](?=[A-Za-z])/g, " ").trim().split(/\s+/);
+  return all.map((word, index) => (index && index < all.length - 1 && SMALL_WORDS.has(word) ? word : word.replace(/^[a-z]/, (letter) => letter.toUpperCase()))).join(" ");
+}
+// A choice's value as shown: the label the catalogue gives it, else the value in title case.
+const choiceLabel = (field, option) => field.labels?.[option] ?? titled(option);
+// A title inside a sentence: "Block" is "block", "MLP" stays "MLP".
+const inSentence = (title) => (/^[A-Z][a-z]/.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : title);
+const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
 // Lines are thin: each is given a wide, invisible twin to click, named for the line
 // as it is drawn (the host maps drawn ids to the figure's).
@@ -120,12 +140,79 @@ export function figureParts(host) {
     const node = nodeOf(id);
     if (node) return plain(node.label) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
-    if (group) return plain(group.label) || (group.id === model()?.root ? "Figure" : group.layout?.kind || "group");
+    if (group) return plain(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) return `${nameOf(nodeOfRef(edge.from))} → ${nameOf(nodeOfRef(edge.to))}`;
     return id;
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
+  // What several things are called together: "Shapes", "Lines", "Groups", or "Items".
+  const isLine = (id) => Boolean(edgeOf(id) || netOf(id));
+  const pluralNoun = (ids) => (ids.every(isLine) ? "Lines" : ids.every((id) => groupOf(id)) ? "Groups" : ids.some(isLine) ? "Items" : "Shapes");
+
+  // What an edit does, in words, for the history: "Move “Model”", "Connect “x” to “y”".
+  // (Said before it is made: the names are the parts' as they were.)
+  function said(action, merge = null) {
+    const ref = (id) => (typeOf(id) ? id : nodeOfRef(id));
+    const name = (id) => `“${nameOf(ref(id))}”`;
+    const many = (ids = [], verb) => (ids.length === 1 ? `${verb} ${isLine(ids[0]) ? "Line" : name(ids[0])}` : `${verb} ${ids.length} ${pluralNoun(ids)}`);
+    switch (action.do) {
+      case "add": return "Add Shape";
+      case "connect": return `Connect ${name(action.source)} to ${name(action.target)}`;
+      case "delete": return many(action.ids, "Delete");
+      case "duplicate": return many(action.ids, "Duplicate");
+      case "gather": return action.ids?.length ? many(action.ids, "Group") : "Add Group";
+      case "ungroup": return `Ungroup ${name(action.id)}`;
+      case "paste": return "Paste Shapes";
+      case "rename": return `Change ID of ${name(action.id)}`;
+      case "move": case "step": return `Move ${name(action.id)}`;
+      case "update": {
+        const target = action.target || action.targets?.[0] || {};
+        const id = target.id, values = action.values || {}, keys = Object.keys(values);
+        const all = (...wanted) => keys.length && keys.every((key) => wanted.includes(key));
+        if (all("label")) {
+          // Typed on in a field, one entry stands for it all: said by the name it had.
+          const was = plain((nodeOf(id) || groupOf(id))?.label), now = plain(values.label);
+          return !merge && was && now ? `Rename “${was}” to “${now}”` : `Edit ${name(id)}`;
+        }
+        if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.)/.test(key))) return "Change Colour";
+        if (all("properties.zoom")) return `Zoom ${name(id)}`;
+        if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Rotate ${name(id)}`;
+        if (all("properties.yaw", "properties.pitch", "properties.roll", "properties.zoom")) return `Reset View of ${name(id)}`;
+        if (all("properties.width", "properties.height")) return `Resize ${name(id)}`;
+        // mol-sketch's settings, by the setting's label: "Change Line Width".
+        const style = keys.filter((key) => key.startsWith("properties.style"));
+        if (style.length && style.length === keys.length) {
+          if (keys[0] === "properties.style" && values[keys[0]] === null) return "Reset Rendering";
+          const label = style.length === 1 ? styleLabel(id, style[0].replace(/^properties\.style\.?/, "")) : null;
+          return label ? `Change ${titled(label)}` : "Change Rendering";
+        }
+        if (all("properties.palette")) return "Change Palette";
+        if (all("properties.colors")) return "Change Colours";
+        if (all("properties.density")) return values["properties.density"] ? "Add Density Map" : "Remove Density Map";
+        if (keys.includes("kind")) return "Change Shape Type";
+        // One field of the inspector's, by its label: "Change Width"; a switch to show
+        // something, "Show Ticks" or "Hide Ticks".
+        const field = keys.length === 1 ? fieldOf(target, keys[0]) : null;
+        if (field?.type === "bool" && /^show /i.test(field.label)) {
+          return `${(values[keys[0]] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
+        }
+        if (field?.label) return `Change ${titled(field.label)}`;
+        return id ? `Edit ${name(id)}` : "Edit";
+      }
+      default: return null;
+    }
+  }
+  // A field of the inspector's, and the label of one of mol-sketch's settings.
+  function fieldOf(target, key) {
+    const list = target.type === "node" ? partOf(nodeOf(target.id))?.fields : target.type === "group" ? catalog.group_fields
+      : target.type === "edge" || target.type === "net" ? catalog.edge_fields : target.type === "figure" ? catalog.figure_fields : null;
+    return (list || []).find((field) => field.key === key) || null;
+  }
+  function styleLabel(id, key) {
+    const drawing = (partOf(nodeOf(id))?.fields || []).find((field) => field.type === "molsketch");
+    return (drawing?.sections || []).flatMap((section) => section.fields).find((field) => field.key === key)?.label || null;
+  }
 
   function setModel(next) {
     if (!next) return;
@@ -136,6 +223,7 @@ export function figureParts(host) {
 
   function select(ids, { reveal = true } = {}) {
     state.selected = [...new Set((Array.isArray(ids) ? ids : [ids]).filter(Boolean))];
+    if (typeInto && !state.selected.includes(typeInto)) typeInto = null;
     host.changed();
     const id = state.selected[state.selected.length - 1];
     if (id && reveal) host.reveal?.(id);
@@ -152,7 +240,7 @@ export function figureParts(host) {
       const waiting = queue.findIndex((job) => job.merge === merge);
       if (waiting >= 0) queue.splice(waiting, 1);
     }
-    queue.push({ action, merge, choose, then, failed });
+    queue.push({ action, merge, choose, then, failed, label: action.do === "read" || action.do === "structure-view" ? null : said(action, merge) });
     run();
   }
   async function run() {
@@ -163,7 +251,7 @@ export function figureParts(host) {
         const job = queue.shift();
         let result;
         try {
-          result = await host.run(job.action, { merge: job.merge });
+          result = await host.run(job.action, { merge: job.merge, label: job.label });
         } catch (error) {
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           job.failed?.();
@@ -185,15 +273,15 @@ export function figureParts(host) {
   // -- adding --
   function placement() {
     const id = chosenOne();
-    if (id && groupOf(id)) return { parent: id, text: id === model().root ? "Adds at the end of the figure" : `Adds inside ${nameOf(id)}` };
-    if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: `Adds after ${nameOf(id)}`, from: id };
-    return { text: "Adds at the end of the figure" };
+    if (id && groupOf(id)) return { parent: id, text: id === model().root ? "Adds to the end of the figure" : `Adds inside “${nameOf(id)}”` };
+    if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: `Adds after “${nameOf(id)}”`, from: id };
+    return { text: "Adds to the end of the figure" };
   }
 
   function addPalette(anchor) {
     if (!model()) return;
     const where = placement();
-    const search = ui.input({ placeholder: "Find a part…" });
+    const search = ui.input({ placeholder: "Search shapes" });
     const grid = h("div.add-grid.scroll-thin");
     const tile = (kind, part) => h(`button.add-tile${part.unavailable ? ".off" : ""}`, {
       type: "button", title: part.unavailable ? `${part.hint} (${part.unavailable})` : part.hint, disabled: Boolean(part.unavailable),
@@ -211,7 +299,7 @@ export function figureParts(host) {
         sections.push([h("div.add-head", {}, "Layout"), h("div.add-tiles", {}, groups.map((group) =>
           h("button.add-tile", { type: "button", title: group.hint, onclick: () => { closeMenu(); gather(group, where); } }, glyph(group.kind), h("span", {}, group.title))))]);
       }
-      clear(grid, sections.length ? sections : h("div.empty", {}, "No part by that name."));
+      clear(grid, sections.length ? sections : h("div.empty", {}, "No matching shapes"));
     };
     // Enter takes the best match: a title that starts with the words, then one that
     // holds them, then a description that does.
@@ -226,7 +314,7 @@ export function figureParts(host) {
     };
     search.addEventListener("input", render);
     search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); best()?.click(); } });
-    const chain = where.from ? ui.toggle({ value: state.chain, label: `Connect from ${nameOf(where.from)}`, onChange: (value) => {
+    const chain = where.from ? ui.toggle({ value: state.chain, label: `Connect from “${nameOf(where.from)}”`, onChange: (value) => {
       state.chain = value;
       where.source = value ? where.from : null;
     } }) : null;
@@ -235,16 +323,20 @@ export function figureParts(host) {
     setTimeout(() => search.focus(), 20);
   }
 
+  // A part added is ready for its words: they are typed on it as soon as it is drawn.
+  // One drawn from a file is named for it (a structure for its PDB ID).
+  let typeInto = null;
   async function addPart(kind, where = placement()) {
     const part = parts[kind];
     const action = { do: "add", kind, parent: where.parent || null, after: where.after || null, source: where.source || null };
     if (part.needs_file) {
       const field = part.fields.find((item) => item.type === "file");
-      const file = await host.chooseFile({ title: `Choose the ${part.title.toLowerCase()}'s file`, types: field.types });
+      const file = await host.chooseFile({ title: `Choose ${article(part.title)} ${titled(part.title)}`, types: field.types });
       if (!file) return;
       action.node = { properties: { source: file } };
+      if (kind === "structure") action.node.label = fileLabel(file);
     }
-    act(action);
+    act(action, { then: (result) => { if (!part.needs_file && result.select?.length === 1) typeInto = result.select[0]; } });
   }
 
   function gather(group, where = null) {
@@ -260,9 +352,60 @@ export function figureParts(host) {
     act({ do: "delete", ids: gone }, { select: false, then: () => select([]) });
   }
 
+  // What a part's right-click menu offers (the host adds cut, copy and paste): the
+  // part is chosen first, as PowerPoint chooses what is right-clicked.
+  function menuOf(id, anchor) {
+    if (!state.selected.includes(id)) select([id]);
+    const node = nodeOf(id), group = groupOf(id), edge = edgeOf(id);
+    const isRoot = id === model()?.root;
+    const items = [];
+    if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
+    if (node) {
+      const kind = nextKind(node);
+      items.push({ icon: "plus", label: `Add ${titled(parts[kind].title)} After${parts[kind].needs_file ? "…" : ""}`, keys: "A", run: () => addPart(kind, { after: id, source: id }) },
+        { icon: "plus", label: "Add Shape After…", run: () => addPalette(anchor) },
+        { icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
+    }
+    const holder = parentOf(id);
+    const row = holder && (holder.layout?.kind || (holder.id === model()?.root ? "column" : "row")) === "row";
+    if ((node || (group && !isRoot)) && row && (holder.children || []).some((child) => child !== id)) {
+      items.push({ icon: "down", label: "Move to Own Row Below", run: () => act({ do: "move", id, line: "below", of: holder.id }) });
+    }
+    if (state.selected.length > 1) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
+    if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
+    if (node || (group && !isRoot)) items.push({ icon: "copy", label: "Duplicate", run: () => duplicate() });
+    if (!isRoot) items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove() });
+    return items;
+  }
+
   function duplicate(ids = state.selected) {
     const chosen = ids.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
     if (chosen.length) act({ do: "duplicate", ids: chosen });
+  }
+
+  // -- copied, and pasted (into this figure or another) --
+  // The parts and groups chosen, with what they hold and the lines between them.
+  function clip() {
+    const figure = model();
+    if (!figure) return null;
+    const chosen = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== figure.root));
+    const top = chosen.filter((id) => !chosen.some((other) => other !== id && inside(id, other)));
+    if (!top.length) return null;
+    const nodes = [], groups = [];
+    const walk = (id) => {
+      if (nodeOf(id)) { nodes.push(structuredClone(nodeOf(id))); return; }
+      const group = groupOf(id);
+      if (group) { groups.push(structuredClone(group)); (group.children || []).forEach(walk); }
+    };
+    top.forEach(walk);
+    const held = new Set(nodes.map((node) => node.id));
+    const edges = figure.edges.filter((edge) => held.has(nodeOfRef(edge.from)) && held.has(nodeOfRef(edge.to))).map((edge) => structuredClone(edge));
+    return { top, nodes, groups, edges };
+  }
+  function paste(clipped) {
+    const where = placement();
+    act({ do: "paste", top: clipped.top, nodes: clipped.nodes, groups: clipped.groups, edges: clipped.edges,
+      parent: where.parent || null, after: where.after || null });
   }
 
   function groupMenu(anchor) {
@@ -283,7 +426,7 @@ export function figureParts(host) {
     const connecting = state.connecting;
     if (!connecting) return null;
     return [icon("right"),
-      connecting.source ? h("span", {}, "Click the part that ", h("b", {}, nameOf(connecting.source)), " leads to") : h("span", {}, "Click the part the line starts from"),
+      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, nameOf(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
       h("span.kbd", {}, "Esc")];
   }
   function connectTo(id) {
@@ -338,10 +481,280 @@ export function figureParts(host) {
   }
   function dblclick(event) {
     const id = idAt(event);
-    if (id && typeOf(id) !== "net") openInline(id);
+    if (!id || typeOf(id) === "net") return;
+    // The part typed on is the part chosen: its panel shows beside it.
+    if (chosenOne() !== id) select([id], { reveal: false });
+    openInline(id);
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
+  }
+
+  // The marks as the host shows them over the drawing: a frame round each part chosen,
+  // and on the one part chosen a + on the side its line leaves by, which adds the part
+  // that usually comes next there, joined to it -- into its line, as a step in a flow.
+  const AFTER = { terminal: "block", decision: "block", text: "block", junction: "block", op: "block", circle: "circle" };
+  function nextKind(node) {
+    const kind = AFTER[node.kind || "block"] || node.kind || "block";
+    return parts[kind] && !parts[kind].unavailable ? kind : "block";
+  }
+  function sideOf(id, box) {
+    const holder = parentOf(id);
+    const siblings = holder?.children || [];
+    const at = siblings.indexOf(id);
+    const line = model().edges.find((edge) => nodeOfRef(edge.from) === id);
+    const toward = line ? nodeOfRef(line.to) : siblings[at + 1] || null;
+    const away = toward ? null : siblings[at - 1] || null;
+    const other = (toward || away) && host.box(toward || away);
+    if (!other) return holder?.layout?.kind === "row" ? "right" : "bottom";
+    const dx = other.left + other.width / 2 - (box.left + box.width / 2);
+    const dy = other.top + other.height / 2 - (box.top + box.height / 2);
+    const sign = toward ? 1 : -1;
+    if (Math.abs(dx) > Math.abs(dy)) return dx * sign > 0 ? "right" : "left";
+    return dy * sign > 0 ? "bottom" : "top";
+  }
+  function markViews() {
+    // A molecule chosen may be grabbed and turned: the pointer says so over it.
+    for (const element of host.overlay.querySelectorAll(".fig-grab")) element.classList.remove("fig-grab");
+    if (nodeOf(chosenOne())?.kind === "structure") moleculeOf(chosenOne())?.classList.add("fig-grab");
+    const views = marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
+      left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
+    group ? h("span.fig-mark-label", {}, name) : null));
+    const id = chosenOne();
+    const box = id && nodeOf(id) && !state.connecting && !inline ? host.box(id) : null;
+    if (box) {
+      const side = sideOf(id, box);
+      const kind = nextKind(nodeOf(id));
+      const x = side === "right" ? box.left + box.width : side === "left" ? box.left : box.left + box.width / 2;
+      const y = side === "bottom" ? box.top + box.height : side === "top" ? box.top : box.top + box.height / 2;
+      const stop = (event) => event.stopPropagation();
+      views.push(h(`button.fig-next.${side}`, {
+        type: "button", style: { left: `${x}px`, top: `${y}px` },
+        title: `Add a connected ${inSentence(parts[kind].title)} after “${nameOf(id)}” (A for other shapes)`,
+        onpointerdown: stop, ondblclick: stop, onmousemove: stop,
+        onclick: (event) => { stop(event); addPart(kind, { after: id, source: id }); },
+      }, icon("plus")));
+    }
+    // A molecule or picture chosen has a handle at each corner: dragged, it is drawn
+    // larger or smaller, and the figure is laid out round it again.
+    if (box && SIZED_PARTS.has(nodeOf(id)?.kind)) {
+      for (const corner of ["nw", "ne", "sw", "se"]) {
+        views.push(h(`span.fig-size.${corner}`, {
+          style: { left: `${corner.endsWith("w") ? box.left : box.left + box.width}px`, top: `${corner.startsWith("n") ? box.top : box.top + box.height}px` },
+          title: "Drag to resize · Double-click to reset size",
+          onpointerdown: (event) => partSizeStart(event, id, corner),
+          ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
+        }));
+      }
+    }
+    return views;
+  }
+
+  // -- a molecule or picture sized by its corners --
+  // It grows or shrinks about its opposite corner as the pointer goes; let go, it is
+  // given that width and height and the figure is laid out again, its parts gliding to
+  // where they go.
+  const SIZED_PARTS = new Set(["structure", "image"]);
+  let partSizing = null;
+  function partSizeStart(event, id, corner) {
+    if (event.button !== 0 || partSizing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = host.element(id);
+    const box = element?.getBoundingClientRect();
+    const unit = element?.getScreenCTM?.()?.a;
+    if (!box || !box.width || !unit) return;
+    const west = corner.endsWith("w"), north = corner.startsWith("n");
+    Object.assign(element.style, { transformBox: "fill-box", transformOrigin: `${west ? "100%" : "0"} ${north ? "100%" : "0"}`, transform: "" });
+    const tip = h("div.fig-turn-tip");
+    host.overlay.append(tip);
+    partSizing = { id, element, box, unit, tip, scale: 1, moved: false, start: { x: event.clientX, y: event.clientY },
+      anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, handle: { x: west ? box.left : box.right, y: north ? box.top : box.bottom } };
+    host.overlay.classList.add("fig-sizing");
+    window.addEventListener("pointermove", partSizeMove);
+    window.addEventListener("pointerup", partSizeEnd);
+    window.addEventListener("pointercancel", partSizeCancel);
+  }
+  function partSizeMove(event) {
+    const sizing = partSizing;
+    if (!sizing) return;
+    if (!sizing.moved && Math.hypot(event.clientX - sizing.start.x, event.clientY - sizing.start.y) < 3) return;
+    sizing.moved = true;
+    const { anchor, handle, box } = sizing;
+    const dx = handle.x - anchor.x, dy = handle.y - anchor.y;
+    let scale = ((event.clientX - anchor.x) * dx + (event.clientY - anchor.y) * dy) / (dx * dx + dy * dy || 1);
+    scale = Math.min(Math.max(scale, 24 / Math.min(box.width, box.height)), 6);
+    if (Math.abs(scale - 1) * box.width < 4) scale = 1;
+    sizing.scale = scale;
+    sizing.element.style.transform = `scale(${scale})`;
+    const outer = host.overlay.getBoundingClientRect();
+    sizing.tip.textContent = `${Math.round(scale * 100)}%`;
+    Object.assign(sizing.tip.style, { left: `${event.clientX - outer.left}px`, top: `${event.clientY - outer.top + 18}px` });
+  }
+  function partSizeFinish() {
+    const sizing = partSizing;
+    partSizing = null;
+    window.removeEventListener("pointermove", partSizeMove);
+    window.removeEventListener("pointerup", partSizeEnd);
+    window.removeEventListener("pointercancel", partSizeCancel);
+    host.overlay.classList.remove("fig-sizing");
+    sizing?.tip.remove();
+    if (sizing?.moved) { state.swallow = true; setTimeout(() => { state.swallow = false; }, 0); }
+    return sizing;
+  }
+  function partSizeEnd() {
+    const sizing = partSizeFinish();
+    if (!sizing) return;
+    if (!sizing.moved || Math.abs(sizing.scale - 1) < 0.01) { sizing.element.style.transform = ""; return; }
+    const { box, unit, scale, id, element } = sizing;
+    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round((box.width / unit) * scale), "properties.height": Math.round((box.height / unit) * scale) } },
+      { then: () => { state.landing = Date.now(); }, failed: () => { element.style.transform = ""; } });
+    // Should no new drawing come, it goes back to the size it is drawn at.
+    setTimeout(() => { if (element.isConnected) element.style.transform = ""; }, 6000);
+  }
+  function partSizeCancel() {
+    const sizing = partSizeFinish();
+    if (sizing) sizing.element.style.transform = "";
+  }
+
+  // -- a structure turned by dragging on it --
+  // Chosen, a molecule is grabbed and turned as in a viewer: across turns it (yaw), up
+  // and down tilts it (pitch). While it turns, its chains' trace is drawn turning over
+  // it -- in mol-sketch's own frame, so it lies as the molecule will -- and once let go,
+  // the molecule is drawn at the new turn.
+  const views = new Map();
+  const moleculeOf = (id) => host.element(`${id}.molecule`);
+  function turnable(event) {
+    const id = chosenOne();
+    if (!id || nodeOf(id)?.kind !== "structure") return false;
+    const box = moleculeOf(id)?.getBoundingClientRect();
+    return Boolean(box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
+  }
+  async function viewOf(id) {
+    const node = nodeOf(id);
+    const key = JSON.stringify([id, node?.properties]);
+    if (!views.has(key)) views.set(key, host.run({ do: "structure-view", id }, { merge: null }).then((result) => result?.view || null).catch(() => null));
+    return views.get(key);
+  }
+  let turning = null;
+  function turnStart(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    const molecule = moleculeOf(id);
+    if (!molecule) return;
+    const outer = host.overlay.getBoundingClientRect(), box = molecule.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    const canvas = h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
+      style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
+    const tip = h("div.fig-turn-tip", { style: { left: `${box.left - outer.left + box.width / 2}px`, top: `${box.top - outer.top + box.height + 6}px` } });
+    turning = { id, molecule, canvas, tip, from: { x: event.clientX, y: event.clientY }, by: { x: 0, y: 0 }, view: null, frame: 0, moved: false };
+    const mine = turning;
+    viewOf(id).then((view) => { if (turning === mine) { mine.view = view; turnDraw(); } });
+    window.addEventListener("pointermove", turnMove);
+    window.addEventListener("pointerup", turnEnd);
+    window.addEventListener("pointercancel", turnCancel);
+    window.addEventListener("keydown", turnKey, true);
+  }
+  const TURN = 0.5;  // degrees a pixel
+  const angle = (value) => Math.round(((((value % 360) + 540) % 360) - 180) * 10) / 10;
+  function turnAngles(turn = turning) {
+    const camera = turn.view?.camera || { yaw: 0, pitch: 0, roll: 0 };
+    return { yaw: angle(camera.yaw + turn.by.x * TURN), pitch: angle(camera.pitch + turn.by.y * TURN), roll: camera.roll || 0 };
+  }
+  function turnMove(event) {
+    if (!turning) return;
+    turning.by = { x: event.clientX - turning.from.x, y: event.clientY - turning.from.y };
+    if (!turning.moved && Math.hypot(turning.by.x, turning.by.y) < 3) return;
+    if (!turning.moved) {
+      turning.moved = true;
+      host.overlay.append(turning.canvas, turning.tip);
+      turning.molecule.classList.add("fig-turning");
+      document.body.classList.add("fig-grabbing");
+    }
+    if (!turning.frame) turning.frame = requestAnimationFrame(() => { if (turning) { turning.frame = 0; turnDraw(); } });
+  }
+  function turnDraw() {
+    const { canvas, view, tip } = turning;
+    if (!turning.moved) return;
+    const { yaw, pitch, roll } = turnAngles();
+    tip.textContent = `Yaw ${Math.round(yaw)}° · Pitch ${Math.round(pitch)}°`;
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!view?.chains?.length) return;
+    const [cy, sy, cp, sp, cr, sr] = [yaw, yaw, pitch, pitch, roll, roll].map((value, index) => (index % 2 ? Math.sin : Math.cos)(value * Math.PI / 180));
+    // As mol-sketch turns it: about y by yaw, x by pitch, then z by roll; y up on the page.
+    const chains = view.chains.map((chain) => chain.map(([x, y, z]) => {
+      const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
+      const y2 = cp * y - sp * z1, z2 = sp * y + cp * z1;
+      return [cr * x1 - sr * y2, -(sr * x1 + cr * y2), z2];
+    }));
+    const all = chains.flat();
+    const [left, right] = [Math.min(...all.map((p) => p[0])), Math.max(...all.map((p) => p[0]))];
+    const [top, bottom] = [Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[1]))];
+    const [near, far] = [Math.max(...all.map((p) => p[2])), Math.min(...all.map((p) => p[2]))];
+    const pad = 0.08 * Math.min(canvas.width, canvas.height);
+    const scale = Math.min((canvas.width - 2 * pad) / Math.max(right - left, 1), (canvas.height - 2 * pad) / Math.max(bottom - top, 1));
+    const at = ([x, y]) => [canvas.width / 2 + (x - (left + right) / 2) * scale, canvas.height / 2 + (y - (top + bottom) / 2) * scale];
+    const ink = getComputedStyle(host.overlay).getPropertyValue("--accent").trim() || "#3d5afe";
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    // Segments far to near, the near ones darker and thicker: the trace reads in depth.
+    const segments = chains.flatMap((chain) => chain.slice(1).map((point, index) => [chain[index], point]));
+    segments.sort((a, b) => (a[0][2] + a[1][2]) - (b[0][2] + b[1][2]));
+    const ratio = window.devicePixelRatio || 1;
+    for (const [a, b] of segments) {
+      const depth = near > far ? ((a[2] + b[2]) / 2 - far) / (near - far) : 1;
+      context.strokeStyle = ink;
+      context.globalAlpha = 0.25 + 0.75 * depth;
+      context.lineWidth = (1.2 + 2.2 * depth) * ratio;
+      context.beginPath();
+      context.moveTo(...at(a));
+      context.lineTo(...at(b));
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+  function turnFinish() {
+    window.removeEventListener("pointermove", turnMove);
+    window.removeEventListener("pointerup", turnEnd);
+    window.removeEventListener("pointercancel", turnCancel);
+    window.removeEventListener("keydown", turnKey, true);
+    document.body.classList.remove("fig-grabbing");
+    const was = turning;
+    turning = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    return was;
+  }
+  // The trace stays over the molecule until it is drawn again at its new turn.
+  function turnClear(was) {
+    was.canvas.remove();
+    was.tip.remove();
+    was.molecule.classList.remove("fig-turning");
+  }
+  function turnEnd() {
+    const was = turnFinish();
+    if (!was) return;
+    if (!was.moved || !was.view) { turnClear(was); return; }
+    // A press that turned it is not a click on it.
+    state.swallow = true;
+    setTimeout(() => { state.swallow = false; }, 0);
+    const { yaw, pitch } = turnAngles(was);
+    was.tip.textContent = "Rendering…";
+    const values = { "properties.yaw": yaw || null, "properties.pitch": pitch || null };
+    act({ do: "update", target: { type: "node", id: was.id }, values }, { select: false, failed: () => turnClear(was) });
+    const started = Date.now();
+    const wait = () => {
+      if (moleculeOf(was.id) !== was.molecule || Date.now() - started > 8000) turnClear(was);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
+  }
+  function turnCancel() { const was = turnFinish(); if (was) turnClear(was); }
+  function turnKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    turnCancel();
   }
 
   // -- dragging a part to another place --
@@ -388,6 +801,7 @@ export function figureParts(host) {
 
   function pointerdown(event) {
     if (event.button !== 0 || state.connecting || inline || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (turnable(event)) { turnStart(event, chosenOne()); return; }
     const id = idAt(event);
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
@@ -446,7 +860,7 @@ export function figureParts(host) {
   }
 
   const dropAt = (point) => dropPlace(model(), drag.boxes, point, drag.id);
-  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index : a === b);
+  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side : a === b);
   const unchanged = (at, id) => stays(model(), at, id);
 
   function showDrop(at) {
@@ -458,6 +872,23 @@ export function figureParts(host) {
     const place = (node, box, extra = {}) => Object.assign(node.style, {
       transform: `translate(${box.left - origin.left}px, ${box.top - origin.top}px)`,
       width: `${Math.max(box.right - box.left, 0)}px`, height: `${Math.max(box.bottom - box.top, 0)}px`, ...extra });
+    if (at.kind === "line") {
+      // A line of its own: a slot where it lands, centred past the rest of the figure.
+      const all = drag.boxes.get(model().root) || room;
+      const own = drag.boxes.get(drag.id);
+      const width = own ? own.right - own.left : 60, height = own ? own.bottom - own.top : 30;
+      const mid = centre(all), gap = 18;
+      const slot = at.side === "below" ? { left: mid.x - width / 2, top: all.bottom + gap }
+        : at.side === "above" ? { left: mid.x - width / 2, top: all.top - gap - height }
+          : at.side === "right" ? { left: all.right + gap, top: mid.y - height / 2 }
+            : { left: all.left - gap - width, top: mid.y - height / 2 };
+      place(drag.zone, { ...slot, right: slot.left + width, bottom: slot.top + height });
+      drag.zone.dataset.label = at.side === "below" || at.side === "above" ? `New row ${at.side}` : `New column on the ${at.side}`;
+      drag.zone.classList.add("on", "own-line");
+      drag.indicator.classList.remove("on");
+      return;
+    }
+    drag.zone.classList.remove("own-line");
     const home = unchanged(at, drag.id);
     drag.zone.classList.toggle("on", Boolean(room) && at.parent !== model().root && !home);
     if (room) place(drag.zone, { left: room.left - 6, top: room.top - 6, right: room.right + 6, bottom: room.bottom + 6 });
@@ -542,7 +973,8 @@ export function figureParts(host) {
     for (const { element } of was.moving) element.classList.add("fig-settling");
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
-    act({ do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
+    act(at.kind === "line" ? { do: "move", id: was.id, line: at.side, of: at.of }
+      : { do: "move", id: was.id, parent: at.parent, index: at.index }, { failed: () => sendHome(was) });
   }
   function dragCancel() { const was = dragFinish(); if (was) sendHome(was); }
   let landed = 0;
@@ -586,9 +1018,13 @@ export function figureParts(host) {
         continue;
       }
       const dx = centre(was).x - centre(now).x, dy = centre(was).y - centre(now).y;
-      if (Math.hypot(dx, dy) < 0.5) continue;
+      // One sized in proportion (a molecule's corner dragged) grows or shrinks the rest of the way.
+      const grown = was.width / (now.width || 1);
+      const sized = Math.abs(grown - 1) > 0.02 && Math.abs(was.height / (now.height || 1) - grown) < 0.05 * grown;
+      if (Math.hypot(dx, dy) < 0.5 && !sized) continue;
       const scale = unitsPerPixel(element);
-      element.animate([{ transform: `translate(${dx * scale}px, ${dy * scale}px)` }, { transform: "translate(0px, 0px)" }],
+      if (sized) Object.assign(element.style, { transformBox: "fill-box", transformOrigin: "center" });
+      element.animate([{ transform: `translate(${dx * scale}px, ${dy * scale}px)${sized ? ` scale(${grown})` : ""}` }, { transform: `translate(0px, 0px)${sized ? " scale(1)" : ""}` }],
         { duration: 300, easing: ease });
     }
     // Lines and frames are drawn anew for where the parts go: they come in as the parts
@@ -612,11 +1048,15 @@ export function figureParts(host) {
     const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : groupOf(id);
     if (!item || !host.box(id)) return;
     const original = words(item.label);
-    const field = ui.markup({ value: original, rows: 1, colours: false });
-    const box = h("div.fig-inline", {}, field,
-      h("div.inline-foot", {}, h("span", {}, "Enter to keep · Esc to leave"), h("span", {}, "$maths$ · *emphasis*")));
+    // A label's words are names and maths, not prose: no spelling, no corrections.
+    const field = ui.markup({ value: original, rows: 1, colours: false, spelling: false });
+    // Typed where the words are, as they look there, when the part has words drawn to
+    // lie over; else in a box under it.
+    const label = host.element(`${id}.label`);
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return to save · Esc to cancel · $maths$ · *emphasis*" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Return to save · Esc to cancel"), h("span", {}, "$maths$ · *emphasis*")));
     host.overlay.append(box);
-    inline = { id, kind, field: field.area, original, box };
+    inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label) };
     placeInline();
     field.area.focus();
     field.area.select();
@@ -627,15 +1067,37 @@ export function figureParts(host) {
     field.area.addEventListener("blur", () => setTimeout(() => { if (inline?.box === box && !box.contains(document.activeElement)) closeInline(true); }, 0));
   }
   function placeInline() {
+    if (typeInto && !inline && host.box(typeInto)) {
+      // Once it has landed where it is drawn.
+      const id = typeInto;
+      typeInto = null;
+      setTimeout(() => { if (!inline && chosenOne() === id && host.box(id)) openInline(id); }, 320);
+    }
     if (!inline) return;
     if (!inline.box.isConnected) host.overlay.append(inline.box);
     const where = host.box(inline.id);
     if (!where) return;
-    Object.assign(inline.box.style, { left: `${where.left}px`, top: `${where.top + where.height + 6}px`, minWidth: `${Math.max(where.width, 240)}px` });
+    const label = inline.inPlace && host.element(`${inline.id}.label`);
+    if (!label) {
+      Object.assign(inline.box.style, { left: `${where.left}px`, top: `${where.top + where.height + 6}px`, minWidth: `${Math.max(where.width, 240)}px` });
+      return;
+    }
+    // Over the drawn words, in their face, size and colour; they step aside meanwhile.
+    if (inline.label !== label) { inline.label?.style.removeProperty("visibility"); label.style.visibility = "hidden"; inline.label = label; }
+    const style = getComputedStyle(label);
+    const size = parseFloat(style.fontSize) * (label.getScreenCTM()?.a || 1);
+    const outer = host.overlay.getBoundingClientRect(), drawn = label.getBoundingClientRect();
+    const width = Math.max(drawn.width + 2 * size, where.width, 120);
+    const middle = drawn.width ? drawn.left + drawn.width / 2 - outer.left : where.left + where.width / 2;
+    const top = (drawn.height ? drawn.top - outer.top : where.top + where.height / 2 - size * 0.7) - 4;
+    Object.assign(inline.box.style, { left: `${middle - width / 2}px`, top: `${top}px`, width: `${width}px`, minWidth: "" });
+    Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: style.fontFamily, fontWeight: style.fontWeight,
+      color: style.fill && style.fill !== "none" ? style.fill : "", textAlign: "center" });
   }
   function closeInline(keep) {
     if (!inline) return;
     const { id, kind, field, original, box } = inline;
+    inline.label?.style.removeProperty("visibility");
     inline = null;
     box.remove();
     if (keep && field.value !== original) update({ type: kind, id }, { label: field.value });
@@ -684,7 +1146,7 @@ export function figureParts(host) {
   // -- the inspector's panels --
   function panel() {
     const figure = model();
-    if (!figure) return h("div.empty", {}, "The figure does not read. Its messages say where.");
+    if (!figure) return h("div.empty", {}, "The figure can't be read. See the messages for details.");
     const chosen = state.selected;
     if (chosen.length > 1) return manyPanel(chosen);
     if (!chosen.length) return host.nothing ? host.nothing() : figurePanel();
@@ -713,8 +1175,8 @@ export function figureParts(host) {
     const siblings = holder?.children || [];
     const at = siblings.indexOf(id);
     return [
-      ui.button("", () => act({ do: "step", id, delta: -1 }), { kind: "ghost", small: true, icon: "up", title: "Earlier (⌥↑)", disabled: at <= 0 }),
-      ui.button("", () => act({ do: "step", id, delta: 1 }), { kind: "ghost", small: true, icon: "down", title: "Later (⌥↓)", disabled: at < 0 || at >= siblings.length - 1 }),
+      ui.button("", () => act({ do: "step", id, delta: -1 }), { kind: "ghost", small: true, icon: "up", title: "Move Up (⌥↑)", disabled: at <= 0 }),
+      ui.button("", () => act({ do: "step", id, delta: 1 }), { kind: "ghost", small: true, icon: "down", title: "Move Down (⌥↓)", disabled: at < 0 || at >= siblings.length - 1 }),
       ui.button("", () => duplicate([id]), { kind: "ghost", small: true, icon: "copy", title: "Duplicate (⌘D)" }),
       ui.button("", () => remove([id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" }),
     ];
@@ -728,7 +1190,7 @@ export function figureParts(host) {
       act({ do: "rename", id, to });
     });
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); } });
-    return ui.field("Id", input, { hint: type === "group" ? "" : "Lines name it" });
+    return ui.field("ID", input, { hint: type === "group" ? "" : "Used by lines" });
   }
 
   const titleBlock = (picture, name, hintText) =>
@@ -736,26 +1198,50 @@ export function figureParts(host) {
 
   function nodePanel(node) {
     const part = partOf(node) || { title: node.kind, fields: [], hint: "" };
-    const kinds = Object.entries(parts).filter(([kind, p]) => !p.needs_file || kind === node.kind);
+    // A part made a structure or a picture is drawn from a file: it is asked for, and
+    // the part keeps its words (under the molecule, say) and its lines.
+    const kinds = Object.entries(parts).filter(([kind, p]) => !p.unavailable || kind === node.kind);
     const retype = ui.select({ value: node.kind || "block", options: kinds.map(([kind, p]) => ({ value: kind, label: p.title })),
-      onChange: (value) => update({ type: "node", id: node.id }, { kind: value }) });
+      onChange: async (value) => {
+        const next = parts[value];
+        if (!next?.needs_file || value === node.kind) { update({ type: "node", id: node.id }, { kind: value }); return; }
+        const field = next.fields.find((item) => item.type === "file");
+        const file = await host.chooseFile({ title: `Choose ${article(next.title)} ${titled(next.title)}`, types: field?.types });
+        if (!file) { retype.value = node.kind || "block"; return; }
+        update({ type: "node", id: node.id }, { kind: value, "properties.source": file });
+      } });
     const lines = model().edges.filter((edge) => nodeOfRef(edge.from) === node.id || nodeOfRef(edge.to) === node.id);
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
         h("div.insp-row", {}, titleBlock(glyph(node.kind || "block"), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
       colourSection([{ type: "node", id: node.id, item: node }]),
-      h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Kind", retype)),
+      h("div.section", {}, h("div.grid2", {}, idField(node.id, "node"), ui.field("Type", retype)),
         fields(part.fields.filter((field) => field.key !== "properties.tone"), node, (values, merge) => update({ type: "node", id: node.id }, values, merge), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length)),
         lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([edge.id]) },
-            nodeOfRef(edge.from) === node.id ? ["to ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["from ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
+            nodeOfRef(edge.from) === node.id ? ["To ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["From ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
             edge.label ? h("span.muted", {}, ` · ${plain(edge.label)}`) : null),
-          ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "close", title: "Remove the line" })))) : null,
+          ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "close", title: "Delete line" })))) : null,
         h("div.row", {},
           ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }),
-          ui.button("Add after…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
+          ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; select([node.id]); addPalette(anchor); }, { small: true, icon: "plus" }))),
+      ownLineSection(node.id),
     ];
+  }
+
+  // A part in a row put on a line of its own, under (or over) that row and centred on
+  // it: a result drawn under the steps it compares. (Dragged out beside a figure laid out
+  // in a column, a part takes a column of its own.)
+  function ownLineSection(id) {
+    const holder = parentOf(id);
+    const kind = holder?.layout?.kind || (holder?.id === model().root ? "column" : "row");
+    if (!holder || kind !== "row" || !(holder.children || []).some((child) => child !== id)) return null;
+    return h("div.section", {}, h("div.section-title", {}, "Move to Own Row"),
+      h("div.row", {}, [["below", "Below", "down"], ["above", "Above", "up"]].map(([side, label, glyphName]) =>
+        ui.button(label, () => act({ do: "move", id, line: side, of: holder.id }),
+          { small: true, icon: glyphName, title: `Move to a new row ${side}, centred on this one` }))),
+      h("div.hint-line", {}, "You can also drag it below or above the figure."));
   }
 
   function groupPanel(group) {
@@ -764,19 +1250,20 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, isRoot ? null : crumbs(group.id),
         h("div.insp-row", {},
-          titleBlock(glyph(groupGlyph(group)), isRoot ? "The figure's layout" : group.role === "module" ? "Module" : "Group",
-            `${count} part${count === 1 ? "" : "s"}, ${group.layout?.kind || "column"}`),
+          titleBlock(glyph(groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
+            `${counted(count, "shape")} · ${titled(group.layout?.kind || "column")}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
-        isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Its parts take its place" })),
+        isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
       h("div.section", {}, isRoot || group.implied ? null : idField(group.id, "group"),
         fields(catalog.group_fields, group, (values, merge) => update({ type: "group", id: group.id }, values, merge), `group:${group.id}`)),
-      h("div.section", {}, h("div.section-title", {}, "Holds", h("span.count", {}, count)),
+      h("div.section", {}, h("div.section-title", {}, "Contents", h("span.count", {}, count)),
         h("div.line-list", {}, (group.children || []).map((child, index) => h("div.line-row", {},
           h("button.link", { type: "button", onclick: () => select([child]) }, nodeOf(child) ? glyph(nodeOf(child).kind || "block") : glyph(groupGlyph(groupOf(child) || {})), nameOf(child)),
-          ui.button("", () => act({ do: "step", id: child, delta: -1 }, { select: false }), { kind: "ghost", small: true, icon: "up", title: "Earlier", disabled: index === 0 }),
-          ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Later", disabled: index === count - 1 })))),
-        ui.button("Add inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
+          ui.button("", () => act({ do: "step", id: child, delta: -1 }, { select: false }), { kind: "ghost", small: true, icon: "up", title: "Move Up", disabled: index === 0 }),
+          ui.button("", () => act({ do: "step", id: child, delta: 1 }, { select: false }), { kind: "ghost", small: true, icon: "down", title: "Move Down", disabled: index === count - 1 })))),
+        ui.button("Add Shape Inside…", (event) => { const anchor = event.currentTarget; select([group.id]); addPalette(anchor); }, { small: true, icon: "plus" })),
+      isRoot ? null : ownLineSection(group.id),
     ];
   }
 
@@ -797,16 +1284,16 @@ export function figureParts(host) {
   function netPanel(net) {
     return [
       h("div.section.insp-top", {},
-        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching line", `${(net.sources || []).join(", ")} → ${(net.targets || []).join(", ")}`),
+        h("div.insp-row", {}, titleBlock(glyph("net"), "Branching Line", `${(net.sources || []).join(", ")} → ${(net.targets || []).join(", ")}`),
           h("div.insp-actions", {}, ui.button("", () => remove([net.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       h("div.section", {}, fields([catalog.edge_fields[0]], net, (values, merge) => update({ type: "net", id: net.id }, values, merge), `net:${net.id}`),
-        h("div.hint-line", {}, "One value into several ports, as into attention's query, key, and value. Its ends are edited in Source.")),
+        h("div.hint-line", {}, "Connects one output to several ports, such as the query, key and value of attention. Edit its ends in Source.")),
     ];
   }
 
   function figurePanel() {
     const figure = model();
-    const counts = `${figure.nodes.length} parts · ${figure.edges.length + figure.nets.length} lines`;
+    const counts = `${counted(figure.nodes.length, "shape")} · ${counted(figure.edges.length + figure.nets.length, "line")}`;
     return [
       h("div.section.insp-top", {}, titleBlock(icon("figure"), "Figure", counts)),
       h("div.section", {}, fields(catalog.figure_fields, { figure: figure.figure }, (values, merge) => update({ type: "figure" }, values, merge), "figure")),
@@ -816,14 +1303,14 @@ export function figureParts(host) {
 
   function howTo() {
     const figure = model();
-    return h("div.section", {}, h("div.section-title", {}, "Making it"),
+    return h("div.section", {}, h("div.section-title", {}, "Tips"),
       h("ul.how", {},
-        h("li", {}, h("b", {}, "Add"), " a part (A). With a part chosen, the new one comes after it, a line between them."),
-        h("li", {}, h("b", {}, "Connect"), " (C): click where a line starts, then where it ends."),
-        h("li", {}, h("b", {}, "Drag"), " a part to another place in its row or column, or into another group; Esc takes it back."),
-        h("li", {}, "Double-click a part to change its words; ⇧-click to choose several, then ", h("b", {}, "Group"), " (G).")),
-      h("div.row", {}, ui.button("Add a part", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
-        figure ? ui.button("The layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
+        h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one is added after it and connected to it."),
+        h("li", {}, h("b", {}, "Connect"), " (C): click the shape where the line starts, then the one where it ends."),
+        h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
+        h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G).")),
+      h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
+        figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
   }
 
   function manyPanel(ids) {
@@ -831,12 +1318,12 @@ export function figureParts(host) {
     const colourable = ids.flatMap((id) => nodeOf(id) ? [{ type: "node", id, item: nodeOf(id) }]
       : groupOf(id) && id !== model().root && !groupOf(id).implied ? [{ type: "group", id, item: groupOf(id) }] : []);
     return [
-      h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} chosen`, ids.map(nameOf).join(", "))),
+      h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} ${pluralNoun(ids)} Selected`, ids.map(nameOf).join(", "))),
       colourable.length ? colourSection(colourable) : null,
-      h("div.section", {}, h("div.section-title", {}, "Gather them into"),
+      h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
           glyph(group.kind), h("span", {}, group.title)))),
-        gatherable ? null : h("div.hint-line", {}, "Lines cannot be gathered; choose parts."),
+        gatherable ? null : h("div.hint-line", {}, "Lines can't be grouped. Select shapes only."),
         h("div.row", {}, ui.button("Duplicate", () => duplicate(ids), { small: true, icon: "copy" }),
           ui.button("Delete", () => remove(ids), { small: true, icon: "trash", kind: "danger" }))),
     ];
@@ -847,7 +1334,7 @@ export function figureParts(host) {
   // -- colours: a part's tone (a colour of the theme's, shared by parts with the same
   // tone), or colours of its own, which win over the tone and the theme --
 
-  const OWN = [["fill", "Fill"], ["stroke", "Outline"], ["label", "Words"]];
+  const OWN = [["fill", "Fill"], ["stroke", "Outline"], ["label", "Text"]];
   const GROUP_OWN = { fill: "Background", stroke: "Border", label: "Title" };
   const TONE_NAMES = () => Object.values(parts).flatMap((part) => part.fields).find((field) => field.key === "properties.tone")?.options.filter((name) => !/^\d+$/.test(name)) || [];
 
@@ -870,17 +1357,17 @@ export function figureParts(host) {
       if (tone === undefined || tone === null || tone === "") return null;
       return /^\d+$/.test(String(tone)) ? String(tone) : tones?.used?.[tone] !== undefined ? String(tones.used[tone]) : `named:${tone}`;
     };
-    const chips = nodes.length && tones?.colours?.length ? ui.field("The theme's", ui.swatches({
+    const chips = nodes.length && tones?.colours?.length ? ui.field("Theme", ui.swatches({
       value: common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null,
-      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `The theme's colour ${index + 1}` })),
+      colours: tones.colours.map((colour, index) => ({ value: String(index + 1), colour: colour.fill, border: colour.stroke, title: `Theme colour ${index + 1}` })),
       onChange: (value) => paint("node", { "properties.tone": value }),
     })) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
-    const named = nodes.length ? ui.field("Tone name", ui.combo({
+    const named = nodes.length ? ui.field("Tone Name", ui.combo({
       value: (() => { const tone = common((target) => target.type === "node" ? target.item.properties?.tone : null); return tone && !/^\d+$/.test(String(tone)) ? tone : ""; })(),
-      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "none",
+      options: TONE_NAMES(), key: `colour:${scope}:tone`, placeholder: "None",
       onChange: (value) => paint("node", { "properties.tone": value.trim() || null }),
-    }), { hint: "Parts with one name share a colour" }) : null;
+    }), { hint: "Same name, same colour" }) : null;
     const own = h("div.own-colours", {}, OWN.map(([part, label]) => h("div.own-colour", {},
       ui.colour({
         title: label, key: `colour:${scope}:${part}`,
@@ -889,7 +1376,7 @@ export function figureParts(host) {
       }),
       h("span", {}, nodes.length ? label : GROUP_OWN[part]))));
     return h("div.section", {}, h("div.section-title", {}, "Colour"), chips, named,
-      ui.field("Its own", own, { hint: "Win over tones and the theme" }));
+      ui.field("Custom", own, { hint: "Overrides the tone and the theme" }));
   }
 
 
@@ -899,7 +1386,12 @@ export function figureParts(host) {
       return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
     };
     const shown = list.filter((field) => !field.show || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
-    return h("div.fields", {}, shown.map((field) => fieldControl(field, item, write, scope)));
+    // Fields few reach for are folded away under the rest -- open, if one of them is set.
+    const more = shown.filter((field) => field.more);
+    const set = more.some((field) => valueAt(item, field.key) !== undefined && valueAt(item, field.key) !== null && valueAt(item, field.key) !== "");
+    return h("div.fields", {}, shown.filter((field) => !field.more).map((field) => fieldControl(field, item, write, scope)),
+      more.length ? h("details.more", { open: set }, h("summary", {}, icon("chevron"), "More"),
+        h("div.inner.fields", {}, more.map((field) => fieldControl(field, item, write, scope)))) : null);
   }
 
   function fieldControl(field, item, write, scope) {
@@ -909,11 +1401,11 @@ export function figureParts(host) {
     const options = { hint: field.hint };
     switch (field.type) {
       case "markup":
-        return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, onInput: set }), options);
+        return ui.field(field.label, ui.markup({ value: words(value), rows: 1, key, colours: false, spelling: false, onInput: set }), options);
       case "text":
         return ui.field(field.label, ui.input({ value: value ?? "", key, onInput: set }), options);
       case "length":
-        return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "auto", mono: true, onInput: (text) => {
+        return ui.field(field.label, ui.input({ value: value ?? "", key, placeholder: "Auto", mono: true, onInput: (text) => {
           const clean = text.trim();
           if (!clean) set(null);
           else if (/^\d+(\.\d+)?$/.test(clean)) set(`${clean}pt`);
@@ -921,10 +1413,33 @@ export function figureParts(host) {
         } }), options);
       case "code":
         return ui.field(field.label, ui.textarea({ value: value ?? "", rows: 2, mono: true, key, onInput: set }), options);
+      case "view": {
+        // A molecule turned, tilted, and framed a step at a click, as in a viewer.
+        const at = (name, fallback) => Number(valueAt(item, `properties.${name}`) ?? fallback);
+        const turn = (name, by) => {
+          const next = ((((at(name, 0) + by) % 360) + 540) % 360) - 180;
+          write({ [`properties.${name}`]: next || null }, null);
+        };
+        const zoom = (by) => {
+          const next = Math.round(at("zoom", 1) * by * 100) / 100;
+          write({ "properties.zoom": next === 1 ? null : next }, null);
+        };
+        const button = (glyphName, title, run) => ui.button("", run, { small: true, icon: glyphName, title });
+        return ui.field(field.label, h("div.view-pad", {},
+          button("left", "Rotate left 30°", () => turn("yaw", -30)),
+          button("right", "Rotate right 30°", () => turn("yaw", 30)),
+          button("up", "Tilt back 30°", () => turn("pitch", -30)),
+          button("down", "Tilt forward 30°", () => turn("pitch", 30)),
+          h("span.sep"),
+          button("minus", "Zoom Out", () => zoom(1 / 1.25)),
+          button("plus", "Zoom In", () => zoom(1.25)),
+          h("span.sep"),
+          button("refresh", "Reset rotation and zoom", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
+      }
       case "integer":
       case "number":
         return ui.field(field.label, ui.number({ value: value ?? "", key, min: field.min, step: field.type === "integer" ? 1 : "any",
-          placeholder: field.default !== undefined ? String(field.default) : "auto",
+          placeholder: field.default !== undefined ? String(field.default) : "Auto",
           onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) }), options);
       case "bool": {
         const on = value ?? field.default ?? false;
@@ -934,7 +1449,7 @@ export function figureParts(host) {
           field.hint ? h("span.switch-hint", {}, field.hint) : null), { inline: true });
       }
       case "choice":
-        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", options: field.options.map((option) => ({ value: option, label: option === "" ? "None" : String(option) })),
+        return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)) })),
           onChange: (next) => {
             const typed = field.options.find((option) => String(option) === next);
             set(typed === field.default || typed === "" ? null : typed);
@@ -944,7 +1459,7 @@ export function figureParts(host) {
       case "palette": {
         const current = value ?? field.default;
         const strip = (name) => h("span.palette-strip", {}, (field.colours?.[name] || []).slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
-        const title = (name) => (name === field.default ? "The theme's own" : name);
+        const title = (name) => (name === field.default ? "Default" : name);
         const choose = (event) => popover(event.currentTarget, h("div.palette-choices", {},
           field.options.map((name) => h(`button.palette-choice${name === current ? ".on" : ""}`, { type: "button",
             onclick: () => { closeMenu(); set(name === field.default ? null : name); } }, strip(name), h("span", {}, title(name))))),
@@ -965,11 +1480,128 @@ export function figureParts(host) {
       }
       case "file":
         return ui.field(field.label, h("div.row", {}, ui.input({ value: value ?? "", mono: true, key, onChange: set }),
-          h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a file", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
+          h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"));
+      case "molpalette":
+        return ui.field(field.label, groupPalette(item, value, set), options);
+      case "molsketch":
+        return styleSections(field, item, write);
       default:
         return null;
+    }
+  }
+
+  // -- a structure's mol-sketch settings --
+  // What it is drawn with -- its look's settings, the figure's colours, and its own --
+  // asked of mol-sketch once for each way it is set, so each setting shows what it is.
+  const settingsAsked = new Map();
+  function settingsOf(id) {
+    const key = JSON.stringify([id, nodeOf(id)?.properties]);
+    if (!settingsAsked.has(key)) {
+      if (settingsAsked.size > 40) settingsAsked.clear();
+      settingsAsked.set(key, host.run({ do: "structure-settings", id }, { merge: null }).then((result) => result?.settings || null).catch(() => null));
+    }
+    return settingsAsked.get(key);
+  }
+  const swatchStrip = (colours = []) => h("span.palette-strip", {}, colours.slice(0, 8).map((colour) => h("span", { style: { background: colour } })));
+
+  // mol-sketch's group palettes, by sight: the colours residues and chains take in turn.
+  function groupPalette(item, value, set) {
+    const name = () => value || "Default";
+    const button = h("button.palette-pick", { type: "button", disabled: true }, swatchStrip(), h("span", {}, name()), icon("chevron"));
+    settingsOf(item.id).then((settings) => {
+      const palettes = settings?.palettes || {};
+      button.disabled = !Object.keys(palettes).length;
+      button.replaceChildren(swatchStrip(palettes[value || settings?.style?.group_palette_name]), h("span", {}, name()), icon("chevron"));
+      button.onclick = () => popover(button, h("div.palette-choices", {},
+        h(`button.palette-choice${value ? "" : ".on"}`, { type: "button", onclick: () => { closeMenu(); set(null); } },
+          swatchStrip(palettes[settings?.style?.group_palette_name] || []), h("span", {}, "Default")),
+        Object.entries(palettes).map(([option, colours]) => h(`button.palette-choice${option === value ? ".on" : ""}`, { type: "button",
+          onclick: () => { closeMenu(); set(option); } }, swatchStrip(colours), h("span", {}, option)))),
+      { className: "palette-menu" });
+    });
+    return button;
+  }
+
+  // Every section of mol-sketch's style the studio offers, folded away; one holding
+  // settings of the structure's own says how many. Each setting shows what the look
+  // (and the figure) make it until it is given its own; emptied, it is the look's again.
+  const openSections = new Set();
+  function styleSections(field, item, write) {
+    const own = {};
+    const walk = (value, prefix) => {
+      for (const [key, part] of Object.entries(value || {})) {
+        if (part && typeof part === "object" && !Array.isArray(part)) walk(part, `${prefix}${key}.`);
+        else own[`${prefix}${key}`] = part;
+      }
+    };
+    walk(item.properties?.style, "");
+    const fills = [];
+    const look = h("span.hint", {}, "Loading…");
+    const ownCount = Object.keys(own).length;
+    const sections = field.sections.map((section) => {
+      const count = section.fields.filter((each) => own[each.key] !== undefined).length;
+      const control = (each) => styleControl(each, own[each.key], fills,
+        (next) => write({ [`properties.style.${each.key}`]: next }, `style:${item.id}:${each.key}`));
+      // Colours as a row of wells; the rest two to a row, their hints on hover.
+      const colours = section.fields.filter((each) => each.type === "colour");
+      const rest = section.fields.filter((each) => each.type !== "colour");
+      const details = h("details.more.mol-section", { open: openSections.has(section.title) },
+        h("summary", {}, icon("chevron"), section.title, count ? h("span.count", {}, count) : null),
+        h("div.inner", {},
+          rest.length ? h("div.mol-grid", {}, rest.map(control)) : null,
+          colours.length ? h("div.mol-colours", {}, colours.map(control)) : null));
+      details.addEventListener("toggle", () => { if (details.open) openSections.add(section.title); else openSections.delete(section.title); });
+      return details;
+    });
+    settingsOf(item.id).then((settings) => {
+      if (!settings) { look.textContent = "Rendering settings unavailable"; return; }
+      look.textContent = settings.look ? `Look: ${titled(settings.look)}` : "";
+      for (const fill of fills) fill(settings.style || {});
+    });
+    return h("div.mol-style", {},
+      h("div.mol-style-head", {}, h("span.section-title", {}, field.label), look,
+        ownCount ? ui.button("Reset All", () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh" }) : null),
+      sections);
+  }
+
+  // One setting: what the look gives it shows until it has its own.
+  function styleControl(field, value, fills, set) {
+    const said = (drawn) => (drawn === null || drawn === undefined ? "" : typeof drawn === "number" ? String(Math.round(drawn * 1000) / 1000) : String(drawn));
+    const options = {};
+    const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
+    switch (field.type) {
+      case "choice": {
+        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option) }))],
+          onChange: (next) => set(next || null) });
+        fills.push((drawn) => { const inherited = drawn[field.key]; select.options[0].textContent = inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`; });
+        return titled(ui.field(field.label, select, options));
+      }
+      case "bool": {
+        const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "Default" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
+          onChange: (next) => set(next === "" ? null : next === "on") });
+        fills.push((drawn) => { select.options[0].textContent = `Default (${drawn[field.key] ? "On" : "Off"})`; });
+        return titled(ui.field(field.label, select, options));
+      }
+      case "integer":
+      case "number": {
+        const input = ui.number({ value: value ?? "", min: field.min, max: field.max, step: field.step ?? "any",
+          onChange: (number) => set(number === null ? null : field.type === "integer" ? Math.round(number) : number) });
+        fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
+        return titled(ui.field(field.label, input, options));
+      }
+      case "colour": {
+        const control = ui.colour({ value, title: field.label, onChange: set });
+        // Unset, the well shows the look's colour, faintly.
+        fills.push((drawn) => { if (value === undefined && /^#[0-9a-f]{6}$/i.test(drawn[field.key] || "")) control.querySelector(".colour-chip").style.background = drawn[field.key]; });
+        return titled(h("div.mol-colour", {}, control, h("span", {}, field.label)));
+      }
+      default: {
+        const input = ui.input({ value: value ?? "", onInput: (text) => set(text.trim() || null) });
+        fills.push((drawn) => { input.placeholder = said(drawn[field.key]); });
+        return titled(ui.field(field.label, input, options));
+      }
     }
   }
 
@@ -982,7 +1614,7 @@ export function figureParts(host) {
       const current = row[column.name];
       const change = (next) => { row[column.name] = next; write(); };
       if (column.type === "choice") {
-        return ui.select({ value: current ?? "", options: column.options.map((option) => ({ value: option, label: option === "" ? "–" : option })),
+        return ui.select({ value: current ?? "", options: column.options.map((option) => ({ value: option, label: column.labels?.[option] ?? (option === "" ? "–" : option) })),
           onChange: (next) => change(next || null) });
       }
       if (column.type === "integer" || column.type === "number") {
@@ -1006,9 +1638,9 @@ export function figureParts(host) {
         field.columns.map((column) => h("span.records-head", { title: column.hint || "" }, column.label)), h("span.records-head"),
         rows.map((row, index) => [
           ...field.columns.map((column) => cell(row, index, column)),
-          ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Remove the row" }),
+          ui.button("", () => { rows.splice(index, 1); write(); }, { kind: "ghost", small: true, icon: "close", title: "Delete row" }),
         ]))),
-      ui.button("Add a row", () => {
+      ui.button("Add Row", () => {
         // A new row starts as the catalogue says: "+N" is the last row's value and N more.
         const last = rows[rows.length - 1];
         const fresh = {};
@@ -1034,8 +1666,8 @@ export function figureParts(host) {
     get justDragged() { return state.swallow; },
     setModel, select, act, update, pointerdown, landing, land,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, hint, key, panel, wantsRoom, howTo,
-    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
+    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf,
     openInline, placeInline, closeInline,
   };
 }

@@ -12,10 +12,14 @@
 // { parent, index, kind, empty } -- index as the server's "move" takes it, among the
 // group's other parts -- with, beside a part, { near, after, across, siblings }:
 // the part it goes next to, which side, and whether the line between them stands
-// (across a row) or lies (down a column).
+// (across a row) or lies (down a column). Under or over a figure laid out in a row
+// (beside one in a column) it is { kind: "line", side, of }: a line of its own there,
+// centred on the rest -- the server's "move" with ``line``.
 
 const MARGIN = 36;
 const PAD = 2;
+// How far under (or beside) the figure a part may be let go to start a line of its own.
+const LINE = 140;
 
 export function dropPlace(model, boxes, point, id) {
   const groups = new Map(model.groups.map((group) => [group.id, group]));
@@ -26,6 +30,8 @@ export function dropPlace(model, boxes, point, id) {
     return false;
   };
   const all = boxes.get(model.root);
+  const line = all && ownLine(model, groups.get(model.root), all, point, id);
+  if (line) return line;
   if (all && (point.x < all.left - MARGIN || point.x > all.right + MARGIN || point.y < all.top - MARGIN || point.y > all.bottom + MARGIN)) return null;
   // The smallest group whose frame holds the point, not the part itself nor inside it.
   let target = null;
@@ -50,9 +56,28 @@ export function dropPlace(model, boxes, point, id) {
   return { parent: group.id, index: siblings.indexOf(near) + (after ? 1 : 0), kind, near, after, across, siblings };
 }
 
+// Out past the figure's end, across the way it runs: a line of its own there. The part
+// must leave the figure's box by more than a little (by its own pad, a row's room), so
+// a part let go just past its row's edge still only moves along it.
+function ownLine(model, root, all, point, id) {
+  const kind = root?.layout?.kind || "column";
+  if (!root || id === model.root || !["row", "column"].includes(kind)) return null;
+  const others = (root.children || []).filter((child) => child !== id);
+  if (!others.length) return null;
+  if (kind === "row") {
+    if (point.x < all.left - MARGIN || point.x > all.right + MARGIN) return null;
+    const side = point.y > all.bottom + 12 && point.y < all.bottom + LINE ? "below" : point.y < all.top - 12 && point.y > all.top - LINE ? "above" : null;
+    return side && { kind: "line", side, of: model.root, parent: model.root, index: -1 };
+  }
+  if (point.y < all.top - MARGIN || point.y > all.bottom + MARGIN) return null;
+  const side = point.x > all.right + 12 && point.x < all.right + LINE ? "right" : point.x < all.left - 12 && point.x > all.left - LINE ? "left" : null;
+  return side && { kind: "line", side, of: model.root, parent: model.root, index: -1 };
+}
+
 // Whether letting go at ``place`` leaves the part where it is.
 export function stays(model, place, id) {
   if (!place) return true;
+  if (place.kind === "line") return false;
   const holder = model.groups.find((group) => (group.children || []).includes(id));
   return holder?.id === place.parent && holder.children.indexOf(id) === place.index;
 }

@@ -113,6 +113,8 @@ class Kind(Protocol):
     #   adopt(data) -> document: a parsed document as this kind keeps it;
     #   act(document, action, base) -> {"document", ...}: an edit the page asks for
     #       by name (a figure's part added or connected), made by the kind.
+    #   export_part(document, base, stem, part, formats) -> [Path]: one part of the
+    #       document written out by itself (a figure on a slide), as export does.
     #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
     #       document: the theme a document is drawn in (a name, or a theme file named
     #       from its folder), read and set, so one theme can be put to use in many.

@@ -30,15 +30,44 @@ class Record:
         return dict(self.items)
 
 
-type PropertyValue = Scalar | tuple[Record, ...]
-"""What a node property holds: one scalar, or a list of records."""
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """A set of settings a node property holds -- a structure's mol-sketch style, say --
+    nested as written (``line: {width: 2}``) and held flat, by dotted name
+    (``line.width``), in the order written. A value is a scalar or a list of them."""
+
+    items: tuple[tuple[str, Scalar | tuple[Scalar, ...]], ...]
+
+    def get(self, key: str, default: object = None) -> object:
+        return dict(self.items).get(key, default)
+
+    def as_dict(self) -> dict[str, object]:
+        """Nested again, as a file writes it."""
+
+        nested: dict[str, object] = {}
+        for key, value in self.items:
+            *path, last = key.split(".")
+            here = nested
+            for part in path:
+                here = here.setdefault(part, {})  # type: ignore[assignment]
+            here[last] = list(value) if isinstance(value, tuple) else value
+        return nested
+
+
+type PropertyValue = Scalar | tuple[Record, ...] | Settings
+"""What a node property holds: one scalar, a list of records, or a set of settings."""
 
 
 def freeze_property(name: str, value: object) -> PropertyValue:
-    """A property as a figure holds it: a list of mappings becomes a tuple of records."""
+    """A property as a figure holds it: a list of mappings becomes a tuple of records,
+    and a mapping a set of settings."""
 
     if isinstance(value, str | bool | int | float):
         return value
+    if isinstance(value, Settings):
+        return value
+    if isinstance(value, dict):
+        return Settings(tuple(_settings(name, value, "")))
     if isinstance(value, list | tuple) and all(isinstance(item, Record | dict) for item in value):
         records = []
         for item in value:
@@ -52,14 +81,39 @@ def freeze_property(name: str, value: object) -> PropertyValue:
                     )
             records.append(Record(tuple(item.items())))
         return tuple(records)
-    raise ValueError(f'property "{name}" is text, a number, a boolean, or a list of records')
+    raise ValueError(
+        f'property "{name}" is text, a number, a boolean, a list of records, or a set of settings'
+    )
+
+
+def _settings(name: str, value: dict, prefix: str) -> list[tuple[str, object]]:
+    pairs: list[tuple[str, object]] = []
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError(f'property "{name}": each setting is named')
+        dotted = f"{prefix}{key}"
+        if isinstance(item, dict):
+            pairs += _settings(name, item, f"{dotted}.")
+        elif isinstance(item, str | bool | int | float):
+            pairs.append((dotted, item))
+        elif isinstance(item, list | tuple) and all(
+            isinstance(part, str | bool | int | float) for part in item
+        ):
+            pairs.append((dotted, tuple(item)))
+        else:
+            raise ValueError(
+                f'property "{name}": {dotted} is text, a number, yes or no, or a list of them'
+            )
+    return pairs
 
 
 def thaw_property(value: PropertyValue) -> object:
-    """A property as a file writes it: records back to mappings."""
+    """A property as a file writes it: records and settings back to mappings."""
 
     if isinstance(value, tuple):
         return [record.as_dict() for record in value]
+    if isinstance(value, Settings):
+        return value.as_dict()
     return value
 
 

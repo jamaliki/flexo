@@ -10,7 +10,9 @@ choose next (the part just added). An action is a mapping with a ``do``:
 
 - ``add``: ``kind`` (a part of ``figure_parts``), placed in ``parent`` or after
   ``after``, fed from ``source`` if given; ``node`` overrides its label and
-  properties;
+  properties. A part put after ``source`` whose one line leads on to the part now
+  after the new one goes into that line, as a step into a flow chart (``splice:
+  false`` keeps the line, and the new part only fed from ``source``);
 - ``connect``: ``source`` to ``target``, each a node or ``node.port``;
 - ``update``: ``target`` (``{"type": "node" | "edge" | "group" | "figure", "id"}``)
   and ``values``, keys as the catalogue's fields name them (``properties.length``);
@@ -20,9 +22,15 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``gather``: ``ids`` held by one group, into a new ``layout`` (row, column,
   grid) group, a titled module if ``role`` is ``module``;
 - ``ungroup``: ``id``'s children take its place;
-- ``move``: ``id`` into ``parent`` at ``index``; ``step``: ``id`` by ``delta``
-  places among its siblings;
+- ``move``: ``id`` into ``parent`` at ``index``; or, with ``line`` (``below``,
+  ``above``, ``right``, ``left``), on a line of its own beside the group ``of``
+  (the root if not given), centred on it; ``step``: ``id`` by ``delta`` places
+  among its siblings;
 - ``duplicate``: ``ids``, with the edges between them;
+- ``paste``: parts copied from a figure (this one or another) -- ``nodes``,
+  ``groups`` and ``edges`` as a file writes them, ``top`` the ones that hold the
+  rest -- put after ``after`` or in ``parent``, each with an id of its own, the
+  lines between them kept;
 - ``read``: nothing; the page asks for the figure as it is.
 
 A figure file that leaves its root group out stacks its parts in a column; the
@@ -47,13 +55,28 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from flexo.ir.semantic import ID_PATTERN
 
 STRUCTURAL = frozenset(
-    {"add", "connect", "rename", "delete", "gather", "ungroup", "move", "step", "duplicate"}
+    {
+        "add",
+        "connect",
+        "rename",
+        "delete",
+        "gather",
+        "ungroup",
+        "move",
+        "step",
+        "duplicate",
+        "paste",
+    }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
 
 
 class EditError(ValueError):
     """An edit that cannot be made; the page says why."""
+
+
+NOUNS = {"node": "shape", "edge": "line", "net": "line"}
+"""What the page calls each thing an edit targets, where it differs from the file."""
 
 
 def apply(
@@ -65,14 +88,17 @@ def apply(
     verb = str(action.get("do", ""))
     handler = getattr(document, f"_{verb}", None)
     if verb not in STRUCTURAL | {"update", "read"} or handler is None:
-        raise EditError(f'unknown figure edit "{verb}"')
+        raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
+        if problem and document.spliced:
+            # A part that cannot carry the line on (one with no output) is only fed.
+            return apply(text, {**action, "splice": False}, suffix=suffix, base=base)
         if problem:
-            raise EditError(f"that would break the figure: {problem}")
+            raise EditError(f"This change would break the figure: {problem}")
     return {"text": result, "select": list(select)}
 
 
@@ -204,9 +230,10 @@ class _Document:
             self.yaml.indent(mapping=2, sequence=indent + 2, offset=indent)
             self.data = self.yaml.load(text) if text.strip() else {}
         if not isinstance(self.data, dict):
-            raise EditError("the file is not a figure yet: fix it in the source first")
+            raise EditError("The file isn't a valid figure yet. Fix it in the source first.")
         self.data.setdefault("figure", {"id": "figure"})
         self.data.setdefault("nodes", [])
+        self.spliced = False
 
     def dump(self) -> str:
         if self.json:
@@ -316,14 +343,15 @@ class _Document:
             found += self.descendants(child)
         return found
 
-    def fresh(self, base: str) -> str:
-        """An unused id made from ``base`` (a label, a kind): ``encoder``, ``encoder-2``."""
+    def fresh(self, base: str, also: set[str] | frozenset[str] = frozenset()) -> str:
+        """An unused id made from ``base`` (a label, a kind): ``encoder``, ``encoder-2``;
+        none of ``also`` either (ids given out but not yet written)."""
 
         words = re.sub(r"\$|\\[A-Za-z]+|[*_`{}]", "", str(base))
         slug = re.sub(r"[^A-Za-z0-9]+", "-", words).strip("-").lower()[:24].strip("-")
         if not slug or not slug[0].isalpha():
             slug = f"part-{slug}" if slug else "part"
-        taken = self.taken()
+        taken = self.taken() | set(also)
         candidate, number = slug, 2
         while candidate in taken:
             candidate, number = f"{slug}-{number}", number + 1
@@ -347,7 +375,7 @@ class _Document:
         if parent:
             group = self.group(parent)
             if group is None:
-                raise EditError(f'no group "{parent}"')
+                raise EditError(f"There's no group named “{parent}”.")
         elif after and self.holder(after) is None and not self.groups:
             # A file of nodes alone stacks them in the order it lists them.
             node = self.node(identifier)
@@ -373,7 +401,7 @@ class _Document:
         kind = str(action.get("kind", "block"))
         part = _parts().get(kind)
         if part is None:
-            raise EditError(f'no part "{kind}" to add')
+            raise EditError(f"There's no shape type “{kind}”.")
         made = copy.deepcopy(part["node"])
         overrides = dict(action.get("node") or {})
         properties = {**made.get("properties", {}), **overrides.pop("properties", {})}
@@ -389,23 +417,58 @@ class _Document:
         self.nodes.append(item)
         self.place(identifier, action.get("parent"), action.get("after"))
         if action.get("source"):
-            self.connect(str(action["source"]), identifier)
+            source = str(action["source"])
+            line = self.onward(source, identifier) if action.get("splice", True) else None
+            if line is None:
+                self.connect(source, identifier)
+            else:
+                # The line from source now ends at the new part (its words with it, as a
+                # decision's "yes"), and a new line carries on to where it went.
+                onward = line["to"]
+                line["to"] = self.free_input(identifier)
+                self.data["edges"].append({"from": identifier, "to": onward})
+                self.spliced = True
         return [identifier]
+
+    def onward(self, source: str, identifier: str) -> dict[str, Any] | None:
+        """The line a part just put after ``source`` goes into: ``source``'s one line,
+        when it leads to the part now right after the new one, in the same group."""
+
+        node = self.node(identifier)
+        if node is None or node.get("kind") == "attention" or self.node(source) is None:
+            return None
+        if any(
+            source in (self.node_of(str(end)) for end in net.get("sources") or [])
+            for net in self.nets
+        ):
+            return None
+        lines = [edge for edge in self.edges if self.node_of(str(edge["from"])) == source]
+        if len(lines) != 1:
+            return None
+        holder = self.holder(identifier)
+        order = list(holder.get("children") or []) if holder is not None else self.top_level()
+        if identifier not in order or self.holder(source) is not holder:
+            return None
+        at = order.index(identifier)
+        following = order[at + 1] if at + 1 < len(order) else None
+        if at == 0 or order[at - 1] != source or following != self.node_of(str(lines[0]["to"])):
+            return None
+        return lines[0]
 
     def _connect(self, action: Mapping[str, Any]) -> list[str]:
         return [self.connect(str(action["source"]), str(action["target"]))]
 
     def connect(self, source: str, target: str) -> str:
         if self.node_of(source) == self.node_of(target):
-            raise EditError("a part cannot be connected to itself")
+            raise EditError("A shape can't be connected to itself.")
         for end in (source, target):
             if self.node(self.node_of(end)) is None:
-                raise EditError(f'no part "{end}" to connect')
+                raise EditError(f"There's no shape named “{end}” to connect.")
         ends = (self.node_of(source), self.node_of(target))
         if any(
             (self.node_of(str(e["from"])), self.node_of(str(e["to"]))) == ends for e in self.edges
         ):
-            raise EditError(f'"{source}" and "{target}" are connected already')
+            raise EditError(f"“{source}” and “{target}” are already connected.")
         node = self.node(target)
         target = self.free_input(target)
         if node is not None and node.get("kind") == "attention":
@@ -470,9 +533,9 @@ class _Document:
         elif kind == "net":
             item = next((net for net in self.nets if net.get("id") == identifier), None)
         else:
-            raise EditError(f'cannot edit a "{kind}"')
+            raise EditError("Can't edit this item.")
         if item is None:
-            raise EditError(f'no {kind} "{identifier}"')
+            raise EditError(f"There's no {NOUNS.get(kind, kind)} named “{identifier}”.")
         chosen = [identifier] if identifier else []
         for key, value in values.items():
             if key == "id" and kind in {"node", "group"}:
@@ -509,7 +572,7 @@ class _Document:
 
         part = _parts().get(kind)
         if part is None:
-            raise EditError(f'no part "{kind}"')
+            raise EditError(f"There's no shape type “{kind}”.")
         if kind == "block":
             item.pop("kind", None)
         elif "kind" in item:
@@ -535,14 +598,14 @@ class _Document:
     def rename(self, old: str, new: str) -> None:
         if not ID_PATTERN.fullmatch(new):
             raise EditError(
-                f'"{new}" cannot name a part: start with a letter; letters, '
-                "digits, dots, dashes and underscores after"
+                f"“{new}” can't be used as a name. A name starts with a letter and "
+                "has only letters, digits, dots, hyphens and underscores."
             )
         if new in self.taken():
-            raise EditError(f'"{new}" names another part already')
+            raise EditError(f"The name “{new}” is already in use.")
         node, group = self.node(old), self.group(old)
         if node is None and group is None and old != self.root:
-            raise EditError(f'no part "{old}"')
+            raise EditError(f"There's nothing named “{old}”.")
         if node is not None:
             node["id"] = new
         if group is not None:
@@ -588,7 +651,7 @@ class _Document:
         nodes: set[str] = set()
         for identifier in ids:
             if identifier == self.root:
-                raise EditError("the figure itself cannot be deleted")
+                raise EditError("The figure itself can't be deleted.")
             if self.group(identifier) is not None:
                 inside = self.descendants(identifier)
                 nodes |= {item for item in inside if self.node(item) is not None}
@@ -605,7 +668,7 @@ class _Document:
             else:
                 net = next((item for item in self.nets if item.get("id") == identifier), None)
                 if net is None:
-                    raise EditError(f'no part "{identifier}" to delete')
+                    raise EditError(f"There's nothing named “{identifier}” to delete.")
                 self.nets.remove(net)
         for identifier in nodes:
             node = self.node(identifier)
@@ -650,7 +713,7 @@ class _Document:
             ids = first
         holders = {id(self.parent_of(item)) for item in ids}
         if len(holders) != 1:
-            raise EditError("choose parts that sit side by side in one row, column, or group")
+            raise EditError("Select shapes that are in the same row, column or group.")
         parent = self.parent_of(ids[0])
         children = parent["children"]
         ordered = sorted(ids, key=children.index)
@@ -675,9 +738,9 @@ class _Document:
         identifier = str(action["id"])
         group = self.group(identifier)
         if group is None:
-            raise EditError(f'no group "{identifier}"')
+            raise EditError(f"There's no group named “{identifier}”.")
         if identifier == self.root:
-            raise EditError("the figure's own layout cannot be taken apart")
+            raise EditError("The figure's layout can't be ungrouped.")
         parent = self.parent_of(identifier)
         children = parent["children"]
         index = children.index(identifier)
@@ -688,18 +751,68 @@ class _Document:
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
+        if action.get("line"):
+            return self.own_line(
+                identifier, str(action.get("of") or self.root), str(action["line"])
+            )
         parent_id = action.get("parent") or self.root
         if parent_id == identifier or parent_id in self.descendants(identifier):
-            raise EditError("a group cannot go inside itself")
+            raise EditError("A group can't be moved inside itself.")
         self.parent_of(identifier)  # held somewhere written, before it moves
         target = self.group(parent_id) if parent_id != self.root else self.written_root()
         if target is None:
-            raise EditError(f'no group "{parent_id}"')
+            raise EditError(f"There's no group named “{parent_id}”.")
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
+        return [identifier]
+
+    def own_line(self, identifier: str, of: str, side: str) -> list[str]:
+        """``identifier`` on a line of its own ``side`` of the group ``of``, centred on it
+        (a result under a row of steps, to compare them). Where ``of`` is held by a group
+        running that way already, the part goes beside it there; else ``of`` keeps its
+        place and its frame, its parts go into a new group laid out as it was, and it
+        lays out that group and the part the other way, centred."""
+
+        if side not in {"below", "above", "right", "left"}:
+            raise EditError(f"“{side}” isn't a valid position.")
+        if identifier == of or of in self.descendants(identifier):
+            raise EditError("A group can't be moved beside itself.")
+        group = self.written_root() if of == self.root else self.group(of)
+        if group is None:
+            raise EditError(f"There's no group named “{of}”.")
+        self.parent_of(identifier)  # held somewhere written, before it moves
+        way = "column" if side in {"below", "above"} else "row"
+        first = side in {"above", "left"}
+        holder = self.holder(of)
+        self.detach(identifier)
+        if holder is not None and (holder.get("layout") or {}).get("kind", "row") == way:
+            children = holder["children"]
+            at = children.index(of)
+            children.insert(at if first else at + 1, identifier)
+            return [identifier]
+        children = list(group.get("children") or [])
+        layout = dict(group.get("layout") or {})
+        # The frame stays the group's own; how its parts were laid out goes with them.
+        outer = {key: layout.pop(key) for key in list(layout) if key.startswith("padding")}
+        outer.update({key: layout.pop(key) for key in ("width", "height") if key in layout})
+        if len(children) == 1:
+            inner = children[0]
+        else:
+            inner = self.fresh("row" if way == "column" else "column")
+            self.data.setdefault("groups", []).append(
+                # Arrangement only: drawn with no frame of its own.
+                {
+                    "id": inner,
+                    "children": children,
+                    "layout": layout or {"kind": "row"},
+                    "role": "layout",
+                }
+            )
+        group["children"] = [identifier, inner] if first else [inner, identifier]
+        group["layout"] = {"kind": way, "align": "center", **outer}
         return [identifier]
 
     def _step(self, action: Mapping[str, Any]) -> list[str]:
@@ -732,6 +845,57 @@ class _Document:
                     twin[side] = renamed[end] + str(edge[side])[len(end) :]
                 self.edges.append(twin)
         return made
+
+    def _paste(self, action: Mapping[str, Any]) -> list[str]:
+        def written(items: object) -> list[dict[str, Any]]:
+            return [
+                copy.deepcopy(dict(item))
+                for item in items or []  # type: ignore[union-attr]
+                if isinstance(item, Mapping) and item.get("id")
+            ]
+
+        nodes, groups = written(action.get("nodes")), written(action.get("groups"))
+        top = [str(item) for item in action.get("top") or []]
+        known = {str(item["id"]) for item in [*nodes, *groups]}
+        if not top or not set(top) <= known:
+            raise EditError("There's nothing to paste.")
+        renamed: dict[str, str] = {}
+        for item in [*nodes, *groups]:
+            renamed[str(item["id"])] = self.fresh(str(item["id"]), set(renamed.values()))
+        for node in nodes:
+            node["id"] = renamed[str(node["id"])]
+            # The page's model lists port names where a file writes ports.
+            if isinstance(node.get("ports"), list) and all(
+                isinstance(p, str) for p in node["ports"]
+            ):
+                del node["ports"]
+            self.nodes.append(node)
+        for group in groups:
+            group["id"] = renamed[str(group["id"])]
+            group.pop("implied", None)
+            group["children"] = [
+                renamed.get(str(child), str(child)) for child in group.get("children") or []
+            ]
+            for placement in (group.get("layout") or {}).get("placements") or []:
+                placement["child"] = renamed.get(placement["child"], placement["child"])
+            self.data.setdefault("groups", []).append(group)
+        after = action.get("after")
+        for item in top:
+            self.place(renamed[item], action.get("parent"), after)
+            after = renamed[item]
+        for edge in written(action.get("edges")):
+            ends = [str(edge["from"]), str(edge["to"])]
+            heads = [
+                next((old for old in renamed if end == old or end.startswith(f"{old}.")), None)
+                for end in ends
+            ]
+            if None in heads:
+                continue  # a line to a part not copied
+            edge.pop("id", None)
+            for side, end, head in zip(("from", "to"), ends, heads, strict=True):
+                edge[side] = renamed[head] + end[len(head) :]  # type: ignore[index]
+            self.data.setdefault("edges", []).append(edge)
+        return [renamed[item] for item in top]
 
     def copy(self, identifier: str, renamed: dict[str, str]) -> str | None:
         node, group = self.node(identifier), self.group(identifier)

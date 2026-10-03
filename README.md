@@ -274,7 +274,16 @@ box; its ink is the figure's, and its helices and strands take the colours a
 protein map in the figure gives them. `colors={"A": "Kinase"}` colours a chain
 (or a residue, subunit, or entity) with a hex colour or one of the figure's
 tones; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
-`surface`, and `site` are mol-sketch selections. Install the `molecules` extra
+`surface`, and `site` are mol-sketch selections (`site="ligand"` picks out the
+largest ligand's pocket). The rest of mol-sketch is there too: `palette=` names
+one of its group palettes, `density=` draws a density map with the model
+(`"auto"`, an EMDB ID, or a map file), and `style=` sets any field of its style
+over the look, nested as mol-sketch writes them --
+`style={"fill": "ink colour", "line": {"width": 2}}`, or in a figure file
+`style: {fill: ink colour, line: {width: 2}}`; a field it does not have, or a
+choice it does not offer, is said with what was meant. In the studio, a chosen
+structure's panel shows these settings in mol-sketch's own sections, each with
+what the look gives it until it is given its own. Install the `molecules` extra
 (or `pip install path/to/mol-sketch/python`).
 
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
@@ -896,19 +905,31 @@ is merged with everyone else's edits, saved, and shown at once. Slides and parts
 an agent touches flash in its colour, its avatar and what it is doing ("Tightening
 slide 4") show where it works, the activity list says who changed what, and
 **Follow** keeps the view on whatever an agent is changing. Undo takes back your
-own last change and leaves others' alone.
+own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
+changes in words, to go back or forward to any of them.
 
 - **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
-  is chosen comes after it, a line between them. **Connect** (C) draws a line from
-  one part to the next; double-click a part or a line to type its words on the
-  drawing; ⇧-click several and **Group** (G) gathers them into a row, column, grid,
-  or titled module. A part (or a whole group) dragged on the drawing goes to another
+  is chosen comes after it, a line between them; when the chosen part's single line
+  runs on to the part after it, the new one goes into that line, as a step into a
+  flow chart. A **+** beside the part chosen adds the next step there at once (a
+  block after a start or a decision, another structure after a structure), and the
+  words of a part just added are typed on it as soon as it is drawn, in place, in
+  the part's own face and size. A chosen structure turns as it is dragged (or by
+  the buttons in its panel), and a structure or picture is sized by its corners;
+  a shape's **Type** may be made either, its file asked for. Right-click a part
+  for what can be done with it. **Connect**
+  (C) draws a line from one part to the next; double-click a part or a line to
+  type its words on the drawing; ⇧-click several and **Group** (G) gathers them
+  into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and
   every part slides to where it now is (Esc, or letting go off the figure, takes it
-  back). The inspector on the right has each part's settings, down to
+  back). A part dragged out under (or over) a figure laid out in a row goes on a line
+  of its own there, centred under the rest -- a score under the steps it compares --
+  as **Below** and **Above** in a part's panel do; beside a figure laid out in a
+  column, it takes a column of its own. The inspector on the right has each part's settings, down to
   a plasmid's features or a plate's groups as a table; the list on the left holds
   the parts as they nest, dragged to move them. Every edit is made to the figure's
   file, which the **Source** tab shows and edits too: comments and order stay, and

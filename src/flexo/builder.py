@@ -1375,6 +1375,9 @@ class GroupBuilder:
         sticks: str | None = None,
         surface: str | None = None,
         site: str | None = None,
+        palette: str | None = None,
+        style: Mapping[str, object] | None = None,
+        density: str | Path | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1385,9 +1388,13 @@ class GroupBuilder:
         -- a hex colour or one of the figure's tones, so a chain can match its domain
         on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
         it; ``cartoon``, ``sticks``, and ``surface`` are mol-sketch selections of what
-        to draw, and ``site`` marks an active site. ``width`` and ``height`` size the
-        molecule's box in points (20 by 15 label sizes by default), its name above it.
-        Needs mol-sketch installed.
+        to draw, and ``site`` marks an active site (``"ligand"``: the largest ligand's
+        pocket). ``palette`` names a mol-sketch group palette, ``style`` sets any field
+        of mol-sketch's style over the look (``{"fill": "ink colour", "line":
+        {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
+        EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
+        points (20 by 15 label sizes by default), its name above it. Needs mol-sketch
+        installed.
         """
 
         properties: dict[str, object] = {"source": str(source)}
@@ -1404,9 +1411,12 @@ class GroupBuilder:
         for name, value in (
             ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
+            ("palette", palette), ("density", None if density is None else str(density)),
         ):
             if value is not None:
                 properties[name] = value
+        if style:
+            properties["style"] = dict(style)
         return self.node(id, "structure", label=label, **_with_properties(options, **properties))  # type: ignore[arg-type]
 
     def feature_strip(

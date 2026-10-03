@@ -8,7 +8,7 @@
 // be written there.
 
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField } from "/static/studio/studio.js";
-import { figureParts, glyph, groupGlyph, plain, widenLines } from "/static/kinds/figure/parts.js";
+import { figureParts, glyph, groupGlyph, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
 
@@ -27,14 +27,14 @@ export function mount(studio, main) {
   const page = h("div.fig-page");
   const hover = h("div.fig-hover", { hidden: true });
   const marks = h("div.fig-marks");
-  const stage = h("div.stage.fig-stage.scroll-thin", {}, h("div.fig-empty", {}, h("div.spinner"), "Drawing…"));
+  const stage = h("div.stage.fig-stage.scroll-thin", {}, h("div.fig-empty", {}, h("div.spinner"), "Loading…"));
   const note = h("div.messages.fig-messages.scroll-thin");
   const hint = h("div.fig-hint", { hidden: true });
   const zoomValue = h("span.value", {}, "");
   const zoomBar = h("div.zoom", {},
-    ui.button("", () => setZoom((state.zoom ?? fitScale()) / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom out" }),
+    ui.button("", () => setZoom((state.zoom ?? fitScale()) / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom Out" }),
     zoomValue,
-    ui.button("", () => setZoom((state.zoom ?? fitScale()) * 1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom in" }),
+    ui.button("", () => setZoom((state.zoom ?? fitScale()) * 1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
     ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
   const center = h("section.fig-center", {}, stage, hint, note, zoomBar);
@@ -52,18 +52,18 @@ export function mount(studio, main) {
   });
 
   // -- the bar --
-  const addButton = ui.button("Add", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "primary", title: "Add a part (A)" });
-  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one part to another (C)" });
-  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Gather the chosen parts into a row, column, grid or module (G)" });
+  const addButton = ui.button("Add Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "primary", title: "Add Shape (A)" });
+  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
+  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
   studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
-    { icon: "export", label: "Editable SVG", hint: "Inkscape layers, live text", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "Editable SVG", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
     { icon: "image", label: "PNG", run: () => studio.exportFiles(["png"]) },
     "-",
-    { icon: "export", label: "Everything", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    { icon: "export", label: "All Formats", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // -- the drawing's parts, edited --
@@ -98,12 +98,14 @@ export function mount(studio, main) {
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did
     // (someone typed, an agent wrote), it is made again on the file as it is now.
-    run: async (action, { merge }) => {
+    run: async (action, { merge, label }) => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         const sent = studio.doc.text;
         const result = await studio.api("/api/act", { file: studio.file, document: studio.doc, action });
         if (studio.doc.text !== sent) continue;
-        studio.change((d) => ({ ...d, text: result.document.text }), { merge });
+        // A question asked of the figure (its parts, a structure's view) changes nothing.
+        if (action.do === "structure-view" || action.do === "structure-settings") return result;
+        studio.change((d) => ({ ...d, text: result.document.text }), { merge, label });
         // An edit made from the drawing is drawn at once: its parts are waiting to land.
         if (action.do !== "read" && action.do !== "update") studio.requestDraw?.(0);
         return result;
@@ -146,9 +148,7 @@ export function mount(studio, main) {
   new ResizeObserver(() => fitPage()).observe(stage);
 
   function placeMarks() {
-    clear(marks, figure.marks().map(({ box, group, name }) => h(`div.fig-mark${group ? ".group" : ""}`, { style: {
-      left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } },
-    group ? h("span.fig-mark-label", {}, name) : null)));
+    clear(marks, figure.markViews());
   }
   page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
   page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
@@ -168,7 +168,7 @@ export function mount(studio, main) {
   function renderOutline() {
     if (state.tab !== "parts") return;
     const found = figure.model;
-    if (!found) { clear(outlineBody, h("div.empty", {}, "The parts appear once the file reads.")); return; }
+    if (!found) { clear(outlineBody, h("div.empty", {}, "Shapes appear here once the figure can be read.")); return; }
     const chosen = figure.selected;
     const choose = (event, id) => {
       if (event.shiftKey || event.metaKey || event.ctrlKey) figure.select(chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id]);
@@ -190,7 +190,7 @@ export function mount(studio, main) {
         renderOutline();
       } }, icon("chevron")) : h("span.tree-caret"),
       node ? glyph(node.kind || "block") : group ? glyph(groupGlyph(group)) : glyph("block"),
-      h("span.tree-name", {}, isRoot ? "Figure" : figure.nameOf(id)),
+      h("span.tree-name", {}, isRoot ? "Layout" : figure.nameOf(id)),
       h("span.tree-id", {}, isRoot ? "" : id));
       outlineDrop(item, id, isRoot);
       if (!isRoot) outlineDrag(item, id);
@@ -198,7 +198,7 @@ export function mount(studio, main) {
     };
     const lines = [...found.edges, ...found.nets.map((net) => ({ ...net, net: true }))];
     clear(outlineBody,
-      h("div.tree-head", {}, "Parts", h("span.count", {}, found.nodes.length)),
+      h("div.tree-head", {}, "Shapes", h("span.count", {}, found.nodes.length)),
       figure.groupOf(found.root) ? row(found.root, 0) : null,
       h("div.tree-head", {}, "Lines", h("span.count", {}, lines.length)),
       lines.length ? lines.map((line) => h(`div.tree-row.line${chosen.includes(line.id) ? ".on" : ""}`, {
@@ -207,7 +207,7 @@ export function mount(studio, main) {
       h("span.tree-name", {}, line.net
         ? `${figure.nameOf(figure.nodeOfRef(line.sources?.[0] || ""))} → ${(line.targets || []).map((t) => figure.nameOf(figure.nodeOfRef(t))).join(", ")}`
         : figure.nameOf(line.id)),
-      line.label ? h("span.tree-id", {}, plain(line.label)) : null)) : h("div.empty.small", {}, "Choose a part, then Connect."));
+      line.label ? h("span.tree-id", {}, plain(line.label)) : null)) : h("div.empty.small", {}, "Select a shape, then click Connect."));
   }
 
   let dragging = null;
@@ -254,7 +254,8 @@ export function mount(studio, main) {
 
   // -- the source --
   const gutter = h("div.code-gutter");
-  const area = h("textarea.code-area.scroll-thin", { spellcheck: false, wrap: "off" });
+  const area = h("textarea.code-area.scroll-thin", { wrap: "off" });
+  area.spellcheck = false;  // h() leaves out what is false
   area.value = studio.doc.text;
   area.addEventListener("input", () => { numbers(); studio.change((doc) => { doc.text = area.value; }, { merge: "text", quiet: true }); });
   area.addEventListener("scroll", () => { gutter.scrollTop = area.scrollTop; });
@@ -290,7 +291,7 @@ export function mount(studio, main) {
 
   function showTab() {
     clear(leftTabs,
-      h(`button.tab${state.tab === "parts" ? ".on" : ""}`, { onclick: () => { state.tab = "parts"; showTab(); } }, "Parts"),
+      h(`button.tab${state.tab === "parts" ? ".on" : ""}`, { onclick: () => { state.tab = "parts"; showTab(); } }, "Shapes"),
       h(`button.tab${state.tab === "source" ? ".on" : ""}`, { onclick: () => { state.tab = "source"; showTab(); } }, "Source"));
     clear(leftBody, state.tab === "source" ? code : outlineBody);
     if (state.tab === "parts") renderOutline();
@@ -303,7 +304,7 @@ export function mount(studio, main) {
     root.classList.toggle("wide", figure.wantsRoom());
     keepFocus(inspectorBody, () => {
       clear(inspectorBody, figure.model ? figure.panel()
-        : h("div.empty", {}, "The file does not read as a figure. Fix it in Source; the messages under the drawing say where."));
+        : h("div.empty", {}, "This file can't be read as a figure. Fix it in Source; the messages below the drawing show where."));
     });
   }
 
@@ -323,9 +324,9 @@ export function mount(studio, main) {
       set(made.slice(folder.length));
       await studio.workspace.refreshDocuments();
       studio.workspace.open(made);
-      toast("Change the theme in its tab: the figure redraws as you go.", { icon: "theme", seconds: 4 });
+      toast("Theme created. Edit it in its tab and the figure updates as you go.", { icon: "theme", seconds: 4 });
     } catch (error) {
-      toast(`Could not make the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+      toast(`Couldn't create the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
     }
   }
 
@@ -345,7 +346,7 @@ export function mount(studio, main) {
         clear(list, files.length ? files.map((file) => h("button.menu-item", { type: "button", onclick: () => finish(file) },
           types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon("file"),
           h("span.menu-text", {}, h("span", {}, file.split("/").pop()), h("span.menu-hint", {}, file))))
-          : h("div.empty", {}, "No such files beside the figure yet: upload one."));
+          : h("div.empty", {}, "No files of this type next to the figure. Click Upload to add one."));
       });
     });
   }
@@ -376,7 +377,7 @@ export function mount(studio, main) {
     if (result.info?.model) figure.setModel(result.info.model);
     const drawn = result.pages[0];
     if (!drawn) {
-      if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to draw yet"));
+      if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
       page.style.opacity = "0.45";
       return;
     }
@@ -423,14 +424,14 @@ export function mount(studio, main) {
     }
   };
   studio.commands = () => [
-    { icon: "plus", label: "Add a part", run: () => figure.addPalette(addButton) },
-    ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${part.title.toLowerCase()}`, hint: part.hint, run: () => figure.addPart(kind) })),
-    { icon: "right", label: "Connect two parts", run: () => figure.toggleConnect(true) },
-    { icon: "export", label: "Export editable SVG", run: () => studio.exportFiles(["editable"]) },
+    { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
+    ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
+    { icon: "right", label: "Connect Shapes", run: () => figure.toggleConnect(true) },
+    { icon: "export", label: "Export Editable SVG", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "Export PDF", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "code", label: "Show the source", run: () => { state.tab = "source"; showTab(); } },
-    { icon: "list", label: "Show the parts", run: () => { state.tab = "parts"; showTab(); } },
-    ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Find ${figure.nameOf(node.id)}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
+    { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
+    { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
+    ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select “${figure.nameOf(node.id)}”`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];
 
   renderBar();

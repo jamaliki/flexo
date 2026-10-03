@@ -32,6 +32,23 @@ function append(node, children) {
   }
 }
 
+// The Mac's help while typing -- words predicted ahead in grey (taken by a space or a
+// tab), corrections, capitals -- gets in the way of labels, names and maths: no field
+// of the studio's asks for it. Spelling is left as each field has it.
+const QUIET = [["writingsuggestions", "false"], ["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"]];
+export function plainTyping(node) {
+  for (const [name, value] of QUIET) node.setAttribute(name, value);
+  return node;
+}
+const TYPED = "textarea, [contenteditable], input:not([type]), input[type=text], input[type=search], input[type=url], input[type=email]";
+if (typeof document !== "undefined") {
+  document.documentElement.setAttribute("writingsuggestions", "false");
+  // Fields made without ui (a code area, the palette's search): quietened as they are focused.
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(TYPED) && event.target.getAttribute("writingsuggestions") !== "false") plainTyping(event.target);
+  }, true);
+}
+
 export function clear(node, ...children) {
   node.replaceChildren();
   append(node, children);
@@ -55,6 +72,9 @@ const ICONS = {
   "chevron-down": "M4 6l4 4 4-4",
   grip: "M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01",
   undo: "M5.5 3.5L2.5 6.5l3 3M2.5 6.5h7a3.5 3.5 0 010 7H7",
+  history: "M2.6 9.2A5.5 5.5 0 102.9 5.4M2.5 2.5v3h3M8 5v3.2l2.2 1.4",
+  cut: "M2.5 11.5a2 2 0 104 0 2 2 0 00-4 0M9.5 11.5a2 2 0 104 0 2 2 0 00-4 0M5.7 10L11.5 2.5M10.3 10L4.5 2.5",
+  paste: "M5.5 3h-1A1.5 1.5 0 003 4.5v8A1.5 1.5 0 004.5 14h7a1.5 1.5 0 001.5-1.5v-8A1.5 1.5 0 0011.5 3h-1M6 2h4v2.5H6z",
   redo: "M10.5 3.5l3 3-3 3M13.5 6.5h-7a3.5 3.5 0 000 7H9",
   save: "M3 3h8l2 2v8H3zM5.5 3v3h4.5V3M5 13V9h6v4",
   play: "M5 3.5v9l7.5-4.5z",
@@ -89,6 +109,8 @@ const ICONS = {
   link: "M7 9a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2L8 3.8M9 7a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2L8 12.2",
   math: "M3 8h4M12 5l-3 6M9 5l3 6M3.5 4h3L5 12",
   mechanism: "M6 5l3 1.75v3.5L6 12l-3-1.75v-3.5zM8.5 3.5a3.5 3.5 0 015 3M13.5 6.5l.3-1.8M13.5 6.5l-1.7-.6",
+  structure: "M2 11c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
+  flow: "M4.5 1.5h7v3h-7zM8 4.5v2M8 6.5l3.5 3L8 12.5l-3.5-3zM8 12.5v2",
   palette: "M8 2a6 6 0 100 12c1 0 1.5-.7 1.5-1.5S9 11 9 10s.8-1.5 1.8-1.5H12A2.5 2.5 0 0014 6c0-2.2-2.7-4-6-4zM5 7.5h.01M7 5h.01M10 5h.01",
   type: "M3 4V3h10v1M8 3v10M6 13h4",
   notes: "M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2",
@@ -152,11 +174,12 @@ export const ui = {
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
-    const node = h(`input.input${mono ? ".mono" : ""}`, { type, placeholder, spellcheck: false });
+    const node = plainTyping(h(`input.input${mono ? ".mono" : ""}`, { type, placeholder }));
+    node.spellcheck = false;  // set here: h() leaves out what is false
     if (key) node.dataset.key = key;
     node.value = value ?? "";
     if (width) node.style.width = width;
-    if (list) node.setAttribute("list", list);
+    if (list) { node.setAttribute("list", list); node.removeAttribute("autocomplete"); }  // its own suggestions stay
     if (onInput) node.addEventListener("input", () => onInput(node.value));
     if (onChange) node.addEventListener("change", () => onChange(node.value));
     return node;
@@ -177,8 +200,9 @@ export const ui = {
     return node;
   },
 
-  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, tabs = mono, key } = {}) {
-    const node = h(`textarea.textarea${mono ? ".mono" : ""}${grow ? ".grow" : ""}`, { rows, placeholder, spellcheck: !mono });
+  textarea({ value = "", rows = 3, placeholder = "", onInput, mono, grow = true, tabs = mono, key, spelling = !mono } = {}) {
+    const node = plainTyping(h(`textarea.textarea${mono ? ".mono" : ""}${grow ? ".grow" : ""}`, { rows, placeholder }));
+    node.spellcheck = Boolean(spelling);
     if (key) node.dataset.key = key;
     node.value = value ?? "";
     if (tabs) node.addEventListener("keydown", (event) => indentKeys(event, node));
@@ -195,8 +219,8 @@ export const ui = {
   },
 
   // Words in flexo markup: **strong**, *emphasis*, $maths$, `code`, [links](url), [colour]{accent}.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, tabs = false, key } = {}) {
-    const area = ui.textarea({ value, rows, placeholder, onInput, tabs, key });
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, tabs = false, key, spelling = true } = {}) {
+    const area = ui.textarea({ value, rows, placeholder, onInput, tabs, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
@@ -207,15 +231,15 @@ export const ui = {
     const tool = (label, title, before, after, style) =>
       h("button", { type: "button", title, style, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
     const tools = h("div.markup-tools", {},
-      tool("B", "Strong (⌘B)", "**", "**", { fontWeight: 700 }),
-      tool("I", "Emphasis (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
-      tool("$x$", "Maths (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
+      tool("B", "Bold (⌘B)", "**", "**", { fontWeight: 700 }),
+      tool("I", "Italic (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
+      tool("$x$", "Equation (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
       tool("</>", "Code", "`", "`", { fontFamily: "var(--mono)", fontSize: "11px" }),
       tool("🔗", "Link (⌘K)", "[", "](https://)"),
       colours ? h("span.sep") : null,
       colours ? tool("A", "Accent colour", "[", "]{accent}", { color: "var(--accent)", fontWeight: 700 }) : null,
-      colours ? tool("A", "Second accent", "[", "]{accent2}", { color: "#c2410c", fontWeight: 700 }) : null,
-      colours ? tool("A", "Muted", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
+      colours ? tool("A", "Second accent colour", "[", "]{accent2}", { color: "#c2410c", fontWeight: 700 }) : null,
+      colours ? tool("A", "Muted colour", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
     );
     const node = h("div.markup", {}, tools, area);
     node.area = area;
@@ -278,7 +302,7 @@ export const ui = {
     if (custom) {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
       const input = h("input", { type: "color", value: own || "#888888" });
-      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Your own colour", style: own ? { background: own } : {} }, icon("plus"), input);
+      const well = h(`label.swatch.custom${own ? ".on" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
       input.addEventListener("input", () => { well.style.background = input.value; choose(well, input.value); });
       node.append(well);
     }
@@ -290,11 +314,11 @@ export const ui = {
   colour({ value, onChange, title = "", key } = {}) {
     const set = HEX.test(value || "") ? value : null;
     const input = h("input", { type: "color", value: set || "#888888", "data-key": key });
-    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: set ? `${title} ${set}` : `${title}: the theme's` },
+    const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: [title, set || "Default"].filter(Boolean).join(": ") },
       h("span.colour-chip", { style: set ? { background: set } : {} }), input);
     input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
     const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; onChange?.(null); },
-      { kind: "ghost", small: true, icon: "undo", title: "Back to the theme's" });
+      { kind: "ghost", small: true, icon: "undo", title: "Reset" });
     reset.hidden = !set;
     input.addEventListener("input", () => { reset.hidden = false; });
     return h("div.colour-control", {}, well, reset);

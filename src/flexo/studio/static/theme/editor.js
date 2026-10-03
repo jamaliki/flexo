@@ -7,10 +7,13 @@ import { h, clear, icon, ui, menu, keepFocus, picture, themeUses } from "/static
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
-  canvas: "Page", ink: "Words", muted: "Quiet words", connector: "Lines", container_fill: "Group fill",
-  container_stroke: "Group outline", neutral_fill: "Plain fill", neutral_stroke: "Plain outline",
-  inset_fill: "Inset fill", inset_stroke: "Inset outline", shadow: "Shadow", residual: "Residual lines",
+  canvas: "Background", ink: "Text", muted: "Muted Text", connector: "Line", container_fill: "Group Fill",
+  container_stroke: "Group Outline", neutral_fill: "Neutral Fill", neutral_stroke: "Neutral Outline",
+  inset_fill: "Inset Fill", inset_stroke: "Inset Outline", shadow: "Shadow", residual: "Residual Line",
 };
+// A setting's name as a person reads it: "arrow_shape" is "Arrow Shape".
+const titled = (text) => String(text).replace(/_/g, " ").replace(/(^|[\s-])([a-z])/g, (_, before, letter) => before + letter.toUpperCase());
+const ARROW_NAMES = { triangle: "Triangle", stealth: "Stealth", latex: "LaTeX", open: "Open" };
 const ARROWS = { triangle: "M2 4l10 4-10 4z", stealth: "M2 4l10 4-10 4 3-4z", latex: "M3 4.5c3 1.5 6 3 9 3.5-3 .5-6 2-9 3.5 1-2.3 1-4.7 0-7z", open: "M3 4l9 4-9 4" };
 
 export function mount(studio, container) {
@@ -28,6 +31,20 @@ export function mount(studio, container) {
   const effective = () => studio.info?.effective || {};
 
   // -- changing a setting --
+  // Said in the history as the setting changed: "Change Arrow Shape".
+  const NAMES = {
+    sketch: "Hand-Drawn Style", base: "Base Theme", rule: "Tones", size: "Font Size", tracking: "Letter Spacing",
+    title_transform: "Title Capitalisation", fill_chroma: "Fill Saturation", stroke_lightness: "Outline Lightness",
+    stroke_chroma: "Outline Saturation", stroke_width: "Outline Width", connector_width: "Line Width",
+    container_style: "Group Style", container_radius: "Group Corner Radius", gap: "Shape Spacing",
+    compact_gap: "Compact Spacing", padding_x: "Horizontal Padding", padding_y: "Vertical Padding",
+    lines: "Line Style", branch: "Branch Style", merge: "Merge Style",
+  };
+  const said = (path, value) => {
+    const key = path[path.length - 1];
+    const name = path[0] === "page" && PAGE_NAMES[key] ? `${PAGE_NAMES[key]} Colour` : NAMES[key] || titled(key);
+    return value === null || value === undefined || value === "" ? `Reset ${name}` : `Change ${name}`;
+  };
   const get = (path) => path.reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), theme());
   const base = (path) => path.reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), effective());
   const set = (path, value, options = {}) => studio.change((doc) => {
@@ -42,7 +59,7 @@ export function mount(studio, container) {
       const key = path[depth - 1];
       if (parent[key] && typeof parent[key] === "object" && !Object.keys(parent[key]).length) delete parent[key];
     }
-  }, { quiet: true, merge: path.join("."), ...options });
+  }, { quiet: true, merge: path.join("."), label: said(path, value), ...options });
 
   // -- the panel --
   const form = h("div.theme-form.scroll-thin");
@@ -54,9 +71,9 @@ export function mount(studio, container) {
   const row = (label, path, control, { hint } = {}) => {
     const changed = get(path) !== undefined;
     return h(`div.setting${changed ? ".changed" : ""}`, {},
-      h("label.setting-label", {}, h("span.setting-dot", { title: changed ? "Changed from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
+      h("label.setting-label", {}, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
       h("div.setting-control", {}, control),
-      h("button.setting-reset", { type: "button", title: "Back to the base theme's", disabled: !changed, onclick: () => { set(path, null, { quiet: false }); } }, icon("undo")));
+      h("button.setting-reset", { type: "button", title: "Reset", disabled: !changed, onclick: () => { set(path, null, { quiet: false }); } }, icon("undo")));
   };
 
   const length = (label, path, { step = 0.25, unit = "pt", hint } = {}) => {
@@ -64,7 +81,7 @@ export function mount(studio, container) {
     const shown = base(path);
     const parse = (text) => (text == null ? null : parseFloat(String(text)));
     return row(label, path, h("div.unit-input", {},
-      ui.number({ value: parse(given), placeholder: shown == null ? "none" : String(parse(shown)), step, key: path.join("."),
+      ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."),
         onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }),
       h("span.unit", {}, unit)), { hint });
   };
@@ -81,7 +98,7 @@ export function mount(studio, container) {
 
   const choice = (label, path, options, { segmented = false, labels = {} } = {}) => {
     const value = get(path) ?? base(path);
-    const items = options.map((option) => ({ value: option, label: labels[option] ?? String(option) }));
+    const items = options.map((option) => ({ value: option, label: labels[option] ?? titled(option) }));
     return row(label, path, segmented
       ? ui.segmented({ value, options: items, onChange: (next) => set(path, next, { quiet: false }) })
       : ui.select({ value, options: items, onChange: (next) => set(path, WEIGHTS.includes(Number(next)) ? Number(next) : next, { quiet: false }) }));
@@ -92,7 +109,7 @@ export function mount(studio, container) {
     const picker = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
       oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; set(path, picker.value); } });
     const swatch = h("span.colour-swatch", { style: { background: value || "transparent" }, onclick: () => picker.click() });
-    const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "none", mono: true, key: path.join("."),
+    const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
       onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; set(path, text); } else if (!text) set(path, null); } });
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
   };
@@ -104,19 +121,19 @@ export function mount(studio, container) {
     const chips = list.map((value, index) => {
       const picker = h("input", { type: "color", value, oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next); } });
       const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, onclick: () => picker.click() }, picker,
-        h("button.palette-remove", { type: "button", title: "Remove", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index)); } }, icon("close")));
+        h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index)); } }, icon("close")));
       return chip;
     });
     const tones = studio.info?.tones || [];
     return h("div.palette-block", {},
       h("div.palette-chips", {}, chips,
-        h("button.palette-add", { type: "button", title: "Add a colour", onclick: () => write([...list, "#888888"]) }, icon("plus"))),
+        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"]) }, icon("plus"))),
       h("div.row", {},
-        h("div.fixed", {}, ui.button("Named palettes", (event) => menu(event.currentTarget, Object.entries(catalog.palettes).map(([name, values]) => ({
+        h("div.fixed", {}, ui.button("Palettes…", (event) => menu(event.currentTarget, Object.entries(catalog.palettes).map(([name, values]) => ({
           label: name, hint: values.join(" "), run: () => write([...values]),
         }))), { kind: "ghost", small: true, icon: "palette" })),
-        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("The base's", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
-      tones.length ? h("div.tones", { title: "The tones blocks are drawn in: fill and outline" },
+        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
+      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes" },
         tones.map((tone) => h("span.tone", { style: { background: tone.fill, borderColor: tone.stroke, color: tone.stroke } }, "Aa"))) : null);
   };
 
@@ -132,57 +149,57 @@ export function mount(studio, container) {
     const sketch = t.sketch ?? base(["sketch"]);
     clear(form,
       section("Theme",
-        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "how figures and decks name it" })),
-        ui.field("Starts from", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
-        ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What it is for", onInput: (value) => set(["description"], value || null) }))),
-      section("Use this theme in", uses),
+        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
+        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
+        ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
+      section("Documents", uses),
       section("Colour",
-        h("div.setting-group-label", {}, "Palette", h("span.hint", {}, "the tones blocks are drawn in, in order")),
+        h("div.setting-group-label", {}, "Palette", h("span.hint", {}, "Colours for shapes, in order")),
         paletteView(),
-        choice("Tones", ["tones", "rule"], catalog.tones, { labels: { tinted: "Tinted", solid: "Solid", "accent-then-grey": "Accent, then grey", greys: "Greys" } }),
-        rule === "tinted" ? [slider("Fill lightness", ["tones", "fill_lightness"], { min: 0.8, max: 0.99 }), slider("Fill colour", ["tones", "fill_chroma"], { min: 0, max: 0.15 }),
-          slider("Outline darkness", ["tones", "stroke_lightness"], { min: 0.2, max: 0.75 }), slider("Outline colour", ["tones", "stroke_chroma"], { min: 0, max: 0.25 })] : null,
+        choice("Tones", ["tones", "rule"], catalog.tones, { labels: { tinted: "Tinted", solid: "Solid", "accent-then-grey": "Accent Then Grey", greys: "Greys" } }),
+        rule === "tinted" ? [slider("Fill Lightness", ["tones", "fill_lightness"], { min: 0.8, max: 0.99 }), slider("Fill Saturation", ["tones", "fill_chroma"], { min: 0, max: 0.15 }),
+          slider("Outline Lightness", ["tones", "stroke_lightness"], { min: 0.2, max: 0.75 }), slider("Outline Saturation", ["tones", "stroke_chroma"], { min: 0, max: 0.25 })] : null,
         h("div.setting-group-label", {}, "Page"),
         Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key]))),
       section("Type",
         row("Font", ["font"], ui.combo({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "", key: "font", onChange: (value) => set(["font"], value || null) })),
-        length("Size", ["type", "size"], { step: 0.5 }),
-        choice("Labels", ["type", "label_weight"], WEIGHTS),
-        choice("Titles", ["type", "title_weight"], WEIGHTS),
-        number("Line height", ["type", "line_height"], { step: 0.05, min: 0.8, max: 2 }),
-        number("Letter spacing", ["type", "tracking"], { step: 0.01 }),
-        choice("Titles set", ["type", "title_transform"], catalog.choices.title_transform || ["none", "upper"], { segmented: true, labels: { none: "As written", upper: "UPPER" } })),
-      section("Lines & shapes",
-        length("Outlines", ["style", "stroke_width"], { step: 0.05 }),
-        length("Connectors", ["style", "connector_width"], { step: 0.05 }),
-        length("Corners", ["style", "corner_radius"], { step: 0.5 }),
-        row("Arrowheads", ["style", "arrow_shape"], h("div.arrow-choices", {}, (catalog.choices.arrow_shape || []).map((shape) => {
+        length("Font Size", ["type", "size"], { step: 0.5 }),
+        choice("Label Weight", ["type", "label_weight"], WEIGHTS),
+        choice("Title Weight", ["type", "title_weight"], WEIGHTS),
+        number("Line Height", ["type", "line_height"], { step: 0.05, min: 0.8, max: 2 }),
+        number("Letter Spacing", ["type", "tracking"], { step: 0.01 }),
+        choice("Title Capitalisation", ["type", "title_transform"], catalog.choices.title_transform || ["none", "upper"], { segmented: true, labels: { none: "None", upper: "All Caps" } })),
+      section("Lines & Shapes",
+        length("Outline Width", ["style", "stroke_width"], { step: 0.05 }),
+        length("Line Width", ["style", "connector_width"], { step: 0.05 }),
+        length("Corner Radius", ["style", "corner_radius"], { step: 0.5 }),
+        row("Arrow Shape", ["style", "arrow_shape"], h("div.arrow-choices", {}, (catalog.choices.arrow_shape || []).map((shape) => {
           const current = get(["style", "arrow_shape"]) ?? base(["style", "arrow_shape"]);
-          return h(`button.arrow-choice${shape === current ? ".on" : ""}`, { type: "button", title: shape, onclick: () => set(["style", "arrow_shape"], shape, { quiet: false }) },
+          return h(`button.arrow-choice${shape === current ? ".on" : ""}`, { type: "button", title: ARROW_NAMES[shape] || titled(shape), onclick: () => set(["style", "arrow_shape"], shape, { quiet: false }) },
             arrowIcon(shape));
         }))),
-        choice("Groups", ["style", "container_style"], catalog.choices.container_style || []),
-        length("Group corners", ["style", "container_radius"], { step: 0.5 }),
-        choice("Shadows", ["style", "shadow_style"], catalog.choices.shadow_style || []),
-        slider("Shadow depth", ["style", "shadow_opacity"], { min: 0, max: 0.5 })),
-      section("Space",
-        length("Between parts", ["style", "gap"], { step: 1 }),
-        length("Close together", ["style", "compact_gap"], { step: 0.5 }),
-        length("Inside, across", ["style", "padding_x"], { step: 0.5 }),
-        length("Inside, down", ["style", "padding_y"], { step: 0.5 }),
-        length("Inside groups", ["style", "group_padding"], { step: 1 })),
+        choice("Group Style", ["style", "container_style"], catalog.choices.container_style || []),
+        length("Group Corner Radius", ["style", "container_radius"], { step: 0.5 }),
+        choice("Shadow Style", ["style", "shadow_style"], catalog.choices.shadow_style || []),
+        slider("Shadow Opacity", ["style", "shadow_opacity"], { min: 0, max: 0.5 })),
+      section("Spacing",
+        length("Shape Spacing", ["style", "gap"], { step: 1 }),
+        length("Compact Spacing", ["style", "compact_gap"], { step: 0.5 }),
+        length("Horizontal Padding", ["style", "padding_x"], { step: 0.5 }),
+        length("Vertical Padding", ["style", "padding_y"], { step: 0.5 }),
+        length("Group Padding", ["style", "group_padding"], { step: 1 })),
       section("Drawing",
-        choice("Lines", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right angles", straight: "Straight" } }),
-        choice("Branches", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
-        choice("Merges", ["conventions", "merge"], catalog.conventions.merge || []),
-        row("By hand", ["sketch"], ui.toggle({ value: Boolean(sketch), label: sketch ? "Drawn as if by hand" : "Ruled", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
+        choice("Line Style", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right Angles", straight: "Straight" } }),
+        choice("Branch Style", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
+        choice("Merge Style", ["conventions", "merge"], catalog.conventions.merge || []),
+        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), label: "Draw by hand", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
         sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
-      h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Every other setting"),
+      h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>
-          typeof value === "string" && /pt$|mm$/.test(value) ? length(key.replace(/_/g, " "), ["style", key], { unit: value.endsWith("mm") ? "mm" : "pt" })
-            : typeof value === "boolean" ? row(key.replace(/_/g, " "), ["style", key], ui.toggle({ value: get(["style", key]) ?? value, onChange: (on) => set(["style", key], on, { quiet: false }) }))
-              : typeof value === "number" ? number(key.replace(/_/g, " "), ["style", key])
-                : row(key.replace(/_/g, " "), ["style", key], ui.input({ value: get(["style", key]) ?? "", placeholder: String(value ?? ""), key: `style.${key}`, onInput: (text) => set(["style", key], text || null) }))))));
+          typeof value === "string" && /pt$|mm$/.test(value) ? length(titled(key), ["style", key], { unit: value.endsWith("mm") ? "mm" : "pt" })
+            : typeof value === "boolean" ? row(titled(key), ["style", key], ui.toggle({ value: get(["style", key]) ?? value, onChange: (on) => set(["style", key], on, { quiet: false }) }))
+              : typeof value === "number" ? number(titled(key), ["style", key])
+                : row(titled(key), ["style", key], ui.input({ value: get(["style", key]) ?? "", placeholder: String(value ?? ""), key: `style.${key}`, onInput: (text) => set(["style", key], text || null) }))))));
   });
 
   // -- the samples --
@@ -202,7 +219,7 @@ export function mount(studio, container) {
     const options = [...catalog.specimens.map((item) => ({ value: item.name, label: item.title })),
       ...(catalog.specimens.some((item) => item.name === "slides") ? decks.map((item) => ({ value: `deck:${item.file}`, label: item.file.split("/").pop() })) : [])];
     const value = specimen.deck ? `deck:${specimen.deck}` : specimen.name;
-    clear(showOn, h("span.show-on-label", {}, "Show on"), ui.segmented({ value, options, onChange: (next) => {
+    clear(showOn, h("span.show-on-label", {}, "Preview"), ui.segmented({ value, options, onChange: (next) => {
       specimen = next.startsWith("deck:") ? { name: "slides", deck: next.slice(5) } : { name: next };
       pages = [];
       renderStage();
@@ -210,7 +227,7 @@ export function mount(studio, container) {
     } }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  studio.actions.append(ui.button("Full theme file", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Write every setting, the base's included, to build/" }));
+  studio.actions.append(ui.button("Export Full Theme", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting, including those from the base theme, to the build folder" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 
@@ -224,8 +241,8 @@ export function mount(studio, container) {
   studio.on("change", ({ quiet }) => { if (!quiet) renderForm(); });
   studio.reveal = () => {};
   studio.commands = () => [
-    { icon: "palette", label: "Use a named palette…", run: () => form.querySelector(".palette-block .btn")?.click() },
-    ...catalog.specimens.map((item) => ({ icon: "eye", label: `Show on ${item.title.toLowerCase()}`, run: () => { specimen = { name: item.name }; renderShowOn(); studio.requestDraw(0); } })),
+    { icon: "palette", label: "Choose Palette…", run: () => form.querySelector(".palette-block .btn")?.click() },
+    ...catalog.specimens.map((item) => ({ icon: "eye", label: `Preview ${item.title}`, run: () => { specimen = { name: item.name }; renderShowOn(); studio.requestDraw(0); } })),
   ];
   renderForm();
   renderStage();

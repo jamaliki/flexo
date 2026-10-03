@@ -80,3 +80,98 @@ def test_a_colour_for_a_chain_the_structure_lacks_is_said_with_the_chains_it_has
     with pytest.raises(_NoSuchChain, match='"A" names no chain of 1a7g') as caught:
         _check_chains(Loaded(), (("A", "#d55e00"),))
     assert "Its chains are E" in caught.value.hint
+
+
+def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.studio.figure_edit import EditError
+    from flexo.studio.figure_kind import FigureKind
+
+    source = DATA / "1a7g.cif"
+    text = (
+        "figure: {id: turned}\n"
+        "nodes:\n"
+        "  - id: model\n    kind: structure\n"
+        f"    properties: {{source: {source}, yaw: 40, pitch: -10}}\n"
+        "  - {id: tag, label: E2}\n"
+    )
+    out = FigureKind().act({"text": text}, {"do": "structure-view", "id": "model"}, tmp_path)
+    assert out["document"]["text"] == text
+    view = out["view"]
+    assert view["camera"]["yaw"] == 40 and view["camera"]["pitch"] == -10
+    points = [point for chain in view["chains"] for point in chain]
+    assert len(points) > 50 and all(len(point) == 3 for point in points)
+    # Centred, so the page turns it about its middle.
+    for k in range(3):
+        values = [point[k] for point in points]
+        assert abs(max(values) + min(values)) < 0.1
+    with pytest.raises(EditError, match="isn't a structure"):
+        FigureKind().act({"text": text}, {"do": "structure-view", "id": "tag"}, tmp_path)
+
+
+def test_a_structure_takes_mol_sketch_settings_over_its_look(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.serialization import figure_to_document
+    from flexo.studio.figure_kind import FigureKind
+
+    with flexo.Figure("styled") as figure:
+        figure.root.structure(
+            "model",
+            DATA / "1a7g.cif",
+            palette="Okabe–Ito",  # noqa: RUF001
+            style={"fill": "ink colour", "line": {"width": 2.5}},
+        )
+    compiled = compile_figure(figure.spec)
+    assert 'id="model.molecule"' in compiled.document.text
+    written = figure_to_document(figure.spec)["nodes"][0]["properties"]
+    assert written["style"] == {"fill": "ink colour", "line": {"width": 2.5}}
+    # What the studio shows beside each setting: what it is drawn with.
+    text = (
+        "figure: {id: styled}\n"
+        "nodes:\n"
+        "  - id: model\n    kind: structure\n"
+        f"    properties: {{source: {DATA / '1a7g.cif'}, style: {{fill: ink colour}}}}\n"
+    )
+    settings = FigureKind().act(
+        {"text": text}, {"do": "structure-settings", "id": "model"}, tmp_path
+    )["settings"]
+    assert settings["style"]["fill"] == "ink colour"
+    assert settings["style"]["line.width"] > 0 and "Okabe–Ito" in settings["palettes"]  # noqa: RUF001
+    assert settings["look"] == "engraved-colour"
+
+
+def test_a_setting_mol_sketch_lacks_is_said_with_what_was_meant() -> None:
+    pytest.importorskip("molsketch")
+    for settings, said, hint in (
+        ({"style": {"fil": "ink"}}, '"fil" is not a field', "Did you mean fill?"),
+        ({"style": {"fill": "crayon"}}, 'fill "crayon" is not one', "watercolour"),
+        ({"palette": "Plaid"}, '"Plaid" is not one of mol-sketch', "Tableau 10"),
+    ):
+        with flexo.Figure("wrong") as figure:
+            figure.root.structure("model", DATA / "1a7g.cif", **settings)  # type: ignore[arg-type]
+        with pytest.raises(flexo.FlexoError, match=said) as caught:
+            compile_figure(figure.spec)
+        assert hint in (caught.value.diagnostics[0].hint or "")
+
+
+def test_every_choice_the_studio_offers_is_shown_by_a_name_of_its_own() -> None:
+    from flexo.structure_style import CHOICES, SECTIONS
+    from flexo.studio.figure_parts import catalogue
+
+    fields = [field for section in SECTIONS for field in section["fields"]]
+    for field in fields:
+        if field["type"] == "choice":
+            # What is written stays mol-sketch's value; what is shown is named for each.
+            assert list(field["labels"]) == list(CHOICES[field["key"]]) == field["options"]
+            assert all(field["labels"].values())
+    cartoon = next(field for field in fields if field["key"] == "cartoon_color")
+    assert cartoon["labels"] == {
+        "ss": "Secondary Structure",
+        "carbon": "Carbon",
+        "rainbow": "Rainbow",
+    }
+    editor = catalogue()
+    for part in [*editor["parts"].values(), {"fields": editor["group_fields"]}]:
+        for field in [*part["fields"], *(c for f in part["fields"] for c in f.get("columns", []))]:
+            if field["type"] == "choice":
+                assert [str(option) for option in field["options"]] == list(field["labels"])

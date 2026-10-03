@@ -556,6 +556,24 @@ def test_a_folder_is_trusted_to_run_its_code_when_its_person_says(tmp_path: Path
         server.server_close()
 
 
+def test_the_studio_offers_to_make_only_the_kinds_it_was_started_with(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    server, workspace = start(tmp_path, browser=False, offered=("theme",))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        kinds = call(f"{url}/api/session", workspace.token)[1]["kinds"]
+        offered = {kind["name"]: kind["offered"] for kind in kinds}
+        assert offered["figure"] is False and offered["theme"] is True
+        # A kind not offered still opens.
+        assert call(f"{url}/api/open?file=figure.yaml", workspace.token)[0] == 200
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
 def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path: Path) -> None:
     import struct
     import zlib
@@ -569,15 +587,16 @@ def test_a_figure_drawn_in_the_studio_reads_no_file_outside_the_folder(tmp_path:
             struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
         )
         header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-                         + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(rows))
+            + chunk(b"IEND", b"")
+        )
 
     png(tmp_path / "private.png")
     png(folder / "own.png")
-    figure = (
-        "figure: {id: f}\nnodes:\n"
-        "- {id: a, kind: image, label: A, properties: {source: %s}}\n"
-    )
+    figure = "figure: {id: f}\nnodes:\n- {id: a, kind: image, label: A, properties: {source: %s}}\n"
     workspace = Workspace(folder)
     try:
         for source, allowed in ((folder / "own.png", True), (tmp_path / "private.png", False)):
@@ -604,7 +623,9 @@ def test_a_photograph_is_sent_to_the_page_once_by_address_and_exported_whole(
     rows = (b"\x00" + b"\x33\x66\xaa" * 600) * 400
     header = struct.pack(">IIBBBBB", 600, 400, 8, 2, 0, 0, 0)
     (tmp_path / "photo.png").write_bytes(
-        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(rows))
         + chunk(b"IEND", b"")
     )
     (tmp_path / "figure.yaml").write_text(
@@ -800,6 +821,7 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["a", 150, -20],  # out of its row, above it
         ["e", 500, 500],  # far from the figure: nowhere
         ["bench", 100, 25],  # a group over itself: where it is
+        ["e", 350, 60],  # past the end of a column: a column of its own, right of it
     ]
     code = (
         f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
@@ -809,6 +831,8 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
         "  const place = dropPlace(model, boxes, { x, y }, id);\n"
         "  if (!place) return null;\n"
+        "  const kept = stays(model, place, id);\n"
+        "  if (place.kind === 'line') return { line: place.side, of: place.of, stays: kept };\n"
         "  return { parent: place.parent, index: place.index, stays: stays(model, place, id) };\n"
         "})));\n"
     )
@@ -822,4 +846,31 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         {"parent": "root", "index": 0, "stays": False},
         None,
         {"parent": "root", "index": 0, "stays": True},
+        {"line": "right", "of": "root", "stays": False},
     ]
+    # Under a figure laid out in a row: a line of its own; just under it, still in the row.
+    row = {
+        "root": "root",
+        "groups": [{"id": "root", "layout": {"kind": "row"}, "children": ["a", "b", "c"]}],
+    }
+    boxes = {
+        "root": [0, 0, 300, 50],
+        "a": [10, 10, 60, 40],
+        "b": [110, 10, 160, 40],
+        "c": [210, 10, 260, 40],
+    }
+    drags = [["c", 150, 120], ["c", 150, 55], ["c", 150, -60], ["c", 150, 400]]
+    code = (
+        f"import {{ dropPlace }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(row)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+        "  return place && (place.kind === 'line' ? place.side : place.parent);\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == ["below", "root", "above", None]

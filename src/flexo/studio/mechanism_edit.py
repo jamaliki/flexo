@@ -67,12 +67,12 @@ def normal_steps(steps: object) -> list[dict[str, Any]]:
             try:
                 item["place"] = place_record(item["place"])
             except (ValueError, IndexError, TypeError, AttributeError) as error:
-                raise EditError("a step's place is not written as the editor writes it") from error
+                raise EditError("This step's placement can't be read.") from error
             if not item["place"]:
                 del item["place"]
         out.append(item)
     if not out:
-        raise EditError("a mechanism needs at least one step")
+        raise EditError("A mechanism needs at least one step.")
     return out
 
 
@@ -244,23 +244,24 @@ def add_arrow(
     written = normal_steps(steps)
     panels, _ = mechanism_states(_figure(written, options).nodes[0])
     if not 0 <= step < len(panels):
-        raise EditError("that structure is not drawn: a step before it cannot be")
+        raise EditError("This structure can't be drawn because an earlier step has a problem.")
     molecule = panels[step].molecule.copy()
     count = len(molecule.atoms)
     ends = [_atoms(tail, count), _atoms(head, count)]
     source, target = ends
     if len(source) == 2 and molecule.bond(*source) is None:
-        raise EditError("those two atoms are not bonded")
+        raise EditError("Those two atoms aren't bonded.")
     if len(source) == 2 and len(target) == 1 and target[0] not in source:
         return {"ends": [{"index": atom, "name": molecule.name(atom)} for atom in source]}
     if len(source) == 1 and len(target) == 2:
         if source[0] not in target:
             raise EditError(
-                f"a lone pair on {molecule.name(source[0])} makes a bond to an atom: click the atom"
+                f"A lone pair on {molecule.name(source[0])} forms a bond to an atom. "
+                "Click the atom."
             )
         target = [atom for atom in target if atom != source[0]]
     if len(source) == 1 and target == source:
-        raise EditError("the electrons go somewhere else: click where they go")
+        raise EditError("The electrons must go somewhere else. Click where they go.")
     origin = max(
         index for index in range(min(step, len(written) - 1) + 1) if written[index].get("smiles")
     )
@@ -282,7 +283,7 @@ def add_arrow(
         written.append({"arrows": [text]})
     else:
         if any(_same(text, other, molecule) for other in written[step]["arrows"]):
-            raise EditError("that arrow is drawn already")
+            raise EditError("That arrow already exists.")
         written[step]["arrows"].append(text)
     return {"steps": written, "arrow": text}
 
@@ -307,10 +308,10 @@ def place_molecule(
     written = normal_steps(steps)
     panels, _ = mechanism_states(_figure(written, options).nodes[0])
     if not 0 <= step < len(panels):
-        raise EditError("that structure is not drawn: a step before it cannot be")
+        raise EditError("This structure can't be drawn because an earlier step has a problem.")
     molecule = panels[step].molecule.copy()
     if not 0 <= atom < len(molecule.atoms):
-        raise EditError("that atom is gone: someone changed the structure meanwhile")
+        raise EditError("That atom no longer exists. Someone else may have changed the structure.")
     fragment = next(group for group in molecule.fragments() if atom in group)
     origin = max(
         index for index in range(min(step, len(written) - 1) + 1) if written[index].get("smiles")
@@ -361,7 +362,9 @@ def remove_arrow(steps: object, *, step: int, index: int) -> dict[str, Any]:
     try:
         written[step]["arrows"].pop(index)
     except (IndexError, KeyError) as error:
-        raise EditError("that arrow is gone: someone changed the step meanwhile") from error
+        raise EditError(
+            "That arrow no longer exists. Someone else may have changed the step."
+        ) from error
     return {"steps": written}
 
 
@@ -420,13 +423,13 @@ def _atoms(end: Mapping[str, Any], count: int) -> list[int]:
     try:
         atoms = [int(atom) for atom in value]  # type: ignore[union-attr]
     except (TypeError, ValueError) as error:
-        raise EditError("an arrow's end is an atom or a bond") from error
+        raise EditError("An arrow must start and end at an atom or a bond.") from error
     if (
         not 1 <= len(atoms) <= 2
         or len(set(atoms)) != len(atoms)
         or not all(0 <= a < count for a in atoms)
     ):
-        raise EditError("that atom is gone: someone changed the structure meanwhile")
+        raise EditError("That atom no longer exists. Someone else may have changed the structure.")
     return atoms
 
 

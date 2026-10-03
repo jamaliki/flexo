@@ -44,9 +44,9 @@ def test_two_clicks_write_an_arrow_and_a_bond_to_a_far_atom_asks_which_end() -> 
         [{"smiles": "[Br:1][Br:2]"}], step=0, tail={"bond": [0, 1]}, head={"atom": 0}, half=True
     )
     assert half["arrow"] == "1-2 ~> 1"
-    with pytest.raises(EditError, match="drawn already"):
+    with pytest.raises(EditError, match="already exists"):
         add_arrow([{"smiles": SN2, "arrows": "1 -> 2"}], step=0, tail={"atom": 0}, head={"atom": 1})
-    with pytest.raises(EditError, match="makes a bond to an atom"):
+    with pytest.raises(EditError, match="forms a bond to an atom"):
         add_arrow(steps, step=0, tail={"atom": 0}, head={"bond": [1, 2]})
     left = remove_arrow([{"smiles": SN2, "arrows": "1 -> 2; 2-3 -> 3"}], step=0, index=0)
     assert left["steps"][0]["arrows"] == ["2-3 -> 3"]
