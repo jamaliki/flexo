@@ -35,6 +35,20 @@ export function ago(seconds) {
 function remembered(key, fallback) { try { return localStorage.getItem(`flexo-studio-${key}`) ?? fallback; } catch { return fallback; } }
 function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`, value); } catch { /* private window */ } }
 
+// A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
+const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+
+// Settled once every stylesheet the page has asked for has loaded (or a moment has
+// passed): an editor is shown styled, never as its bare elements.
+function stylesLoaded() {
+  const waiting = [...document.querySelectorAll('link[rel="stylesheet"]')].filter((link) => !link.sheet);
+  const loads = waiting.map((link) => new Promise((done) => {
+    link.addEventListener("load", done, { once: true });
+    link.addEventListener("error", done, { once: true });
+  }));
+  return Promise.race([Promise.all(loads), new Promise((done) => setTimeout(done, 2000))]);
+}
+
 export class Workspace {
   constructor(info) {
     this.info = info;
@@ -87,8 +101,10 @@ export class Workspace {
         this.order.push(info.file);
         session.on("status", () => this.emit("status", session));
         session.on("change", () => this.emit("status", session));
-        this.emit("opened", session);
+        // Said once its editor is built and styled: the page goes from what it showed to the
+        // document, with no welcome page or unstyled editor between.
         await this.mount(session);
+        this.emit("opened", session);
         session.requestDraw(0);
       }
       file = session.file;
@@ -102,6 +118,7 @@ export class Workspace {
     try {
       const editor = await import(`/static/kinds/${session.kind}/editor.js`);
       await editor.mount(session, session.container);
+      await stylesLoaded();
     } catch (error) {
       console.error(error);
       clear(session.container, h("div.fatal", {}, h("h1", {}, `The ${session.title.toLowerCase()} editor failed to start`), h("pre", {}, String(error.stack || error))));
@@ -118,7 +135,7 @@ export class Workspace {
     session.active = true;
     session.emit("activate");
     history.replaceState(null, "", `?file=${encodeURIComponent(file)}`);
-    document.title = `${file.split("/").pop()} — Flexo Studio`;
+    document.title = `${docName(file)} — Flexo Studio`;
     this.emit("active", session);
     this.reportFocus(file, null);
   }
@@ -282,7 +299,7 @@ export async function start() {
     const next = order[(order.indexOf(remembered("theme", "auto")) + 1) % 3];
     remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${{ auto: "Auto", light: "Light", dark: "Dark" }[next]}`, { seconds: 1.5 });
   }, { kind: "ghost", title: "Appearance" });
-  const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
+  const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "appearance"));
   showTheme();
   const bar = h("header.bar", {},
     h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo Studio")),
@@ -409,7 +426,10 @@ export async function start() {
   for (const event of ["status", "active", "opened", "closed", "documents"]) workspace.on(event, report);
   window.addEventListener("pywebviewready", report);
   const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
-  clear(root, h("div.studio", {}, bar, body));
+  // The spinner the page opened with stays over the frame until the first document is
+  // ready to show (below): then the window goes from it to the document in one step.
+  const loading = root.querySelector(".loading");
+  clear(root, h("div.studio", {}, bar, body), loading);
 
   // -- keeping the frame current --
   const renderTabs = () => {
@@ -417,11 +437,11 @@ export async function start() {
       const session = workspace.sessions.get(file);
       const here = workspace.presenceOn(file);
       const tab = h(`div.tab${workspace.active === session ? ".on" : ""}`, {
-        title: file, onclick: () => workspace.activate(file),
+        title: `${String(workspace.info.folder || "").replace(/\/+$/, "")}/${file}`, onclick: () => workspace.activate(file),
         onauxclick: (event) => { if (event.button === 1) workspace.close(file); },
       },
       icon(KIND_ICONS[session.kind] || "file"),
-      h("span.tab-name", {}, file.split("/").pop()),
+      h("span.tab-name", {}, docName(file)),
       session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving…" }) : null,
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
@@ -438,7 +458,7 @@ export async function start() {
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
-      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("plug")));
+      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("collaborate")));
     followChip.hidden = !others.some((entry) => entry.who.kind === "agent");
     followChip.classList.toggle("on", workspace.follow);
     const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
@@ -542,6 +562,17 @@ export async function start() {
   settled();
   renderViews();
   if (remembered("side", "") && info.assistant) side.show(remembered("side", ""));
+  // The document shows drawn, words and all, rather than filling in: its first drawing
+  // and the faces it uses are waited for (a moment at most).
+  const shown = workspace.active;
+  if (loading && shown) {
+    const drawn = shown.drawn ? null : new Promise((done) => shown.on("drawn", done));
+    await Promise.race([
+      (async () => { await drawn; await new Promise(requestAnimationFrame); await document.fonts?.ready; })(),
+      new Promise((done) => setTimeout(done, 1200)),
+    ]);
+  }
+  loading?.remove();
 }
 
 function inField(event) {
@@ -706,7 +737,7 @@ export function palette(workspace) {
     ].filter((item) => offers(workspace, item.kind)),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
-    { icon: "plug", label: "Work with Agents…", run: () => connectDialog(workspace) },
+    { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
   ];
   const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });

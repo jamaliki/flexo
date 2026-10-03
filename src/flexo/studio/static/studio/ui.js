@@ -95,7 +95,7 @@ const ICONS = {
   quote: "M3 9.5c0-3 1-4.5 3-5.5M3 9.5h3v3H3zM9 9.5c0-3 1-4.5 3-5.5M9 9.5h3v3H9z",
   stats: "M3 13V8M8 13V3M13 13V6",
   callout: "M3 3h10v7H8l-3 3v-3H3z",
-  figure: "M2.5 5.5h4v5h-4zM9.5 5.5h4v5h-4zM6.5 8h3",
+  figure: "M2 2.5h5.5V7H2zM8.5 9H14v4.5H8.5zM4.75 7v4.25H8.5",
   plot: "M2.5 2.5v11h11M4.5 11l3-4 2.5 2 3.5-5",
   image: "M2.5 3.5h11v9h-11zM2.5 11l3.5-3.5 3 3 2-2 2.5 2.5M10.5 6.5h.01",
   gallery: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
@@ -109,7 +109,7 @@ const ICONS = {
   link: "M7 9a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2L8 3.8M9 7a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2L8 12.2",
   math: "M3 8h4M12 5l-3 6M9 5l3 6M3.5 4h3L5 12",
   mechanism: "M6 5l3 1.75v3.5L6 12l-3-1.75v-3.5zM8.5 3.5a3.5 3.5 0 015 3M13.5 6.5l.3-1.8M13.5 6.5l-1.7-.6",
-  structure: "M2 11c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
+  structure: "M2 8c1.5-6 3-6 4 0s2.5 6 4 0 2.5-6 4 0",
   flow: "M4.5 1.5h7v3h-7zM8 4.5v2M8 6.5l3.5 3L8 12.5l-3.5-3zM8 12.5v2",
   palette: "M8 2a6 6 0 100 12c1 0 1.5-.7 1.5-1.5S9 11 9 10s.8-1.5 1.8-1.5H12A2.5 2.5 0 0014 6c0-2.2-2.7-4-6-4zM5 7.5h.01M7 5h.01M10 5h.01",
   type: "M3 4V3h10v1M8 3v10M6 13h4",
@@ -130,6 +130,8 @@ const ICONS = {
   activity: "M1.5 8h3l2-5 3 10 2-5h3",
   command: "M5.5 5.5h5v5h-5zM5.5 5.5V4a1.5 1.5 0 10-1.5 1.5zM10.5 5.5V4A1.5 1.5 0 1112 5.5zM5.5 10.5V12A1.5 1.5 0 114 10.5zM10.5 10.5V12a1.5 1.5 0 101.5-1.5z",
   plug: "M6 1.5v3M10 1.5v3M4 4.5h8v3a4 4 0 01-8 0zM8 11.5v3",
+  collaborate: "M6.5 2.75a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM2 13.25c.45-2.55 2.3-4.25 4.5-4.25s4.05 1.7 4.5 4.25M12.5 4.5v4M10.5 6.5h4",
+  appearance: "M8 2.25a5.75 5.75 0 100 11.5 5.75 5.75 0 000-11.5z",
   target: "M8 2a6 6 0 100 12A6 6 0 008 2zM8 5a3 3 0 100 6 3 3 0 000-6zM8 7.5v1",
   file: "M4 1.5h5.5L12 4v10.5H4zM9.5 1.5V4H12",
   send: "M2.5 8L13.5 3 9 13.5 7.5 9z",
@@ -140,6 +142,10 @@ const ICONS = {
   pencil: "M10.5 2.5l3 3L6 13H3v-3z",
   theme: "M8 2a6 6 0 100 12 1.5 1.5 0 001.2-2.4 1.5 1.5 0 011.2-2.4H12a2 2 0 002-2C14 4.4 11.3 2 8 2zM5 8h.01M6.5 5h.01M9.5 5h.01",
   deck: "M2 3h12v8H2zM5.5 14h5M8 11v3",
+};
+// Parts of an icon filled rather than drawn: Appearance's circle, half dark as on a Mac.
+const FILLS = {
+  appearance: "M8 2.25a5.75 5.75 0 000 11.5z",
 };
 
 export function icon(name, extra = {}) {
@@ -156,6 +162,13 @@ export function icon(name, extra = {}) {
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("d", d);
   node.append(path);
+  if (FILLS[name]) {
+    const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    fill.setAttribute("d", FILLS[name]);
+    fill.setAttribute("fill", "currentColor");
+    fill.setAttribute("stroke", "none");
+    node.append(fill);
+  }
   return node;
 }
 
@@ -228,17 +241,19 @@ export const ui = {
       if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
       if (mod && event.key.toLowerCase() === "m") { event.preventDefault(); wrap(area, "$", "$", onInput); }
     });
+    // The tools show while the field is typed in (studio.css) and are worked by the pointer,
+    // the keys beside each name doing the same: Tab goes from field to field, not through them.
     const tool = (label, title, before, after, style) =>
-      h("button", { type: "button", title, style, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
+      h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
     const tools = h("div.markup-tools", {},
       tool("B", "Bold (⌘B)", "**", "**", { fontWeight: 700 }),
       tool("I", "Italic (⌘I)", "*", "*", { fontStyle: "italic", fontFamily: "Georgia, serif" }),
       tool("$x$", "Equation (⌘M)", "$", "$", { fontFamily: "Georgia, serif", fontStyle: "italic" }),
       tool("</>", "Code", "`", "`", { fontFamily: "var(--mono)", fontSize: "11px" }),
-      tool("🔗", "Link (⌘K)", "[", "](https://)"),
+      tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
       colours ? h("span.sep") : null,
       colours ? tool("A", "Accent colour", "[", "]{accent}", { color: "var(--accent)", fontWeight: 700 }) : null,
-      colours ? tool("A", "Second accent colour", "[", "]{accent2}", { color: "#c2410c", fontWeight: 700 }) : null,
+      colours ? tool("A", "Second accent colour", "[", "]{accent2}", { color: "var(--accent-2)", fontWeight: 700 }) : null,
       colours ? tool("A", "Muted colour", "[", "]{muted}", { color: "var(--ink-3)", fontWeight: 700 }) : null,
     );
     const node = h("div.markup", {}, tools, area);

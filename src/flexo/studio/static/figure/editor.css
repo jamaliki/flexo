@@ -8,10 +8,11 @@
 .fig-center { position: relative; min-width: 0; min-height: 0; }
 .fig-inspector { border-left: 1px solid var(--line); }
 
-.tabs { display: flex; gap: 2px; }
-.tab { height: 28px; border: 0; background: transparent; border-radius: 6px; padding: 0 10px; color: var(--ink-3); cursor: pointer; font-weight: 560; }
-.tab:hover { color: var(--ink); }
-.tab.on { background: var(--sunken); color: var(--ink); }
+/* Shapes and Source: the left panel's own tabs (the studio's document tabs are .bar .tab). */
+.fig-left .tabs { display: flex; gap: 2px; }
+.fig-left .tab { height: 28px; border: 0; background: transparent; border-radius: 6px; padding: 0 10px; color: var(--ink-3); cursor: pointer; font-weight: 560; }
+.fig-left .tab:hover { color: var(--ink); }
+.fig-left .tab.on { background: var(--sunken); color: var(--ink); }
 
 
 /* -- source -- */
