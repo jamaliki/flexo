@@ -1053,12 +1053,14 @@ export function markupNodes(markup) {
 
 // Words in flexo markup as they read: maths as words, emphasis, links and colours as plain words.
 export function readable(markup) {
-  // Escaped marks (\$ \* \` \]) are the marks themselves, held aside while the rest is read.
-  const held = { "\u0000": "$", "\u0001": "*", "\u0002": "`", "\u0003": "]" };
-  return String(markup ?? "").replace(/\\\$/g, "\u0000").replace(/\\\*/g, "\u0001").replace(/\\`/g, "\u0002").replace(/\\\](?=[({])/g, "\u0003")
+  // Escaped marks (\$ \* \` \]) are the marks themselves, held aside while the rest is read,
+  // and a backslash typed before a bracket (written \\( or \\[) is a backslash, not maths.
+  const held = { "\u0000": "$", "\u0001": "*", "\u0002": "`", "\u0003": "]", "\u0004": "\\" };
+  return String(markup ?? "").replace(/\\\\(?=[([\]])/g, "\u0004").replace(/\\\$/g, "\u0000").replace(/\\\*/g, "\u0001").replace(/\\`/g, "\u0002").replace(/\\\](?=[({])/g, "\u0003")
     .replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g, (_, a, b, c) => mathWords(a ?? b ?? c))
     .replace(/\$(?!\s)([^$]+?)(?<!\s)\$(?!\d)/g, (_, tex) => mathWords(tex))
+    .replace(/\\\]/g, "\u0003")
     .replace(/\[([^\]]+)\]\{[^}]+\}/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/\*\*|\*|`/g, "")
-    .replace(/[\u0000-\u0003]/g, (mark) => held[mark]);
+    .replace(/[\u0000-\u0004]/g, (mark) => held[mark]);
 }
