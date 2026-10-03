@@ -26,8 +26,14 @@ from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
 from flexo.style import LayoutStyle
 
-WIDENING_KINDS = frozenset({"block", "mlp", "cnn", "terminal"})
-"""Components whose drawing is centred in the box, whatever its width."""
+WIDENING_KINDS = frozenset(
+    {"block", "mlp", "cnn", "terminal", "io", "database", "server", "queue", "document"}
+)
+"""Components whose drawing is centred in the box, whatever its width.
+
+A cylinder's lid is an eighth of its shorter side, so a database widened is the
+same cylinder, longer; a cloud's puffs would stretch and a person's figure would
+not grow, so neither is here."""
 
 _EPSILON = 1e-6
 

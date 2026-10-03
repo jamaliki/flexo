@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import secrets
 import threading
 import time
@@ -84,18 +85,36 @@ class Doc:
         self.kind = kind
         self.lock = threading.RLock()
         self.exists = path.is_file()
-        self.document = kind.load(path) if self.exists else kind.new(path)
-        _bounded(self.document)
+        self.problem: str | None = None
+        self.held = False
+        """Whether the file on disk does not read (or is not a document its kind can show):
+        nothing is written over it until it reads again, so what is written there is kept."""
+        self.unread = False
+        """Whether the file has not read since it was opened: its kind's editor has nothing
+        to show but why, and nothing is changed or written until the file reads."""
+        self.foreign: str | None = None
+        """The kind of document the file on disk is, when another kind's: this one does not
+        write over it."""
+        try:
+            self.document = kind.load(path) if self.exists else kind.new(path)
+            _bounded(self.document)
+            _shaped(kind, self.document)
+        except Exception as error:
+            if not self.exists:
+                raise
+            # A typo left in the file: it opens all the same, empty, saying where the typo is.
+            self.document = {}
+            self.held = self.unread = True
+            self.problem = f"Can't read {name}: {_unread(error, path.name)}"
         self.version = 1
         self.history: OrderedDict[int, str] = OrderedDict({1: _dumps(self.document)})
         self.saved = 1 if self.exists else 0
         self.changed_at = 0.0
         self.unsaved_since = 0.0
         self.retry_at = 0.0
-        self.on_disk = copy.deepcopy(self.document) if self.exists else None
-        self.disk_text = path.read_text(encoding="utf-8") if self.exists else None
+        self.on_disk = copy.deepcopy(self.document) if self.exists and not self.unread else None
+        self.disk_text = _words(path) if self.exists else None
         self.disk_stamp = _stamp(path)
-        self.problem: str | None = None
         self.depends: set[Path] = set()
         self.depend_stamps: dict[Path, float] = {}
 
@@ -110,6 +129,31 @@ class Doc:
                 "saved": self.saved,
                 "document": self.document,
                 "problem": self.problem,
+                "held": self.held,
+                "unread": self.unread,
+                "source": self.source(),
+                "instance": self.workspace.instance,
+            }
+
+    def source(self) -> str | None:
+        """The words of a file that has not read, for its person to put right where the
+        studio shows it (not a file too large to show)."""
+
+        text = self.disk_text if self.unread else None
+        return text if text is not None and len(text) <= CLAIM_LIMIT else None
+
+    def said(self) -> dict[str, Any]:
+        """The ``problem`` event telling the pages what is wrong with the file (or that
+        nothing is)."""
+
+        with self.lock:
+            return {
+                "type": "problem",
+                "file": self.name,
+                "text": self.problem,
+                "held": self.held,
+                "unread": self.unread,
+                "source": self.source(),
             }
 
     def update(
@@ -118,6 +162,15 @@ class Doc:
         """Take a changed document made from version ``base``; return the version and
         document it became (merged with changes made since ``base``)."""
 
+        wrong = _malformed(self.kind, document)
+        if wrong:
+            raise ValueError(f"{wrong}, so nothing was changed")
+        if self.unread:
+            # Made from nothing (the file never read): it would stand for the whole document.
+            raise ValueError(
+                f"{(self.problem or '').rstrip('.')}. Nothing was changed: put the file right, "
+                "and it opens as soon as it reads."
+            )
         with self.lock:
             if base == self.version:
                 merged = document
@@ -127,7 +180,9 @@ class Doc:
                 merged = merge3(start, self.document, document)
             return self._become(merged, who, client)
 
-    def _become(self, merged: Any, who: dict[str, Any], client: str) -> tuple[int, Any]:
+    def _become(
+        self, merged: Any, who: dict[str, Any], client: str, *, news: bool = True
+    ) -> tuple[int, Any]:
         before = self.document
         if _dumps(merged) == _dumps(before):
             return self.version, self.document
@@ -139,7 +194,7 @@ class Doc:
         self.changed_at = time.monotonic()
         if self.saved >= self.version - 1:
             self.unsaved_since = self.changed_at
-        self.workspace.changed(self, before, merged, who, client)
+        self.workspace.changed(self, before, merged, who, client, news=news)
         return self.version, merged
 
     def base(self, version: int) -> Any:
@@ -148,11 +203,20 @@ class Doc:
 
     # -- the file --
 
-    def write(self) -> bool:
-        """Write the document if it has changed since last written; whether it did."""
+    def write(self, *, again: bool = False) -> bool:
+        """Write the document if it has changed since last written (``again``: or if its
+        file was moved or deleted); whether it did. A file that does not read is not
+        written over."""
 
         with self.lock:
-            if self.saved >= self.version:
+            if self.held:
+                return False
+            if self.saved >= self.version and (self.exists or not again):
+                return False
+            other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
+            if other is not None and other != self.kind.name:
+                # Another kind's document now (put right by hand, an agent's): kept as it is.
+                self._foreign(other)
                 return False
             self.path.parent.mkdir(parents=True, exist_ok=True)
             # Written beside the file and moved over it: a write cut short (a full disk,
@@ -169,16 +233,65 @@ class Doc:
                 with contextlib.suppress(OSError):
                     partial.unlink()
                 raise
-            self.disk_text = self.path.read_text(encoding="utf-8")
+            self.disk_text = _words(self.path)
             self.disk_stamp = _stamp(self.path)
             self.on_disk = copy.deepcopy(self.document)
             self.saved = self.version
             self.exists = True
             self.problem = None
+            other = self.workspace.kind_on_disk(self.path)
+            if other is not None and other != self.kind.name:
+                # Written as asked (its words put right in a figure's Source, say), and
+                # another kind's document now: it opens as that kind from here on.
+                self._foreign(other)
             return True
 
+    def _foreign(self, other: str) -> None:
+        title = self.workspace.kinds[other].title.lower()
+        self.held = True
+        self.foreign = other
+        self.problem = (
+            f"{self.name} is a {title} now, not a {self.kind.title.lower()}: it opens again "
+            f"as a {title}."
+        )
+
+    def mend(self, text: str) -> None:
+        """Put the file right by hand while it does not read: ``text`` is written as it is
+        once this kind reads it (and no other kind claims it), then taken in; else nothing
+        is written, and why is said."""
+
+        with self.lock:
+            if not self.held:
+                raise ValueError(f"{self.name} reads as it is: edit it here instead.")
+            other = self.workspace.kind_of_text(text, self.path.suffix)
+            if other is not None and other != self.kind.name:
+                title = self.workspace.kinds[other].title.lower()
+                raise ValueError(f"That is a {title}, not a {self.kind.title.lower()}.")
+            partial = self.path.with_name(
+                f".{self.path.name}.{secrets.token_hex(4)}.saving{self.path.suffix}"
+            )
+            try:
+                partial.write_text(text, encoding="utf-8")
+                try:
+                    found = self.kind.load(partial)
+                    _bounded(found)
+                    _shaped(self.kind, found)
+                except Exception as error:
+                    raise ValueError(
+                        f"{self.name} still can't be read: {_unread(error, partial.name)}"
+                    ) from None
+                with contextlib.suppress(OSError):
+                    os.chmod(partial, self.path.stat().st_mode & 0o7777)
+                os.replace(partial, self.path)
+            finally:
+                with contextlib.suppress(OSError):
+                    partial.unlink()
+        self.workspace.reread(self)
+
     def reread(self) -> str | None:
-        """Take in the file if something else changed it; what happened, if anything."""
+        """Take in the file if something else changed it; what happened, if anything:
+        ``changed`` (taken in: the file reads), or ``problem`` (it does not read, or is
+        gone; ``problem`` says which)."""
 
         stamp = _stamp(self.path)
         if stamp == self.disk_stamp:
@@ -186,32 +299,62 @@ class Doc:
         with self.lock:
             self.disk_stamp = stamp
             if stamp == 0.0:
-                return None  # removed: keep what is open; saving writes it again
-            try:
-                text = self.path.read_text(encoding="utf-8")
-            except OSError:
+                if not self.exists:
+                    return None
+                # Moved or deleted: kept open, and written again by the next edit or a save
+                # (not one that never read: there is nothing of it to write).
+                self.exists = False
+                self.held = self.unread
+                self.problem = f"{self.name} was moved or deleted." + (
+                    "" if self.unread else " Saving writes it again."
+                )
+                return "problem"
+            text = _words(self.path)
+            if text is None:
                 return None
-            if text == self.disk_text:
+            returned = not self.exists
+            if text == self.disk_text and not returned:
                 return None
             try:
                 found = self.kind.load(self.path)
-            except Exception as error:  # a file half-written, or wrong: say so, keep ours
-                self.problem = f"{self.name} on disk does not read: {explain(error)}"
+                _bounded(found)
+                _shaped(self.kind, found)
+            except Exception as error:
+                # Half written, or wrong: said, and the studio's copy kept, but nothing
+                # written over the file until it reads again.
+                problem = f"Can't read {self.name}: {_unread(error, self.path.name)}"
                 self.disk_text = text
+                self.exists = True
+                self.held = True
+                if problem == self.problem and not self.unread:
+                    return None
+                self.problem = problem
                 return "problem"
+            other = self.workspace.kind_on_disk(self.path)
+            if other is not None and other != self.kind.name:
+                # Another kind's document now: not taken in as this kind's, nor written over.
+                self.disk_text = text
+                self.exists = True
+                self._foreign(other)
+                return "problem"
+            opened = self.unread  # read at last: what it holds is no change anyone made
+            self.held = self.unread = False
+            self.foreign = None
             self.problem = None
             base = self.on_disk if self.on_disk is not None else self.document
             merged = merge3(base, self.document, found)
             self.on_disk = found
             self.disk_text = text
             self.exists = True
+            # Changed on disk by something the studio doesn't know (an editor, a script):
+            # in the activity, "Another app edited slide 3".
             who = self.workspace.agent_on(self.name) or {
                 "id": "disk",
-                "name": "The file",
+                "name": "Another app",
                 "kind": "file",
             }
             unsaved = self.saved < self.version
-            self._become(merged, who, "")
+            self._become(merged, who, "", news=not opened)
             if not unsaved and _dumps(merged) == _dumps(found):
                 self.saved = self.version
             return "changed"
@@ -239,11 +382,17 @@ class Workspace:
         figure of its own: figures are made on slides). Any kind still opens."""
         self.default_kind = kind
         self.token = secrets.token_urlsafe(24)
+        self.instance = secrets.token_hex(6)
+        """This run of the studio: versions count afresh in each, so a page that last heard
+        from another takes the document in again."""
         self.lock = threading.RLock()
         self.docs: dict[str, Doc] = {}
         self.listeners: dict[str, Listener] = {}
         self.presence: dict[str, dict[str, Any]] = {}
         self.activity: deque[dict[str, Any]] = deque(maxlen=300)
+        self.uploads: set[Path] = set()
+        """Files this studio copied into the folder for a document (a picture dropped on a
+        slide): those no document uses when it closes are taken away again."""
         self.drawing = threading.Lock()
         self.latest: dict[str, int] = {}
         self._documents: dict[Path, tuple[float, str | None]] = {}
@@ -282,6 +431,7 @@ class Workspace:
                 self.assistant.stop()
         try:
             self.flush()
+            self.tidy_uploads()
         finally:
             with self.lock:
                 listeners = list(self.listeners.values())
@@ -290,6 +440,30 @@ class Workspace:
             for then in self.on_close:
                 with contextlib.suppress(Exception):
                     then()
+
+    def tidy_uploads(self) -> None:
+        """Take away the files this studio copied in that no document uses now (a picture
+        dropped and then undone), as Keynote keeps no media a deck no longer shows. Only
+        copies it made itself, never a file that was there before."""
+
+        with self.lock:
+            docs = list(self.docs.values())
+            uploads, self.uploads = set(self.uploads), set()
+        for upload in uploads:
+            if not upload.is_file():
+                continue
+            used = False
+            for doc in docs:
+                written = json.dumps(doc.document, ensure_ascii=False) + (doc.disk_text or "")
+                where = os.path.relpath(upload, doc.path.parent).replace(os.sep, "/")
+                if where in written or upload.name in written:
+                    used = True
+                    break
+            if not used:
+                with contextlib.suppress(OSError):
+                    upload.unlink()
+                    if upload.parent.name == "assets" and not any(upload.parent.iterdir()):
+                        upload.parent.rmdir()
 
     # -- files --
 
@@ -318,6 +492,29 @@ class Workspace:
             return self.kinds[self.default_kind]
         return self.kinds["figure"]
 
+    def kind_on_disk(self, path: Path) -> str | None:
+        """The kind of document the file is now, if any kind's."""
+
+        return self._claim(path)
+
+    def kind_of_text(self, text: str, suffix: str) -> str | None:
+        """The kind of document ``text`` is (written in a file ending ``suffix``), if any
+        kind's: the kind that claims it, or, when it does not read, the kind its top-level
+        keys say."""
+
+        try:
+            return self._claiming(_parsed(text, suffix))
+        except Exception:
+            return self._claiming(_outline(text))
+
+    def _claiming(self, parsed: Any) -> str | None:
+        # The figure kind claims broadly; every other kind is asked first.
+        for kind in sorted(self.kinds.values(), key=lambda item: item.name == "figure"):
+            with contextlib.suppress(Exception):
+                if kind.claims(parsed):
+                    return kind.name
+        return None
+
     def _claim(self, path: Path) -> str | None:
         stamp = _stamp(path)
         cached = self._documents.get(path)
@@ -327,16 +524,15 @@ class Workspace:
         try:
             if path.stat().st_size < CLAIM_LIMIT:
                 text = path.read_text(encoding="utf-8")
-                json_file = path.suffix.lower() == ".json"
-                parsed = json.loads(text) if json_file else yaml.load(text, _LOADER)
-                # The figure kind claims broadly; every other kind is asked first.
-                for kind in sorted(self.kinds.values(), key=lambda item: item.name == "figure"):
-                    if kind.claims(parsed):
-                        found = kind.name
-                        break
+                try:
+                    found = self._claiming(_parsed(text, path.suffix))
+                except Exception:
+                    # Anything a file can be (a typo mid-edit, a date that is no date, nesting
+                    # too deep to read): not a document now, but one it was stays that kind,
+                    # and one never read is the kind its keys say (a deck's `slides:` is there
+                    # to see past a typo further down).
+                    found = cached[1] if cached else self._claiming(_outline(text))
         except Exception:
-            # Anything a file can be (a typo mid-edit, a date that is no date, nesting too
-            # deep to read): not a document now, but one it was stays that kind.
             found = cached[1] if cached else None
         self._documents[path] = (stamp, found)
         return found
@@ -376,10 +572,21 @@ class Workspace:
                 # The same file by another spelling (decomposed accents, other capitals, as
                 # macOS allows) is the document already open.
                 doc = next((open_ for open_ in self.docs.values() if _same(open_.path, path)), None)
+            if doc is not None and doc.foreign and self._claim(doc.path) == doc.foreign:
+                # Its file is another kind's document now: opened again as that kind (what
+                # its old kind held was never written over it), and the pages told.
+                relative, path = doc.name, doc.path
+                del self.docs[relative]
+                doc = None
+                reopened = True
+            else:
+                reopened = False
             if doc is None:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
                 self.docs[relative] = doc
-            return doc
+        if reopened:
+            self.broadcast({"type": "reopened", "file": doc.name, "kind": doc.kind.name})
+        return doc
 
     def new(self, name: str, kind_name: str, data: Any = None) -> Doc:
         """Make a file of a kind -- its starting document, or ``data`` (a parsed
@@ -410,8 +617,11 @@ class Workspace:
 
     def _write(self, doc: Doc) -> None:
         """Write one document; one that cannot be written says why on its page, and is
-        tried again later, while the others are written as usual."""
+        tried again later, while the others are written as usual. A change made to the
+        file meanwhile is taken in first, not written over."""
 
+        self.reread(doc)
+        said = doc.problem
         try:
             wrote = doc.write()
         except Exception as error:
@@ -419,14 +629,22 @@ class Workspace:
             doc.retry_at = time.monotonic() + RETRY
             if doc.problem != problem:
                 doc.problem = problem
-                self.broadcast({"type": "problem", "file": doc.name, "text": problem})
+                self.broadcast(doc.said())
             return
         if wrote:
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+        if doc.foreign:
+            # Another kind's file now: the pages are told, and it opens again as that kind.
+            if doc.problem != said or wrote:
+                self.broadcast(doc.said())
+            self.open(doc.name)
 
     # -- changes --
 
-    def changed(self, doc: Doc, before: Any, after: Any, who: dict[str, Any], client: str) -> None:
+    def changed(
+        self, doc: Doc, before: Any, after: Any, who: dict[str, Any], client: str, *,
+        news: bool = True,
+    ) -> None:
         self.broadcast(
             {
                 "type": "doc",
@@ -437,6 +655,8 @@ class Workspace:
                 "client": client,
             }
         )
+        if not news:
+            return
         describe = getattr(doc.kind, "describe", None)
         try:
             notes = describe(before, after) if describe else [{"text": "edited", "where": None}]
@@ -521,11 +741,22 @@ class Workspace:
         with self.lock:
             if self.listeners.get(listener.client) is listener:
                 del self.listeners[listener.client]
-            if listener.client in self.presence and not any(
-                other.who.get("id") == listener.who.get("id") for other in self.listeners.values()
+            # Where a person is goes with their last window.
+            person = listener.who.get("id") or listener.client
+            if person in self.presence and not any(
+                other.who.get("id") == person for other in self.listeners.values()
             ):
-                del self.presence[listener.client]
+                del self.presence[person]
         self.broadcast({"type": "presence", "presence": self.present()})
+
+    def depart(self, client: str) -> None:
+        """A page that closes says so: whoever it was is gone from the others' windows at
+        once, not when the next heartbeat finds its connection dead."""
+
+        with self.lock:
+            listener = self.listeners.get(client)
+        if listener is not None:
+            self.leave(listener)
 
     def broadcast(self, event: dict[str, Any]) -> None:
         with self.lock:
@@ -558,7 +789,7 @@ class Workspace:
                     "seconds": time.perf_counter() - started,
                     "messages": [
                         {
-                            "text": explain(error),
+                            "text": self.named(explain(error), doc),
                             "severity": "error",
                             "where": "",
                             "page": "",
@@ -589,9 +820,20 @@ class Workspace:
             "pages": pages,
             "info": drawing.info,
             "seconds": elapsed,
-            "messages": [asdict(message) for message in drawing.messages],
+            "messages": [
+                {**asdict(message), "text": self.named(message.text, doc)}
+                for message in drawing.messages
+            ],
             "unfinished": drawing.unfinished,
         }
+
+    def named(self, text: str, doc: Doc) -> str:
+        """Words that name a file by where it is on this machine, naming it from the
+        document's folder instead (as the document itself names it)."""
+
+        for folder in dict.fromkeys((doc.path.parent, self.root)):
+            text = text.replace(f"{folder}{os.sep}", "").replace(str(folder), "the folder")
+        return text
 
     def drawing_of(self, name: str, hints: dict[str, Any] | None = None) -> Any:
         """The document's current drawing, every page drawn (for an agent to look at)."""
@@ -616,12 +858,22 @@ class Workspace:
             except Exception:
                 traceback.print_exc()
 
+    def reread(self, doc: Doc) -> None:
+        """Take in a document's file if something else changed it, and tell the pages."""
+
+        happened = doc.reread()
+        if happened == "problem":
+            self.broadcast(doc.said())
+            if doc.foreign:
+                self.open(doc.name)  # as the kind it is now
+        elif happened == "changed":
+            # The pages' word on the file -- saved, or a problem with it gone -- is current.
+            self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+
     def _step(self) -> None:
         now = time.monotonic()
         for doc in list(self.docs.values()):
-            happened = doc.reread()
-            if happened == "problem":
-                self.broadcast({"type": "problem", "file": doc.name, "text": doc.problem})
+            self.reread(doc)
             rested = now - doc.changed_at > QUIET or now - doc.unsaved_since > PATIENCE
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
@@ -706,6 +958,29 @@ def _bounded(document: Any, limit: int = SIZE_LIMIT) -> None:
             stack.extend(item)
 
 
+def _malformed(kind: Kind, document: Any) -> str | None:
+    malformed = getattr(kind, "malformed", None)
+    return malformed(document) if malformed else None
+
+
+def _shaped(kind: Kind, document: Any) -> None:
+    """Refuse a document its kind's editor cannot show (a deck whose slides are a number)."""
+
+    wrong = _malformed(kind, document)
+    if wrong:
+        raise ValueError(wrong)
+
+
+def _unread(error: BaseException, name: str) -> str:
+    """Why a file does not read, in words that do not name it again."""
+
+    said = explain(error)
+    for lead in (f"{name}: ", f"{name}, "):
+        if said.startswith(lead):
+            return said[len(lead):]
+    return f"it {said[len(name) + 1:]}" if said.startswith(f"{name} ") else said
+
+
 def _reason(error: Exception) -> str:
     if isinstance(error, OSError) and error.strerror:
         return error.strerror.lower()
@@ -717,6 +992,48 @@ def _stamp(path: Path) -> float:
         return path.stat().st_mtime_ns / 1e9
     except OSError:
         return 0.0
+
+
+def _words(path: Path) -> str | None:
+    """A file's words, to tell when they change: a file not in UTF-8 too."""
+
+    try:
+        return path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _parsed(text: str, suffix: str) -> Any:
+    return json.loads(text) if suffix.lower() == ".json" else yaml.load(text, _LOADER)
+
+
+_YAML_KEY = re.compile(
+    # A key at the start of a line: quoted, or plain words (not a list's item, a comment).
+    r"""^(?:"((?:[^"\\\n]|\\.)*)"|'([^'\n]*)'|([^\s#'"\-?:,\[\]{}&*!|>%@`][^:#\n]*?))"""
+    r"[ \t]*:(?:[ \t]|$)",
+    re.M,
+)
+_JSON_TOKEN = re.compile(r'"((?:[^"\\\n]|\\.)*)"(\s*:)?|[{}\[\]]')
+
+
+def _outline(text: str) -> dict[str, Any]:
+    """The top-level keys a file's text still shows when it does not read (a typo further
+    down), each standing for a value: enough for a kind to tell its own documents."""
+
+    keys = [next(key for key in found.groups() if key is not None).strip()
+            for found in _YAML_KEY.finditer(text)]
+    if not keys:
+        # JSON, or YAML written as one: the keys of the outermost mapping.
+        depth = 0
+        for found in _JSON_TOKEN.finditer(text):
+            token = found.group(0)
+            if token in "{[":
+                depth += 1
+            elif token in "}]":
+                depth -= 1
+            elif depth == 1 and found.group(2):
+                keys.append(found.group(1))
+    return {key: {} for key in keys}
 
 
 def _dumps(document: Any) -> str:

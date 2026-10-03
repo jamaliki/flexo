@@ -13,6 +13,7 @@ from flexo.drawn import DRAWN_KINDS
 from flexo.geometry import Rect, Side, Size
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec
+from flexo.shapes import SHAPE_KINDS, shape_size
 from flexo.style import LayoutStyle
 
 TRANSPARENT_KINDS = frozenset({"spacer", "junction"})
@@ -237,6 +238,17 @@ side centres and lets the counterpart adapt instead. Its ``input`` and
 encoder feeds it from below, not from its right side round a corner.
 """
 
+_FIGURE_PORTS = (
+    PortSpec("input", Side.WEST, auto_side=True),
+    PortSpec("output", Side.EAST, auto_side=True),
+)
+"""A person takes a line at its shoulders, or over its head and under its name.
+
+Its box is as tall above the shoulders as below them (``flexo.shapes``), so the
+middle of each side is where a line meets the figure. Not adaptive: a pin slid
+down the side would leave the figure for the name under it.
+"""
+
 _DEFAULT_CELLS = 3
 _DEFAULT_COLUMNS = 1
 
@@ -381,6 +393,15 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # A feature map drawn as a box in oblique projection, sized by its shape.
         ComponentDefinition("volume", Size(0.0, 0.0), _OP_PORTS),
         ComponentDefinition("terminal", Size(44.0, 24.0), _STANDARD),
+        # Flowchart input/output, and the shapes of software diagrams
+        # (flexo.shapes): each drawn from an outline that lines meet.
+        ComponentDefinition("io", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("database", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("server", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("cloud", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("queue", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("document", Size(0.0, 0.0), _STANDARD),
+        ComponentDefinition("person", Size(0.0, 0.0), _FIGURE_PORTS),
         ComponentDefinition("graph", Size(70.0, 62.0), _STANDARD, motif_height=GRAPH_INK_HEIGHT),
         ComponentDefinition("inset", Size(82.0, 60.0), _STANDARD, motif_height=INSET_INK.height),
         # A vector's size is exactly its cell grid, so it comes from the style
@@ -727,6 +748,9 @@ def intrinsic_node_size(
         height = style.resolve_extent(node.height).points if node.height is not None else side
         side = max(width, height)
         return Size(side, side)
+    elif node.kind in SHAPE_KINDS:
+        # A cylinder, a cloud, a page...: the label in the room its outline leaves.
+        natural = shape_size(node.kind, label, style)
     elif node.kind in DRAWN_KINDS:
         # A drawn component (a genetic design, a protein, a tree, a plate) is as
         # big as its picture: its outlines and their words.

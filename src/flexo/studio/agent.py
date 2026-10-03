@@ -187,8 +187,8 @@ class Tools:
         for entry in workspace.focus_of_people():
             if entry.get("file"):
                 where = f", {_where(entry.get('where'))}" if entry.get("where") else ""
-                name = entry["who"].get("name") or "You"
-                who = "The person in the studio" if name == "You" else name
+                name = entry["who"].get("name") or ""
+                who = "Someone in the studio" if name in {"", "You"} else name
                 lines.append(f"{who} is looking at {entry['file']}{where}.")
         return [_text("\n".join(lines))]
 
@@ -218,6 +218,9 @@ class Tools:
         doc = self.workspace.open(file)
         with doc.lock:
             text, version = _dump(doc.kind, doc.document), doc.version
+            # A file that does not read is shown as it is written, to be put right.
+            if doc.unread and doc.source() is not None:
+                text = doc.source()
         problem = f"\nNote: {doc.problem}" if doc.problem else ""
         return [_text(f"{doc.name} ({doc.kind.name}), version {version}:{problem}\n\n{text}")]
 
@@ -227,6 +230,8 @@ class Tools:
         doc = self.workspace.open(file)
         with doc.lock:
             text, version = _dump(doc.kind, doc.document), doc.version
+            if doc.unread and doc.source() is not None:
+                text = doc.source()
         count = text.count(old) if old else 0
         if count == 0:
             raise ValueError(
@@ -247,6 +252,10 @@ class Tools:
         return self._apply(doc, text, version)
 
     def _apply(self, doc, text: str, version: int) -> list[dict[str, Any]]:
+        if doc.unread:
+            # Put right as written: taken in once it reads, else nothing is written.
+            doc.mend(text)
+            return [_text(f"{doc.name} reads now: version {doc.version}.")]
         try:
             document = _parse(doc.kind, text)
         except yaml.YAMLError as error:

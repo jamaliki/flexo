@@ -62,7 +62,9 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 `block` (a box), `text` (words with ports), `attention` (grows Q/K/V glyphs with
 `vectors=True`), `mlp`, `cnn`, `add_norm(input=, skip=)`, `add`/`multiply`/`op(id, "Σ")`
 (operator circles; label with the symbol, caption the edge out), `circle`
-(`shaded=True` for observed), `decision`, `terminal`, `loss`, `prediction`,
+(`shaded=True` for observed), `decision`, `terminal`, `io` (flowchart input/output),
+`database`, `server`, `cloud`, `queue`, `document`, `person` (software diagrams; lines
+meet their drawn outlines), `loss`, `prediction`,
 `concat`, `tensor`, `matrix`, `sequence`, `vector`, `volume`, `feature_strip`,
 `graph`, `image(id, "art.svg" or "photo.png")`, `inset`, `legend(entries=, badges=)`. Nets:
 `figure.net(src=a, sinks=[b, c])` (one value to many), `figure.merge(sinks=[a, b], dst=c)`,

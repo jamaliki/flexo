@@ -46,27 +46,29 @@ _JOINS = {"miter": 0, "round": 1, "bevel": 2}
 type Pages = str | Drawing | Sequence[str | Drawing]
 
 
-def write_pdf(pages: Pages, target: str | Path, *, title: str = "") -> Path:
-    """Write ``pages`` (Flexo SVGs or drawings) as a PDF, one page each."""
+def write_pdf(pages: Pages, target: str | Path, *, title: str = "", author: str = "") -> Path:
+    """Write ``pages`` (Flexo SVGs or drawings) as a PDF, one page each. ``title`` and
+    ``author`` are the file's own, as a reader's Properties show them."""
 
     target = Path(target)
-    target.write_bytes(pdf_bytes(pages, title=title))
+    target.write_bytes(pdf_bytes(pages, title=title, author=author))
     return target
 
 
-def pdf_bytes(pages: Pages, *, title: str = "") -> bytes:
+def pdf_bytes(pages: Pages, *, title: str = "", author: str = "") -> bytes:
     if isinstance(pages, str | Drawing):
         pages = [pages]
     drawings = [read_drawing(page) if isinstance(page, str) else page for page in pages]
-    return _Writer(title).write(drawings)
+    return _Writer(title, author).write(drawings)
 
 
 # -- the file ------------------------------------------------------------------------
 
 
 class _Writer:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, author: str = "") -> None:
         self.title = title
+        self.author = author
         self.objects: list[bytes | None] = [None]  # object 0 is the free head
         self.fonts: dict[tuple[FontFace, int], _Font] = {}
         self.states: dict[tuple[float, float, str], str] = {}
@@ -129,7 +131,8 @@ class _Writer:
         listed = " ".join(f"{kid} 0 R" for kid in kids)
         self.put(tree, f"<< /Type /Pages /Kids [{listed}] /Count {len(kids)} >>".encode())
         self.put(catalog, f"<< /Type /Catalog /Pages {tree} 0 R >>".encode())
-        info = self.add(f"<< /Producer (flexo) /Title {_string(self.title)} >>".encode())
+        author = f" /Author {_string(self.author)}" if self.author else ""
+        info = self.add(f"<< /Producer (flexo) /Title {_string(self.title)}{author} >>".encode())
         out = BytesIO()
         out.write(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
         offsets = [0]

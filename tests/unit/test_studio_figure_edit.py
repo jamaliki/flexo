@@ -59,7 +59,8 @@ def test_a_part_added_into_a_chain_takes_its_place_in_the_line() -> None:
     assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("encoder", "mlp")]
     text, _ = edit(NEW_FIGURE, do="add", kind="mlp", after="y", source="y")
     assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("y", "mlp")]
-    # A decision's branch keeps its words on the line that leaves the decision.
+    # A decision's lines are its branches: a part added after it is a branch of its own,
+    # the "yes" left as it was.
     flow = (
         "figure: {id: flow}\nnodes:\n- {id: start, kind: terminal, label: Start}\n"
         "- {id: check, kind: decision, label: 'Done?'}\n- {id: end, kind: terminal, label: End}\n"
@@ -69,8 +70,8 @@ def test_a_part_added_into_a_chain_takes_its_place_in_the_line() -> None:
     lines = data(text)["edges"]
     assert [(line["from"], line["to"], line.get("label")) for line in lines] == [
         ("start", "check", None),
-        ("check", chosen[0], "yes"),
-        (chosen[0], "end", None),
+        ("check", "end", "yes"),
+        ("check", chosen[0], None),
     ]
     # Two lines out of a part: which one it would go into is not known, so it is only fed.
     text, _ = edit(NEW_FIGURE, do="connect", source="encoder", target="x")
@@ -339,3 +340,12 @@ def test_reading_changes_nothing_and_a_figure_inside_another_document_is_edited_
     assert [node["id"] for node in made["data"]["nodes"]] == ["x", "backbone", "y"]
     assert [node["id"] for node in made["model"]["nodes"]] == ["x", "backbone", "y"]
     assert inline["nodes"][1]["id"] == "encoder"
+
+
+def test_a_word_yaml_could_read_as_a_flag_or_number_stays_a_word() -> None:
+    from flexo.studio.figure_edit import apply_to_data
+
+    data = {"figure": {"id": "f"}, "nodes": [{"id": "a", "label": "A"}]}
+    for word in ("Yes", "no", "Off", "on", "12", "null"):
+        action = {"do": "update", "target": {"type": "node", "id": "a"}, "values": {"label": word}}
+        assert apply_to_data(data, action)["data"]["nodes"][0]["label"] == word

@@ -83,7 +83,9 @@ from flexo.routing.trees import (
     arrows_at_joins,
     dots_at_joins,
     edge_cuts,
+    net_reach_outlines,
     point_key,
+    reach_outlines,
     routed_edge,
     routed_net,
     straight_edge,
@@ -267,8 +269,9 @@ def route_figure(
             routed_edges[edge.id] = straight_edge(
                 edge, fitted, layout_style, text_measurer, offset=offset
             )
-    edges = [routed_edges[edge.id] for edge in semantic.edges]
-    nets = [routed_nets[net.id] for net in semantic.nets]
+    # Ink meets a drawn shape's outline, not the box round it.
+    edges = [reach_outlines(routed_edges[edge.id], fitted, layout_style) for edge in semantic.edges]
+    nets = [net_reach_outlines(routed_nets[net.id], fitted, layout_style) for net in semantic.nets]
     edges, nets = place_captions(
         edges,
         nets,

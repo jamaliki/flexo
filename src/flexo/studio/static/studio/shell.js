@@ -17,10 +17,18 @@ export function colourOf(who) {
   return COLOURS[hash % COLOURS.length];
 }
 
+// Who someone is, in words: "You" to themselves (whatever they are called to others),
+// else their name, else what they are.
+let selfId = null;
+export function nameOf(who) {
+  if (who?.id && who.id === selfId) return "You";
+  return who?.name || (who?.kind === "agent" ? "An agent" : "Someone");
+}
+
 export function avatar(who, { size = 24, ring = false } = {}) {
   const agent = who?.kind === "agent";
-  const initials = agent ? null : String(who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  return h("span.avatar", { title: who?.name || "", style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
+  const initials = agent ? null : String(who?.id === selfId && !who?.name ? "You" : who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return h("span.avatar", { title: nameOf(who), style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
     agent ? icon("sparkle", { weight: "1.3" }) : initials);
 }
 
@@ -35,11 +43,47 @@ export function ago(seconds) {
 function remembered(key, fallback) { try { return localStorage.getItem(`flexo-studio-${key}`) ?? fallback; } catch { return fallback; } }
 function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`, value); } catch { /* private window */ } }
 
+// A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
+const docName = (file) => String(file).split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+
+// The word on a document's saving: what is true of it and its file, briefly.
+function statusWords(session) {
+  const state = session.state;
+  if (state === "saved") return "Saved";
+  if (state === "saving") return "Saving…";
+  if (state === "offline") return "Not saved: can't reach the studio";
+  const problem = session.problem || "";
+  // The file on disk does not read: "Not saved" only while edits made here wait for it.
+  if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
+  // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
+  const said = problem.replace(/^.*? could not be saved:\s*/, "");
+  return session.unsaved ? `Not saved: ${said}` : said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+// Settled once every stylesheet the page has asked for has loaded (or a moment has
+// passed): an editor is shown styled, never as its bare elements.
+function stylesLoaded() {
+  const waiting = [...document.querySelectorAll('link[rel="stylesheet"]')].filter((link) => !link.sheet);
+  const loads = waiting.map((link) => new Promise((done) => {
+    link.addEventListener("load", done, { once: true });
+    link.addEventListener("error", done, { once: true });
+  }));
+  return Promise.race([Promise.all(loads), new Promise((done) => setTimeout(done, 2000))]);
+}
+
 export class Workspace {
   constructor(info) {
     this.info = info;
+    // This window; and the person, the same in each of their windows and after a reload,
+    // so they keep their colour and are never shown to themselves as someone else.
     this.client = Math.random().toString(36).slice(2, 10);
-    this.me = { id: this.client, name: remembered("name", "You"), kind: "person" };
+    let person = remembered("person", "");
+    if (!person) { person = Math.random().toString(36).slice(2, 10); remember("person", person); }
+    // Unnamed, a person is "You" to themselves and "Someone" to others (once, the name "You"
+    // was given to everyone unnamed, so others were shown as "You" too).
+    const named = remembered("name", "");
+    this.me = { id: person, name: named === "You" ? "" : named, kind: "person" };
+    selfId = person;
     this.sessions = new Map();
     this.order = [];
     this.active = null;
@@ -83,8 +127,10 @@ export class Workspace {
         this.order.push(info.file);
         session.on("status", () => this.emit("status", session));
         session.on("change", () => this.emit("status", session));
-        this.emit("opened", session);
+        // Said once its editor is built and styled: the page goes from what it showed to the
+        // document, with no welcome page or unstyled editor between.
         await this.mount(session);
+        this.emit("opened", session);
         session.requestDraw(0);
       }
       file = session.file;
@@ -98,6 +144,7 @@ export class Workspace {
     try {
       const editor = await import(`/static/kinds/${session.kind}/editor.js`);
       await editor.mount(session, session.container);
+      await stylesLoaded();
     } catch (error) {
       console.error(error);
       clear(session.container, h("div.fatal", {}, h("h1", {}, `The ${session.title.toLowerCase()} editor failed to start`), h("pre", {}, String(error.stack || error))));
@@ -114,7 +161,7 @@ export class Workspace {
     session.active = true;
     session.emit("activate");
     history.replaceState(null, "", `?file=${encodeURIComponent(file)}`);
-    document.title = `${file.split("/").pop()} — Flexo Studio`;
+    document.title = `${docName(file)} — Flexo Studio`;
     this.emit("active", session);
     this.reportFocus(file, null);
   }
@@ -136,12 +183,32 @@ export class Workspace {
     this.remember();
   }
 
+  // A document whose file has become another kind's (put right by hand as one): opened
+  // again in that kind's editor, in its tab's place. What its old editor held was never
+  // written over the file, and goes.
+  async reopen(file, kind) {
+    const session = this.sessions.get(file);
+    if (!session || session.kind === kind) return;
+    const place = this.order.indexOf(file), active = this.active === session;
+    session.document = session.synced;
+    this.close(file);
+    try {
+      await this.open(file, { activate: active });
+      this.order.splice(this.order.indexOf(file), 1);
+      this.order.splice(place, 0, file);
+      this.remember();
+      this.emit("status", this.sessions.get(file));
+    } catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
+  }
+
   remember() { remember(`tabs:${this.info.folder}`, JSON.stringify(this.order)); }
   rememberedTabs() { try { return JSON.parse(remembered(`tabs:${this.info.folder}`, "[]")); } catch { return []; } }
 
   async create(kind, name) {
     const result = await this.api("/api/new", { file: name, kind, client: this.client, who: this.me });
     await this.refreshDocuments();
+    // Its editor knows it is new (and so ready to be typed in at once).
+    this.justMade = result.file;
     return this.open(result.file);
   }
 
@@ -160,15 +227,15 @@ export class Workspace {
   }
 
   presenceOn(file) {
-    return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.client);
+    return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.me.id);
   }
 
   others() {
-    return this.presence.filter((entry) => entry.who.id !== this.client);
+    return this.presence.filter((entry) => entry.who.id !== this.me.id);
   }
 
   setName(name) {
-    this.me = { ...this.me, name: name || "You" };
+    this.me = { ...this.me, name: name || "" };
     remember("name", this.me.name);
     this.reportFocus(this.active?.file || null, null);
   }
@@ -178,7 +245,7 @@ export class Workspace {
   // -- events --
 
   connect() {
-    const source = new EventSource(this.url("/api/events", { client: this.client, name: this.me.name }));
+    const source = new EventSource(this.url("/api/events", { client: this.client, person: this.me.id, name: this.me.name }));
     source.onmessage = (message) => this.handle(JSON.parse(message.data));
     source.addEventListener("hello", () => this.emit("online", true));
     source.onerror = () => this.emit("online", false);
@@ -192,13 +259,21 @@ export class Workspace {
         session?.remote(event);
         if (session && event.client !== this.client) session.emit("remote", event);
         break;
-      case "saved": session?.saved(event.version); break;
+      case "saved":
+        session?.saved(event.version);
+        // What was wrong with the file is over (it is back, or reads again): so is its word.
+        session?.notice?.remove();
+        break;
       case "problem":
         if (session) {
-          if (session.problem !== event.text) toast(event.text, { kind: "error", icon: "error", seconds: 8 });
-          session.problem = event.text; session.emit("status");
+          if (session.problem !== event.text && event.text) {
+            session.notice?.remove();
+            session.notice = toast(event.text, { kind: "error", icon: "error", seconds: 8 });
+          }
+          session.told(event);
         }
         break;
+      case "reopened": this.reopen(event.file, event.kind); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
@@ -218,7 +293,7 @@ export class Workspace {
         const entry = event.entry;
         const index = this.activity.findIndex((item) => item.id === entry.id);
         // What others do is news; what you did yourself is not.
-        if (index >= 0) this.activity[index] = entry; else { this.activity.push(entry); if (entry.who?.id !== this.me.id) this.unseen += 1; }
+        if (index >= 0) this.activity[index] = entry; else { this.activity.push(entry); if (entry.who?.id !== this.me.id && entry.who?.kind !== "system") this.unseen += 1; }
         if (this.activity.length > 300) this.activity.shift();
         this.emit("activity", entry);
         if (this.follow && entry.who?.kind === "agent") this.goTo(entry.file, entry.where, { quiet: true });
@@ -271,12 +346,14 @@ export async function start() {
   activityButton.append(activityCount);
   const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
   const paletteButton = h("button.search-button", { type: "button", onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
-  const themeButton = ui.button("", () => {
-    const order = ["auto", "light", "dark"];
-    const next = order[(order.indexOf(remembered("theme", "auto")) + 1) % 3];
-    remember("theme", next); applyTheme(next); showTheme(); toast(`Appearance: ${{ auto: "Auto", light: "Light", dark: "Dark" }[next]}`, { seconds: 1.5 });
+  // Appearance as a Mac's: Automatic, Light or Dark, the one in use ticked.
+  const themeButton = ui.button("", (event) => {
+    const now = remembered("theme", "auto");
+    const choose = (value) => () => { remember("theme", value); applyTheme(value); showTheme(); };
+    menu(event.currentTarget, [{ title: "Appearance" },
+      ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, label]) => ({ label, checked: now === value, run: choose(value) }))], { align: "end" });
   }, { kind: "ghost", title: "Appearance" });
-  const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "eye"));
+  const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "appearance"));
   showTheme();
   const bar = h("header.bar", {},
     h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo Studio")),
@@ -291,11 +368,36 @@ export async function start() {
   const docLeft = h("div.docbar-slot");
   const docRight = h("div.docbar-slot");
   const status = h("div.status", {}, h("span.dot"), h("span.status-text"));
-  const undo = ui.button("", () => workspace.active?.undo(), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
-  const redo = ui.button("", () => workspace.active?.redo(), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
+  // Undo and redo wait for edits still on their way (a figure's typing), so they take
+  // back the latest edit, not the one before it. Text being typed that is not yet in the
+  // document (a shape's label in its editor) is undone as text, by the field itself.
+  const ownUndo = () => document.activeElement?.closest?.(".fig-inline, [data-own-undo]");
+  const travel = async (way) => {
+    const session = workspace.active;
+    if (!session) return;
+    if (ownUndo()) { document.execCommand(way); return; }
+    await session.settled?.();
+    session[way]();
+  };
+  const undo = ui.button("", () => travel("undo"), { kind: "ghost", icon: "undo", title: "Undo (⌘Z)" });
+  const redo = ui.button("", () => travel("redo"), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
     { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
   const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+  // A toolbar button clicked does not take the keys, as a Mac toolbar's doesn't: they stay
+  // with the document (Delete deletes what is chosen, not the button's next press).
+  docbar.addEventListener("mousedown", (event) => { if (event.target.closest("button") && !event.target.closest("input, select, textarea")) event.preventDefault(); });
+  // Too wide for the window (or beside the side panel), the bar shows its tools as icons
+  // alone, and then its other buttons too, rather than run off the edge.
+  const crowded = () => [docbar, docLeft, docRight].some((node) => node.scrollWidth > node.clientWidth + 1);
+  const fitDocbar = () => {
+    docbar.classList.remove("compact", "tight");
+    if (!crowded()) return;
+    docbar.classList.add("compact");
+    if (crowded()) docbar.classList.add("tight");
+  };
+  const fitting = new ResizeObserver(fitDocbar);
+  for (const node of [docbar, docLeft, docRight]) fitting.observe(node);
 
   // The document's history, newest first: each row is the document as a change left
   // it, the one it is now marked; a click goes back (or forward) to that point.
@@ -322,6 +424,8 @@ export async function start() {
     rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
       h("span.history-mark"), h("span.history-text", {}, "Original")));
     popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
+    // The keys start at where the document is now, not at the newest change undone.
+    requestAnimationFrame(() => document.querySelector(".history-menu .history-row.now")?.focus({ preventScroll: false }));
   }
 
   const views = h("main.views");
@@ -345,14 +449,23 @@ export async function start() {
   workspace.command = (name, arg) => {
     const session = workspace.active;
     switch (name) {
-      case "undo": session?.undo(); break;
-      case "redo": session?.redo(); break;
+      case "undo": travel("undo"); break;
+      case "redo": travel("redo"); break;
+      case "history": if (session && !past.disabled) historyMenu(past, session); break;
       case "save":
+        if (session?.unread) { unread?.mend(); break; }
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
       case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
       case "present": session?.present?.(); break;
+      // One of the document's own commands, by the label reported below (the app's Insert
+      // and Slide menus): "Add Picture" runs "Add Picture…".
+      case "run": {
+        const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
+        session?.commands().find((command) => bare(command.label) === bare(arg))?.run();
+        break;
+      }
       case "palette": palette(workspace); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
@@ -362,6 +475,12 @@ export async function start() {
       case "shortcuts": shortcutsDialog(); break;
       default: break;
     }
+    // What a command did may change what can be done (Show Speaker Notes is then Hide).
+    report();
+  };
+  // What the document can do now, by label: the app enables its Insert and Slide items by it.
+  const doable = (session) => {
+    try { return session ? session.commands().map((command) => command.label) : []; } catch { return []; }
   };
   let reporting = null;
   const report = () => {
@@ -375,13 +494,26 @@ export async function start() {
         undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
+        commands: doable(session),
       });
     }, 80);
   };
-  for (const event of ["status", "active", "opened", "closed", "documents"]) workspace.on(event, report);
+  // A slide or part chosen changes what can be done; so does a field taking the keys
+  // (⌘D is then the field's).
+  for (const event of ["status", "active", "opened", "closed", "documents", "focus"]) workspace.on(event, report);
+  document.addEventListener("focusin", report);
+  document.addEventListener("focusout", report);
   window.addEventListener("pywebviewready", report);
-  const body = h("div.workbench", {}, h("div.center", {}, h("div", {}, docbar, trustBar), views, doing), side.node);
-  clear(root, h("div.studio", {}, bar, body));
+  const docHead = h("div", {}, docbar, trustBar);
+  const unreadView = h("div.unread-view.scroll-thin", { hidden: true });
+  const body = h("div.workbench", {}, h("div.center", {}, docHead, views, unreadView, doing), side.node);
+  // In a narrow window the side panel lies over the document below its bar (studio.css),
+  // so Present, Export, Undo and the word on saving stay in reach.
+  new ResizeObserver(() => body.style.setProperty("--doc-head", `${docHead.offsetHeight}px`)).observe(docHead);
+  // The spinner the page opened with stays over the frame until the first document is
+  // ready to show (below): then the window goes from it to the document in one step.
+  const loading = root.querySelector(".loading");
+  clear(root, h("div.studio", {}, bar, body), loading);
 
   // -- keeping the frame current --
   const renderTabs = () => {
@@ -389,16 +521,16 @@ export async function start() {
       const session = workspace.sessions.get(file);
       const here = workspace.presenceOn(file);
       const tab = h(`div.tab${workspace.active === session ? ".on" : ""}`, {
-        title: file, onclick: () => workspace.activate(file),
+        title: `${String(workspace.info.folder || "").replace(/\/+$/, "")}/${file}`, onclick: () => workspace.activate(file),
         onauxclick: (event) => { if (event.button === 1) workspace.close(file); },
       },
       icon(KIND_ICONS[session.kind] || "file"),
-      h("span.tab-name", {}, file.split("/").pop()),
-      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: session.state === "problem" ? session.problem : "Saving…" }) : null,
-      here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: entry.who.name }))) : null,
+      h("span.tab-name", {}, docName(file)),
+      session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: statusWords(session) }) : null,
+      here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: nameOf(entry.who) }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
-    }), h("button.tab-new", { type: "button", title: "New or open a document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
+    }), h("button.tab-new", { type: "button", title: "New Document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
   };
 
   const renderPeople = () => {
@@ -406,23 +538,23 @@ export async function start() {
     clear(people,
       others.map((entry) => {
         const button = h("button.person", { type: "button", onclick: () => entry.file && workspace.goTo(entry.file, entry.where),
-          title: `${entry.who.name}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
+          title: `${nameOf(entry.who)}${entry.doing ? ` · ${entry.doing}` : ""}${entry.file ? ` · ${entry.file}` : ""}` },
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
-      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("plug")));
+      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("collaborate")));
     followChip.hidden = !others.some((entry) => entry.who.kind === "agent");
     followChip.classList.toggle("on", workspace.follow);
     const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
     clear(doing, working.map((entry) => h("button.doing", { type: "button", onclick: () => workspace.goTo(entry.file, entry.where) },
-      avatar(entry.who, { size: 18 }), h("b", {}, entry.who.name), h("span", {}, entry.doing), h("span.pulse"))));
+      avatar(entry.who, { size: 18 }), h("b", {}, nameOf(entry.who)), h("span", {}, entry.doing), h("span.pulse"))));
     renderTabs();
   };
 
   const renderStatus = () => {
     const session = workspace.active;
     docbar.hidden = !session;
-    if (!session) return;
+    if (!session) { renderUnread(null); return; }
     undo.disabled = !session.past.length;
     redo.disabled = !session.future.length;
     past.disabled = !session.past.length && !session.future.length;
@@ -431,9 +563,62 @@ export async function start() {
     undo.title = `Undo${what(last)} (⌘Z)`;
     redo.title = `Redo${what(next)} (⇧⌘Z)`;
     const state = session.state;
-    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : "busy"}`;
-    status.title = session.problem || "";
-    status.querySelector(".status-text").textContent = state === "saved" ? "Saved" : state === "problem" ? `Not saved: ${(session.problem || "").replace(/^.*?(could not be saved|on disk does not read):?\s*/, (_, why) => why === "could not be saved" ? "" : "can't read the file on disk: ")}` : "Saving…";
+    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}`;
+    const words = statusWords(session);
+    status.title = state === "problem" ? session.problem || "" : state === "offline" ? "Your changes are kept here, and saved when the studio is back." : "";
+    const text = status.querySelector(".status-text");
+    if (text.textContent !== words) {
+      text.textContent = words;
+      // The bar has room again for its tools' words once a long word on saving is gone.
+      fitDocbar();
+    }
+    // A document that has never read has nothing to edit, export or present.
+    for (const slot of [docLeft, docRight]) slot.inert = session.unread;
+    renderUnread(session);
+  };
+
+  // A document whose file has not read since it was opened: its editor has nothing to show,
+  // so this says why over it, with the file's words to put right there (or in another app:
+  // it opens as soon as it reads).
+  let unread = null;
+  const renderUnread = (session) => {
+    unreadView.hidden = !session?.unread;
+    if (!session?.unread) { unread = null; return; }
+    if (unread?.session === session && unread.problem === session.problem && (unread.source === session.source || unread.edited)) return;
+    const area = h("textarea.unread-source", { autocomplete: "off", "aria-label": `${session.file}, as written`, dataset: { ownUndo: "" } });
+    area.spellcheck = false;
+    // Words the person has typed here are kept when the file changes again.
+    const kept = unread?.session === session && unread.edited;
+    area.value = kept ? unread.area.value : session.source ?? "";
+    const shown = kept || session.source != null;  // not a file too large to show
+    // What is wrong, the file named once (in the heading).
+    const said = h("div.unread-said", {}, (session.problem || "").replace(/^Can't read [^:]+: (.)/, (_, first) => first.toUpperCase()));
+    const save = ui.button("Save", () => mend(), { kind: "primary" });
+    const mend = async () => {
+      if (!shown) return;
+      save.disabled = true;
+      try { await session.mend(area.value); }
+      // The words typed here, not the file (which the bar above speaks of), are what does not read.
+      catch (error) { said.textContent = /reach the studio/.test(error.message) ? error.message : `Not saved: as typed here, ${error.message.charAt(0).toLowerCase()}${error.message.slice(1)}`; }
+      finally { save.disabled = false; }
+    };
+    area.addEventListener("input", () => { if (unread) unread.edited = true; });
+    clear(unreadView, h("div.unread-inner", {},
+      h("div.unread-head", {}, icon("warning"), h("h2", {}, `${session.file.split("/").pop()} can't be read`)),
+      said,
+      h("p.unread-note", {}, `Nothing has been changed in the file. Put it right ${shown ? "here and save, or " : ""}in another app: it opens as soon as it reads.`),
+      shown ? area : null,
+      shown ? h("div.unread-foot", {}, save) : null));
+    unread = { session, problem: session.problem, source: session.source, area, edited: kept, mend };
+    // The line the problem names, chosen and in view.
+    const line = Number((session.problem || "").match(/\bline (\d+)/)?.[1] || 0);
+    if (line && shown) requestAnimationFrame(() => {
+      const lines = area.value.split("\n");
+      const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(start, start + (lines[line - 1] || "").length);
+      area.scrollTop = Math.max(0, (line - 4) * parseFloat(getComputedStyle(area).lineHeight || "18"));
+    });
   };
 
   const renderViews = () => {
@@ -466,11 +651,13 @@ export async function start() {
         card("theme", "Theme", "Fonts, colours and lines for decks and figures", "theme.yaml")),
       workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
         h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
-          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, item.file), h("span.doc-kind", {}, item.title))))) : null,
+          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", { title: item.file }, docName(item.file)),
+          h("span.doc-kind", {}, [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · ")))))) : null,
       h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
         h("p", {}, "Ask Claude in the panel on the right, or connect Claude Code or another MCP agent. Run this command once in this folder, then ask the agent to make something. Its changes appear here as it works:"),
         copyable(MCP_COMMAND),
-        h("p.hint-line", {}, info.folder))));
+        // Which folder "this folder" is, said as such.
+        h("p.hint-line.folder-line", { title: info.folder }, icon("folder"), h("span", {}, "This folder: ", h("span.folder-path", {}, homeShort(info.folder)))))));
   };
 
   workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
@@ -492,15 +679,30 @@ export async function start() {
     if (document.querySelector(".scrim, .present")) return;
     if (mod && key === "s") {
       event.preventDefault();
-      session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
+      // A file that does not read is saved as it has been put right, once it reads.
+      if (session?.unread) unread?.mend();
+      else session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
         (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
     }
     else if (mod && event.altKey && event.code === "KeyZ") { event.preventDefault(); if (session && !past.disabled) historyMenu(past, session); }
-    else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); session?.undo(); }
-    else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); session?.redo(); }
-    else if (key === "?" && !inField(event)) { event.preventDefault(); shortcutsDialog(); }
+    else if (mod && key === "z" && ownUndo()) { /* the field's own undo */ }
+    else if (mod && key === "z" && !event.shiftKey) { event.preventDefault(); travel("undo"); }
+    else if (mod && ((key === "z" && event.shiftKey) || key === "y")) { event.preventDefault(); travel("redo"); }
+    // Once the page has had the key: a word typed into a shape on its way (a decision's
+    // "?") is the shape's.
+    else if (key === "?" && !inField(event)) setTimeout(() => { if (!event.defaultPrevented) shortcutsDialog(); });
   });
-  addEventListener("beforeunload", () => { for (const session of workspace.sessions.values()) session.push(); });
+  // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
+  // with it: while there are any, the browser asks first.
+  // A window closing tells the studio, so the others see it go at once.
+  addEventListener("pagehide", () => { navigator.sendBeacon?.(workspace.url("/api/leave"), JSON.stringify({ client: workspace.client })); });
+  addEventListener("beforeunload", (event) => {
+    for (const session of workspace.sessions.values()) session.push();
+    if ([...workspace.sessions.values()].some((session) => session.pendingLocal)) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
 
   workspace.connect();
   renderPeople();
@@ -513,11 +715,25 @@ export async function start() {
   settled();
   renderViews();
   if (remembered("side", "") && info.assistant) side.show(remembered("side", ""));
+  // The document shows drawn, words and all, rather than filling in: its first drawing
+  // and the faces it uses are waited for (a moment at most).
+  const shown = workspace.active;
+  if (loading && shown) {
+    const drawn = shown.drawn ? null : new Promise((done) => shown.on("drawn", done));
+    await Promise.race([
+      (async () => { await drawn; await new Promise(requestAnimationFrame); await document.fonts?.ready; })(),
+      new Promise((done) => setTimeout(done, 1200)),
+    ]);
+  }
+  loading?.remove();
 }
 
 function inField(event) {
-  return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "");
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "") || Boolean(event.target?.isContentEditable);
 }
+
+// A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
+const homeShort = (folder) => String(folder || "").replace(/\/+$/, "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 
 function markIcon() {
   const node = icon("info");
@@ -551,26 +767,38 @@ function newMenu(anchor, workspace) {
 }
 
 export function askName(workspace, kind, suggestion) {
-  const taken = new Set(workspace.documents.map((item) => item.file));
-  let name = suggestion;
-  for (let n = 2; taken.has(name); n++) name = suggestion.replace(/(\.\w+)$/, `-${n}$1`);
-  const input = ui.input({ value: name, mono: true });
-  const go = async () => {
+  const taken = new Set(workspace.documents.map((item) => item.file.toLowerCase()));
+  // A name, as a Mac app asks for one: the file's extension is the studio's business.
+  const fileOf = (name) => (/\.(ya?ml|json)$/i.test(name) ? name : `${name}.yaml`);
+  const stem = suggestion.replace(/\.(ya?ml|json)$/i, "");
+  let name = stem;
+  for (let n = 2; taken.has(fileOf(name).toLowerCase()); n++) name = `${stem} ${n}`;
+  const input = ui.input({ value: name });
+  const problem = h("div.field-problem", { hidden: true });
+  // A name already used is said at once, and nothing is opened or overwritten.
+  const check = () => {
     const file = input.value.trim();
-    if (!file) return false;
-    try { await workspace.create(kind, /\.(ya?ml|json)$/i.test(file) ? file : `${file}.yaml`); }
-    catch (error) { toast(error.message, { kind: "error", icon: "error" }); }
+    const why = !file ? "Enter a name." : /[/\\:]/.test(file) ? "A name can't contain / \\ or :."
+      : taken.has(fileOf(file).toLowerCase()) ? `“${file}” is already used in this folder. Choose a different name.` : "";
+    problem.textContent = why;
+    problem.hidden = !why;
+    return !why;
+  };
+  input.addEventListener("input", () => { if (!problem.hidden) check(); });
+  const go = () => {
+    if (!check()) { input.focus(); return false; }
+    workspace.create(kind, fileOf(input.value.trim())).catch((error) => toast(error.message, { kind: "error", icon: "error" }));
     return true;
   };
-  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go().then((ok) => ok && box.close()); } });
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); if (go()) box.close(); } });
   const kindTitle = (workspace.info.kinds || []).find((item) => item.name === kind)?.title || kind.charAt(0).toUpperCase() + kind.slice(1);
-  const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("File Name", input, { hint: "Saved in the studio folder" })],
-    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: () => { go(); } }] });
-  setTimeout(() => { input.focus(); input.setSelectionRange(0, input.value.lastIndexOf(".")); }, 30);
+  const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("Name", input, { hint: "Saved in this folder" }), problem],
+    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: go }] });
+  setTimeout(() => { input.focus(); input.select(); }, 30);
 }
 
 export function connectDialog(workspace) {
-  const name = ui.input({ value: workspace.me.name, onChange: (value) => workspace.setName(value.trim()) });
+  const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
   dialog({ title: "Work with Agents", body: [
     h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it's working and what it's doing, and you can keep editing at the same time."),
     h("ol.steps", {},
@@ -582,13 +810,37 @@ export function connectDialog(workspace) {
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
+// Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
+const SHORTCUTS = [
+  ["General", [["⌘ K", "Command Palette"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
+    ["⌘ S", "Save (documents also save as you work)"], ["⌥ ⌘ I", "Go to the Inspector (Esc: back)"], ["?", "Keyboard Shortcuts"]]],
+  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
+    ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
+    ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
+  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
+  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "Indent an Item (⇧⇥: Outdent)"],
+    ["⇥", "Next Title, Subtitle or Cell"], ["Esc", "Done"]]],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["↩", "Edit Label"], ["⌫", "Delete Shape"]]],
+  ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["4 ↩", "Go to Slide 4"],
+    ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
+];
+
 function shortcutsDialog() {
-  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span", {}, keys.split(" ").map((key) => h("span.kbd", {}, key))));
-  dialog({ title: "Keyboard Shortcuts", body: [h("div.shortcuts", {},
-    row("⌘ K", "Command palette"), row("⌘ J", "Ask Claude"), row("⌘ Z", "Undo"), row("⇧ ⌘ Z", "Redo"), row("⌥ ⌘ Z", "Show history"),
-    row("⌘ S", "Save (documents also save automatically)"), row("↑ ↓", "Previous or next slide"), row("↩", "Edit the selection"),
-    row("Esc", "Deselect"), row("⌫", "Delete the selection"), row("⌘ D", "Duplicate slide"),
-    row("⌘ ↩", "Present"), row("?", "Keyboard shortcuts"))] });
+  // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
+  // them, and keys given side by side ("↑ ↓", "Home End") are each a keycap of their own.
+  const chords = (keys) => {
+    const out = [];
+    let held = "";
+    for (const key of keys.split(" ").filter(Boolean)) {
+      if (/^[⌘⇧⌥⌃]$/.test(key)) held += key;
+      else out.push(held + key);
+    }
+    return out;
+  };
+  const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span.shortcut-keys", {}, chords(keys).map((chord) => h("span.kbd", {}, chord))));
+  dialog({ title: "Keyboard Shortcuts", wide: true, body: [h("div.shortcut-groups", {}, SHORTCUTS.map(([title, rows]) =>
+    h("div.shortcuts", {}, h("div.section-title", {}, title), rows.map(([keys, what]) => row(keys, what)))))] });
 }
 
 // -- the side panel: Claude and activity --------------------------------------------
@@ -631,8 +883,8 @@ class SidePanel {
     const entries = [...this.workspace.activity].reverse();
     clear(this.activityList, entries.length ? entries.map((entry) => h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
       avatar(entry.who, { size: 22 }),
-      h("span.activity-text", {}, h("b", {}, entry.who?.name || "Someone"), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
-        h("span.activity-where", {}, [entry.file, entry.where?.label].filter(Boolean).join(" · "))),
+      h("span.activity-text", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
+        h("span.activity-where", {}, [entry.file && docName(entry.file), entry.where?.label].filter(Boolean).join(" · "))),
       h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, Claude and other agents appear here."));
   }
 }
@@ -651,9 +903,13 @@ export function palette(workspace) {
       { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
       { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
+    // The Edit menu's, by name.
+    ...(session?.past.length ? [{ icon: "undo", label: "Undo", keys: "⌘Z", hint: session.said(session.past[session.past.length - 1]).text, run: () => workspace.command("undo") }] : []),
+    ...(session?.future.length ? [{ icon: "redo", label: "Redo", keys: "⇧⌘Z", hint: session.said(session.future[session.future.length - 1]).text, run: () => workspace.command("redo") }] : []),
+    ...(session?.past.length || session?.future.length ? [{ icon: "history", label: "Show History", keys: "⌥⌘Z", run: () => workspace.command("history") }] : []),
     { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
-    { icon: "plug", label: "Work with Agents…", run: () => connectDialog(workspace) },
+    { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
   ];
   const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });
@@ -661,23 +917,36 @@ export function palette(workspace) {
   const list = h("div.command-list.scroll-thin");
   let shown = [];
   let index = 0;
-  // Letters of the query in order, closer together and nearer the start ranking higher;
-  // null when they are not all there.
-  const score = (label, query) => {
-    const text = label.toLowerCase();
+  // A command is found by its name: the words typed in it, at a word's start best; each
+  // word typed starting one of its words; or the first letters of its words ("ns", New
+  // Slide). What it says of itself counts only for words typed whole. Lower ranks
+  // higher; null when it is not found.
+  const wordsOf = (text) => text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const score = (command, query) => {
+    const label = command.label.toLowerCase(), names = wordsOf(label), said = wordsOf((command.hint || "").toLowerCase());
+    const tidy = label.length * 0.01;
+    const at = label.indexOf(query);
+    const starts = at === 0 || /[^\p{L}\p{N}]/u.test(label[at - 1] ?? "");
+    // Inside a word, two letters are as often chance ("ns" in Columns) as meant.
+    if (at >= 0 && (starts || query.length > 2)) return (starts ? -20 : -10) + at * 0.1 + tidy;
+    const typed = wordsOf(query);
+    if (typed.every((word) => names.some((name) => name.startsWith(word)))) return tidy;
+    if (typed.every((word) => names.some((name) => name.startsWith(word)) || said.some((name) => name.startsWith(word)))) return 10 + tidy;
     let position = 0, total = 0;
-    for (const ch of query) {
-      const found = text.indexOf(ch, position);
+    for (const ch of query.replace(/\s+/g, "")) {
+      let found = -1;
+      for (let k = position; k < label.length && found < 0; k += 1) {
+        if (label[k] === ch && ((k === position && position > 0) || k === 0 || /[^\p{L}\p{N}]/u.test(label[k - 1]))) found = k;
+      }
       if (found < 0) return null;
       total += found - position;
       position = found + 1;
     }
-    const whole = text.indexOf(query);
-    return total + (whole >= 0 ? -20 + whole * 0.1 : 0) + text.length * 0.01;
+    return 20 + total * 0.1 + tidy;
   };
   const render = () => {
     const query = input.value.trim().toLowerCase();
-    shown = query ? commands.map((command) => [score(`${command.label} ${command.hint || ""}`, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
+    shown = query ? commands.map((command) => [score(command, query), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     shown = shown.slice(0, 60);
     index = Math.min(index, Math.max(0, shown.length - 1));
     clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
@@ -685,15 +954,25 @@ export function palette(workspace) {
       command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
-  const run = (command) => { scrim.remove(); command.run(); };
+  // Closed, it gives the keys back where they were, as Spotlight does; a command run then
+  // takes them where it goes.
+  const before = document.activeElement;
+  const close = () => {
+    scrim.remove();
+    const under = [...document.querySelectorAll(".scrim")].pop();
+    if (before?.isConnected && before !== document.body && (!under || under.contains(before))) before.focus({ preventScroll: true });
+  };
+  const run = (command) => { close(); command.run(); };
   input.addEventListener("input", () => { index = 0; render(); });
   input.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") { event.preventDefault(); index = Math.min(index + 1, shown.length - 1); mark(); }
     else if (event.key === "ArrowUp") { event.preventDefault(); index = Math.max(index - 1, 0); mark(); }
-    else if (event.key === "Enter") { event.preventDefault(); if (shown[index]) run(shown[index]); }
-    else if (event.key === "Escape") { event.preventDefault(); scrim.remove(); }
+    else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); if (shown[index]) run(shown[index]); }
+    else if (event.key === "Escape") { event.preventDefault(); close(); }
+    // Its one field holds the keys: Tab goes nowhere behind it.
+    else if (event.key === "Tab") event.preventDefault();
   });
-  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) scrim.remove(); } },
+  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } },
     h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list));
   document.body.append(scrim);
   render();

@@ -2,7 +2,9 @@
 
 The studio's figure page builds its insert palette and its inspector from this
 catalogue, so a kind added to flexo is offered by adding an entry here -- the
-page has no form of its own for any kind. A field names the key it edits in the
+page has no form of its own for any kind. A part's ``words`` are what else people
+call it ("cylinder", "storage" and "DB" for a database), which the palette's search
+finds it by as well as by its title and hint. A field names the key it edits in the
 figure file (``label``, ``properties.length``, ``layout.gap``) and how it is
 edited:
 
@@ -18,11 +20,16 @@ edited:
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
   at a time by buttons, as one turns a molecule in a viewer.
 
+A ``records`` column is edited as a field of the same type is, or as a ``chain`` (one of
+the structure's chains, offered from a menu; residues and the like typed) or a ``colour``
+(a colour well, or one of ``options``, a tone, typed).
+
 A field may carry a ``default`` (what the kind does when the key is absent),
 ``more`` (shown folded away, under the rest, for those who look for it),
 ``show`` (``{"key": value}`` or ``{"key": [values]}``: shown only while another key
 has that value), and ``hint``. A ``records`` field's ``row`` is what a new row
-starts as; ``"+N"`` is the last row's value and N more.
+starts as; ``"+N"`` is the last row's value and N more, and ``"@chain"`` a chain of the
+structure's that no row names yet.
 """
 
 from __future__ import annotations
@@ -482,7 +489,9 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field("properties", "View", "view", hint="Or drag the molecule to rotate it"),
+            _field(
+                "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
+            ),
             _field(
                 "properties.look",
                 "Look",
@@ -503,14 +512,16 @@ def _structure() -> dict[str, Any]:
                 "properties.colors",
                 "Colours",
                 "records",
-                row={"group": "A", "color": "#e69f00"},
+                # A new row colours a chain the structure has that no row colours yet.
+                row={"group": "@chain", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or Residue", hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain or Residue", "chain",
+                            hint="A, SER195, entity:1, subunit:L"),
                     _column(
-                        "color", "Colour", "combo", options=list(TONES), hint="#e69f00 or a tone"
+                        "color", "Colour", "colour", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="These override the palette and the look",
+                hint="These override the palette, the look and its colours (such as Helices)",
             ),
             _field(
                 "properties.cartoon", "Cartoon", "text", hint="Drawn as ribbons: polymer", more=True
@@ -554,9 +565,9 @@ def _structure() -> dict[str, Any]:
             ),
             _field("properties.width", "Width", "number", more=True),
             _field("properties.height", "Height", "number", more=True),
-            _field("properties.yaw", "Yaw", "number", hint="In degrees", more=True),
-            _field("properties.pitch", "Pitch", "number", hint="In degrees", more=True),
-            _field("properties.roll", "Roll", "number", hint="In degrees", more=True),
+            _field("properties.yaw", "Yaw", "number", unit="°", more=True),
+            _field("properties.pitch", "Pitch", "number", unit="°", more=True),
+            _field("properties.roll", "Roll", "number", unit="°", more=True),
             _field("properties.zoom", "Zoom", "number", more=True),
             _field(
                 "properties.pan_x", "Offset X", "number", hint="A fraction of the frame", more=True
@@ -631,7 +642,15 @@ def _learning() -> list[dict[str, Any]]:
 
 def _basics() -> list[dict[str, Any]]:
     return [
-        _part("block", "Block", "Basics", "A labelled box", {"label": "Block"}, SIZE),
+        _part(
+            "block",
+            "Block",
+            "Basics",
+            "A labelled box, such as a step of a process",
+            {"label": "Block"},
+            SIZE,
+            words=["process", "step", "task", "action", "activity", "rectangle", "box"],
+        ),
         _part(
             "text",
             "Text",
@@ -677,8 +696,24 @@ def _basics() -> list[dict[str, Any]]:
             "Basics",
             "A rounded start or end of a flowchart",
             {"label": "Start"},
+            words=["start", "end", "begin", "stop", "terminator", "terminal", "pill", "flowchart"],
         ),
-        _part("decision", "Decision", "Basics", "A diamond for a decision", {"label": "Decision?"}),
+        _part(
+            "decision",
+            "Decision",
+            "Basics",
+            "A diamond for a decision",
+            {"label": "Decision?"},
+            words=["if", "branch", "condition", "choice", "question", "yes/no", "diamond"],
+        ),
+        _part(
+            "io",
+            "Input/Output",
+            "Basics",
+            "A parallelogram for data a flowchart reads or writes",
+            {"label": "Input"},
+            words=["input", "output", "i/o", "io", "data", "read", "write", "parallelogram"],
+        ),
         _part(
             "image",
             "Picture",
@@ -730,7 +765,7 @@ def _cells() -> dict[str, Any]:
                     _column("label", "Label", hint="Name in the legend"),
                 ],
             ),
-            _field("properties.cell", "Cell Size", "number", hint="In points"),
+            _field("properties.cell", "Cell Size", "number", unit="pt"),
             _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
             _field(
                 "properties.corner",
@@ -767,6 +802,62 @@ def _cells() -> dict[str, Any]:
             _field("properties.legend", "Show legend", "bool", default=True),
         ],
     )
+
+
+def _software() -> list[dict[str, Any]]:
+    """The shapes of an architecture diagram (``flexo.shapes``), each found by the
+    words people search for it by."""
+
+    return [
+        _part(
+            "database",
+            "Database",
+            "Software",
+            "A cylinder for a database, cache or other store",
+            {"label": "Database"},
+            words=["cylinder", "storage", "store", "cache", "db", "sql", "table", "disk", "data"],
+        ),
+        _part(
+            "server",
+            "Server",
+            "Software",
+            "A server: a host, machine or computer",
+            {"label": "Server"},
+            words=["computer", "host", "machine", "rack", "node", "service", "instance", "vm"],
+        ),
+        _part(
+            "cloud",
+            "Cloud",
+            "Software",
+            "A cloud for the internet or a network",
+            {"label": "Internet"},
+            words=["internet", "network", "web", "online", "provider"],
+        ),
+        _part(
+            "queue",
+            "Queue",
+            "Software",
+            "A message queue, buffer or stream",
+            {"label": "Queue"},
+            words=["message queue", "buffer", "stream", "topic", "bus", "pipe", "fifo", "jobs"],
+        ),
+        _part(
+            "document",
+            "Document",
+            "Software",
+            "A page with a wavy foot: a file or report",
+            {"label": "Document"},
+            words=["file", "report", "page", "paper", "log", "flowchart"],
+        ),
+        _part(
+            "person",
+            "Person",
+            "Software",
+            "A person with the label under it: a user, client or actor",
+            {"label": "User"},
+            words=["user", "client", "actor", "people", "customer", "human", "account", "role"],
+        ),
+    ]
 
 
 GROUPS = [
@@ -845,6 +936,7 @@ EDGE_FIELDS = [
         default="arrow",
         hint="What the arrowhead means, as in SBGN",
         show={"arrow": ["end", "both"]},
+        more=True,  # pathways' marks: under More, open where one is set
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(
@@ -856,6 +948,7 @@ EDGE_FIELDS = [
         "pair",
         labels=["Consumed", "Produced"],
         hint="Shown on an arc beside the reaction: ATP, ADP",
+        more=True,
     ),
 ]
 
@@ -885,13 +978,21 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-CATEGORIES = ("Basics", "Machine Learning", "Biology")
+CATEGORIES = ("Basics", "Software", "Machine Learning", "Biology")
 
 
 def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
     """The editor's catalogue: parts by category, groups, and the fields of each thing."""
 
-    parts = [*_basics(), *_learning(), *_genetics(), *_proteins(), *_bench(), _structure()]
+    parts = [
+        *_basics(),
+        *_software(),
+        *_learning(),
+        *_genetics(),
+        *_proteins(),
+        *_bench(),
+        _structure(),
+    ]
     return {
         "categories": list(CATEGORIES),
         "parts": {part["kind"]: part for part in parts},

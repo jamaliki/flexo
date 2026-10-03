@@ -114,10 +114,15 @@ export class AssistantPanel {
     this.turns.clear();
     if (!state.transcript.length) {
       const kind = this.workspace.active?.kind || "none";
+      // The Mac app comes with what Claude needs: a copy without it is told so in plain
+      // words, not given a command for Terminal.
+      const why = window.pywebview && /pip install/.test(state.why || "")
+        ? "Claude isn't included in this copy of Flexo Studio. Download Flexo Studio again to ask Claude here." : state.why;
       clear(this.list, h("div.chat-empty", {},
         h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "Works with you on the documents open here"))),
-        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, state.why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
-        h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text)))));
+        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
+        // What to ask: only where Claude can be asked.
+        state.available ? h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text))) : null));
       return;
     }
     clear(this.list, state.transcript.map((item) => this.itemView(item)),

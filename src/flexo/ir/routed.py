@@ -58,6 +58,13 @@ class RoutedEdge:
     """The words written on the far side of the line: a back label, or cofactors."""
     aside: Aside | None = None
     """Where those words (and the cofactors' arc) went; see ``flexo.routing.aside``."""
+    outline_depth: tuple[float, float] = (0.0, 0.0)
+    """How far inside its box each end's component draws its outline, start and end.
+
+    The centerline runs pin to pin on the boxes; a cylinder's lid or a document's
+    wavy foot lies further in (``flexo.shapes.ink_depth``), and the shaft is
+    carried on that far, so its ink meets the shape rather than the box round it.
+    """
 
 
 @dataclass(frozen=True, slots=True)

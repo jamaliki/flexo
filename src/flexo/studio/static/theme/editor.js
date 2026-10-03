@@ -1,9 +1,9 @@
-// The theme editor: a theme's settings on the left, grouped as a designer thinks of
-// them (colour, type, line, space), and samples drawn in it on the right -- figures,
-// slides, or a deck in the folder. Only what differs from the base theme is
+// The theme editor: samples drawn in a theme -- figures, slides, or a deck in the folder
+// -- and its settings on the right, where a deck's inspector is, grouped as a designer
+// thinks of them (colour, type, line, space). Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus, picture, themeUses } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -65,7 +65,7 @@ export function mount(studio, container) {
   const form = h("div.theme-form.scroll-thin");
   const stage = h("div.stage.theme-stage.scroll-thin");
   const note = h("div.messages.theme-messages");
-  const root = h("div.theme", {}, h("section.panel.theme-panel", {}, form), h("section.theme-right", {}, stage, note));
+  const root = h("div.theme", {}, h("section.theme-right", {}, stage, note), h("section.panel.theme-panel", {}, form));
   clear(container, root);
 
   const row = (label, path, control, { hint } = {}) => {
@@ -80,10 +80,8 @@ export function mount(studio, container) {
     const given = get(path);
     const shown = base(path);
     const parse = (text) => (text == null ? null : parseFloat(String(text)));
-    return row(label, path, h("div.unit-input", {},
-      ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."),
-        onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }),
-      h("span.unit", {}, unit)), { hint });
+    return row(label, path, ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."), unit,
+      onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }), { hint });
   };
 
   const number = (label, path, { step = 0.05, min, max, hint } = {}) => row(label, path,
@@ -107,10 +105,11 @@ export function mount(studio, container) {
   const colour = (label, path) => {
     const value = get(path) ?? base(path);
     const picker = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
-      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; set(path, picker.value); } });
-    const swatch = h("span.colour-swatch", { style: { background: value || "transparent" }, onclick: () => picker.click() });
+      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
+    // No colour is the hatched chip every "None" is drawn as.
+    const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", onclick: () => picker.click() });
     const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
-      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; set(path, text); } else if (!text) set(path, null); } });
+      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; swatch.classList.remove("none"); set(path, text); } else if (!text) set(path, null); } });
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
   };
 
@@ -133,7 +132,8 @@ export function mount(studio, container) {
           label: name, hint: values.join(" "), run: () => write([...values]),
         }))), { kind: "ghost", small: true, icon: "palette" })),
         get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
-      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes" },
+      // In rows of equal chips, never one left alone on a row of its own.
+      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes", style: { gridTemplateColumns: `repeat(${Math.ceil(tones.length / Math.ceil(tones.length / 10))}, minmax(0, 1fr))` } },
         tones.map((tone) => h("span.tone", { style: { background: tone.fill, borderColor: tone.stroke, color: tone.stroke } }, "Aa"))) : null);
   };
 
@@ -149,8 +149,8 @@ export function mount(studio, container) {
     const sketch = t.sketch ?? base(["sketch"]);
     clear(form,
       section("Theme",
-        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
-        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
+        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
+        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
       section("Documents", uses),
       section("Colour",
@@ -162,7 +162,7 @@ export function mount(studio, container) {
         h("div.setting-group-label", {}, "Page"),
         Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key]))),
       section("Type",
-        row("Font", ["font"], ui.combo({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "", key: "font", onChange: (value) => set(["font"], value || null) })),
+        row("Font", ["font"], ui.font({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "Default", key: "font", onChange: (value) => set(["font"], value || null, { quiet: false }) })),
         length("Font Size", ["type", "size"], { step: 0.5 }),
         choice("Label Weight", ["type", "label_weight"], WEIGHTS),
         choice("Title Weight", ["type", "title_weight"], WEIGHTS),
@@ -192,7 +192,8 @@ export function mount(studio, container) {
         choice("Line Style", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right Angles", straight: "Straight" } }),
         choice("Branch Style", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
         choice("Merge Style", ["conventions", "merge"], catalog.conventions.merge || []),
-        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), label: "Draw by hand", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
+        // Named once, by its row, as every switch in the panel is.
+        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), key: "sketch", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
         sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
       h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>
@@ -227,7 +228,8 @@ export function mount(studio, container) {
     } }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  studio.actions.append(ui.button("Export Full Theme", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting, including those from the base theme, to the build folder" }));
+  studio.exports = [{ format: "yaml", label: "Full Theme…" }];
+  studio.actions.append(ui.button("Export Full Theme…", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 

@@ -1,9 +1,13 @@
-/* Editing a figure's parts, in the figure editor and on a deck's slides (parts.js). */
+/* Editing a figure's parts, in the figure editor and on a deck's slides (parts.js).
+   Loaded into a deck's page too, once a figure on a slide is chosen: what the deck draws
+   its own way (its breadcrumbs, its layout glyphs, its lists) is styled here only inside
+   the figure editor (.fig), so the deck looks the same before a figure is chosen and after. */
 
-.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
 .hit-line { fill: none; stroke: transparent; stroke-width: 9; pointer-events: stroke; cursor: pointer; }
 .fig-marks { position: absolute; inset: 0; pointer-events: none; }
-.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 4px; background: var(--accent-soft); transition: all 0.1s; }
+/* A chosen part's frame is where the part is, at once: it never glides there. */
+.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
 .fig-mark.group { background: transparent; border-style: dashed; }
 .fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; background: var(--raised); border: 1.5px solid var(--accent); border-radius: 2px; touch-action: none; }
 .fig-size::before { content: ""; position: absolute; inset: -6px; }
@@ -12,14 +16,21 @@
 .fig-size.ne, .fig-size.sw { cursor: nesw-resize; }
 .fig-sizing .fig-mark, .fig-sizing .fig-next, .fig-sizing .fig-size { visibility: hidden; }
 .fig-mark-label { position: absolute; top: -19px; left: -2px; background: var(--accent); color: var(--accent-ink); font: 600 10.5px/17px var(--font); padding: 0 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; }
+.fig-mark-label.below { top: auto; bottom: -19px; border-radius: 0 4px 4px 4px; }
 /* The chosen part's next step: a + just outside the side its line leaves by. */
-.fig-next { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--raised); background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-2); cursor: pointer; opacity: 0.88; transition: opacity 0.1s, transform 0.1s; }
+.fig-next { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--raised); background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-2); cursor: pointer; opacity: 0.88; transition: opacity 0.1s; }
 .fig-next svg { width: 13px; height: 13px; }
-.fig-next:hover { opacity: 1; transform: scale(1.12); }
-.fig-next.right { translate: 18px 0; }
-.fig-next.left { translate: -18px 0; }
-.fig-next.bottom { translate: 0 18px; }
-.fig-next.top { translate: 0 -18px; }
+.fig-next:hover { opacity: 1; }
+/* A molecule chosen is turned by its handle (or by ⌥-dragging it); dragged, it moves. */
+.fig-rotate { position: absolute; z-index: 3; pointer-events: auto; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--accent-line); background: var(--raised); color: var(--accent); box-shadow: var(--shadow-2); cursor: grab; touch-action: none; }
+.fig-rotate svg { width: 13px; height: 13px; }
+.fig-rotate:hover { background: var(--accent); color: var(--accent-ink); }
+.fig-sizing .fig-rotate, .fig-landing .fig-rotate, .fig-dragging .fig-rotate { visibility: hidden; }
+/* A molecule being drawn again: a small spinner on it, the slide left as it is. */
+.fig-redrawing { position: absolute; z-index: 3; pointer-events: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--raised); box-shadow: var(--shadow-2); }
+.fig-redrawing .spinner { width: 12px; height: 12px; }
+/* A line chosen: marked along its own path. */
+.hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
 .fig-hover { position: absolute; pointer-events: none; border: 1px dashed var(--accent-line); border-radius: 4px; }
 .fig-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 99px; background: var(--ink); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-2); white-space: nowrap; }
 .fig-hint svg { width: 14px; height: 14px; }
@@ -29,9 +40,11 @@
 /* Typed in place: over the part's words, as they look; the tools float above. */
 .fig-inline.in-place { background: transparent; padding: 0; border-radius: 4px; box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); animation: none; }
 .fig-inline.in-place .markup { background: transparent; }
-.fig-inline.in-place .textarea { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; line-height: 1.2; resize: none; overflow: hidden; caret-color: var(--accent); }
+.fig-inline.in-place .textarea { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; line-height: 1.2; resize: none; overflow: hidden; caret-color: var(--accent); white-space: pre; }
 .fig-inline.in-place .textarea:focus { box-shadow: none; outline: none; }
-.fig-inline.in-place .markup-tools { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); opacity: 1; padding: 3px; background: var(--raised); border-radius: 8px; box-shadow: var(--shadow-2), 0 0 0 1px var(--line); white-space: nowrap; }
+.fig-inline.in-place .markup-tools { position: absolute; bottom: calc(100% + 8px); left: 50%; right: auto; transform: translateX(-50%); opacity: 1; padding: 3px; background: var(--raised); border-radius: 8px; box-shadow: var(--shadow-2), 0 0 0 1px var(--line); white-space: nowrap; }
+/* In a box under the part, the tools are a row at the top of the box. */
+.fig-inline:not(.in-place) .markup-tools { position: static; opacity: 1; visibility: visible; padding: 2px 2px 0; background: none; box-shadow: none; }
 .fig-inline .inline-foot { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--ink-3); padding: 0 6px 2px; }
 .menu.add-menu { padding: 0; width: 392px; }
 .add-palette { display: grid; gap: 8px; padding: 10px; }
@@ -45,40 +58,73 @@
 .add-tile:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ink); }
 .add-tile:hover:not(:disabled) .glyph { color: var(--accent); }
 .add-tile:disabled { opacity: 0.4; cursor: default; }
+.add-tile.on { border-color: var(--accent-line); color: var(--ink); }
+.add-tile:focus-visible { outline: none; background: var(--accent-soft); border-color: var(--accent); }
+/* Just opened, nothing is lit under a pointer that has not moved: a second click chooses nothing. */
+.menu.fresh .add-tile:hover:not(:focus) { background: transparent; border-color: transparent; color: var(--ink-2); }
+.menu.fresh .add-tile:hover:not(:focus) .glyph { color: var(--ink-2); }
+/* The shape's type is a pop-up button (.type-pick, studio.css): the palette of shapes opens from it. */
+.insp-problem { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--ink); font: var(--text-small); }
+.insp-problem svg { width: 14px; height: 14px; flex: none; color: var(--warn); margin-top: 1px; }
+/* A field's problem (.field-problem, .field-stack) is styled in studio.css: dialogs say them too. */
+.records-warnings { display: grid; gap: 3px; }
+.records-warnings:empty { display: none; }
+.hint-line.turned { display: flex; gap: 6px; align-items: flex-start; }
+.hint-line.turned svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+details.advanced > .inner { margin-top: 10px; }
+/* A number typed is a number field as any other (.number-field, studio.css); in a table's
+   cell, a smaller one. */
+.records-table .number-field { height: 26px; }
+.records-table .number-field > .input { height: 100%; padding-left: 6px; }
+.records-table .number-field .unit { display: none; }
+.records-table .number-field .steppers { margin: 0 2px 0 3px; width: 12px; height: 20px; }
+.records-table .cell.with-pick, .records-table .cell.with-well { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.records-table .cell.with-pick .input, .records-table .cell.with-well .input { flex: 1; }
+.cell-pick { flex: none; display: grid; place-items: center; width: 20px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--raised); color: var(--ink-2); cursor: pointer; }
+.cell-pick:hover { border-color: var(--ink-3); color: var(--ink); }
+.cell-pick svg { width: 12px; height: 12px; }
+.cell-well { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; box-shadow: 0 0 0 1px var(--line-strong); background: transparent; cursor: pointer; overflow: hidden; }
+.cell-well::-webkit-color-swatch-wrapper { padding: 0; }
+.cell-well::-webkit-color-swatch { border: 0; border-radius: 4px; box-shadow: var(--chip-ring); }
+.cell-well.unset { opacity: 0.35; }
 .insp-top { gap: 10px; }
 .insp-row { display: flex; align-items: flex-start; gap: 8px; }
 .insp-title { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .insp-title > svg { width: 30px; height: 30px; padding: 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); flex: none; box-sizing: border-box; }
 .insp-words { min-width: 0; }
-.insp-name { font-weight: 640; font-size: 13.5px; }
-.insp-hint { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.insp-name { font: var(--text-title); }
+.insp-hint { color: var(--ink-3); font: var(--text-hint); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .insp-actions { display: flex; gap: 1px; flex: none; }
-.crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 12px; color: var(--ink-3); }
-.crumbs svg { width: 11px; height: 11px; }
-.crumb { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 2px 4px; border-radius: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-button.crumb:hover { background: var(--sunken); color: var(--ink); }
-.crumb.here { color: var(--ink); font-weight: 560; cursor: default; }
+.fig .crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font: var(--text-small); color: var(--ink-3); }
+.fig .crumbs svg { width: 11px; height: 11px; }
+.fig .crumb { border: 0; background: transparent; color: var(--ink-3); cursor: pointer; padding: 2px 4px; border-radius: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fig button.crumb:hover { background: var(--sunken); color: var(--ink); }
+.fig .crumb.here { color: var(--ink); font-weight: 600; cursor: default; }
 .fields { display: grid; gap: 12px; }
-.hint-line { color: var(--ink-3); font-size: 12px; line-height: 1.45; }
-.how { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
+.how { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font: var(--text-small); line-height: 1.45; }
+.how b { font-weight: 600; }
 .line-list { display: grid; gap: 1px; }
 .line-row { display: flex; align-items: center; gap: 2px; }
 .line-row .link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; border: 0; background: transparent; text-align: left; padding: 4px 6px; border-radius: 5px; cursor: pointer; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .line-row .link:hover { background: var(--sunken); color: var(--ink); }
 .line-row .link .glyph { color: var(--ink-3); }
 .line-row .muted { color: var(--ink-3); }
+.line-row b, .insp-problem b { font-weight: 600; }
 .records-scroll { overflow-x: auto; margin: 0 -2px; padding: 0 2px 2px; }
 .records-table { display: grid; gap: 3px; align-items: center; min-width: 100%; }
-.records-head { font-size: 10.5px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.records-table .input, .records-table .select { height: 26px; font-size: 12px; padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
-.records-table .select { padding-right: 18px; background-position: right 4px center; }
+.records-head { font: var(--text-hint); color: var(--ink-3); padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.records-table .input, .records-table .select { height: 26px; font: var(--text-small); padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
+.records-table .select { gap: 2px; padding-right: 3px; }
 .records-table .cell { display: contents; }
 .field.records { gap: 6px; }
 .field.records > .btn { justify-self: start; }
-.list-rows { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
-.list-rows .pic { width: 34px; height: 34px; object-fit: contain; border-radius: 4px; background: var(--sunken); }
-.switch-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.switch-hint { color: var(--ink-3); font-size: 11.5px; line-height: 1.3; }
+/* A switch's setting, as the Mac's settings set one out: its name at the left, the switch at
+   the right edge, its hint under its name. */
+.field.inline:has(> .switch-row) { grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 1px; }
+.field.inline > .switch-row { display: contents; }
+.field.inline > .switch-row > .switch { grid-column: 2; grid-row: 1; }
+.field.inline > .switch-row > .switch-hint { grid-column: 1; grid-row: 2; }
+.switch-hint { color: var(--ink-3); font: var(--text-hint); }
 
 /* Dragging a part: it is lifted and follows the pointer; a line glides to where it would
    go, the group it would join is outlined, and its lines wait, faded, to be drawn again. */
@@ -108,17 +154,16 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-turn { position: absolute; z-index: 4; pointer-events: none; }
 .fig-turn-tip { position: absolute; z-index: 5; transform: translateX(-50%); pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 .fig-turning { opacity: 0.15; transition: opacity 0.12s; }
-.fig-grab { cursor: grab; }
 
 /* A structure's mol-sketch settings: sections folded away, each setting showing the look's until it has its own. */
 .mol-style { display: grid; gap: 2px; margin-top: 8px; }
 .mol-style-head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
 .mol-style-head .section-title { margin: 0; }
-.mol-style-head .hint { flex: 1; color: var(--ink-3); font-size: 11.5px; }
-.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
+.mol-style-head .hint { flex: 1; color: var(--ink-3); font: var(--text-hint); }
+.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: var(--text-hint); }
 .mol-section .colour-well.unset .colour-chip { opacity: 0.55; }
 .mol-section { padding: 7px 0 5px; border-top: 1px solid var(--line); }
-.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; color: var(--ink-2); }
+.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); }
 .mol-section > summary::-webkit-details-marker { display: none; }
 .mol-section > summary svg { width: 14px; height: 14px; transition: transform 0.15s; }
 .mol-section[open] > summary svg { transform: rotate(90deg); }
@@ -127,5 +172,5 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .mol-grid > .field { min-width: 0; }
 .mol-grid > .field.own > label, .mol-grid > .field.own .label { color: var(--accent); }
 .mol-colours { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
-.mol-colour { display: grid; justify-items: center; gap: 2px; width: 58px; font-size: 10.5px; color: var(--ink-3); text-align: center; }
+.mol-colour { display: grid; justify-items: center; gap: 2px; width: 58px; font: var(--text-hint); color: var(--ink-3); text-align: center; }
 .mol-colour.own { color: var(--accent); }

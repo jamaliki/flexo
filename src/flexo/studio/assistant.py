@@ -326,7 +326,11 @@ def _explain(error: Exception) -> str:
     try:
         import anthropic
     except ImportError:
-        return str(error)
+        # Said as what to do, not as Python's words.
+        return (
+            "Claude isn't set up in this studio: it needs the assistant package "
+            "(pip install 'flexo[assistant]'), then a restart."
+        )
     if isinstance(error, anthropic.AuthenticationError):
         return (
             "Claude could not sign in: set ANTHROPIC_API_KEY, or run `ant auth login`, "

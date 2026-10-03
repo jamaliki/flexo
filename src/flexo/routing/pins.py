@@ -846,8 +846,10 @@ A circle and a diamond touch their box at four points; a pin anywhere else on
 the box edge would leave a gap between the arrowhead and the ink.
 """
 
-POINT_KINDS = CORNER_KINDS | {"op"}
-"""Kinds whose pins stay at the middle of their side: operators too."""
+POINT_KINDS = CORNER_KINDS | {"op", "person"}
+"""Kinds whose pins stay at the middle of their side: operators too, and a person,
+whose middle is its shoulders (``flexo.shapes``) -- a pin slid down from there
+would meet its name, and up, the air beside its head."""
 
 
 def _one_end_per_corner(ends: list[End], straight: dict[str, list[Side]] | None = None) -> None:

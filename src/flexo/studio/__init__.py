@@ -51,6 +51,8 @@ class Message:
     """The id of the page it concerns, when it concerns one."""
     code: str = ""
     """A stable name for the kind of message (``layout.width.grown``)."""
+    place: str = ""
+    """``where`` as a person says it (``Slide 4 · Picture``), for the page to show."""
 
 
 @dataclass(slots=True)
@@ -102,7 +104,9 @@ class Kind(Protocol):
         with many pages may draw that one first and leave others pending."""
 
     def export(self, document: Any, base: Path, stem: str, formats: list[str]) -> list[Path]:
-        """Write the document's outputs into ``base / "build"``; the files written."""
+        """Write the document's outputs into ``base / "build"``; the files written. A kind
+        may take ``into=``, a folder to write them in instead (the page's exports are made
+        aside and handed to its person), and options of its own (a deck's ``steps=``)."""
 
     # A kind may also offer, for agents and the activity list:
     #   dump(document) -> str and parse(text) -> document: the document as text
@@ -118,6 +122,9 @@ class Kind(Protocol):
     #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
     #       document: the theme a document is drawn in (a name, or a theme file named
     #       from its folder), read and set, so one theme can be put to use in many.
+    #   malformed(document) -> str | None: what makes a document one its editor cannot
+    #       show (a deck whose slides are a number), if anything: such a file is not
+    #       taken in (nor written over), and such an edit is refused.
 
 
 def kinds() -> dict[str, Kind]:

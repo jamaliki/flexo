@@ -57,13 +57,13 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
-  studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
+  studio.exports = [{ format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }, { format: "editable", label: "Editable SVG…" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
-    { icon: "export", label: "Editable SVG", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "image", label: "PNG", run: () => studio.exportFiles(["png"]) },
+    { icon: "export", label: "Editable SVG…", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "PDF…", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "image", label: "PNG…", run: () => studio.exportFiles(["png"]) },
     "-",
-    { icon: "export", label: "All Formats", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    { icon: "export", label: "All Formats…", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // -- the drawing's parts, edited --
@@ -259,18 +259,8 @@ export function mount(studio, main) {
   area.value = studio.doc.text;
   area.addEventListener("input", () => { numbers(); studio.change((doc) => { doc.text = area.value; }, { merge: "text", quiet: true }); });
   area.addEventListener("scroll", () => { gutter.scrollTop = area.scrollTop; });
-  area.addEventListener("keydown", (event) => {
-    if (event.key !== "Tab") return;
-    event.preventDefault();
-    const { selectionStart: start, selectionEnd: end, value } = area;
-    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-    if (start === end && !event.shiftKey) area.setRangeText("  ", start, end, "end");
-    else {
-      const block = value.slice(lineStart, end);
-      area.setRangeText(event.shiftKey ? block.replace(/^ {1,2}/gm, "") : block.replace(/^/gm, "  "), lineStart, end, "select");
-    }
-    area.dispatchEvent(new Event("input"));
-  });
+  // Tab indents the YAML; Ctrl-Tab, or Esc and then Tab, goes on (ui.js).
+  ui.indent(area);
   const code = h("div.code", {}, gutter, area);
   function numbers() {
     const count = area.value.split("\n").length;
@@ -338,16 +328,49 @@ export function mount(studio, main) {
       const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : ".pdb,.cif,.mmcif,.ent";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
-      const box = dialog({ title, body: [list, upload], actions: [
-        { label: "Upload…", run: () => { upload.click(); return false; } },
-        { label: "Cancel", run: () => finish(null) },
-      ], onClose: () => finish(null) });
+      const actions = [{ label: "Upload…", run: () => { upload.click(); return false; } }];
+      if (types.includes("structure")) actions.push({ label: "PDB ID…", run: () => { askEntry().then((id) => { if (id) finish(id); }); return false; } });
+      actions.push({ label: "Cancel", run: () => finish(null) });
+      const box = dialog({ title, body: [list, upload], actions, onClose: () => finish(null) });
       studio.files(types).then((files) => {
-        clear(list, files.length ? files.map((file) => h("button.menu-item", { type: "button", onclick: () => finish(file) },
-          types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon("file"),
-          h("span.menu-text", {}, h("span", {}, file.split("/").pop()), h("span.menu-hint", {}, file))))
-          : h("div.empty", {}, "No files of this type next to the figure. Click Upload to add one."));
+        // Each file once, by its name; the folder it is in said only when it is in one.
+        const seen = new Set();
+        const shown = files.filter((file) => !seen.has(file) && seen.add(file));
+        clear(list, shown.length ? shown.map((file) => h("button.menu-item", { type: "button", onclick: () => finish(file) },
+          types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon(types.includes("structure") ? "structure" : "file"),
+          h("span.menu-text", {}, h("span", {}, file.split("/").pop()), file.includes("/") ? h("span.menu-hint", {}, file.slice(0, file.lastIndexOf("/") + 1)) : null)))
+          : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID." : "No files of this type next to the figure. Click Upload to add one."));
       });
+    });
+  }
+
+  // A PDB entry, downloaded before it is added: if it can't be, the dialog says why and
+  // nothing is added.
+  function askEntry() {
+    return new Promise((resolve) => {
+      let done = false;
+      const input = ui.input({ placeholder: "1UBQ", mono: true });
+      const note = h("div.field-problem", { hidden: true });
+      const fetchIt = async () => {
+        const id = input.value.trim().toUpperCase();
+        if (!id) { input.focus(); return; }
+        clear(note, h("span.spinner"), h("span", {}, `Downloading ${id}…`));
+        note.hidden = false;
+        try {
+          const found = await studio.api("/api/act", { file: studio.file, document: studio.doc, action: { do: "structure-fetch", id } });
+          if (!done) { done = true; resolve(found.id); box.close(); }
+        } catch (error) {
+          clear(note, icon("warning"), h("span", {}, error.message));
+          input.classList.add("invalid");
+          input.focus();
+        }
+      };
+      input.addEventListener("input", () => { input.classList.remove("invalid"); note.hidden = true; });
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); fetchIt(); } });
+      const box = dialog({ title: "Add a Structure from the PDB", body: [ui.field("PDB ID", input, { hint: "Four characters, like 1UBQ" }), note],
+        actions: [{ label: "Cancel", run: () => { done = true; resolve(null); } }, { label: "Download", kind: "primary", run: () => { fetchIt(); return false; } }],
+        onClose: () => { if (!done) { done = true; resolve(null); } } });
+      setTimeout(() => input.focus(), 20);
     });
   }
 
@@ -359,6 +382,9 @@ export function mount(studio, main) {
   });
 
   // -- what the drawing brings --
+  // Where a message is, as the page names it: a part by its name, the figure as the Figure.
+  const placeName = (where) => (figure.typeOf(where) ? figure.nameOf(where)
+    : where === figure.model?.figure?.id ? "Figure" : where.replace(/^line /, "Line "));
   const showMessages = () => {
     clear(note, messages.map((message) => h(`div.message.${message.severity}${message.where ? ".link" : ""}`,
       { onclick: () => {
@@ -367,14 +393,15 @@ export function mount(studio, main) {
         else if (figure.typeOf(message.where)) figure.select([message.where]);
       } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
-      h("div", {}, message.text, message.where ? h("div.where", {}, message.where) : null))));
+      // Where it is, by the name the part is shown by, not its ID.
+      h("div", {}, message.text, message.where ? h("div.where", {}, placeName(message.where)) : null))));
     if (state.tab === "source") numbers();
   };
 
   studio.on("drawn", (result) => {
     messages = result.messages || [];
-    showMessages();
     if (result.info?.model) figure.setModel(result.info.model);
+    showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
       if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
@@ -427,8 +454,9 @@ export function mount(studio, main) {
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
     { icon: "right", label: "Connect Shapes", run: () => figure.toggleConnect(true) },
-    { icon: "export", label: "Export Editable SVG", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "Export PDF", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "export", label: "Export as Editable SVG…", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "Export as PDF…", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select “${figure.nameOf(node.id)}”`, hint: node.id, run: () => figure.select([node.id]) })) : []),

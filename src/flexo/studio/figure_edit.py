@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
-from ruamel.yaml.scalarstring import LiteralScalarString
+from ruamel.yaml.scalarstring import LiteralScalarString, SingleQuotedScalarString
 
 from flexo.ir.semantic import ID_PATTERN
 
@@ -436,6 +436,9 @@ class _Document:
 
         node = self.node(identifier)
         if node is None or node.get("kind") == "attention" or self.node(source) is None:
+            return None
+        # A decision's lines are its branches: a part after it is a branch of its own.
+        if self.node(source).get("kind") == "decision":
             return None
         if any(
             source in (self.node_of(str(end)) for end in net.get("sources") or [])
@@ -952,17 +955,32 @@ def _set(item: dict[str, Any], path: list[str], value: object) -> None:
         trail[-1][last] = value
 
 
+def _misread(text: str) -> bool:
+    """Whether ``text``, written plain, would read back as anything but itself."""
+
+    import yaml
+
+    return yaml.SafeLoader.resolve(yaml.SafeLoader, yaml.ScalarNode, text, (True, False)) != (
+        "tag:yaml.org,2002:str"
+    )
+
+
 def _blocks(value: Any) -> Any:
-    """``value`` with every new multi-line string written as a block (``|``).
+    """``value`` with every new multi-line string written as a block (``|``), and every
+    new string that would read back as something else (``Yes``, ``off``, ``12``) quoted.
 
     A grid of cells or a Newick tree typed into the page reads line by line in
     the file only as a block; a quoted string with ``\\n`` in it reads as noise.
+    The file is written as YAML 1.2 writes it but read as YAML 1.1 reads it, where a
+    plain ``Yes`` or ``no`` is true or false: a label typed as "Yes" stays the word.
     Only plain strings change: what the file already held keeps the quoting it
     was written with.
     """
 
     if type(value) is str and "\n" in value:
         return LiteralScalarString(value if value.endswith("\n") else value + "\n")
+    if type(value) is str and _misread(value):
+        return SingleQuotedScalarString(value)
     if isinstance(value, dict):
         for key in list(value):
             value[key] = _blocks(value[key])

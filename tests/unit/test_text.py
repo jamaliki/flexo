@@ -262,3 +262,10 @@ def test_thai_breaks_between_its_words_where_the_system_has_a_dictionary() -> No
             word = next((word for word in longest if rest.startswith(word)), None)
             assert word is not None, (line, rest)
             rest = rest[len(word):]
+
+
+def test_an_emoji_sequence_is_one_cluster_so_one_face_draws_it_whole() -> None:
+    from flexo.text import _clusters
+
+    joined = [cluster for cluster in _clusters("Hi 👩🏽‍🔬, 🇬🇧🇫🇷 and 1️⃣") if len(cluster) > 1]
+    assert joined == ["👩🏽‍🔬", "🇬🇧", "🇫🇷", "1️⃣"]
