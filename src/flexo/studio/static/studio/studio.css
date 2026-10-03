@@ -294,10 +294,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .side[hidden] { display: none; }
 /* In a narrow window the side panel lies over the document rather than squeezing it: below
    the document's bar (its height set by shell.js), which keeps Present, Export, Undo and the
-   word on saving in reach. */
+   word on saving in reach, and as wide as the inspector, whose place it takes -- the slide
+   stays in view. */
 @media (max-width: 1239px) {
   .workbench { position: relative; }
-  .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; box-shadow: var(--shadow-2); }
+  .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; width: 340px; box-shadow: var(--shadow-2); }
 }
 .side-head { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .side-tabs { display: flex; gap: 2px; }
