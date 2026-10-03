@@ -146,6 +146,8 @@ export class Workspace {
   async create(kind, name) {
     const result = await this.api("/api/new", { file: name, kind, client: this.client, who: this.me });
     await this.refreshDocuments();
+    // Its editor knows it is new (and so ready to be typed in at once).
+    this.justMade = result.file;
     return this.open(result.file);
   }
 
@@ -182,7 +184,7 @@ export class Workspace {
   // -- events --
 
   connect() {
-    const source = new EventSource(this.url("/api/events", { client: this.client, name: this.me.name }));
+    const source = new EventSource(this.url("/api/events", { client: this.client, person: this.me.id, name: this.me.name }));
     source.onmessage = (message) => this.handle(JSON.parse(message.data));
     source.addEventListener("hello", () => this.emit("online", true));
     source.onerror = () => this.emit("online", false);
@@ -625,7 +627,7 @@ export function connectDialog(workspace) {
 const SHORTCUTS = [
   ["General", [["⌘ K", "Command Palette"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (documents also save as you work)"], ["?", "Keyboard Shortcuts"]]],
-  ["Slides", [["N", "New Slide…"], ["⇧ ⌘ N", "New Slide in the Same Layout"], ["↑ ↓", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
+  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
   ["Objects on a Slide", [["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
