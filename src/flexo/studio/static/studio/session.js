@@ -294,19 +294,63 @@ export class Session {
 
   folder() { return this.file.includes("/") ? this.file.slice(0, this.file.lastIndexOf("/") + 1) : ""; }
 
-  // `part` exports one part of the document by itself (a figure on a slide), if its kind can.
+  // Export, as Keynote's File › Export To does. The kind's entry for a format (in
+  // `exports`) may ask first, in a sheet: `choose`, the formats to offer for it
+  // ([{ format, label }]), and `options`, settings its export takes ([{ name, label,
+  // value }]). Then the Mac app's one save panel puts the file, or a folder of several,
+  // where its person says, or the browser downloads it (several files as a zip): nothing
+  // is left beside the document. `part` exports one part of the document by itself (a
+  // figure on a slide), if its kind can. Answers where it went, or [] if it did not.
   async exportFiles(formats, part = null) {
-    const note = toast(h("span.row", {}, h("span.spinner"), `Exporting ${formats.join(", ").toUpperCase()}…`), { seconds: 120 });
-    try {
-      const result = await this.api("/api/export", { file: this.file, document: this.document, formats, ...(part ? { part } : {}) });
-      note.remove();
-      const folder = this.folder();
-      const links = result.files.map((file) => {
-        const beside = file.startsWith(folder) ? file.slice(folder.length) : file;
-        return h("a", { href: this.raw(beside, true), download: "" }, beside.split("/").pop());
+    const { dialog, ui } = await import("./ui.js");
+    const app = window.pywebview?.api?.save_export ? window.pywebview.api : null;
+    const entry = part || formats.length !== 1 ? null : this.exports.find((item) => item.format === formats[0]);
+    const named = entry?.label?.replace(/…$/, "") || formats.join(", ").toUpperCase();
+    const options = {};
+    if (entry?.choose?.length || entry?.options?.length) {
+      let chosen = entry.format;
+      for (const option of entry.options || []) options[option.name] = Boolean(option.value);
+      const go = await new Promise((done) => {
+        let going = false;
+        dialog({
+          title: `Export ${named}`,
+          body: [
+            entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
+            ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; } })),
+          ],
+          actions: [{ label: "Cancel" }, { label: app ? "Next…" : "Export", kind: "primary", run: () => { going = true; } }],
+          onClose: () => done(going),
+        });
+        [...document.querySelectorAll(".dialog-foot .btn.primary")].pop()?.focus();
       });
-      toast(h("span", {}, "Exported ", links.flatMap((link, index) => (index ? [", ", link] : [link]))), { icon: "check", seconds: 10 });
-      return result.files;
+      if (!go) return [];
+      formats = [chosen];
+    }
+    const note = toast(h("span.row", {}, h("span.spinner"), `Exporting ${named}…`), { seconds: 120 });
+    try {
+      const body = { file: this.file, document: this.document, formats, options, deliver: app ? "staged" : "download", ...(part ? { part } : {}) };
+      const response = await fetch(this.workspace.url("/api/export"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `${response.status} ${response.statusText}`);
+      if (app) {
+        const made = await response.json();
+        note.remove();
+        const saved = await app.save_export({ ...made, file: this.file });
+        if (saved?.error) throw new Error(saved.error);
+        if (!saved?.path) return [];
+        const show = h("a", { href: "#", onclick: (event) => { event.preventDefault(); app.show_in_finder(saved.path); } }, "Show in Finder");
+        toast(h("span.row", {}, `Exported “${saved.path.split("/").pop()}”`, show), { icon: "check", seconds: 10 });
+        return [saved.path];
+      }
+      const said = response.headers.get("Content-Disposition") || "";
+      const name = decodeURIComponent(said.match(/filename\*=UTF-8''([^;]+)/)?.[1] || "") || "export";
+      const link = h("a", { href: URL.createObjectURL(await response.blob()), download: name });
+      note.remove();
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+      toast(`Exported “${name}”`, { icon: "check", seconds: 4 });
+      return [name];
     } catch (error) {
       note.remove();
       toast(`Export failed: ${error.message}`, { kind: "error", icon: "error", seconds: 8 });

@@ -270,22 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             doc = workspace.new(name, data.get("kind", ""), data.get("data"))
             self._json({"file": doc.name})
         elif route == "/api/export":
-            doc = workspace.open(name)
-            document = data.get("document", doc.document)
-            formats = list(data.get("formats") or [])
-            # One part of the document, exported by itself (a figure on a slide).
-            part = data.get("part")
-            if part is not None and getattr(doc.kind, "export_part", None) is None:
-                self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
-                return
-            with workspace.drawing, workspace.running():
-                if part is not None:
-                    written = doc.kind.export_part(
-                        document, doc.path.parent, doc.path.stem, part, formats
-                    )
-                else:
-                    written = doc.kind.export(document, doc.path.parent, doc.path.stem, formats)
-            self._json({"files": [workspace.relative(file) for file in written]})
+            self._export(workspace.open(name), data)
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
             # connected, renamed): the kind answers with the document as it would be.
@@ -378,6 +363,85 @@ class Handler(BaseHTTPRequestHandler):
         target.write_bytes(data)
         return {"path": target.relative_to(self.workspace.path(name).parent).as_posix()}
 
+    def _export(self, doc: Any, data: dict[str, Any]) -> None:
+        """A document's outputs, written into ``build/`` beside it, as agents and the CLI
+        have them; or made aside, for the page to hand to its person (``deliver``):
+        ``"download"`` answers with the file itself, or a zip of several, and ``"staged"``
+        with where the file, or a folder of several, was made, for the Mac app to move
+        where its person says. ``options`` go to the kind's export as far as it takes
+        them (a deck's ``steps``)."""
+
+        import inspect
+        import shutil
+        import tempfile
+
+        workspace = self.workspace
+        document = data.get("document", doc.document)
+        formats = list(data.get("formats") or [])
+        deliver = data.get("deliver") or "build"
+        if deliver not in {"build", "download", "staged"}:
+            raise ValueError(f"An export is delivered to build, download or staged, not {deliver}.")
+        # One part of the document, exported by itself (a figure on a slide).
+        part = data.get("part")
+        write = doc.kind.export if part is None else getattr(doc.kind, "export_part", None)
+        if write is None:
+            self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
+            return
+        takes = inspect.signature(write).parameters
+        extra = {key: value for key, value in (data.get("options") or {}).items()
+                 if key in takes and key != "into"}
+        aside = None if deliver == "build" else Path(tempfile.mkdtemp(prefix="flexo-export-"))
+        into = aside / "files" if aside is not None else None
+        if into is not None and "into" in takes:
+            extra["into"] = into
+        given = (document, doc.path.parent, doc.path.stem, *([] if part is None else [part]))
+        try:
+            with workspace.drawing, workspace.running():
+                written = write(*given, formats, **extra)
+            if into is None:
+                self._json({"files": [workspace.relative(file) for file in written]})
+                return
+            if "into" not in takes:  # a kind that writes into build/ alone: its files, copied
+                into.mkdir(parents=True, exist_ok=True)
+                for file in written:
+                    shutil.copy2(file, into / Path(file).name)
+            made = _made(into, doc.path.stem)
+            if deliver == "staged":
+                self._json({"path": str(made), "name": made.name, "folder": made.is_dir()})
+                aside = None  # the Mac app moves it, and clears the rest away
+                return
+            self._attachment(made)
+        finally:
+            if aside is not None:
+                shutil.rmtree(aside, ignore_errors=True)
+
+    def _attachment(self, made: Path) -> None:
+        """A file made aside, as a download: itself, or a folder of several as a zip."""
+
+        import io
+        import zipfile
+
+        if made.is_dir():
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                for file in sorted(made.rglob("*")):
+                    if file.is_file():
+                        archive.write(file, file.relative_to(made).as_posix())
+            data, name, kind = buffer.getvalue(), f"{made.name}.zip", "application/zip"
+        else:
+            data, name = made.read_bytes(), made.name
+            kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        plain = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        disposition = f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name)}"
+        self.send_header("Content-Disposition", disposition)
+        self.end_headers()
+        self.wfile.write(data)
+
     def _raw(self, query: dict[str, list[str]]) -> None:
         """A file in the folder, named from a document's own folder (a picture a slide
         shows, an export to download)."""
@@ -443,9 +507,23 @@ def _one(query: dict[str, list[str]], key: str) -> str:
 
 
 def _person(data: dict[str, Any]) -> dict[str, Any]:
+    """Who made a call: the person (one in every window they have open), else the window."""
+
     who = data.get("who") or {}
-    client = str(data.get("client") or who.get("id") or "someone")
-    return {"id": client, "name": str(who.get("name") or "You"), "kind": "person"}
+    person = str(who.get("id") or data.get("client") or "someone")
+    return {"id": person, "name": str(who.get("name") or "You"), "kind": "person"}
+
+
+def _made(into: Path, stem: str) -> Path:
+    """What an export made in ``into`` comes to: its one file or folder, or, of several,
+    the folder holding them, named ``stem``."""
+
+    made = sorted(into.iterdir()) if into.is_dir() else []
+    if not made:
+        raise ValueError("Nothing was exported.")
+    if len(made) == 1:
+        return made[0]
+    return into.rename(into.with_name(stem))
 
 
 _AGENTS: dict[tuple[int, str], Any] = {}

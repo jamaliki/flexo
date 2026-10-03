@@ -228,9 +228,15 @@ class ThemeKind:
         return Drawing(pages, messages, files, info)
 
     def export(
-        self, document: dict[str, Any], base: Path, stem: str, formats: list[str]
+        self,
+        document: dict[str, Any],
+        base: Path,
+        stem: str,
+        formats: list[str],
+        *,
+        into: Path | None = None,
     ) -> list[Path]:
-        target = base / "build" / f"{stem}.yaml"
+        target = (into or base / "build") / f"{stem}.yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
         from flexo.theme_files import dump_theme
 

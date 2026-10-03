@@ -214,13 +214,25 @@ class FigureKind:
         return Drawing([page], [_message(item) for item in report.diagnostics], files, info)
 
     def export(
-        self, document: dict[str, Any], base: Path, stem: str, formats: list[str]
+        self,
+        document: dict[str, Any],
+        base: Path,
+        stem: str,
+        formats: list[str],
+        *,
+        into: Path | None = None,
     ) -> list[Path]:
         from flexo.export import build
 
         spec = parse(document["text"], base)
-        result = build(spec, base / "build", stem=stem, formats=tuple(formats))
-        return list(result.outputs.existing())
+        result = build(spec, into or base / "build", stem=stem, formats=tuple(formats))
+        written = list(result.outputs.existing())
+        if into is not None and "editable" not in formats and len(written) > 1:
+            # The editable SVG is written whatever is asked for: made aside, to be handed
+            # over, only what was asked for is.
+            result.outputs.editable_svg.unlink()
+            written.remove(result.outputs.editable_svg)
+        return written
 
 
 def _tones(spec) -> dict[str, Any]:

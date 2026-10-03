@@ -102,7 +102,9 @@ class Kind(Protocol):
         with many pages may draw that one first and leave others pending."""
 
     def export(self, document: Any, base: Path, stem: str, formats: list[str]) -> list[Path]:
-        """Write the document's outputs into ``base / "build"``; the files written."""
+        """Write the document's outputs into ``base / "build"``; the files written. A kind
+        may take ``into=``, a folder to write them in instead (the page's exports are made
+        aside and handed to its person), and options of its own (a deck's ``steps=``)."""
 
     # A kind may also offer, for agents and the activity list:
     #   dump(document) -> str and parse(text) -> document: the document as text
