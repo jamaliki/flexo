@@ -194,6 +194,15 @@ def test_pictures_beside_the_document_are_listed_and_uploaded(
     )
     assert json.loads(OPENER.open(request).read())["path"] == "assets/photo.png"
     assert (workspace.root / "assets" / "photo.png").read_bytes() == b"data"
+    # A file that is already beside the document, the same, is used where it is.
+    (workspace.root / "beside.png").write_bytes(b"same")
+    request = urllib.request.Request(
+        f"{base}/api/upload?file=figure.yaml&name=beside.png",
+        data=b"same",
+        headers={"X-Studio-Token": workspace.token},
+    )
+    assert json.loads(OPENER.open(request).read())["path"] == "beside.png"
+    assert not (workspace.root / "assets" / "beside.png").exists()
 
 
 # -- people and agents at once ------------------------------------------------------------

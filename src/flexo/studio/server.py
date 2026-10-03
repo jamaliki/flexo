@@ -364,6 +364,11 @@ class Handler(BaseHTTPRequestHandler):
         return {"files": found[:500]}
 
     def _upload(self, name: str, filename: str, data: bytes) -> dict[str, Any]:
+        # A file dropped from the document's own folder is used where it is, not copied.
+        beside = self.workspace.path(name).parent / Path(filename).name
+        if beside.is_file() and beside.read_bytes() == data:
+            self.workspace.relative(beside)
+            return {"path": beside.name}
         folder = self.workspace.path(name).parent / "assets"
         clean = (
             "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ").strip()
