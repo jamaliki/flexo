@@ -86,6 +86,7 @@ class Doc:
         self.exists = path.is_file()
         self.document = kind.load(path) if self.exists else kind.new(path)
         _bounded(self.document)
+        _shaped(kind, self.document)
         self.version = 1
         self.history: OrderedDict[int, str] = OrderedDict({1: _dumps(self.document)})
         self.saved = 1 if self.exists else 0
@@ -96,6 +97,9 @@ class Doc:
         self.disk_text = path.read_text(encoding="utf-8") if self.exists else None
         self.disk_stamp = _stamp(path)
         self.problem: str | None = None
+        self.held = False
+        """Whether the file on disk does not read (or is not a document its kind can show):
+        nothing is written over it until it reads again, so what is written there is kept."""
         self.depends: set[Path] = set()
         self.depend_stamps: dict[Path, float] = {}
 
@@ -110,6 +114,7 @@ class Doc:
                 "saved": self.saved,
                 "document": self.document,
                 "problem": self.problem,
+                "instance": self.workspace.instance,
             }
 
     def update(
@@ -118,6 +123,9 @@ class Doc:
         """Take a changed document made from version ``base``; return the version and
         document it became (merged with changes made since ``base``)."""
 
+        wrong = _malformed(self.kind, document)
+        if wrong:
+            raise ValueError(f"{wrong}, so nothing was changed")
         with self.lock:
             if base == self.version:
                 merged = document
@@ -148,11 +156,15 @@ class Doc:
 
     # -- the file --
 
-    def write(self) -> bool:
-        """Write the document if it has changed since last written; whether it did."""
+    def write(self, *, again: bool = False) -> bool:
+        """Write the document if it has changed since last written (``again``: or if its
+        file was moved or deleted); whether it did. A file that does not read is not
+        written over."""
 
         with self.lock:
-            if self.saved >= self.version:
+            if self.held:
+                return False
+            if self.saved >= self.version and (self.exists or not again):
                 return False
             self.path.parent.mkdir(parents=True, exist_ok=True)
             # Written beside the file and moved over it: a write cut short (a full disk,
@@ -178,7 +190,9 @@ class Doc:
             return True
 
     def reread(self) -> str | None:
-        """Take in the file if something else changed it; what happened, if anything."""
+        """Take in the file if something else changed it; what happened, if anything:
+        ``changed`` (taken in: the file reads), or ``problem`` (it does not read, or is
+        gone; ``problem`` says which)."""
 
         stamp = _stamp(self.path)
         if stamp == self.disk_stamp:
@@ -186,19 +200,36 @@ class Doc:
         with self.lock:
             self.disk_stamp = stamp
             if stamp == 0.0:
-                return None  # removed: keep what is open; saving writes it again
+                if not self.exists:
+                    return None
+                # Moved or deleted: kept open, and written again by the next edit or a save.
+                self.exists = False
+                self.held = False
+                self.problem = f"{self.name} was moved or deleted. Saving writes it again."
+                return "problem"
             try:
                 text = self.path.read_text(encoding="utf-8")
             except OSError:
                 return None
-            if text == self.disk_text:
+            returned = not self.exists
+            if text == self.disk_text and not returned:
                 return None
             try:
                 found = self.kind.load(self.path)
-            except Exception as error:  # a file half-written, or wrong: say so, keep ours
-                self.problem = f"{self.name} on disk does not read: {explain(error)}"
+                _bounded(found)
+                _shaped(self.kind, found)
+            except Exception as error:
+                # Half written, or wrong: said, and the studio's copy kept, but nothing
+                # written over the file until it reads again.
+                problem = f"{self.name} on disk does not read: {_unread(error, self.path.name)}"
                 self.disk_text = text
+                self.exists = True
+                self.held = True
+                if problem == self.problem:
+                    return None
+                self.problem = problem
                 return "problem"
+            self.held = False
             self.problem = None
             base = self.on_disk if self.on_disk is not None else self.document
             merged = merge3(base, self.document, found)
@@ -239,6 +270,9 @@ class Workspace:
         figure of its own: figures are made on slides). Any kind still opens."""
         self.default_kind = kind
         self.token = secrets.token_urlsafe(24)
+        self.instance = secrets.token_hex(6)
+        """This run of the studio: versions count afresh in each, so a page that last heard
+        from another takes the document in again."""
         self.lock = threading.RLock()
         self.docs: dict[str, Doc] = {}
         self.listeners: dict[str, Listener] = {}
@@ -410,8 +444,10 @@ class Workspace:
 
     def _write(self, doc: Doc) -> None:
         """Write one document; one that cannot be written says why on its page, and is
-        tried again later, while the others are written as usual."""
+        tried again later, while the others are written as usual. A change made to the
+        file meanwhile is taken in first, not written over."""
 
+        self.reread(doc)
         try:
             wrote = doc.write()
         except Exception as error:
@@ -521,10 +557,12 @@ class Workspace:
         with self.lock:
             if self.listeners.get(listener.client) is listener:
                 del self.listeners[listener.client]
-            if listener.client in self.presence and not any(
-                other.who.get("id") == listener.who.get("id") for other in self.listeners.values()
+            # Where a person is goes with their last window.
+            person = listener.who.get("id") or listener.client
+            if person in self.presence and not any(
+                other.who.get("id") == person for other in self.listeners.values()
             ):
-                del self.presence[listener.client]
+                del self.presence[person]
         self.broadcast({"type": "presence", "presence": self.present()})
 
     def broadcast(self, event: dict[str, Any]) -> None:
@@ -558,7 +596,7 @@ class Workspace:
                     "seconds": time.perf_counter() - started,
                     "messages": [
                         {
-                            "text": explain(error),
+                            "text": self.named(explain(error), doc),
                             "severity": "error",
                             "where": "",
                             "page": "",
@@ -589,9 +627,20 @@ class Workspace:
             "pages": pages,
             "info": drawing.info,
             "seconds": elapsed,
-            "messages": [asdict(message) for message in drawing.messages],
+            "messages": [
+                {**asdict(message), "text": self.named(message.text, doc)}
+                for message in drawing.messages
+            ],
             "unfinished": drawing.unfinished,
         }
+
+    def named(self, text: str, doc: Doc) -> str:
+        """Words that name a file by where it is on this machine, naming it from the
+        document's folder instead (as the document itself names it)."""
+
+        for folder in dict.fromkeys((doc.path.parent, self.root)):
+            text = text.replace(f"{folder}{os.sep}", "").replace(str(folder), "the folder")
+        return text
 
     def drawing_of(self, name: str, hints: dict[str, Any] | None = None) -> Any:
         """The document's current drawing, every page drawn (for an agent to look at)."""
@@ -616,12 +665,20 @@ class Workspace:
             except Exception:
                 traceback.print_exc()
 
+    def reread(self, doc: Doc) -> None:
+        """Take in a document's file if something else changed it, and tell the pages."""
+
+        happened = doc.reread()
+        if happened == "problem":
+            self.broadcast({"type": "problem", "file": doc.name, "text": doc.problem})
+        elif happened == "changed":
+            # The pages' word on the file -- saved, or a problem with it gone -- is current.
+            self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+
     def _step(self) -> None:
         now = time.monotonic()
         for doc in list(self.docs.values()):
-            happened = doc.reread()
-            if happened == "problem":
-                self.broadcast({"type": "problem", "file": doc.name, "text": doc.problem})
+            self.reread(doc)
             rested = now - doc.changed_at > QUIET or now - doc.unsaved_since > PATIENCE
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
@@ -704,6 +761,29 @@ def _bounded(document: Any, limit: int = SIZE_LIMIT) -> None:
             stack.extend(item.values())
         elif isinstance(item, list):
             stack.extend(item)
+
+
+def _malformed(kind: Kind, document: Any) -> str | None:
+    malformed = getattr(kind, "malformed", None)
+    return malformed(document) if malformed else None
+
+
+def _shaped(kind: Kind, document: Any) -> None:
+    """Refuse a document its kind's editor cannot show (a deck whose slides are a number)."""
+
+    wrong = _malformed(kind, document)
+    if wrong:
+        raise ValueError(wrong)
+
+
+def _unread(error: BaseException, name: str) -> str:
+    """Why a file does not read, in words that do not name it again."""
+
+    said = explain(error)
+    for lead in (f"{name}: ", f"{name}, "):
+        if said.startswith(lead):
+            return said[len(lead):]
+    return f"it {said[len(name) + 1:]}" if said.startswith(f"{name} ") else said
 
 
 def _reason(error: Exception) -> str:

@@ -1,22 +1,39 @@
 // Three-way merge of JSON documents: the page's copy of flexo/studio/merge.py.
-// merge3(base, ours, theirs) keeps what either side changed from base; where both
-// changed one thing differently, theirs wins.
+// merge3(base, ours, theirs) keeps what either side changed from base; words merge
+// line by line, then word by word; where both changed one thing differently, theirs wins.
 
 export function merge3(base, ours, theirs) {
   if (same(ours, theirs) || same(base, theirs)) return ours;
   if (same(base, ours)) return theirs;
   if (isMap(ours) && isMap(theirs)) return mergeMaps(isMap(base) ? base : {}, ours, theirs);
   if (Array.isArray(ours) && Array.isArray(theirs)) return mergeLists(Array.isArray(base) ? base : [], ours, theirs);
-  if (typeof ours === "string" && typeof theirs === "string" && typeof base === "string"
-      && (base.includes("\n") || ours.includes("\n") || theirs.includes("\n"))) {
-    return mergeLists(lines(base), lines(ours), lines(theirs)).join("");
-  }
+  if (typeof ours === "string" && typeof theirs === "string" && typeof base === "string") return mergeText(base, ours, theirs);
   return theirs;
 }
 
 const MISSING = Symbol("missing");
 const isMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const lines = (text) => text.match(/[^\n]*\n|[^\n]+$/g) || [];
+const WORDS = /[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu;
+
+// Two edits of words: line by line, and lines both changed word by word, so two people
+// typing in one field keep both their words. A single word (a name, a colour) is not
+// taken apart: where both changed it, theirs wins.
+export function mergeText(base, ours, theirs) {
+  if (ours === theirs || base === theirs) return ours;
+  if (base === ours) return theirs;
+  if (base.includes("\n") || ours.includes("\n") || theirs.includes("\n")) return diff3(lines(base), lines(ours), lines(theirs), linesChunk).join("");
+  return mergeWords(base, ours, theirs);
+}
+
+function mergeWords(base, ours, theirs) {
+  if (![base, ours, theirs].some((text) => /\s/.test(text))) return theirs;
+  const words = (text) => text.match(WORDS) || [];
+  return diff3(words(base), words(ours), words(theirs), wordsChunk).join("");
+}
+
+const linesChunk = (base, ours, theirs) => (base.length ? [mergeWords(base.join(""), ours.join(""), theirs.join(""))] : [...ours, ...theirs]);
+const wordsChunk = (base, ours, theirs) => (base.length ? [...theirs] : [...ours, ...theirs]);
 
 function mergeMaps(base, ours, theirs) {
   const result = {};
@@ -33,6 +50,12 @@ function mergeMaps(base, ours, theirs) {
 }
 
 export function mergeLists(base, ours, theirs) {
+  return diff3(base, ours, theirs, chunk);
+}
+
+// The items of base both sides kept hold the merge together; between them, the side
+// that changed something has it, and `both` settles what both sides changed.
+function diff3(base, ours, theirs, both) {
   const keysBase = base.map(key);
   const toOurs = matches(keysBase, ours.map(key));
   const toTheirs = matches(keysBase, theirs.map(key));
@@ -42,7 +65,10 @@ export function mergeLists(base, ours, theirs) {
   const result = [];
   let b = 0, o = 0, t = 0;
   for (const [ab, ao, at] of anchors) {
-    result.push(...chunk(base.slice(b, ab), ours.slice(o, ao), theirs.slice(t, at)));
+    const was = base.slice(b, ab), mine = ours.slice(o, ao), other = theirs.slice(t, at);
+    if (same(mine, was)) result.push(...other);
+    else if (same(other, was) || same(mine, other)) result.push(...mine);
+    else result.push(...both(was, mine, other));
     if (ab < base.length) result.push(ours[ao]);
     b = ab + 1; o = ao + 1; t = at + 1;
   }
@@ -50,8 +76,6 @@ export function mergeLists(base, ours, theirs) {
 }
 
 function chunk(base, ours, theirs) {
-  if (same(ours, base)) return [...theirs];
-  if (same(theirs, base) || same(ours, theirs)) return [...ours];
   if (!base.length) return [...ours, ...theirs];
   if (base.length === ours.length && ours.length === theirs.length) return base.map((was, i) => merge3(was, ours[i], theirs[i]));
   return [...theirs];

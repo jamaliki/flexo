@@ -68,3 +68,26 @@ def test_undo_is_a_merge_that_keeps_later_edits_by_others() -> None:
     after = deck({"title": "A, mine"}, {"title": "B"})
     now = deck({"title": "A, mine"}, {"title": "B, theirs"})
     assert merge3(after, now, before) == deck({"title": "A"}, {"title": "B, theirs"})
+
+
+def test_two_people_typing_in_one_line_keep_both_their_words() -> None:
+    base = deck({"title": "The pipeline"})
+    ours = deck({"title": "The pipeline by Alice"})
+    theirs = deck({"title": "Bob: The pipeline"})
+    assert merge3(base, ours, theirs)["slides"][0]["title"] == "Bob: The pipeline by Alice"
+    assert merge3("one two three", "one TWO three", "one two THREE") == "one TWO THREE"
+
+
+def test_the_same_words_changed_both_ways_go_to_the_newer_change() -> None:
+    assert merge3("one two three", "one TWO three", "one 2 three") == "one 2 three"
+    # One word alone (a name, a colour) is not taken apart.
+    assert merge3("terminal", "decision", "terminal2") == "terminal2"
+    assert merge3("#ff0000", "#00ff00", "#ff00aa") == "#ff00aa"
+
+
+def test_one_line_of_several_changed_by_both_merges_word_by_word() -> None:
+    base = "one\ntwo words here\nthree\n"
+    ours = "one\nfirst words here\nthree\n"
+    theirs = "one\ntwo words there\nthree\n"
+    assert merge3(base, ours, theirs) == "one\nfirst words there\nthree\n"
+    assert merge3("a\n", "b\n", "c\n") == "c\n"

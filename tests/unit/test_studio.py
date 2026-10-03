@@ -256,6 +256,158 @@ def test_a_file_on_disk_that_does_not_read_is_reported_and_ours_kept(tmp_path: P
         workspace.close()
 
 
+def test_a_file_on_disk_that_does_not_read_is_not_written_over(tmp_path: Path) -> None:
+    theme = tmp_path / "lab.yaml"
+    theme.write_text("theme: {name: lab, base: paper}\n", encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("lab.yaml")
+        listener = workspace.listen("page", PERSON)
+        broken = "theme: {name: lab, base: [\n"
+        theme.write_text(broken, encoding="utf-8")
+        wait_for(lambda: doc.held)
+        assert (doc.problem or "").startswith("lab.yaml on disk does not read: line ")
+        assert doc.problem.count("lab.yaml") == 1
+        # An edit made meanwhile is kept, and nothing is written over the file.
+        mine = {"theme": {"name": "lab", "base": "paper", "description": "mine"}}
+        doc.update(mine, doc.version, PERSON)
+        time.sleep(0.8)
+        workspace.flush()
+        assert theme.read_text(encoding="utf-8") == broken
+        # Mended on disk: what was written there and the edit made meanwhile, both, saved.
+        theme.write_text("theme: {name: lab, base: ink}\n", encoding="utf-8")
+        wait_for(lambda: "mine" in theme.read_text(encoding="utf-8"))
+        assert doc.document == {"theme": {"name": "lab", "base": "ink", "description": "mine"}}
+        assert doc.problem is None and not doc.held
+        said = [event["type"] for event in _drained(listener)]
+        said = [kind for kind in said if kind in {"problem", "saved"}]
+        assert said[0] == "problem" and said[-1] == "saved"  # the page hears the problem is gone
+    finally:
+        workspace.close()
+
+
+def test_a_change_on_disk_that_reads_tells_the_pages_the_file_is_saved(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        listener = workspace.listen("page", PERSON)
+        changed = NEW_FIGURE.replace("Encoder", "There")
+        (tmp_path / "figure.yaml").write_text(changed, encoding="utf-8")
+        wait_for(lambda: doc.version == 2)
+        wait_for(lambda: any(event["type"] == "saved" for event in _drained(listener)))
+        assert doc.saved == doc.version
+    finally:
+        workspace.close()
+
+
+def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) -> None:
+    figure = tmp_path / "figure.yaml"
+    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        figure.unlink()
+        wait_for(lambda: doc.problem is not None)
+        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.info()["problem"] == doc.problem  # a page opened now says so too
+        time.sleep(0.6)
+        assert not figure.exists()  # not put back behind its person's back
+        assert doc.write(again=True)
+        assert figure.read_text(encoding="utf-8") == NEW_FIGURE and doc.problem is None
+    finally:
+        workspace.close()
+
+
+def test_a_refused_call_ends_its_connection(served: tuple[str, Workspace]) -> None:
+    import socket
+
+    base, _ = served
+    port = int(base.rsplit(":", 1)[1])
+    body = json.dumps({"file": "figure.yaml", "base": 1, "document": {"text": "x"}}).encode()
+    refused = (
+        f"POST /api/update HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Studio-Token: wrong\r\n"
+        f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n"
+    ).encode() + body
+    after = f"GET /api/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Studio-Token: wrong\r\n\r\n"
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+        connection.sendall(refused + after.encode())
+        answer = b""
+        while chunk := connection.recv(65536):
+            answer += chunk
+    # Its body unread, it is not taken for a request of its own ("400 Bad request syntax").
+    assert answer.startswith(b"HTTP/1.1 403") and answer.count(b"HTTP/1.1") == 1
+
+
+def test_a_page_that_heard_from_an_earlier_studio_is_told_to_take_the_document_in(
+    served: tuple[str, Workspace],
+) -> None:
+    base, workspace = served
+    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    update = {"file": "figure.yaml", "base": 1, "document": document, "who": PERSON}
+    status, result = call(f"{base}/api/update", workspace.token, {**update, "instance": "before"})
+    assert status == 200 and result == {"restarted": True}
+    assert workspace.open("figure.yaml").version == 1
+    status, opened = call(f"{base}/api/open?file=figure.yaml", workspace.token)
+    assert opened["instance"] == workspace.instance
+    update["instance"] = workspace.instance
+    status, result = call(f"{base}/api/update", workspace.token, update)
+    assert status == 200 and result["version"] == 2
+
+
+def test_a_file_that_does_not_read_is_not_saved_over(served: tuple[str, Workspace]) -> None:
+    base, workspace = served
+    theme = workspace.root / "lab.yaml"
+    theme.write_text("theme: {name: lab, base: paper}\n", encoding="utf-8")
+    doc = workspace.open("lab.yaml")
+    theme.write_text("theme: [\n", encoding="utf-8")
+    status, answer = call(f"{base}/api/save", workspace.token, {"file": "lab.yaml"})
+    assert status == 409 and "does not read" in answer["error"] and doc.held
+    assert theme.read_text(encoding="utf-8") == "theme: [\n"
+
+
+def test_a_studio_started_again_on_its_port_keeps_its_token(tmp_path: Path) -> None:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    tokens = []
+    for folder in (tmp_path, tmp_path, tmp_path / "other"):
+        folder.mkdir(exist_ok=True)
+        server, workspace = start(folder, port=port, browser=False)
+        tokens.append(workspace.token)
+        workspace.close()
+        server.server_close()
+    # A page left open on it goes on working; another folder's studio is another matter.
+    assert tokens[0] == tokens[1] != tokens[2]
+
+
+def test_one_person_s_windows_are_one_person(served: tuple[str, Workspace]) -> None:
+    base, workspace = served
+    ada = {"id": "ada", "name": "Ada", "kind": "person"}
+    first, second = workspace.listen("window-1", ada), workspace.listen("window-2", ada)
+    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    update = {"file": "figure.yaml", "base": 1, "document": document, "client": "window-1",
+              "who": {"id": "ada", "name": "Ada"}}
+    assert call(f"{base}/api/update", workspace.token, update)[0] == 200
+    (event,) = [event for event in _drained(second) if event["type"] == "doc"]
+    # The person made it, from the window that knows it as its own.
+    assert event["who"]["id"] == "ada" and event["client"] == "window-1"
+    workspace.set_presence(ada, "figure.yaml", None, None)
+    workspace.leave(first)
+    assert [entry["who"]["id"] for entry in workspace.present()] == ["ada"]
+    workspace.leave(second)
+    assert workspace.present() == []
+
+
+def _drained(listener) -> list[dict]:
+    events = []
+    while not listener.events.empty():
+        events.append(listener.events.get())
+    return events
+
+
 def test_the_agent_tools_read_edit_and_look(tmp_path: Path) -> None:
     (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
@@ -762,6 +914,12 @@ def test_the_page_merges_as_the_server_does() -> None:
         ],
         [{"a": 1, "b": 2}, {"a": 1, "c": 3}, {"a": 5, "b": 2}],
         ["one\ntwo\nthree\n", "ONE\ntwo\nthree\n", "one\ntwo\nTHREE\n"],
+        ["The pipeline", "The pipeline by Alice", "Bob: The pipeline"],
+        ["one two three", "one TWO three", "one 2 three"],
+        ["terminal", "decision", "terminal2"],
+        ["one\ntwo words here\n", "one\nfirst words here\n", "one\ntwo words there\n"],
+        ["a\n", "b\n", "c\n"],
+        ["naïve café", "naïve café au lait", "très naïve café"],
         [
             {"s": [{"t": "A"}]},
             {"s": [{"t": "A"}, {"t": "Mine"}]},
@@ -791,6 +949,72 @@ def test_the_page_merges_as_the_server_does() -> None:
     merged, equal = json.loads(result.stdout)
     assert merged == [merge3(*case) for case in cases]
     assert equal == [True, True, False, False, False, False, False]
+
+
+FAKE_PAGE = """
+class Node {
+  constructor(tag) {
+    Object.assign(this, { tag, children: [], attributes: {}, style: {}, dataset: {} });
+  }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  getAttribute(key) { return this.attributes[key] ?? null; }
+  append(...children) { this.children.push(...children); }
+  appendChild(child) { this.children.push(child); return child; }
+  addEventListener() {}
+  remove() { this.removed = true; }
+}
+globalThis.Node = Node;
+globalThis.SVGElement = class extends Node {};
+globalThis.document = {
+  body: new Node("body"), documentElement: new Node("html"),
+  addEventListener() {}, querySelector() { return null; },
+  createElement: (tag) => new Node(tag), createElementNS: (_, tag) => new SVGElement(tag),
+  createTextNode: (text) => Object.assign(new Node("#text"), { text }),
+};
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_page_s_history_and_word_on_saving_are_its_own() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async (route, body) => (route === "/api/update"
+    ? { version: 2, document: body.document } : { pages: [], messages: [] }),
+};
+const info = { file: "a.yaml", version: 1, saved: 1, exists: true, document: { title: "A" } };
+const session = new Session(workspace, info);
+const wait = () => new Promise((done) => setTimeout(done, 50));
+const said = {};
+// A letter typed and taken away again did nothing: nothing for the history.
+session.change((d) => { d.title = "Ab"; }, { merge: "title" });
+session.change((d) => { d.title = "A"; }, { merge: "title" });
+said.typedAndDeleted = session.past.length;
+// Another person's edit, not yet written, is not this page saving.
+session.remote({ client: "other", version: 5, document: { title: "B" } });
+said.othersEdit = session.state;
+// A change put back elsewhere that cannot be: the history stays where it is.
+session.record({ label: "Edit Figure", apply: () => Promise.reject(new Error("changed")) });
+session.undo();
+await wait();
+said.failedUndo = [session.past.length, session.future.length];
+session.record({ label: "Edit Figure", apply: () => Promise.resolve() });
+session.undo();
+await wait();
+said.undone = [session.past.length, session.future.length];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == {
+        "typedAndDeleted": 0, "othersEdit": "saved", "failedUndo": [1, 0], "undone": [1, 1]
+    }
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")

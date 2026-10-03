@@ -84,6 +84,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if encoding:
             self.send_header("Content-Encoding", encoding)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -152,6 +154,9 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if not self._host_ok() or not self._token_ok(query):
+            # Its body is not read: the connection ends with the answer, so the body is
+            # not taken for the next request on it.
+            self.close_connection = True
             self._fail(HTTPStatus.FORBIDDEN, "missing or wrong studio token")
             return
         body = self._body()
@@ -223,7 +228,8 @@ class Handler(BaseHTTPRequestHandler):
             body, kind = pictures.shown(path)
             self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
-            self._events(_one(query, "client"), (query.get("name") or ["You"])[0])
+            name, person = (query.get("name") or ["You"])[0], (query.get("person") or [""])[0]
+            self._events(_one(query, "client"), name, person)
         elif route == "/api/themes":
             from flexo.studio import theming
 
@@ -249,7 +255,13 @@ class Handler(BaseHTTPRequestHandler):
         who = _person(data)
         if route == "/api/update":
             doc = workspace.open(name)
-            version, document = doc.update(data["document"], int(data["base"]), who, who["id"])
+            if data.get("instance") not in (None, workspace.instance):
+                # Made from a version of a studio since stopped: this one counts afresh.
+                self._json({"restarted": True})
+                return
+            # Told to the pages with the window it came from, so that window knows its own.
+            client = str(data.get("client") or who["id"])
+            version, document = doc.update(data["document"], int(data["base"]), who, client)
             self._json({"version": version, "document": document})
         elif route == "/api/draw":
             self._json(
@@ -263,7 +275,11 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif route == "/api/save":
             doc = workspace.open(name)
-            if doc.write():
+            workspace.reread(doc)
+            if doc.held:
+                self._fail(HTTPStatus.CONFLICT, doc.problem or f"{doc.name} on disk does not read")
+                return
+            if doc.write(again=True):
                 workspace.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
             self._json({"ok": True, "saved": doc.saved})
         elif route == "/api/new":
@@ -468,10 +484,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _events(self, client: str, name: str) -> None:
-        """Server-sent events: everything that happens in the workspace, as it happens."""
+    def _events(self, client: str, name: str, person: str = "") -> None:
+        """Server-sent events: everything that happens in the workspace, as it happens,
+        to one window (``client``) of a ``person``."""
 
-        who = {"id": client, "name": name, "kind": "person"}
+        who = {"id": person or client, "name": name, "kind": "person"}
         listener = self.workspace.listen(client, who)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -575,6 +592,10 @@ def start(
     workspace = Workspace(folder, kind=kind, trusted=trusted, offered=offered)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
     server = Server(("127.0.0.1", port), handler)
+    if port:
+        # On a port of its own choosing, a studio started again keeps its token: a page
+        # left open on it goes on where it was.
+        workspace.token = sessions.kept_token(folder, port, workspace.token)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]

@@ -4,17 +4,23 @@
 Mappings merge key by key; lists merge like lines of text (each side's
 insertions, removals, and edits kept where they do not touch, both sides'
 insertions at one place kept in order, an item both edited merged in turn);
-words over several lines merge line by line. Where both sides changed the same
-thing differently, ``theirs`` wins: the studio passes the newest change as
-``theirs``. ``static/studio/merge.js`` is the same algorithm for the page.
+words merge line by line, and within a line both changed, word by word. Where
+both sides changed the same thing differently, ``theirs`` wins: the studio
+passes the newest change as ``theirs``. ``static/studio/merge.js`` is the same
+algorithm for the page.
 """
 
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
 from typing import Any
 
 _MISSING = object()
+_LINES = re.compile(r"[^\n]*\n|[^\n]+")
+_WORDS = re.compile(r"\w+|\s+|[^\w\s]")
+_SPACE = re.compile(r"\s")
 
 
 def merge3(base: Any, ours: Any, theirs: Any) -> Any:
@@ -26,15 +32,42 @@ def merge3(base: Any, ours: Any, theirs: Any) -> Any:
         return _merge_dicts(base if isinstance(base, dict) else {}, ours, theirs)
     if isinstance(ours, list) and isinstance(theirs, list):
         return merge_lists(base if isinstance(base, list) else [], ours, theirs)
-    texts = isinstance(ours, str) and isinstance(theirs, str) and isinstance(base, str)
-    if texts and ("\n" in base or "\n" in ours or "\n" in theirs):
-        lines = merge_lists(
-            base.splitlines(keepends=True),
-            ours.splitlines(keepends=True),
-            theirs.splitlines(keepends=True),
-        )
-        return "".join(lines)
+    if isinstance(ours, str) and isinstance(theirs, str) and isinstance(base, str):
+        return merge_text(base, ours, theirs)
     return theirs
+
+
+def merge_text(base: str, ours: str, theirs: str) -> str:
+    """Two edits of words, merged as diff3 merges two edits of a file: line by line,
+    and lines both changed word by word, so two people typing in one field keep both
+    their words. Where both changed the same words differently, ``theirs`` wins; a
+    single word (a name, a colour, a file) is not taken apart."""
+
+    if ours == theirs or base == theirs:
+        return ours
+    if base == ours:
+        return theirs
+    if "\n" in base or "\n" in ours or "\n" in theirs:
+        lines = [_LINES.findall(text) for text in (base, ours, theirs)]
+        return "".join(_diff3(*lines, _lines_chunk))
+    return _merge_words(base, ours, theirs)
+
+
+def _merge_words(base: str, ours: str, theirs: str) -> str:
+    if not any(_SPACE.search(text) for text in (base, ours, theirs)):
+        return theirs
+    words = [_WORDS.findall(text) for text in (base, ours, theirs)]
+    return "".join(_diff3(*words, _words_chunk))
+
+
+def _lines_chunk(base: list, ours: list, theirs: list) -> list:
+    if not base:
+        return [*ours, *theirs]
+    return [_merge_words("".join(base), "".join(ours), "".join(theirs))]
+
+
+def _words_chunk(base: list, ours: list, theirs: list) -> list:
+    return [*ours, *theirs] if not base else list(theirs)
 
 
 def _merge_dicts(base: dict, ours: dict, theirs: dict) -> dict:
@@ -59,6 +92,13 @@ def _merge_dicts(base: dict, ours: dict, theirs: dict) -> dict:
 def merge_lists(base: list, ours: list, theirs: list) -> list:
     """Merge two edits of a list, as diff3 merges two edits of a file."""
 
+    return _diff3(base, ours, theirs, _chunk)
+
+
+def _diff3(base: list, ours: list, theirs: list, both: Callable[[list, list, list], list]) -> list:
+    """The items of ``base`` both sides kept hold the merge together; between them, the
+    side that changed something has it, and ``both`` settles what both sides changed."""
+
     keys_base = [_key(item) for item in base]
     to_ours = _matches(keys_base, [_key(item) for item in ours])
     to_theirs = _matches(keys_base, [_key(item) for item in theirs])
@@ -68,7 +108,13 @@ def merge_lists(base: list, ours: list, theirs: list) -> list:
         (i, to_ours[i], to_theirs[i]) for i in range(len(base)) if i in to_ours and i in to_theirs
     ]
     for ab, ao, at in [*anchors, (len(base), len(ours), len(theirs))]:
-        result.extend(_chunk(base[b:ab], ours[o:ao], theirs[t:at]))
+        was, mine, other = base[b:ab], ours[o:ao], theirs[t:at]
+        if _same(mine, was):
+            result.extend(other)
+        elif _same(other, was) or _same(mine, other):
+            result.extend(mine)
+        else:
+            result.extend(both(was, mine, other))
         if ab < len(base):
             result.append(ours[ao])
         b, o, t = ab + 1, ao + 1, at + 1
@@ -76,10 +122,6 @@ def merge_lists(base: list, ours: list, theirs: list) -> list:
 
 
 def _chunk(base: list, ours: list, theirs: list) -> list:
-    if _same(ours, base):
-        return list(theirs)
-    if _same(theirs, base) or _same(ours, theirs):
-        return list(ours)
     if not base:
         # Both inserted here: keep both.
         return [*ours, *theirs]

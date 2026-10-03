@@ -51,6 +51,8 @@ class Message:
     """The id of the page it concerns, when it concerns one."""
     code: str = ""
     """A stable name for the kind of message (``layout.width.grown``)."""
+    place: str = ""
+    """``where`` as a person says it (``Slide 4 · Picture``), for the page to show."""
 
 
 @dataclass(slots=True)
@@ -120,6 +122,9 @@ class Kind(Protocol):
     #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
     #       document: the theme a document is drawn in (a name, or a theme file named
     #       from its folder), read and set, so one theme can be put to use in many.
+    #   malformed(document) -> str | None: what makes a document one its editor cannot
+    #       show (a deck whose slides are a number), if anything: such a file is not
+    #       taken in (nor written over), and such an edit is refused.
 
 
 def kinds() -> dict[str, Kind]:

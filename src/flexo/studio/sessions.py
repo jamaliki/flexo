@@ -40,6 +40,25 @@ def register(root: Path, port: int, token: str) -> Path:
     return path
 
 
+def kept_token(root: Path, port: int, token: str) -> str:
+    """The token the studio on ``root`` and ``port`` had when it last ran, if one did, so
+    a page left open on it goes on working once it runs again; else ``token``, kept."""
+
+    folder = _folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(folder, 0o700)
+    path = folder / f"{_digest(root)}-{port}.token"
+    with contextlib.suppress(OSError):
+        kept = path.read_text(encoding="utf-8").strip()
+        if kept:
+            return kept
+    with contextlib.suppress(OSError):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(token)
+    return token
+
+
 def unregister(root: Path, port: int | None = None) -> None:
     """Take this process's studio on ``root`` (the one on ``port``, if given) off the list;
     another studio open on the same folder stays on it."""
