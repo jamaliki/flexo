@@ -120,6 +120,90 @@ def apply_to_data(
     }
 
 
+def mend(data: Any) -> bool:
+    """A figure as two edits of it were merged may name what neither kept: a line to a
+    shape one side deleted while the other drew it. Lines and nets to what is gone, and
+    names of it in groups, go -- and a group left holding nothing with them, as a
+    delete leaves none. Answers whether anything went."""
+
+    if not isinstance(data, dict):
+        return False
+    nodes = {str(node.get("id")) for node in data.get("nodes") or [] if isinstance(node, dict)}
+    groups = [group for group in data.get("groups") or [] if isinstance(group, dict)]
+    root = str((data.get("figure") or {}).get("root", "root"))
+    known = nodes | {str(group.get("id")) for group in groups} | {root}
+
+    def there(reference: object) -> bool:
+        reference = str(reference)
+        return reference in known or reference.rpartition(".")[0] in nodes
+
+    changed = False
+    for key in ("edges", "nets"):
+        lines = data.get(key)
+        if not isinstance(lines, list):
+            continue
+        kept = []
+        for line in lines:
+            if key == "edges":
+                if not isinstance(line, dict) or (
+                    there(line.get("from")) and there(line.get("to"))
+                ):
+                    kept.append(line)
+                continue
+            if not isinstance(line, dict):
+                kept.append(line)
+                continue
+            for side in ("sources", "targets"):
+                ends = line.get(side) or []
+                if all(there(end) for end in ends):
+                    continue
+                line[side] = [end for end in ends if there(end)]
+                changed = True
+            sources, targets = line.get("sources") or [], line.get("targets") or []
+            if not sources or not targets:
+                continue
+            # A fan-out left one target (a merge one source) is a line from one to the other.
+            if (line.get("kind") == "fan-out" and len(targets) < 2) or (
+                line.get("kind") == "merge" and len(sources) < 2
+            ):
+                edge = {"from": sources[0], "to": targets[0]}
+                edge.update({k: line[k] for k in ("label", "line", "role") if k in line})
+                data.setdefault("edges", []).append(edge)
+                changed = True
+                continue
+            kept.append(line)
+        if len(kept) != len(lines):
+            data[key] = kept
+            changed = True
+    for key in ("edges", "nets"):
+        if key in data and data[key] == []:
+            del data[key]
+    emptied = True
+    while emptied:
+        emptied = False
+        known = nodes | {str(group.get("id")) for group in groups} | {root}
+        for group in list(groups):
+            children = group.get("children")
+            if isinstance(children, list) and not all(str(child) in known for child in children):
+                group["children"] = [child for child in children if str(child) in known]
+                changed = True
+            layout = group.get("layout")
+            if isinstance(layout, dict) and isinstance(layout.get("placements"), list):
+                placements = [
+                    place
+                    for place in layout["placements"]
+                    if not isinstance(place, dict) or str(place.get("child")) in known
+                ]
+                if len(placements) != len(layout["placements"]):
+                    layout["placements"] = placements
+                    changed = True
+            if "children" in group and not group.get("children") and str(group.get("id")) != root:
+                groups.remove(group)
+                data["groups"] = groups
+                emptied = changed = True
+    return changed
+
+
 def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
     """The figure as its file writes it, for the page's inspector and outline: the
     figure's settings, nodes (with the ports each has), groups (the root among them,
@@ -714,12 +798,8 @@ class _Document:
             for edge in list(self.edges):
                 if {self.node_of(str(edge["from"])), self.node_of(str(edge["to"]))} & nodes:
                     self.edges.remove(edge)
-            for net in list(self.nets):
-                for side in ("sources", "targets"):
-                    kept = net.get(side) or []
-                    net[side] = [value for value in kept if self.node_of(str(value)) not in nodes]
-                if not net["sources"] or not net["targets"]:
-                    self.nets.remove(net)
+            # Its nets lose it; one left with a single end each way becomes a line.
+            mend(self.data)
         self._tidy()
         return []
 

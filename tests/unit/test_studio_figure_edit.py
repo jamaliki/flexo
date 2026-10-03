@@ -401,3 +401,49 @@ def test_a_word_yaml_could_read_as_a_flag_or_number_stays_a_word() -> None:
     for word in ("Yes", "no", "Off", "on", "12", "null"):
         action = {"do": "update", "target": {"type": "node", "id": "a"}, "values": {"label": word}}
         assert apply_to_data(data, action)["data"]["nodes"][0]["label"] == word
+
+
+def test_a_merge_that_keeps_a_line_to_a_shape_deleted_is_mended() -> None:
+    from flexo.studio.merge import merge3
+
+    base = {
+        "figure": {"id": "f"},
+        "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}],
+        "groups": [
+            {"id": "root", "layout": {"kind": "row"}, "children": ["a", "b", "d", "box"]},
+            {"id": "box", "layout": {"kind": "column"}, "children": ["c"]},
+        ],
+    }
+    # Here lines are drawn to c, and a fan-out to b and c; there, c is deleted.
+    ours = {
+        **base,
+        "edges": [{"from": "a", "to": "b"}, {"from": "d", "to": "c"}],
+        "nets": [{"id": "n", "kind": "fan-out", "sources": ["a"], "targets": ["b", "c"]}],
+    }
+    theirs = {
+        "figure": {"id": "f"},
+        "nodes": [{"id": "a"}, {"id": "b"}, {"id": "d"}],
+        "groups": [
+            {"id": "root", "layout": {"kind": "row"}, "children": ["a", "b", "d", "box"]},
+            {"id": "box", "layout": {"kind": "column"}, "children": []},
+        ],
+    }
+    merged = FigureKind().mended(merge3(base, ours, theirs))
+    # The line to c goes; the fan-out left one target is a line; the emptied group goes.
+    assert merged["edges"] == [{"from": "a", "to": "b"}, {"from": "a", "to": "b"}]
+    assert "nets" not in merged
+    assert [group["id"] for group in merged["groups"]] == ["root"]
+    assert merged["groups"][0]["children"] == ["a", "b", "d"]
+    compile_figure(parse(yaml.safe_dump(merged), Path.cwd()))
+
+
+def test_deleting_one_end_of_a_fan_out_of_two_leaves_a_line() -> None:
+    text = (
+        "figure: {id: f}\nnodes:\n- {id: a}\n- {id: b}\n- {id: c}\n"
+        "groups:\n- {id: root, layout: {kind: row}, children: [a, b, c]}\n"
+        "nets:\n- {id: n, kind: fan-out, sources: [a], targets: [b, c], label: splits}\n"
+    )
+    text, _ = edit(text, do="delete", ids=["c"])
+    assert "nets" not in data(text)
+    assert data(text)["edges"] == [{"from": "a", "to": "b", "label": "splits"}]
+    compile_figure(parse(text, Path.cwd()))

@@ -180,11 +180,18 @@ class Doc:
             else:
                 known = self.history.get(base)
                 start = json.loads(known) if known is not None else self.document
-                merged = merge3(start, self.document, document, notes)
+                merged = self._mended(merge3(start, self.document, document, notes))
             others = self.author_since(base, who)
             result = self._become(merged, who, client)
         self._tell(notes, who, client, others)
         return result
+
+    def _mended(self, merged: Any) -> Any:
+        """Two edits merged, put right by the kind where they meet badly (a line kept to a
+        shape the other side deleted): a kind that knows how has ``mended``."""
+
+        mend = getattr(self.kind, "mended", None)
+        return mend(merged) if mend is not None else merged
 
     def author_since(self, base: int, who: dict[str, Any]) -> dict[str, Any] | None:
         """Who other than ``who`` last changed the document since version ``base``."""
@@ -389,7 +396,7 @@ class Doc:
             self.problem = None
             base = self.on_disk if self.on_disk is not None else self.document
             notes: list = []
-            merged = merge3(base, self.document, found, notes)
+            merged = self._mended(merge3(base, self.document, found, notes))
             self.on_disk = found
             self.disk_text = text
             self.exists = True
