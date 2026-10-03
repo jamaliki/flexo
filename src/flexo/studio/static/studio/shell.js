@@ -81,7 +81,8 @@ export class Workspace {
     if (!person) { person = Math.random().toString(36).slice(2, 10); remember("person", person); }
     // Unnamed, a person is "You" to themselves and "Someone" to others (once, the name "You"
     // was given to everyone unnamed, so others were shown as "You" too).
-    const named = remembered("name", "");
+    // Else the name the Mac app gives (its account's), when it gives one.
+    const named = remembered("name", "") || new URLSearchParams(location.search).get("me") || "";
     this.me = { id: person, name: named === "You" ? "" : named, kind: "person" };
     selfId = person;
     this.sessions = new Map();
