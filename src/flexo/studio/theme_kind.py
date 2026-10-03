@@ -236,7 +236,8 @@ class ThemeKind:
         *,
         into: Path | None = None,
     ) -> list[Path]:
-        target = (into or base / "build") / f"{stem}.yaml"
+        # Never the theme's own name: exported beside it, it would replace it.
+        target = (into or base / "build") / f"{stem} (full).yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
         from flexo.theme_files import dump_theme
 

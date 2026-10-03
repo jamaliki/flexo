@@ -57,13 +57,13 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
-  studio.exports = [{ format: "pdf", label: "PDF" }, { format: "png", label: "PNG" }, { format: "editable", label: "Editable SVG" }];
+  studio.exports = [{ format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }, { format: "editable", label: "Editable SVG…" }];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
-    { icon: "export", label: "Editable SVG", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "PDF", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "image", label: "PNG", run: () => studio.exportFiles(["png"]) },
+    { icon: "export", label: "Editable SVG…", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "PDF…", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "image", label: "PNG…", run: () => studio.exportFiles(["png"]) },
     "-",
-    { icon: "export", label: "All Formats", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    { icon: "export", label: "All Formats…", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // -- the drawing's parts, edited --
@@ -464,8 +464,9 @@ export function mount(studio, main) {
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
     { icon: "right", label: "Connect Shapes", run: () => figure.toggleConnect(true) },
-    { icon: "export", label: "Export Editable SVG", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "Export PDF", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "export", label: "Export as Editable SVG…", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: "Export as PDF…", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select “${figure.nameOf(node.id)}”`, hint: node.id, run: () => figure.select([node.id]) })) : []),

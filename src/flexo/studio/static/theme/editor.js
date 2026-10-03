@@ -227,7 +227,8 @@ export function mount(studio, container) {
     } }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  studio.actions.append(ui.button("Export Full Theme", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting, including those from the base theme, to the build folder" }));
+  studio.exports = [{ format: "yaml", label: "Full Theme…" }];
+  studio.actions.append(ui.button("Export Full Theme…", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 
