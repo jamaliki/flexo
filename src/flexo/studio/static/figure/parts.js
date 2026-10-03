@@ -1259,7 +1259,7 @@ export function figureParts(host) {
     const original = words(item.label);
     // A label's words are names and maths, not prose: no spelling, no corrections.
     // Its format bar is the slide's words': the theme's colours too.
-    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), spelling: false });
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, spelling: false });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     const label = host.element(`${id}.label`);
@@ -1785,7 +1785,7 @@ export function figureParts(host) {
       case "markup": {
         // Return is done, as on the drawing (the words are chosen, ready to type over);
         // ⇧Return starts a new line.
-        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, colours: labelColours(), spelling: false, onInput: set });
+        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, colours: labelColours(), emphasis: false, spelling: false, onInput: set });
         control.area.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); control.area.select(); }
         });

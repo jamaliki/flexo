@@ -270,12 +270,14 @@ export const ui = {
   // Words in flexo markup: **strong**, *emphasis*, $maths$, `code`, [links](url), [colour]{accent}.
   // `colours`: the theme's ({ accent, accent2, muted, ink } as colours) offered in its format bar,
   // true for the studio's own as stand-ins, or false for none.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, key, spelling = true } = {}) {
+  // `emphasis: false` for words that set no bold or italic -- a figure's labels, which keep
+  // their asterisks -- leaves those tools out.
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, key, spelling = true } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
-      if (mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*", onInput); }
+      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
+      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*", onInput); }
       if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
       if (mod && event.key.toLowerCase() === "m") { event.preventDefault(); wrap(area, "$", "$", onInput); }
       // A field of one line (a shape's label) takes Return as done, as the label's editor on
@@ -290,8 +292,8 @@ export const ui = {
     const palette = colours === true ? { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)", ink: "var(--ink)" } : colours || {};
     const swatch = (name, title) => (palette[name] ? tool(h("span.rt-swatch", { style: { background: palette[name] } }), title, "[", `]{${name}}`) : null);
     const tools = h("div.markup-tools", {},
-      tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**"),
-      tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*"),
+      emphasis ? tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**") : null,
+      emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
       tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
       tool(h("span.tool-maths", {}, "∑"), "Equation (⌘M)", "$", "$"),
       tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
