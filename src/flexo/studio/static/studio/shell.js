@@ -55,7 +55,9 @@ function statusWords(session) {
   const problem = session.problem || "";
   // The file on disk does not read: "Not saved" only while edits made here wait for it.
   if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
-  return `Not saved: ${problem.replace(/^.*? could not be saved:\s*/, "")}`;
+  // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
+  const said = problem.replace(/^.*? could not be saved:\s*/, "");
+  return session.unsaved ? `Not saved: ${said}` : said.charAt(0).toUpperCase() + said.slice(1);
 }
 
 // Settled once every stylesheet the page has asked for has loaded (or a moment has
