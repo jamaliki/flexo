@@ -3132,10 +3132,16 @@ _RUNS_ON = re.compile(r"[_^]\w+$")
 
 
 def _grouped(items: list) -> str:
-    """Items in parentheses when an operation joins them (``(a + b)``, not ``(2)``)."""
+    """Items in parentheses when an operation joins them (``(a + b)``, not ``(2)``), or when
+    more than letters stand side by side (``1/(k₂[Z]₀)``, which would read as ``(1/k₂)[Z]₀``;
+    ``dp/dt`` as it is)."""
 
     said = " ".join(_linear(items).split())
-    return f"({said})" if " " in said or "/" in said else said
+    parts = [item for item in items if not isinstance(item, Space)]
+    plain = all(
+        isinstance(part, Sym) and (part.char.isalnum() or part.char in "!′") for part in parts
+    )
+    return f"({said})" if " " in said or "/" in said or (len(parts) > 1 and not plain) else said
 
 
 def _scripted_text(items: list, forms: dict[str, str], mark: str) -> str:

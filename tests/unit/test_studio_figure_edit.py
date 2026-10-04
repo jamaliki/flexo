@@ -535,3 +535,87 @@ def test_a_row_folded_to_fit_is_written_as_seen_and_only_the_part_moved_moves() 
     # Parts the figure no longer has (another's edit meanwhile) are not written over.
     with pytest.raises(EditError):
         apply(text, {"do": "arrange", "id": "root", "kind": "row", "lines": [["a", "b"], seen[1]]})
+
+
+def test_a_part_put_into_a_line_and_taken_out_at_once_leaves_the_line_as_it_was() -> None:
+    text = "figure:\n  id: f\nnodes:\n- id: a\n  label: A\n- id: b\n  label: B\n"
+    text += "edges:\n- from: a\n  to: b\n  label: 'yes'\n"
+    added = apply(text, {"do": "add", "kind": "text", "after": "a", "source": "a"})
+    (made,) = added["select"]
+    back = apply(added["text"], {"do": "delete", "ids": [made], "rejoin": True})
+    assert yaml.safe_load(back["text"]) == yaml.safe_load(text)
+    # Deleted as a person deletes it, its lines go with it.
+    gone = apply(added["text"], {"do": "delete", "ids": [made]})
+    assert "edges" not in yaml.safe_load(gone["text"])
+
+
+def test_a_branch_goes_on_a_line_of_its_own_beside_its_part_and_taken_out_leaves_the_file() -> None:
+    text = "figure:\n  id: f\nnodes:\n- id: start\n  label: Start\n- id: ask\n  kind: decision\n"
+    text += "  label: Ready?\n- id: go\n  label: Go\nedges:\n- from: start\n  to: ask\n"
+    text += "- from: ask\n  to: go\n  label: 'yes'\n"
+    # A decision's other outcome: beside it (the flow runs down), joined to it, not put
+    # into the line on to "Go".
+    first = apply(text, {"do": "add", "kind": "block", "after": "ask", "source": "ask",
+                         "line": "right", "of": "ask"})
+    (made,) = first["select"]
+    data = yaml.safe_load(first["text"])
+    groups = {group["id"]: group for group in data["groups"]}
+    pair = next(group for group in groups.values() if group["children"] == ["ask", made])
+    assert pair["layout"] == {"kind": "row", "align": "center"}
+    assert groups["root"]["children"] == ["start", pair["id"], "go"]
+    assert ("ask", "go") in edges(first["text"]) and ("ask", made) in edges(first["text"])
+    compile_figure(parse(first["text"], Path.cwd()))
+    # A third goes beside the second, not between the decision and it.
+    second = apply(first["text"], {"do": "add", "kind": "block", "after": "ask", "source": "ask",
+                                   "line": "below", "of": made})
+    (other,) = second["select"]
+    inner = [group for group in yaml.safe_load(second["text"])["groups"]
+             if group["children"] == [made, other]]
+    assert inner and inner[0]["layout"]["kind"] == "column"
+    # Taken out at once (left empty), each leaves the file as it was before it.
+    back = apply(second["text"], {"do": "delete", "ids": [other], "rejoin": True})
+    assert back["text"] == first["text"]
+    back = apply(first["text"], {"do": "delete", "ids": [made], "rejoin": True})
+    assert back["text"] == text
+    # Not joined to it, a shape goes beside its part all the same: never between two parts
+    # a line joins.
+    alone = apply(text, {"do": "add", "kind": "block", "after": "ask", "line": "right",
+                         "of": "ask"})
+    assert edges(alone["text"]) == edges(text)
+
+
+def test_activity_says_what_a_figure_edit_did_not_which_line_of_its_file() -> None:
+    kind = FigureKind()
+
+    def said(action: dict) -> list[str]:
+        after = apply(SAMPLE_FIGURE, action)["text"]
+        return [note["text"] for note in kind.describe({"text": SAMPLE_FIGURE}, {"text": after})]
+
+    # A part put into a line: added, the line it went into not said to be taken away.
+    assert said({"do": "add", "kind": "block", "after": "encoder", "source": "encoder",
+                 "node": {"label": "Cache"}}) == ["added “Cache”"]
+    assert said({"do": "update", "target": {"type": "node", "id": "encoder"},
+                 "values": {"label": "Big encoder"}}) == [
+        "renamed “Encoder” to “Big encoder”"]
+    assert said({"do": "delete", "ids": ["encoder"]}) == ["deleted “Encoder”"]
+    assert said({"do": "connect", "source": "x", "target": "y"})[0].startswith("connected ")
+    assert said({"do": "move", "id": "y", "parent": "root", "index": 0})[0].startswith("moved ")
+    # A file that does not read as a figure is said by its line, as before.
+    notes = kind.describe({"text": "a: [b"}, {"text": "a: [c"})
+    assert notes[0]["where"] == {"line": 1, "label": "line 1"}
+
+
+def test_a_line_to_a_shape_there_is_none_of_is_left_out_and_said() -> None:
+    from flexo.studio.figure_edit import mend
+
+    text = "figure:\n  id: f\nnodes:\n- id: a\n  label: A\n- id: b\n  label: B\nedges:\n"
+    text += "- from: a\n  to: b\n- from: b\n  to: nowhere\n"
+    drawing = FigureKind().draw({"text": text}, Path.cwd())
+    assert drawing.pages, "the rest of the figure is drawn"
+    assert [message.text for message in drawing.messages] == [
+        "A line to “nowhere” has no shape to go to."]
+    # Two edits merged: a line kept to a shape one deleted goes; one to a shape there never
+    # was is the person's to put right, and stays to be said.
+    data = yaml.safe_load(text)
+    assert not mend(data, before={"a", "b"}) and len(data["edges"]) == 2
+    assert mend(data, before={"a", "b", "nowhere"}) and len(data["edges"]) == 1

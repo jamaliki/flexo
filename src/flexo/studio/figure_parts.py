@@ -276,7 +276,16 @@ def _proteins() -> list[dict[str, Any]]:
                     "records",
                     row={"type": "domain", "label": "Domain", "start": "+60", "end": "+60"},
                     columns=[
-                        _column("type", "Type", "choice", options=kinds),
+                        # A site is at one residue (At); the rest run from Start to End.
+                        _column(
+                            "type",
+                            "Type",
+                            "choice",
+                            options=kinds,
+                            points=sorted(
+                                kind for kind, drawn in FEATURE_TYPES.items() if drawn == "site"
+                            ),
+                        ),
                         _column("label", "Label"),
                         _column("start", "Start", "integer"),
                         _column("end", "End", "integer"),

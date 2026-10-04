@@ -26,6 +26,19 @@ caption is words on the page, and words are not transparent (see
 ``CAPTION_KINDS``).
 """
 
+TITLED_KINDS = frozenset(
+    {"structure", "protein", "wellplate", "timeline", "construct", "tree", "cells"}
+)
+"""Kinds that set their name over their panel, across its top: a line attached to that
+side would run into the name, so none is (unless the author asks for it)."""
+
+
+def titled(spec) -> bool:
+    """Whether ``spec`` (a node) has its name set across its top."""
+
+    return spec.kind in TITLED_KINDS and bool(spec.label)
+
+
 CAPTION_KINDS = frozenset({"label", "text"})
 """Kinds that paint text and nothing else.
 
@@ -723,6 +736,11 @@ def intrinsic_node_size(
         natural = Size(label.width, label.height)
     elif node.kind == "text":
         natural = Size(label.width + style.padding_y.points, label.height + style.padding_y.points)
+        if not any(run.text.strip() for run in node.label):
+            # Words not written yet: room for a few, so it is somewhere to be seen and chosen
+            # (an editor shows what it is there, faintly), not a point.
+            size = style.typography.size.points
+            natural = Size(max(natural.width, 3.5 * size), max(natural.height, 1.6 * size))
     elif node.kind in {"spacer", "icon"}:
         natural = Size(0.0, 0.0)
     elif node.kind == "vector":

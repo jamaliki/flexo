@@ -462,9 +462,14 @@ class Handler(BaseHTTPRequestHandler):
         given = (document, doc.path.parent, doc.path.stem, *([] if part is None else [part]))
         try:
             with workspace.drawing, workspace.running():
+                # What the export left out and says so (a figure that can't be drawn, left an
+                # empty box): told to the page with what was made.
+                doc.kind.export_notes = []
                 written = write(*given, formats, **extra)
+                notes = [str(note) for note in getattr(doc.kind, "export_notes", None) or []]
             if into is None:
-                self._json({"files": [workspace.relative(file) for file in written]})
+                files = [workspace.relative(file) for file in written]
+                self._json({"files": files, "notes": notes})
                 return
             if "into" not in takes:  # a kind that writes into build/ alone: its files, copied
                 into.mkdir(parents=True, exist_ok=True)
@@ -472,15 +477,19 @@ class Handler(BaseHTTPRequestHandler):
                     shutil.copy2(file, into / Path(file).name)
             made = _made(into, doc.path.stem)
             if deliver == "staged":
-                self._json({"path": str(made), "name": made.name, "folder": made.is_dir()})
+                self._json(
+                    {"path": str(made), "name": made.name, "folder": made.is_dir(), "notes": notes}
+                )
                 aside = None  # the Mac app moves it, and clears the rest away
                 return
-            self._attachment(made, aside)
+            self._attachment(made, aside, notes)
         finally:
             if aside is not None:
                 shutil.rmtree(aside, ignore_errors=True)
 
-    def _attachment(self, made: Path, aside: Path | None = None) -> None:
+    def _attachment(
+        self, made: Path, aside: Path | None = None, notes: list[str] | None = None
+    ) -> None:
         """A file made aside, as a download: itself, or a folder of several as a zip. Read,
         what was made `aside` is cleared away before it is sent, so nothing is left once the
         download has come."""
@@ -509,6 +518,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         disposition = f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name)}"
         self.send_header("Content-Disposition", disposition)
+        if notes:
+            self.send_header("X-Flexo-Notes", quote(json.dumps(notes)))
         self.end_headers()
         self.wfile.write(data)
 

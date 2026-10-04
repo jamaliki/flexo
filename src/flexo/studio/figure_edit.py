@@ -106,6 +106,35 @@ def apply(
     return {"text": result, "select": list(select)}
 
 
+def astray(data: Any) -> list[str]:
+    """Lines written to (or from) a shape the figure has none of -- ``to: nowhere``, a name
+    mistyped -- taken out of ``data`` so the rest of it can be drawn: each said, as
+    "A line to “nowhere” has no shape to go to."."""
+
+    if not isinstance(data, dict) or not isinstance(data.get("edges"), list):
+        return []
+    nodes = {str(node.get("id")) for node in data.get("nodes") or [] if isinstance(node, dict)}
+
+    def there(reference: object) -> bool:
+        reference = str(reference)
+        return reference in nodes or reference.rpartition(".")[0] in nodes
+
+    said, kept = [], []
+    for edge in data["edges"]:
+        if not isinstance(edge, dict) or ("from" not in edge or "to" not in edge):
+            kept.append(edge)
+            continue
+        if not there(edge["to"]):
+            said.append(f"A line to \u201c{edge['to']}\u201d has no shape to go to.")
+        elif not there(edge["from"]):
+            said.append(f"A line from \u201c{edge['from']}\u201d has no shape to start from.")
+        else:
+            kept.append(edge)
+    if said:
+        data["edges"] = kept
+    return said
+
+
 def apply_to_data(
     data: Mapping[str, Any], action: Mapping[str, Any], *, base: Path | None = None
 ) -> dict[str, Any]:
@@ -123,11 +152,15 @@ def apply_to_data(
     }
 
 
-def mend(data: Any) -> bool:
+def mend(data: Any, before: set[str] | None = None) -> bool:
     """A figure as two edits of it were merged may name what neither kept: a line to a
     shape one side deleted while the other drew it. Lines and nets to what is gone, and
     names of it in groups, go -- and a group left holding nothing with them, as a
-    delete leaves none. Answers whether anything went."""
+    delete leaves none. Answers whether anything went.
+
+    ``before``, the shapes there were before the edits: only a line to one of those is a
+    line to a shape gone. One written to a shape there never was (``to: nowhere``) is the
+    person's to put right, and stays: the drawing leaves it out and says so (``astray``)."""
 
     if not isinstance(data, dict):
         return False
@@ -138,7 +171,11 @@ def mend(data: Any) -> bool:
 
     def there(reference: object) -> bool:
         reference = str(reference)
-        return reference in known or reference.rpartition(".")[0] in nodes
+        if reference in known or reference.rpartition(".")[0] in nodes:
+            return True
+        # (Never there at all: kept, for the drawing to say.)
+        named = reference if "." not in reference else reference.rpartition(".")[0]
+        return before is not None and reference not in before and named not in before
 
     changed = False
     for key in ("edges", "nets"):
@@ -592,9 +629,14 @@ class _Document:
             item["properties"] = properties
         self.nodes.append(item)
         self.place(identifier, action.get("parent"), action.get("after"))
+        # A branch (``line``: a side, ``of``: the part or branch it goes beside) is put on a
+        # line of its own there: a decision's other outcome under it, never into the line
+        # between two parts.
+        branch = str(action["line"]) if action.get("line") else None
         if action.get("source"):
             source = str(action["source"])
-            line = self.onward(source, identifier) if action.get("splice", True) else None
+            spliced = action.get("splice", True) and not branch
+            line = self.onward(source, identifier) if spliced else None
             if line is None:
                 self.connect(source, identifier)
             else:
@@ -604,6 +646,8 @@ class _Document:
                 line["to"] = self.free_input(identifier)
                 self.data["edges"].append({"from": identifier, "to": onward})
                 self.spliced = True
+        if branch:
+            self.own_line(identifier, str(action.get("of") or action.get("after")), branch)
         return [identifier]
 
     def structure_label(self, label: object, source: object) -> str | None:
@@ -905,11 +949,25 @@ class _Document:
                 if net is None:
                     raise EditError(f"There's nothing named “{identifier}” to delete.")
                 self.nets.remove(net)
+        pair = None
+        if action.get("rejoin") and len(nodes) == 1:
+            # A part put into a line (an Add Shape that spliced it in) and taken out again at
+            # once: the line it was put into is joined up again as it was, its words with it.
+            (only,) = nodes
+            into = [edge for edge in self.edges if self.node_of(str(edge["to"])) == only]
+            out = [edge for edge in self.edges if self.node_of(str(edge["from"])) == only]
+            if len(into) == 1 and len(out) == 1 and self.node_of(str(into[0]["from"])) != only:
+                into[0]["to"] = out[0]["to"]
+                self.edges.remove(out[0])
+            # Put beside a part as a branch, the pair it made goes with it.
+            pair = self.holder(only)
         for identifier in nodes:
             node = self.node(identifier)
             if node is not None:
                 self.nodes.remove(node)
             self.detach(identifier)
+        if pair is not None:
+            self.unpair(pair)
         if nodes:
             for edge in list(self.edges):
                 if {self.node_of(str(edge["from"])), self.node_of(str(edge["to"]))} & nodes:
@@ -918,6 +976,37 @@ class _Document:
             mend(self.data)
         self._tidy()
         return []
+
+    def unpair(self, pair: dict[str, Any]) -> None:
+        """A branch's pair (a part and what was put on a line of its own beside it, laid out
+        only for that) left holding one: that one goes back where the pair was -- and a root
+        written only to hold the pair goes back to being implied, as the file had it."""
+
+        children = pair.get("children") or []
+        layout = pair.get("layout") or {}
+        made = layout.get("align") == "center" and set(layout) <= {"kind", "align"}
+        if pair.get("id") == self.root or pair.get("role") != "layout" or not made:
+            return
+        if len(children) != 1:
+            return
+        holder = self.holder(str(pair["id"]))
+        if holder is None:
+            return
+        at = holder["children"].index(pair["id"])
+        holder["children"][at] = children[0]
+        self.groups.remove(pair)
+        root = self.group(self.root)
+        others = [group for group in self.groups if group is not root]
+        implied = [str(node["id"]) for node in self.nodes]
+        if (
+            root is not None
+            and not others
+            and root.get("role") == "canvas"
+            and dict(root.get("layout") or {}) == {"kind": "column", "justify": "center"}
+            and [str(child) for child in root.get("children") or []] == implied
+            and set(root) == {"id", "children", "layout", "role"}
+        ):
+            self.groups.remove(root)
 
     def _tidy(self) -> None:
         emptied = True

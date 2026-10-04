@@ -59,3 +59,110 @@ def test_the_studio_writes_a_theme_over_the_words_it_read(tmp_path: Path) -> Non
     document["theme"]["name"] = "Lab look"
     ThemeKind().save(path, document, previous=THEME)
     assert path.read_text(encoding="utf-8") == THEME.replace('"Lab"', '"Lab look"')
+
+
+DECK = (
+    "# The lab meeting -- keep this comment\n"
+    "deck:\n"
+    "  id: talk\n"
+    "  theme: paper   # chosen by Kiarash\n"
+    "slides:\n"
+    "# --- opening ---\n"
+    '- title: "Making it fast"\n'
+    "  subtitle: 'What we found'\n"
+    "- title: The pipeline\n"
+    "  body:\n"
+    "  - bullets:\n"
+    "    - Generate   # step one\n"
+    "    - Design\n"
+    "  - figure:\n"
+    "      edges:\n"
+    "      - {from: start, to: check}\n"
+    "      - from: check\n"
+    "        label: 'yes'\n"
+    "# --- the middle ---\n"
+    "- body:\n"
+    '  - text: "First paragraph."   # Alice wrote this\n'
+    "  - text: Second paragraph.\n"
+    "  title: The question\n"
+    "# end of deck\n"
+)
+
+
+def moved(document: dict, at: int, to: int) -> dict:
+    import copy
+
+    changed = copy.deepcopy(document)
+    changed["slides"].insert(to, changed["slides"].pop(at))
+    return changed
+
+
+def test_a_slide_moved_takes_its_comments_and_quotes_and_an_undo_puts_the_file_back() -> None:
+    document = yaml.safe_load(DECK)
+    for at, to in [(1, 0), (2, 1), (1, 2), (0, 2)]:
+        written = rewrite(DECK, moved(document, at, to), fresh)
+        assert yaml.safe_load(written) == moved(document, at, to)
+        # Every comment once, each over the slide it was over; every quote kept.
+        for comment in [
+            "# --- the middle ---\n- body:",
+            "# Alice wrote this",
+            "# step one",
+            "'yes'",
+            '"Making it fast"',
+        ]:
+            assert written.count(comment) == 1, (at, to, comment)
+        assert written.endswith("# end of deck\n") and written.startswith("# The lab meeting")
+        assert rewrite(written, document, fresh) == DECK  # undone
+
+
+def test_a_slide_duplicated_or_deleted_and_undone_is_written_as_it_was() -> None:
+    import copy
+
+    document = yaml.safe_load(DECK)
+    twice = copy.deepcopy(document)
+    twice["slides"].insert(2, copy.deepcopy(twice["slides"][1]))
+    written = rewrite(DECK, twice, fresh)
+    assert yaml.safe_load(written) == twice and written.count("# step one") == 2
+    assert rewrite(written, document, fresh) == DECK
+    fewer = copy.deepcopy(document)
+    del fewer["slides"][1]
+    written = rewrite(DECK, fewer, fresh)
+    assert "# step one" not in written and "# --- the middle ---\n- body:" in written
+    assert rewrite(written, document, fresh) == DECK  # its deletion undone, its comments back
+
+
+def test_an_object_moved_in_a_slide_and_back_keeps_its_comment_and_quotes() -> None:
+    import copy
+
+    document = yaml.safe_load(DECK)
+    changed = copy.deepcopy(document)
+    body = changed["slides"][2]["body"]
+    body.insert(1, body.pop(0))
+    written = rewrite(DECK, changed, fresh)
+    assert '- text: "First paragraph."   # Alice wrote this' in written
+    assert rewrite(written, document, fresh) == DECK
+
+
+def test_new_words_are_plain_unless_yaml_or_their_person_quotes_them() -> None:
+    text = "slides:\n- title: ''\n  body:\n  - text: '**Bold** start'\n- title: \"The pipeline\"\n"
+    document = {
+        "slides": [{"title": "Mine", "body": [{"text": "Bold start"}]}, {"title": "The pipelines"}]
+    }
+    written = rewrite(text, document, fresh)
+    assert (
+        written
+        == 'slides:\n- title: Mine\n  body:\n  - text: Bold start\n- title: "The pipelines"\n'
+    )
+    # A word YAML would read otherwise (as the studio reads it, YAML 1.1) is quoted.
+    labels = rewrite(
+        "edges:\n- from: a  # first\n", {"edges": [{"from": "a", "label": "yes"}]}, fresh
+    )
+    assert labels == "edges:\n- from: a  # first\n  label: 'yes'\n"
+
+
+def test_a_comment_after_words_keeps_its_room_as_they_change() -> None:
+    text = "slides:\n- body:\n  - text: First   # Alice wrote this\n"
+    longer = {"slides": [{"body": [{"text": "First paragraph, longer"}]}]}
+    written = rewrite(text, longer, fresh)
+    assert "  - text: First paragraph, longer   # Alice wrote this\n" in written
+    assert rewrite(written, yaml.safe_load(text), fresh) == text

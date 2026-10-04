@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
@@ -296,7 +296,7 @@ export function mount(studio, main) {
         ? `${figure.nameOf(figure.nodeOfRef(line.sources?.[0] || ""))} → ${(line.targets || []).map((t) => figure.nameOf(figure.nodeOfRef(t))).join(", ")}`
         : figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
-      line.label && !figure.nameOf(line.id).includes(`“${plain(line.label)}”`) ? h("span.tree-id", {}, plain(line.label)) : null))
+      line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
       : h("div.empty.small", {}, "Select a shape, then click Connect."));
   }
 
@@ -501,8 +501,9 @@ export function mount(studio, main) {
         else if (figure.typeOf(message.where)) figure.select([message.where]);
       } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
-      // Where it is, by the name the part is shown by, not its ID.
-      h("div", {}, message.text, message.where ? h("div.where", {}, placeName(message.where)) : null))));
+      // Where it is, by the name the part is shown by, not its ID (the figure as a whole, not
+      // said: it is what is shown).
+      h("div", {}, message.text, message.where && placeName(message.where) !== "Figure" ? h("div.where", {}, placeName(message.where)) : null))));
     if (state.tab === "source") numbers();
   };
 
@@ -577,7 +578,7 @@ export function mount(studio, main) {
     { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
-    ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select “${figure.nameOf(node.id)}”`, hint: node.id, run: () => figure.select([node.id]) })) : []),
+    ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select ${inQuotes(figure.nameOf(node.id))}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];
 
   renderBar();

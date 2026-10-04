@@ -88,23 +88,30 @@ export function dropPlace(model, boxes, point, id) {
 // Well under a part in a row, and in line with its middle, with nothing else there (no
 // other part, no group it is not in): under that part, the two one over the other there --
 // in the row's own frame too, where it is taller than the part (beside a column), but not
-// under the first line of a row folded onto two, which is its second.
+// under the first line of a row folded onto two, which is its second. Under the last part
+// of a column, anywhere in the free space under it: under it, in its column.
 function underPart(model, groups, boxes, point, id, inside) {
   const holds = (box) => box && point.x >= box.left - 2 && point.x <= box.right + 2 && point.y >= box.top - 2 && point.y <= box.bottom + 2;
   for (const group of model.groups) {
-    if ((group.layout?.kind || "column") !== "row" || inside(group.id, id)) continue;
+    const way = group.layout?.kind || "column";
+    if ((way !== "row" && way !== "column") || inside(group.id, id)) continue;
+    // (Of a column, only its last part has free space under it.)
+    const lowest = way === "column" ? (group.children || []).filter((child) => child !== id && boxes.get(child))
+      .reduce((low, child) => (!low || boxes.get(child).bottom > boxes.get(low).bottom ? child : low), null) : null;
+    if (way === "column" && (!lowest || groups.has(lowest))) continue;
     // Within the row's frame, under a part only where the frame has room under it -- not in
     // a row folded onto two lines, where under a part of its first is one of its second
     // (the part dragged among them, from where it was).
     const frame = holds(boxes.get(group.id)) ? boxes.get(group.id) : null;
     const filled = (box) => [...boxes.entries()].some(([other, rect]) => !groups.has(other) && rect !== box
       && rect.top >= box.bottom - 1 && rect.top < frame.bottom && rect.left < box.right && rect.right > box.left);
-    for (const child of group.children || []) {
+    for (const child of way === "column" ? [lowest] : group.children || []) {
       const box = boxes.get(child);
       if (child === id || groups.has(child) || !box || (frame && filled(box))) continue;
       const span = (box.right - box.left) * 0.35, middle = (box.left + box.right) / 2;
       const below = point.y - box.bottom;
-      if (Math.abs(point.x - middle) > span || below < Math.max(UNDER, (box.bottom - box.top) * 0.6) || below > LINE) continue;
+      const least = way === "column" ? 4 : Math.max(UNDER, (box.bottom - box.top) * 0.6);
+      if (Math.abs(point.x - middle) > span || below < least || below > LINE) continue;
       const between = [...boxes.entries()].some(([other, rect]) => other !== child && other !== id && !inside(other, id)
         && (groups.has(other) ? other !== model.root && !inside(child, other) && holds(rect) : rect.top >= box.bottom && rect.top < point.y && rect.right > point.x && rect.left < point.x));
       if (!between) return { kind: "line", side: "below", of: child, parent: group.id, index: -1 };

@@ -161,6 +161,29 @@ def test_a_timeline_writes_its_times_and_stacks_its_spans() -> None:
     assert "induce" in ports
 
 
+def test_timeline_spans_that_only_touch_share_a_lane() -> None:
+    def lanes(spans: list[dict]) -> list[float]:
+        with flexo.Figure("assay") as figure:
+            figure.root.timeline("t", events=[{"at": 0}, {"at": 40}], spans=spans)
+        drawing = _drawing(figure, "t")
+        tops = {
+            shape.id: float(re.match(r"M\s*[-\d.]+[ ,]+([-\d.]+)", shape.d).group(1))
+            for shape in drawing.shapes
+            if re.search(r"\.span\d+$", shape.id)
+        }
+        return [round(tops[key], 1) for key in sorted(tops)]
+
+    # Lag, then the burst as it ends, then the plateau as that ends: one lane.
+    touching = [
+        {"start": 0, "end": 8, "label": "Lag"},
+        {"start": 8, "end": 14},
+        {"start": 14, "end": 40, "label": "Plateau"},
+    ]
+    assert len(set(lanes(touching))) == 1
+    # Spans that overlap are stacked.
+    assert len(set(lanes([{"start": 0, "end": 10}, {"start": 5, "end": 20}]))) == 2
+
+
 @pytest.mark.parametrize(
     ("make", "words"),
     [
@@ -497,3 +520,24 @@ def test_a_domain_s_name_is_inside_it_whenever_it_fits_and_its_domains_names_are
     assert set(names) == {"feature1", "feature2"}
     (first_y, first_size), (second_y, second_size) = names["feature1"], names["feature2"]
     assert first_y == pytest.approx(second_y) and first_size == second_size
+
+
+def test_short_domains_names_sit_near_them_in_rows_not_led_to_from_afar() -> None:
+    from flexo.builder import Figure
+
+    domains = [
+        {"type": "domain", "label": "Signal peptide", "start": 1, "end": 15},
+        {"type": "domain", "label": "Activation peptide", "start": 16, "end": 23},
+        {"type": "domain", "label": "Serine protease domain", "start": 24, "end": 247},
+    ]
+    with Figure("prss1") as figure:
+        figure.root.protein("p", 247, domains, label="PRSS1")
+    svg = compile_figure(figure.spec).document.text
+    # Each name too long for its domain is under it, on a row of its own where the one
+    # before it is in the way -- not pushed along and led back to by a line under the chain.
+    assert 'p.feature1.label.leader' not in svg and 'p.feature2.label.leader' not in svg
+    rows = {
+        name: float(y)
+        for name, y in re.findall(r'<text id="p\.(feature[12])\.label"[^>]* y="([\d.]+)"', svg)
+    }
+    assert rows["feature2"] > rows["feature1"]

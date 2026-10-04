@@ -431,6 +431,12 @@ def test_a_structure_is_named_for_what_its_file_holds_and_a_long_name_wraps(tmp_
         "TITLE     LAC REPRESSOR HIV GFP II DNA\n"
     )
     assert structure_caption(entry) == "Lac repressor HIV GFP II DNA (1LCD)"
+    # A long title is cut before the phrase the cut falls in: no "during" left hanging.
+    entry.write_text(
+        f"{'HEADER    HYDROLASE':<62}1GBT\n"
+        "TITLE     ACYL-ENZYME INTERMEDIATE DURING THE HYDROLYSIS OF A SUBSTRATE\n"
+    )
+    assert structure_caption(entry) == "Acyl-enzyme intermediate (1GBT)"
     assert structure_caption(tmp_path / "none.cif") is None
     # A name wider than its panel is set on two lines over it, not across its edges.
     with flexo.Figure("named") as figure:

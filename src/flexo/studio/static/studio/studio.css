@@ -245,7 +245,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .status.offline .dot, .tab-dot.offline { background: var(--warn); }
 .status.offline { color: var(--ink-2); }
 /* A document never read has nothing to edit, export or present (shell.js). */
-.docbar-slot[inert] { opacity: 0.4; }
+/* A document's tools it has nothing for (it does not read): dimmed as a disabled button is,
+   once -- not their own dimming again over the slot's. */
+.docbar-slot[inert] { opacity: 0.45; }
+.docbar-slot[inert] .btn:disabled { opacity: 1; }
 /* A document whose file does not read: why, and its words to put right, over its editor. */
 .unread-view { grid-row: 2; grid-column: 1; z-index: 20; min-height: 0; overflow: auto; background: var(--stage); display: grid; justify-items: center; align-content: start; padding: 6vh 24px 32px; }
 .unread-view[hidden] { display: none; }

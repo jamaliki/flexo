@@ -21,7 +21,18 @@ export function mount(studio, container) {
     document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/theme/editor.css" }));
   }
   const catalog = studio.catalog;
-  let specimen = { name: "figures" };
+  // Opened from a deck (Customise…, Edit Theme), shown on that deck; else on its sample figures.
+  const asked = () => {
+    const deck = studio.workspace.previewOn?.[studio.file];
+    if (deck) delete studio.workspace.previewOn[studio.file];
+    return deck && catalog.specimens?.some((item) => item.name === "slides") ? { name: "slides", deck } : null;
+  };
+  let specimen = asked() || { name: "figures" };
+  // Opened so again while open (its tab there already): shown on that deck now.
+  studio.on("activate", () => {
+    const next = asked();
+    if (next && next.deck !== specimen.deck) { specimen = next; pages = []; renderShowOn(); renderStage(); studio.requestDraw(0); }
+  });
   let pages = [];
   let messages = [];
   let effectiveKey = "";
@@ -217,7 +228,11 @@ export function mount(studio, container) {
     const cards = pages.map((page) => h(`figure.sample${page.stale ? ".stale" : ""}${figures ? "" : ".slide"}`, {},
       page.svg ? picture(page.svg, page.hash, { natural: figures }) : h("div.sample-wait", {}, h("div.spinner")),
       h("figcaption", {}, page.label)));
-    clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards : h("div.empty", {}, h("div.spinner"))));
+    // Nothing to show and why said (a deck that does not read): that, not a spinner for ever.
+    const said = !cards.length && messages.find((message) => message.severity === "error");
+    clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards
+      : said ? h("div.empty", {}, icon("warning"), h("span", {}, said.text)) : h("div.empty", {}, h("div.spinner"))));
+    if (said) { clear(note); return; }
     clear(note, messages.filter((m) => m.severity !== "note").map((message) => h(`div.message.${message.severity}`, {}, icon(message.severity === "error" ? "error" : "warning"), h("div", {}, message.text))));
   };
 

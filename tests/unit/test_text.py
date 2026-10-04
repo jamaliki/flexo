@@ -274,3 +274,20 @@ def test_an_emoji_sequence_is_one_cluster_so_one_face_draws_it_whole() -> None:
 
     joined = [cluster for cluster in _clusters("Hi 👩🏽‍🔬, 🇬🇧🇫🇷 and 1️⃣") if len(cluster) > 1]
     assert joined == ["👩🏽‍🔬", "🇬🇧", "🇫🇷", "1️⃣"]
+
+
+def test_a_sign_a_face_lacks_falls_back_alone_and_the_word_around_it_stays() -> None:
+    from flexo.text import font_stack
+
+    stack = font_stack(TypographyStyle(family="Liberation Sans", fallbacks=("DejaVu Sans",)))
+    if stack.face(400, False, 1).family != "DejaVu Sans":
+        pytest.skip("needs DejaVu Sans installed")
+    # Liberation Sans has no ⁺: that sign alone is set in DejaVu Sans, not "²⁺-dependent",
+    # which would be set wider than the words around it.
+    found = stack.segments("Ca²⁺-dependent autolysis", 400, False)
+    pieces = [(face.family, words) for face, words in found]
+    assert pieces == [
+        ("Liberation Sans", "Ca²"),
+        ("DejaVu Sans", "⁺"),
+        ("Liberation Sans", "-dependent autolysis"),
+    ]

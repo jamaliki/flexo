@@ -1,12 +1,14 @@
 // The studio's frame: open documents as tabs, who is here, what happened, the
 // assistant, and the command palette. A kind's editor fills a document's view.
 
-import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables, inQuotes } from "./ui.js";
 import { Session } from "./session.js";
 import { AssistantPanel } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
+// A new document's name, as a Mac app's: Untitled (Untitled 2, if that is taken).
+const UNTITLED = { deck: "Untitled.yaml", figure: "Untitled Figure.yaml", theme: "Untitled Theme.yaml" };
 // Each far from the others in hue, the first few most of all (they are given in the order
 // people come), and none near the blue of what is chosen here, which is one's own.
 const COLOURS = ["#e8590c", "#0ca678", "#d6336c", "#5c940d", "#ae3ec9", "#1098ad", "#f59f00", "#795548"];
@@ -65,6 +67,10 @@ function movedNote(workspace, text, moved) {
   return h("span", {}, text, " · ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); workspace.open(moved); } }, `Open ${moved}`));
 }
 
+// A document whose file does not read -- not since it was opened, or not now (broken while
+// open): shown the one way, the file's words to put right, its line chosen.
+const unreadable = (session) => Boolean(session?.unread || (session?.held && session?.source != null));
+
 // The word on a document's saving: what is true of it and its file, briefly.
 function statusWords(session) {
   const state = session.state;
@@ -73,7 +79,7 @@ function statusWords(session) {
   if (state === "offline") return session.unsaved ? "Not saved: can't reach the studio" : "Can't reach the studio";
   const problem = session.problem || "";
   // A document that never read: which file, whole -- why is said on the page under it.
-  if (session.unread) return /^Can't read [^:]+/.exec(problem)?.[0] || problem;
+  if (unreadable(session)) return /^Can't read [^:]+/.exec(problem)?.[0] || problem;
   // The file on disk does not read: "Not saved" only while edits made here wait for it.
   if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
   // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
@@ -193,9 +199,18 @@ export class Workspace {
     this.reportFocus(file, null);
   }
 
-  close(file) {
+  close(file, { asked = false } = {}) {
     const session = this.sessions.get(file);
     if (!session) return;
+    // Edits not yet saved -- the studio out of reach -- are not thrown away unasked: a sheet,
+    // as a Mac app's for a document with changes, its default keeping the tab open.
+    if (!asked && session.pendingLocal && session.state === "offline") {
+      const name = docName(file);
+      dialog({ title: `Close “${name}”?`,
+        body: [h("p.export-hint", {}, "This document has changes that couldn't be saved yet, as the studio can't be reached. Keep it open until the studio is back?")],
+        actions: [{ label: "Close and Lose Changes", run: () => this.close(file, { asked: true }) }, { label: "Keep Open", kind: "primary" }] });
+      return;
+    }
     session.push();
     session.emit("close");
     this.sessions.delete(file);
@@ -218,7 +233,7 @@ export class Workspace {
     if (!session || session.kind === kind) return;
     const place = this.order.indexOf(file), active = this.active === session;
     session.document = session.synced;
-    this.close(file);
+    this.close(file, { asked: true });
     try {
       await this.open(file, { activate: active });
       this.order.splice(this.order.indexOf(file), 1);
@@ -226,6 +241,28 @@ export class Workspace {
       this.remember();
       this.emit("status", this.sessions.get(file));
     } catch (error) { toast(`Could not open ${file}: ${error.message}`, { kind: "error", icon: "error" }); }
+  }
+
+  // Its file renamed as it was open (in the Finder, by an agent): the document follows it, as
+  // a Mac document does -- its tab, the window's title and the address name the file it is
+  // now, and its edits are saved there; no second tab, nothing written under the old name.
+  renamed(file, to) {
+    const session = this.sessions.get(file);
+    if (!session || this.sessions.has(to)) return;
+    this.sessions.delete(file);
+    session.file = to;
+    this.sessions.set(to, session);
+    this.order = this.order.map((name) => (name === file ? to : name));
+    session.notice?.remove();
+    session.exists = true;
+    session.told();
+    if (this.focused?.[0] === file) this.focused = [to, this.focused[1]];
+    if (this.active === session) {
+      history.replaceState(null, "", `?file=${encodeURIComponent(to)}`);
+      document.title = `${docName(to)} — Flexo Studio`;
+    }
+    this.remember();
+    this.emit("status", session);
   }
 
   remember() { remember(`tabs:${this.info.folder}`, JSON.stringify(this.order)); }
@@ -297,10 +334,19 @@ export class Workspace {
       try { hello = JSON.parse(message.data || "{}"); } catch { hello = {}; }
       if (Array.isArray(hello.presence)) { this.presence = hello.presence; give(this.presence); this.emit("presence"); }
       if (this.focused) this.reportFocus(...this.focused);
+      this.retryIn = 0;
       this.emit("online", true);
     });
     source.onerror = () => {
       this.emit("online", false);
+      // Tried again soon, then less and less often (half a second, a second, two... at most
+      // five): back quickly from a restart, not knocking twice a second while it is away.
+      if (this.source === source) {
+        source.close();
+        this.retryIn = Math.min(5000, Math.max(500, (this.retryIn || 250) * 2));
+        clearTimeout(this.retryTimer);
+        this.retryTimer = setTimeout(() => { if (this.source === source) this.connect(); }, this.retryIn);
+      }
       // Out of reach for more than a moment, who is here is not known: no one is shown, rather
       // than as they were last known, until the studio says again (its hello).
       clearTimeout(this.awayTimer);
@@ -337,6 +383,7 @@ export class Workspace {
         }
         break;
       case "reopened": this.reopen(event.file, event.kind); break;
+      case "renamed": this.renamed(event.file, event.to); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
       case "presence": this.presence = event.presence; give(this.presence); this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
@@ -441,6 +488,11 @@ export async function start() {
     const session = workspace.active;
     if (!session) return;
     if (ownUndo()) { document.execCommand(way); return; }
+    // Its file not reading, nothing is undone unseen behind the page that says so: said.
+    if (unreadable(session)) {
+      toast(`Can't ${way} while ${session.file.split("/").pop()} can't be read. Your changes wait here, saved once it reads.`, { icon: "info", seconds: 5 });
+      return;
+    }
     // An edit held for the studio while it is away (a figure's) is taken back first, and
     // made again first.
     if (way === "undo" && session.takeBack?.()) return;
@@ -484,13 +536,21 @@ export async function start() {
     };
     const rows = [];
     const ahead = session.future, back = session.past;
+    // Edits held for the studio while it is away (a figure's), as ⌘Z and ⇧⌘Z take them: the
+    // last made, first; the last taken back, above it.
+    const held = session.takeBackLabel?.(), again = session.putBackLabel?.();
+    const waiting = (text, undone) => h(`button.history-row${undone ? ".undone" : ".now"}`, { type: "button", onclick: go(() => travel(undone ? "redo" : "undo")),
+      title: undone ? "Redo it: it is saved when the studio is back" : "Undo it: it was not saved yet" },
+    h("span.history-mark"), h("span.history-text", {}, text), h("span.history-place", {}, "Waiting"));
+    if (again) rows.push(waiting(again, true));
+    if (held) rows.push(waiting(held, false));
     ahead.forEach((entry, index) => rows.push(row(entry, { undone: true, run: () => session.redo(ahead.length - index) })));
     const shown = 60;
     for (let index = back.length - 1; index >= Math.max(0, back.length - shown); index -= 1) {
-      rows.push(row(back[index], { now: index === back.length - 1, run: () => session.undo(back.length - 1 - index) }));
+      rows.push(row(back[index], { now: !held && index === back.length - 1, run: () => session.undo(back.length - 1 - index) }));
     }
     if (back.length > shown) rows.push(h("div.history-more", {}, `${back.length - shown} earlier ${back.length - shown === 1 ? "change" : "changes"} not shown`));
-    rows.push(h(`button.history-row.start${back.length ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
+    rows.push(h(`button.history-row.start${back.length || held ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
       h("span.history-mark"), h("span.history-text", {}, "Original")));
     popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
     // The keys start at where the document is now, not at the newest change undone.
@@ -522,7 +582,7 @@ export async function start() {
       case "redo": travel("redo"); break;
       case "history": if (session && !past.disabled) historyMenu(past, session); break;
       case "save":
-        if (session?.unread) { unread?.mend(); break; }
+        if (unreadable(session)) { unread?.mend(); break; }
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
@@ -538,7 +598,7 @@ export async function start() {
       case "palette": palette(workspace); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
-      case "new": askName(workspace, arg, { figure: "figure.yaml", deck: "talk.yaml", theme: "theme.yaml" }[arg] || "document.yaml"); break;
+      case "new": askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
       case "close-tab": if (session) workspace.close(session.file); break;
       case "agents": connectDialog(workspace); break;
       case "shortcuts": shortcutsDialog(); break;
@@ -643,15 +703,15 @@ export async function start() {
     // right in the sheet, which has its own).
     // (An edit held for the studio while it is away is what Undo takes back first.)
     const held = session.takeBackLabel?.(), again = session.putBackLabel?.();
-    undo.disabled = session.unread || (!session.past.length && !held);
-    redo.disabled = session.unread || (!session.future.length && !again);
-    past.disabled = session.unread || (!session.past.length && !session.future.length);
+    undo.disabled = unreadable(session) || (!session.past.length && !held);
+    redo.disabled = unreadable(session) || (!session.future.length && !again);
+    past.disabled = unreadable(session) || (!session.past.length && !session.future.length && !held && !again);
     const last = session.past[session.past.length - 1], next = session.future[session.future.length - 1];
     const what = (entry) => (entry && session.said(entry).text ? ` ${session.said(entry).text}` : "");
-    undo.title = `Undo${held ? ` “${held}”` : what(last)} (⌘Z)`;
-    redo.title = `Redo${again ? ` “${again}”` : what(next)} (⇧⌘Z)`;
+    undo.title = `Undo${held ? ` ${inQuotes(held)}` : what(last)} (⌘Z)`;
+    redo.title = `Redo${again ? ` ${inQuotes(again)}` : what(next)} (⇧⌘Z)`;
     const state = session.state;
-    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}${session.unread ? " unread" : ""}`;
+    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}${unreadable(session) ? " unread" : ""}`;
     const words = statusWords(session);
     status.title = state === "problem" ? session.problem || "" : state === "offline" && session.unsaved ? "Your changes are kept here, and saved when the studio is back." : "";
     const text = status.querySelector(".status-text");
@@ -661,7 +721,7 @@ export async function start() {
       fitDocbar();
     }
     // A document that has never read has nothing to edit, export or present.
-    for (const slot of [docLeft, docRight]) slot.inert = session.unread;
+    for (const slot of [docLeft, docRight]) slot.inert = unreadable(session);
     renderUnread(session);
   };
 
@@ -670,8 +730,8 @@ export async function start() {
   // it opens as soon as it reads).
   let unread = null;
   const renderUnread = (session) => {
-    unreadView.hidden = !session?.unread;
-    if (!session?.unread) { unread = null; return; }
+    unreadView.hidden = !unreadable(session);
+    if (!unreadable(session)) { unread = null; return; }
     if (unread?.session === session && unread.problem === session.problem && (unread.source === session.source || unread.edited)) return;
     const area = h("textarea.unread-source", { autocomplete: "off", "aria-label": `${session.file}, as written`, dataset: { ownUndo: "" } });
     area.spellcheck = false;
@@ -729,7 +789,8 @@ export async function start() {
     clear(unreadView, h("div.unread-inner", {},
       h("div.unread-head", {}, icon("warning"), h("h2", {}, `${session.file.split("/").pop()} can't be read`)),
       said,
-      h("p.unread-note", {}, `Nothing has been changed in the file. Put it right ${shown ? "here and save, or " : ""}in another app: it opens as soon as it reads.`),
+      // (Changes made here meanwhile wait here, saved once it reads: said so.)
+      h("p.unread-note", {}, `${session.pendingLocal ? "Your changes wait here, saved once it reads; nothing" : "Nothing"} has been changed in the file. Put it right ${shown ? "here and save, or " : ""}in another app: it opens as soon as it reads.`),
       shown ? area : null,
       shown ? h("div.unread-foot", {}, save) : null));
     unread = { session, problem: session.problem, source: session.source, area, edited: kept, mend };
@@ -761,9 +822,9 @@ export async function start() {
       h("h1", {}, "New Document"),
       h("p.lead", {}, "Create decks, figures and themes. You and any agents you invite can edit them at the same time."),
       h("div.start-cards", {},
-        card("deck", "Deck", "Slides for a talk, with live figures", "talk.yaml"),
-        card("figure", "Figure", "A diagram that is laid out automatically", "figure.yaml"),
-        card("theme", "Theme", "Fonts, colours and lines for decks and figures", "theme.yaml")),
+        card("deck", "Deck", "Slides for a talk, with live figures", UNTITLED.deck),
+        card("figure", "Figure", "A diagram that is laid out automatically", UNTITLED.figure),
+        card("theme", "Theme", "Fonts, colours and lines for decks and figures", UNTITLED.theme)),
       workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
         h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", { title: item.file }, docName(item.file)),
@@ -929,9 +990,9 @@ function newMenu(anchor, workspace) {
   menu(anchor, [
     { title: "New" },
     ...[
-      { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
-      { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
-      { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+      { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
+      { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), hint: [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · "), run: () => workspace.open(item.file) }))] : []),
   ]);
@@ -1000,7 +1061,7 @@ const SHORTCUTS = [
     ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
     ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["⇧ Click", "Choose One More Shape (or One Less)"], ["← → ↑ ↓", "Choose the Shape That Way"],
-    ["⌥ ← → ↑ ↓", "Move Back or On in Its Row or Column"], ["↩", "Edit Label"], ["⌫", "Delete Shape"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
+    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label"], ["⌫", "Delete Shape"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
   ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
@@ -1127,9 +1188,9 @@ export function palette(workspace) {
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
     ...[
-      { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", "talk.yaml"), kind: "deck" },
-      { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", "figure.yaml"), kind: "figure" },
-      { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", "theme.yaml"), kind: "theme" },
+      { icon: "deck", label: "New Deck", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      { icon: "figure", label: "New Figure", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
+      { icon: "theme", label: "New Theme", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     ...workspace.order.filter((file) => file !== session?.file).map((file) => ({ icon: "file", label: `Go to ${docName(file)}`, run: () => workspace.activate(file) })),
     ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),

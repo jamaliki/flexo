@@ -392,6 +392,12 @@ class FontStack:
             start = end + 1
             if not word or all(all(loaded[0].has(ch) for ch in cluster) for cluster in word):
                 continue
+            # Only a letter the primary face lacks (Vietnamese's) takes the word with it: a
+            # sign it lacks (the ⁺ of Ca²⁺-dependent) falls back alone, the word around it
+            # staying in the primary face, as wide as it is.
+            missing = [cluster for cluster in word if not all(loaded[0].has(ch) for ch in cluster)]
+            if not any(unicodedata.category(cluster[0])[0] in "LM" for cluster in missing):
+                continue
             scripts = {
                 unicodedata.name(cluster[0], "?").split()[0]
                 for cluster in word if unicodedata.category(cluster[0]).startswith("L")

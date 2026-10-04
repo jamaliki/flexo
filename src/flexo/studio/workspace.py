@@ -146,7 +146,9 @@ class Doc:
         """The words of a file that has not read, for its person to put right where the
         studio shows it (not a file too large to show)."""
 
-        text = self.disk_text if self.unread else None
+        # (Not read since opened, or not reading now: shown the same way, as one that does
+        # not read.)
+        text = self.disk_text if self.unread or self.held else None
         return text if text is not None and len(text) <= CLAIM_LIMIT else None
 
     def said(self) -> dict[str, Any]:
@@ -677,7 +679,9 @@ class Workspace:
                 break
             if file.suffix.lower() in DOCUMENT_SUFFIXES:
                 files.append(file)
-        for file in sorted(files):
+        # In the Finder's order: by name, capitals or not, numbers as numbers (Pathway before
+        # Pathway 2, before Pathway 10).
+        for file in sorted(files, key=lambda found: _finder_key(self.root, found)):
             try:
                 name = self.relative(file)
             except PermissionError:
@@ -1127,6 +1131,8 @@ class Workspace:
         """Take in a document's file if something else changed it, and tell the pages."""
 
         happened = doc.reread()
+        if happened == "problem" and self._follow_rename(doc):
+            return
         if happened == "problem":
             self.broadcast(doc.said())
             if doc.foreign:
@@ -1134,6 +1140,33 @@ class Workspace:
         elif happened == "changed":
             # The pages' word on the file -- saved, or a problem with it gone -- is current.
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+
+    def _follow_rename(self, doc: Doc) -> bool:
+        """A document whose file was renamed as it was open -- a file beside it of its words as
+        last read, word for word, by Finder or an agent -- follows it, as a Mac document does:
+        it is the new file from now on, its edits saved there, and its pages told (a
+        ``renamed`` event), never written again under its old name. Answers whether it did."""
+
+        moved = doc.moved
+        if not moved or doc.unread or doc.disk_text is None:
+            return False
+        path = self.path(moved)
+        # (The document's lock first, then the folder's, as a document takes them.)
+        with doc.lock, self.lock:
+            if moved in self.docs or _words(path) != doc.disk_text:
+                return False
+            old = doc.name
+            del self.docs[old]
+            doc.name, doc.path = moved, path
+            doc.exists, doc.held, doc.problem, doc.moved = True, False, None, None
+            doc.disk_stamp = _stamp(path)
+            self.docs[moved] = doc
+            for entry in self.presence.values():
+                if entry.get("file") == old:
+                    entry["file"] = moved
+        self.broadcast({"type": "renamed", "file": old, "to": moved})
+        self.broadcast({"type": "presence", "presence": self.present()})
+        return True
 
     def _step(self) -> None:
         now = time.monotonic()
@@ -1275,6 +1308,23 @@ def _stamp(path: Path) -> float:
         return path.stat().st_mtime_ns / 1e9
     except OSError:
         return 0.0
+
+
+def _finder_key(root: Path, file: Path) -> list[Any]:
+    """A file's place in a list as the Finder sorts one: folder by folder, each name without
+    its extension first, letters whatever their case, runs of digits by their value."""
+
+    try:
+        parts = file.relative_to(root).parts
+    except ValueError:
+        parts = file.parts
+    key: list[Any] = []
+    for at, part in enumerate(parts):
+        name = Path(part).stem if at == len(parts) - 1 else part
+        key.append([(0, int(run), "") if run.isdigit() else (1, 0, run.casefold())
+                    for run in re.findall(r"\d+|\D+", name)])
+        key.append(part.casefold())
+    return key
 
 
 @functools.cache

@@ -62,11 +62,16 @@
 .fig-page svg { display: block; }
 .fig-page [data-flexo-entity] { cursor: pointer; }
 
-.zoom { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 2px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 3px; z-index: 5; }
+/* At the top: notices come up from the foot of the window, and would cover it there. */
+.zoom { position: absolute; right: 14px; top: 14px; display: flex; gap: 2px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 3px; z-index: 5; }
 .zoom .value { min-width: 46px; text-align: center; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .fig-messages { position: absolute; left: 14px; bottom: 14px; right: 190px; max-height: 40%; overflow: auto; z-index: 5; }
 .fig-messages .message.link { cursor: pointer; }
-.fig-messages .where { font: 11px var(--mono); color: var(--ink-3); }
+.fig-messages .where { font: 11px var(--font); color: var(--ink-3); }
+/* Solid, in either light: the drawing does not show through the words over it. */
+.fig-messages .message { background-color: var(--raised); background-image: linear-gradient(var(--warn-soft), var(--warn-soft)); box-shadow: var(--shadow-1), 0 0 0 1px var(--line); }
+.fig-messages .message.error { background-image: linear-gradient(var(--error-soft), var(--error-soft)); }
+.fig-messages .message.note { background-image: linear-gradient(var(--sunken), var(--sunken)); }
 .fig-empty { color: var(--ink-3); display: grid; gap: 8px; justify-items: center; }
 .fig-page.flash { animation: flash 0.9s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px #d97757, var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }

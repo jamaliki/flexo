@@ -8,7 +8,7 @@
 // change, and only that: it is a merge too, so others' later edits stay.
 
 import { merge3, mergeAnswer, replay, same, stable } from "./merge.js";
-import { toast, h } from "./ui.js";
+import { toast, h, inQuotes } from "./ui.js";
 
 // Whether the studio answers, for the page as a whole: while it doesn't, one notice
 // says so (not a message for each edit), edits wait and drawings stay as they were;
@@ -57,6 +57,11 @@ function reached(workspace) {
 
 // A request that never reached the studio (fetch's own failure), not one it refused.
 const unreachable = (error) => error instanceof TypeError;
+
+// What an export left out, and says so (a figure that can't be drawn, left an empty box).
+function exportNotes(notes) {
+  for (const note of notes || []) toast(note, { icon: "info", seconds: 8 });
+}
 
 export class Session {
   constructor(workspace, info) {
@@ -147,7 +152,7 @@ export class Session {
     this.problem = text;
     this.held = held;
     this.unread = unread;
-    this.source = unread ? source : null;
+    this.source = unread || held ? source : null;
     this.emit("status");
     // It reads at last: there is something to draw, and this page's edits made meanwhile go.
     if (read) { this.requestDraw(0); this.schedulePush(); }
@@ -256,8 +261,8 @@ export class Session {
         }, (error) => {
           const verb = target === "before" ? "undo" : "redo";
           const why = unreachable(error) ? "Can't reach the studio." : error?.message || error;
-          const what = (this.said(entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
-          toast(`Couldn't ${verb} “${what}”. ${why}`, { kind: "error", icon: "error", seconds: 6 });
+          const what = inQuotes(this.said(entry).text || "Edit");
+          toast(`Couldn't ${verb} ${what}. ${why}`, { kind: "error", icon: "error", seconds: 6 });
           this.emit("status");
         });
       }
@@ -302,8 +307,8 @@ export class Session {
     // (Changed by this person, in another of their windows: said so, not as another's doing.)
     const name = mine ? "you" : who?.name || (who?.kind === "agent" ? "An agent" : "Someone else");
     const verb = target === "before" ? "undo" : "redo";
-    // Named as the history names it, quotation marks within it made single ones.
-    const named = (entry) => (this.said(entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
+    // Named as the history names it, in quotation marks: those within it alternating (inQuotes).
+    const named = (entry) => inQuotes(this.said(entry).text || "Edit");
     const what = named(steps[0].entry);
     const notes = steps.flatMap((step) => step.lost);
     // (Deleted only where objects went: words gone from about the change -- retyped, or a
@@ -311,10 +316,10 @@ export class Session {
     const did = notes.length && notes.every((note) => note.removed !== undefined) ? "deleted" : "changed";
     const more = steps.length - 1;
     const has = mine ? "have" : "has", where = mine ? " in another window" : "";
-    const words = some ? `Couldn't ${verb} all of “${what}”: ${name} ${has} ${did} some of it since${where}.`
-      : more === 1 ? `Couldn't ${verb} “${what}” or “${named(steps[1].entry)}”: ${name} ${has} ${did} what they changed since${where}.`
-          : more ? `Couldn't ${verb} “${what}” or the ${more} steps before it: ${name} ${has} ${did} what they changed since${where}.`
-            : `Couldn't ${verb} “${what}”: ${name} ${has} ${did} it since${where}.`;
+    const words = some ? `Couldn't ${verb} all of ${what}: ${name} ${has} ${did} some of it since${where}.`
+      : more === 1 ? `Couldn't ${verb} ${what} or ${named(steps[1].entry)}: ${name} ${has} ${did} what they changed since${where}.`
+          : more ? `Couldn't ${verb} ${what} or the ${more} steps before it: ${name} ${has} ${did} what they changed since${where}.`
+            : `Couldn't ${verb} ${what}: ${name} ${has} ${did} it since${where}.`;
     this.unmadeNote?.remove();
     this.unmadeNote = toast(words, { icon: "info", seconds: 6 });
   }
@@ -662,11 +667,11 @@ export class Session {
   folder() { return this.file.includes("/") ? this.file.slice(0, this.file.lastIndexOf("/") + 1) : ""; }
 
   // Export, as Keynote's File › Export To does. The kind's entry for a format (in
-  // `exports`) asks first, in a sheet, when it has anything to say -- its `hint`, what the
-  // file will be; `choose`, the formats to offer for it ([{ format, label }]); and
-  // `options`, settings its export takes ([{ name, label, value, onChange }], `onChange` to
-  // keep a setting for next time) -- so each of a
-  // deck's exports (PDF…, PowerPoint…, Images…) opens a sheet, as Keynote's each do. Then the Mac app's one save panel puts the file, or a folder of several,
+  // `exports`) asks first, in a sheet, when there is anything to choose -- `choose`, the
+  // formats to offer for it ([{ format, label }]); `options`, settings its export takes
+  // ([{ name, label, value, onChange }], `onChange` to keep a setting for next time) --
+  // its `hint` (what the file will be) said there too. With nothing to choose (a deck's
+  // PowerPoint, its PDF with no builds) it goes straight on, as Keynote does. Then the Mac app's one save panel puts the file, or a folder of several,
   // where its person says, or the browser downloads it (several files as a zip): nothing
   // is left beside the document. `part` exports one part of the document by itself (a
   // figure on a slide), if its kind can. Answers where it went, or [] if it did not.
@@ -676,7 +681,7 @@ export class Session {
     const entry = part || formats.length !== 1 ? null : this.exports.find((item) => item.format === formats[0]);
     const named = entry?.label?.replace(/…$/, "") || formats.join(", ").toUpperCase();
     const options = {};
-    if (entry?.hint || entry?.choose?.length || entry?.options?.length) {
+    if (entry?.choose?.length || entry?.options?.length) {
       let chosen = entry.format;
       for (const option of entry.options || []) options[option.name] = Boolean(option.value);
       const go = await new Promise((done) => {
@@ -709,6 +714,7 @@ export class Session {
         if (!saved?.path) return [];
         const show = h("a", { href: "#", onclick: (event) => { event.preventDefault(); app.show_in_finder(saved.path); } }, "Show in Finder");
         toast(h("span.row", {}, `Exported “${saved.path.split("/").pop()}”`, show), { icon: "check", seconds: 10 });
+        exportNotes(made.notes);
         return [saved.path];
       }
       const said = response.headers.get("Content-Disposition") || "";
@@ -720,6 +726,7 @@ export class Session {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 60000);
       toast(`Exported “${name}”`, { icon: "check", seconds: 4 });
+      try { exportNotes(JSON.parse(decodeURIComponent(response.headers.get("X-Flexo-Notes") || "[]"))); } catch { /* none to say */ }
       return [name];
     } catch (error) {
       note.remove();

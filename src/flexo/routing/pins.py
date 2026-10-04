@@ -13,7 +13,7 @@ import itertools
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
+from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance, titled
 from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -405,6 +405,7 @@ def plan_pins(
     _spread_operator_inputs(ends)
     _one_end_per_corner(ends, _straight_sides(fitted, members))
     _self_loops(fitted, members, ends)
+    _off_titles(ends, hints)
     by_side: dict[tuple[str, Side], dict[tuple[str, str, Side, bool], list[End]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -605,6 +606,28 @@ def _clear_approaches(
         choice = facing or [candidate for candidate in clear if candidate is not side.opposite]
         if choice:
             end.group = (end.group[0], end.group[1], choice[0], end.group[3])
+
+
+def _off_titles(ends: list[End], hints: dict[tuple[str, str], Side]) -> None:
+    """Move a pin off the top of a component whose name is set across it (a structure's,
+    a protein's): a line there would start in the name. The pin goes to the best other
+    side facing what it joins -- every end sharing it with it."""
+
+    moved: dict[tuple, Side] = {}
+    for end in ends:
+        assert end.group is not None
+        spec = end.node.measured.spec
+        if end.group[2] is not Side.NORTH or not titled(spec):
+            continue
+        if end.fixed or (spec.id, end.reference.port_name) in hints:
+            continue
+        if end.group not in moved:
+            ranked = _facing_sides(end.node.bounds, end.counterpart, Side.EAST)
+            moved[end.group] = next(side for side in ranked if side is not Side.NORTH)
+    for end in ends:
+        assert end.group is not None
+        if end.group in moved:
+            end.group = (end.group[0], end.group[1], moved[end.group], end.group[3])
 
 
 def _approach_clear(bounds: Rect, side: Side, reach: float, boxes: list[Rect]) -> bool:

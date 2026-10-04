@@ -54,6 +54,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-inline.in-place:not(.words-chosen) .markup-tools { opacity: 0; visibility: hidden; pointer-events: none; }
 /* A part added, standing where it will be drawn until it is, in the look of the one before. */
 .fig-standing { position: absolute; z-index: 19; pointer-events: none; box-sizing: border-box; border: 1.5px solid var(--line-strong); border-radius: 6px; background: var(--raised); animation: fig-stand 0.12s ease-out; }
+/* Words with no shape of their own (a Text): no shape stands for them. */
+.fig-standing.bare { border-color: transparent; background: transparent; }
 /* Solid from its first frame: it grows into place, never fading in over what is beside it. */
 @keyframes fig-stand { from { transform: scale(0.94); } }
 /* Done with before its part is drawn, the words wait where they were typed. */

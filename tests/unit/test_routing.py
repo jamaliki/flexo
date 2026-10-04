@@ -1340,3 +1340,19 @@ def test_a_search_past_its_ceiling_gives_up_and_a_repair_trial_with_it() -> None
     finally:
         ceiling(None)
     assert compile_figure(vertical_slice()).document.text  # no ceiling: routed in full
+
+
+def test_a_line_never_leaves_from_over_a_name_set_across_a_panel_top(tmp_path) -> None:
+    # A structure named over its panel, the shape it feeds straight above it: its line
+    # leaves from a side, not from the top its name is set across.
+    with Figure("titled") as figure:
+        column = figure.root.column("stack")
+        column.block("above", label="Above")
+        column.structure("model", tmp_path / "missing.cif", width=60, height=40, label="A model")
+        figure.connect("model", "above")
+    compiled = compile_figure(figure.spec)
+    (edge,) = compiled.routed.edges
+    nodes = compiled.fitted.nodes
+    (box,) = [node.bounds for node in nodes if node.measured.spec.id.endswith("model")]
+    start = edge.centerline[0]
+    assert start.y > box.top + 1.0, (start, box)

@@ -237,12 +237,11 @@ class ThemeKind:
             try:
                 makers = provider.pages(name, base, hints)
             except Exception as error:
-                return Drawing(
-                    [],
-                    [Message(f"The {provider.title.lower()} could not be drawn: "
-                             f"{_explain(error)}", "error")],
-                    info=info,
+                # One that says it plainly (a deck that does not read) is said as it says it.
+                said = str(error) if getattr(error, "plain", False) else (
+                    f"The {provider.title.lower()} could not be drawn: {_explain(error)}"
                 )
+                return Drawing([], [Message(said, "error")], info=info)
         pages: list[Page] = []
         started = time.perf_counter()
         drew = False

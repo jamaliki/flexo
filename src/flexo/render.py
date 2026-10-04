@@ -64,6 +64,13 @@ def render_node(
         return group
     if spec.kind in SHAPE_KINDS:
         _shape(group, node, style, palette)
+    elif spec.kind == "text" and not any(run.text.strip() for run in spec.label):
+        # Text with no words yet: an unseen box where they will go, to be pointed at.
+        bounds = node.bounds
+        element(
+            group, "rect", id=f"{spec.id}.body", x=bounds.x, y=bounds.y, width=bounds.width,
+            height=bounds.height, fill="none", stroke="none", pointer_events="all",
+        )
     elif spec.kind not in {"label", "spacer", "text"}:
         # Behind the body, so the box's own fill hides all but the ring.
         if spec.shadow:

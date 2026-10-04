@@ -317,6 +317,14 @@ _PLAIN = frozenset(
 )
 """Short words a name in capitals has that are English, not an acronym like DNA or HIV."""
 
+_JOINS = _PLAIN | frozenset(
+    {"ABOUT", "AFTER", "AGAINST", "AMONG", "BEFORE", "BETWEEN", "BOUND", "COMPLEXED", "DURING",
+     "ITS", "OVER", "THAT", "THEIR", "THROUGH", "UNDER", "UPON", "VERSUS", "VIA", "VS", "WHICH",
+     "WITHIN", "WITHOUT"}
+)
+"""Words a phrase of a name begins with (or that leave it hanging): a name cut short ends
+before the phrase the cut fell in, never on one of these."""
+
 ACRONYMS = frozenset(
     {"DNA", "RNA", "MRNA", "TRNA", "RRNA", "SSDNA", "DSDNA", "HIV", "SIV", "GFP", "YFP", "CFP",
      "RFP", "ATP", "ADP", "AMP", "GTP", "GDP", "NAD", "NADH", "NADP", "NADPH", "FAD", "FMN",
@@ -373,12 +381,18 @@ def structure_caption(path: Path) -> str | None:
         entry = stem
     if not name:
         return None
-    # Cut short between words.
+    # Cut short between words -- and before the phrase the cut fell in ("Acyl-enzyme
+    # intermediate", not "Acyl-enzyme intermediate during").
     if len(name) > NAMED:
         words = name[:NAMED + 1].split()[:-1] or [name[:NAMED]]
-        while len(words) > 1 and words[-1].upper() in _PLAIN:
+        joins = [
+            at for at, word in enumerate(words) if at > 0 and word.upper().strip(",;") in _JOINS
+        ]
+        if joins:
+            words = words[: joins[-1]]
+        while len(words) > 1 and words[-1].upper().strip(",;") in _JOINS:
             words.pop()
-        name = " ".join(words)
+        name = " ".join(words).rstrip(",;")
     if name.isupper():
         # In sentence case: a word in lower case, an acronym (DNA, HIV), a name with a digit
         # (E2, P53) or a Roman numeral (II) as written.

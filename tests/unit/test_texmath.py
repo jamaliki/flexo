@@ -516,6 +516,9 @@ def test_maths_in_bold_words_is_regular_all_of_it() -> None:
     ("source", "said"),
     [
         (r"\frac{a+b}{2}", "(a + b)/2"),
+        # A part of more than letters side by side is bracketed: 1/(k₂[Z]₀), not (1/k₂)[Z]₀.
+        (r"t_{1/2} \approx \frac{1}{k_2 [Z]_0}", "t_(1/2) \u2248 1/(k\u2082[Z]\u2080)"),
+        (r"\frac{dp}{dt}", "dp/dt"),
         (r"x^2 + y_i", "x² + y_i"),
         (r"[\mathrm{Na^+}]_{in}", "[Na⁺]_in"),
         # One rule for every script: digits and signs raised or lowered, words after a mark.
@@ -567,3 +570,38 @@ def test_a_degree_written_as_a_raised_ring_is_the_degree_sign_in_words_and_in_ma
     glyphs = [item for item in glyphs if isinstance(item, GlyphItem)]
     degree = next(item for item in glyphs if item.face.hb.glyph_to_string(item.gid) == "degree")
     assert degree.size == glyphs[0].size
+
+
+def test_the_studio_s_preview_reads_maths_as_the_pdf_and_powerpoint_do(tmp_path) -> None:
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from flexo.texmath import linear
+
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    source = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
+    text = source.read_text()
+    start = text.index("// -- maths, as words to read")
+    end = text.index("\n// ", text.index("export function mathWords", start))
+    maths = text[start:end]
+    (tmp_path / "maths.mjs").write_text(maths)
+    formulas = [
+        r"k_{cat}/K_m = 2\times10^{6}",
+        r"t_{1/2} \approx \frac{1}{k_2 [Z]_0} \ln\!\left(\frac{k_2 [Z]_0}{k_1 [E]}\right)",
+        r"e^{-m}(1+m)",
+        r"\frac{dp}{dt} = k_{\text{auto}}\,(1-p) - k_B p",
+        r"[\mathrm{Na^+}]_{in}",
+        r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+        r"\int_0^\infty e^{-x}\,dx",
+    ]
+    code = (
+        f"import {{ mathWords }} from {json.dumps((tmp_path / 'maths.mjs').as_uri())};\n"
+        f"console.log(JSON.stringify({json.dumps(formulas)}.map(mathWords)));\n"
+    )
+    command = ["node", "--input-type=module", "-e", code]
+    done = subprocess.run(command, capture_output=True, text=True, check=True)
+    # One rule wherever maths is read: the inspector's words are the PDF's and PowerPoint's.
+    assert json.loads(done.stdout) == [linear(formula) for formula in formulas]

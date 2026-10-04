@@ -190,8 +190,13 @@ export const ui = {
   // rather than wrapping raggedly at the right.
   field(label, control, { hint, inline } = {}) {
     const long = typeof label === "string" && typeof hint === "string" && label.length + hint.length > 40;
+    // Its control named by its label, for VoiceOver -- one in a box of its own (a number's
+    // steppers, a switch) or a group (segments) is not inside the label, so not named by it.
+    const id = typeof label === "string" && label ? `field-${++fieldCount}` : null;
+    const target = id && control?.nodeType === 1 ? (control.matches(NAMED) ? control : control.querySelector(NAMED)) : null;
+    if (target && !target.hasAttribute("aria-label") && !target.hasAttribute("aria-labelledby")) target.setAttribute("aria-labelledby", id);
     return h(`div.field${inline ? ".inline" : ""}`, {},
-      label ? h("label.label", {}, label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
+      label ? h("label.label", {}, id ? h("span", { id }, label) : label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
@@ -582,9 +587,10 @@ export const ui = {
   // Colours to choose from; `custom` adds one more, any colour, from the system's picker. A
   // row of them is one stop for Tab, as a segmented control is; the chosen one is ticked,
   // the one with the keys ringed with the focus's glow.
-  swatches({ value, colours, onChange, none = true, custom = false, key } = {}) {
+  swatches({ value, colours, onChange, none = true, noneTitle = "None", custom = false, key } = {}) {
     const node = h("div.swatches", { role: "radiogroup" });
-    const all = [...(none ? [{ value: null, colour: null, title: "None" }] : []), ...colours];
+    // `noneTitle`: what no colour of its own is ("Default", where it is the words' own colour).
+    const all = [...(none ? [{ value: null, colour: null, title: noneTitle }] : []), ...colours];
     const choose = (button, next) => {
       node.querySelectorAll(".swatch").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-checked", "false"); });
       button.classList.add("on");
@@ -817,6 +823,13 @@ export function menu(anchor, items, { align = "start", className = "" } = {}) {
   return place(node, anchor, align);
 }
 
+// What a field's label names: its control, or the group of them.
+const NAMED = "input:not([type=hidden]), select, textarea, button.select, [contenteditable=true], [role=radiogroup], [role=group], [role=slider]";
+let fieldCount = 0;
+// Where the pointer was last pressed: a menu's place when the button it was opened from is gone.
+let lastPress = null;
+if (typeof document !== "undefined") document.addEventListener?.("pointerdown", (event) => { lastPress = { x: event.clientX, y: event.clientY }; }, true);
+
 // Pop-up buttons: their menus are at least as wide as they are, as a Mac's are.
 const POPUPS = ".select, .palette-pick, .type-pick, .theme-card.compact, .combo";
 // Room enough under a button for a menu to scroll there, rather than open over it.
@@ -829,6 +842,9 @@ const ROOM = 240;
 // menu at a point (a context menu) opens there and moves up as far as it must to show every
 // item, as on a Mac; only one taller than the window scrolls.
 function place(node, anchor, align) {
+  // A button gone (drawn again by what its click did) has no place: the menu opens where the
+  // press was, never in the window's corner.
+  if (anchor.getBoundingClientRect && !anchor.isConnected) anchor = lastPress || { x: innerWidth / 2, y: innerHeight / 3 };
   const point = !anchor.getBoundingClientRect;
   if (point) node.style.maxHeight = `${innerHeight - 16}px`;
   else if (anchor.matches?.(POPUPS)) node.style.minWidth = `${anchor.getBoundingClientRect().width}px`;
@@ -1095,29 +1111,48 @@ const SUP = { 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶",
 const ALPHABET = { mathcal: [0x1d49c, { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ" }],
   mathbb: [0x1d538, { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" }] };
 
-// A script Unicode cannot set keeps its mark: a power in brackets (e^(−x²/2)), a word
-// lowered as it is (x_eff), and one letter lowered reads as itself beside what it is on
-// (pθ, not p_θ). The marks kept are held aside (\u0005, \u0006) until the end, so they are
-// not read again as scripts.
+// A script read by one rule wherever one is read (flexo.texmath.scripted, which the PDF and
+// the PowerPoint read by): digits and signs raised or lowered in Unicode (x², k₁, M⁻¹),
+// anything else after its mark (k_cat, x^T), in brackets where it is more than a word
+// (e^(−x)). The marks are held aside (\u0005, \u0006) until the end, so they are not read
+// again as scripts.
+const FIGURES = new Set([..."0123456789+-−=()"]);
 function script(text, table, mark) {
-  const chars = [...text];
-  if (chars.every((ch) => ch in table)) return chars.map((ch) => table[ch]).join("");
-  if (mark === "_") return chars.length === 1 ? text : `\u0005${text}`;
-  return `\u0006${chars.length > 1 ? `(${text})` : text}`;
+  const chars = [...text.trim()];
+  if (chars.length && chars.every((ch) => FIGURES.has(ch))) return chars.map((ch) => table[ch === "−" ? "-" : ch]).join("");
+  const word = chars.join("");
+  // (\u0008: where it ends, for a letter after it to be kept apart: k_B p, not k_Bp.)
+  return `${mark === "_" ? "\u0005" : "\u0006"}${chars.length > 1 && !/^[\p{L}\p{N}]+$/u.test(word) ? `(${word})` : word}\u0008`;
 }
 
-// A fraction's part in brackets when it is more than one term.
-const grouped = (tex) => { const words = mathWords(tex); return /[\s+−\-=/·×]/.test(words) ? `(${words})` : words; };
+// A fraction's part in brackets when it is more than one term: an operation in it (a + b),
+// or more than letters side by side (k₂[Z]₀, which would read as (1/k₂)[Z]₀; dp as it is).
+const UNIT = /(?:[\p{L}\p{N}!′]|\[[^\]]*\]|\([^)]*\))(?:[_^\u0005\u0006](?:\([^)]*\)|[\p{L}\p{N}]+)|[\p{No}⁺⁻₊₋])*/gu;
+const grouped = (tex) => {
+  const words = mathWords(tex);
+  const units = words.match(UNIT) || [];
+  const several = units.length > 1 && !units.every((unit) => /^[\p{L}\p{N}!′]$/u.test(unit));
+  return /[\s+−\-=/·×]/.test(words) || several ? `(${words})` : words;
+};
 
 // A formula as a line of words: Greek and signs as themselves, fractions as a/b,
 // scripts raised or lowered where Unicode can, commands without their backslashes.
 export function mathWords(tex) {
+  // Spaces typed in maths are nothing, as in TeX: a space is said where TeX sets one (\, ,
+  // \quad, around a sign, after a function's name, in words), held aside (\u0007) till the end.
   let text = String(tex ?? "").replace(/\\(left|right|big|Big|bigg|Bigg)[lrm]?\b\.?/g, "")
-    .replace(/\\(displaystyle|textstyle|limits|nolimits|,|;|:|!|quad|qquad)\b|\\[,;:!]/g, " ")
-    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, " ").replace(/&/g, "").replace(/\\\\/g, "; ")
+    .replace(/\\(displaystyle|textstyle|limits|nolimits)\b|\\!/g, "")
+    .replace(/\\(quad|qquad)\b|\\[,;:]/g, "\u0007")
+    .replace(/\\(text|textrm|textbf|textit|mbox)\{([^{}]*)\}/g, (_, name, words) => `\\${name}{${words.replace(/ /g, "\u0007")}}`)
+    .replace(/\\(ln|log|exp|sin|cos|tan|sinh|cosh|tanh|max|min|det|lim|arg|gcd|sup|inf|dim|ker|Pr)(?![A-Za-z])/g, "\u0007$1\u0007")
+    // A matrix as its rows, its cells apart: (a, b; c, d).
+    .replace(/\\begin\{pmatrix\}/g, "(").replace(/\\end\{pmatrix\}/g, ")")
+    .replace(/\\begin\{bmatrix\}/g, "[").replace(/\\end\{bmatrix\}/g, "]")
+    .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, "").replace(/&/g, ",\u0007").replace(/\\\\/g, ";\u0007")
     // Greek and signs first, so a script of one (p_{\theta}, x^{\prime}) is set as one; not
     // a command taking an argument (\sqrt{…}, set below).
-    .replace(/\\([A-Za-z]+)(?![A-Za-z{])/g, (whole, name) => TEX_WORDS[name] ?? whole);
+    .replace(/\\([A-Za-z]+)(?![A-Za-z{])/g, (whole, name) => TEX_WORDS[name] ?? whole)
+    .replace(/\s+/g, "");
   for (let i = 0; i < 20; i++) {
     const before = text;
     text = text
@@ -1137,7 +1172,12 @@ export function mathWords(tex) {
     .replace(/_([^\s_^])/g, (_, a) => script(a, SUB, "_"))
     .replace(/\^([^\s_^])/g, (_, a) => script(a, SUP, "^"))
     .replace(/\u0005/g, "_").replace(/\u0006/g, "^")
-    .replace(/'/g, "′").replace(/-/g, "−").replace(/\s+/g, " ").trim();
+    .replace(/'/g, "′").replace(/-/g, "−").replace(/\u0007/g, " ")
+    .replace(/\u0008(?=[\p{L}\p{N}])/gu, " ").replace(/\u0008/g, "")
+    // Relations spaced, and an operation between two terms -- a sign before one (−x) not.
+    .replace(/\s*([=<>≤≥≠≈≡∼≃∝→←⇒⟹⟺↦∈∉⊂⊆])\s*/g, " $1 ")
+    .replace(/([\p{L}\p{N})\]′!⁺⁻₊₋])\s*([+−×·±∓÷])\s*/gu, "$1 $2 ")
+    .replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")").trim();
 }
 
 // Words in flexo markup set as they read on a slide: strong, emphatic, code and maths (as
@@ -1176,4 +1216,48 @@ export function readable(markup) {
     .replace(/\[([^\]]+)\]\{[^}]+\}/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/\*\*|\*|`/g, "")
     .replace(/[\u0000-\u0004]/g, (mark) => held[mark]);
+}
+
+// Words in quotation marks, as a name is quoted ("Typing in “Hello ‘world’ again”"): the marks
+// within them set by how deep they are, so that a quotation within a quotation alternates --
+// double, single, double -- however deep it goes. (An apostrophe -- a ’ between letters, or one
+// that closes no ‘ -- stays.)
+export function inQuotes(words) {
+  const letters = [...String(words ?? "")], open = [];
+  const letter = (mark) => mark !== undefined && /[\p{L}\p{N}]/u.test(mark);
+  let turned = "";
+  letters.forEach((mark, n) => {
+    if (mark === "“" || mark === "‘") { turned += open.length % 2 ? "“" : "‘"; open.push(mark); }
+    else if (mark === "”" || (mark === "’" && open.length && !(letter(letters[n - 1]) && letter(letters[n + 1])))) {
+      open.pop();
+      turned += open.length % 2 ? "”" : "’";
+    } else turned += mark;
+  });
+  return `“${turned}”`;
+}
+
+// A run of typing as the history names it: by the words it typed ("Typing “away more”"), so
+// that runs in the same words are told apart at a glance; by the words it was typed in
+// ("Typing in “Second paragraph…”") where those are all it typed (into nothing) or it only took
+// words away. (`was` and `now`: the words before and after it, plain; `most`: the letters shown.)
+export function typingName(was, now, most = 28) {
+  const before = [...String(was ?? "")], after = [...String(now ?? "")];
+  let start = 0, end = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  const short = (letters) => {
+    const words = [...letters.join("").replace(/\s+/g, " ").trim()];
+    return words.length > most ? `${words.slice(0, most - 1).join("")}…` : words.join("");
+  };
+  // (Whole words: a word typed on from where the last run left it is named whole, "away".)
+  const letter = (mark) => mark !== undefined && /[\p{L}\p{N}]/u.test(mark);
+  let from = start, to = after.length - end;
+  if (from < to) {
+    while (from > 0 && letter(after[from - 1]) && letter(after[from])) from--;
+    while (to < after.length && letter(after[to]) && letter(after[to - 1])) to++;
+  }
+  const typed = short(after.slice(from, to));
+  if (typed && before.join("").trim()) return `Typing ${inQuotes(typed)}`;
+  const words = short(after.join("").trim() ? after : before);
+  return words ? `Typing in ${inQuotes(words)}` : "Typing";
 }

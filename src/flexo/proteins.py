@@ -503,14 +503,15 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     (x_of(low) + x_of(high + 1)) / 2.0,
                 )
             )
+        # In as few rows as keep each name near what it names (a short span's name under it
+        # on the row below, rather than pushed along the row and led to by a long line).
+        rows = _in_rows(outside, 0.4 * u, left, right)
+        line = max((item.metrics.height for item in outside), default=0.0)
+        deep = len(rows) * line + (len(rows) - 1) * 0.15 * u
         below = top_reach
         if outside:
-            below += 0.35 * u + max(item.metrics.height for item in outside)
-        bond_top = (
-            base
-            + top_reach
-            + (0.35 * u + max(i.metrics.height for i in outside) + 0.3 * u if outside else 0.3 * u)
-        )
+            below += 0.35 * u + deep
+        bond_top = base + top_reach + (0.35 * u + deep + 0.3 * u if outside else 0.3 * u)
         bond_lanes = _lanes([(x_of(b.start), x_of(b.end)) for b in bonds], 0.4 * u)
         if bonds:
             below = bond_top - base + (max(bond_lanes) + 1) * 0.6 * u
@@ -607,10 +608,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                 )
             if item.id is not None and number == 1:
                 ports.append((item.id, Side.NORTH, (x1 + x2) / 2.0))
-        if outside:
-            spread(outside, 0.4 * u, left, right)
-            top = base + top_reach + 0.35 * u
-            for label in outside:
+        for row, names in enumerate(rows):
+            top = base + top_reach + 0.35 * u + row * (line + 0.15 * u)
+            for label in names:
                 words.append(
                     Words(
                         label.key,
@@ -622,11 +622,23 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         role="muted-ink",
                     )
                 )
-                if abs(label.x - label.want) > 0.2 * u:
+                # A name pushed aside from its span is led to from it, to the name's near end:
+                # a short line, never one sweeping under the chain to the name's middle. A
+                # name still under its span needs none.
+                inset = min(0.3 * u, label.width / 4.0)
+                low, high = label.x - label.width / 2.0 + inset, label.x + label.width / 2.0 - inset
+                if not low <= label.want <= high:
                     shapes.append(
                         Shape(
                             f"{label.key}.leader",
-                            path("M", label.want, base + top_reach, "L", label.x, top),
+                            path(
+                                "M",
+                                label.want,
+                                base + top_reach,
+                                "L",
+                                min(max(label.want, low), high),
+                                top - 0.1 * u,
+                            ),
                             "leader",
                             None,
                             pen * 0.7,
@@ -891,6 +903,27 @@ def _name_room(feature: Feature, track: Track, spans: list[Feature]) -> tuple[fl
     if at < stop:
         free.append((at, stop))
     return max(free, key=lambda item: item[1] - item[0]) if free else (at, at)
+
+
+def _in_rows(names: list[Name], gap: float, low: float, high: float) -> list[list[Name]]:
+    """``names`` placed in rows under what they name, left to right, ``gap`` apart: each on
+    the first row where it stays near its place (its place under it), else on a row of its
+    own below; within ``low`` and ``high``."""
+
+    rows: list[list[Name]] = []
+    for name in sorted(names, key=lambda item: item.want):
+        half = name.width / 2.0
+        for row in rows:
+            after = row[-1].x + row[-1].width / 2.0 + gap
+            x = min(max(name.want, after + half, low + half), high - half)
+            if abs(x - name.want) <= max(half, gap) and x - half >= after - 1e-6:
+                name.x = x
+                row.append(name)
+                break
+        else:
+            name.x = min(max(name.want, low + half), high - half)
+            rows.append([name])
+    return rows
 
 
 def _inside(

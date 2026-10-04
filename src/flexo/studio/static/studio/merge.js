@@ -17,8 +17,11 @@ export function merge3(base, ours, theirs, notes = null) {
   // (Both changed alike, words or a setting are one change; a list, or what holds one, is
   // merged all the same: what both added is each's own -- two slides added at one place at
   // once are two, however alike -- but for a change made again: see mergeItems.)
-  if (same(base, theirs) || (same(ours, theirs) && (replaying || ours === null || typeof ours !== "object"))) return ours;
+  // (Theirs, alike, where either will do: the page's own objects -- `theirs` in its merges --
+  // stay the very objects its editors have open, and are known by it, two alike told apart.)
   if (same(base, ours)) return theirs;
+  if (same(base, theirs)) return ours;
+  if (same(ours, theirs) && (replaying || ours === null || typeof ours !== "object")) return theirs;
   if (isMap(ours) && isMap(theirs)) {
     // Made again, a figure's change is made whole or not at all: a shape put between two
     // others is not taken back from under the label someone has since given it, leaving it
@@ -456,19 +459,21 @@ function mergeMaps(base, ours, theirs, notes = null) {
   return result;
 }
 
-// Made again on words made a list since (a paragraph made a list, its lines items): the change
-// is made on them as they now are, line for line -- `base` and `target` (the change) given the
-// words as the list's, the old's taken out. [base, target]
+// Made again on words made another kind since (a paragraph made a list, its lines items; or a
+// callout, its words its words): the change is made on them as they now are, line for line --
+// `base` and `target` (the change) given the words as the new kind's, the old's taken out.
+// [base, target]
 function reworded(base, target, now) {
-  const words = (value) => Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string");
+  const words = (value) => typeof value === "string" || (Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string"));
   const gone = Object.keys(base).filter((key) => typeof base[key] === "string" && typeof target[key] === "string" && !(key in now));
   const come = Object.keys(now).filter((key) => !(key in base) && !(key in target) && words(now[key]));
   if (gone.length !== 1 || come.length !== 1) return [base, target];
   const [was, into] = [gone[0], come[0]];
-  const made = replayText(base[was], target[was], now[into].join("\n"));
+  const lined = typeof now[into] === "string" ? now[into] : now[into].join("\n");
+  const made = replayText(base[was], target[was], lined);
   if (made === null) return [base, target];
   const { [was]: _old, ...restBase } = base, { [was]: _gone, ...restTarget } = target;
-  return [{ ...restBase, [into]: now[into] }, { ...restTarget, [into]: made.split("\n") }];
+  return [{ ...restBase, [into]: now[into] }, { ...restTarget, [into]: typeof now[into] === "string" ? made : made.split("\n") }];
 }
 
 // Made again where it made words another kind (a paragraph a list, its lines items, or a list a

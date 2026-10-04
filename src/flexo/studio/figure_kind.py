@@ -8,6 +8,7 @@ groups, edges) beside the text, and selecting one marks it in the drawing.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -138,8 +139,14 @@ class FigureKind:
         return GUIDE
 
     def describe(self, before: Any, after: Any) -> list[dict[str, Any]]:
+        """What an edit did, said as the figure has it ("added “Cache”", "connected “A” to
+        “B”"), not as lines of its file -- but for a file that does not read as a figure."""
+
         import difflib
 
+        said = _changes(_figure_of(before), _figure_of(after))
+        if said is not None:
+            return said
         old = (before or {}).get("text", "").splitlines()
         new = (after or {}).get("text", "").splitlines()
         changed = [
@@ -214,6 +221,9 @@ class FigureKind:
             info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
         except Exception:  # not a shape the inspector can list: the drawing says why
             info = {}
+        said_first: list[Message] = []
+        # A line to a shape there is none of is left out, and said; the rest is drawn.
+        document = _strays(document, said_first)
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except (yaml.YAMLError, json.JSONDecodeError) as error:
@@ -221,7 +231,13 @@ class FigureKind:
                 [], [Message(_yaml_problem(error), "error", _yaml_line(error))], info=info
             )
         except FlexoError as error:
-            return Drawing([], [_message(item) for item in error.diagnostics], info=info)
+            # A shape that can't be drawn as it is (a protein with no length): said by its
+            # name, plainly, the message leading to it -- and the rest of the figure drawn,
+            # it a plain box with its words meanwhile.
+            said_first += [_shape_problem(item, info) for item in error.diagnostics]
+            spec = _without(document, base, error)
+            if spec is None:
+                return Drawing([], said_first, info=info)
         except Exception as error:
             return Drawing([], [Message(explain(error), "error")], info=info)
         try:
@@ -237,7 +253,7 @@ class FigureKind:
         )
         files = [base / value for value in (spec.style, spec.palette) if _is_file(value)]
         said = [*report.diagnostics, *structure_problems(spec)]
-        return Drawing([page], [_message(item) for item in said], files, info)
+        return Drawing([page], [*said_first, *(_message(item) for item in said)], files, info)
 
     def export(
         self,
@@ -403,10 +419,95 @@ def _is_file(value: object) -> bool:
     return isinstance(value, str) and value.lower().endswith((".yaml", ".yml", ".json"))
 
 
+_PLAIN = {
+    "layout.width.grown": (
+        "The figure is wider than its page. Choose a wider Width, or fewer shapes in a row."
+    ),
+}
+"""Diagnostics said in the editor's words, not the file's (what to do there, not what to write)."""
+
+
 def _message(diagnostic) -> Message:
-    text = diagnostic.message + (f" ({diagnostic.hint})" if diagnostic.hint else "")
+    text = _PLAIN.get(diagnostic.code) or (
+        diagnostic.message + (f" ({diagnostic.hint})" if diagnostic.hint else "")
+    )
     severity = "note" if diagnostic.severity.value == "info" else diagnostic.severity.value
     return Message(text, severity, diagnostic.entity_id or "", code=diagnostic.code)
+
+
+def _shape_problem(diagnostic, info: dict[str, Any]) -> Message:
+    """What keeps a shape from being drawn, said of it by its name ("“Spike” can't be drawn
+    yet: a protein needs its length in residues.") -- the editor's words: its panel is where
+    it is put right, not a file to write in."""
+
+    nodes = (info.get("model") or {}).get("nodes") or []
+    node = next((item for item in nodes if item.get("id") == diagnostic.entity_id), None)
+    if node is None:
+        return _message(diagnostic)
+    label = node.get("label")
+    words = (
+        label
+        if isinstance(label, str)
+        else " ".join(str(run.get("text", "")) for run in label or [] if isinstance(run, dict))
+    )
+    # (Its words as read: emphasis, code and maths marks left out.)
+    name = re.sub(r"\]\{[^}]*\}|[*`$\[]", "", words).strip()
+    message = diagnostic.message.strip()
+    first = message.split(" ", 1)[0]
+    lower = message if len(first) > 1 and first.isupper() else message[:1].lower() + message[1:]
+    called = f"\u201c{name}\u201d" if name else f"This {node.get('kind') or 'shape'!s}"
+    return Message(
+        f"{called} can\u2019t be drawn yet: {lower} Choose it to set this in its panel.",
+        "error",
+        diagnostic.entity_id or "",
+        code=diagnostic.code,
+    )
+
+
+def _strays(document: dict[str, Any], said: list[Message]) -> dict[str, Any]:
+    """The figure without its lines to (or from) shapes it has none of, each said in
+    ``said`` -- or as it is, with none (or should it not read)."""
+
+    from flexo.studio.figure_edit import astray
+
+    json_file = document.get("suffix", ".yaml") == ".json"
+    try:
+        data = json.loads(document["text"]) if json_file else yaml.safe_load(document["text"])
+    except (yaml.YAMLError, json.JSONDecodeError, TypeError):
+        return document
+    lost = astray(data)
+    if not lost:
+        return document
+    said += [Message(line, "warning") for line in lost]
+    text = (
+        json.dumps(data, indent=2, ensure_ascii=False)
+        if json_file
+        else yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    )
+    return {**document, "text": text}
+
+
+def _without(document: dict[str, Any], base: Path, error) -> Any:
+    """The figure with each shape that can't be drawn (``error``'s) as a plain box of its
+    words, so the rest is drawn: None should it not draw even so."""
+
+    from flexo.diagnostics import FlexoError
+
+    wrong = {item.entity_id for item in error.diagnostics if item.entity_id}
+    if not wrong:
+        return None
+    suffix = document.get("suffix", ".yaml")
+    data = json.loads(document["text"]) if suffix == ".json" else yaml.safe_load(document["text"])
+    if not isinstance(data, dict):
+        return None
+    for node in data.get("nodes") or []:
+        if isinstance(node, dict) and node.get("id") in wrong:
+            node.pop("properties", None)
+            node["kind"] = "block"
+    try:
+        return parse(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), base)
+    except (FlexoError, ValueError, TypeError, yaml.YAMLError):
+        return None
 
 
 def _yaml_problem(error: Exception) -> str:
@@ -417,3 +518,151 @@ def _yaml_problem(error: Exception) -> str:
 def _yaml_line(error: Exception) -> str:
     mark = getattr(error, "problem_mark", None)
     return f"line {mark.line + 1}" if mark is not None else ""
+
+
+def _figure_of(document: Any) -> dict[str, Any] | None:
+    """A figure file's nodes, lines, groups and settings, as written; None if it does not
+    read as one."""
+
+    try:
+        data = yaml.safe_load((document or {}).get("text", "") or "") or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
+        return None
+    nodes = {
+        str(node["id"]): node
+        for node in data.get("nodes") or []
+        if isinstance(node, dict) and "id" in node
+    }
+
+    def end(value: Any) -> str:
+        value = str(value)
+        return value if value in nodes else value.rsplit(".", 1)[0]
+
+    edges = {}
+    for edge in data.get("edges") or []:
+        if isinstance(edge, dict) and "from" in edge and "to" in edge:
+            edges[(end(edge["from"]), end(edge["to"]))] = edge
+    groups = {
+        str(group["id"]): group
+        for group in data.get("groups") or []
+        if isinstance(group, dict) and "id" in group
+    }
+    rest = {key: value for key, value in data.items() if key not in {"nodes", "edges", "groups"}}
+    return {"nodes": nodes, "edges": edges, "groups": groups, "rest": rest}
+
+
+def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dict] | None:
+    """What changed between two readings of a figure file, a few notes at most."""
+
+    if old is None or new is None:
+        return None
+
+    def name(node: dict[str, Any]) -> str:
+        words = re.sub(r"\s+", " ", str(node.get("label") or "")).strip()
+        if words:
+            return f"\u201c{words}\u201d"
+        kind = str(node.get("kind") or "block")
+        return "a shape" if kind == "block" else f"a {kind.replace('-', ' ')}"
+
+    def called(identifier: str) -> str:
+        node = new["nodes"].get(identifier) or old["nodes"].get(identifier) or {}
+        return name(node)
+
+    notes: list[dict[str, Any]] = []
+    added = [key for key in new["nodes"] if key not in old["nodes"]]
+    gone = [key for key in old["nodes"] if key not in new["nodes"]]
+    if len(added) > 2:
+        notes.append({"text": f"added {len(added)} shapes", "where": None})
+    else:
+        notes += [{"text": f"added {called(key)}", "where": {"id": key}} for key in added]
+    if len(gone) > 2:
+        notes.append({"text": f"deleted {len(gone)} shapes", "where": None})
+    else:
+        notes += [{"text": f"deleted {called(key)}", "where": None} for key in gone]
+    for key, node in new["nodes"].items():
+        was = old["nodes"].get(key)
+        if was is None or was == node:
+            continue
+        before, after = str(was.get("label") or "").strip(), str(node.get("label") or "").strip()
+        if before != after:
+            text = (
+                f"named {name(was)} \u201c{after}\u201d"
+                if not before
+                else f"emptied {name(was)}"
+                if not after
+                else f"renamed {name(was)} to {name(node)}"
+            )
+        elif was.get("kind") != node.get("kind"):
+            kind = str(node.get("kind") or "block").replace("-", " ")
+            text = f"made {name(was)} a {kind}"
+        else:
+            text = f"changed {name(node)}"
+        notes.append({"text": text, "where": {"id": key}})
+    # Lines: a line between two parts made or taken away (not those that went with a part).
+    for pair, edge in new["edges"].items():
+        if pair not in old["edges"] and not set(pair) & set(added):
+            notes.append(
+                {"text": f"connected {called(pair[0])} to {called(pair[1])}", "where": None}
+            )
+        elif pair in old["edges"] and old["edges"][pair] != edge:
+            notes.append(
+                {
+                    "text": f"changed the line from {called(pair[0])} to {called(pair[1])}",
+                    "where": None,
+                }
+            )
+    for pair in old["edges"]:
+        # (A line a new part was put into runs on through it: nothing was taken away.)
+        through = any(
+            (pair[0], key) in new["edges"] and (key, pair[1]) in new["edges"] for key in added
+        )
+        if pair not in new["edges"] and not set(pair) & set(gone) and not through:
+            notes.append(
+                {
+                    "text": f"removed the line from {called(pair[0])} to {called(pair[1])}",
+                    "where": None,
+                }
+            )
+    if not added and not gone and _order(old) != _order(new):
+        moved = [
+            key
+            for key in new["nodes"]
+            if [item for item in _order(old) if item != key]
+            == [item for item in _order(new) if item != key]
+        ]
+        if len(moved) == 1:
+            notes.append({"text": f"moved {called(moved[0])}", "where": {"id": moved[0]}})
+        else:
+            notes.append({"text": "rearranged the figure", "where": None})
+    elif old["groups"] != new["groups"] and not added and not gone:
+        notes.append({"text": "rearranged the figure", "where": None})
+    if old["rest"] != new["rest"]:
+        notes.append({"text": "changed the figure's settings", "where": None})
+    return notes[:4] if notes else None
+
+
+def _order(figure: dict[str, Any]) -> list[str]:
+    """The parts as the figure lays them out, in turn: through its groups from the root (or,
+    with none written, as the file lists them)."""
+
+    groups, nodes = figure["groups"], figure["nodes"]
+    root = str((figure["rest"].get("figure") or {}).get("root") or "root")
+    held = {str(child) for group in groups.values() for child in group.get("children") or []}
+    top = (
+        [str(child) for child in groups[root].get("children") or []]
+        if root in groups
+        else [key for key in [*groups, *nodes] if key not in held]
+    )
+    found: list[str] = []
+
+    def walk(items: list[str], seen: set[str]) -> None:
+        for item in items:
+            if item in nodes:
+                found.append(item)
+            elif item in groups and item not in seen:
+                walk([str(child) for child in groups[item].get("children") or []], seen | {item})
+
+    walk(top, {root})
+    return found

@@ -581,9 +581,12 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         )
         if item.id is not None:
             ports.append((item.id, x))
-    # Spans under the times, in lanes where they overlap.
+    # Spans under the times, in lanes where they overlap. Spans that only touch (one ends as
+    # the next starts) share a lane, a hair apart -- unless the first's words, set after it,
+    # are in the way.
     lane_height = 1.5 * u
     lanes: list[float] = []
+    ends: list[float] = []
     y0 = below_axis + 0.5 * u
     bottom = below_axis
     for index, item in enumerate(sorted(spans, key=lambda moment: moment.start), 1):
@@ -591,18 +594,30 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         metrics = measures.measure(item.label, small=True) if item.label else None
         inside = metrics is not None and metrics.width + 0.6 * u <= x2 - x1
         reach = x2 if inside or metrics is None else x2 + 0.3 * u + metrics.width
-        lane = next((i for i, end in enumerate(lanes) if x1 >= end + 0.3 * u), None)
+        lane = next(
+            (
+                i
+                for i, (end, bar_end) in enumerate(zip(lanes, ends, strict=True))
+                if x1 >= end + 0.3 * u or (end <= bar_end + 1e-6 and x1 >= bar_end - 1e-6)
+            ),
+            None,
+        )
+        start = x1
         if lane is None:
             lanes.append(reach)
+            ends.append(x2)
             lane = len(lanes) - 1
         else:
+            if x1 < lanes[lane] + 0.3 * u:
+                start = min(x1 + 0.15 * u, (x1 + x2) / 2.0)
             lanes[lane] = reach
+            ends[lane] = x2
         y = y0 + lane * lane_height
         bar = 1.05 * u
         shapes.append(
             Shape(
                 f"{node.id}.span{index}",
-                _bar(x1, y, x2 - x1, bar),
+                _bar(start, y, x2 - start, bar),
                 "body" if item.tone else "solid",
                 item.tone,
                 pen,

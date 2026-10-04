@@ -394,24 +394,25 @@ def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) 
         workspace.close()
 
 
-def test_a_file_renamed_while_open_is_named_and_not_written_under_its_old_name(
+def test_a_file_renamed_while_open_is_followed_and_saved_under_its_new_name(
     tmp_path: Path,
 ) -> None:
     figure = tmp_path / "figure.yaml"
     figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
+    told: list = []
+    workspace.broadcast = told.append  # type: ignore[method-assign]
     try:
         doc = workspace.open("figure.yaml")
         figure.rename(tmp_path / "renamed.yaml")
-        wait_for(lambda: doc.problem is not None)
-        assert doc.problem == "figure.yaml was renamed renamed.yaml."
-        assert doc.said()["moved"] == "renamed.yaml"
-        # Edited meanwhile, it is not made again under its old name behind its person's back.
-        text = doc.document["text"].replace("Generated backbones", "Backbones")
+        wait_for(lambda: doc.name == "renamed.yaml")
+        assert doc.problem is None and workspace.docs["renamed.yaml"] is doc
+        assert {"type": "renamed", "file": "figure.yaml", "to": "renamed.yaml"} in told
+        # Edited after, it is saved there, never made again under its old name.
+        text = doc.document["text"].replace("Encoder", "Decoder")
         doc.update({**doc.document, "text": text}, doc.version, {"id": "me", "name": "Me"})
-        time.sleep(0.8)
+        wait_for(lambda: "Decoder" in (tmp_path / "renamed.yaml").read_text(encoding="utf-8"))
         assert not figure.exists()
-        assert doc.write(again=True) and figure.exists()  # a save does
     finally:
         workspace.close()
 
@@ -806,7 +807,8 @@ def test_the_agent_tools_read_edit_and_look(tmp_path: Path) -> None:
         assert tools.call("status", {"doing": "Looking around"})[1] is False
         assert workspace.present()[0]["doing"] == "Looking around"
         notes = [entry["text"] for entry in workspace.activity]
-        assert "edited line 10" in notes
+        # (Said as the figure has it, not by the line of its file.)
+        assert "renamed \u201cEncoder\u201d to \u201cDecoder\u201d" in notes
     finally:
         workspace.close()
 
@@ -1690,6 +1692,8 @@ see({ bullets: ["Second."] }, { text: "Second." }, { bullets: ["Second. bob", "b
 const levels = ["What", "Why", ["and why still"]];
 see({ text: "What\\nWhy\\nand why still" }, { bullets: levels, numbered: true },
   { text: "What\\nWhy\\nand why still bob" });
+// Words typed, undone after another made them a callout: taken back from the callout.
+see({ text: "Second alice" }, { text: "Second" }, { callout: "Second alice" });
 console.log(JSON.stringify(seen));
 """
     )
@@ -1718,6 +1722,7 @@ console.log(JSON.stringify(seen));
     assert seen[14] == [{"text": "Second. bob\nbob item"}, 0]
     kept = {"bullets": ["What", "Why", ["and why still bob"]], "numbered": True}
     assert seen[15] == [kept, 0]
+    assert seen[16] == [{"callout": "Second"}, 0]
 
 
 def test_a_window_opened_again_leaves_nothing_of_the_last_one_behind(
@@ -1806,6 +1811,32 @@ process.exit(0);
         "atOnce": "saving", "later": ["offline", True], "back": ["saving", False],
         "saved": "saved", "unreadDraws": ["problem", 0], "readDraws": ["saved", 1],
     }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_quotation_within_a_quotation_alternates_its_marks() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
+    # (The marks spelled out: double opening and closing, single opening and closing.)
+    dq, dc, sq, sc = "\u201c", "\u201d", "\u2018", "\u2019"
+    code = FAKE_PAGE + (
+        f"const {{ inQuotes }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const [dq, dc, sq, sc] = ["\\u201c", "\\u201d", "\\u2018", "\\u2019"];
+const label = `Typing in ${inQuotes(`Hello ${dq}world${dc} again`)}`;
+const big = inQuotes(`Alice${sc}s ${sq}big${sc} day`);
+console.log(JSON.stringify([label, inQuotes(label), inQuotes(`Undo ${inQuotes(label)}`), big]));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        f"Typing in {dq}Hello {sq}world{sc} again{dc}",
+        f"{dq}Typing in {sq}Hello {dq}world{dc} again{sc}{dc}",
+        f"{dq}Undo {sq}Typing in {dq}Hello {sq}world{sc} again{dc}{sc}{dc}",
+        f"{dq}Alice{sc}s {sq}big{sc} day{dc}",
+    ]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -2074,6 +2105,34 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["right of b", "left of b", 1, 1]
+    # Anywhere in the free space under a column's last part, in line with it: under it, in
+    # its column -- not only just under it, nor a new row under the whole figure.
+    beside = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "row"}, "children": ["a", "col"]},
+            {"id": "col", "layout": {"kind": "column"}, "children": ["b", "c"]},
+        ],
+    }
+    boxes = {
+        "root": [0, 0, 300, 150], "a": [10, 60, 60, 90], "col": [100, 0, 200, 150],
+        "b": [110, 10, 190, 40], "c": [110, 110, 190, 140],
+    }
+    drags = [["a", 150, 146], ["a", 150, 200], ["a", 150, 270], ["a", 150, 75]]
+    code = (
+        f"import {{ dropPlace }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(beside)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+        "  return place.kind === 'line' ? `${place.side} of ${place.of}` : place.index;\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == ["below of c", "below of c", "below of c", 1]
 
 
 def test_an_agent_reads_a_file_that_does_not_read_as_written_and_puts_it_right(
