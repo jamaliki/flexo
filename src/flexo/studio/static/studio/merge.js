@@ -806,6 +806,7 @@ function followMoves(base, side, other) {
   const goneB = new Map(), goneO = new Map(), addedB = new Map(), addedO = new Map();
   const add = (map, name, entry) => { if (!map.has(name)) map.set(name, []); map.get(name).push(entry); };
   const drop = (map, name, index) => { if (!map.has(name)) map.set(name, new Set()); map.get(name).add(index); };
+  const landed = new Map();
   for (const [from, i, to, j] of moves) {
     const back = new Map([...(kept.get(to) || new Map())].map(([b, k]) => [k, b]));
     let after = -1;
@@ -817,7 +818,25 @@ function followMoves(base, side, other) {
     drop(goneO, from, theirsNow.get(i));
     const inOther = pairsOf(listsB.get(to)?.[1] || [], listsO.get(to)?.[1] || []);
     const place = after >= 0 && inOther.has(after) ? inOther.get(after) : -1;
-    add(addedO, to, [place + 0.5, listsO.get(from)[1][theirsNow.get(i)]]);
+    add(addedO, to, [place + 0.5 + j / 1e6, listsO.get(from)[1][theirsNow.get(i)]]);
+    landed.set(`${from}\u0001${theirsNow.get(i)}`, [to, place + 0.5 + j / 1e6]);
+  }
+  // What the other side added to a list the side took away whole, all its items moved (a
+  // paragraph added to a column as the slide was made one column again): it goes with them,
+  // after the one before it where that went -- not left behind in a list no longer there.
+  for (const [name, [, items]] of listsO) {
+    const was = listsB.get(name)?.[1] || [];
+    if (listsS.has(name) || !was.length || was.some((_, i) => !goneB.get(name)?.has(i))) continue;
+    const theirs = new Set(pairsOf(was, items).values());
+    let after = null, n = 0;
+    items.forEach((item, k) => {
+      const at = landed.get(`${name}\u0001${k}`);
+      if (at) { after = at; n = 0; return; }
+      if (theirs.has(k) || !after) return;
+      n += 1;
+      drop(goneO, name, k);
+      add(addedO, after[0], [after[1] + n / 1e9, item]);
+    });
   }
   const poolOf = new Map([...listsB, ...listsS, ...listsO].map(([name, [pool]]) => [name, pool]));
   return [repooled(base, listsB, goneB, addedB, poolOf), repooled(other, listsO, goneO, addedO, poolOf)];
@@ -846,8 +865,10 @@ function repooled(value, lists, gone, added, poolOf) {
 // Where each item of `before` is in `after` (its index, or -1 if it is gone): paired as
 // a merge pairs them, then, for one moved and changed at once (a paragraph moved while
 // someone typed in it), the most alike of those left, wherever it went.
-export function follows(before, after) {
-  const pairs = pairsOf(before, after);
+// (`late`: of items alike, the later taken for the later -- a page's own new items in the
+// studio's answer to what it sent, which puts others' added at one place before its own.)
+export function follows(before, after, late = false) {
+  const pairs = pairsOf(before, after, late);
   const used = new Set(pairs.values());
   const scored = [];
   before.forEach((item, i) => {

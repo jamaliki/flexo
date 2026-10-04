@@ -84,6 +84,8 @@ const ICONS = {
   settings: "M8 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4",
   warning: "M8 2.5l6 10.5H2zM8 6.5v3M8 11.5h.01",
   error: "M8 2a6 6 0 100 12A6 6 0 008 2zM6 6l4 4M10 6l-4 4",
+  // An exclamation mark alone, for a small badge already round and coloured.
+  exclaim: "M8 3.5v6M8 12.5h.01",
   info: "M8 2a6 6 0 100 12A6 6 0 008 2zM8 7.5v3.5M8 5h.01",
   sun: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1",
   moon: "M13 9.5A5.5 5.5 0 016.5 3a5.5 5.5 0 106.5 6.5z",
@@ -194,7 +196,11 @@ export const ui = {
     // steppers, a switch) or a group (segments) is not inside the label, so not named by it.
     const id = typeof label === "string" && label ? `field-${++fieldCount}` : null;
     const target = id && control?.nodeType === 1 ? (control.matches(NAMED) ? control : control.querySelector(NAMED)) : null;
-    if (target && !target.hasAttribute("aria-label") && !target.hasAttribute("aria-labelledby")) target.setAttribute("aria-labelledby", id);
+    if (target && !target.hasAttribute("aria-label") && !target.hasAttribute("aria-labelledby")) {
+      // A pop-up shown by its choice ("Deep Sea Harvest") is named by its label, then its choice.
+      if (target.matches(".palette-pick, .type-pick")) { target.id ||= `${id}-choice`; target.setAttribute("aria-labelledby", `${id} ${target.id}`); }
+      else target.setAttribute("aria-labelledby", id);
+    }
     return h(`div.field${inline ? ".inline" : ""}`, {},
       label ? h("label.label", {}, id ? h("span", { id }, label) : label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
   },
@@ -610,7 +616,7 @@ export const ui = {
     let well = null;
     if (custom) {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
-      const input = h("input", { type: "color", value: own || "#888888", title: "Custom colour" });
+      const input = h("input", { type: "color", value: own || "#888888", title: "Custom colour", "aria-label": "Custom colour" });
       well = h(`label.swatch.custom${own ? ".on" : ""}${own && light(own) ? ".light" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
       input.addEventListener("input", () => { well.style.background = input.value; well.classList.toggle("light", light(input.value)); choose(well, input.value); });
       node.append(well);
@@ -624,7 +630,7 @@ export const ui = {
   // picker, and a button to go back to the theme's.
   colour({ value, onChange, title = "", key } = {}) {
     const set = HEX.test(value || "") ? value : null;
-    const input = h("input", { type: "color", value: set || "#888888", "data-key": key });
+    const input = h("input", { type: "color", value: set || "#888888", "data-key": key, "aria-label": [title, "Colour"].filter(Boolean).join(" ") });
     const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: [title, set || "Default"].filter(Boolean).join(": ") },
       h("span.colour-chip", { style: set ? { background: set } : {} }), input);
     input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
@@ -824,7 +830,7 @@ export function menu(anchor, items, { align = "start", className = "" } = {}) {
 }
 
 // What a field's label names: its control, or the group of them.
-const NAMED = "input:not([type=hidden]), select, textarea, button.select, [contenteditable=true], [role=radiogroup], [role=group], [role=slider]";
+const NAMED = "input:not([type=hidden]), select, textarea, button.select, button.palette-pick, button.type-pick, [contenteditable=true], [role=radiogroup], [role=group], [role=slider]";
 let fieldCount = 0;
 // Where the pointer was last pressed: a menu's place when the button it was opened from is gone.
 let lastPress = null;
@@ -1024,9 +1030,13 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
     onClose?.();
   };
   const topmost = () => [...document.querySelectorAll(".scrim")].pop() === scrim;
+  // As a Mac sheet's: Esc is its Cancel (the action marked `cancel`, or named Cancel or
+  // Done), Return its default (the primary action) wherever the keys are but in a field
+  // that takes Return itself; a destructive action (`danger`) stands at the left, apart.
+  const cancelling = actions.find((action) => action.cancel || action.label === "Cancel" || action.label === "Done");
   const keys = (event) => {
     if (!topmost()) return;
-    if (event.key === "Escape") { event.stopPropagation(); close(); }
+    if (event.key === "Escape") { event.stopPropagation(); if (cancelling?.run?.() !== false) close(); }
     // Keys from outside it (focus left on the page) come into it; a menu opened from it keeps its own.
     else if (event.key === "Tab" && !panel.contains(document.activeElement) && !document.activeElement?.closest?.(".menu")) {
       event.preventDefault();
@@ -1034,16 +1044,34 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
       (items[event.shiftKey ? items.length - 1 : 0] || panel).focus();
     }
   };
-  // A sheet with a Cancel or a Done is closed by it (or Esc), as a Mac's is: no × beside its
-  // title too.
-  const cancels = actions.some((action) => action.label === "Cancel" || action.label === "Done");
+  // A sheet with choices to make is closed by one of them (or Esc), as a Mac's is: no ×
+  // beside its title too.
+  const cancels = actions.some((action) => action.label !== undefined);
   const panel = h(`div.dialog${wide ? ".wide" : ""}`, { role: "dialog", "aria-modal": "true", tabIndex: -1 },
     h("div.dialog-head", {}, h("div.dialog-title", {}, title), h("div.spacer"), cancels ? null : ui.button("", close, { kind: "ghost", icon: "close", title: "Close" })),
     h("div.dialog-body.scroll-thin", { tabIndex: -1 }, body),
-    // Actions `aside` (Upload…, New Folder…) stand at the left, as in a Mac's open panel;
-    // Cancel and the default at the right.
-    actions.length ? h("div.dialog-foot", {}, [...actions.filter((action) => action.aside), ...(actions.some((action) => action.aside) ? [h("div.spacer")] : []), ...actions.filter((action) => !action.aside)].map((action) =>
-      action.label === undefined ? action : ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || "" }))) : null);
+    // Actions `aside` (Upload…, New Folder…) and destructive ones (`danger`: Close and Lose
+    // Changes) stand at the left, as on a Mac; Cancel and the default at the right.
+    actions.length ? h("div.dialog-foot", {}, [...actions.filter((action) => action.aside || action.danger), ...(actions.some((action) => action.aside || action.danger) ? [h("div.spacer")] : []), ...actions.filter((action) => !action.aside && !action.danger)].map((action) =>
+      action.label === undefined ? action : ui.button(action.label, () => { if (action.run?.() !== false) close(); }, { kind: action.kind || (action.danger ? "danger" : "") }))) : null);
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const at = document.activeElement;
+    if (at?.closest?.("textarea, select, button, a, summary, [contenteditable=true], .menu")) return;
+    const primary = panel.querySelector(".dialog-foot .btn.primary:not(:disabled)");
+    if (!primary) return;
+    event.preventDefault();
+    primary.click();
+  });
+  // The keys on its buttons (its default has them at first), the arrows, Page keys, Home
+  // and End still scroll what it says.
+  panel.addEventListener("keydown", (event) => {
+    const room = panel.querySelector(".dialog-body");
+    const by = { ArrowDown: 40, ArrowUp: -40, PageDown: room.clientHeight * 0.9, PageUp: -room.clientHeight * 0.9, Home: -room.scrollHeight, End: room.scrollHeight }[event.key];
+    if (by === undefined || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || !document.activeElement?.closest?.(".dialog-foot")) return;
+    event.preventDefault();
+    room.scrollBy({ top: by });
+  });
   // Tab from its last control goes to its first, ⇧Tab from its first to its last. A Tab
   // a field took (indenting code) is the field's.
   panel.addEventListener("keydown", (event) => {
@@ -1058,9 +1086,10 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
   const scrim = h("div.scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } }, panel);
   document.addEventListener("keydown", keys, true);
   document.body.append(scrim);
-  // The dialog has the keys at once (Esc, Tab, and the arrows scroll what it says); a caller
-  // that wants a field focused focuses it.
-  panel.querySelector(".dialog-body").focus({ preventScroll: true });
+  // The dialog has the keys at once, on its default button when it has one (Return chooses
+  // it, Space too), else on what it says (Esc, Tab, and the arrows scroll it); a caller that
+  // wants a field focused focuses it.
+  (panel.querySelector(".dialog-foot .btn.primary:not(:disabled)") || panel.querySelector(".dialog-body")).focus({ preventScroll: true });
   return { close };
 }
 
@@ -1075,9 +1104,27 @@ const sheetOpen = () => Boolean(document.querySelector(".scrim:not(.palette-scri
 // -- else at the foot of the window.
 function placeToasts(box) {
   const area = [...(document.querySelectorAll?.("[data-toast-area]") || [])].find((node) => node.offsetParent !== null);
-  const room = area?.getBoundingClientRect();
-  if (room?.width) Object.assign(box.style, { left: `${room.left + room.width / 2}px`, bottom: `${Math.max(16, innerHeight - room.bottom + 16)}px` });
-  else Object.assign(box.style, { left: "", bottom: "" });
+  let room = area?.getBoundingClientRect();
+  // Else the document's own room: its view, short of its inspector (a figure's, a theme's),
+  // and above what it says at its foot (a figure's message banner).
+  if (!room?.width) {
+    const view = [...(document.querySelectorAll?.(".views > *") || [])].find((node) => !node.hidden && node.offsetParent !== null);
+    const panel = view?.querySelector(".inspector, .fig-inspector, .theme-panel");
+    if (view && panel) {
+      const whole = view.getBoundingClientRect(), side = panel.getBoundingClientRect();
+      const banner = [...view.querySelectorAll(".fig-messages, .messages, .fig-banner")].map((node) => node.getBoundingClientRect())
+        .filter((said) => said.height && said.left < side.left && said.bottom > whole.bottom - 120);
+      const bottom = Math.min(whole.bottom, ...banner.map((said) => said.top - 4));
+      room = { left: whole.left, width: Math.max(0, side.left - whole.left), bottom };
+    }
+  }
+  if (room?.width) {
+    Object.assign(box.style, { left: `${room.left + room.width / 2}px`, bottom: `${Math.max(16, innerHeight - room.bottom + 16)}px` });
+    box.style.setProperty("--toast-room", `${Math.max(200, room.width - 32)}px`);
+  } else {
+    Object.assign(box.style, { left: "", bottom: "" });
+    box.style.removeProperty?.("--toast-room");
+  }
 }
 export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}) {
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
@@ -1218,28 +1265,37 @@ export function readable(markup) {
     .replace(/[\u0000-\u0004]/g, (mark) => held[mark]);
 }
 
-// Words in quotation marks, as a name is quoted ("Typing in “Hello ‘world’ again”"): the marks
-// within them set by how deep they are, so that a quotation within a quotation alternates --
-// double, single, double -- however deep it goes. (An apostrophe -- a ’ between letters, or one
-// that closes no ‘ -- stays.)
+// Words in quotation marks, as a name is quoted ("Typing “Hello ‘world’ again”"): the marks
+// within them -- typographic or typed straight ("fast", 'fast') -- set by how deep they are, so
+// that a quotation within a quotation alternates, double, single, double, however deep it goes.
+// (An apostrophe -- ’ or ' between letters, or one that closes nothing open -- stays as it is.)
 export function inQuotes(words) {
   const letters = [...String(words ?? "")], open = [];
-  const letter = (mark) => mark !== undefined && /[\p{L}\p{N}]/u.test(mark);
   let turned = "";
+  const letter = (mark) => mark !== undefined && /[\p{L}\p{N}]/u.test(mark);
+  const opens = (mark) => { turned += open.length % 2 ? "“" : "‘"; open.push(mark); };
+  const closes = () => { open.pop(); turned += open.length % 2 ? "”" : "’"; };
   letters.forEach((mark, n) => {
-    if (mark === "“" || mark === "‘") { turned += open.length % 2 ? "“" : "‘"; open.push(mark); }
-    else if (mark === "”" || (mark === "’" && open.length && !(letter(letters[n - 1]) && letter(letters[n + 1])))) {
-      open.pop();
-      turned += open.length % 2 ? "”" : "’";
-    } else turned += mark;
+    const before = letters[n - 1], after = letters[n + 1];
+    const within = letter(before) && letter(after);
+    // (Straight, it opens where words start -- after a space, a bracket, another mark -- and
+    // closes the one like it that is open.)
+    const starts = (before === undefined || /[\s([{“‘"'«-]/.test(before)) && after !== undefined && !/\s/.test(after);
+    if (mark === "“" || mark === "‘") opens(mark);
+    else if (mark === "”") closes();
+    else if (mark === "’" && open.length && !within) closes();
+    else if (mark === '"') { if (open.at(-1) === '"') closes(); else opens(mark); }
+    else if (mark === "'" && !within && open.at(-1) === "'") closes();
+    else if (mark === "'" && !within && starts) opens(mark);
+    else turned += mark;
   });
   return `“${turned}”`;
 }
 
-// A run of typing as the history names it: by the words it typed ("Typing “away more”"), so
-// that runs in the same words are told apart at a glance; by the words it was typed in
-// ("Typing in “Second paragraph…”") where those are all it typed (into nothing) or it only took
-// words away. (`was` and `now`: the words before and after it, plain; `most`: the letters shown.)
+// A run of typing as the history names it, one way wherever it was typed: by the words it typed
+// ("Typing “away more”"), so that runs in the same words are told apart at a glance; one that
+// only took words away, by the words it took them from ("Deleting in “Second paragraph…”").
+// (`was` and `now`: the words before and after it, plain; `most`: the letters shown.)
 export function typingName(was, now, most = 28) {
   const before = [...String(was ?? "")], after = [...String(now ?? "")];
   let start = 0, end = 0;
@@ -1257,7 +1313,7 @@ export function typingName(was, now, most = 28) {
     while (to < after.length && letter(after[to]) && letter(after[to - 1])) to++;
   }
   const typed = short(after.slice(from, to));
-  if (typed && before.join("").trim()) return `Typing ${inQuotes(typed)}`;
-  const words = short(after.join("").trim() ? after : before);
-  return words ? `Typing in ${inQuotes(words)}` : "Typing";
+  if (typed) return `Typing ${inQuotes(typed)}`;
+  const gone = short(before.slice(start, before.length - end)), words = short(after.join("").trim() ? after : before);
+  return gone && words ? `Deleting in ${inQuotes(words)}` : "Typing";
 }

@@ -21,6 +21,7 @@ import socket
 import socketserver
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from collections.abc import Sequence
@@ -35,9 +36,13 @@ from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
-LEAVE_GRACE = 2.5
-"""Seconds a window whose connection broke is still taken as there: back by then (a page
-reconnecting), its person never left."""
+LEAVE_GRACE = 1.0
+"""Seconds a window whose connection broke without a word is still taken as there: back by
+then (a page reconnecting, half a second after: its ``retry``), its person never left. A window
+closed says so as it goes (``/api/leave``), and goes at once."""
+HANG_UP_CHECK = 0.25
+"""How often, in seconds, a quiet connection is looked at for a window gone without a word
+(crashed, killed, its browser closed under it)."""
 FILE_TYPES = {
     "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf", ".ai"),
     "figure": (".yaml", ".yml", ".json"),
@@ -570,24 +575,23 @@ class Handler(BaseHTTPRequestHandler):
             # they are.
             self.wfile.write(f"retry: 500\nevent: hello\ndata: {hello}\n\n".encode())
             self.wfile.flush()
-            quiet = 0
+            quiet = time.monotonic()
             while True:
                 try:
-                    event = listener.events.get(timeout=1)
+                    event = listener.events.get(timeout=HANG_UP_CHECK)
                 except queue.Empty:
                     # A window gone without a word (crashed, killed) has closed its end:
-                    # seen within a second, not at the next heartbeat that fails.
+                    # seen in a moment, not at the next heartbeat that fails.
                     if self._hung_up():
                         return
-                    quiet += 1
-                    if quiet >= 15:
-                        quiet = 0
+                    if time.monotonic() - quiet >= 15:
+                        quiet = time.monotonic()
                         self.wfile.write(b": still here\n\n")
                         self.wfile.flush()
                     continue
                 if event is None:
                     return
-                quiet = 0
+                quiet = time.monotonic()
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 self.wfile.write(f"data: {payload}\n\n".encode())
                 self.wfile.flush()

@@ -31,6 +31,7 @@ import logging
 import re
 from collections import OrderedDict
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import PurePath
 from typing import Any
 
@@ -52,10 +53,12 @@ _LOG = logging.getLogger(__name__)
 _VERSION = (1, 1)
 """YAML as the studio reads it (PyYAML's 1.1): ``yes`` is true, so a word "yes" is quoted."""
 
-_GONE_NODES: OrderedDict[str, tuple[Any, Any]] = OrderedDict()
-_GONE_LINES: OrderedDict[str, list[str]] = OrderedDict()
-"""Items taken out of a list (a slide deleted), as the file had them -- by what they say --
-for a while: put back (its deletion undone), one is written as it was, its comments too."""
+_GONE_BY_FILE: OrderedDict[str, tuple[OrderedDict, OrderedDict]] = OrderedDict()
+"""Items taken out of a file's lists (a slide deleted) as it had them, nodes and lines, for
+a while -- by what they say and what was either side of them: put back where they were
+(the deletion undone), one is written as it was, its comments too. A file's own, never
+another's, and never for an item new and empty (a Text just added brings no comments)."""
+_GONE: ContextVar[tuple[OrderedDict, OrderedDict] | None] = ContextVar("gone", default=None)
 
 
 def _keep(kept: OrderedDict, key: str, value: Any) -> None:
@@ -65,13 +68,72 @@ def _keep(kept: OrderedDict, key: str, value: Any) -> None:
         kept.popitem(last=False)
 
 
-def rewrite(previous: str | None, document: Any, fresh: Callable[[Any], str]) -> str:
+def _gone(which: int) -> OrderedDict | None:
+    """The file being written's items taken out (0: nodes, 1: lines); None for no file."""
+
+    found = _GONE.get()
+    return found[which] if found is not None else None
+
+
+def _placed(keys: list[str], at: int) -> str:
+    """An item by what it says and what is either side of it in its list."""
+
+    before = keys[at - 1] if at > 0 else ""
+    after = keys[at + 1] if at + 1 < len(keys) else ""
+    return "\x00".join((before, keys[at], after))
+
+
+def _empty(value: Any) -> bool:
+    """Whether a value says nothing: no words, no numbers (a Text just added)."""
+
+    if isinstance(value, dict):
+        return all(_empty(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_empty(item) for item in value)
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _earliest(sources: list[int | None], keys: list[str], free: list[bool]) -> None:
+    """Of items alike side by side (a slide and its copy just made), the first is the one
+    there before, with all that is its own (the comment over it): the copy is the later.
+    ``free``: an item kept as it was, or new -- not one changed in another's place."""
+
+    run = 0
+    for end in range(1, len(keys) + 1):
+        if end < len(keys) and keys[end] == keys[run]:
+            continue
+        places = [j for j in range(run, end) if free[j]]
+        mine = [sources[j] for j in places if sources[j] is not None]
+        for k, j in enumerate(places):
+            sources[j] = mine[k] if k < len(mine) else None
+        run = end
+
+
+def rewrite(
+    previous: str | None, document: Any, fresh: Callable[[Any], str], *, name: str | None = None
+) -> str:
     """``document`` as YAML text, written over ``previous`` (the file's text as it is on
     disk): its comments, blank lines, quoting, flow style and key order kept wherever the
-    document did not change. Without a ``previous`` that reads as a mapping, ``fresh``."""
+    document did not change. Without a ``previous`` that reads as a mapping, ``fresh``.
+    ``name`` is the file's: what was deleted from it is put back as it was (an undo)."""
 
     if not previous or not previous.strip() or not isinstance(document, dict):
         return fresh(document)
+    if name is None:
+        token = _GONE.set(None)
+    else:
+        kept = _GONE_BY_FILE.setdefault(name, (OrderedDict(), OrderedDict()))
+        _GONE_BY_FILE.move_to_end(name)
+        while len(_GONE_BY_FILE) > 32:
+            _GONE_BY_FILE.popitem(last=False)
+        token = _GONE.set(kept)
+    try:
+        return _rewrite(previous, document, fresh)
+    finally:
+        _GONE.reset(token)
+
+
+def _rewrite(previous: str, document: Any, fresh: Callable[[Any], str]) -> str:
     reader = _yaml()
     try:
         old, indent, offset = load_yaml_guess_indent(previous, yaml=reader)
@@ -85,6 +147,9 @@ def rewrite(previous: str | None, document: Any, fresh: Callable[[Any], str]) ->
     was = _parts(old, lines)
     gaps = _gaps(lines)
     _comments_to_items(old)
+    # The comments at the file's end are its end's, whatever comes last in it now: never
+    # carried off by the item they follow (a quote moved down, past them).
+    ending = _cut_tail(old, list(old)[-1]) if old else None
     root = _merge(old, document)
     writer = _yaml()
     if indent:
@@ -95,7 +160,7 @@ def rewrite(previous: str | None, document: Any, fresh: Callable[[Any], str]) ->
     except Exception:
         _LOG.warning("a YAML file could not be written over its words", exc_info=True)
         return fresh(document)
-    text = _trimmed(_undeclared(out.getvalue(), previous))
+    text = _trimmed(_undeclared(out.getvalue(), previous)) + (ending or "")
     # The parts that did not change are their lines as the file had them, word for word:
     # written again, a long line would be wrapped otherwise than it was.
     try:
@@ -192,7 +257,8 @@ def _parts(root: CommentedMap, lines: list[str]) -> dict[Any, dict[str, Any]]:
             last = tail(heads[-1], end)
             ends = [*begins[1:], last]
             items = [
-                {"start": first, "line": heads[k], "end": ends[k], "key": _key(value[k])}
+                {"start": first, "line": heads[k], "end": ends[k], "key": _key(value[k]),
+                 "empty": _empty(value[k])}
                 for k, first in enumerate(begins)
             ]
             rest = (last, end)
@@ -268,6 +334,8 @@ def _splice(
                     if found is not None:
                         source[j] = found
                         used.add(found)
+            keys_new = [item["key"] for item in news]
+            _earliest(source, keys_new, [True] * len(news))
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():
                 if tag == "replace":
                     free = [i for i in range(i1, i2) if i not in used]
@@ -275,10 +343,12 @@ def _splice(
                         if source[j] is None and free:
                             changed[j] = free.pop(0)
                             used.add(changed[j])
+            gone = _gone(1)
             for i, item in enumerate(olds):
-                if i not in used:
-                    _keep(_GONE_LINES, item["key"], lines[item["start"] : item["end"]])
+                if i not in used and gone is not None:
+                    _keep(gone, _placed(keys_old, i), lines[item["start"] : item["end"]])
             for j, item in enumerate(news):
+                placed = _placed(keys_new, j)
                 if source[j] is not None:
                     mine = olds[source[j]]
                     out += lines[mine["start"] : mine["end"]]
@@ -286,8 +356,8 @@ def _splice(
                     mine = olds[changed[j]]
                     out += lines[mine["start"] : mine["line"]]
                     out += _spaced(written[item["line"] : item["end"]], gaps)
-                elif item["key"] in _GONE_LINES:
-                    out += _GONE_LINES.pop(item["key"])
+                elif gone is not None and placed in gone and not item["empty"]:
+                    out += gone.pop(placed)
                 else:
                     out += _spaced(written[item["line"] : item["end"]], gaps)
             out += (
@@ -434,7 +504,7 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
     for tag, i1, _i2, j1, j2 in opcodes:
         if tag == "equal":
             for k in range(j2 - j1):
-                result[j1 + k], sources[j1 + k] = items[i1 + k], i1 + k
+                sources[j1 + k] = i1 + k
                 used.add(i1 + k)
     # Items moved (a slide moved up; an undo putting it back): found where they were.
     for j, key in enumerate(keys_new):
@@ -443,8 +513,12 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
                 (i for i, key_old in enumerate(keys_old) if key_old == key and i not in used), None
             )
             if found is not None:
-                result[j], sources[j] = items[found], found
+                sources[j] = found
                 used.add(found)
+    _earliest(sources, keys_new, [True] * len(new))
+    for j, source in enumerate(sources):
+        if source is not None:
+            result[j] = items[source]
     # Items changed: put into the ones they took the place of, item for item.
     for tag, i1, i2, j1, j2 in opcodes:
         if tag != "replace":
@@ -456,19 +530,25 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
                 result[j], sources[j] = _merge(items[at], new[j]), at
                 used.add(at)
     notes = dict(old.ca.items)
+    gone = _gone(0)
     for i, item in enumerate(items):
-        if i not in used and isinstance(item, (CommentedMap, CommentedSeq)):
-            _keep(_GONE_NODES, keys_old[i], (item, notes.get(i)))
-    # The rest is new -- one taken out a moment ago (put back by an undo) as it was; a copy
-    # of one there (a slide duplicated) as that one is written; else written as YAML does.
+        if i not in used and isinstance(item, (CommentedMap, CommentedSeq)) and gone is not None:
+            _keep(gone, _placed(keys_old, i), (item, notes.get(i)))
+    # The rest is new -- one taken out a moment ago put back where it was (by an undo) as it
+    # was; a copy of one there (a slide duplicated, a figure in it given a new id) as that one
+    # is written, comments in it and all (not the one over it, which is the first's); else
+    # written as YAML does.
     back: dict[int, Any] = {}
     for j, key in enumerate(keys_new):
         if sources[j] is None and result[j] is None:
-            twin = next((i for i, key_old in enumerate(keys_old) if key_old == key), None)
-            if key in _GONE_NODES:
-                result[j], back[j] = _GONE_NODES.pop(key)
+            placed = _placed(keys_new, j)
+            if gone is not None and placed in gone and not _empty(new[j]):
+                result[j], back[j] = gone.pop(placed)
+            elif (twin := _twin(items, keys_old, key, new[j])) is not None:
+                copied = _copy(items[twin])
+                result[j] = copied if keys_old[twin] == key else _merge(copied, new[j])
             else:
-                result[j] = _copy(items[twin]) if twin is not None else _fresh(new[j])
+                result[j] = _fresh(new[j])
     if sources == list(range(len(items))) and all(
         a is b for a, b in zip(result, items, strict=True)
     ):
@@ -482,6 +562,27 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
         elif back.get(at) is not None:
             old.ca.items[at] = back[at]
     return old
+
+
+def _twin(items: list, keys: list[str], key: str, value: Any) -> int | None:
+    """The item a new one is a copy of: the same, or -- a mapping or list -- all but the
+    same (a slide duplicated, its figure given an id of its own). None for one empty."""
+
+    if _empty(value):
+        return None
+    same = next((i for i, other in enumerate(keys) if other == key), None)
+    if same is not None or not isinstance(value, (dict, list)):
+        return same
+    best, found = 0.9, None
+    for i, other in enumerate(keys):
+        if not isinstance(items[i], (CommentedMap, CommentedSeq)):
+            continue
+        matcher = difflib.SequenceMatcher(None, other, key, autojunk=False)
+        if matcher.real_quick_ratio() > best and matcher.quick_ratio() > best:
+            ratio = matcher.ratio()
+            if ratio > best:
+                best, found = ratio, i
+    return found
 
 
 def _copy(node: Any) -> Any:

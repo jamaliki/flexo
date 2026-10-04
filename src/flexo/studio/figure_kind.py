@@ -177,7 +177,15 @@ class FigureKind:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
             return {"document": document, "settings": settings_of(spec, str(action.get("id")))}
         if action.get("do") == "structure-fetch":
-            return {"document": document, "id": fetched(str(action.get("id") or ""))}
+            # One that can't be had is an answer, said in the dialog -- not a failed request
+            # (which the browser would also log as an error).
+            from flexo.studio.figure_edit import EditError
+            from flexo.studio.plain import explain
+
+            try:
+                return {"document": document, "id": fetched(str(action.get("id") or ""))}
+            except EditError as error:
+                return {"document": document, "failed": explain(error)}
         result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
         from flexo.studio.figure_edit import model
 
@@ -264,9 +272,24 @@ class FigureKind:
         *,
         into: Path | None = None,
     ) -> list[Path]:
+        from flexo.diagnostics import FlexoError
         from flexo.export import build
+        from flexo.studio.figure_edit import model
 
-        spec = parse(document["text"], base)
+        # Exported as it is drawn: lines to shapes it has none of left out, a shape that
+        # can't be drawn as written (a protein with no length) a plain box of its words --
+        # each said in a note with what was made.
+        said: list[Message] = []
+        document = _strays(document, said)
+        try:
+            spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
+        except FlexoError as error:
+            info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+            said += [_shape_problem(item, info) for item in error.diagnostics]
+            spec = _without(document, base, error)
+            if spec is None:
+                raise ValueError(" ".join(message.text for message in said)) from None
+        self.export_notes = [_exported_as(message.text) for message in said]
         result = build(spec, into or base / "build", stem=stem, formats=tuple(formats))
         written = list(result.outputs.existing())
         if into is not None and "editable" not in formats and len(written) > 1:
@@ -464,6 +487,16 @@ def _shape_problem(diagnostic, info: dict[str, Any]) -> Message:
     )
 
 
+def _exported_as(said: str) -> str:
+    """What an export says of a shape it drew as a plain box, or a line it left out."""
+
+    found = re.match(r"(\u201c[^\u201d]*\u201d|This \S+) can\u2019t be drawn yet: ", said)
+    if found:
+        why = said[found.end() :].split(" Choose it")[0]
+        return f"{found.group(1)} is drawn as a plain box: {why}"
+    return said
+
+
 def _strays(document: dict[str, Any], said: list[Message]) -> dict[str, Any]:
     """The figure without its lines to (or from) shapes it has none of, each said in
     ``said`` -- or as it is, with none (or should it not read)."""
@@ -528,6 +561,18 @@ def _figure_of(document: Any) -> dict[str, Any] | None:
         data = yaml.safe_load((document or {}).get("text", "") or "") or {}
     except yaml.YAMLError:
         return None
+    return _read_figure(data)
+
+
+def figure_changes(old: Any, new: Any) -> list[str]:
+    """What an edit did to a figure written in another document (a deck's slide), as its
+    data before and after: a few notes ("added “Cache”", "moved “Encoder”"); none when it
+    does not read as a figure."""
+
+    return [note["text"] for note in _changes(_read_figure(old), _read_figure(new)) or []]
+
+
+def _read_figure(data: Any) -> dict[str, Any] | None:
     if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
         return None
     nodes = {

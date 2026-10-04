@@ -270,10 +270,15 @@ WRAPPED_KINDS = frozenset(
         "inset",
         "feature-strip",
         "sequence",
+        "decision",
         *SHAPE_KINDS,
     }
 )
 """Kinds whose box is sized round their label, so a long label wraps instead."""
+
+DECISION_MEASURE = 8.0
+"""The longest a decision's line of words runs, in ems: a longer question takes two lines,
+so its diamond stays near square rather than a long flat lozenge."""
 
 
 def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
@@ -288,6 +293,8 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
         return max(1.0, width - 2.0 * style.padding_x.points)
     if node.kind == "cloud":
         return CLOUD_MEASURE * style.typography.size.points
+    if node.kind == "decision":
+        return DECISION_MEASURE * style.typography.size.points
     return style.label_measure * style.typography.size.points
 
 

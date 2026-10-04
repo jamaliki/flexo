@@ -192,7 +192,7 @@ export class Session {
       // own, so that undone it takes back these edits alone -- never folding theirs in.
       if (joins && !same(top.after, before)) top.parts = [...(top.parts || [{ before: top.before, after: top.after }]), { before, after }];
       else if (joins && top.parts) top.parts[top.parts.length - 1].after = after;
-      // (Named as its latest edit says, where it says: "Typing in “Alice step”", not "“A”".)
+      // (Named as its latest edit says, where it says: "Typing “Alice step”", not "“A”".)
       if (joins) Object.assign(top, { after, at: now, said: null }, label ? { label } : {});
       else this.past.push({ before, after, at: now, label });
       if (this.past.length > 300) this.past.shift();
@@ -360,6 +360,19 @@ export class Session {
       let told = null;
       try { told = this.describe(own.before, own.after); } catch { told = null; }
       const said = typeof told === "string" ? { text: told } : told || {};
+      // A run of typing others' changes cut into parts: named by all it typed, as its undo
+      // takes it all back ("Typing “alice types on”"), not by its last part's words alone.
+      if (entry.parts && /^Typing “.*”$/.test(said.text || "")) {
+        const typed = entry.parts.map((part) => {
+          let text = null;
+          try { const one = this.describe(part.before, part.after); text = typeof one === "string" ? one : one?.text; } catch { text = null; }
+          return /^Typing “(.*)”$/.exec(text || "")?.[1] ?? null;
+        });
+        if (typed.every((words) => words !== null)) {
+          const words = [...typed.map((one) => one.replace(/…$/, "")).join(" ")];
+          said.text = `Typing “${words.length > 40 ? `${words.slice(0, 39).join("")}…` : words.join("")}”`;
+        }
+      }
       entry.said = { text: entry.label || said.text || "", place: said.place, where: said.where };
     }
     // Placed where it is now, as the kind follows it (`follow`), the place it was made in
@@ -434,7 +447,9 @@ export class Session {
     // same edit (a space both typed at one place), taken as one.
     if (who && from && same(document, sent) && same(local, sent)) this.emit("absorbed", { base: from, incoming: document, before: local, who });
     const notes = [];
-    this.document = same(local, sent) ? document : this.mended(mergeAnswer(sent, document, local, notes), notes, sent);
+    // (Come back as it is here, it stays the very document here: the editor's objects, and
+    // what it knows by them, stay.)
+    this.document = same(local, sent) ? (same(document, local) ? local : document) : this.mended(mergeAnswer(sent, document, local, notes), notes, sent);
     this.synced = document;
     this.unwritten = [...this.unwritten.slice(-19), document];
     this.version = version;
@@ -443,7 +458,9 @@ export class Session {
     if (!same(this.document, local)) {
       // (`base` and `incoming`: what was merged with what was here, for an editor to carry its
       // caret through the same merge.)
-      this.emit("change", { quiet: false, source: "remote", who, before: local, base: sent, incoming: document, merged: true });
+      // (`answer`: the studio's answer to what this page sent -- its own items, among others'
+      // alike added at one place, the later.)
+      this.emit("change", { quiet: false, source: "remote", who, before: local, base: sent, incoming: document, merged: true, answer: true });
       this.requestDraw();
     }
     if (who && !same(document, sent)) this.lastWho = who;

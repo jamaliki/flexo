@@ -45,6 +45,8 @@ export function dropPlace(model, boxes, point, id) {
   }
   const under = underPart(model, groups, boxes, point, id, inside);
   if (under) return under;
+  const beside = besidePart(model, groups, parent, boxes, point, id, inside);
+  if (beside) return beside;
   const line = all && ownLine(model, groups.get(model.root), all, point, id);
   if (line) return line;
   if (all && (point.x < all.left - MARGIN || point.x > all.right + MARGIN || point.y < all.top - MARGIN || point.y > all.bottom + MARGIN)) return null;
@@ -108,16 +110,57 @@ function underPart(model, groups, boxes, point, id, inside) {
     for (const child of way === "column" ? [lowest] : group.children || []) {
       const box = boxes.get(child);
       if (child === id || groups.has(child) || !box || (frame && filled(box))) continue;
-      const span = (box.right - box.left) * 0.35, middle = (box.left + box.right) / 2;
+      // (Anywhere under its width.)
       const below = point.y - box.bottom;
       const least = way === "column" ? 4 : Math.max(UNDER, (box.bottom - box.top) * 0.6);
-      if (Math.abs(point.x - middle) > span || below < least || below > LINE) continue;
+      if (point.x < box.left - 2 || point.x > box.right + 2 || below < least || below > LINE) continue;
       const between = [...boxes.entries()].some(([other, rect]) => other !== child && other !== id && !inside(other, id)
         && (groups.has(other) ? other !== model.root && !inside(child, other) && holds(rect) : rect.top >= box.bottom && rect.top < point.y && rect.right > point.x && rect.left < point.x));
       if (!between) return { kind: "line", side: "below", of: child, parent: group.id, index: -1 };
     }
   }
   return null;
+}
+
+// Just past a part's side, level with it, at any depth (a part in a group in a row of the
+// figure's), with nothing between: beside it -- next to it in its row, or, in a column, the
+// two side by side ({ kind: "line", side, of }).
+const NEAR = 40;
+function besidePart(model, groups, parent, boxes, point, id, inside) {
+  let found = null;
+  for (const [child, box] of boxes) {
+    if (child === id || groups.has(child) || inside(child, id) || !parent.has(child) || String(child).includes("~line")) continue;
+    if (point.y < box.top || point.y > box.bottom) continue;
+    const right = point.x - box.right, left = box.left - point.x;
+    const off = right >= 2 ? { side: "right", by: right } : left >= 2 ? { side: "left", by: left } : null;
+    if (!off || off.by > NEAR) continue;
+    // Nothing between the part and the point.
+    const [from, to] = off.side === "right" ? [box.right, point.x] : [point.x, box.left];
+    const between = [...boxes.entries()].some(([other, rect]) => other !== child && other !== id && !groups.has(other) && !inside(other, id)
+      && rect.left < to && rect.right > from && rect.top < point.y && rect.bottom > point.y);
+    if (between || (found && found.by <= off.by)) continue;
+    // In a column, only past the column's own parts that way: within them, it is in line.
+    const holder = groups.get(parent.get(child));
+    if ((holder?.layout?.kind || "column") === "column") {
+      const others = (holder.children || []).filter((each) => each !== id).map((each) => boxes.get(each)).filter(Boolean);
+      const edge = off.side === "right" ? Math.max(...others.map((rect) => rect.right)) : Math.min(...others.map((rect) => rect.left));
+      if (off.side === "right" ? point.x <= edge : point.x >= edge) continue;
+    }
+    found = { child, ...off };
+  }
+  if (!found) return null;
+  const holder = groups.get(parent.get(found.child));
+  const way = holder?.layout?.kind || "column";
+  if (way === "row") {
+    // In a row, beside it is next to it there -- as its row runs, should it run back.
+    const siblings = (holder.children || []).filter((child) => child !== id);
+    const at = siblings.indexOf(found.child);
+    const next = siblings[at + 1] && boxes.get(siblings[at + 1]);
+    const back = Boolean(next && (next.left + next.right) / 2 < (boxes.get(found.child).left + boxes.get(found.child).right) / 2);
+    const after = (found.side === "right") !== back;
+    return { parent: holder.id, index: at + (after ? 1 : 0), kind: "row", near: found.child, after, across: true, siblings, back };
+  }
+  return { kind: "line", side: found.side, of: found.child, parent: holder?.id || model.root, index: -1 };
 }
 
 // Out past the figure's end, across the way it runs: a line of its own there. The part

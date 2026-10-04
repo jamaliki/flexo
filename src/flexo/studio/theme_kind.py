@@ -115,7 +115,8 @@ class ThemeKind:
             )
         else:
             # Over the file's words as they were (``previous``): its comments and quoting kept.
-            path.write_text(rewrite(previous, document, self.dump), encoding="utf-8")
+            text = rewrite(previous, document, self.dump, name=str(path.resolve()))
+            path.write_text(text, encoding="utf-8")
 
     def dump(self, document: Any) -> str:
         return yaml.safe_dump(document, sort_keys=False, allow_unicode=True, width=100)

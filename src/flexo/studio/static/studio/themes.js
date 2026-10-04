@@ -53,7 +53,9 @@ export async function themesFor(session, { fresh = false } = {}) {
 // fallback (the kind's own default).
 export function themeField(session, { value, fallback = "paper", onPick, onCustomise } = {}) {
   const current = value || fallback;
-  const holder = h("div.theme-field", {}, themeCard({ title: current, value: current }, { compact: true, chevron: true }));
+  // Named for VoiceOver as what it is, then the theme it shows.
+  const named = (card, title) => { card.setAttribute?.("aria-label", `Theme, ${title}`); return card; };
+  const holder = h("div.theme-field", {}, named(themeCard({ title: current, value: current }, { compact: true, chevron: true }), current));
   const pick = (card) => { closeMenu(); if (card.value !== current) onPick?.(card.value === fallback ? null : card.value); };
   const open = async (anchor) => {
     const cards = await themesFor(session, { fresh: true });
@@ -69,7 +71,7 @@ export function themeField(session, { value, fallback = "paper", onPick, onCusto
   };
   themesFor(session).then((cards) => {
     const card = cards.find((item) => item.value === current) || { title: current, value: current };
-    clear(holder, themeCard(card, { compact: true, chevron: true, onclick: (event) => open(event.currentTarget) }));
+    clear(holder, named(themeCard(card, { compact: true, chevron: true, onclick: (event) => open(event.currentTarget) }), card.title || current));
   }).catch(() => {});
   return holder;
 }

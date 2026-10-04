@@ -15,6 +15,8 @@
 .fig.narrow > .fig-inspector { grid-column: 2; grid-row: 1; }
 .fig.narrow > .fig-left { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: min(272px, 80%); background: var(--panel); box-shadow: var(--shadow-2); visibility: hidden; }
 .fig.narrow.list-open > .fig-left { visibility: visible; }
+/* Opened over the figure, the list leaves it the room beside it: fitted, it is drawn there. */
+.fig.narrow.list-open .fig-stage { padding-left: calc(min(272px, 80%) + 24px); }
 
 /* Shapes and Source: the left panel's own tabs (the studio's document tabs are .bar .tab). */
 .fig-left .tabs { display: flex; gap: 2px; }

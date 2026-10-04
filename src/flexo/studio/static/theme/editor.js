@@ -81,8 +81,13 @@ export function mount(studio, container) {
 
   const row = (label, path, control, { hint } = {}) => {
     const changed = get(path) !== undefined;
+    // Its control named by its label, for VoiceOver (it is beside the label, not in it).
+    const id = `setting-${path.join("-")}`;
+    for (const named of control?.querySelectorAll ? [control, ...control.querySelectorAll("input, button.select, [role=radiogroup]")] : []) {
+      if (named.matches?.("input, button.select, [role=radiogroup], .switch") && !named.hasAttribute("aria-label") && !named.hasAttribute("aria-labelledby")) named.setAttribute("aria-labelledby", id);
+    }
     return h(`div.setting${changed ? ".changed" : ""}`, {},
-      h("label.setting-label", {}, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
+      h("label.setting-label", { id }, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
       h("div.setting-control", {}, control),
       h("button.setting-reset", { type: "button", title: "Reset", disabled: !changed, onclick: () => { set(path, null, { quiet: false }); } }, icon("undo")));
   };
@@ -115,10 +120,13 @@ export function mount(studio, container) {
 
   const colour = (label, path) => {
     const value = get(path) ?? base(path);
-    const picker = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
+    // The picker is the swatch's, not a stop of its own for Tab: the swatch is (Return or
+    // Space opens it), and the hex beside it.
+    const picker = h("input", { type: "color", tabIndex: -1, "aria-hidden": "true", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
       oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
     // No colour is the hatched chip every "None" is drawn as.
-    const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", onclick: () => picker.click() });
+    const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", role: "button", tabIndex: 0, "aria-label": `${label}: choose a colour`,
+      onclick: () => picker.click(), onkeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); picker.click(); } } });
     const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
       onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; swatch.classList.remove("none"); set(path, text); } else if (!text) set(path, null); } });
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
@@ -130,8 +138,9 @@ export function mount(studio, container) {
     // Said in the history by the colour changed: "Change Colour 2", "Change Theme Colours".
     const write = (next, label = "Change Theme Colours") => set(["palette"], next, { quiet: false, label });
     const chips = list.map((value, index) => {
-      const picker = h("input", { type: "color", value, oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` }); } });
-      const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, onclick: () => picker.click() }, picker,
+      const picker = h("input", { type: "color", value, tabIndex: -1, "aria-hidden": "true", oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` }); } });
+      const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, role: "button", tabIndex: 0, "aria-label": `Colour ${index + 1}, ${value}`,
+        onclick: () => picker.click(), onkeydown: (event) => { if (event.target === chip && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); picker.click(); } } }, picker,
         h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index), `Remove Colour ${index + 1}`); } }, icon("close")));
       return chip;
     });
@@ -231,7 +240,7 @@ export function mount(studio, container) {
     // Nothing to show and why said (a deck that does not read): that, not a spinner for ever.
     const said = !cards.length && messages.find((message) => message.severity === "error");
     clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards
-      : said ? h("div.empty", {}, icon("warning"), h("span", {}, said.text)) : h("div.empty", {}, h("div.spinner"))));
+      : said ? h("div.empty.sample-said", {}, icon("warning"), h("span", {}, said.text)) : h("div.empty", {}, h("div.spinner"))));
     if (said) { clear(note); return; }
     clear(note, messages.filter((m) => m.severity !== "note").map((message) => h(`div.message.${message.severity}`, {}, icon(message.severity === "error" ? "error" : "warning"), h("div", {}, message.text))));
   };

@@ -592,6 +592,7 @@ def _follow_moves(base: dict, side: dict, other: dict) -> tuple[dict, dict]:
     added_b: dict[tuple, list[tuple[float, Any]]] = {}
     added_o: dict[tuple, list[tuple[float, Any]]] = {}
     order = list(pools_s)
+    landed: dict[tuple, tuple[tuple, float]] = {}
     for from_pool, i, to_pool, j in sorted(moves, key=lambda move: (order.index(move[2]), move[3])):
         before = kept.get(to_pool, {})
         back = {k: b for b, k in before.items()}
@@ -604,7 +605,29 @@ def _follow_moves(base: dict, side: dict, other: dict) -> tuple[dict, dict]:
         gone_o.setdefault(from_pool, set()).add(theirs_now[i])
         in_other = _pairs(pools_b.get(to_pool, []), pools_o.get(to_pool, []))
         place = in_other.get(after, -1) if after >= 0 else -1
-        added_o.setdefault(to_pool, []).append((place + 0.5, pools_o[from_pool][theirs_now[i]]))
+        landing = place + 0.5 + j / 1e6
+        added_o.setdefault(to_pool, []).append((landing, pools_o[from_pool][theirs_now[i]]))
+        landed[(from_pool, theirs_now[i])] = (to_pool, landing)
+    # What the other side added to a list the side took away whole, all its items moved (a
+    # paragraph added to a column as the slide was made one column again): it goes with them,
+    # after the one before it where that went -- not left behind in a list no longer there.
+    for pool, items in pools_o.items():
+        was = pools_b.get(pool, [])
+        moved = gone_b.get(pool, set())
+        if pool in pools_s or not was or any(i not in moved for i in range(len(was))):
+            continue
+        theirs = set(_pairs(was, items).values())
+        last: tuple[tuple, float] | None = None
+        count = 0
+        for k, item in enumerate(items):
+            if (pool, k) in landed:
+                last, count = landed[(pool, k)], 0
+                continue
+            if k in theirs or last is None:
+                continue
+            count += 1
+            gone_o.setdefault(pool, set()).add(k)
+            added_o.setdefault(last[0], []).append((last[1] + count / 1e9, item))
     return _repooled(base, new_b, gone_b, added_b), _repooled(other, new_o, gone_o, added_o)
 
 

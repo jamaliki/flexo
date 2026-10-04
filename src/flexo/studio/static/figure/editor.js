@@ -54,14 +54,14 @@ export function mount(studio, main) {
   clear(main, root);
   // In a narrow window the shapes' list folds away -- opened over the figure by its button
   // in the bar -- and the inspector narrows: the figure keeps the room it is drawn in.
-  const listButton = ui.button("", () => root.classList.toggle("list-open"), { kind: "ghost", icon: "sidebar", title: "Shapes and Source" });
+  const listButton = ui.button("", () => { root.classList.toggle("list-open"); fitPage(); }, { kind: "ghost", icon: "sidebar", title: "Shapes and Source" });
   new ResizeObserver(() => {
     const narrow = root.clientWidth < NARROW;
     root.classList.toggle("narrow", narrow);
     if (!narrow) root.classList.remove("list-open");
     listButton.hidden = !narrow;
   }).observe(root);
-  center.addEventListener("pointerdown", () => root.classList.remove("list-open"));
+  center.addEventListener("pointerdown", () => { if (root.classList.contains("list-open")) { root.classList.remove("list-open"); fitPage(); } });
   split.addEventListener("pointerdown", (event) => {
     split.setPointerCapture(event.pointerId);
     split.classList.add("dragging");
@@ -108,6 +108,9 @@ export function mount(studio, main) {
     box: boxOf,
     changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
     settled: () => placeMarks(),
+    // What keeps a shape from being drawn as written, as the drawing says: its panel says it.
+    problems: () => messages.filter((message) => message.severity === "error" && figure.typeOf(message.where) === "node")
+      .map((message) => ({ id: message.where, text: message.text, what: String(message.code || "").split(".").pop() })),
     reveal: (id) => {
       outlineBody.querySelector(`.tree-row[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
       if (state.tab === "source") find(id);
@@ -148,10 +151,14 @@ export function mount(studio, main) {
   // one shape's words (shell.js's create).
   studio.takesKeys = true;
   // ⌘Z and Undo take back an edit held for the studio while it is away, and say which.
-  studio.takeBack = () => figure.takeBackWaiting();
+  // (`key`: one of studio.heldEdits(), for one history with the document's own, in the
+  // order they were made.)
+  studio.takeBack = (key = null) => figure.takeBackWaiting(key);
+  studio.heldEdits = () => figure.heldEdits();
+  studio.takenEdits = () => figure.takenEdits();
   studio.takeBackLabel = () => figure.waitingLabel();
   // (And made again, ⇧⌘Z and Redo, should nothing else be done meanwhile.)
-  studio.putBack = () => figure.putBackWaiting();
+  studio.putBack = (key = null) => figure.putBackWaiting(key);
   studio.putBackLabel = () => figure.takenLabel();
 
   function renderBar() {
@@ -171,8 +178,10 @@ export function mount(studio, main) {
   // -- the drawing --
   let natural = { width: 1, height: 1 };
   const fitScale = () => {
-    const room = stage.getBoundingClientRect();
-    return Math.min((room.width - 96) / natural.width, (room.height - 96) / natural.height, 3);
+    // (In the room the stage leaves it: less the shapes' list, opened over it.)
+    const room = stage.getBoundingClientRect(), style = getComputedStyle(stage);
+    const width = room.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return Math.min(width / natural.width, (room.height - 96) / natural.height, 3);
   };
   // Zoomed in or out, the drawing stays put under a point: the pointer's, for a pinch; else
   // the middle of what is chosen, if it is in sight; else the middle of the view.
@@ -452,6 +461,8 @@ export function mount(studio, main) {
         busy(true);
         try {
           const found = await studio.api("/api/act", { file: studio.file, document: studio.doc, action: { do: "structure-fetch", id } });
+          // (One that can't be had is said in the answer, not as a failed request.)
+          if (found.failed) throw new Error(found.failed);
           if (!done) { done = true; resolve(found.id); box.close(); }
         } catch (error) {
           clear(note, icon("warning"), h("span", {}, error.message));
@@ -477,6 +488,7 @@ export function mount(studio, main) {
     if (event.key === "Escape" && root.classList.contains("list-open")) {
       event.preventDefault();
       root.classList.remove("list-open");
+      fitPage();
       return;
     }
     if (typing(event.target)) return;
@@ -498,12 +510,15 @@ export function mount(studio, main) {
       { onclick: () => {
         if (!message.where) return;
         if (message.where.startsWith("line ")) studio.reveal({ line: Number(message.where.slice(5)) });
+        // A shape's problem: the shape chosen, its panel at the field to put it right in.
+        else if (figure.typeOf(message.where) === "node") figure.revealProblem(message.where, String(message.code || "").split(".").pop());
         else if (figure.typeOf(message.where)) figure.select([message.where]);
       } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
       // Where it is, by the name the part is shown by, not its ID (the figure as a whole, not
-      // said: it is what is shown).
-      h("div", {}, message.text, message.where && placeName(message.where) !== "Figure" ? h("div.where", {}, placeName(message.where)) : null))));
+      // said: it is what is shown; nor a part the message names already).
+      h("div", {}, message.text, message.where && placeName(message.where) !== "Figure" && !message.text.includes(`\u201c${placeName(message.where)}\u201d`)
+        ? h("div.where", {}, placeName(message.where)) : null))));
     if (state.tab === "source") numbers();
   };
 

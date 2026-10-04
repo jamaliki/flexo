@@ -479,6 +479,19 @@ def _turn_crossing_ends(
             for port in end.node.measured.spec.ports
         )
     }
+    # A line back to a step before it (a loop) is first tried as a C round the rest, both
+    # ends turned at once, while there is time for it: by the time single ends have been
+    # turned, there may be none left -- and the loop drawn through the middle, across the
+    # lines there, with the side beside the figure empty.
+    looped = _on_cycles(members)
+    if best and looped and _within_budget():
+        improved, used = _try_loops(
+            attempt, separated, overrides, bundles, members, ends, free, sides, tried,
+            SIDE_TRIALS, spacing, best, only=looped,
+        )
+        trials = used - SIDE_TRIALS
+        if improved is not None:
+            sides, (pins, bundles, wires), best = improved
     while best and trials < SIDE_TRIALS and _within_budget():
         involved = {index for pair in best for index in pair}
         # A pin is one candidate: the ends that share it move together, or
@@ -552,8 +565,49 @@ def _turn_crossing_ends(
     return pins, bundles, wires
 
 
+def _on_cycles(members) -> set[int]:
+    """The edges (by their index among ``members``) that close a loop: a line back to a
+    step whose lines lead on to where it starts (a decision's "try again")."""
+
+    onward: dict[str, set[str]] = defaultdict(set)
+    edges = [
+        (index, member.spec.source.node_id, member.spec.target.node_id)
+        for index, member in enumerate(members)
+        if isinstance(member.spec, EdgeSpec)
+    ]
+    for _, source, target in edges:
+        onward[source].add(target)
+
+    def reaches(start: str, goal: str) -> bool:
+        seen, stack = {start}, [start]
+        while stack:
+            at = stack.pop()
+            if at == goal:
+                return True
+            for following in onward[at] - seen:
+                seen.add(following)
+                stack.append(following)
+        return False
+
+    return {
+        index for index, source, target in edges if source != target and reaches(target, source)
+    }
+
+
 def _try_loops(
-    attempt, separated, overrides, bundles, members, ends, free, sides, tried, trials, spacing, best
+    attempt,
+    separated,
+    overrides,
+    bundles,
+    members,
+    ends,
+    free,
+    sides,
+    tried,
+    trials,
+    spacing,
+    best,
+    only=None,
 ):
     """Both ends of a defective edge on one side: the edge becomes a C round the rest.
 
@@ -568,7 +622,7 @@ def _try_loops(
     for index in sorted(involved):
         for member in bundles[index].members:
             spec = members[member].spec
-            if not isinstance(spec, EdgeSpec):
+            if not isinstance(spec, EdgeSpec) or (only is not None and member not in only):
                 continue
             first, second = members[member].ends
             if first not in free or second not in free:

@@ -180,6 +180,13 @@ def test_timeline_spans_that_only_touch_share_a_lane() -> None:
         {"start": 14, "end": 40, "label": "Plateau"},
     ]
     assert len(set(lanes(touching))) == 1
+    # A span too narrow for its words, its words under it: the next span still shares its lane.
+    narrow = [
+        {"start": 0, "end": 1, "label": "Excitation"},
+        {"start": 1, "end": 10, "label": "Adaptation"},
+        {"start": 10, "end": 40, "label": "Adapted"},
+    ]
+    assert len(set(lanes(narrow))) == 1
     # Spans that overlap are stacked.
     assert len(set(lanes([{"start": 0, "end": 10}, {"start": 5, "end": 20}]))) == 2
 
@@ -541,3 +548,26 @@ def test_short_domains_names_sit_near_them_in_rows_not_led_to_from_afar() -> Non
         for name, y in re.findall(r'<text id="p\.(feature[12])\.label"[^>]* y="([\d.]+)"', svg)
     }
     assert rows["feature2"] > rows["feature1"]
+
+
+def test_a_drawn_things_words_are_drawn_as_read_its_name_then_its_parts_in_order() -> None:
+    from flexo.builder import Figure
+
+    features = [
+        {"type": "domain", "label": "P4 kinase", "start": 355, "end": 507},
+        {"type": "domain", "label": "P1", "start": 1, "end": 134},
+        {"type": "domain", "label": "P2", "start": 159, "end": 227},
+        {"type": "phosphorylation", "label": "His48", "at": 48},
+    ]
+    with Figure("chea") as figure:
+        figure.root.protein("p", 654, features, label="CheA")
+    svg = compile_figure(figure.spec).document.text
+    # A PDF's tags, a slide program and a screen reader read words in the order drawn: its
+    # name first, then its parts from the N-terminus on (a site among its domains), then
+    # the residue numbers -- not the widest domain first, nor its name last.
+    said = re.findall(r'<text id="p(?:\.[\w.]+)?"[^>]*>(?:<tspan[^>]*>)?([^<]+)<', svg)
+    assert said[:5] == ["CheA", "P1", "His48", "P2", "P4 kinase"]
+    # Drawn under nothing, as nothing is drawn where it is; the domains from the N-terminus.
+    assert svg.index('id="p.label"') < svg.index('id="p.chain"')
+    shapes = re.findall(r'<path id="p\.(feature\d)"', svg)
+    assert shapes == ["feature2", "feature3", "feature1"]

@@ -1356,3 +1356,38 @@ def test_a_line_never_leaves_from_over_a_name_set_across_a_panel_top(tmp_path) -
     (box,) = [node.bounds for node in nodes if node.measured.spec.id.endswith("model")]
     start = edge.centerline[0]
     assert start.y > box.top + 1.0, (start, box)
+
+
+def test_a_loop_back_goes_round_the_free_side_not_across_the_lines() -> None:
+    import yaml
+
+    from flexo.serialization import parse_figure
+
+    # "Keep running" back to "Sample": round the empty left, not through the middle across
+    # the decision's "No".
+    text = """
+figure: {id: loop}
+nodes:
+- {id: swim, kind: terminal, label: Swimming}
+- {id: sample, label: Sample attractant over 1 s}
+- {id: rising, kind: decision, label: 'Concentration rising?'}
+- {id: tumble, label: 'Tumble (CW), new heading'}
+- {id: keep, label: 'Keep running (CCW)'}
+- {id: turn, label: Random reorientation}
+edges:
+- {from: swim, to: sample}
+- {from: sample, to: rising}
+- {from: rising, to: keep, label: 'Yes'}
+- {from: rising, to: tumble, label: 'No'}
+- {from: tumble, to: turn}
+- {from: turn, to: swim}
+- {from: keep, to: sample}
+groups:
+- {id: root, layout: {kind: column, justify: center}, role: canvas,
+   children: [swim, sample, row, keep]}
+- {id: row, layout: {kind: row, align: center}, role: layout, children: [rising, column]}
+- {id: column, layout: {kind: column, align: center}, role: layout, children: [tumble, turn]}
+"""
+    compiled = compile_figure(parse_figure(yaml.safe_load(text)))
+    codes = [item.code for item in lint_compilation(compiled).diagnostics]
+    assert "routing.connector.crossing" not in codes, codes

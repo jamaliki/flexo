@@ -216,6 +216,15 @@ def test_an_object_put_on_another_slide_keeps_the_words_typed_in_it_meanwhile() 
     assert merge3(base, moved, typed) == went
 
 
+def test_an_object_added_to_a_column_made_part_of_the_body_again_goes_with_it() -> None:
+    base = {"left": [{"text": "A"}, {"text": "B"}], "right": [{"image": "p.png"}]}
+    one = {"body": [{"text": "A"}, {"text": "B"}, {"image": "p.png"}]}
+    added = {"left": [{"text": "A"}, {"text": "B"}, {"text": "New"}], "right": [{"image": "p.png"}]}
+    went = {"body": [{"text": "A"}, {"text": "B"}, {"text": "New"}, {"image": "p.png"}]}
+    assert merge3(base, one, added) == went
+    assert merge3(base, added, one) == went
+
+
 def test_a_shape_renamed_keeps_the_words_typed_in_it_meanwhile() -> None:
     def figure(name: str, label: str) -> dict:
         return {

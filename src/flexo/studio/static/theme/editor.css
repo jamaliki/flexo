@@ -25,7 +25,9 @@
 .setting-reset svg { width: 13px; height: 13px; }
 .setting-group-label { font: var(--text-label); color: var(--ink); margin-top: 6px; display: flex; gap: 8px; align-items: baseline; }
 .setting-group-label .hint { font: var(--text-hint); color: var(--ink-3); }
-.colour-field { display: flex; align-items: center; gap: 8px; }
+/* Its picker (out of sight) is placed in it, not at the page's foot, where it would
+   make the window scroll. */
+.colour-field { display: flex; align-items: center; gap: 8px; position: relative; }
 .colour-field input[type=color] { width: 0; height: 0; opacity: 0; position: absolute; pointer-events: none; }
 .colour-swatch { width: 28px; height: 28px; border-radius: 7px; box-shadow: var(--chip-ring); cursor: pointer; flex: none; }
 .colour-swatch.none { background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
@@ -51,6 +53,10 @@
 .theme-stage { padding: 36px; }
 .samples { display: grid; gap: 28px; justify-items: center; }
 .samples.slides { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); justify-items: stretch; }
+/* Nothing to show, and why (a deck that does not read): said in the middle of the stage,
+   its sign the size of its words, as the studio's other empty states are. */
+.samples .sample-said { grid-column: 1 / -1; justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 420px; margin-top: 15vh; }
+.samples .sample-said svg { width: 22px; height: 22px; color: var(--warn); }
 .sample { margin: 0; display: grid; gap: 8px; justify-items: center; }
 .sample .picture { max-width: min(100%, 900px); background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; display: block; }
 .sample.slide .picture { width: 100%; aspect-ratio: 16 / 9; }

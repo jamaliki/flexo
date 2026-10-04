@@ -370,7 +370,9 @@ export function figureParts(host) {
       if (older[0]?.action.was !== undefined && action.was !== undefined) action = { ...action, was: older[0].action.was };
       if (action.do === "update") typed.set(merge, action.values);
     }
-    const job = { action, merge, hold, choose, then, failed, follow, fresh, label: action.do === "read" || action.do === "structure-view" ? null : label || said(action, merge) };
+    // (When it was made, and which it is, for the history: a run of typing from its first key.)
+    const job = { action, merge, hold, choose, then, failed, follow, fresh, label: action.do === "read" || action.do === "structure-view" ? null : label || said(action, merge),
+      at: older[0]?.at ?? Date.now(), key: older[0]?.key ?? (jobCount += 1) };
     // Made while the studio is away, behind those held for it: shown as made at once (what
     // it shows put back, should it be taken back, to before the words it replaces).
     if (waiting) job.shown = [...older.flatMap((each) => each.shown || []), ...showWaiting(action)];
@@ -393,7 +395,9 @@ export function figureParts(host) {
         try {
           current = job;
           result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label });
-          if (waiting) { waiting = false; host.waiting?.(false); }
+          // The studio back: what was held goes, and nothing is said to wait -- nor what was
+          // taken back while it was away (made again by an edit of its own, not by ⇧⌘Z).
+          if (waiting) { waiting = false; takenBack.length = 0; host.waiting?.(false); host.held?.(); }
         } catch (error) {
           // The studio out of reach (the request never got there): the edit waits, and those
           // after it, and goes when the studio answers again -- the document says it is not
@@ -469,10 +473,22 @@ export function figureParts(host) {
   // another edit is made.
   const takenBack = [];
   let puttingBack = false;
-  function takeBackWaiting() {
+  let jobCount = 0;
+  // The edits held for the studio while it is away, in the order they were made ({ key, at,
+  // label }): for one history with the document's own; and those taken back, the latest last.
+  function heldEdits() {
+    if (!waiting) return [];
+    const jobs = [...(current && !current.taken && current.action.do !== "read" ? [current] : []),
+      ...queue.filter((job) => job.action.do !== "read" && !job.taken)];
+    return jobs.map((job) => ({ key: job.key, at: job.at, label: job.label || "Change" }));
+  }
+  const takenEdits = () => takenBack.map((job) => ({ key: job.key, at: job.at, label: job.label || "Change" }));
+  // `key`: that edit (heldEdits'), else the last made.
+  function takeBackWaiting(key = null) {
     if (!waiting) return false;
-    const at = queue.findLastIndex((job) => job.action.do !== "read");
-    const job = at >= 0 ? queue.splice(at, 1)[0] : current && current.action.do !== "read" ? current : null;
+    const at = key === null ? queue.findLastIndex((job) => job.action.do !== "read") : queue.findIndex((job) => job.key === key);
+    const job = at >= 0 ? queue.splice(at, 1)[0]
+      : current && current.action.do !== "read" && (key === null || current.key === key) ? current : null;
     if (!job || job.taken) return false;
     job.taken = true;
     takenBack.push(job);
@@ -496,13 +512,15 @@ export function figureParts(host) {
     if (inline && targets.some((target) => target?.id === inline.id)) closeInline(false);
     if (!queue.some((next) => next.action.do !== "read") && (!current || current.taken)) { waiting = false; host.waiting?.(false); }
     host.changed();
-    toast(`Undid ${job.label ? inQuotes(job.label) : "the last change"}: it was not saved yet`, { icon: "undo", seconds: 2.5 });
+    toast(`Undid ${job.label || "the last change"}: it was not saved yet`, { icon: "undo", seconds: 2.5 });
     return true;
   }
   // The last edit taken back while the studio was away, made again (⇧⌘Z, Redo): held for
   // the studio as it was, and shown as made. Answers whether there was one.
-  function putBackWaiting() {
-    const job = takenBack.pop();
+  // (`key`: that one, takenEdits'; else the last taken back.)
+  function putBackWaiting(key = null) {
+    const at = key === null ? takenBack.length - 1 : takenBack.findIndex((each) => each.key === key);
+    const job = at >= 0 ? takenBack.splice(at, 1)[0] : null;
     if (!job) return false;
     puttingBack = true;
     try {
@@ -516,7 +534,7 @@ export function figureParts(host) {
       typedOver = { ids: [job.action.target.id], words, until: Date.now() + 4000, box: null, patch: !/[$\\]/.test(words) };
       showTyped();
     }
-    toast(`Redid ${job.label ? inQuotes(job.label) : "the change"}: it is saved when the studio is back`, { icon: "redo", seconds: 2.5 });
+    toast(`Redid ${job.label || "the change"}: it is saved when the studio is back`, { icon: "redo", seconds: 2.5 });
     return true;
   }
   // What ⌘Z would take back while the studio is away: the last edit held for it, if any.
@@ -570,7 +588,7 @@ export function figureParts(host) {
     // A pair made for a branch: the part, and on a line of its own beside it what branches
     // from it -- a new branch goes beside that one, not between the two.
     const layout = holder.layout || {};
-    const pair = holder.id !== model().root && holder.role === "layout" && layout.align === "center" && children.length === 2 && children[0] === id;
+    const pair = holder.id !== model().root && holder.role === "layout" && ["center", "ports"].includes(layout.align) && children.length === 2 && children[0] === id;
     const nodesIn = (child) => (nodeOf(child) ? [child] : (groupOf(child)?.children || []).flatMap(nodesIn));
     const linked = (other) => {
       const ends = new Set(nodesIn(other));
@@ -685,8 +703,21 @@ export function figureParts(host) {
     // Where it will be drawn, as nearly as can be told before it is: its words are typed
     // there as soon as the figure knows it, and follow it when it is drawn.
     const merge = `add:${kind}:${Date.now()}`;
-    const guess = !part.node?.label ? null : plan?.branch ? guessPlace(plan.branch.of, plan.branch.towards) : guessPlace(where.after);
+    const guessed = part.needs_file ? null : plan?.branch ? guessPlace(plan.branch.of, plan.branch.towards) : guessPlace(where.after);
+    const guess = part.node?.label ? guessed : null;
     const mine = part.needs_file ? null : { text: null, done: false, guess, merge, after: where.after || where.source || null };
+    // A part with no words to type (a volume, a junction) stands where it will be all the
+    // same, until it is drawn there.
+    if (guessed && !guess) {
+      const holder = typingPlace(), frame = holder.getBoundingClientRect(), outer = host.overlay.getBoundingClientRect();
+      stand({ ...guessed, kind, left: outer.left + guessed.left - frame.left + holder.scrollLeft - holder.clientLeft,
+        top: outer.top + guessed.top - frame.top + holder.scrollTop - holder.clientTop }, holder);
+      const shown = standing;
+      setTimeout(() => { if (standing === shown && !inline) stand(null); }, 4000);
+    }
+    // Put on its flow's side, before the part after it: those after it on its line step aside
+    // for it at once, as the figure will draw them -- its stand-in never over them meanwhile.
+    const stepped = guessed && !plan?.branch ? stepAside(where.after, guessed) : null;
     early = mine;
     // Should it never be drawn, the keys are the page's again.
     if (mine) setTimeout(() => { if (early === mine) early = null; }, 5000);
@@ -697,7 +728,7 @@ export function figureParts(host) {
         if (!part.needs_file && result.select?.length === 1) { typeInto = result.select[0]; placeInline(); }
         else if (early === mine) early = null;
       },
-      failed: () => { if (early === mine) early = null; },
+      failed: () => { if (early === mine) early = null; stepped?.(); },
     });
     // A branch goes under its part as it is seen: the figure is written as it is drawn first
     // (turned to fit a slide, folded onto lines), in the same step.
@@ -766,12 +797,34 @@ export function figureParts(host) {
     const covers = ({ left, top, side, off }) => off + outside({ left, top }) * 0.5 + others.reduce((sum, { id, box: other }) => sum + (side === flow && id === next ? 0
       : Math.max(0, Math.min(left + width + 6, other.left + other.width) - Math.max(left - 6, other.left))
       * Math.max(0, Math.min(top + height + 6, other.top + other.height) - Math.max(top - 6, other.top))), 0);
-    const sides = [...new Set([flow, "bottom", "right", "top", "left"])].map(placed);
+    // (A branch goes where it goes, across the flow: its stand-in is there, never elsewhere.)
+    const sides = (towards ? [towards] : [...new Set([flow, "bottom", "right", "top", "left"])]).map(placed);
     const { left, top } = sides.reduce((best, place) => (covers(place) < covers(best) ? place : best));
     const body = host.element(after)?.querySelector("rect, path, polygon, ellipse");
     const painted = body ? getComputedStyle(body) : null;
     const paint = { fill: painted?.fill && painted.fill !== "none" ? painted.fill : "", stroke: painted?.stroke && painted.stroke !== "none" ? painted.stroke : "" };
     return { left, top, width, height, look, paint };
+  }
+  // How wide a part may be drawn where it is, its middle kept: up to the parts beside it on
+  // its line (a little short of them), in the overlay's pixels.
+  function roomBeside(id, at) {
+    const middle = at.left + at.width / 2;
+    let left = -Infinity, right = Infinity;
+    for (const node of model()?.nodes || []) {
+      const other = node.id !== id && host.box(node.id);
+      if (!other || other.top >= at.top + at.height || other.top + other.height <= at.top) continue;
+      if (other.left + other.width <= middle) left = Math.max(left, other.left + other.width);
+      else if (other.left >= middle) right = Math.min(right, other.left);
+    }
+    const page = host.overlay.getBoundingClientRect();
+    const half = Math.min(middle - Math.max(left, 0), Math.min(right, page.width) - middle);
+    return Math.max(at.width, 2 * half - 16);
+  }
+  // How a part is painted where it is drawn: its body's fill and outline.
+  function paintOf(id) {
+    const body = host.element(id)?.querySelector("rect, path, polygon, ellipse");
+    const painted = body ? getComputedStyle(body) : null;
+    return { fill: painted?.fill && painted.fill !== "none" ? painted.fill : "", stroke: painted?.stroke && painted.stroke !== "none" ? painted.stroke : "" };
   }
   // How a part's words look where they are drawn: their face, their size in the window's
   // pixels, weight and colour, and the measure (ems) they wrap at.
@@ -791,6 +844,8 @@ export function figureParts(host) {
   // What a part with no words is, said faintly where they will go while it is edited --
   // never drawn. Only a part whose kind is worded: a junction or a picture says nothing.
   const HINTS = { block: "Shape", terminal: "Start", decision: "Decision" };
+  // The least size (in the window's pixels) a hint is said at.
+  const HINT_SIZE = 11;
   // Where a part's words go while it has none, as the figure will draw them once it has: in
   // the middle of most parts; above its length, in a plasmid's ring; over a panel with a
   // heading (a protein, a plate, a timeline, a construct, a tree, a grid of cells), at its
@@ -848,9 +903,62 @@ export function figureParts(host) {
     placeInline();
   }
 
+  // Those after `after` on its line, moved aside along it for a part put at `guessed` (in
+  // the overlay's pixels) until the figure is drawn with it; answers how to put them back.
+  function stepAside(after, guessed) {
+    const holder = after && parentOf(after), box = after && host.box(after);
+    if (!holder || !box) return null;
+    const flow = sideOf(after, box);
+    const across = flow === "right" || flow === "left", sign = flow === "right" || flow === "bottom" ? 1 : -1;
+    const level = (other) => (across ? other.top < box.top + box.height && other.top + other.height > box.top
+      : other.left < box.left + box.width && other.left + other.width > box.left);
+    const beyond = (other) => sign * ((across ? other.left - box.left : other.top - box.top)) > 0;
+    const following = (holder.children || []).slice((holder.children || []).indexOf(after) + 1)
+      .map((id) => ({ id, box: host.box(id) })).filter((item) => item.box && level(item.box) && beyond(item.box));
+    if (!following.length) return null;
+    const gap = (guessed.look?.size || 8) * 2.5;
+    const first = following.reduce((near, item) => (sign * ((across ? item.box.left : item.box.top) - (across ? near.box.left : near.box.top)) < 0 ? item : near));
+    const shift = across
+      ? (sign > 0 ? guessed.left + guessed.width + gap - first.box.left : first.box.left + first.box.width - (guessed.left - gap))
+      : (sign > 0 ? guessed.top + guessed.height + gap - first.box.top : first.box.top + first.box.height - (guessed.top - gap));
+    if (shift <= 0) return null;
+    const moved = following.flatMap((item) => elementsOf(item.id)).map((element) => ({ element, base: element.getAttribute("transform") || "" }));
+    for (const { element, base } of moved) {
+      const scale = unitsPerPixel(element), d = sign * shift * scale;
+      element.setAttribute("transform", `${base} translate(${across ? d : 0} ${across ? 0 : d})`.trim());
+    }
+    // (Their lines, which would point where they were, are faded meanwhile.)
+    const ids = new Set(following.map((item) => item.id));
+    const lines = model().edges.filter((edge) => ids.has(nodeOfRef(edge.from)) || ids.has(nodeOfRef(edge.to)))
+      .map((edge) => host.element(edge.id)).filter(Boolean);
+    for (const line of lines) line.classList.add("fig-faded");
+    const back = () => {
+      for (const { element, base } of moved) if (element.isConnected) { if (base) element.setAttribute("transform", base); else element.removeAttribute("transform"); }
+      for (const line of lines) line.classList.remove("fig-faded");
+    };
+    // (Drawn anew, they are where they go; should it not be, they go back.)
+    setTimeout(back, 5000);
+    return back;
+  }
+
   function gather(group, where = null) {
     const chosen = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== model().root));
     const at = where || placement();
+    // A group stands, dashed, round what it gathers -- or, made empty, where it will be --
+    // until it is drawn.
+    const boxes = chosen.map((id) => host.box(id)).filter(Boolean);
+    const guessed = boxes.length ? null : at.after ? guessPlace(at.after) : null;
+    const room = boxes.length ? {
+      left: Math.min(...boxes.map((box) => box.left)) - 6, top: Math.min(...boxes.map((box) => box.top)) - 6,
+      right: Math.max(...boxes.map((box) => box.left + box.width)) + 6, bottom: Math.max(...boxes.map((box) => box.top + box.height)) + 6,
+    } : guessed ? { left: guessed.left, top: guessed.top, right: guessed.left + guessed.width, bottom: guessed.top + guessed.height } : null;
+    if (room) {
+      const holder = typingPlace(), frame = holder.getBoundingClientRect(), outer = host.overlay.getBoundingClientRect();
+      stand({ kind: "group", left: outer.left + room.left - frame.left + holder.scrollLeft - holder.clientLeft,
+        top: outer.top + room.top - frame.top + holder.scrollTop - holder.clientTop, width: room.right - room.left, height: room.bottom - room.top }, holder);
+      const shown = standing;
+      setTimeout(() => { if (standing === shown && !inline) stand(null); }, 4000);
+    }
     act({ do: "gather", ids: chosen, layout: group.layout, role: group.role || null,
           parent: chosen.length ? null : at.parent || null, after: chosen.length ? null : at.after || null });
   }
@@ -1092,7 +1200,20 @@ export function figureParts(host) {
     const along = (side) => (side === "right" || side === "left" ? box.height : box.width);
     const tries = (side) => [PLUS, PLUS * 0.75].flatMap((off) => [0, 0.25, -0.25, 0.4, -0.4, 0.5 + PLUS / along(side), -0.5 - PLUS / along(side)]
       .map((share) => at(side, share * along(side), off)));
-    const clear = (place) => onPage(place) && clearAt(outer.left + place.x, outer.top + place.y, own);
+    // The lines, as points along them in the window's pixels: the + lies on none (a line's
+    // drawing may let the pointer through it, so it is not found by pointing).
+    const points = [];
+    for (const path of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || []) {
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      if (!matrix || !length) continue;
+      const step = Math.max(length / 200, 3 / (matrix.a || 1));
+      for (let along = 0; along <= length; along += step) {
+        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
+        points.push(point);
+      }
+    }
+    const offLines = (x, y) => !points.some((point) => Math.abs(point.x - x) < PLUS / 2 + 3 && Math.abs(point.y - y) < PLUS / 2 + 3);
+    const clear = (place) => onPage(place) && offLines(outer.left + place.x, outer.top + place.y) && clearAt(outer.left + place.x, outer.top + place.y, own);
     for (const side of [flow, ...["right", "bottom", "left", "top"].filter((other) => other !== flow)]) {
       const found = tries(side).find(clear);
       if (found) return found;
@@ -1103,7 +1224,8 @@ export function figureParts(host) {
     // A line chosen is marked along its path, not by the box round it.
     // (The lines' twins are in the drawing, not the overlay.)
     for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
-    for (const id of state.selected) if (isLine(id)) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
+    // (But for one whose words are being typed: its words' box is where it is marked.)
+    for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
     const outer = host.overlay.getBoundingClientRect();
@@ -1135,9 +1257,12 @@ export function figureParts(host) {
       const headed = HEADED.has(node.kind) || node.kind === "structure" || BANDED.has(node.kind);
       const room = at.width * ({ decision: 0.5, circle: 0.62, io: 0.55 }[node.kind] || 0.85);
       const tall = at.height * (node.kind === "database" ? 0.45 : 0.8);
-      const fits = Math.min(look.size, room / (hint.length * 0.55), tall / 1.15);
-      const under = !headed && fits < look.size * 0.85;
-      const size = headed ? look.size : under ? look.size * 0.85 : fits;
+      // (A hint is the editor's, not the figure's: never smaller than words on the page round
+      // it are, however far the drawing is zoomed out.)
+      const wanted = Math.max(look.size, HINT_SIZE);
+      const fits = Math.min(wanted, room / (hint.length * 0.55), tall / 1.15);
+      const under = !headed && fits < Math.max(HINT_SIZE, look.size * 0.85);
+      const size = headed ? wanted : under ? Math.max(HINT_SIZE, look.size * 0.85) : fits;
       const place = under ? { x: at.left + at.width / 2, y: at.top + at.height + size * 0.9, anchor: "middle" } : wordsAt(node, at, size);
       views.push(h(`div.fig-wordless${place.anchor === "start" ? ".start" : ""}`, { dataset: { id: node.id }, style: { left: `${place.x}px`, top: `${place.y}px`,
         fontSize: `${size}px`, fontFamily: look.family, fontWeight: HEADED.has(node.kind) || node.kind === "structure" ? "600" : "" } }, hint));
@@ -1720,6 +1845,8 @@ export function figureParts(host) {
   function nudge(id, key) {
     const place = nudgePlace(id, key);
     if (place) moveAsSeen(id, place.at, place);
+    // At the end of its line already: said, not nothing at all.
+    else toast(`${inQuotes(nameOf(id))} is at the end of its ${drawnKind(parentOf(id)) === "column" ? "column" : "row"} already.`, { icon: "info", seconds: 2 });
     return Boolean(place);
   }
   function nudgePlace(id, key) {
@@ -1742,9 +1869,14 @@ export function figureParts(host) {
       return { at: { parent: holder.id, index: others.indexOf(past) + (after ? 1 : 0) }, folds, drawn };
     }
     // Across its line: onto the next line that way, of a folded row (column), beside the part
-    // nearest where it is.
+    // nearest where it is -- or, a line of one row or column, onto a line of its own that
+    // way, beside the rest (as dragging it there would).
     const outer = drawn.groups.find((group) => (group.children || []).includes(holder.id));
-    if (!outer || !String(holder.id).includes("~line")) return null;
+    if (!outer || !String(holder.id).includes("~line")) {
+      if ((holder.children || []).filter((each) => each !== id).length === 0) return null;
+      const side = way === "row" ? (key === "ArrowUp" ? "above" : "below") : key === "ArrowLeft" ? "left" : "right";
+      return { at: { kind: "line", side, of: holder.id }, folds, drawn };
+    }
     const sign = (way === "row" ? key === "ArrowUp" : key === "ArrowLeft") ? -1 : 1;
     const across = (box) => (way === "row" ? (box.top + box.bottom) / 2 : (box.left + box.right) / 2);
     const lines = [...outer.children].sort((a, b) => across(boxes.get(a)) - across(boxes.get(b)));
@@ -1907,6 +2039,8 @@ export function figureParts(host) {
   }
   function land(before) {
     host.overlay.classList.remove("fig-dragging");
+    // (A part with no words, drawn now: its stand-in goes.)
+    if (!inline && standing) stand(null);
     if (!before) return;
     state.landing = 0;
     // What is typed on a part goes with it to where it is drawn now, as one: from its
@@ -2094,6 +2228,8 @@ export function figureParts(host) {
     typingPlace().append(box);
     // The handles on the part step aside while it is typed on.
     for (const handle of host.overlay.querySelectorAll(".fig-next, .fig-rotate")) handle.remove();
+    // So does a line's mark along it: its words' box is where it is now.
+    for (const twin of host.element(id)?.querySelectorAll(".hit-line.chosen") || []) twin.classList.remove("chosen");
     inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label), sent: original, merge: `label:${id}:${Date.now()}`, live: null,
       guess: label === guess ? guess : null, look: guess?.look || null, fresh, after, waiting: null,
       // The words as the figure has them, that what is typed is typed over; and every
@@ -2316,14 +2452,21 @@ export function figureParts(host) {
       const beside = (model()?.nodes || []).filter((node) => node.id !== id).map((node) => host.box(node.id))
         .filter((box) => box && mine && box.top < mine.top + mine.height && box.top + box.height > mine.top);
       const gap = (side) => Math.min(Infinity, ...beside.map((box) => (side < 0 ? mine.left - (box.left + box.width) : box.left - (mine.left + mine.width))).filter((each) => each >= 0));
-      // (Clear of the line between them, and its arrowhead.)
-      const spare = Math.max(0, Math.min(gap(-1), gap(1), 400) - 22) * perPixel;
+      // (Clear of the line between them, its arrowhead and its words: a third of the way.)
+      const spare = Math.max(0, Math.min(gap(-1), gap(1), 400) * 0.33 - 4) * perPixel;
       const wide = Math.min(grown.width + 2 * pad, outline.width + 2 * spare);
       Object.assign(shown, { body: shape, x: shape.getAttribute("x"), width: shape.getAttribute("width") });
       const centre = Number(shape.getAttribute("x")) + Number(shape.getAttribute("width")) / 2;
       shape.setAttribute("x", centre - wide / 2);
       shape.setAttribute("width", wide);
       room = wide;
+      // A line's words the grown shape would lie under step aside until it is drawn anew.
+      const body = shape.getBoundingClientRect();
+      shown.hidden = [...(host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] [id$=".label"]') || [])].filter((words) => {
+        const rect = words.getBoundingClientRect();
+        return rect.width && rect.left < body.right && rect.right > body.left && rect.top < body.bottom && rect.bottom > body.top;
+      });
+      for (const words of shown.hidden) words.style.visibility = "hidden";
     }
     const fit = Math.min(1, (room - 2 * pad) / (grown.width || 1), (outline.height * inner - pad) / (grown.height || 1));
     if (fit < 0.98) {
@@ -2337,6 +2480,7 @@ export function figureParts(host) {
   function unshowTyped(id) {
     const shown = typedShown.get(id);
     typedShown.delete(id);
+    for (const words of shown?.hidden || []) words.style.visibility = "";
     if (!shown?.label.isConnected) return;
     shown.label.replaceChildren(...shown.children);
     delete shown.label.dataset.typed;
@@ -2386,7 +2530,13 @@ export function figureParts(host) {
     // In place on a shape with no words drawn: typed at its middle, as its words will be.
     const bare = !label && !inline.guess && inline.inPlace && (inline.kind === "node" || inline.kind === "edge");
     if (!label && !inline.guess && !bare) {
-      Object.assign(inline.box.style, { left: `${x(part.left)}px`, top: `${y(part.bottom + 6)}px`, minWidth: `${Math.max(where.width, 240)}px` });
+      // Under the part, kept on the stage -- in sight, clear of what is beside it (a slide's
+      // inspector), and over the part should there be no room under it.
+      const wide = Math.max(where.width, 240), seen = inSight(holder);
+      const left = Math.max(seen.left + 8, Math.min(part.left, seen.right - 8 - wide));
+      const high = inline.box.getBoundingClientRect().height || 60;
+      const top = part.bottom + 6 + high > seen.bottom - 8 ? Math.max(seen.top + 8, part.top - 6 - high) : part.bottom + 6;
+      Object.assign(inline.box.style, { left: `${x(left)}px`, top: `${y(top)}px`, minWidth: `${wide}px` });
       return;
     }
     // Over the drawn words, in their face, size and colour; they step aside meanwhile.
@@ -2407,10 +2557,20 @@ export function figureParts(host) {
       const sized = nodeOf(inline.id)?.width != null;
       room = sized && drawn && lines > inline.sent.split("\n").length ? drawn.width + size * 0.6 : measure * size;
     }
+    // Typed on a part with no words drawn yet, between others (one just added): the words
+    // wrap to the room there is beside it -- in a diamond's or a circle's middle -- not across
+    // its neighbours while the figure makes room for them.
+    const kindHere = nodeOf(inline.id)?.kind || "block";
+    if (bare && inline.kind === "node" && !inline.guess) {
+      const share = { decision: 0.55, circle: 0.62, io: 0.7 }[kindHere] || 1;
+      room = Math.max(size * 4, Math.min(room, roomBeside(inline.id, where) * share - size - 12));
+    }
     const font = `${look.weight} ${size}px ${look.family}`;
     // With nothing typed yet, as wide as what it says it is.
     const lines = inline.field.value ? inline.field.value.split("\n") : [inline.field.placeholder || " "];
     const text = Math.min(Math.max(...lines.map((line) => evened(plain(line) || " ", room, font))), room);
+    // (How many lines they take, wrapped so.)
+    const rows = lines.reduce((sum, line) => sum + Math.max(1, wrapped(plain(line) || " ", room, font).length), 0);
     let width = text + size + 12;
     // Drawn as typed, the shape holds the words: the box keeps inside it, its ring within the
     // chosen frame -- and room for the words and the caret all the same, never cut short.
@@ -2441,14 +2601,27 @@ export function figureParts(host) {
       const best = tries.reduce((chosen, spot) => (covered(spot) < covered(chosen) - 1 ? spot : chosen));
       [middle, top] = [best[0] + width / 2, best[1]];
     }
+    // Kept within the figure's frame, wider than the shape as it may be: never past its edge.
+    const all = inline.kind === "node" ? host.box(model()?.root) : null;
+    if (all?.width > width) middle = Math.max(outer.left + all.left + width / 2, Math.min(middle, outer.left + all.left + all.width - width / 2));
     Object.assign(inline.box.style, { left: `${x(middle - width / 2)}px`, top: `${y(top)}px`, width: `${width}px`, minWidth: "" });
     // Not drawn yet, the part stands where it will be, as a shape like the one before it --
     // wide enough for its words from the first, the box over them never past its edges.
-    if (inline.guess) {
-      const wide = Math.max(where.width, width + 10), left = outer.left + where.left + where.width / 2 - wide / 2;
+    // So too a part drawn with no words yet (as it was added), while the words typed on it are
+    // wider than it is: as that shape, grown to hold them, over it -- never hidden under them.
+    const kind = nodeOf(inline.id)?.kind || "block";
+    const inside = inline.kind === "node" && !["text", "label", "person", "structure", "plasmid"].includes(kind) && !HEADED.has(kind) && !BANDED.has(kind);
+    if (inline.guess || (bare && inside && inline.field.value)) {
+      const typingHeight = rows * size * 1.3 + 8;
+      const grown = holding(kind, width, typingHeight, where);
+      const wide = inline.guess ? Math.max(grown.width, width + 10) : grown.width, high = grown.height;
       // (Words with no shape of their own -- a Text -- stand as words alone.)
-      const bare = ["text", "label"].includes(nodeOf(inline.id)?.kind);
-      stand({ left: x(left), top: y(outer.top + where.top), width: wide, height: where.height, paint: where.paint, bare }, holder);
+      const alone = ["text", "label"].includes(kind);
+      const paint = inline.guess ? where.paint : paintOf(inline.id);
+      if (inline.guess || wide > where.width + 2 || high > where.height + 2) {
+        stand({ left: x(outer.left + where.left + where.width / 2 - wide / 2), top: y(outer.top + where.top + where.height / 2 - high / 2),
+          width: wide, height: high, paint, bare: alone, kind }, holder);
+      }
     }
     Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: look.family, fontWeight: look.weight,
       color: look.fill, textAlign: "center", paddingLeft: `${pad}px`, paddingRight: `${pad}px`, textRendering: "geometricPrecision" });
@@ -2548,8 +2721,41 @@ export function figureParts(host) {
     // Put after what the holder holds: a slide's page stays the first thing in it.
     if (!standing) { standing = h("div.fig-standing"); holder.append(standing); }
     standing.classList.toggle("bare", Boolean(place.bare));
+    standing.classList.toggle("group", place.kind === "group");
+    // A shape not a box (a diamond, a circle, a cylinder) stands as that shape.
+    const outline = place.bare ? null : outlineOf(place.kind, place.width, place.height);
+    standing.classList.toggle("shaped", Boolean(outline));
     Object.assign(standing.style, { left: `${place.left}px`, top: `${place.top}px`, width: `${place.width}px`, height: `${place.height}px`,
-      background: place.bare ? "" : place.paint?.fill || "", borderColor: place.bare ? "" : place.paint?.stroke || "" });
+      background: place.bare || outline ? "" : place.paint?.fill || "", borderColor: place.bare || outline ? "" : place.paint?.stroke || "" });
+    const fill = place.paint?.fill || "var(--raised)", stroke = place.paint?.stroke || "var(--line-strong)";
+    standing.innerHTML = outline ? `<svg width="${place.width}" height="${place.height}" style="overflow:visible;display:block"><g style="fill:${fill};stroke:${stroke};stroke-width:1.5">${outline}</g></svg>` : "";
+  }
+  // The outline of a shape of `kind`, `w` by `h` (SVG), for one that is not a box; else null.
+  function outlineOf(kind, w, h) {
+    const i = 1;
+    switch (kind) {
+      case "decision": return `<polygon points="${w / 2},${i} ${w - i},${h / 2} ${w / 2},${h - i} ${i},${h / 2}"/>`;
+      case "circle": return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2 - i}" ry="${h / 2 - i}"/>`;
+      case "terminal": return `<rect x="${i}" y="${i}" width="${w - 2 * i}" height="${h - 2 * i}" rx="${h / 2 - i}"/>`;
+      case "io": { const slant = Math.min(h * 0.35, w * 0.2); return `<polygon points="${slant + i},${i} ${w - i},${i} ${w - slant - i},${h - i} ${i},${h - i}"/>`; }
+      case "database": {
+        const ry = Math.min(h * 0.14, 8), rx = w / 2 - i;
+        return `<path d="M${i},${ry + i} A${rx},${ry} 0 0 1 ${w - i},${ry + i} V${h - ry - i} A${rx},${ry} 0 0 1 ${i},${h - ry - i} Z"/>`
+          + `<path d="M${i},${ry + i} A${rx},${ry} 0 0 0 ${w - i},${ry + i}" style="fill:none"/>`;
+      }
+      default: return null;
+    }
+  }
+  // How large a shape of `kind` must be to hold a box of typing `width` by `height` inside it
+  // (a diamond's words in its middle, a cylinder's under its lid).
+  function holding(kind, width, height, at) {
+    switch (kind) {
+      case "decision": { const high = Math.max(at.height, height * 2.4); return { width: Math.max(at.width, width / (1 - height / high) + 6), height: high }; }
+      case "circle": { const across = Math.max(at.width, at.height, Math.hypot(width, height) + 6); return { width: across, height: across }; }
+      case "io": { const high = Math.max(at.height, height + 8); return { width: Math.max(at.width, width + high * 0.7 + 6), height: high }; }
+      case "database": return { width: Math.max(at.width, width + 10), height: Math.max(at.height, height * 1.9 + 6) };
+      default: return { width: Math.max(at.width, width + 10), height: Math.max(at.height, height + 6) };
+    }
   }
   // Words typed on a part sent, with the words they were typed over: should someone else
   // have changed those meanwhile, the figure keeps both changes, merged.
@@ -2796,6 +3002,12 @@ export function figureParts(host) {
     if (file) update({ type: "node", id: node.id }, { kind, "properties.source": file });
   }
 
+  // A line's fields: those of a reaction (its cofactors) only on a figure of biology or
+  // chemistry -- or a line that has them already.
+  function edgeFields(edge) {
+    const science = (model()?.nodes || []).some((node) => ["Biology", "Chemistry"].includes(partOf(node)?.category));
+    return catalog.edge_fields.filter((field) => !field.science || science || valueAt(edge, field.key) !== undefined);
+  }
   function nodePanel(node) {
     const part = partOf(node) || { title: node.kind, fields: [], hint: "" };
     const kind = node.kind || "block";
@@ -2807,6 +3019,7 @@ export function figureParts(host) {
       h("div.section.insp-top", {}, crumbs(node.id),
         h("div.insp-row", {}, titleBlock(glyph(kind), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
       kind === "structure" ? structureProblem(node) : null,
+      shapeProblem(node, part),
       colourSection([{ type: "node", id: node.id, item: node }]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
@@ -2828,6 +3041,44 @@ export function figureParts(host) {
   }
 
   // What keeps a structure from being drawn as written, said where it is edited.
+  // What keeps a shape from being drawn as written (a protein with no length), as the
+  // drawing says it (`host.problems()`: [{ id, text, what }]): said at the top of its panel,
+  // and the field it is about marked -- the field to put it right in.
+  function problemOf(id) {
+    return (host.problems?.() || []).find((problem) => problem.id === id) || null;
+  }
+  // The field of a part's panel a problem is about (`what`: "length", "position", ...).
+  function problemField(part, what) {
+    if (!part || !what) return null;
+    const fieldsOf = part.fields || [];
+    return fieldsOf.find((field) => field.key === what || field.key === `properties.${what}` || field.key.endsWith(`.${what}`))
+      || (/^(position|records|field|unknown|span|feature|event|track)/.test(what) ? fieldsOf.find((field) => field.type === "records") : null) || null;
+  }
+  function shapeProblem(node, part) {
+    const problem = problemOf(node.id);
+    if (!problem) return null;
+    const field = problemField(part, problem.what);
+    // (Said of the shape by its words; here, in its own panel, what to do is the rest.)
+    const words = problem.text.replace(/^\u201c[^\u201d]*\u201d can\u2019t be drawn yet: /, "").replace(/ Choose it to set this in its panel\.$/, "");
+    const said = `${words[0]?.toUpperCase() || ""}${words.slice(1)}${field ? ` Set ${field.label} below.` : ""}`;
+    return h("div.section", {}, h("div.field-problem", {}, icon("error"), h("span", {}, said)));
+  }
+  // The part chosen, its panel showing the field a problem of it is about, ready to type in.
+  function revealProblem(id, what = null) {
+    if (!typeOf(id)) return;
+    select([id]);
+    const field = problemField(partOf(nodeOf(id)), what || problemOf(id)?.what);
+    if (!field) return;
+    const show = (tries = 0) => {
+      const input = document.querySelector(`[data-key="${CSS.escape(`node:${id}:${field.key}`)}"]`)
+        || document.querySelector(`[data-key^="${CSS.escape(`node:${id}:${field.key}`)}"]`);
+      if (!input) { if (tries < 20) setTimeout(() => show(tries + 1), 50); return; }
+      input.closest(".field, .records")?.classList.add("wanted");
+      input.scrollIntoView({ block: "center" });
+      input.focus?.({ preventScroll: true });
+    };
+    show();
+  }
   function structureProblem(node) {
     const box = h("div.insp-problem");
     const section = h("div.section", { hidden: true }, box);
@@ -2950,7 +3201,7 @@ export function figureParts(host) {
           h("div.insp-actions", {}, ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       // From and To across the panel, as every pop-up is, the shapes' names read whole.
       h("div.section", {}, ui.field("From", end("from")), ui.field("To", end("to")),
-        fields(catalog.edge_fields, edge, (values, merge, hold) => update({ type: "edge", id: edge.id }, values, merge, hold), `edge:${edge.id}`)),
+        fields(edgeFields(edge), edge, (values, merge, hold) => update({ type: "edge", id: edge.id }, values, merge, hold), `edge:${edge.id}`)),
     ];
   }
 
@@ -3039,18 +3290,22 @@ export function figureParts(host) {
       if (tone === undefined || tone === null || tone === "") return null;
       return /^\d+$/.test(String(tone)) ? String(tone) : tones?.used?.[tone] !== undefined ? String(tones.used[tone]) : `named:${tone}`;
     };
-    const toneNow = common((target) => target.type === "node" ? toneOf(target.item) : null) ?? null;
+    // (Shapes of different colours chosen together: no colour is theirs -- none is marked.)
+    const shared = common((target) => target.type === "node" ? toneOf(target.item) : null);
+    const mixed = shared === undefined;
+    const toneNow = mixed ? "mixed" : shared ?? null;
     // A palette of five fills eight tones by going round again: each colour is offered once
     // (by its first tone), as the slide's colour rows offer it -- and the one in use, always.
     const seen = new Set();
-    const offered = (tones?.colours || []).map((colour, index) => ({ value: String(index + 1), colour: painted(colour), title: `Theme colour ${index + 1}` }))
+    // Named as words' colours are named: Default, Accent, Accent 2...
+    const offered = (tones?.colours || []).map((colour, index) => ({ value: String(index + 1), colour: painted(colour), title: index ? `Accent ${index + 1}` : "Accent" }))
       .filter((item) => item.value === toneNow || !seen.has(String(item.colour).toLowerCase()) && seen.add(String(item.colour).toLowerCase()));
     const chips = nodes.length && offered.length ? ui.field("Theme", ui.swatches({
-      value: toneNow,
+      value: toneNow, noneTitle: "Default",
       // Each tone as a filled chip in its strong colour, as a palette's colours are shown.
       colours: offered,
       onChange: (value) => paint("node", { "properties.tone": value }),
-    })) : null;
+    }), mixed ? { hint: "Mixed" } : {}) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
     // Sent as it is typed; the words in the field stay the person's while they type.
     const toneKey = `colour:${scope}:tone`;
@@ -3555,11 +3810,12 @@ export function figureParts(host) {
       if (column.type === "choice") {
         // (A value the menu does not offer -- a synonym written in the file -- is offered too.)
         const offered = current && !column.options.includes(current) ? [...column.options, current] : column.options;
-        return ui.select({ value: current ?? "", options: offered.map((option) => ({ value: option, label: column.labels?.[option] ?? (option === "" ? "–" : option) })),
+        return ui.select({ value: current ?? "", key: cellKey, options: offered.map((option) => ({ value: option, label: column.labels?.[option] ?? (option === "" ? "–" : option) })),
           onChange: (next) => {
-            // A part's words that only said what it was ("Gene", "Domain") say what it is now.
+            // A part's words that only said what it was ("Gene", "Domain") are no words of its
+            // own: it goes wordless, its hint saying what it is now (never drawn).
             if (column.name === "type" && field.columns.some((other) => other.name === "label")
-                && (!row.label || row.label === typeWords(current || field.row?.type))) row.label = typeWords(next);
+                && row.label && row.label === typeWords(current || field.row?.type)) delete row.label;
             // A span made a site (one residue) is at where it started, its Start and End gone;
             // a site made a span runs on from where it was.
             const point = (type) => (column.points || []).includes(type || field.row?.type);
@@ -3590,7 +3846,9 @@ export function figureParts(host) {
             change(number);
           } });
       }
-      const input = ui.input({ value: typing(cellKey) ?? current ?? "", key: cellKey, placeholder: column.hint || "", onInput: (text) => change(text) });
+      // A row's words, while it has none, say faintly what it is ("Domain", "RBS").
+      const hint = column.name === "label" && field.columns.some((other) => other.name === "type") ? typeWords(row.type || field.row?.type) : "";
+      const input = ui.input({ value: typing(cellKey) ?? current ?? "", key: cellKey, placeholder: hint || column.hint || "", onInput: (text) => change(text) });
       if (column.type === "chain") {
         // One of the molecule's chains from the menu; a residue or the like typed.
         const pick = h("button.cell-pick", { type: "button", tabIndex: -1, title: "Choose a chain", onclick: async (event) => {
@@ -3628,10 +3886,10 @@ export function figureParts(host) {
     const table = field.columns.length > 4
       ? h("div.records-cards", {}, rows.map((row, index) => h("div.records-card", {},
         field.columns.map((column) => h(`div.records-cell${column.type === "choice" || column.name === "label" ? ".wide" : ""}`, {},
-          h("span.records-head", { title: column.hint || "" }, column.label), cell(row, index, column))),
+          h("span.records-head", { title: column.title || column.hint || "" }, column.label), cell(row, index, column))),
         remove(index))))
       : h("div.records-table", { style: { gridTemplateColumns: template } },
-        field.columns.map((column) => h("span.records-head", { title: column.hint || "" }, column.label)), h("span.records-head"),
+        field.columns.map((column) => h("span.records-head", { title: column.title || column.hint || "" }, column.label)), h("span.records-head"),
         rows.map((row, index) => [...field.columns.map((column) => cell(row, index, column)), remove(index)]));
     // A row naming a chain the molecule lacks is said on it: it colours nothing, the rest is drawn.
     const chainColumn = field.columns.findIndex((column) => column.type === "chain");
@@ -3707,6 +3965,8 @@ export function figureParts(host) {
         }
         for (const [name, start] of Object.entries(field.row || { label: "New" })) {
           if (spans && (name === "start" || name === "end")) { fresh[name] = spans[name]; continue; }
+          // No sample words: a new part's words are its person's (its hint says what it is).
+          if (name === "label" && field.columns.some((column) => column.name === "type")) continue;
           if (typeof start === "string" && /^\+\d+(\.\d+)?$/.test(start)) {
             const step = Number(start.slice(1));
             const next = typeof last?.[name] === "number" ? last[name] + step : typeof last?.at === "number" ? last.at + step : step;
@@ -3724,6 +3984,13 @@ export function figureParts(host) {
         }
         rows.push(fresh);
         write();
+        // The new row's first field, ready to be typed in, once the panel is drawn again.
+        const first = `${key}:${rows.length - 1}:${field.columns[0].name}`;
+        const focus = (tries = 0) => {
+          const control = document.querySelector(`[data-key="${CSS.escape(first)}"]`);
+          if (control) { control.focus(); control.scrollIntoView?.({ block: "nearest" }); } else if (tries < 20) setTimeout(() => focus(tries + 1), 50);
+        };
+        setTimeout(focus, 0);
       }, { small: true, icon: "plus" }));
   }
 
@@ -3737,7 +4004,7 @@ export function figureParts(host) {
     setModel, select, act, update, idle, pointerdown, landing, land, settles,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
-    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf,
-    openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel,
+    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf, revealProblem,
+    openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }

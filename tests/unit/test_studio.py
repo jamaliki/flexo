@@ -417,6 +417,28 @@ def test_a_file_renamed_while_open_is_followed_and_saved_under_its_new_name(
         workspace.close()
 
 
+def test_only_a_file_that_just_appeared_can_be_one_renamed_or_moved(tmp_path: Path) -> None:
+    figure = tmp_path / "figure.yaml"
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
+    (tmp_path / "figure copy.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    (tmp_path / "old").mkdir()
+    workspace = Workspace(tmp_path)
+    try:
+        # Deleted: the copy that was there already, word for word the same, is another file.
+        doc = workspace.open("figure.yaml")
+        figure.unlink()
+        wait_for(lambda: doc.problem is not None)
+        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.write(again=True) and doc.problem is None
+        # Moved into a folder in its folder: followed there.
+        time.sleep(0.6)
+        figure.rename(tmp_path / "old" / "figure.yaml")
+        wait_for(lambda: doc.name == "old/figure.yaml")
+        assert doc.problem is None
+    finally:
+        workspace.close()
+
+
 def test_a_refused_call_ends_its_connection(served: tuple[str, Workspace]) -> None:
     import socket
 
@@ -1340,6 +1362,12 @@ def test_the_page_merges_as_the_server_does() -> None:
             {"nodes": [{"id": "z", "label": "Step one"}], "edges": [{"from": "z"}]},
         ],
         [{"s": [{"t": "A"}]}, {"s": [{"t": "A"}, {"t": ""}]}, {"s": [{"t": "A"}, {"t": ""}]}],
+        # Two columns made one again while another added to the first: theirs goes with it.
+        [
+            {"left": [{"x": "A"}, {"x": "B"}], "right": [{"y": 1}]},
+            {"body": [{"x": "A"}, {"x": "B"}, {"y": 1}]},
+            {"left": [{"x": "A"}, {"x": "B"}, {"x": "New"}], "right": [{"y": 1}]},
+        ],
     ]
     pairs = [
         [{"a": [1, {"b": None}]}, {"a": [1, {"b": None}]}],
@@ -1824,7 +1852,10 @@ def test_a_quotation_within_a_quotation_alternates_its_marks() -> None:
 const [dq, dc, sq, sc] = ["\\u201c", "\\u201d", "\\u2018", "\\u2019"];
 const label = `Typing in ${inQuotes(`Hello ${dq}world${dc} again`)}`;
 const big = inQuotes(`Alice${sc}s ${sq}big${sc} day`);
-console.log(JSON.stringify([label, inQuotes(label), inQuotes(`Undo ${inQuotes(label)}`), big]));
+// Straight marks typed in a name, made typographic at their depth; apostrophes left be.
+const straight = inQuotes(`Typing in ${inQuotes(`Take the "fast" path, it's 'quick'`)}`);
+const undo = inQuotes(`Undo ${inQuotes(label)}`);
+console.log(JSON.stringify([label, inQuotes(label), undo, big, straight]));
 process.exit(0);
 """
     )
@@ -1836,6 +1867,7 @@ process.exit(0);
         f"{dq}Typing in {sq}Hello {dq}world{dc} again{sc}{dc}",
         f"{dq}Undo {sq}Typing in {dq}Hello {sq}world{sc} again{dc}{sc}{dc}",
         f"{dq}Alice{sc}s {sq}big{sc} day{dc}",
+        f"{dq}Typing in {sq}Take the {dq}fast{dc} path, it's {dq}quick{dc}{sc}{dc}",
     ]
 
 

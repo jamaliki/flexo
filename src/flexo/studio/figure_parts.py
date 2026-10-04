@@ -114,6 +114,13 @@ def _column(name: str, label: str, type: str = "text", **options: Any) -> dict[s
     return {"name": name, "label": label, "type": type, **options}
 
 
+def _attach() -> dict[str, Any]:
+    """A row's name for lines to end at (a feature's, a part's): said as what it does."""
+
+    title = "A name lines are drawn to, to end at this one"
+    return _column("id", "Attach At", hint="a name", title=title)
+
+
 LABEL = _field("label", "Label", "markup")
 TONE = _field(
     "properties.tone",
@@ -193,7 +200,7 @@ def _genetics() -> list[dict[str, Any]]:
                         strand,
                         tone,
                         _column("bp", "Length", "integer", hint="In base pairs"),
-                        _column("id", "Port", hint="Name to connect lines to"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -291,7 +298,7 @@ def _proteins() -> list[dict[str, Any]]:
                         _column("end", "End", "integer"),
                         _column("at", "At", "integer", hint="The residue of a single site"),
                         _column("tone", "Tone", "combo", options=list(TONES)),
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -305,7 +312,7 @@ def _proteins() -> list[dict[str, Any]]:
                         _column("start", "Start", "integer"),
                         _column("end", "End", "integer"),
                         _column("delete", "Deleted", hint="61-121"),
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -416,7 +423,7 @@ def _bench() -> list[dict[str, Any]]:
                         _column("at", "At", "number"),
                         _column("label", "Label"),
                         tone,
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -925,6 +932,8 @@ EDGE_FIELDS = [
         labels=["Consumed", "Produced"],
         hint="Shown on an arc beside the reaction: ATP, ADP",
         more=True,
+        # A reaction's: offered on a figure of biology or chemistry, not a flow chart.
+        science=True,
     ),
 ]
 

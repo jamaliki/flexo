@@ -421,6 +421,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     first_base = None
     for number, (track, heading) in enumerate(zip(tracks, names, strict=True), 1):
         key = f"{node.id}.track{number}" if len(tracks) > 1 else node.id
+        before = len(words)
         kept = [item for item in features if _kept(item, track)]
         sites = [item for item in kept if item.kind == "site"]
         spans = [item for item in kept if item.kind in _SPANS]
@@ -563,8 +564,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         pen,
                     )
                 )
-        # Spans, the widest first, so a motif inside a domain is drawn over it.
-        for item in sorted(spans, key=lambda item: -(item.end - item.start)):
+        # Spans from the N-terminus on, as they are read; of two from one residue, the wider
+        # first, so a motif inside a domain is drawn over it.
+        for item in sorted(spans, key=lambda item: (item.start, -(item.end - item.start))):
             index = features.index(item) + 1
             tone = feature_tone(item)
             for low, high in _clip(item, track):
@@ -740,6 +742,14 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     anchor="end",
                 )
             )
+        # The track's names as they are read: its own, then its parts' from the N-terminus on.
+        starts = {f"{key}.feature{features.index(item) + 1}.label": item.start for item in spans}
+        starts |= {f"{key}.site{index}.label": item.start for index, item in enumerate(sites, 1)}
+        read = [
+            (item.id != f"{key}.label", starts.get(item.id, float(length) + 1), index, item)
+            for index, item in enumerate(words[before:])
+        ]
+        words[before:] = [item for *_, item in sorted(read)]
         y = base + below + 0.9 * u
 
     # The residue axis, under the last track.

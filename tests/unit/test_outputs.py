@@ -278,6 +278,23 @@ def test_maths_in_words_and_a_drawn_formula_read_alike_in_a_pdf() -> None:
     assert "dp/dt = k_auto p \u2212 k_B p + x²" in said
 
 
+def test_a_greek_letter_reads_as_one_letter_in_words_and_in_a_drawn_formula() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("greek") as figure:
+        figure.root.block("a", label=r"Methylation shifts $\epsilon(m)$ by $\alpha \partial x$")
+        figure.root.block("b", label=r"$\frac{\epsilon(m)}{\alpha} = \partial x$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    said = " ".join(pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().split())
+    # Drawn as a variable is (𝜖, slanted), but read as the letter it is, in words as in a
+    # formula: one ϵ, never the mathematical italic one in one place and the letter in another.
+    assert "shifts \u03f5(m) by \u03b1\u2202x" in said
+    assert "(\u03f5(m))/\u03b1 = \u2202x" in said
+    assert not any(0x1D400 <= ord(character) <= 0x1D7FF for character in said)
+
+
 def test_words_after_invisible_ones_on_a_pdf_page_are_still_drawn() -> None:
     pdfium = pytest.importorskip("pypdfium2")
     from flexo.compiler import compile_figure

@@ -153,6 +153,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body, #studio { height: 100%; margin: 0; }
+/* The window itself never scrolls -- not to a control out of sight, whatever it is in: what
+   overflows is cut off at its edge (and is placed in it, not at the page's foot). */
+#studio { position: relative; overflow: clip; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -301,7 +304,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .shortcut-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; }
 .shortcut { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 2px; border-bottom: 1px solid var(--line); }
 .shortcut-keys { display: flex; gap: 4px; flex: none; }
-.shortcut .kbd { color: var(--ink-2); }
+.shortcut /* A word between a shortcut's keycaps ("or", "click"). */
+.shortcut-word { color: var(--ink-3); font: var(--text-small); }
+.kbd { color: var(--ink-2); }
 
 /* the side panel */
 .side { width: 360px; border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
@@ -713,7 +718,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    standing still, ui.js): nothing floats over a sheet, nor peeks from under it. */
 .toasts { position: fixed; z-index: 45; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
 body:has(.scrim:not(.palette-scrim)) .toasts { visibility: hidden; }
-.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; background: var(--toast); color: var(--toast-ink); border: 1px solid var(--toast-line); padding: 8px 12px; border-radius: var(--radius); box-shadow: var(--shadow-2); animation: rise 0.18s ease-out; max-width: min(640px, 90vw); }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; background: var(--toast); color: var(--toast-ink); border: 1px solid var(--toast-line); padding: 8px 12px; border-radius: var(--radius); box-shadow: var(--shadow-2); animation: rise 0.18s ease-out; max-width: min(640px, 90vw, var(--toast-room, 90vw)); }
 .toast.error { background: var(--toast-error); color: var(--toast-error-ink); }
 .toast.error svg { color: inherit; }
 .toast a { color: inherit; font-weight: 600; }

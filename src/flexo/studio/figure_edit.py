@@ -256,6 +256,31 @@ def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
         return None
     data = json.loads(json.dumps(document.data, default=str))
     groups = list(data.get("groups") or [])
+    root = next(
+        (group for group in groups if isinstance(group, dict) and group.get("id") == document.root),
+        None,
+    )
+    if root is not None:
+        # What no group holds is drawn at the end of the root (see ``parse_figure``): listed so.
+        held = {
+            child
+            for group in groups
+            if isinstance(group, dict)
+            for child in group.get("children") or []
+        }
+        loose = [
+            item
+            for item in [
+                *(g.get("id") for g in groups if isinstance(g, dict)),
+                *(n.get("id") for n in data.get("nodes") or [] if isinstance(n, dict)),
+            ]
+            if item is not None and item not in held and item != document.root
+        ]
+        if loose:
+            groups[groups.index(root)] = {
+                **root,
+                "children": [*(root.get("children") or []), *loose],
+            }
     if document.group(document.root) is None:
         groups.append(
             {
@@ -984,7 +1009,7 @@ class _Document:
 
         children = pair.get("children") or []
         layout = pair.get("layout") or {}
-        made = layout.get("align") == "center" and set(layout) <= {"kind", "align"}
+        made = layout.get("align") in ("center", "ports") and set(layout) <= {"kind", "align"}
         if pair.get("id") == self.root or pair.get("role") != "layout" or not made:
             return
         if len(children) != 1:
@@ -1152,16 +1177,28 @@ class _Document:
         if group is None:
             pair = self.fresh(way)
             self.data.setdefault("groups", []).append(
-                # Arrangement only: drawn with no frame of its own.
+                # Arrangement only: drawn with no frame of its own, the two lined up by their
+                # lines (a part and what branches from it).
                 {
                     "id": pair,
                     "children": [identifier, of] if first else [of, identifier],
-                    "layout": {"kind": way, "align": "center"},
+                    "layout": {"kind": way, "align": "ports"},
                     "role": "layout",
                 }
             )
-            children = self.parent_of(of)["children"]
+            outer = self.parent_of(of)
+            children = outer["children"]
             children[children.index(of)] = pair
+            # Where the pair goes is lined up by its parts' lines too, should it have been
+            # arranged so (centred): ``of`` keeps its place, level with the parts beside it,
+            # not centred with what is now under it.
+            layout = outer.get("layout")
+            if (
+                outer.get("role") == "layout"
+                and isinstance(layout, dict)
+                and layout.get("align") == "center"
+            ):
+                layout["align"] = "ports"
             return [identifier]
         children = list(group.get("children") or [])
         layout = dict(group.get("layout") or {})

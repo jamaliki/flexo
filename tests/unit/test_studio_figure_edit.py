@@ -261,10 +261,11 @@ def test_a_part_let_go_beside_one_in_a_column_goes_side_by_side_with_it() -> Non
     assert chosen == ["db"]
     groups = {group["id"]: group for group in data(text)["groups"]}
     assert groups["root"]["children"] == ["a", "row"]
+    # (Lined up by their lines, as a part and what it leads to are.)
     assert groups["row"] == {
         "id": "row",
         "children": ["cloud", "db"],
-        "layout": {"kind": "row", "align": "center"},
+        "layout": {"kind": "row", "align": "ports"},
         "role": "layout",
     }
     compile_figure(parse(text, Path.cwd()))
@@ -561,7 +562,7 @@ def test_a_branch_goes_on_a_line_of_its_own_beside_its_part_and_taken_out_leaves
     data = yaml.safe_load(first["text"])
     groups = {group["id"]: group for group in data["groups"]}
     pair = next(group for group in groups.values() if group["children"] == ["ask", made])
-    assert pair["layout"] == {"kind": "row", "align": "center"}
+    assert pair["layout"] == {"kind": "row", "align": "ports"}
     assert groups["root"]["children"] == ["start", pair["id"], "go"]
     assert ("ask", "go") in edges(first["text"]) and ("ask", made) in edges(first["text"])
     compile_figure(parse(first["text"], Path.cwd()))
@@ -619,3 +620,71 @@ def test_a_line_to_a_shape_there_is_none_of_is_left_out_and_said() -> None:
     data = yaml.safe_load(text)
     assert not mend(data, before={"a", "b"}) and len(data["edges"]) == 2
     assert mend(data, before={"a", "b", "nowhere"}) and len(data["edges"]) == 1
+
+
+def test_a_part_put_under_one_in_an_arranged_row_keeps_that_one_level_with_the_row() -> None:
+    # "Tumble" beside the decision (a row arranged so, centred); "Turn" put under "Tumble":
+    # the two lined up by their lines, so "Tumble" stays level with the decision.
+    text = "figure:\n  id: f\nnodes:\n- id: ask\n  kind: decision\n  label: Rising?\n"
+    text += "- id: tumble\n  label: Tumble\n- id: turn\n  label: Turn\nedges:\n"
+    text += "- from: ask\n  to: tumble\n- from: tumble\n  to: turn\ngroups:\n"
+    text += "- id: root\n  layout: {kind: column}\n  children: [row, turn]\n"
+    text += "- id: row\n  layout: {kind: row, align: center}\n  role: layout\n"
+    text += "  children: [ask, tumble]\n"
+    moved, _ = edit(text, do="move", id="turn", line="below", of="tumble")
+    groups = {group["id"]: group for group in data(moved)["groups"]}
+    assert groups["row"]["layout"]["align"] == "ports"
+    compiled = compile_figure(parse(moved, Path.cwd()))
+    nodes = compiled.fitted.nodes
+    middle = {node.measured.spec.id: node.bounds.y + node.bounds.height / 2 for node in nodes}
+    assert abs(middle["ask"] - middle["tumble"]) < 1.0
+
+
+
+def test_a_shape_put_in_no_group_is_drawn_at_the_end_of_the_root() -> None:
+    from flexo.serialization import parse_figure
+
+    text = "figure:\n  id: f\nnodes:\n- id: a\n  label: A\n- id: b\n  label: B\n"
+    text += "- id: extra\n  label: Log it\ngroups:\n- id: root\n  layout: {kind: row}\n"
+    text += "  children: [a, b]\n"
+    spec = parse_figure(yaml.safe_load(text))
+    root = next(group for group in spec.groups if group.id == "root")
+    assert root.children == ("a", "b", "extra")
+    compile_figure(spec)
+    # The editor lists it where it is drawn.
+    root = next(group for group in model(text)["groups"] if group["id"] == "root")
+    assert root["children"] == ["a", "b", "extra"]
+
+
+def test_a_figure_file_with_a_shape_that_cannot_be_drawn_exports_with_a_plain_box(
+    tmp_path: Path,
+) -> None:
+    from flexo.studio.figure_kind import figure_changes
+
+    text = "figure:\n  id: bad\nnodes:\n- id: p\n  kind: protein\n  label: Spike\n"
+    text += "- id: q\n  label: Next\nedges:\n- from: p\n  to: q\n"
+    kind = FigureKind()
+    written = kind.export({"text": text}, tmp_path, "bad", ["png"], into=tmp_path / "out")
+    assert written and all(path.exists() for path in written)
+    assert kind.export_notes == [
+        "“Spike” is drawn as a plain box: a protein needs its length in residues."
+    ]
+    # And a figure in another document (a deck's) is said by what changed in it.
+    before = yaml.safe_load(SAMPLE_FIGURE)
+    after = yaml.safe_load(SAMPLE_FIGURE)
+    after["nodes"].append({"id": "extra", "label": "Extra step"})
+    assert figure_changes(before, after) == ["added “Extra step”"]
+
+
+def test_a_structure_that_cannot_be_downloaded_is_an_answer_not_a_failed_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import flexo.structures as structures
+
+    def unreachable(identifier: str) -> str:
+        raise ValueError("PDB can't be reached: no network.")
+
+    monkeypatch.setattr(structures, "fetch_structure", unreachable)
+    action = {"do": "structure-fetch", "id": "1UBQ"}
+    answer = FigureKind().act({"text": SAMPLE_FIGURE}, action, Path.cwd())
+    assert answer["failed"] == "PDB can't be reached: no network." and "id" not in answer

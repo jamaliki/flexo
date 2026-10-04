@@ -119,8 +119,10 @@ def _head_marker(
     # standoff an arrow keeps, to the component's edge.
     tip = length + style.connector_standoff.points - width / 2.0
     if head == "inhibition":
-        bar = half * 2.1
-        data = f"M 0 0 L {n(tip)} 0 M {n(tip)} {n(-bar)} L {n(tip)} {n(bar)}"
+        # Its bar a hair short of the edge: on it, it would read as a thick stretch of the
+        # outline, not a bar of its own.
+        bar, at = half * 2.1, tip - width * 2.2
+        data = f"M 0 0 L {n(at)} 0 M {n(at)} {n(-bar)} L {n(at)} {n(bar)}"
         paint = {"stroke_role": paint_role, "stroke_width": width * 1.4}
     elif head == "catalysis":
         radius = half * 1.1

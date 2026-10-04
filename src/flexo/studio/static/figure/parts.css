@@ -218,3 +218,9 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 /* Each well's name on one line ("Nucleic Acid"), four wells to a row. */
 .mol-colour { display: grid; justify-items: center; gap: 2px; width: 64px; font: var(--text-hint); color: var(--ink-3); text-align: center; white-space: nowrap; }
 .mol-colour.own { color: var(--accent); }
+/* The field a shape's problem is about, shown from the message that says it. */
+.field.wanted input, .field.wanted .select, .records.wanted .records-scroll { outline: 2px solid var(--error); outline-offset: 1px; border-radius: 4px; }
+/* A stand-in shaped as its part (a diamond, a circle): its outline is drawn inside it. */
+.fig-standing.shaped { border-color: transparent; background: transparent; border-radius: 0; }
+/* A group being made: dashed round what it gathers, until it is drawn. */
+.fig-standing.group { border-style: dashed; border-color: var(--accent); background: transparent; }

@@ -126,9 +126,52 @@ def test_a_slide_duplicated_or_deleted_and_undone_is_written_as_it_was() -> None
     assert rewrite(written, document, fresh) == DECK
     fewer = copy.deepcopy(document)
     del fewer["slides"][1]
-    written = rewrite(DECK, fewer, fresh)
+    written = rewrite(DECK, fewer, fresh, name="talk.yaml")
     assert "# step one" not in written and "# --- the middle ---\n- body:" in written
-    assert rewrite(written, document, fresh) == DECK  # its deletion undone, its comments back
+    # Its deletion undone, its comments back -- the file's own, put back where they were.
+    assert rewrite(written, document, fresh, name="talk.yaml") == DECK
+
+
+def test_a_copy_is_the_later_of_the_two_and_keeps_the_style_of_what_it_copies() -> None:
+    import copy
+
+    text = DECK.replace("- title: The pipeline", "# Pipeline first\n- title: The pipeline")
+    document = yaml.safe_load(text)
+    twice = copy.deepcopy(document)
+    twice["slides"].insert(2, copy.deepcopy(twice["slides"][1]))
+    # Its figure given an id of its own, it is still a copy: its rows in flow, its comments.
+    twice["slides"][2]["body"][1]["figure"]["id"] = "copy"
+    written = rewrite(text, twice, fresh)
+    assert yaml.safe_load(written) == twice
+    assert "# Pipeline first\n- title: The pipeline" in written
+    assert written.count("# Pipeline first") == 1
+    assert written.index("# Pipeline first") < written.index("The pipeline")
+    assert written.count("- {from: start, to: check}") == 2 and written.count("# step one") == 2
+
+
+def test_comments_go_to_no_other_file_nor_a_new_empty_object_and_the_end_stays_at_the_end() -> None:
+    import copy
+
+    document = yaml.safe_load(DECK)
+    other = DECK + "# private: from notes2.yaml\n"
+    # In another file: a Text added and taken away again (Esc).
+    added = copy.deepcopy(document)
+    added["slides"][2]["body"].append({"text": ""})
+    written = rewrite(other, added, fresh, name="notes2.yaml")
+    assert rewrite(written, document, fresh, name="notes2.yaml") == other
+    # Here, a Text added to another slide brings no comments with it.
+    here = copy.deepcopy(document)
+    here["slides"][1]["body"].append({"text": ""})
+    written = rewrite(DECK, here, fresh, name="talk.yaml")
+    assert "private" not in written and written.count("# end of deck") == 1
+    # An object moved down past the file's last comment leaves it at the end, undone or redone.
+    down = copy.deepcopy(document)
+    body = down["slides"][2]["body"]
+    body.append(body.pop(0))
+    written = rewrite(DECK, down, fresh, name="talk.yaml")
+    assert written.count("# end of deck") == 1 and written.endswith("# end of deck\n")
+    undone = rewrite(written, document, fresh, name="talk.yaml")
+    assert undone == DECK and rewrite(undone, down, fresh, name="talk.yaml") == written
 
 
 def test_an_object_moved_in_a_slide_and_back_keeps_its_comment_and_quotes() -> None:

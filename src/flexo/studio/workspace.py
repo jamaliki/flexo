@@ -733,22 +733,55 @@ class Workspace:
                         else f"{doc.name} was moved or deleted. Saving writes it again."
                     )
                 self.docs[relative] = doc
+                if doc.exists:
+                    self._around(doc)
         if reopened:
             self.broadcast({"type": "reopened", "file": doc.name, "kind": doc.kind.name})
         return doc
+
+    def _around(self, doc: Doc) -> None:
+        """What is beside a document's file -- in its folder, and the folders in that --
+        kept as it changes while the file is there: once it is gone, only a file that was not
+        there before can be it, renamed or moved."""
+
+        folder = doc.path.parent
+        inner = getattr(doc, "around_folders", [])
+        stamps = tuple(_stamp(place) for place in [folder, *inner])
+        if getattr(doc, "around", None) is not None and stamps == doc.around_stamps:
+            return
+        names: set[str] = set()
+        folders = []
+        with contextlib.suppress(OSError):
+            for path in sorted(folder.iterdir()):
+                if path.is_dir() and not path.name.startswith(".") and len(folders) < 20:
+                    folders.append(path)
+                    with contextlib.suppress(OSError):
+                        names.update(f"{path.name}/{one.name}" for one in path.iterdir())
+                else:
+                    names.add(path.name)
+        doc.around, doc.around_folders = names, folders
+        doc.around_stamps = tuple(_stamp(place) for place in [folder, *folders])
 
     def _moved(self, doc: Doc) -> str | None:
         """The file a document whose own has gone most likely is now: renamed, a file beside
         it of its words as last read; else, renamed while the studio was away, another file of
         its kind beside it that names it inside (a deck's id is the name of the file it was
-        made in), if a kind says what names it (``identity``)."""
+        made in), if a kind says what names it (``identity``). Gone while the studio looked
+        on, only a file that has just appeared beside it (or in a folder in its folder) can
+        be it: one there already is another, that a deck's id may name too."""
 
         identity = getattr(doc.kind, "identity", None)
         if not doc.path.parent.is_dir():
             return None
+        around = getattr(doc, "around", None)
+        folder = doc.path.parent
+        places = [folder, *(getattr(doc, "around_folders", []) if around is not None else [])]
         found = None
-        for path in sorted(doc.path.parent.iterdir()):
+        for path in [one for place in places if place.is_dir() for one in sorted(place.iterdir())]:
             if path == doc.path or path.suffix != doc.path.suffix or not path.is_file():
+                continue
+            name = path.name if path.parent == folder else f"{path.parent.name}/{path.name}"
+            if around is not None and name in around:
                 continue
             # Its words as last read, word for word: the file renamed as it was.
             if doc.disk_text is not None and _words(path) == doc.disk_text:
@@ -836,6 +869,26 @@ class Workspace:
                 "client": client,
             }
         )
+        # What the activity list says was done keeps its place: clicked, it goes to the slide
+        # or object where it is now (moved, dragged to another slide), or says it is gone.
+        follow = getattr(doc.kind, "follow", None)
+        try:
+            moved = follow(before, after) if follow else None
+        except Exception:
+            moved = None
+        if moved is not None:
+            with self.lock:
+                followed = []
+                for entry in self.activity:
+                    if entry["file"] != doc.name or not entry["where"]:
+                        continue
+                    with contextlib.suppress(Exception):
+                        where = moved(entry["where"])
+                        if where is not entry["where"]:
+                            entry["where"] = where
+                            followed.append(entry)
+            for entry in followed:
+                self.broadcast({"type": "activity", "entry": entry, "followed": True})
         if not news:
             return
         describe = getattr(doc.kind, "describe", None)
@@ -1130,6 +1183,8 @@ class Workspace:
     def reread(self, doc: Doc) -> None:
         """Take in a document's file if something else changed it, and tell the pages."""
 
+        if doc.exists and _stamp(doc.path):
+            self._around(doc)
         happened = doc.reread()
         if happened == "problem" and self._follow_rename(doc):
             return
@@ -1321,8 +1376,11 @@ def _finder_key(root: Path, file: Path) -> list[Any]:
     key: list[Any] = []
     for at, part in enumerate(parts):
         name = Path(part).stem if at == len(parts) - 1 else part
+        # (Accents folded first, as the Finder does: "étude" among the e's.)
+        decomposed = unicodedata.normalize("NFKD", name)
+        plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
         key.append([(0, int(run), "") if run.isdigit() else (1, 0, run.casefold())
-                    for run in re.findall(r"\d+|\D+", name)])
+                    for run in re.findall(r"\d+|\D+", plain)])
         key.append(part.casefold())
     return key
 

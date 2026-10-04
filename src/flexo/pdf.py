@@ -28,6 +28,7 @@ import hashlib
 import math
 import re
 import struct
+import unicodedata
 import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -50,6 +51,13 @@ _CAPS = {"butt": 0, "round": 1, "square": 2}
 _JOINS = {"miter": 0, "round": 1, "bevel": 2}
 _WORD_BREAKS = frozenset("-\u2010/_")
 """What a word too long for its line is broken after: no space follows it there."""
+_ITALIC_LETTERS = {
+    code: chr(int(unicodedata.decomposition(chr(code)).split()[1], 16))
+    for code in (*range(0x1D434, 0x1D468), 0x210E, *range(0x1D6E2, 0x1D71C))
+    if unicodedata.decomposition(chr(code)).startswith("<font>")
+}
+"""Mathematical italic letters (U+1D434 on), as a variable is set, and the letters they are:
+what the words read (ϵ, not U+1D716), whether the letter is in a formula or among words."""
 
 
 def _beside(run: Run, script: Run) -> bool:
@@ -667,7 +675,7 @@ class _Font:
             self.widths[cid] = hb_font(self.face, self.weight).get_glyph_h_advance(gid)
         cid = self.cids[key]
         if text and cid not in self.texts:
-            self.texts[cid] = text
+            self.texts[cid] = text.translate(_ITALIC_LETTERS)
         return cid, self.widths[cid]
 
     def embed(self, writer: _Writer) -> int:
