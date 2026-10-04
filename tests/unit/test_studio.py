@@ -394,6 +394,28 @@ def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) 
         workspace.close()
 
 
+def test_a_file_renamed_while_open_is_named_and_not_written_under_its_old_name(
+    tmp_path: Path,
+) -> None:
+    figure = tmp_path / "figure.yaml"
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        figure.rename(tmp_path / "renamed.yaml")
+        wait_for(lambda: doc.problem is not None)
+        assert doc.problem == "figure.yaml was renamed renamed.yaml."
+        assert doc.said()["moved"] == "renamed.yaml"
+        # Edited meanwhile, it is not made again under its old name behind its person's back.
+        text = doc.document["text"].replace("Generated backbones", "Backbones")
+        doc.update({**doc.document, "text": text}, doc.version, {"id": "me", "name": "Me"})
+        time.sleep(0.8)
+        assert not figure.exists()
+        assert doc.write(again=True) and figure.exists()  # a save does
+    finally:
+        workspace.close()
+
+
 def test_a_refused_call_ends_its_connection(served: tuple[str, Workspace]) -> None:
     import socket
 
@@ -1303,6 +1325,19 @@ def test_the_page_merges_as_the_server_does() -> None:
             {"s": [{"t": "0"}, {"t": "1"}, {"t": "Q", "b": [{"x": "P typed"}]}]},
             {"s": [{"t": "0"}, {"t": "Q moved", "b": [{"x": "P"}]}, {"t": "1"}]},
         ],
+        # An object put on another slide while typed in; a shape renamed while typed in; two
+        # new slides, alike, added at one place at once.
+        [
+            {"s": [{"b": [{"x": "A"}, {"x": "P"}]}, {"b": [{"y": 1}]}]},
+            {"s": [{"b": [{"x": "A"}, {"x": "P typed"}]}, {"b": [{"y": 1}]}]},
+            {"s": [{"b": [{"x": "A"}]}, {"b": [{"y": 1}, {"x": "P"}]}]},
+        ],
+        [
+            {"nodes": [{"id": "a", "label": "Step one"}], "edges": [{"from": "a"}]},
+            {"nodes": [{"id": "a", "label": "Step one typed"}], "edges": [{"from": "a"}]},
+            {"nodes": [{"id": "z", "label": "Step one"}], "edges": [{"from": "z"}]},
+        ],
+        [{"s": [{"t": "A"}]}, {"s": [{"t": "A"}, {"t": ""}]}, {"s": [{"t": "A"}, {"t": ""}]}],
     ]
     pairs = [
         [{"a": [1, {"b": None}]}, {"a": [1, {"b": None}]}],
@@ -1649,6 +1684,12 @@ see(file(label("Alice step")), file(["- id: s"]), file(label("Bob Alice step")))
 see(file(["- id: s"]), file([]), file(label("Bob")));
 const block = (words) => ["- id: s", "  label: |", `    ${words}`];
 see(file(block("Alice step")), file(["- id: s"]), file(block("Bob Alice step")));
+// Words made a list (or a list words), typed in by another since: undone, their words are
+// followed through it, made the other kind again with the change -- not left beside it.
+see({ bullets: ["Second."] }, { text: "Second." }, { bullets: ["Second. bob", "bob item"] });
+const levels = ["What", "Why", ["and why still"]];
+see({ text: "What\\nWhy\\nand why still" }, { bullets: levels, numbered: true },
+  { text: "What\\nWhy\\nand why still bob" });
 console.log(JSON.stringify(seen));
 """
     )
@@ -1674,6 +1715,9 @@ console.log(JSON.stringify(seen));
     assert "\n- id: s\n  label: Bob\nedges:" in seen[11][0]["text"] and seen[11][1] == 0
     assert "\n- id: s\n  label: Bob\nedges:" in seen[12][0]["text"] and seen[12][1] > 0
     assert seen[13][0]["text"].count("    Bob Alice step") == 1 and seen[13][1] > 0
+    assert seen[14] == [{"text": "Second. bob\nbob item"}, 0]
+    kept = {"bullets": ["What", "Why", ["and why still bob"]], "numbered": True}
+    assert seen[15] == [kept, 0]
 
 
 def test_a_window_opened_again_leaves_nothing_of_the_last_one_behind(
@@ -1761,6 +1805,104 @@ process.exit(0);
     assert json.loads(result.stdout) == {
         "atOnce": "saving", "later": ["offline", True], "back": ["saving", False],
         "saved": "saved", "unreadDraws": ["problem", 0], "readDraws": ["saved", 1],
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_edits_that_reached_the_studio_unanswered_are_not_entered_twice() -> None:
+    session_js = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    merge_js = Path(__file__).parents[2] / "src/flexo/studio/static/studio/merge.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(session_js.as_uri())});\n"
+        f"const {{ merge3 }} = await import({json.dumps(merge_js.as_uri())});\n"
+        """
+const listeners = {};
+const deck = (words, ...more) => ({ slides: [{ title: "Q", body: [{ text: words }] }, ...more] });
+// The studio: each version kept, an update merged from the version it was made from.
+let studio, lose = false, reachable = true;
+const start = (document, instance, unread = false) => {
+  studio = { instance, versions: { 1: document }, version: 1, unread };
+};
+start(deck("Second paragraph."), "one");
+const info = () => ({
+  file: "a.yaml", kind: "deck", version: studio.version, saved: studio.version, exists: true,
+  document: studio.unread ? {} : studio.versions[studio.version], instance: studio.instance,
+  unread: studio.unread, held: studio.unread,
+});
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), url: (route) => route,
+  on(event, listener) { (listeners[event] ||= []).push(listener); },
+  async api(route, body) {
+    if (route === "/api/draw") return { pages: [], messages: [] };
+    if (!reachable) throw new TypeError("Failed to fetch");
+    if (route !== "/api/update") return info();
+    if (body.instance !== studio.instance) return { restarted: true };
+    const now = studio.versions[studio.version];
+    studio.version += 1;
+    studio.versions[studio.version] = merge3(studio.versions[body.base], now, body.document);
+    // Taken in, but its answer lost on the way back.
+    if (lose) { lose = false; reachable = false; throw new TypeError("Failed to fetch"); }
+    return { version: studio.version, document: studio.versions[studio.version] };
+  },
+};
+const wait = (ms = 50) => new Promise((done) => setTimeout(done, ms));
+const words = (document) => document.slides?.map((slide) => slide.body[0].text).join(" | ");
+const said = {};
+const session = new Session(workspace, info());
+workspace.sessions.set("a.yaml", session);
+const type = (letters) => session.change((d) => { d.slides[0].body[0].text += letters; });
+const away = () => { reachable = false; listeners.online.forEach((listener) => listener(false)); };
+const back = () => { reachable = true; listeners.online.forEach((listener) => listener(true)); };
+type(" abc");
+await wait(150);
+// The studio takes in "d", but its answer never comes; "ef" is typed meanwhile.
+lose = true;
+type("d");
+await wait(150);
+type("ef");
+back();
+await wait(400);
+said.unanswered = [words(session.document), words(studio.versions[studio.version])];
+// So too when it stops as the answer comes, and starts again on the file it wrote ("g" in).
+lose = true;
+type("g");
+await wait(150);
+start(studio.versions[studio.version], "two");
+type("hi");
+back();
+await wait(400);
+said.restarted = [words(session.document), words(studio.versions[studio.version])];
+// Started again on a file that does not read while "jk" is typed: once it reads (as it was
+// last written), the words are in their slide once, and no slide is a copy.
+const written = studio.versions[studio.version];
+session.saved(studio.version);
+away();
+type("jk");
+await wait(100);
+start(written, "three", true);
+back();
+await wait(400);
+said.unread = [words(session.document), words(studio.versions[studio.version])];
+studio.unread = false;
+studio.version += 1;
+studio.versions[studio.version] = written;
+session.told();
+session.remote({ type: "change", version: studio.version, document: written, client: "disk" });
+await wait(400);
+said.read = [words(session.document), words(studio.versions[studio.version])];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    words = "Second paragraph. abc"
+    assert json.loads(result.stdout) == {
+        "unanswered": [f"{words}def"] * 2,
+        "restarted": [f"{words}defghi"] * 2,
+        "unread": [f"{words}defghijk", f"{words}defghi"],
+        "read": [f"{words}defghijk"] * 2,
     }
 
 

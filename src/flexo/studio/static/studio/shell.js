@@ -60,6 +60,11 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 // (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
 const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
 
+// A file renamed: what is said of it, with the file it is now to open.
+function movedNote(workspace, text, moved) {
+  return h("span", {}, text, " · ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); workspace.open(moved); } }, `Open ${moved}`));
+}
+
 // The word on a document's saving: what is true of it and its file, briefly.
 function statusWords(session) {
   const state = session.state;
@@ -152,6 +157,8 @@ export class Workspace {
         await this.mount(session);
         this.emit("opened", session);
         session.requestDraw(0);
+        // Its file renamed (while the studio was away): the file it is now, a click away.
+        if (info.moved && !info.exists) session.notice = toast(movedNote(this, info.problem, info.moved), { icon: "info", seconds: 12 });
       }
       file = session.file;
     }
@@ -322,7 +329,9 @@ export class Workspace {
         if (session) {
           if (session.problem !== event.text && event.text) {
             session.notice?.remove();
-            session.notice = toast(event.text, { kind: "error", icon: "error", seconds: 8 });
+            // Renamed as it was open: the file it is now, a click away.
+            session.notice = event.moved ? toast(movedNote(this, event.text, event.moved), { icon: "info", seconds: 12 })
+              : toast(event.text, { kind: "error", icon: "error", seconds: 8 });
           }
           session.told(event);
         }

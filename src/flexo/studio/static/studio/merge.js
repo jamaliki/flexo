@@ -650,7 +650,29 @@ function pairsOf(base, side, late = false) {
   }
   scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
   for (const [, i, j] of scored) if (!pairs.has(i) && !used.has(j)) { pairs.set(i, j); used.add(j); }
+  // Renamed (a shape's id changed -- an agent writing the file): of the mappings left, ids gone
+  // and ids new, the most alike in all but their ids -- one shape, renamed, not one gone and
+  // another new.
+  const renamed = [];
+  for (const i of named(base, side)) for (const j of named(side, base)) {
+    if (pairs.has(i) || used.has(j)) continue;
+    const score = alike(unnamed(base[i]), unnamed(side[j]));
+    if (score >= MOVED) renamed.push([-score, i, j]);
+  }
+  renamed.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  for (const [, i, j] of renamed) if (!pairs.has(i) && !used.has(j)) { pairs.set(i, j); used.add(j); }
   return pairs;
+}
+
+// Which of `items` are mappings with an id, and more than an id, none of `others` has.
+function named(items, others) {
+  const ids = new Set(others.filter((item) => isMap(item) && Object.hasOwn(item, "id")).map((item) => key(item.id)));
+  return items.map((_, n) => n).filter((n) => isMap(items[n]) && Object.hasOwn(items[n], "id") && Object.keys(unnamed(items[n])).length && !ids.has(key(items[n].id)));
+}
+
+function unnamed(item) {
+  const { id: _id, ...rest } = item;
+  return rest;
 }
 
 // How alike a mapping moved and changed at once must be to the one it was (see pairsOf).

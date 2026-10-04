@@ -204,6 +204,33 @@ def test_items_both_sides_added_are_each_kept_however_alike() -> None:
     assert merge3(["a", "b"], ["a", "c"], ["a", "c"]) == ["a", "c"]
 
 
+def test_an_object_put_on_another_slide_keeps_the_words_typed_in_it_meanwhile() -> None:
+    def deck(first: list, second: list) -> dict:
+        return {"slides": [{"title": "Q", "body": first}, {"title": "F", "body": second}]}
+
+    base = deck([{"text": "First."}, {"text": "Second."}], [{"image": "a.png"}])
+    typed = deck([{"text": "First."}, {"text": "Second, typed."}], [{"image": "a.png"}])
+    moved = deck([{"text": "First."}], [{"image": "a.png"}, {"text": "Second."}])
+    went = deck([{"text": "First."}], [{"image": "a.png"}, {"text": "Second, typed."}])
+    assert merge3(base, typed, moved) == went
+    assert merge3(base, moved, typed) == went
+
+
+def test_a_shape_renamed_keeps_the_words_typed_in_it_meanwhile() -> None:
+    def figure(name: str, label: str) -> dict:
+        return {
+            "nodes": [{"id": "a", "label": "Start"}, {"id": name, "label": label}],
+            "edges": [{"from": "a", "to": name}],
+        }
+
+    base, typed = figure("step", "Do the next"), figure("step", "Do the next step")
+    renamed = figure("next-step", "Do the next")
+    assert merge3(base, typed, renamed) == figure("next-step", "Do the next step")
+    # Not a shape gone and another come that is nothing like it.
+    other = figure("check", "Done?")
+    assert len(merge3(base, typed, other)["nodes"]) == 3
+
+
 def test_numbers_in_a_list_merge_place_by_place() -> None:
     assert merge3([0.5, 0.5], [0.3, 0.5], [0.5, 0.6]) == [0.3, 0.6]
     assert merge3([0.5, 0.5], [0.3, 0.7], [0.4, 0.6]) == [0.4, 0.6]

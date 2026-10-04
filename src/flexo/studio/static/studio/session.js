@@ -116,6 +116,8 @@ export class Session {
     // Two edits merged here, put right by the kind where they meet badly (as the studio's
     // kinds do with theirs): told the merge's notes (it leaves out those it settles) and base.
     this.mended = (document) => document;
+    // A step said where it was made (`said`, its kind's describe), placed where that now is.
+    this.follow = () => {};
     link(workspace);
   }
 
@@ -301,14 +303,18 @@ export class Session {
     const name = mine ? "you" : who?.name || (who?.kind === "agent" ? "An agent" : "Someone else");
     const verb = target === "before" ? "undo" : "redo";
     // Named as the history names it, quotation marks within it made single ones.
-    const what = (this.said(steps[0].entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
+    const named = (entry) => (this.said(entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
+    const what = named(steps[0].entry);
     const notes = steps.flatMap((step) => step.lost);
-    const did = !notes.length || notes.every((note) => note.removed !== undefined) ? "deleted" : "changed";
+    // (Deleted only where objects went: words gone from about the change -- retyped, or a
+    // paragraph made a list -- are changed.)
+    const did = notes.length && notes.every((note) => note.removed !== undefined) ? "deleted" : "changed";
     const more = steps.length - 1;
     const has = mine ? "have" : "has", where = mine ? " in another window" : "";
     const words = some ? `Couldn't ${verb} all of “${what}”: ${name} ${has} ${did} some of it since${where}.`
-      : more ? `Couldn't ${verb} “${what}” or the ${more === 1 ? "step" : `${more} steps`} before it: ${name} ${has} ${did} what they changed since${where}.`
-        : `Couldn't ${verb} “${what}”: ${name} ${has} ${did} it since${where}.`;
+      : more === 1 ? `Couldn't ${verb} “${what}” or “${named(steps[1].entry)}”: ${name} ${has} ${did} what they changed since${where}.`
+          : more ? `Couldn't ${verb} “${what}” or the ${more} steps before it: ${name} ${has} ${did} what they changed since${where}.`
+            : `Couldn't ${verb} “${what}”: ${name} ${has} ${did} it since${where}.`;
     this.unmadeNote?.remove();
     this.unmadeNote = toast(words, { icon: "info", seconds: 6 });
   }
@@ -351,6 +357,10 @@ export class Session {
       const said = typeof told === "string" ? { text: told } : told || {};
       entry.said = { text: entry.label || said.text || "", place: said.place, where: said.where };
     }
+    // Placed where it is now, as the kind follows it (`follow`), the place it was made in
+    // having moved since (another moving its slide): its row in the history, and where its
+    // undo goes. (The same words, changed in place: what it is, is.)
+    if (!entry.apply) try { this.follow(entry, entry.said); } catch { /* where it was made */ }
     return entry.said;
   }
 
@@ -468,10 +478,11 @@ export class Session {
   // deleted while it was edited here, words they wrote anew while words were typed in them
   // here (merge.js's notes, where this page's copy is "theirs"). Said as the studio says
   // what its merges kept (a "merged" event): { kept: item, by } or { rewritten, typed, by }.
-  kept(notes, who = null) {
+  // (`away`: merged as the studio came back, this page's edits made while it was away.)
+  kept(notes, who = null, away = false) {
     const ours = notes.flatMap((note) => (note.kept === "theirs" ? [{ kept: note.item, by: who }]
       : note.rewritten === "ours" ? [{ rewritten: note.words, typed: note.typed, by: who }] : []));
-    if (ours.length) this.emit("merged", { notes: ours });
+    if (ours.length) this.emit("merged", { notes: ours, away });
     // What this page deleted that another was typing in, kept for them here before it left
     // (their typing came first): they are told, as the studio tells them of what it keeps.
     const theirs = notes.filter((note) => note.kept === "ours").map((note) => note.item);
@@ -536,7 +547,11 @@ export class Session {
       this.echoing = echoing;
     } else {
       // Its file gone, a studio started again has nothing of it: this page's document stands.
-      this.document = restarted && !info.exists ? local : merge3(this.ownBase(from, info.document, echoing), info.document, local);
+      // (What it keeps of this page's that the file lost meanwhile -- a slide typed in while it
+      // was away, deleted there by an agent -- is said.)
+      const base = this.ownBase(from, info.document, echoing), notes = [];
+      this.document = restarted && !info.exists ? local : this.mended(merge3(base, info.document, local, notes), notes, base);
+      this.kept(notes, restarted ? { id: "disk", name: "Another app", kind: "file" } : this.lastWho, true);
       this.synced = info.document;
       this.echoing = false;
     }

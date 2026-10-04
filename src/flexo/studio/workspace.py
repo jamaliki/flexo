@@ -158,6 +158,7 @@ class Doc:
                 "type": "problem",
                 "file": self.name,
                 "text": self.problem,
+                "moved": self.moved,
                 "held": self.held,
                 "unread": self.unread,
                 "source": self.source(),
@@ -275,6 +276,8 @@ class Doc:
                 return False
             if self.saved >= self.version and (self.exists or not again):
                 return False
+            if not self.exists and self.moved and not again:
+                return False  # renamed: written under its old name only by a save
             other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
             if other is not None and other != self.kind.name:
                 # Another kind's document now (put right by hand, an agent's): kept as it is.
@@ -369,16 +372,23 @@ class Doc:
                 if not self.exists:
                     return None
                 # Moved or deleted: kept open, and written again by the next edit or a save
-                # (not one that never read: there is nothing of it to write).
+                # (not one that never read: there is nothing of it to write). Renamed -- a
+                # file of its words, or its kind's that names it, beside it -- it is not
+                # written under its old name but by a save: its pages offer the new one.
                 self.exists = False
                 self.held = self.unread
-                self.problem = f"{self.name} was moved or deleted." + (
-                    "" if self.unread else " Saving writes it again."
+                self.moved = self.workspace._moved(self)
+                self.problem = (
+                    f"{self.name} was renamed {self.moved}."
+                    if self.moved
+                    else f"{self.name} was moved or deleted."
+                    + ("" if self.unread else " Saving writes it again.")
                 )
                 return "problem"
             text = _words(self.path)
             if text is None:
                 return None
+            self.moved = None
             returned = not self.exists
             if text == self.disk_text and not returned:
                 return None
@@ -707,9 +717,12 @@ class Workspace:
                 reopened = False
             if doc is None:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
-                if held and not doc.exists:
-                    doc.saved = doc.version  # nothing of its kind's own is written there
-                    doc.moved = self._moved(doc)
+                moved = self._moved(doc) if not doc.exists else None
+                if (held or moved) and not doc.exists:
+                    # Nothing of its kind's own is written there -- nor, renamed while the
+                    # studio was away, anything under its old name but by a save.
+                    doc.saved = doc.version
+                    doc.moved = moved
                     doc.problem = (
                         f"{doc.name} is gone: renamed {doc.moved}?"
                         if doc.moved
@@ -721,22 +734,26 @@ class Workspace:
         return doc
 
     def _moved(self, doc: Doc) -> str | None:
-        """The file a document whose own has gone most likely is now: renamed while the
-        studio was away, another file of its kind beside it that names it inside (a deck's id
-        is the name of the file it was made in), if a kind says what names it (``identity``)."""
+        """The file a document whose own has gone most likely is now: renamed, a file beside
+        it of its words as last read; else, renamed while the studio was away, another file of
+        its kind beside it that names it inside (a deck's id is the name of the file it was
+        made in), if a kind says what names it (``identity``)."""
 
         identity = getattr(doc.kind, "identity", None)
-        if identity is None or not doc.path.parent.is_dir():
+        if not doc.path.parent.is_dir():
             return None
+        found = None
         for path in sorted(doc.path.parent.iterdir()):
-            if path == doc.path or path.suffix != doc.path.suffix:
+            if path == doc.path or path.suffix != doc.path.suffix or not path.is_file():
                 continue
-            if self._claim(path) != doc.kind.name:
-                continue
-            with contextlib.suppress(Exception):
-                if identity(doc.kind.load(path)) == doc.path.stem:
-                    return self.relative(path)
-        return None
+            # Its words as last read, word for word: the file renamed as it was.
+            if doc.disk_text is not None and _words(path) == doc.disk_text:
+                return self.relative(path)
+            if found is None and identity is not None and self._claim(path) == doc.kind.name:
+                with contextlib.suppress(Exception):
+                    if identity(doc.kind.load(path)) == doc.path.stem:
+                        found = self.relative(path)
+        return found
 
     def new(
         self, name: str, kind_name: str, data: Any = None, who: dict[str, Any] | None = None

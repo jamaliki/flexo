@@ -408,7 +408,40 @@ def _pairs(base: list, side: list) -> dict[int, int]:
         if i not in pairs and j not in used:
             pairs[i] = j
             used.add(j)
+    # Renamed (a shape's id changed -- an agent writing the file): of the mappings left, ids
+    # gone and ids new, the most alike in all but their ids -- one shape, renamed, not one gone
+    # and another new.
+    gone = [i for i in _named(base, side) if i not in pairs]
+    come = [j for j in _named(side, base) if j not in used]
+    scored = sorted(
+        (-score, i, j)
+        for i in gone
+        for j in come
+        if (score := _alike(_unnamed(base[i]), _unnamed(side[j]))) >= _MOVED
+    )
+    for _, i, j in scored:
+        if i not in pairs and j not in used:
+            pairs[i] = j
+            used.add(j)
     return pairs
+
+
+def _named(items: list, others: list) -> list[int]:
+    """Which of ``items`` are mappings with an id, more than an id, none of ``others`` has."""
+
+    ids = {_key(item["id"]) for item in others if isinstance(item, dict) and "id" in item}
+    return [
+        n
+        for n, item in enumerate(items)
+        if isinstance(item, dict)
+        and "id" in item
+        and _unnamed(item)
+        and _key(item["id"]) not in ids
+    ]
+
+
+def _unnamed(item: dict) -> dict:
+    return {key: value for key, value in item.items() if key != "id"}
 
 
 _MOVED = 0.6
