@@ -106,10 +106,11 @@ def apply(
     return {"text": result, "select": list(select)}
 
 
-def astray(data: Any) -> list[str]:
+def astray(data: Any, ids: list[str] | None = None) -> list[str]:
     """Lines written to (or from) a shape the figure has none of -- ``to: nowhere``, a name
     mistyped -- taken out of ``data`` so the rest of it can be drawn: each said, as
-    "A line to “nowhere” has no shape to go to."."""
+    "A line to “nowhere” has no shape to go to.". ``ids``, given, gets the id the editor
+    knows each by (``edge.2.b-to-nowhere``), to choose it by."""
 
     if not isinstance(data, dict) or not isinstance(data.get("edges"), list):
         return []
@@ -119,8 +120,12 @@ def astray(data: Any) -> list[str]:
         reference = str(reference)
         return reference in nodes or reference.rpartition(".")[0] in nodes
 
+    def node(reference: object) -> str:
+        reference = str(reference)
+        return reference if reference in nodes else reference.rpartition(".")[0] or reference
+
     said, kept = [], []
-    for edge in data["edges"]:
+    for index, edge in enumerate(data["edges"], start=1):
         if not isinstance(edge, dict) or ("from" not in edge or "to" not in edge):
             kept.append(edge)
             continue
@@ -130,6 +135,11 @@ def astray(data: Any) -> list[str]:
             said.append(f"A line from \u201c{edge['from']}\u201d has no shape to start from.")
         else:
             kept.append(edge)
+            continue
+        if ids is not None:
+            ids.append(
+                str(edge.get("id") or f"edge.{index}.{node(edge['from'])}-to-{node(edge['to'])}")
+            )
     if said:
         data["edges"] = kept
     return said
@@ -417,7 +427,7 @@ class _Document:
             self.yaml.indent(mapping=2, sequence=indent + 2, offset=indent)
             self.data = self.yaml.load(text) if text.strip() else {}
         if not isinstance(self.data, dict):
-            raise EditError("The file isn't a valid figure yet. Fix it in the source first.")
+            raise EditError("The file isn\u2019t a valid figure yet. Fix it in the source first.")
         self.data.setdefault("figure", {"id": "figure"})
         self.data.setdefault("nodes", [])
         self.spliced = False
@@ -606,7 +616,7 @@ class _Document:
         if parent:
             group = self.group(parent)
             if group is None:
-                raise EditError(f"There's no group named “{parent}”.")
+                raise EditError(f"There\u2019s no group named “{parent}”.")
         elif after and self.holder(after) is None and not self.groups:
             # A file of nodes alone stacks them in the order it lists them.
             node = self.node(identifier)
@@ -632,7 +642,7 @@ class _Document:
         kind = str(action.get("kind", "block"))
         part = _parts().get(kind)
         if part is None:
-            raise EditError(f"There's no shape type “{kind}”.")
+            raise EditError(f"There\u2019s no shape type “{kind}”.")
         made = copy.deepcopy(part["node"])
         overrides = dict(action.get("node") or {})
         properties = {**made.get("properties", {}), **overrides.pop("properties", {})}
@@ -722,10 +732,10 @@ class _Document:
 
     def connect(self, source: str, target: str) -> str:
         if self.node_of(source) == self.node_of(target):
-            raise EditError("A shape can't be connected to itself.")
+            raise EditError("A shape can\u2019t be connected to itself.")
         for end in (source, target):
             if self.node(self.node_of(end)) is None:
-                raise EditError(f"There's no shape named “{end}” to connect.")
+                raise EditError(f"There\u2019s no shape named “{end}” to connect.")
         ends = (self.node_of(source), self.node_of(target))
         if any(
             (self.node_of(str(e["from"])), self.node_of(str(e["to"]))) == ends for e in self.edges
@@ -798,9 +808,9 @@ class _Document:
         elif kind == "net":
             item = next((net for net in self.nets if net.get("id") == identifier), None)
         else:
-            raise EditError("Can't edit this item.")
+            raise EditError("Can\u2019t edit this item.")
         if item is None:
-            raise EditError(f"There's no {NOUNS.get(kind, kind)} named “{identifier}”.")
+            raise EditError(f"There\u2019s no {NOUNS.get(kind, kind)} named “{identifier}”.")
         # (A line found by its ends is chosen by the name it has now.)
         now = self.edge_id(item) if kind == "edge" else None
         chosen = [now or identifier] if identifier else []
@@ -878,7 +888,7 @@ class _Document:
 
         part = _parts().get(kind)
         if part is None:
-            raise EditError(f"There's no shape type “{kind}”.")
+            raise EditError(f"There\u2019s no shape type “{kind}”.")
         if kind == "block":
             item.pop("kind", None)
         elif "kind" in item:
@@ -904,14 +914,14 @@ class _Document:
     def rename(self, old: str, new: str) -> None:
         if not ID_PATTERN.fullmatch(new):
             raise EditError(
-                f"“{new}” can't be used as a name. A name starts with a letter and "
+                f"“{new}” can\u2019t be used as a name. A name starts with a letter and "
                 "has only letters, digits, dots, hyphens and underscores."
             )
         if new in self.taken():
             raise EditError(f"The name “{new}” is already in use.")
         node, group = self.node(old), self.group(old)
         if node is None and group is None and old != self.root:
-            raise EditError(f"There's nothing named “{old}”.")
+            raise EditError(f"There\u2019s nothing named “{old}”.")
         if node is not None:
             node["id"] = new
         if group is not None:
@@ -956,7 +966,7 @@ class _Document:
         nodes: set[str] = set()
         for identifier in ids:
             if identifier == self.root:
-                raise EditError("The figure itself can't be deleted.")
+                raise EditError("The figure itself can\u2019t be deleted.")
             if self.group(identifier) is not None:
                 inside = self.descendants(identifier)
                 nodes |= {item for item in inside if self.node(item) is not None}
@@ -972,7 +982,7 @@ class _Document:
             else:
                 net = next((item for item in self.nets if item.get("id") == identifier), None)
                 if net is None:
-                    raise EditError(f"There's nothing named “{identifier}” to delete.")
+                    raise EditError(f"There\u2019s nothing named “{identifier}” to delete.")
                 self.nets.remove(net)
         pair = None
         if action.get("rejoin") and len(nodes) == 1:
@@ -1089,10 +1099,10 @@ class _Document:
         identifier = str(action.get("id") or self.root)
         group = self.written_root() if identifier == self.root else self.group(identifier)
         if group is None:
-            raise EditError(f"There's no group named “{identifier}”.")
+            raise EditError(f"There\u2019s no group named “{identifier}”.")
         kind = str(action.get("kind", "row"))
         if kind not in {"row", "column"}:
-            raise EditError(f"“{kind}” isn't a way to lay out a line.")
+            raise EditError(f"“{kind}” isn\u2019t a way to lay out a line.")
         lines = [[str(item) for item in line] for line in action.get("lines") or []]
         held = [str(child) for child in group.get("children") or []]
         seen = [item for line in lines for item in line]
@@ -1117,9 +1127,9 @@ class _Document:
         identifier = str(action["id"])
         group = self.group(identifier)
         if group is None:
-            raise EditError(f"There's no group named “{identifier}”.")
+            raise EditError(f"There\u2019s no group named “{identifier}”.")
         if identifier == self.root:
-            raise EditError("The figure's layout can't be ungrouped.")
+            raise EditError("The figure\u2019s layout can\u2019t be ungrouped.")
         parent = self.parent_of(identifier)
         children = parent["children"]
         index = children.index(identifier)
@@ -1136,11 +1146,11 @@ class _Document:
             )
         parent_id = action.get("parent") or self.root
         if parent_id == identifier or parent_id in self.descendants(identifier):
-            raise EditError("A group can't be moved inside itself.")
+            raise EditError("A group can\u2019t be moved inside itself.")
         self.parent_of(identifier)  # held somewhere written, before it moves
         target = self.group(parent_id) if parent_id != self.root else self.written_root()
         if target is None:
-            raise EditError(f"There's no group named “{parent_id}”.")
+            raise EditError(f"There\u2019s no group named “{parent_id}”.")
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
@@ -1158,12 +1168,12 @@ class _Document:
         ``of`` was, laid out that way."""
 
         if side not in {"below", "above", "right", "left"}:
-            raise EditError(f"“{side}” isn't a valid position.")
+            raise EditError(f"“{side}” isn\u2019t a valid position.")
         if identifier == of or of in self.descendants(identifier):
-            raise EditError("A group can't be moved beside itself.")
+            raise EditError("A group can\u2019t be moved beside itself.")
         group = self.written_root() if of == self.root else self.group(of)
         if group is None and self.node(of) is None:
-            raise EditError(f"There's no group or part named “{of}”.")
+            raise EditError(f"There\u2019s no group or part named “{of}”.")
         self.parent_of(identifier)  # held somewhere written, before it moves
         way = "column" if side in {"below", "above"} else "row"
         first = side in {"above", "left"}
@@ -1265,7 +1275,7 @@ class _Document:
         top = [str(item) for item in action.get("top") or []]
         known = {str(item["id"]) for item in [*nodes, *groups]}
         if not top or not set(top) <= known:
-            raise EditError("There's nothing to paste.")
+            raise EditError("There\u2019s nothing to paste.")
         renamed: dict[str, str] = {}
         for item in [*nodes, *groups]:
             renamed[str(item["id"])] = self.fresh(str(item["id"]), set(renamed.values()))

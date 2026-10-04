@@ -14,6 +14,10 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
    drawing's light shapes and its dark ones alike. */
 .fig-wordless { position: absolute; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap; color: rgb(128 126 136 / 0.85); line-height: 1; font-style: normal; }
 .fig-wordless.start { transform: translate(0, -50%); }
+/* One too small to read where its words go, or crowded there (the drawing zoomed far out):
+   said only as its shape is pointed at or chosen, on a slip of the page's paper. */
+.fig-wordless.tight { visibility: hidden; }
+.fig-wordless.tight.pointed { visibility: visible; z-index: 2; color: var(--text-small); background: var(--raised); padding: 2px 5px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
 .fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; background: var(--raised); border: 1.5px solid var(--accent); border-radius: 2px; touch-action: none; }
 .fig-size::before { content: ""; position: absolute; inset: -6px; }
 .fig-size:hover { background: var(--accent); }

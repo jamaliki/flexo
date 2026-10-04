@@ -295,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
             doc = workspace.open(name)
             workspace.reread(doc)
             if doc.held:
-                self._fail(HTTPStatus.CONFLICT, doc.problem or f"Can't read {doc.name}")
+                self._fail(HTTPStatus.CONFLICT, doc.problem or f"Can\u2019t read {doc.name}")
                 return
             wrote = doc.write(again=True)
             if wrote:
@@ -310,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "saved": doc.saved})
         elif route == "/api/mend":
             # A file that does not read, put right by its person where the studio shows it.
-            workspace.open(name).mend(str(data.get("text", "")))
+            workspace.open(name).mend(str(data.get("text", "")), over=bool(data.get("over")))
             self._json({"ok": True})
         elif route == "/api/new":
             doc = workspace.new(name, data.get("kind", ""), data.get("data"), who)

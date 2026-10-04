@@ -10,9 +10,9 @@ const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya
 
 const SUGGESTIONS = {
   deck: ["Tighten the wording on this slide", "Add a slide that explains the method with a figure", "Make the whole deck shorter and punchier"],
-  figure: ["Group the encoder's parts", "Add a decoder after the encoder", "Label the arrows"],
+  figure: ["Group the encoder’s parts", "Add a decoder after the encoder", "Label the arrows"],
   theme: ["Make it quieter: fewer colours, thinner lines", "A dark version for talks", "Use a serif for titles"],
-  none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab's colours"],
+  none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab’s colours"],
 };
 
 export class AssistantPanel {
@@ -116,7 +116,7 @@ export class AssistantPanel {
     // Where Claude can't be asked, nothing offers to send: the note above says why.
     this.input.disabled = !state.available && !state.running;
     this.sendButton.disabled = !state.available && !state.running;
-    this.input.placeholder = state.available || state.running ? "Ask Claude to make or change something…" : "Claude isn't available here";
+    this.input.placeholder = state.available || state.running ? "Ask Claude to make or change something…" : "Claude isn’t available here";
     clear(this.sendButton, icon(state.running ? "stop" : "send"));
     this.sendButton.classList.toggle("running", Boolean(state.running));
     this.sendButton.onclick = () => (state.running && !this.input.value.trim() ? this.stop() : this.send());
@@ -126,10 +126,10 @@ export class AssistantPanel {
       // The Mac app comes with what Claude needs: a copy without it is told so in plain
       // words, not given a command for Terminal.
       const why = window.pywebview && /pip install/.test(state.why || "")
-        ? "Claude isn't included in this copy of Flexo Studio. Download Flexo Studio again to ask Claude here." : state.why;
+        ? "Claude isn’t included in this copy of Flexo Studio. Download Flexo Studio again to ask Claude here." : state.why;
       clear(this.list, h("div.chat-empty", {},
         h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "Works with you on the documents open here"))),
-        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
+        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || "Claude isn’t available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
         // What to ask: only where Claude can be asked.
         state.available ? h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text))) : null));
       return;

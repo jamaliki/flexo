@@ -643,18 +643,28 @@ export const ui = {
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
+// How light a colour is (0 black, 1 white), however it is written (#rgb, #rrggbb with or
+// without its #, an alpha after, rgb()); null for one that is not a colour so written.
+function lightness(colour) {
+  const text = String(colour || "").trim();
+  let rgb = null;
+  const hex = /^#?([0-9a-f]{3}|[0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(text);
+  if (hex) {
+    const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join("") : hex[1];
+    rgb = [0, 2, 4].map((at) => parseInt(digits.slice(at, at + 2), 16));
+  } else {
+    const found = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(text);
+    if (found) rgb = found.slice(1, 4).map(Number);
+  }
+  if (!rgb) return null;
+  const [r, g, b] = rgb.map((value) => value / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
 // A colour light enough that a mark on it is drawn dark.
-function light(colour) {
-  if (!HEX.test(colour || "")) return false;
-  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
-}
-// A colour near black: ringed clearly on a dark panel, where a faint ring would leave it unseen.
-function dark(colour) {
-  if (!HEX.test(colour || "")) return false;
-  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
-}
+const light = (colour) => (lightness(colour) ?? 0) > 0.6;
+// A colour near black: ringed clearly on a dark panel (a deck's, a figure's tones alike),
+// where a faint ring would leave it unseen.
+const dark = (colour) => (lightness(colour) ?? 1) < 0.2;
 
 // A group of controls that is one stop for Tab, as a Mac's segmented control, a row of
 // colours or a grid of layouts is: Tab comes to the chosen one (else the first), and the
@@ -1105,17 +1115,22 @@ const sheetOpen = () => Boolean(document.querySelector(".scrim:not(.palette-scri
 function placeToasts(box) {
   const area = [...(document.querySelectorAll?.("[data-toast-area]") || [])].find((node) => node.offsetParent !== null);
   let room = area?.getBoundingClientRect();
-  // Else the document's own room: its view, short of its inspector (a figure's, a theme's),
-  // and above what it says at its foot (a figure's message banner).
+  // Else the document's own room: its view, short of the panels at its sides (a figure's
+  // shapes and inspector, a theme's), and above what it says at its foot (a figure's
+  // message banner).
   if (!room?.width) {
     const view = [...(document.querySelectorAll?.(".views > *") || [])].find((node) => !node.hidden && node.offsetParent !== null);
-    const panel = view?.querySelector(".inspector, .fig-inspector, .theme-panel");
-    if (view && panel) {
-      const whole = view.getBoundingClientRect(), side = panel.getBoundingClientRect();
+    const panels = view ? [...view.querySelectorAll(".inspector, .fig-inspector, .theme-panel, .fig-left")].filter((node) => node.offsetParent !== null) : [];
+    if (view && panels.length) {
+      const whole = view.getBoundingClientRect();
+      let left = whole.left, right = whole.right;
+      for (const side of panels.map((node) => node.getBoundingClientRect())) {
+        if (side.left - whole.left < whole.right - side.right) left = Math.max(left, side.right); else right = Math.min(right, side.left);
+      }
       const banner = [...view.querySelectorAll(".fig-messages, .messages, .fig-banner")].map((node) => node.getBoundingClientRect())
-        .filter((said) => said.height && said.left < side.left && said.bottom > whole.bottom - 120);
+        .filter((said) => said.height && said.left < right && said.right > left && said.bottom > whole.bottom - 120);
       const bottom = Math.min(whole.bottom, ...banner.map((said) => said.top - 4));
-      room = { left: whole.left, width: Math.max(0, side.left - whole.left), bottom };
+      room = { left, width: Math.max(0, right - left), bottom };
     }
   }
   if (room?.width) {
@@ -1126,6 +1141,11 @@ function placeToasts(box) {
     box.style.removeProperty?.("--toast-room");
   }
 }
+// An export's name as its menu gives it: "…" when more is asked before the file is made (a
+// sheet of choices, or the Mac app's save panel), as on a Mac -- none when it goes straight
+// to the browser's downloads.
+export const exportLabel = (label, sheet = false) => `${String(label).replace(/…$/, "")}${sheet || window.pywebview?.api?.save_export ? "…" : ""}`;
+
 export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}) {
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
   const box = toasts();

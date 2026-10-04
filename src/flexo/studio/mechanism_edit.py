@@ -67,7 +67,7 @@ def normal_steps(steps: object) -> list[dict[str, Any]]:
             try:
                 item["place"] = place_record(item["place"])
             except (ValueError, IndexError, TypeError, AttributeError) as error:
-                raise EditError("This step's placement can't be read.") from error
+                raise EditError("This step\u2019s placement can\u2019t be read.") from error
             if not item["place"]:
                 del item["place"]
         out.append(item)
@@ -244,13 +244,13 @@ def add_arrow(
     written = normal_steps(steps)
     panels, _ = mechanism_states(_figure(written, options).nodes[0])
     if not 0 <= step < len(panels):
-        raise EditError("This structure can't be drawn because an earlier step has a problem.")
+        raise EditError("This structure can\u2019t be drawn because an earlier step has a problem.")
     molecule = panels[step].molecule.copy()
     count = len(molecule.atoms)
     ends = [_atoms(tail, count), _atoms(head, count)]
     source, target = ends
     if len(source) == 2 and molecule.bond(*source) is None:
-        raise EditError("Those two atoms aren't bonded.")
+        raise EditError("Those two atoms aren\u2019t bonded.")
     if len(source) == 2 and len(target) == 1 and target[0] not in source:
         return {"ends": [{"index": atom, "name": molecule.name(atom)} for atom in source]}
     if len(source) == 1 and len(target) == 2:
@@ -308,7 +308,7 @@ def place_molecule(
     written = normal_steps(steps)
     panels, _ = mechanism_states(_figure(written, options).nodes[0])
     if not 0 <= step < len(panels):
-        raise EditError("This structure can't be drawn because an earlier step has a problem.")
+        raise EditError("This structure can\u2019t be drawn because an earlier step has a problem.")
     molecule = panels[step].molecule.copy()
     if not 0 <= atom < len(molecule.atoms):
         raise EditError("That atom no longer exists. Someone else may have changed the structure.")

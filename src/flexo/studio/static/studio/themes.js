@@ -32,7 +32,7 @@ export function themeCard(card, { on = false, onclick, compact = false, chevron 
     h("span.theme-words", {},
       h("span.theme-name", {}, themeName(card)),
       // A folder's theme says its file only when that is not its name already.
-      card.problem ? h("span.theme-where.bad", {}, "Can't be read") : card.source === "folder" && docName(card.value) !== themeName(card) ? h("span.theme-where", {}, docName(card.value)) : null),
+      card.problem ? h("span.theme-where.bad", {}, "Can’t be read") : card.source === "folder" && docName(card.value) !== themeName(card) ? h("span.theme-where", {}, docName(card.value)) : null),
     chevron ? h("span.theme-chevron", {}, icon("chevron-down")) : null);
 }
 
@@ -100,7 +100,7 @@ export function themeUses(session) {
         icon(entry.kind === "deck" ? "deck" : "figure"),
         h("button.theme-use-name", { type: "button", title: `Open ${entry.file}`, onclick: () => session.workspace.open(entry.file) }, docName(entry.file)),
         entry.uses ? h("span.chip-on", {}, icon("check"), "In Use")
-          : entry.unread ? h("span.hint-line", { title: `Open ${entry.file} to see why and put it right` }, "Can't be read")
+          : entry.unread ? h("span.hint-line", { title: `Open ${entry.file} to see why and put it right` }, "Can’t be read")
           : ui.button("Use", () => use([entry.file]), { small: true, title: `Use this theme in “${docName(entry.file)}” (now ${entry.theme || "the default theme"})` }))))
         : h("div.hint-line", {}, "No figures or decks in this folder yet."),
       others.length > 1 ? h("div.row", {}, ui.button(useAll(others.length, documents.filter((entry) => !entry.unread).length), () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);

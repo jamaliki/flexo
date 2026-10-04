@@ -341,7 +341,7 @@ def test_a_file_on_disk_that_does_not_read_is_not_written_over(tmp_path: Path) -
         broken = "theme: {name: lab, base: [\n"
         theme.write_text(broken, encoding="utf-8")
         wait_for(lambda: doc.held)
-        assert (doc.problem or "").startswith("Can't read lab.yaml: line ")
+        assert (doc.problem or "").startswith("Can\u2019t read lab.yaml: line ")
         assert doc.problem.count("lab.yaml") == 1
         # An edit made meanwhile is kept, and nothing is written over the file.
         mine = {"theme": {"name": "lab", "base": "paper", "description": "mine"}}
@@ -482,7 +482,7 @@ def test_a_file_that_does_not_read_is_not_saved_over(served: tuple[str, Workspac
     doc = workspace.open("lab.yaml")
     theme.write_text("theme: [\n", encoding="utf-8")
     status, answer = call(f"{base}/api/save", workspace.token, {"file": "lab.yaml"})
-    assert status == 409 and "Can't read lab.yaml" in answer["error"] and doc.held
+    assert status == 409 and "Can\u2019t read lab.yaml" in answer["error"] and doc.held
     assert theme.read_text(encoding="utf-8") == "theme: [\n"
 
 
@@ -523,7 +523,7 @@ def test_a_file_with_a_typo_opens_as_the_kind_its_keys_say_and_is_not_written(
         assert [item["kind"] for item in workspace.documents()] == ["deck"]
         doc = workspace.open("talk.yaml")
         assert doc.kind.name == "deck" and doc.unread and doc.held and doc.document == {}
-        assert (doc.problem or "").startswith("Can't read talk.yaml: line 5")
+        assert (doc.problem or "").startswith("Can\u2019t read talk.yaml: line 5")
         info = doc.info()
         assert info["unread"] and info["source"] == TYPO and info["problem"] == doc.problem
         # Nothing it shows is anything to change, and nothing is written over the file.
@@ -583,7 +583,7 @@ def test_a_file_put_right_where_the_studio_shows_it_is_written_once_it_reads(
     # Still wrong: said, and nothing written.
     mend = {"file": "lab.yaml", "text": "theme:\n  name: lab\n  base: [paper\n"}
     status, answer = call(f"{base}/api/mend", workspace.token, mend)
-    assert status == 400 and answer["error"].startswith("lab.yaml still can't be read: line ")
+    assert status == 400 and answer["error"].startswith("lab.yaml still can\u2019t be read: line ")
     assert theme.read_text(encoding="utf-8") == "theme:\n  name: lab\n  base: [\n"
     # Another kind's document: not written either.
     mend["text"] = "figure: {id: f}\nnodes: []\n"
@@ -831,6 +831,24 @@ def test_the_agent_tools_read_edit_and_look(tmp_path: Path) -> None:
         notes = [entry["text"] for entry in workspace.activity]
         # (Said as the figure has it, not by the line of its file.)
         assert "renamed \u201cEncoder\u201d to \u201cDecoder\u201d" in notes
+    finally:
+        workspace.close()
+
+
+def test_a_shape_renamed_as_it_is_typed_is_one_row_of_activity(tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path)
+    try:
+        me = {"id": "me", "name": "Me", "kind": "person"}
+        where = {"page": 4, "label": "Slide 4"}
+        said = "renamed \u201c{}\u201d to \u201c{}\u201d in the figure"
+        for was, now in [("Customer", "S"), ("S", "Sh"), ("Sh", "Shoppe"), ("Shoppe", "Shopper")]:
+            workspace.record(me, "talk.yaml", said.format(was, now), where)
+        assert [entry["text"] for entry in workspace.activity] == [
+            "renamed \u201cCustomer\u201d to \u201cShopper\u201d in the figure"
+        ]
+        # Another shape renamed next is a row of its own.
+        workspace.record(me, "talk.yaml", said.format("API", "Gateway"), where)
+        assert len(workspace.activity) == 2
     finally:
         workspace.close()
 
@@ -1842,6 +1860,46 @@ process.exit(0);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_document_closed_and_opened_again_in_a_page_draws() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+// The studio's rule (Workspace.draw): a drawing older than the last this page asked for,
+// of this document, is stale.
+const latest = {};
+const opened = {
+  file: "a.yaml", kind: "deck", version: 1, saved: 1, exists: true, document: { title: "A" },
+};
+const workspace = {
+  client: "page", me: { id: "me" }, sessions: new Map(), url: (route) => route, on() {},
+  async api(route, body) {
+    if (route !== "/api/draw") return opened;
+    const key = `${body.file}\\u0000${body.hints.client}`;
+    latest[key] = Math.max(latest[key] || 0, body.version);
+    if (body.version < latest[key]) return { version: body.version, stale: true };
+    return { pages: [], messages: [] };
+  },
+};
+const drawn = async (session) => {
+  let seen = 0;
+  session.on("drawn", () => { seen += 1; });
+  for (let n = 0; n < 3; n++) await session.draw();
+  return seen;
+};
+const first = new Session(workspace, opened);
+const again = new Session(workspace, opened);  // closed, and opened again in the same page
+console.log(JSON.stringify([await drawn(first), await drawn(again)]));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [3, 3]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_a_quotation_within_a_quotation_alternates_its_marks() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
     # (The marks spelled out: double opening and closing, single opening and closing.)
@@ -2179,7 +2237,8 @@ def test_an_agent_reads_a_file_that_does_not_read_as_written_and_puts_it_right(
     try:
         tools = Tools(workspace, {"id": "agent", "name": "Claude"})
         said, failed = tools.call("read_document", {"file": "talk.yaml"})
-        assert not failed and TYPO in said[0]["text"] and "Can't read talk.yaml" in said[0]["text"]
+        assert not failed and TYPO in said[0]["text"]
+        assert "Can\u2019t read talk.yaml" in said[0]["text"]
         said, failed = tools.call("write_document", {"file": "talk.yaml", "text": DECK})
         assert not failed, said
         doc = workspace.open("talk.yaml")

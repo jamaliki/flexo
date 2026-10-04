@@ -34,6 +34,7 @@ structure's that no row names yet.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
@@ -444,7 +445,14 @@ def _bench() -> list[dict[str, Any]]:
                     "combo",
                     options=["", "s", "min", "h", "day", "week", "month", "year"],
                 ),
-                _field("properties.length", "Length", "number"),
+                # (The axis's width on the page, not how long the protocol runs: never so
+                # short that its times overprint.)
+                _field(
+                    "properties.length",
+                    "Axis Width (pt)",
+                    "number",
+                    hint="Auto: as wide as its times need",
+                ),
             ],
         ),
     ]
@@ -982,11 +990,38 @@ def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
         *_bench(),
         _structure(),
     ]
+    sizes = _sizes()
     return {
         "categories": list(CATEGORIES),
-        "parts": {part["kind"]: part for part in parts},
+        "parts": {
+            part["kind"]: {**part, "size": sizes[part["kind"]]} if part["kind"] in sizes else part
+            for part in parts
+        },
         "groups": GROUPS,
         "group_fields": GROUP_FIELDS,
         "edge_fields": EDGE_FIELDS,
         "figure_fields": figure_fields(catalog or {}),
     }
+
+
+@functools.cache
+def _sizes() -> dict[str, list[float]]:
+    """How large each part is drawn as it is added (with the words it starts with), in ems
+    of the figure's words: so the page can stand it in where it goes at the size it will be,
+    before it is drawn there -- a circle a circle's size, not its neighbour's."""
+
+    from flexo.layout.measure import measure_figure
+    from flexo.serialization import parse_figure
+    from flexo.themes import figure_style
+
+    sizes = {}
+    for part in [*_basics(), *_software(), *_learning(), *_genetics(), *_proteins(), *_bench()]:
+        try:
+            spec = parse_figure({"figure": {"id": "x"}, "nodes": [{"id": "n", **part["node"]}]})
+            style = figure_style(spec)
+            size = measure_figure(spec, style=style).nodes[0].intrinsic_size
+        except Exception:  # (one that can't be drawn bare is stood in as its neighbour's size)
+            continue
+        em = style.typography.size.points
+        sizes[part["kind"]] = [round(size.width / em, 2), round(size.height / em, 2)]
+    return sizes

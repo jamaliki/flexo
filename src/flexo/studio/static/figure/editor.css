@@ -1,6 +1,6 @@
 /* The figure editor: parts on the left, the figure in the middle, what is chosen on the right. */
 
-.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 328px; }
+.fig { position: absolute; inset: 0; display: grid; grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) var(--inspector, 340px); }
 .fig.wide { grid-template-columns: var(--left, 272px) 5px minmax(0, 1fr) 468px; }
 .fig-left { border-right: 1px solid var(--line); }
 .fig-split { cursor: col-resize; background: transparent; position: relative; z-index: 2; margin: 0 -2px; }
@@ -9,7 +9,7 @@
 .fig-inspector { border-left: 1px solid var(--line); }
 /* Narrow, the shapes' list lies over the figure while it is opened, and the inspector takes
    less room (figure/editor.js). */
-.fig.narrow, .fig.narrow.wide { grid-template-columns: minmax(0, 1fr) 280px; }
+.fig.narrow, .fig.narrow.wide { grid-template-columns: minmax(0, 1fr) var(--inspector, 300px); }
 .fig.narrow > .fig-split { display: none; }
 .fig.narrow > .fig-center { grid-column: 1; grid-row: 1; }
 .fig.narrow > .fig-inspector { grid-column: 2; grid-row: 1; }

@@ -393,3 +393,24 @@ def test_a_tagged_pdf_has_headings_described_figures_and_decoration_passed_over(
     # Untagged, as a figure's own PDF is: nothing of the sort.
     untagged = pdf_bytes(svg)
     assert b"/StructTreeRoot" not in untagged and b"BDC" not in b"".join(streams(untagged))
+
+
+def test_a_drawn_formula_s_words_are_copied_whole_by_every_reader() -> None:
+    import shutil
+    import subprocess
+
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+    from flexo.texmath import linear
+
+    if shutil.which("pdftotext") is None:
+        pytest.skip("poppler's pdftotext is not installed")
+    source = r"\theta = \frac{[U]^{n_H}}{K_{1/2}^{\,n_H} + [U]^{n_H}}"
+    with Figure("hill") as figure:
+        figure.root.block("a", label=f"${source}$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    read = subprocess.run(["pdftotext", "-", "-"], input=pdf, capture_output=True, check=True)
+    said = read.stdout.decode()
+    # Its words are set no wider than it is drawn: squeezed narrower, letters overlap, and
+    # poppler drops one set over its twin ("))" read as ")") and runs the words together.
+    assert linear(source) in said

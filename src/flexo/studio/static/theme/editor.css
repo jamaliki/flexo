@@ -1,6 +1,6 @@
 /* The settings on the right, where a deck's and a figure's inspectors are: the window keeps
    its shape from tab to tab. */
-.theme { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) 400px; }
+.theme { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector, 340px); }
 .theme-panel { border-left: 1px solid var(--line); min-height: 0; }
 .theme-form { overflow: auto; height: 100%; padding-bottom: 60px; }
 .theme-section { gap: 12px; }
@@ -50,12 +50,14 @@
 .arrow-choice.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .theme-more { padding: 14px; }
 .theme-right { position: relative; min-width: 0; }
-.theme-stage { padding: 36px; }
+.theme-stage { padding: 36px; display: flex; flex-direction: column; }
 .samples { display: grid; gap: 28px; justify-items: center; }
 .samples.slides { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); justify-items: stretch; }
 /* Nothing to show, and why (a deck that does not read): said in the middle of the stage,
    its sign the size of its words, as the studio's other empty states are. */
-.samples .sample-said { grid-column: 1 / -1; justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 420px; margin-top: 15vh; }
+/* Nothing to show, and why: in the middle of the stage, as a Mac app's empty view says it. */
+.samples:has(> .sample-said) { flex: 1 0 auto; align-content: center; }
+.samples .sample-said { grid-column: 1 / -1; justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 420px; text-align: center; }
 .samples .sample-said svg { width: 22px; height: 22px; color: var(--warn); }
 .sample { margin: 0; display: grid; gap: 8px; justify-items: center; }
 .sample .picture { max-width: min(100%, 900px); background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; display: block; }

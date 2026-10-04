@@ -22,6 +22,7 @@ said in the log, never in silence.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import difflib
 import io
@@ -59,6 +60,10 @@ a while -- by what they say and what was either side of them: put back where the
 (the deletion undone), one is written as it was, its comments too. A file's own, never
 another's, and never for an item new and empty (a Text just added brings no comments)."""
 _GONE: ContextVar[tuple[OrderedDict, OrderedDict] | None] = ContextVar("gone", default=None)
+_FILE: ContextVar[str | None] = ContextVar("file", default=None)
+_LOOSE: ContextVar[dict[str, Any] | None] = ContextVar("loose", default=None)
+"""In one writing, the items taken out of a list and those new in one: an object moved to
+another list (a slide's other column) is the one taken out, its comments with it."""
 
 
 def _keep(kept: OrderedDict, key: str, value: Any) -> None:
@@ -93,6 +98,21 @@ def _empty(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def _first_of_runs(sources: list[int | None], keys: list[str]) -> None:
+    """Of items alike side by side in the file (a slide and its copy), those kept are the
+    first: a copy undone leaves the one there before, the comment over it with it."""
+
+    run = 0
+    for end in range(1, len(keys) + 1):
+        if end < len(keys) and keys[end] == keys[run]:
+            continue
+        if end - run > 1:
+            places = [j for j, at in enumerate(sources) if at is not None and run <= at < end]
+            for k, j in enumerate(places):
+                sources[j] = run + k
+        run = end
+
+
 def _earliest(sources: list[int | None], keys: list[str], free: list[bool]) -> None:
     """Of items alike side by side (a slide and its copy just made), the first is the one
     there before, with all that is its own (the comment over it): the copy is the later.
@@ -109,6 +129,19 @@ def _earliest(sources: list[int | None], keys: list[str], free: list[bool]) -> N
         run = end
 
 
+@contextlib.contextmanager
+def writing(name: str):
+    """While a file is written by way of another (a file beside it, moved over it once whole),
+    the file it is: what was deleted from it comes back as it was, as when it is written
+    itself."""
+
+    token = _FILE.set(name)
+    try:
+        yield
+    finally:
+        _FILE.reset(token)
+
+
 def rewrite(
     previous: str | None, document: Any, fresh: Callable[[Any], str], *, name: str | None = None
 ) -> str:
@@ -119,6 +152,7 @@ def rewrite(
 
     if not previous or not previous.strip() or not isinstance(document, dict):
         return fresh(document)
+    name = _FILE.get() or name
     if name is None:
         token = _GONE.set(None)
     else:
@@ -150,7 +184,13 @@ def _rewrite(previous: str, document: Any, fresh: Callable[[Any], str]) -> str:
     # The comments at the file's end are its end's, whatever comes last in it now: never
     # carried off by the item they follow (a quote moved down, past them).
     ending = _cut_tail(old, list(old)[-1]) if old else None
-    root = _merge(old, document)
+    loose: dict[str, Any] = {"out": {}, "new": []}
+    token = _LOOSE.set(loose)
+    try:
+        root = _merge(old, document)
+        _rehome(loose)
+    finally:
+        _LOOSE.reset(token)
     writer = _yaml()
     if indent:
         writer.indent(mapping=indent, sequence=indent, offset=offset or 0)
@@ -336,6 +376,8 @@ def _splice(
                         used.add(found)
             keys_new = [item["key"] for item in news]
             _earliest(source, keys_new, [True] * len(news))
+            _first_of_runs(source, keys_old)
+            used = {mine for mine in source if mine is not None}
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():
                 if tag == "replace":
                     free = [i for i in range(i1, i2) if i not in used]
@@ -394,6 +436,7 @@ def _comments_to_items(node: Any) -> None:
         keys = list(node)
         for key in keys:
             _comments_to_items(node[key])
+            _first_over(node, key)
         for before, key in itertools.pairwise(keys):
             _over(node, key, _cut_tail(node, before))
     elif isinstance(node, CommentedSeq):
@@ -401,6 +444,26 @@ def _comments_to_items(node: Any) -> None:
             _comments_to_items(item)
         for k in range(1, len(node)):
             _over(node, k, _cut_tail(node, k - 1))
+
+
+def _first_over(holder: CommentedMap, key: Any) -> None:
+    """The comments between a key and the first item of its list (``body:``, then ``#
+    Callout: say this slowly``, then ``- callout:``) made that item's: ruamel keeps them with
+    the list, where they would stay over whichever item came first."""
+
+    value = holder[key]
+    if not isinstance(value, CommentedSeq) or not value or value.fa.flow_style():
+        return
+    tokens = value.ca.comment[1] if value.ca.comment and len(value.ca.comment) > 1 else None
+    if not tokens:
+        return
+    said = [token for token in tokens if isinstance(token, CommentToken)]
+    words = "".join(" " * (token.column or 0) + token.value for token in said)
+    value.ca.comment[1] = []
+    entry = holder.ca.items.get(key)
+    if entry and len(entry) > 3:
+        entry[3] = None
+    _over(value, 0, words)
 
 
 def _over(holder: Any, slot: Any, words: str | None) -> None:
@@ -478,9 +541,12 @@ def _merge_map(old: CommentedMap, new: dict) -> CommentedMap:
                 ordereddict.__setitem__(old, key, merged)
                 old._ok.add(key)
         else:
-            # A key the file did not have goes after the one the document has before it.
+            # A key the file did not have goes after the one the document has before it (a
+            # list of it put together as one would be: an object moved there is itself).
             keys = list(old)
-            old.insert(keys.index(before) + 1 if before in keys else 0, key, _fresh(value))
+            listed = isinstance(value, (list, tuple))
+            made = _merge_seq(CommentedSeq(), list(value)) if listed else _fresh(value)
+            old.insert(keys.index(before) + 1 if before in keys else 0, key, made)
         before = key
     return old
 
@@ -489,6 +555,12 @@ def _drop_key(old: CommentedMap, key: Any) -> None:
     """A key gone, and the comments that are its own (on its lines, over it) with it."""
 
     old.ca.items.pop(key, None)
+    # The items of a list gone with it (a slide's column emptied) may be in another now.
+    loose, value = _LOOSE.get(), old[key]
+    if loose is not None and isinstance(value, CommentedSeq):
+        for at, item in enumerate(value):
+            if isinstance(item, (CommentedMap, CommentedSeq)):
+                loose["out"].setdefault(_key(item), []).append((item, value.ca.items.get(at)))
     del old[key]
 
 
@@ -516,6 +588,8 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
                 sources[j] = found
                 used.add(found)
     _earliest(sources, keys_new, [True] * len(new))
+    _first_of_runs(sources, keys_old)
+    used = {source for source in sources if source is not None}
     for j, source in enumerate(sources):
         if source is not None:
             result[j] = items[source]
@@ -530,10 +604,13 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
                 result[j], sources[j] = _merge(items[at], new[j]), at
                 used.add(at)
     notes = dict(old.ca.items)
-    gone = _gone(0)
+    gone, loose = _gone(0), _LOOSE.get()
     for i, item in enumerate(items):
-        if i not in used and isinstance(item, (CommentedMap, CommentedSeq)) and gone is not None:
-            _keep(gone, _placed(keys_old, i), (item, notes.get(i)))
+        if i not in used and isinstance(item, (CommentedMap, CommentedSeq)):
+            if gone is not None:
+                _keep(gone, _placed(keys_old, i), (item, notes.get(i)))
+            if loose is not None:
+                loose["out"].setdefault(keys_old[i], []).append((item, notes.get(i)))
     # The rest is new -- one taken out a moment ago put back where it was (by an undo) as it
     # was; a copy of one there (a slide duplicated, a figure in it given a new id) as that one
     # is written, comments in it and all (not the one over it, which is the first's); else
@@ -549,6 +626,9 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
                 result[j] = copied if keys_old[twin] == key else _merge(copied, new[j])
             else:
                 result[j] = _fresh(new[j])
+                # (One new and empty, a Text just added, is no object moved.)
+                if loose is not None and isinstance(new[j], (dict, list)) and not _empty(new[j]):
+                    loose["new"].append((old, j, key))
     if sources == list(range(len(items))) and all(
         a is b for a, b in zip(result, items, strict=True)
     ):
@@ -562,6 +642,21 @@ def _merge_seq(old: CommentedSeq, new: list) -> CommentedSeq:
         elif back.get(at) is not None:
             old.ca.items[at] = back[at]
     return old
+
+
+def _rehome(loose: dict[str, Any]) -> None:
+    """Each item new in a list that is one taken out of another (a table moved to the left
+    column) put there as it was read, the comments over it and in it with it."""
+
+    for holder, at, key in loose["new"]:
+        taken = loose["out"].get(key)
+        if not taken:
+            continue
+        item, notes = taken.pop(0)
+        list.__setitem__(holder, at, item)
+        holder.ca.items.pop(at, None)
+        if notes is not None:
+            holder.ca.items[at] = notes
 
 
 def _twin(items: list, keys: list[str], key: str, value: Any) -> int | None:

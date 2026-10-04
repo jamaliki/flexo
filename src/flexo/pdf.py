@@ -410,20 +410,25 @@ class _Content:
         face = font_stack(TypographyStyle()).face(400, False)
         font = self.writer.font(face, 400)
         loaded = hb_font(face, 400)
-        size = min(bottom - top, 1000.0)
         upem = load_face(face).upem
         shown, advance = [], 0.0
         for character in words:
             gid = loaded.get_nominal_glyph(ord(character)) or 0
             cid, width = font.use(gid, character)
             shown.append(f"<{cid:04X}>")
-            advance += width / upem * size
-        stretch = 100.0 * (right - left) / advance if advance > 0 else 100.0
+            advance += width / upem
+        # As tall as the drawing, but never wider than it: words squeezed into less room
+        # than they take overlap, and a reader that drops a letter set over its twin
+        # (poppler's) reads "))" as ")" and runs the words together. Narrower, they are
+        # set smaller, on the drawing's middle.
+        size = min(bottom - top, 1000.0, (right - left) / advance if advance > 0 else 1000.0)
+        stretch = 100.0 * (right - left) / (advance * size) if advance > 0 else 100.0
+        baseline = min(bottom - 0.2 * size, (top + bottom) / 2.0 + 0.35 * size)
         # Within q ... Q: the render mode and scaling are graphics state, which outlasts ET,
         # and would leave every word after these invisible too.
         self.ops.append(
             f"q BT 3 Tr /{font.name} 1 Tf {_n(stretch)} Tz {_n(size)} 0 0 {_n(-size)} {_n(left)} "
-            f"{_n(bottom - 0.2 * size)} Tm [{''.join(shown)}] TJ ET Q"
+            f"{_n(baseline)} Tm [{''.join(shown)}] TJ ET Q"
         )
 
     def paint(self, paint: Paint, segments: Sequence[Segment]) -> None:

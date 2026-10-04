@@ -209,3 +209,77 @@ def test_a_comment_after_words_keeps_its_room_as_they_change() -> None:
     written = rewrite(text, longer, fresh)
     assert "  - text: First paragraph, longer   # Alice wrote this\n" in written
     assert rewrite(written, yaml.safe_load(text), fresh) == text
+
+
+COLUMNS = (
+    "slides:\n"
+    "- layout: two-columns\n"
+    "  title: Treatments\n"
+    "  left:\n"
+    "  - bullets:\n"
+    "    - Mechanism\n"
+    "  right:\n"
+    "  # The numbers\n"
+    "  - table:\n"
+    "    - [Drug, Spliced]\n"
+    "    - - DTT, 2 mM  # n = 3 biological repeats\n"
+    "      - '91'\n"
+    "    caption: Table 2\n"
+    "  - text: Our own numbers.\n"
+    "- title: A switch\n"
+    "  body:\n"
+    "  - quote: The decision is made by duration.\n"
+    "    by: Lin 2007\n"
+    "  # Callout: say this slowly\n"
+    "  - callout: Brief activity protects.\n"
+    "    title: Duration decides\n"
+)
+
+
+def test_an_object_moved_to_another_column_takes_its_comments_and_an_undo_puts_them_back() -> None:
+    import copy
+
+    document = yaml.safe_load(COLUMNS)
+    for emptied in (False, True):
+        moved = copy.deepcopy(document)
+        slide = moved["slides"][0]
+        slide["left"].append(slide["right"].pop(0))
+        if emptied:
+            slide["left"].append(slide.pop("right")[0])
+        written = rewrite(COLUMNS, moved, fresh, name="talk.yaml")
+        assert yaml.safe_load(written) == moved
+        # Its comment over it, a row's at its end, its rows' style: all in the left column now.
+        assert "    - Mechanism\n  # The numbers\n  - table:\n    - [Drug, Spliced]\n" in written
+        assert "    - - DTT, 2 mM  # n = 3 biological repeats\n" in written
+        assert written.count("# The numbers") == 1
+        assert rewrite(written, document, fresh, name="talk.yaml") == COLUMNS  # undone
+
+
+def test_an_object_moved_up_takes_the_comment_over_it_and_an_undo_puts_it_back() -> None:
+    import copy
+
+    document = yaml.safe_load(COLUMNS)
+    up = copy.deepcopy(document)
+    body = up["slides"][1]["body"]
+    body.insert(0, body.pop())
+    written = rewrite(COLUMNS, up, fresh, name="talk.yaml")
+    assert "  body:\n  # Callout: say this slowly\n  - callout:" in written
+    undone = rewrite(written, document, fresh, name="talk.yaml")
+    assert undone == COLUMNS
+    # The comment over the first item is that item's too: moved down, it goes with it.
+    assert rewrite(undone, up, fresh, name="talk.yaml") == written
+
+
+def test_a_slide_with_a_comment_over_it_copied_and_undone_keeps_its_comment() -> None:
+    import copy
+
+    document = yaml.safe_load(DECK)
+    for at in (0, 2):
+        twice = copy.deepcopy(document)
+        twice["slides"].insert(at + 1, copy.deepcopy(twice["slides"][at]))
+        written = rewrite(DECK, twice, fresh, name="talk.yaml")
+        # The original keeps the comment over it; the copy, after it, has none.
+        assert written.count("# --- opening ---") == 1
+        assert written.count("# --- the middle ---") == 1
+        assert rewrite(written, document, fresh, name="talk.yaml") == DECK
+

@@ -8,7 +8,7 @@
 // change, and only that: it is a merge too, so others' later edits stay.
 
 import { merge3, mergeAnswer, replay, same, stable } from "./merge.js";
-import { toast, h, inQuotes } from "./ui.js";
+import { toast, h, inQuotes, dialog } from "./ui.js";
 
 // Whether the studio answers, for the page as a whole: while it doesn't, one notice
 // says so (not a message for each edit), edits wait and drawings stay as they were;
@@ -38,7 +38,7 @@ function lost(workspace) {
   // A moment's break (the event stream reconnecting) is not worth a word.
   state.timer = setTimeout(() => {
     state.away = true;
-    state.note = toast(h("span.row", {}, h("span.spinner"), "Can't reach the studio — reconnecting…"), { seconds: 86400 });
+    state.note = toast(h("span.row", {}, h("span.spinner"), "Can’t reach the studio — reconnecting…"), { seconds: 86400 });
     restate(workspace);
   }, 1500);
 }
@@ -58,9 +58,83 @@ function reached(workspace) {
 // A request that never reached the studio (fetch's own failure), not one it refused.
 const unreachable = (error) => error instanceof TypeError;
 
-// What an export left out, and says so (a figure that can't be drawn, left an empty box).
-function exportNotes(notes) {
-  for (const note of notes || []) toast(note, { icon: "info", seconds: 8 });
+// What an export did, said in one note in place of the last export's: the file, and what
+// it left out (a figure that can't be drawn, left an empty box) summed up -- on how many
+// slides -- each said in a sheet a click away. `more` is a link beside it (Show in Finder).
+let lastExport = null;
+function exported(name, notes = [], more = null) {
+  lastExport?.remove();
+  const said = [...new Set(notes || [])];
+  const slides = new Set(said.map((note) => /^Slide (\d+)\b/.exec(note)?.[1]).filter(Boolean));
+  const counted = slides.size === said.length ? `${slides.size} slide${slides.size === 1 ? "" : "s"}` : `${said.length} part${said.length === 1 ? "" : "s"}`;
+  const show = said.length ? h("a", { href: "#", onclick: (event) => {
+    event.preventDefault();
+    lastExport?.remove();
+    dialog({ title: `Notes on “${name}”`, body: [h("ul.export-notes", {}, said.map((note) => h("li", {}, note)))], actions: [{ label: "Done", kind: "primary" }] });
+  } }, "Show") : null;
+  lastExport = toast(h("span.row", {}, `Exported “${name}”${said.length ? ` with notes on ${counted}` : ""}`, show, more),
+    { icon: said.length ? "info" : "check", seconds: said.length ? 12 : more ? 10 : 4 });
+}
+
+// Drawings asked for by this page, of any of its documents (see drawOnce).
+let drawings = 0;
+
+// A run of typing made in parts, others' typing between them (see change): where it began
+// with its own words alone -- each letter kept as whoever typed it, and those others typed
+// left out, those they took away kept. Null where it is not only words changed in place.
+function ownWords(parts) {
+  const at = (value, path) => path.reduce((into, key) => (into == null ? undefined : into[key]), value);
+  // The words each part changed, where.
+  const paths = new Map();
+  const walk = (was, now, path) => {
+    if (typeof was === "string" && typeof now === "string") { if (was !== now) paths.set(JSON.stringify(path), path); return true; }
+    if (was === now) return true;
+    if (!was || !now || typeof was !== "object" || typeof now !== "object" || Array.isArray(was) !== Array.isArray(now)) return false;
+    const keys = new Set([...Object.keys(was), ...Object.keys(now)]);
+    if (Array.isArray(was) ? was.length !== now.length : [...keys].some((key) => !(key in was) || !(key in now))) return false;
+    return [...keys].every((key) => walk(was[key], now[key], [...path, key]));
+  };
+  if (!parts.every((part) => walk(part.before, part.after, []))) return null;
+  const own = structuredClone(parts[0].before);
+  for (const path of paths.values()) {
+    if (typeof at(own, path) !== "string") return null;
+    let letters = [...at(own, path)].map((letter) => ({ letter }));
+    // One change to the words as they read: the letters it took away marked as taken by
+    // `by`, those it put in as typed by `by`.
+    const made = (was, now, by) => {
+      if (typeof was !== "string" || typeof now !== "string") return false;
+      const shown = letters.filter((one) => !one.gone);
+      if (shown.map((one) => one.letter).join("") !== was) return false;
+      const a = [...was], b = [...now];
+      let start = 0, end = 0;
+      while (start < a.length && start < b.length && a[start] === b[start]) start++;
+      while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+      const cut = a.length - start - end;
+      let put = b.slice(start, b.length - end);
+      // (Where it could as well have been made a letter or more back -- a space typed beside
+      // another's space -- it is put by the same hand's letters: the run it goes on.)
+      let best = start, kept = put, most = -1;
+      for (let from = start, typed = put; ; ) {
+        const near = cut ? shown.slice(from, from + cut).filter((one) => one.by === by).length : Number(shown[from - 1]?.by === by);
+        if (near > most) { most = near; best = from; kept = typed; }
+        if (!from || (cut ? put.length || a[from - 1] !== a[from - 1 + cut] : a[from - 1] !== typed[typed.length - 1])) break;
+        if (!cut) typed = [a[from - 1], ...typed.slice(0, -1)];
+        from--;
+      }
+      put = kept;
+      for (const one of shown.slice(best, best + cut)) one.gone = by;
+      const after = best ? letters.indexOf(shown[best - 1]) + 1 : 0;
+      letters = [...letters.slice(0, after), ...put.map((letter) => ({ letter, by })), ...letters.slice(after)];
+      return true;
+    };
+    for (const [index, part] of parts.entries()) {
+      if (index && !made(at(parts[index - 1].after, path), at(part.before, path), "others")) return null;
+      if (!made(at(part.before, path), at(part.after, path), "own")) return null;
+    }
+    const words = letters.filter((one) => one.by !== "others" && one.gone !== "own").map((one) => one.letter).join("");
+    path.slice(0, -1).reduce((into, key) => into[key], own)[path[path.length - 1]] = words;
+  }
+  return own;
 }
 
 export class Session {
@@ -161,7 +235,7 @@ export class Session {
   // Put right the words of a file that does not read: written once they read.
   async mend(text) {
     try { await this.workspace.api("/api/mend", { file: this.file, text }); }
-    catch (error) { throw unreachable(error) ? new Error("Can't reach the studio.") : error; }
+    catch (error) { throw unreachable(error) ? new Error("Can’t reach the studio.") : error; }
   }
 
   // -- editing --
@@ -255,14 +329,15 @@ export class Session {
         if (moved) this.travelled(moved);
         return Promise.resolve().then(() => entry.apply(target)).then(() => {
           from.pop();
+          entry.undoneAt = target === "before" ? Date.now() : null;
           to.push(entry);
           this.travelled(entry);
           return this.trip({ from, to, target, current, count }, done + 1);
         }, (error) => {
           const verb = target === "before" ? "undo" : "redo";
-          const why = unreachable(error) ? "Can't reach the studio." : error?.message || error;
+          const why = unreachable(error) ? "Can’t reach the studio." : error?.message || error;
           const what = inQuotes(this.said(entry).text || "Edit");
-          toast(`Couldn't ${verb} ${what}. ${why}`, { kind: "error", icon: "error", seconds: 6 });
+          toast(`Couldn’t ${verb} ${what}. ${why}`, { kind: "error", icon: "error", seconds: 6 });
           this.emit("status");
         });
       }
@@ -290,6 +365,9 @@ export class Session {
       // (Undone, what the undo did is kept, for a redo to take it back: see travelOne.)
       entry.undid = target === "before" ? { from: was, to: document } : null;
       if (lost.length) this.unmade([{ entry, lost }], target, true);
+      // (When it was undone: for one history with edits held elsewhere -- a figure's, while the
+      // studio is away -- ⇧⌘Z making again the latest undone of either.)
+      entry.undoneAt = target === "before" ? Date.now() : null;
       to.push(entry);
       moved = entry;
     }
@@ -316,10 +394,10 @@ export class Session {
     const did = notes.length && notes.every((note) => note.removed !== undefined) ? "deleted" : "changed";
     const more = steps.length - 1;
     const has = mine ? "have" : "has", where = mine ? " in another window" : "";
-    const words = some ? `Couldn't ${verb} all of ${what}: ${name} ${has} ${did} some of it since${where}.`
-      : more === 1 ? `Couldn't ${verb} ${what} or ${named(steps[1].entry)}: ${name} ${has} ${did} what they changed since${where}.`
-          : more ? `Couldn't ${verb} ${what} or the ${more} steps before it: ${name} ${has} ${did} what they changed since${where}.`
-            : `Couldn't ${verb} ${what}: ${name} ${has} ${did} it since${where}.`;
+    const words = some ? `Couldn’t ${verb} all of ${what}: ${name} ${has} ${did} some of it since${where}.`
+      : more === 1 ? `Couldn’t ${verb} ${what} or ${named(steps[1].entry)}: ${name} ${has} ${did} what they changed since${where}.`
+          : more ? `Couldn’t ${verb} ${what} or the ${more} steps before it: ${name} ${has} ${did} what they changed since${where}.`
+            : `Couldn’t ${verb} ${what}: ${name} ${has} ${did} it since${where}.`;
     this.unmadeNote?.remove();
     this.unmadeNote = toast(words, { icon: "info", seconds: 6 });
   }
@@ -361,17 +439,15 @@ export class Session {
       try { told = this.describe(own.before, own.after); } catch { told = null; }
       const said = typeof told === "string" ? { text: told } : told || {};
       // A run of typing others' changes cut into parts: named by all it typed, as its undo
-      // takes it all back ("Typing “alice types on”"), not by its last part's words alone.
-      if (entry.parts && /^Typing “.*”$/.test(said.text || "")) {
-        const typed = entry.parts.map((part) => {
-          let text = null;
-          try { const one = this.describe(part.before, part.after); text = typeof one === "string" ? one : one?.text; } catch { text = null; }
-          return /^Typing “(.*)”$/.exec(text || "")?.[1] ?? null;
-        });
-        if (typed.every((words) => words !== null)) {
-          const words = [...typed.map((one) => one.replace(/…$/, "")).join(" ")];
-          said.text = `Typing “${words.length > 40 ? `${words.slice(0, 39).join("")}…` : words.join("")}”`;
-        }
+      // takes it all back ("Typing “alice types on”") -- the words others typed between
+      // its parts, in among its own, left out (ownWords).
+      if (entry.parts && /^Typing\b/.test(said.text || "")) {
+        try {
+          const own = ownWords(entry.parts);
+          const whole = own && this.describe(entry.parts[0].before, own);
+          const text = typeof whole === "string" ? whole : whole?.text;
+          if (/^Typing\b/.test(text || "")) said.text = text;
+        } catch { /* by its last part */ }
       }
       entry.said = { text: entry.label || said.text || "", place: said.place, where: said.where };
     }
@@ -419,7 +495,7 @@ export class Session {
       if (unreachable(error)) lost(this.workspace);
       else if (this.failed !== error.message) {
         this.failed = error.message;
-        toast(`Couldn't sync your changes to ${this.file}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+        toast(`Couldn’t sync your changes to ${this.file}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
       }
       clearTimeout(this.retryTimer);
       this.retryTimer = setTimeout(() => this.schedulePush(), Math.min(30000, 1000 * 2 ** this.failures));
@@ -607,7 +683,7 @@ export class Session {
   async saveNow() {
     await this.push();
     try { await this.workspace.api("/api/save", { file: this.file }); }
-    catch (error) { throw unreachable(error) ? new Error("can't reach the studio") : error; }
+    catch (error) { throw unreachable(error) ? new Error("can’t reach the studio") : error; }
   }
 
   // -- drawing --
@@ -637,7 +713,10 @@ export class Session {
   async drawOnce() {
     // A file that has not read has nothing to draw (its editor says why instead).
     if (this.unread) return;
-    const version = ++this.drawVersion;
+    // (Counted for the page, not the document opened in it: the studio drops a drawing older
+    // than the last it was asked for by this page, and a document closed and opened again in it
+    // counts on from there -- never from one again, its every drawing taken for an old one.)
+    const version = this.drawVersion = ++drawings;
     const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
     this.emit("drawing", { version });
     let result;
@@ -730,8 +809,7 @@ export class Session {
         if (saved?.error) throw new Error(saved.error);
         if (!saved?.path) return [];
         const show = h("a", { href: "#", onclick: (event) => { event.preventDefault(); app.show_in_finder(saved.path); } }, "Show in Finder");
-        toast(h("span.row", {}, `Exported “${saved.path.split("/").pop()}”`, show), { icon: "check", seconds: 10 });
-        exportNotes(made.notes);
+        exported(saved.path.split("/").pop(), made.notes, show);
         return [saved.path];
       }
       const said = response.headers.get("Content-Disposition") || "";
@@ -742,8 +820,9 @@ export class Session {
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 60000);
-      toast(`Exported “${name}”`, { icon: "check", seconds: 4 });
-      try { exportNotes(JSON.parse(decodeURIComponent(response.headers.get("X-Flexo-Notes") || "[]"))); } catch { /* none to say */ }
+      let notes = [];
+      try { notes = JSON.parse(decodeURIComponent(response.headers.get("X-Flexo-Notes") || "[]")); } catch { /* none to say */ }
+      exported(name, notes);
       return [name];
     } catch (error) {
       note.remove();

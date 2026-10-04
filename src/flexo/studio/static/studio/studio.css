@@ -150,6 +150,11 @@
   color-scheme: dark;
 }
 
+/* One inspector width in every editor (a deck's, a figure's, a theme's): the window keeps
+   its shape from tab to tab. */
+:root { --inspector: 340px; }
+@media (max-width: 1250px) { :root { --inspector: 300px; } }
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body, #studio { height: 100%; margin: 0; }
@@ -293,6 +298,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .doc-row svg { width: 16px; height: 16px; color: var(--ink-3); }
 .doc-name { font-size: 13px; font-weight: 500; flex: 1; text-align: left; }
 .doc-kind { color: var(--ink-3); font-size: 12px; }
+.doc-kind.bad { color: var(--error); }
 .copyable { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); margin: 6px 0; }
 .copyable code { flex: 1; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 10px; color: var(--ink-2); }
@@ -505,6 +511,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .number-field:hover { border-color: var(--ink-3); }
 .number-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
 .number-field:has(.invalid) { border-color: var(--error); }
+/* A field a problem asks to be put right (a figure's "Length", wanted): the whole control
+   marked, its steppers too, the red ring in place of the blue one while it has the keys. */
+.field.wanted .number-field, .field.wanted .number-field:focus-within { border-color: var(--error); box-shadow: 0 0 0 2px var(--error); }
+.field.wanted .number-field > .input { outline: none; }
 .number-field > .input { flex: 1; height: 100%; min-width: 0; border: 0; border-radius: inherit; background: transparent; box-shadow: none; padding: 0 0 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
 .number-field > .input:focus { box-shadow: none; }
 .number-field > .unit { flex: none; padding-left: 3px; font: var(--text-hint); color: var(--ink-3); pointer-events: none; }
@@ -706,6 +716,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 /* What an export makes, said at the top of its sheet. */
 .export-hint { margin: 0; color: var(--ink-2); }
+.export-notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); }
 /* In a sheet a setting is a checkbox before its words, as a Mac's sheet has it (a switch is a
    settings window's): its box ticked when on. */
 .dialog .switch { flex-direction: row; justify-content: flex-start; gap: 8px; font: var(--text-body); color: var(--ink); }
@@ -779,6 +790,9 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .slider .value { width: 38px; text-align: right; font: var(--text-small); font-variant-numeric: tabular-nums; color: var(--ink-2); }
 /* A file chooser's list of files. */
 .dialog .list-rows { display: grid; gap: 2px; max-height: 50vh; overflow: auto; }
+/* The file chosen, as a Mac's open panel marks it (taken by a double-click, or the default button). */
+.dialog .list-rows [role=option][aria-selected=true] { background: var(--accent); color: var(--accent-ink); }
+.dialog .list-rows [role=option][aria-selected=true] .menu-hint, .dialog .list-rows [role=option][aria-selected=true] svg { color: inherit; opacity: 0.85; }
 .dialog .list-rows .pic { width: 34px; height: 34px; object-fit: contain; border-radius: 4px; background: var(--sunken); }
 
 /* -- themes, chosen by sight (themes.js) -- */

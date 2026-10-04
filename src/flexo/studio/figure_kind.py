@@ -174,7 +174,7 @@ class FigureKind:
         if action.get("do") == "structure-view":
             return {"document": document, "view": _structure_view(document, action, base)}
         if action.get("do") == "structure-settings":
-            spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
+            spec = _as_drawn(document, base)
             return {"document": document, "settings": settings_of(spec, str(action.get("id")))}
         if action.get("do") == "structure-fetch":
             # One that can't be had is an answer, said in the dialog -- not a failed request
@@ -230,6 +230,7 @@ class FigureKind:
         except Exception:  # not a shape the inspector can list: the drawing says why
             info = {}
         said_first: list[Message] = []
+        wrong: set[str] = set()  # the shapes drawn as plain boxes
         # A line to a shape there is none of is left out, and said; the rest is drawn.
         document = _strays(document, said_first)
         try:
@@ -242,18 +243,20 @@ class FigureKind:
             # A shape that can't be drawn as it is (a protein with no length): said by its
             # name, plainly, the message leading to it -- and the rest of the figure drawn,
             # it a plain box with its words meanwhile.
-            said_first += [_shape_problem(item, info) for item in error.diagnostics]
-            spec = _without(document, base, error)
+            spec = _stand_in(document, base, error, info, said_first, wrong)
             if spec is None:
                 return Drawing([], said_first, info=info)
         except Exception as error:
             return Drawing([], [Message(explain(error), "error")], info=info)
+        # So too a shape found wanting as it is drawn (a plasmid of -5 bp, a tree whose
+        # Newick does not read).
         try:
-            compilation = compile_figure(spec)
-        except FlexoError as error:
-            return Drawing([], [_message(item) for item in error.diagnostics], info=info)
+            drawn = _despite(document, base, spec, info, said_first, wrong, compile_figure)
         except Exception as error:
             return Drawing([], [Message(explain(error), "error")], info=info)
+        if drawn is None:
+            return Drawing([], said_first, info=info)
+        spec, compilation = drawn
         report = lint_compilation(compilation)
         info["tones"] = _tones(spec)
         page = Page(
@@ -280,17 +283,28 @@ class FigureKind:
         # can't be drawn as written (a protein with no length) a plain box of its words --
         # each said in a note with what was made.
         said: list[Message] = []
+        wrong: set[str] = set()
         document = _strays(document, said)
+        info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except FlexoError as error:
-            info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
-            said += [_shape_problem(item, info) for item in error.diagnostics]
-            spec = _without(document, base, error)
+            spec = _stand_in(document, base, error, info, said, wrong)
             if spec is None:
                 raise ValueError(" ".join(message.text for message in said)) from None
+        made = _despite(
+            document,
+            base,
+            spec,
+            info,
+            said,
+            wrong,
+            lambda spec: build(spec, into or base / "build", stem=stem, formats=tuple(formats)),
+        )
+        if made is None:
+            raise ValueError(" ".join(message.text for message in said))
         self.export_notes = [_exported_as(message.text) for message in said]
-        result = build(spec, into or base / "build", stem=stem, formats=tuple(formats))
+        result = made[1]
         written = list(result.outputs.existing())
         if into is not None and "editable" not in formats and len(written) > 1:
             # The editable SVG is written whatever is asked for: made aside, to be handed
@@ -380,8 +394,24 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
 def _structure_view(document: dict[str, Any], action: dict[str, Any], base: Path) -> Any:
     """A structure's trace and turn, for the page to turn while it is dragged round."""
 
-    spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
-    return view_of(spec, str(action.get("id")))
+    return view_of(_as_drawn(document, base), str(action.get("id")))
+
+
+def _as_drawn(document: dict[str, Any], base: Path) -> Any:
+    """The figure as it is drawn -- a line to a shape it has none of left out, a shape that
+    can't be drawn as written a plain box -- for what is asked of one of its parts (a
+    structure's settings), which the rest being wrong does not change."""
+
+    from flexo.diagnostics import FlexoError
+
+    document = _strays(document, [])
+    try:
+        return parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
+    except FlexoError as error:
+        spec = _stand_in(document, base, error, {}, [], set())
+        if spec is None:
+            raise
+        return spec
 
 
 def settings_of(spec, identifier: str) -> dict[str, Any]:
@@ -508,10 +538,12 @@ def _strays(document: dict[str, Any], said: list[Message]) -> dict[str, Any]:
         data = json.loads(document["text"]) if json_file else yaml.safe_load(document["text"])
     except (yaml.YAMLError, json.JSONDecodeError, TypeError):
         return document
-    lost = astray(data)
+    ids: list[str] = []
+    lost = astray(data, ids)
     if not lost:
         return document
-    said += [Message(line, "warning") for line in lost]
+    # (Each at its line: chosen from the message, its panel says where it goes.)
+    said += [Message(line, "warning", where) for line, where in zip(lost, ids, strict=True)]
     text = (
         json.dumps(data, indent=2, ensure_ascii=False)
         if json_file
@@ -520,21 +552,66 @@ def _strays(document: dict[str, Any], said: list[Message]) -> dict[str, Any]:
     return {**document, "text": text}
 
 
-def _without(document: dict[str, Any], base: Path, error) -> Any:
-    """The figure with each shape that can't be drawn (``error``'s) as a plain box of its
-    words, so the rest is drawn: None should it not draw even so."""
+def _stand_in(
+    document: dict[str, Any],
+    base: Path,
+    error,
+    info: dict[str, Any],
+    said: list[Message],
+    wrong: set[str],
+) -> Any:
+    """The figure with each shape ``error`` names (and those in ``wrong``, found so
+    before) a plain box of its words, each said in ``said`` by its name; None, said too,
+    should ``error`` name no shape not found so already, or the figure not draw even so."""
+
+    said += [_shape_problem(item, info) for item in error.diagnostics]
+    named = {item.entity_id for item in error.diagnostics if item.entity_id} - wrong
+    if not named:
+        return None
+    wrong |= named
+    return _without(document, base, wrong)
+
+
+def _despite(
+    document: dict[str, Any],
+    base: Path,
+    spec,
+    info: dict[str, Any],
+    said: list[Message],
+    wrong: set[str],
+    attempt,
+) -> tuple[Any, Any] | None:
+    """``spec`` and what ``attempt(spec)`` makes of it -- a shape it fails at (a plasmid of
+    -5 bp, a tree whose Newick does not read) a plain box of its words, and tried again, so
+    one wrong shape does not blank the rest; each said in ``said``, and kept in ``wrong``
+    with those found so before. None should it fail otherwise."""
 
     from flexo.diagnostics import FlexoError
 
-    wrong = {item.entity_id for item in error.diagnostics if item.entity_id}
-    if not wrong:
-        return None
+    while True:
+        try:
+            return spec, attempt(spec)
+        except FlexoError as error:
+            spec = _stand_in(document, base, error, info, said, wrong)
+            if spec is None:
+                return None
+
+
+def _without(document: dict[str, Any], base: Path, wrong: set[str]) -> Any:
+    """The figure with each shape in ``wrong`` (that can't be drawn) a plain box of its
+    words, so the rest is drawn: None should it name none of them, or not draw even so."""
+
+    from flexo.diagnostics import FlexoError
+
     suffix = document.get("suffix", ".yaml")
     data = json.loads(document["text"]) if suffix == ".json" else yaml.safe_load(document["text"])
     if not isinstance(data, dict):
         return None
-    for node in data.get("nodes") or []:
-        if isinstance(node, dict) and node.get("id") in wrong:
+    nodes = [node for node in data.get("nodes") or [] if isinstance(node, dict)]
+    if not any(node.get("id") in wrong for node in nodes):
+        return None
+    for node in nodes:
+        if node.get("id") in wrong:
             node.pop("properties", None)
             node["kind"] = "block"
     try:

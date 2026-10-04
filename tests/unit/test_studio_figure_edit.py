@@ -119,7 +119,7 @@ def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
     assert "backbone" in next(g for g in data(text)["groups"] if g["id"] == "row")["children"]
     with pytest.raises(EditError, match="already in use"):
         edit(text, do="rename", id="x", to="y")
-    with pytest.raises(EditError, match="can't be used as a name"):
+    with pytest.raises(EditError, match="can\u2019t be used as a name"):
         edit(text, do="rename", id="x", to="2x")
 
 
@@ -213,7 +213,7 @@ def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
     assert edges(text) == []
     assert [group["id"] for group in data(text)["groups"]] == ["root"]
     assert "encoder" not in data(text)["groups"][0]["children"]
-    with pytest.raises(EditError, match="can't be deleted"):
+    with pytest.raises(EditError, match="can\u2019t be deleted"):
         edit(text, do="delete", ids=["root"])
 
 
@@ -247,7 +247,7 @@ def test_a_part_goes_on_a_line_of_its_own_centred_under_a_row() -> None:
         "score",
     ]
     compile_figure(parse(text, Path.cwd()))
-    with pytest.raises(EditError, match="isn't a valid position"):
+    with pytest.raises(EditError, match="isn\u2019t a valid position"):
         edit(steps, do="move", id="score", line="inside")
 
 
@@ -688,3 +688,46 @@ def test_a_structure_that_cannot_be_downloaded_is_an_answer_not_a_failed_request
     action = {"do": "structure-fetch", "id": "1UBQ"}
     answer = FigureKind().act({"text": SAMPLE_FIGURE}, action, Path.cwd())
     assert answer["failed"] == "PDB can't be reached: no network." and "id" not in answer
+
+
+def test_a_shape_found_wanting_as_it_is_drawn_is_a_plain_box_the_rest_drawn(tmp_path: Path) -> None:
+    text = (
+        "figure:\n  id: f\nnodes:\n"
+        "- {id: p, kind: plasmid, label: pUC19, properties: {length: -5}}\n"
+        "- {id: t, kind: tree, label: Tree, properties: {newick: '((A,B'}}\n"
+        "- {id: q, label: Next}\n"
+        "edges:\n- {from: p, to: q}\n- {from: q, to: zz}\n"
+    )
+    drawing = FigureKind().draw({"text": text, "suffix": ".yaml"}, tmp_path)
+    (page,) = drawing.pages
+    assert "Next" in page.svg and "pUC19" in page.svg
+    # Each said where it is: the shape and the field it is about, the line by its id.
+    said = {(message.where, message.code) for message in drawing.messages}
+    assert {("p", "genetics.plasmid.length"), ("t", "tree.newick"), ("edge.2.q-to-zz", "")} <= said
+    kind = FigureKind()
+    document = {"text": text, "suffix": ".yaml"}
+    written = kind.export(document, tmp_path, "f", ["pdf"], into=tmp_path / "out")
+    assert [path.suffix for path in written] == [".pdf"]
+    note = "“pUC19” is drawn as a plain box: a plasmid of -5 bp is too short to draw."
+    assert note in kind.export_notes
+
+
+def test_each_part_is_stood_in_at_the_size_it_is_drawn() -> None:
+    parts = catalogue()["parts"]
+    # In ems of the figure's words: a circle smaller than a block, a decision wider.
+    assert parts["circle"]["size"][0] < parts["block"]["size"][0] < parts["decision"]["size"][0]
+
+
+def test_a_timeline_asked_for_too_short_an_axis_keeps_its_times_apart() -> None:
+    from flexo.layout.measure import measure_figure
+    from flexo.serialization import parse_figure
+
+    def width(**extra) -> float:
+        events = [{"at": 0, "label": "Seed"}, {"at": 24, "label": "Harvest"}]
+        props = {"events": events, "unit": "h", **extra}
+        node = {"id": "t", "kind": "timeline", "properties": props}
+        spec = parse_figure({"figure": {"id": "t"}, "nodes": [node]})
+        return measure_figure(spec).nodes[0].intrinsic_size.width
+
+    # 24 (points, not hours) would set its times one over another: it is as wide as they need.
+    assert width(length=24) > 100 and width(length=400) > 400

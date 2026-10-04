@@ -35,6 +35,7 @@ from typing import Any
 
 import yaml
 
+from flexo.roundtrip import writing
 from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
@@ -107,7 +108,7 @@ class Doc:
             # A typo left in the file: it opens all the same, empty, saying where the typo is.
             self.document = {}
             self.held = self.unread = True
-            self.problem = f"Can't read {name}: {_unread(error, path.name)}"
+            self.problem = f"Can\u2019t read {name}: {_unread(error, path.name)}"
         self.version = 1
         self.history: OrderedDict[int, str] = OrderedDict({1: _dumps(self.document)})
         self.authors: OrderedDict[int, dict[str, Any]] = OrderedDict()
@@ -293,11 +294,13 @@ class Doc:
             )
             try:
                 # Over the file's words as they are (a kind that can keeps its comments and
-                # quoting where the document did not change).
-                if _keeps_words(type(self.kind)):
-                    self.kind.save(partial, self.document, previous=self.disk_text)
-                else:
-                    self.kind.save(partial, self.document)
+                # quoting where the document did not change) -- as the file it is, not the
+                # one beside it it is written to first: a deletion undone puts back its words.
+                with writing(str(self.path.resolve())):
+                    if _keeps_words(type(self.kind)):
+                        self.kind.save(partial, self.document, previous=self.disk_text)
+                    else:
+                        self.kind.save(partial, self.document)
                 with contextlib.suppress(OSError):
                     os.chmod(partial, self.path.stat().st_mode & 0o7777)
                 os.replace(partial, self.path)
@@ -327,13 +330,14 @@ class Doc:
             f"as a {title}."
         )
 
-    def mend(self, text: str) -> None:
+    def mend(self, text: str, *, over: bool = False) -> None:
         """Put the file right by hand while it does not read: ``text`` is written as it is
         once this kind reads it (and no other kind claims it), then taken in; else nothing
-        is written, and why is said."""
+        is written, and why is said. ``over``: written over it though it reads now (put
+        right elsewhere meanwhile, its person keeping their own words after all)."""
 
         with self.lock:
-            if not self.held:
+            if not self.held and not over:
                 raise ValueError(f"{self.name} reads as it is: edit it here instead.")
             other = self.workspace.kind_of_text(text, self.path.suffix)
             if other is not None and other != self.kind.name:
@@ -350,7 +354,7 @@ class Doc:
                     _shaped(self.kind, found)
                 except Exception as error:
                     raise ValueError(
-                        f"{self.name} still can't be read: {_unread(error, partial.name)}"
+                        f"{self.name} still can\u2019t be read: {_unread(error, partial.name)}"
                     ) from None
                 with contextlib.suppress(OSError):
                     os.chmod(partial, self.path.stat().st_mode & 0o7777)
@@ -401,7 +405,7 @@ class Doc:
             except Exception as error:
                 # Half written, or wrong: said, and the studio's copy kept, but nothing
                 # written over the file until it reads again.
-                problem = f"Can't read {self.name}: {_unread(error, self.path.name)}"
+                problem = f"Can\u2019t read {self.name}: {_unread(error, self.path.name)}"
                 self.disk_text = text
                 self.exists = True
                 self.held = True
@@ -483,6 +487,7 @@ class Workspace:
         self.drawing = threading.Lock()
         self.latest: dict[str, int] = {}
         self._documents: dict[Path, tuple[float, str | None]] = {}
+        self._unread: dict[Path, bool] = {}  # files of a kind that do not read as it has them
         self._stop = threading.Event()
         self.assistant = None
         self.on_close: list[Any] = []
@@ -651,21 +656,26 @@ class Workspace:
         cached = self._documents.get(path)
         if cached and cached[0] == stamp:
             return cached[1]
-        found = None
+        found, unread = None, False
         try:
             if path.stat().st_size < CLAIM_LIMIT:
                 text = path.read_text(encoding="utf-8")
                 try:
-                    found = self._claiming(_parsed(text, path.suffix))
+                    parsed = _parsed(text, path.suffix)
+                    found = self._claiming(parsed)
+                    # Its kind's, but not as its kind has them (a deck whose slides are a number).
+                    unread = bool(found and _malformed(self.kinds[found], parsed))
                 except Exception:
                     # Anything a file can be (a typo mid-edit, a date that is no date, nesting
                     # too deep to read): not a document now, but one it was stays that kind,
                     # and one never read is the kind its keys say (a deck's `slides:` is there
                     # to see past a typo further down).
                     found = cached[1] if cached else self._claiming(_outline(text))
+                    unread = found is not None
         except Exception:
             found = cached[1] if cached else None
         self._documents[path] = (stamp, found)
+        self._unread[path] = unread
         return found
 
     def documents(self) -> list[dict[str, Any]]:
@@ -691,7 +701,18 @@ class Workspace:
             kind = self._claim(file)
             if kind:
                 seen.add(name)
-                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title})
+                # One that does not read is said to be, as the themes' list says it.
+                # One that does not read is said to be, as the themes' list says it; one open
+                # that does not draw as written, so.
+                open_doc = self.docs.get(name)
+                said = (
+                    {"unread": True}
+                    if self._unread.get(file) or (open_doc is not None and open_doc.unread)
+                    else {"faulty": True}
+                    if getattr(open_doc, "faulty", False)
+                    else {}
+                )
+                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title, **said})
             if len(found) >= 300:
                 break
         return found
@@ -905,16 +926,24 @@ class Workspace:
         now = time.time()
         with self.lock:
             last = self.activity[-1] if self.activity else None
-            if (
-                last
+            same = (
+                last is not None
                 and last["who"].get("id") == who.get("id")
                 and last["file"] == file
-                and last["text"] == text
                 and last["where"] == where
                 and now - last["at"] < 20
-            ):
+            )
+            # Words typed in a run (a shape renamed letter by letter, saved as it goes) are
+            # one change, said with its first words and its last: "renamed “Customer” to
+            # “Shopper”", not a row for each save.
+            run = _run_of(last["text"], text) if same and last else None
+            if same and last and last["text"] == text:
                 last["at"] = now
                 last["count"] = last.get("count", 1) + 1
+                entry = last
+            elif run is not None and last:
+                last["at"] = now
+                last["text"] = run
                 entry = last
             else:
                 entry = {
@@ -1121,6 +1150,12 @@ class Workspace:
                 }
             elapsed = time.perf_counter() - started
         doc.depends = {file.resolve() for file in drawing.files}
+        # Whether it draws as written (a problem said in it), for the folder's list of documents.
+        faulty = any(message.severity == "error" for message in drawing.messages)
+        current = not drawing.unfinished and version >= doc.version
+        if current and faulty != getattr(doc, "faulty", False):
+            doc.faulty = faulty
+            self.broadcast({"type": "documents", "documents": self.documents()})
         pages = []
         for page in drawing.pages:
             if page.pending:
@@ -1356,6 +1391,23 @@ def _reason(error: Exception) -> str:
     if isinstance(error, OSError) and error.strerror:
         return error.strerror.lower()
     return str(error) or type(error).__name__
+
+
+_RENAMED = re.compile(
+    r"^(?P<head>.*?)\u201c(?P<was>[^\u201d]*)\u201d to \u201c(?P<now>[^\u201d]*)\u201d(?P<tail>.*)$"
+)
+
+
+def _run_of(before: str, after: str) -> str | None:
+    """Two notes of words changed one after the other ("renamed “S” to “Sh”", then "renamed
+    “Sh” to “Shoppe”") as one, from the first words to the last; None if they are not."""
+
+    first, then = _RENAMED.match(before), _RENAMED.match(after)
+    if not first or not then or first["now"] != then["was"]:
+        return None
+    if (first["head"], first["tail"]) != (then["head"], then["tail"]):
+        return None
+    return f"{first['head']}\u201c{first['was']}\u201d to \u201c{then['now']}\u201d{first['tail']}"
 
 
 def _stamp(path: Path) -> float:

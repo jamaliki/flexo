@@ -3,7 +3,7 @@
 // thinks of them (colour, type, line, space). Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, popover, closeMenu, keepFocus, picture, themeName, themeUses } from "/static/studio/studio.js";
+import { h, clear, icon, ui, popover, closeMenu, keepFocus, picture, themeName, themeUses, exportLabel } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -240,7 +240,10 @@ export function mount(studio, container) {
     // Nothing to show and why said (a deck that does not read): that, not a spinner for ever.
     const said = !cards.length && messages.find((message) => message.severity === "error");
     clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards
-      : said ? h("div.empty.sample-said", {}, icon("warning"), h("span", {}, said.text)) : h("div.empty", {}, h("div.spinner"))));
+      : said ? h("div.empty.sample-said", {}, icon("warning"), h("span", {}, said.text.replace(/\s*Open it to see why and put it right\.$/, "")),
+        // A deck that does not read, opened by a button: its own page says why, and where.
+        specimen.deck ? ui.button(`Open “${specimen.deck.split("/").pop().replace(/\.(ya?ml|json)$/i, "")}”`, () => studio.workspace.open(specimen.deck), { small: true }) : null)
+        : h("div.empty", {}, h("div.spinner"))));
     if (said) { clear(note); return; }
     clear(note, messages.filter((m) => m.severity !== "note").map((message) => h(`div.message.${message.severity}`, {}, icon(message.severity === "error" ? "error" : "warning"), h("div", {}, message.text))));
   };
@@ -262,9 +265,10 @@ export function mount(studio, container) {
     clear(showOn, h("span.show-on-label", {}, "Preview"), options.length > 3 ? ui.select({ value, options, onChange }) : ui.segmented({ value, options, onChange }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  // A sheet first, as each of a deck's exports has, saying what the file is.
-  studio.exports = [{ format: "yaml", label: "Full Theme…", hint: "The theme with every setting written out, those it takes from its base theme too" }];
-  studio.actions.append(ui.button("Export Full Theme…", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
+  // Straight to the file, as an export with nothing to choose is ("…" in the Mac app, whose
+  // save panel asks where).
+  studio.exports = [{ format: "yaml", label: exportLabel("Full Theme"), hint: "The theme with every setting written out, those it takes from its base theme too" }];
+  studio.actions.append(ui.button(exportLabel("Export Full Theme"), () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 

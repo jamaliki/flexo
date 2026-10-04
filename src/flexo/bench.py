@@ -465,8 +465,17 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         step = 1.0  # whole days stay whole: no "Day 0.5" between them
     first = math.floor(low / step) * step
     last = math.ceil(high / step) * step
-    width = float(node.property("length") or 0) or max(
-        24.0 * u, min(40.0 * u, 3.2 * u * (last - first) / step)
+    # As wide as asked (``length``, in points) or as its times need -- but never so short
+    # that its times overprint one another: each has room beside the next.
+    ticks = round((last - first) / step) + 1
+    widest = max(
+        measures.measure((TextRun(_time_text(first + index * step, unit)),), small=True).width
+        for index in range(ticks)
+    )
+    width = max(
+        float(node.property("length") or 0)
+        or max(24.0 * u, min(40.0 * u, 3.2 * u * (last - first) / step)),
+        (ticks - 1) * (widest + 0.6 * u),
     )
     pad = 0.25 * u
     title = (

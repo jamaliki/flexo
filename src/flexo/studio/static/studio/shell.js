@@ -76,12 +76,12 @@ function statusWords(session) {
   const state = session.state;
   if (state === "saved") return "Saved";
   if (state === "saving") return "Saving…";
-  if (state === "offline") return session.unsaved ? "Not saved: can't reach the studio" : "Can't reach the studio";
+  if (state === "offline") return session.unsaved ? "Not saved: can’t reach the studio" : "Can’t reach the studio";
   const problem = session.problem || "";
   // A document that never read: which file, whole -- why is said on the page under it.
-  if (unreadable(session)) return /^Can't read [^:]+/.exec(problem)?.[0] || problem;
+  if (unreadable(session)) return /^Can[’']t read [^:]+/.exec(problem)?.[0] || problem;
   // The file on disk does not read: "Not saved" only while edits made here wait for it.
-  if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
+  if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can[’']t/, "can’t")}` : problem;
   // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
   // A reason why it could not be saved starts the sentence; a file's name keeps its spelling.
   const why = /^.*? could not be saved:\s*/.exec(problem);
@@ -215,15 +215,20 @@ export class Workspace {
           .catch((error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error" }));
       };
       dialog({ title: `Do you want to save the changes you made to “${name}”?`,
-        body: [h("p.export-hint", {}, "Your changes will be lost if you don't save them.")],
-        actions: [{ label: "Don't Save", danger: true, run: () => { session.sourceDraft = null; this.close(file, { asked: true }); } },
+        body: [h("p.export-hint", {}, "Your changes will be lost if you don’t save them.")],
+        actions: [{ label: "Don’t Save", danger: true, run: () => { session.sourceDraft = null; this.close(file, { asked: true }); } },
           { label: "Cancel", cancel: true }, { label: "Save", kind: "primary", run: save }] });
       return;
     }
-    if (!asked && session.pendingLocal && session.state === "offline") {
+    // Held for any reason -- the studio out of reach, or the file not reading (they are
+    // saved once it reads) -- they are asked about, never lost unasked.
+    // (Held by the studio, they are lost should it stop before the file reads again.)
+    const held = session.state === "offline" ? session.pendingLocal && "the studio can’t be reached. Keep it open until the studio is back?"
+      : (session.held || session.unread) && session.unsaved ? "its file can’t be read. Keep it open until the file is put right?" : null;
+    if (!asked && held) {
       const name = docName(file);
       dialog({ title: `Close “${name}”?`,
-        body: [h("p.export-hint", {}, "This document has changes that couldn't be saved yet, as the studio can't be reached. Keep it open until the studio is back?")],
+        body: [h("p.export-hint", {}, `This document has changes that couldn’t be saved yet, as ${held}`)],
         actions: [{ label: "Close and Lose Changes", danger: true, run: () => this.close(file, { asked: true }) }, { label: "Keep Open", kind: "primary", cancel: true }] });
       return;
     }
@@ -468,7 +473,7 @@ export async function start() {
     info = await response.json();
     if (!response.ok) throw new Error(info.error || response.statusText);
   } catch (error) {
-    clear(root, h("div.fatal", {}, h("h1", {}, "Flexo Studio couldn't start"), h("pre", {}, String(error.message || error))));
+    clear(root, h("div.fatal", {}, h("h1", {}, "Flexo Studio couldn’t start"), h("pre", {}, String(error.message || error))));
     return;
   }
   const workspace = new Workspace(info);
@@ -521,7 +526,7 @@ export async function start() {
     if (ownUndo()) { document.execCommand(way); return; }
     // Its file not reading, nothing is undone unseen behind the page that says so: said.
     if (unreadable(session)) {
-      toast(`Can't ${way} while ${session.file.split("/").pop()} can't be read. Your changes wait here, saved once it reads.`, { icon: "info", seconds: 5 });
+      toast(`Can’t ${way} while ${session.file.split("/").pop()} can’t be read. Your changes wait here, saved once it reads.`, { icon: "info", seconds: 5 });
       return;
     }
     // An edit held for the studio while it is away (a figure's) is taken back first, and
@@ -567,25 +572,31 @@ export async function start() {
     };
     const rows = [];
     const ahead = session.future, back = session.past;
-    // Edits held for the studio while it is away (a figure's), among the others where they
-    // fall in time, as ⌘Z and ⇧⌘Z take them; the last taken back, above the rest.
-    const heldRow = session.heldRow?.() || (session.takeBackLabel?.() ? { label: session.takeBackLabel(), at: Infinity } : null);
-    const again = session.putBackLabel?.();
-    const held = Boolean(heldRow) && !(back.length && back[back.length - 1].at > heldRow.at);
-    const waiting = (text, undone, now = false) => h(`button.history-row${undone ? ".undone" : now ? ".now" : ""}`, { type: "button", onclick: go(() => travel(undone ? "redo" : "undo")),
-      title: undone ? "Redo it: it is saved when the studio is back" : "Undo it: it was not saved yet" },
-    h("span.history-mark"), h("span.history-text", {}, text), h("span.history-place", {}, "Waiting"));
-    if (again) rows.push(waiting(again, true));
-    ahead.forEach((entry, index) => rows.push(row(entry, { undone: true, run: () => session.redo(ahead.length - index) })));
-    if (held) rows.push(waiting(heldRow.label, false, true));
-    const shown = 60;
-    for (let index = back.length - 1; index >= Math.max(0, back.length - shown); index -= 1) {
-      rows.push(row(back[index], { now: !held && index === back.length - 1, run: () => session.undo(back.length - 1 - index) }));
-      // (Held after the edit below it.)
-      if (heldRow && !held && back[index].at > heldRow.at && !(index > 0 && back[index - 1].at > heldRow.at)) rows.push(waiting(heldRow.label, false));
-    }
+    // Edits held for the studio while it is away (a figure's), each among the others where it
+    // falls in time, as ⌘Z takes them -- and those taken back among those undone, as ⇧⌘Z makes
+    // them again -- each said where it was made, as the others are, and as waiting.
+    const helds = session.heldEdits?.() || (session.takeBackLabel?.() ? [{ label: session.takeBackLabel(), at: Infinity }] : []);
+    const takens = session.takenEdits?.() || (session.putBackLabel?.() ? [{ label: session.putBackLabel() }] : []);
+    // (Gone back or forward to by a click: as many ⌘Z or ⇧⌘Z, held edits and the document's
+    // alike, each in turn.)
+    const steps = (way, count) => (helds.length || takens.length ? async () => { for (let n = 0; n < count; n += 1) await travel(way); }
+      : () => session[way](count));
+    const waiting = (edit, { now = false, undone = false, run }) => h(`button.history-row${undone ? ".undone" : now ? ".now" : ""}`, { type: "button", onclick: go(run),
+      title: undone ? "Redo to this point: it is saved when the studio is back" : now ? "Current state: not saved yet" : "Undo to this point: it was not saved yet" },
+    h("span.history-mark"), h("span.history-text", {}, edit.label), edit.place ? h("span.history-place", {}, edit.place) : null, h("span.history-when", {}, "Waiting"));
+    // Undone, the first undone last: what ⇧⌘Z makes again next is nearest the present.
+    const later = [...ahead.map((entry) => ({ entry, when: entry.undoneAt ?? 0 })), ...takens.map((edit) => ({ edit, when: edit.undone ?? Infinity }))];
+    if (takens.length) later.sort((a, b) => a.when - b.when);
+    later.forEach((item, index) => rows.push(item.entry ? row(item.entry, { undone: true, run: steps("redo", later.length - index) })
+      : waiting(item.edit, { undone: true, run: steps("redo", later.length - index) })));
+    // Done, the latest first: the present, then what ⌘Z takes back in turn.
+    const shown = 60, kept = back.slice(-shown);
+    const done = [...kept.map((entry) => ({ entry, when: entry.at })), ...helds.map((edit) => ({ edit, when: edit.at }))];
+    if (helds.length) done.sort((a, b) => a.when - b.when);
+    done.reverse().forEach((item, index) => rows.push(item.entry ? row(item.entry, { now: !index, run: steps("undo", index) })
+      : waiting(item.edit, { now: !index, run: steps("undo", index) })));
     if (back.length > shown) rows.push(h("div.history-more", {}, `${back.length - shown} earlier ${back.length - shown === 1 ? "change" : "changes"} not shown`));
-    rows.push(h(`button.history-row.start${back.length || held ? "" : ".now"}`, { type: "button", onclick: go(() => session.undo(back.length)), title: "Undo all changes" },
+    rows.push(h(`button.history-row.start${done.length ? "" : ".now"}`, { type: "button", onclick: go(steps("undo", back.length + helds.length)), title: "Undo all changes" },
       h("span.history-mark"), h("span.history-text", {}, "Original")));
     popover(anchor, [h("div.menu-title", {}, "History"), h("div.history", {}, rows)], { align: "end", className: "history-menu" });
     // The keys start at where the document is now, not at the newest change undone.
@@ -597,7 +608,7 @@ export async function start() {
   const side = new SidePanel(workspace);
   // A folder someone else made runs none of its own Python until its person says so.
   const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
-    h("div.trust-words", {}, h("b", {}, "Python files in this folder haven't been run. "),
+    h("div.trust-words", {}, h("b", {}, "Python files in this folder haven’t been run. "),
       "Decks in this folder use them to draw plots and figures. Run them only if you trust where the folder came from."),
     ui.button("Trust and Run", async () => {
       try { await workspace.api("/api/trust", {}); }
@@ -768,7 +779,26 @@ export async function start() {
   const renderUnread = (session) => {
     unreadView.hidden = !unreadable(session);
     // (Read again, what was typed in its words is put right, or is no longer wanted.)
-    if (!unreadable(session)) { if (session) session.sourceDraft = null; unread = null; return; }
+    if (!unreadable(session)) {
+      // Put right elsewhere (another app) while words were typed in it here: those words are
+      // kept, and it is said, to put them in the file after all or let them go.
+      const draft = session?.sourceDraft;
+      if (draft != null && !session.draftTold) {
+        session.draftTold = true;
+        const name = session.file.split("/").pop();
+        const note = toast(h("span.row", {}, `${name} was put right elsewhere. What you typed in it here isn’t saved.`,
+          h("a", { href: "#", onclick: (event) => {
+            event.preventDefault(); note.remove();
+            workspace.api("/api/mend", { file: session.file, text: draft, over: true }).then(() => { session.sourceDraft = null; toast(`Your words were saved in ${name}`, { icon: "check" }); })
+              .catch((error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 6 }));
+          } }, "Use Mine"),
+          h("a", { href: "#", onclick: (event) => { event.preventDefault(); note.remove(); session.sourceDraft = null; } }, "Discard")),
+        { icon: "info", seconds: 60 });
+      }
+      unread = null;
+      return;
+    }
+    if (session) session.draftTold = false;
     // (Said again as the page's edits wait, or no longer do.)
     const waiting = () => `${session.pendingLocal ? "Your changes wait here, saved once it reads; nothing" : "Nothing"} has been changed in the file. Put it right ${session.source != null || session.sourceDraft != null ? "here and save, or " : ""}in another app: it opens as soon as it reads.`;
     if (unread?.session === session && unread.problem === session.problem && (unread.source === session.source || unread.edited)) {
@@ -783,7 +813,7 @@ export async function start() {
     area.value = kept ? session.sourceDraft : session.source ?? "";
     const shown = kept || session.source != null;  // not a file too large to show
     // What is wrong, the file named once (in the heading).
-    const said = h("div.unread-said", {}, (session.problem || "").replace(/^Can't read [^:]+: (.)/, (_, first) => first.toUpperCase()));
+    const said = h("div.unread-said", {}, (session.problem || "").replace(/^Can[’']t read [^:]+: (.)/, (_, first) => first.toUpperCase()));
     const save = ui.button("Save", () => mend(), { kind: "primary" });
     const mend = async () => {
       if (!shown) return;
@@ -839,7 +869,7 @@ export async function start() {
     // (Changes made here meanwhile wait here, saved once it reads: said so.)
     const note = h("p.unread-note", {}, waiting());
     clear(unreadView, h("div.unread-inner", {},
-      h("div.unread-head", {}, icon("warning"), h("h2", {}, `${session.file.split("/").pop()} can't be read`)),
+      h("div.unread-head", {}, icon("warning"), h("h2", {}, `${session.file.split("/").pop()} can’t be read`)),
       said, note,
       shown ? area : null,
       shown ? h("div.unread-foot", {}, save) : null));
@@ -878,6 +908,8 @@ export async function start() {
       workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
         h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", { title: item.file }, docName(item.file)),
+          // One that does not read, or does not draw as written, says so, as the themes' list does.
+          item.unread || item.faulty ? h("span.doc-kind.bad", { title: `Open ${docName(item.file)} to see why and put it right` }, item.unread ? "Can’t be read" : "Has problems") : null,
           h("span.doc-kind", {}, [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · ")))))) : null,
       h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
         h("p", {}, "Ask Claude in the panel on the right, or connect Claude Code or another MCP agent. Run this command once in this folder, then ask the agent to make something. Its changes appear here as it works:"),
@@ -939,7 +971,7 @@ export async function start() {
   addEventListener("pagehide", () => { navigator.sendBeacon?.(workspace.url("/api/leave"), JSON.stringify({ client: workspace.client })); });
   addEventListener("beforeunload", (event) => {
     for (const session of workspace.sessions.values()) session.push();
-    if ([...workspace.sessions.values()].some((session) => session.pendingLocal || session.sourceDraft != null)) {
+    if ([...workspace.sessions.values()].some((session) => session.pendingLocal || session.sourceDraft != null || ((session.held || session.unread) && session.unsaved))) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -1029,7 +1061,7 @@ export function copyable(text) {
       setTimeout(() => { clear(button, icon("copy")); button.title = "Copy"; }, 1500);
     } catch {
       getSelection().selectAllChildren(code);
-      button.title = "Couldn't copy: the command is chosen, press ⌘C";
+      button.title = "Couldn’t copy: the command is chosen, press ⌘C";
     }
   }, { kind: "ghost", icon: "copy", small: true, title: "Copy" });
   return h("div.copyable", {}, code, button);
@@ -1063,7 +1095,7 @@ export function askName(workspace, kind, suggestion) {
   // A name already used is said at once, and nothing is opened or overwritten.
   const check = () => {
     const file = input.value.trim();
-    const why = !file ? "Enter a name." : /[/\\:]/.test(file) ? "A name can't contain / \\ or :."
+    const why = !file ? "Enter a name." : /[/\\:]/.test(file) ? "A name can’t contain / \\ or :."
       : taken.has(fileOf(file).toLowerCase()) ? `“${file}” is already used in this folder. Choose a different name.` : "";
     problem.textContent = why;
     problem.hidden = !why;
@@ -1089,7 +1121,7 @@ export function askName(workspace, kind, suggestion) {
 export function connectDialog(workspace) {
   const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
   dialog({ title: "Work with Agents", body: [
-    h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it's working and what it's doing, and you can keep editing at the same time."),
+    h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it’s working and what it’s doing, and you can keep editing at the same time."),
     h("ol.steps", {},
       h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND)),
       h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
@@ -1103,14 +1135,14 @@ export function connectDialog(workspace) {
 
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Command Palette"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
+  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (documents also save as you work)"], ["⌥ ⌘ I", "Go to the Inspector (Esc: back)"], ["?", "Keyboard Shortcuts"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
     ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Choose All Objects"], ["⇧ or ⌘ Click", "Choose One More (or One Less)"], ["Drag", "From Where Nothing Is: Choose the Objects It Touches"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Next Column"]]],
-  ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
+  ["While Typing", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
     ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
     ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["⇧ or ⌘ Click", "Choose One More Shape (or One Less)"], ["← → ↑ ↓", "Choose the Shape That Way"],

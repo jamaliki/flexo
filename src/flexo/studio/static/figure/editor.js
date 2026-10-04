@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
@@ -38,6 +38,9 @@ export function mount(studio, main) {
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
     ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
+  // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
+  // it would look pressed while the drawing is zoomed on from the keyboard.
+  for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());
   const center = h("section.fig-center", {}, stage, hint, note, zoomBar);
   const inspectorBody = h("div.panel-body.scroll-thin");
   const inspector = h("aside.panel.fig-inspector", {}, inspectorBody);
@@ -77,13 +80,18 @@ export function mount(studio, main) {
   const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   studio.tools.append(listButton, h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
-  studio.exports = [{ format: "editable", label: "Editable SVG…" }, { format: "pdf", label: "PDF…" }, { format: "png", label: "PNG…" }];
+  // ("…" only where the Mac app's save panel follows: in a browser each is saved at once.)
+  studio.exports = [
+    { format: "editable", get label() { return exportLabel("Editable SVG"); } },
+    { format: "pdf", get label() { return exportLabel("PDF"); } },
+    { format: "png", get label() { return exportLabel("PNG"); } },
+  ];
   studio.actions.append(ui.button("Export", (event) => menu(event.currentTarget, [
-    { icon: "export", label: "Editable SVG…", hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
-    { icon: "export", label: "PDF…", hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
-    { icon: "image", label: "PNG…", run: () => studio.exportFiles(["png"]) },
+    { icon: "export", label: exportLabel("Editable SVG"), hint: "Inkscape layers and live text", run: () => studio.exportFiles(["editable"]) },
+    { icon: "export", label: exportLabel("PDF"), hint: "Embedded fonts", run: () => studio.exportFiles(["pdf"]) },
+    { icon: "image", label: exportLabel("PNG"), run: () => studio.exportFiles(["png"]) },
     "-",
-    { icon: "export", label: "All Formats…", run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    { icon: "export", label: exportLabel("All Formats"), run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // -- the drawing's parts, edited --
@@ -393,7 +401,7 @@ export function mount(studio, main) {
     root.classList.toggle("wide", figure.wantsRoom());
     keepFocus(inspectorBody, () => {
       clear(inspectorBody, figure.model ? figure.panel()
-        : h("div.empty", {}, "This file can't be read as a figure. Fix it in Source; the messages below the drawing show where."));
+        : h("div.empty", {}, "This file can’t be read as a figure. Fix it in Source; the messages below the drawing show where."));
     });
   }
 
@@ -415,11 +423,13 @@ export function mount(studio, main) {
       studio.workspace.open(made);
       toast("Theme created. Edit it in its tab and the figure updates as you go.", { icon: "theme", seconds: 4 });
     } catch (error) {
-      toast(`Couldn't create the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+      toast(`Couldn’t create the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
     }
   }
 
-  function chooseFile({ title, types }) {
+  // As a Mac's open panel: a click chooses a file, the arrows move along them, and a
+  // double-click, Return or the default button (`action`: "Insert", "Choose") takes it.
+  function chooseFile({ title, types, action = "Choose" }) {
     return new Promise((resolve) => {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
@@ -427,18 +437,49 @@ export function mount(studio, main) {
       const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : ".pdb,.cif,.mmcif,.ent";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
-      const actions = [{ label: "Upload…", run: () => { upload.click(); return false; } }];
-      if (types.includes("structure")) actions.push({ label: "PDB ID…", run: () => { askEntry().then((id) => { if (id) finish(id); }); return false; } });
+      const actions = [{ label: "Upload…", aside: true, run: () => { upload.click(); return false; } }];
+      // The PDB's sheet in this one's place, not over it: this one closes first.
+      if (types.includes("structure")) actions.push({ label: "PDB ID…", aside: true, run: () => {
+        done = true;
+        askEntry().then((id) => resolve(id || null));
+      } });
+      let chosen = null;
       actions.push({ label: "Cancel", run: () => finish(null) });
+      actions.push({ label: action, kind: "primary", run: () => { if (chosen) finish(chosen); return false; } });
+      list.setAttribute("role", "listbox");
+      list.setAttribute("aria-label", title);
       const box = dialog({ title, body: [list, upload], actions, onClose: () => finish(null) });
+      const take = [...document.querySelectorAll(".dialog-foot .btn.primary")].pop();
+      if (take) take.disabled = true;
+      const pick = (row, file) => {
+        chosen = file;
+        for (const other of list.querySelectorAll("[role=option]")) other.setAttribute("aria-selected", String(other === row));
+        if (take) take.disabled = false;
+        row.focus({ preventScroll: true });
+        row.scrollIntoView({ block: "nearest" });
+      };
+      list.addEventListener("keydown", (event) => {
+        const rows = [...list.querySelectorAll("[role=option]")], at = rows.indexOf(document.activeElement);
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const next = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))];
+          if (next) pick(next, next.dataset.file);
+        } else if (event.key === "Enter" && chosen) { event.preventDefault(); finish(chosen); }
+      });
       studio.files(types).then((files) => {
         // Each file once, by its name; the folder it is in said only when it is in one.
         const seen = new Set();
         const shown = files.filter((file) => !seen.has(file) && seen.add(file));
-        clear(list, shown.length ? shown.map((file) => h("button.menu-item", { type: "button", onclick: () => finish(file) },
-          types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon(types.includes("structure") ? "structure" : "file"),
-          h("span.menu-text", {}, h("span", {}, file.split("/").pop()), file.includes("/") ? h("span.menu-hint", {}, file.slice(0, file.lastIndexOf("/") + 1)) : null)))
+        clear(list, shown.length ? shown.map((file) => {
+          const row = h("button.menu-item", { type: "button", role: "option", "aria-selected": "false", dataset: { file },
+            onclick: () => pick(row, file), ondblclick: () => finish(file) },
+            types.includes("image") ? h("img.pic", { src: studio.raw(file), alt: "" }) : icon(types.includes("structure") ? "structure" : "file"),
+            h("span.menu-text", {}, h("span", {}, file.split("/").pop()), file.includes("/") ? h("span.menu-hint", {}, file.slice(0, file.lastIndexOf("/") + 1)) : null));
+          return row;
+        })
           : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID." : "No files of this type next to the figure. Click Upload to add one."));
+        // The keys at the first file, to choose with the arrows.
+        list.querySelector("[role=option]")?.focus({ preventScroll: true });
       });
     });
   }
@@ -510,8 +551,9 @@ export function mount(studio, main) {
       { onclick: () => {
         if (!message.where) return;
         if (message.where.startsWith("line ")) studio.reveal({ line: Number(message.where.slice(5)) });
-        // A shape's problem: the shape chosen, its panel at the field to put it right in.
-        else if (figure.typeOf(message.where) === "node") figure.revealProblem(message.where, String(message.code || "").split(".").pop());
+        // A shape's problem: the shape chosen, its panel at the field to put it right in (a
+        // line's, at its end that is at no shape).
+        else if (["node", "edge"].includes(figure.typeOf(message.where))) figure.revealProblem(message.where, String(message.code || "").split(".").pop());
         else if (figure.typeOf(message.where)) figure.select([message.where]);
       } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
