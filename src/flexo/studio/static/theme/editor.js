@@ -1,9 +1,9 @@
-// The theme editor: a theme's settings on the left, grouped as a designer thinks of
-// them (colour, type, line, space), and samples drawn in it on the right -- figures,
-// slides, or a deck in the folder. Only what differs from the base theme is
+// The theme editor: samples drawn in a theme -- figures, slides, or a deck in the folder
+// -- and its settings on the right, where a deck's inspector is, grouped as a designer
+// thinks of them (colour, type, line, space). Only what differs from the base theme is
 // written; every other setting shows the base's value, ready to change.
 
-import { h, clear, icon, ui, menu, keepFocus, picture, themeUses } from "/static/studio/studio.js";
+import { h, clear, icon, ui, popover, closeMenu, keepFocus, picture, themeName, themeUses, exportLabel } from "/static/studio/studio.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -21,7 +21,18 @@ export function mount(studio, container) {
     document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/theme/editor.css" }));
   }
   const catalog = studio.catalog;
-  let specimen = { name: "figures" };
+  // Opened from a deck (Customise…, Edit Theme), shown on that deck; else on its sample figures.
+  const asked = () => {
+    const deck = studio.workspace.previewOn?.[studio.file];
+    if (deck) delete studio.workspace.previewOn[studio.file];
+    return deck && catalog.specimens?.some((item) => item.name === "slides") ? { name: "slides", deck } : null;
+  };
+  let specimen = asked() || { name: "figures" };
+  // Opened so again while open (its tab there already): shown on that deck now.
+  studio.on("activate", () => {
+    const next = asked();
+    if (next && next.deck !== specimen.deck) { specimen = next; pages = []; renderShowOn(); renderStage(); studio.requestDraw(0); }
+  });
   let pages = [];
   let messages = [];
   let effectiveKey = "";
@@ -65,13 +76,18 @@ export function mount(studio, container) {
   const form = h("div.theme-form.scroll-thin");
   const stage = h("div.stage.theme-stage.scroll-thin");
   const note = h("div.messages.theme-messages");
-  const root = h("div.theme", {}, h("section.panel.theme-panel", {}, form), h("section.theme-right", {}, stage, note));
+  const root = h("div.theme", {}, h("section.theme-right", {}, stage, note), h("section.panel.theme-panel", {}, form));
   clear(container, root);
 
   const row = (label, path, control, { hint } = {}) => {
     const changed = get(path) !== undefined;
+    // Its control named by its label, for VoiceOver (it is beside the label, not in it).
+    const id = `setting-${path.join("-")}`;
+    for (const named of control?.querySelectorAll ? [control, ...control.querySelectorAll("input, button.select, [role=radiogroup]")] : []) {
+      if (named.matches?.("input, button.select, [role=radiogroup], .switch") && !named.hasAttribute("aria-label") && !named.hasAttribute("aria-labelledby")) named.setAttribute("aria-labelledby", id);
+    }
     return h(`div.setting${changed ? ".changed" : ""}`, {},
-      h("label.setting-label", {}, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
+      h("label.setting-label", { id }, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
       h("div.setting-control", {}, control),
       h("button.setting-reset", { type: "button", title: "Reset", disabled: !changed, onclick: () => { set(path, null, { quiet: false }); } }, icon("undo")));
   };
@@ -80,10 +96,8 @@ export function mount(studio, container) {
     const given = get(path);
     const shown = base(path);
     const parse = (text) => (text == null ? null : parseFloat(String(text)));
-    return row(label, path, h("div.unit-input", {},
-      ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."),
-        onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }),
-      h("span.unit", {}, unit)), { hint });
+    return row(label, path, ui.number({ value: parse(given), placeholder: shown == null ? "None" : String(parse(shown)), step, key: path.join("."), unit,
+      onChange: (value) => set(path, value === null ? null : `${value}${unit}`) }), { hint });
   };
 
   const number = (label, path, { step = 0.05, min, max, hint } = {}) => row(label, path,
@@ -106,34 +120,46 @@ export function mount(studio, container) {
 
   const colour = (label, path) => {
     const value = get(path) ?? base(path);
-    const picker = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
-      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; set(path, picker.value); } });
-    const swatch = h("span.colour-swatch", { style: { background: value || "transparent" }, onclick: () => picker.click() });
+    // The picker is the swatch's, not a stop of its own for Tab: the swatch is (Return or
+    // Space opens it), and the hex beside it.
+    const picker = h("input", { type: "color", tabIndex: -1, "aria-hidden": "true", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
+      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
+    // No colour is the hatched chip every "None" is drawn as.
+    const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", role: "button", tabIndex: 0, "aria-label": `${label}: choose a colour`,
+      onclick: () => picker.click(), onkeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); picker.click(); } } });
     const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
-      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; set(path, text); } else if (!text) set(path, null); } });
+      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; swatch.classList.remove("none"); set(path, text); } else if (!text) set(path, null); } });
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
   };
 
   const paletteView = () => {
     const colours = get(["palette"]) ?? base(["palette"]) ?? [];
     const list = Array.isArray(colours) ? colours : [];
-    const write = (next) => set(["palette"], next, { quiet: false });
+    // Said in the history by the colour changed: "Change Colour 2", "Change Theme Colours".
+    const write = (next, label = "Change Theme Colours") => set(["palette"], next, { quiet: false, label });
     const chips = list.map((value, index) => {
-      const picker = h("input", { type: "color", value, oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next); } });
-      const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, onclick: () => picker.click() }, picker,
-        h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index)); } }, icon("close")));
+      const picker = h("input", { type: "color", value, tabIndex: -1, "aria-hidden": "true", oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` }); } });
+      const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, role: "button", tabIndex: 0, "aria-label": `Colour ${index + 1}, ${value}`,
+        onclick: () => picker.click(), onkeydown: (event) => { if (event.target === chip && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); picker.click(); } } }, picker,
+        h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index), `Remove Colour ${index + 1}`); } }, icon("close")));
       return chip;
     });
     const tones = studio.info?.tones || [];
     return h("div.palette-block", {},
       h("div.palette-chips", {}, chips,
-        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"]) }, icon("plus"))),
+        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"], "Add Colour") }, icon("plus"))),
       h("div.row", {},
-        h("div.fixed", {}, ui.button("Palettes…", (event) => menu(event.currentTarget, Object.entries(catalog.palettes).map(([name, values]) => ({
-          label: name, hint: values.join(" "), run: () => write([...values]),
-        }))), { kind: "ghost", small: true, icon: "palette" })),
-        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false }), { kind: "ghost", small: true, icon: "undo" })) : null),
-      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes" },
+        // Each palette by sight, as the deck's Palette pop-up shows them: its colours, then its
+        // name; the one the theme holds ticked.
+        h("div.fixed", {}, ui.button("Palettes…", (event) => {
+          const holds = list.map((colour) => colour.toLowerCase()).join();
+          popover(event.currentTarget, h("div.palette-choices", {}, Object.entries(catalog.palettes).map(([name, values]) =>
+            h(`button.palette-choice${values.map((colour) => colour.toLowerCase()).join() === holds ? ".on" : ""}`, { type: "button", onclick: () => { closeMenu(); write([...values]); } },
+              h("span.palette-strip", {}, values.map((colour) => h("span", { style: { background: colour } }))), h("span", {}, name)))), { className: "palette-menu" });
+        }, { kind: "ghost", small: true, icon: "palette" })),
+        get(["palette"]) !== undefined ? h("div.fixed", {}, ui.button("Reset", () => set(["palette"], null, { quiet: false, label: "Reset Theme Colours" }), { kind: "ghost", small: true, icon: "undo" })) : null),
+      // In rows of equal chips, never one left alone on a row of its own.
+      tones.length ? h("div.tones", { title: "Fill and outline colours for shapes", style: { gridTemplateColumns: `repeat(${Math.ceil(tones.length / Math.ceil(tones.length / 10))}, minmax(0, 1fr))` } },
         tones.map((tone) => h("span.tone", { style: { background: tone.fill, borderColor: tone.stroke, color: tone.stroke } }, "Aa"))) : null);
   };
 
@@ -149,8 +175,10 @@ export function mount(studio, container) {
     const sketch = t.sketch ?? base(["sketch"]);
     clear(form,
       section("Theme",
-        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", mono: true, key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
-        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases, onChange: (value) => set(["base"], value, { quiet: false }) })),
+        // What a theme is, said once at the top, as a Mac's settings pane says what it is for.
+        h("p.theme-intro", {}, "How figures and decks look: their colours, type, lines and shapes. Each document that uses this theme changes with it."),
+        h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
+        ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
       section("Documents", uses),
       section("Colour",
@@ -162,7 +190,7 @@ export function mount(studio, container) {
         h("div.setting-group-label", {}, "Page"),
         Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key]))),
       section("Type",
-        row("Font", ["font"], ui.combo({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "", key: "font", onChange: (value) => set(["font"], value || null) })),
+        row("Font", ["font"], ui.font({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "Default", key: "font", onChange: (value) => set(["font"], value || null, { quiet: false }) })),
         length("Font Size", ["type", "size"], { step: 0.5 }),
         choice("Label Weight", ["type", "label_weight"], WEIGHTS),
         choice("Title Weight", ["type", "title_weight"], WEIGHTS),
@@ -192,7 +220,8 @@ export function mount(studio, container) {
         choice("Line Style", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right Angles", straight: "Straight" } }),
         choice("Branch Style", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
         choice("Merge Style", ["conventions", "merge"], catalog.conventions.merge || []),
-        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), label: "Draw by hand", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
+        // Named once, by its row, as every switch in the panel is.
+        row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), key: "sketch", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
         sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
       h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>
@@ -208,7 +237,14 @@ export function mount(studio, container) {
     const cards = pages.map((page) => h(`figure.sample${page.stale ? ".stale" : ""}${figures ? "" : ".slide"}`, {},
       page.svg ? picture(page.svg, page.hash, { natural: figures }) : h("div.sample-wait", {}, h("div.spinner")),
       h("figcaption", {}, page.label)));
-    clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards : h("div.empty", {}, h("div.spinner"))));
+    // Nothing to show and why said (a deck that does not read): that, not a spinner for ever.
+    const said = !cards.length && messages.find((message) => message.severity === "error");
+    clear(stage, h(`div.samples${specimen.name === "figures" ? "" : ".slides"}`, {}, cards.length ? cards
+      : said ? h("div.empty.sample-said", {}, icon("warning"), h("span", {}, said.text.replace(/\s*Open it to see why and put it right\.$/, "")),
+        // A deck that does not read, opened by a button: its own page says why, and where.
+        specimen.deck ? ui.button(`Open “${specimen.deck.split("/").pop().replace(/\.(ya?ml|json)$/i, "")}”`, () => studio.workspace.open(specimen.deck), { small: true }) : null)
+        : h("div.empty", {}, h("div.spinner"))));
+    if (said) { clear(note); return; }
     clear(note, messages.filter((m) => m.severity !== "note").map((message) => h(`div.message.${message.severity}`, {}, icon(message.severity === "error" ? "error" : "warning"), h("div", {}, message.text))));
   };
 
@@ -217,17 +253,22 @@ export function mount(studio, container) {
   const renderShowOn = () => {
     const decks = studio.workspace.documents.filter((item) => item.kind === "deck");
     const options = [...catalog.specimens.map((item) => ({ value: item.name, label: item.title })),
-      ...(catalog.specimens.some((item) => item.name === "slides") ? decks.map((item) => ({ value: `deck:${item.file}`, label: item.file.split("/").pop() })) : [])];
+      ...(catalog.specimens.some((item) => item.name === "slides") ? decks.map((item) => ({ value: `deck:${item.file}`, label: item.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "") })) : [])];
     const value = specimen.deck ? `deck:${specimen.deck}` : specimen.name;
-    clear(showOn, h("span.show-on-label", {}, "Preview"), ui.segmented({ value, options, onChange: (next) => {
+    const onChange = (next) => {
       specimen = next.startsWith("deck:") ? { name: "slides", deck: next.slice(5) } : { name: next };
       pages = [];
       renderStage();
       studio.requestDraw(0);
-    } }));
+    };
+    // A few, side by side; more (a folder of decks), a pop-up, which keeps to its width.
+    clear(showOn, h("span.show-on-label", {}, "Preview"), options.length > 3 ? ui.select({ value, options, onChange }) : ui.segmented({ value, options, onChange }));
   };
   studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
-  studio.actions.append(ui.button("Export Full Theme", () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting, including those from the base theme, to the build folder" }));
+  // Straight to the file, as an export with nothing to choose is ("…" in the Mac app, whose
+  // save panel asks where).
+  studio.exports = [{ format: "yaml", label: exportLabel("Full Theme"), hint: "The theme with every setting written out, those it takes from its base theme too" }];
+  studio.actions.append(ui.button(exportLabel("Export Full Theme"), () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 

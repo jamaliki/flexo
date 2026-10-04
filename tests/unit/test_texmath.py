@@ -510,3 +510,98 @@ def test_maths_in_bold_words_is_regular_all_of_it() -> None:
     weights = [item.face.weight for _, _, item in formula.box.items if isinstance(item, GlyphItem)]
     assert weights[:2] == [400, 400] and weights[-1] == 400  # x, 2 and ξ
     assert set(weights[2:-1]) == {700}  # " if "
+
+
+@pytest.mark.parametrize(
+    ("source", "said"),
+    [
+        (r"\frac{a+b}{2}", "(a + b)/2"),
+        # A part of more than letters side by side is bracketed: 1/(k₂[Z]₀), not (1/k₂)[Z]₀.
+        (r"t_{1/2} \approx \frac{1}{k_2 [Z]_0}", "t_(1/2) \u2248 1/(k\u2082[Z]\u2080)"),
+        (r"\frac{dp}{dt}", "dp/dt"),
+        (r"x^2 + y_i", "x² + y_i"),
+        (r"[\mathrm{Na^+}]_{in}", "[Na⁺]_in"),
+        # One rule for every script: digits and signs raised or lowered, words after a mark.
+        (r"k_{\text{auto}} - k_{\text{dephos}} p", "k_auto \u2212 k_dephos p"),
+        (r"f_{\mathrm{PRE}}(x) + k_B (1 - p)", "f_PRE(x) + k_B(1 \u2212 p)"),
+        (r"x_{i+1}^{-1}", "x_(i + 1)⁻¹"),
+        (r"\sqrt{x^2+1}", "√(x² + 1)"),
+        (r"\int_0^\infty e^{-x}\,dx", "∫₀^∞ e^(\u2212x) dx"),
+        (r"\Delta G = -RT \ln K", "ΔG = \u2212RT ln K"),
+        (r"\Delta G^\circ_{298} = 37^{\circ}", "ΔG°₂₉₈ = 37°"),
+        (r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "(a, b; c, d)"),
+    ],
+)
+def test_a_formula_reads_as_one_line_of_words(source: str, said: str) -> None:
+    from flexo.texmath import linear
+
+    assert linear(source) == said
+
+
+def test_a_minus_is_as_long_as_the_plus_beside_it() -> None:
+    from flexo.texmath import Box, GlyphItem, RuleItem
+
+    def ink(source: str) -> list[tuple[float, object]]:
+        def walk(box: Box, x: float) -> list[tuple[float, object]]:
+            found: list[tuple[float, object]] = []
+            for dx, _, item in box.items:
+                found += walk(item, x + dx) if isinstance(item, Box) else [(x + dx, item)]
+            return found
+
+        return walk(_set(source).box, 0.0)
+
+    # Figtree draws its minus five-sixths as long as its plus, so it read as a hyphen beside it.
+    _, (at, plus), _ = ink("a + b")
+    assert isinstance(plus, GlyphItem)
+    left, right, _, _ = plus.face.extents(plus.gid)
+    _, (bar_at, bar), _ = ink("a - b")
+    assert isinstance(bar, RuleItem)
+    assert bar.width == pytest.approx((right - left) * 20.0)
+    assert bar_at == pytest.approx(at + left * 20.0)
+
+
+def test_a_degree_written_as_a_raised_ring_is_the_degree_sign_in_words_and_in_maths() -> None:
+    from flexo.texmath import GlyphItem
+
+    # In a line of words, as on a slide: the degree sign, not a small ring operator.
+    assert "".join(run.text for run in parse_label(r"$\Delta G^\circ = -RT$")) == "ΔG° = \u2212RT"
+    # Laid out, it follows its letter on the line as a prime does, at the letter's size.
+    glyphs = [item for _, _, item in _set(r"\frac{\Delta G^\circ}{RT}").box.items]
+    glyphs = [item for item in glyphs if isinstance(item, GlyphItem)]
+    degree = next(item for item in glyphs if item.face.hb.glyph_to_string(item.gid) == "degree")
+    assert degree.size == glyphs[0].size
+
+
+def test_the_studio_s_preview_reads_maths_as_the_pdf_and_powerpoint_do(tmp_path) -> None:
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from flexo.texmath import linear
+
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    source = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
+    text = source.read_text()
+    start = text.index("// -- maths, as words to read")
+    end = text.index("\n// ", text.index("export function mathWords", start))
+    maths = text[start:end]
+    (tmp_path / "maths.mjs").write_text(maths)
+    formulas = [
+        r"k_{cat}/K_m = 2\times10^{6}",
+        r"t_{1/2} \approx \frac{1}{k_2 [Z]_0} \ln\!\left(\frac{k_2 [Z]_0}{k_1 [E]}\right)",
+        r"e^{-m}(1+m)",
+        r"\frac{dp}{dt} = k_{\text{auto}}\,(1-p) - k_B p",
+        r"[\mathrm{Na^+}]_{in}",
+        r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+        r"\int_0^\infty e^{-x}\,dx",
+    ]
+    code = (
+        f"import {{ mathWords }} from {json.dumps((tmp_path / 'maths.mjs').as_uri())};\n"
+        f"console.log(JSON.stringify({json.dumps(formulas)}.map(mathWords)));\n"
+    )
+    command = ["node", "--input-type=module", "-e", code]
+    done = subprocess.run(command, capture_output=True, text=True, check=True)
+    # One rule wherever maths is read: the inspector's words are the PDF's and PowerPoint's.
+    assert json.loads(done.stdout) == [linear(formula) for formula in formulas]

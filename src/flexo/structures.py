@@ -34,15 +34,17 @@ import difflib
 import functools
 import re
 import struct
+import threading
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
 from flexo.confine import outside
-from flexo.diagnostics import Diagnostic, FlexoError
-from flexo.drawn import Picture, Words, units
+from flexo.diagnostics import Diagnostic, FlexoError, Severity
+from flexo.drawn import Picture, Shape, Words, path, units
 from flexo.geometry import Side, Size
-from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings
+from flexo.ir.measured import TextMetrics
+from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings, TextRun
 from flexo.style import LayoutStyle, Palette
 
 LOOKS = (
@@ -90,14 +92,10 @@ def _colours(node: NodeSpec) -> tuple[tuple[str, str], ...]:
     for record in value:
         assert isinstance(record, Record)
         group, colour = record.get("group"), record.get("color")
-        if group is None or colour is None:
-            raise _fail(
-                node,
-                "colors",
-                "each colour names a group and a color.",
-                hint='Write colors: [{group: A, color: Kinase}] (a tone) or color: "#3366aa".',
-            )
-        pairs.append((str(group), str(colour)))
+        # A row still being filled in (a chain with no colour yet) colours nothing.
+        if group is None or colour is None or not str(group).strip() or not str(colour).strip():
+            continue
+        pairs.append((str(group).strip(), str(colour).strip()))
     return tuple(pairs)
 
 
@@ -109,8 +107,21 @@ def structure_tones(node: NodeSpec) -> tuple[str, ...]:
     )
 
 
+def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
+    """A structure's name as it is set over its panel: in the title's weight, wrapped to the
+    panel's width."""
+
+    u = units(style).u
+    width = float(node.property("width") or 20.0 * u)  # type: ignore[arg-type]
+    return units(style).measurer.measure(
+        node.label, weight=style.typography.title_weight, max_width=width
+    )
+
+
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
-    """The panel: the molecule's box, under the component's name if it has one."""
+    """The panel: the molecule's box, under the component's name if it has one. A molecule
+    that can't be had (a PDB entry not downloaded, a file that does not read) is a dashed
+    panel the same size saying why, so the rest of the figure is drawn all the same."""
 
     measures = units(style)
     u = measures.u
@@ -119,7 +130,8 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     words = []
     top = 0.0
     if node.label:
-        title = measures.measure(node.label, weight=style.typography.title_weight)
+        # A long name is set on as many lines as the panel is wide, not over its edges.
+        title = structure_title(node, style)
         words.append(
             Words(
                 f"{node.id}.label",
@@ -133,49 +145,378 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         top = title.height + 0.3 * u
     size = Size(width, top + height)
     middle = (top + height / 2.0) / size.height
-    return Picture(
-        size,
-        (),
-        tuple(words),
-        (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle)),
-        images=((f"{node.id}.molecule", 0.0, top, width, height),),
+    ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
+    problem = _problem(node, style)
+    if problem is None or problem.drawn:
+        return Picture(
+            size, (), tuple(words), ports,
+            images=((f"{node.id}.molecule", 0.0, top, width, height),),
+        )
+    shapes, said = _placeholder(node, measures, problem, top, width, height)
+    return Picture(size, shapes, (*words, *said), ports)
+
+
+def _placeholder(node: NodeSpec, measures, problem: _Problem, top: float, width: float,
+                 height: float) -> tuple[tuple[Shape, ...], tuple[Words, ...]]:
+    """A dashed panel where the molecule goes, a warning sign, and what went wrong."""
+
+    u = measures.u
+    inset = 0.4 * measures.pen
+    corner = min(0.6 * u, width / 4.0, height / 4.0)
+    x0, y0, x1, y1 = inset, top + inset, width - inset, top + height - inset
+    frame = path(
+        "M", x0 + corner, y0, "L", x1 - corner, y0, "A", corner, corner, 0, 0, 1, x1, y0 + corner,
+        "L", x1, y1 - corner, "A", corner, corner, 0, 0, 1, x1 - corner, y1,
+        "L", x0 + corner, y1, "A", corner, corner, 0, 0, 1, x0, y1 - corner,
+        "L", x0, y0 + corner, "A", corner, corner, 0, 0, 1, x0 + corner, y0, "Z",
     )
+    room = max(width - 1.6 * u, 4.0 * u)
+    heading = (TextRun(problem.title, weight=600),)
+    reason = (TextRun(problem.reason),)
+    first = measures.measurer.measure(heading, max_width=room)
+    second = measures.small.measure(reason, max_width=room)
+    sign = 1.1 * u
+    gap = 0.35 * u
+    total = sign + gap + first.height + 0.2 * u + second.height
+    y = top + max((height - total) / 2.0, 0.3 * u)
+    mid = width / 2.0
+    warning = path(
+        "M", mid, y, "L", mid + sign * 0.58, y + sign, "L", mid - sign * 0.58, y + sign, "Z",
+        "M", mid, y + sign * 0.36, "L", mid, y + sign * 0.66,
+        "M", mid, y + sign * 0.82, "L", mid, y + sign * 0.84,
+    )
+    shapes = (
+        Shape(f"{node.id}.placeholder", frame, "guide", width=measures.pen),
+        Shape(f"{node.id}.warning", warning, "line", width=measures.pen, color="muted-ink"),
+    )
+    y += sign + gap
+    said = (
+        Words(f"{node.id}.problem", heading, first, mid, y + first.baseline, weight=600),
+        Words(
+            f"{node.id}.reason", reason, second, mid, y + first.height + 0.2 * u + second.baseline,
+            role="muted-ink", size=measures.small_size,
+        ),
+    )
+    return shapes, said
+
+
+@dataclass(frozen=True, slots=True)
+class _Problem:
+    """What keeps a structure from being drawn as written: ``title`` and ``reason`` as its
+    panel says them. ``drawn``: the molecule is drawn all the same, without what it can't
+    show (a colour for a chain it does not have)."""
+
+    code: str
+    title: str
+    reason: str
+    hint: str | None = None
+    drawn: bool = False
+
+
+def structure_problem(node: NodeSpec, style: LayoutStyle) -> Diagnostic | None:
+    """What keeps the structure ``node`` from being drawn as written, as a warning on it --
+    the figure is drawn all the same, the structure as a panel saying why (or, for a colour
+    it can't show, without that colour) -- or None."""
+
+    problem = _problem(node, style)
+    if problem is None:
+        return None
+    said = problem.title.startswith("Couldn't")
+    message = f"{problem.title}. {problem.reason}" if said else problem.reason
+    return Diagnostic(
+        f"structure.{problem.code}", message, Severity.WARNING, entity_id=node.id,
+        hint=problem.hint,
+    )
+
+
+def _problem(node: NodeSpec, style: LayoutStyle) -> _Problem | None:
+    """The molecule set up as it will be drawn -- read, or fetched, its settings checked --
+    without drawing it: what goes wrong, if anything."""
+
+    name = _name(node)
+    try:
+        # Colours are checked here, not painted: any tone will do.
+        tones = Palette("checking", {}, tuple((tone, 1) for tone in structure_tones(node)))
+        ask = _ask(node, style, tones)
+    except FlexoError as error:
+        said = error.diagnostics[0]
+        return _Problem(said.code.removeprefix("structure."), f"Couldn't draw {name}",
+                        _sentence(said.message), said.hint)
+    found = _checked(ask, name)
+    failed = None if found else _failed.get(_failing(ask))
+    return _Problem("draw", f"Couldn't draw {name}", failed, drawn=True) if failed else found
+
+
+@functools.lru_cache(maxsize=64)
+def _checked(ask: _Ask, name: str) -> _Problem | None:
+    if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
+                                                   re.IGNORECASE):
+        return _Problem("source", f"Couldn't find {name}", "There is no such file in the folder.")
+    fetched = not Path(ask.source).exists()
+    try:
+        figure = _one_at_a_time(_drawn, ask)
+    except ImportError:
+        return _Problem(
+            "molsketch", f"Couldn't draw {name}", "Drawing a structure needs mol-sketch.",
+            'pip install "flexo[molecules]", or pip install path/to/mol-sketch/python.',
+        )
+    except _Unknown as error:
+        return _Problem(error.code, f"Couldn't draw {name}", _sentence(str(error)), error.hint)
+    except ConnectionError:
+        return _Problem("fetch", f"Couldn't download {name}",
+                        "The Protein Data Bank can't be reached. Check the network connection.")
+    except FileNotFoundError:
+        return _Problem("source", f"Couldn't find {name}", "There is no such file in the folder.")
+    except Exception as error:  # whatever it is, the panel says it, not the slide
+        first = str(error).split("\n")[0]
+        said = _sentence(first) if first else "It can't be read as a structure."
+        if fetched and "not in the PDB" in first:
+            return _Problem("fetch", f"Couldn't download {name}", f"{name} isn't in the PDB.")
+        if fetched and "not a PDB ID" in first:
+            return _Problem("source", f"Couldn't draw {name}",
+                            f"“{ask.source}” isn't a PDB ID or a file in the folder.")
+        return _Problem("source", f"Couldn't read {name}", said)
+    try:
+        _one_at_a_time(_check_chains, figure, ask.colours)
+    except _NoSuchChain as error:
+        return _Problem("colors", name, _sentence(str(error)), error.hint, drawn=True)
+    return None
+
+
+def fetch_structure(pdb_id: str) -> str:
+    """The PDB entry ``pdb_id`` downloaded and read, ready to draw (mol-sketch keeps the file,
+    so it is fetched once): its ID, in capitals. A ValueError says why it couldn't be, in a
+    sentence."""
+
+    pid = pdb_id.strip().upper()
+    if not re.fullmatch(r"[0-9][A-Z0-9]{3}", pid):
+        raise ValueError(
+            f"“{pdb_id.strip()}” isn't a PDB ID. An ID is four characters, starting with a "
+            "digit, like 1UBQ."
+        )
+    try:
+        _one_at_a_time(_loaded, pid, 0.0)
+    except ImportError:
+        raise ValueError("Drawing a structure needs mol-sketch.") from None
+    except ConnectionError:
+        raise ValueError(
+            f"Couldn't download {pid}: the Protein Data Bank can't be reached. Check the network "
+            "connection."
+        ) from None
+    except Exception as error:
+        said = str(error).split("\n")[0] or "it can't be read"
+        if "not in the PDB" in said:
+            said = "there is no such entry in the PDB"
+        raise ValueError(f"Couldn't download {pid}: {said.rstrip('.')}.") from None
+    return pid
+
+
+_PLAIN = frozenset(
+    {"A", "AN", "AND", "AS", "AT", "BY", "FOR", "FROM", "IN", "INTO", "OF", "ON", "OR", "THE",
+     "TO", "WITH"}
+)
+"""Short words a name in capitals has that are English, not an acronym like DNA or HIV."""
+
+_JOINS = _PLAIN | frozenset(
+    {"ABOUT", "AFTER", "AGAINST", "AMONG", "BEFORE", "BETWEEN", "BOUND", "COMPLEXED", "DURING",
+     "ITS", "OVER", "THAT", "THEIR", "THROUGH", "UNDER", "UPON", "VERSUS", "VIA", "VS", "WHICH",
+     "WITHIN", "WITHOUT"}
+)
+"""Words a phrase of a name begins with (or that leave it hanging): a name cut short ends
+before the phrase the cut fell in, never on one of these."""
+
+ACRONYMS = frozenset(
+    {"DNA", "RNA", "MRNA", "TRNA", "RRNA", "SSDNA", "DSDNA", "HIV", "SIV", "GFP", "YFP", "CFP",
+     "RFP", "ATP", "ADP", "AMP", "GTP", "GDP", "NAD", "NADH", "NADP", "NADPH", "FAD", "FMN",
+     "MHC", "HLA", "TCR", "BCR", "IGG", "IGE", "IGM", "TNF", "EGF", "VEGF", "FGF", "PDGF", "SARS",
+     "COV", "MERS", "CRISPR", "PCR", "LDL", "HDL", "ABC", "PDZ", "SUMO", "HSP", "GPCR", "ERK",
+     "MAP", "JAK", "STAT", "CAP", "TATA", "EGFR", "HER", "PKA", "PKC", "CDK", "ATPASE", "TBP"}
+)
+"""Names in a title in capitals that stay in capitals: acronyms, not words (``LAC`` is a word)."""
+
+NAMED = 32
+"""How long (characters) a structure's name from its file may be before it is cut short."""
+
+
+def structure_caption(path: Path) -> str | None:
+    """What a structure file says it holds, as a person would write it, with its PDB ID:
+    ``E2 DNA-binding domain (1A7G)`` for a file titled THE CRYSTAL STRUCTURE OF THE E2
+    DNA-BINDING DOMAIN FROM HUMAN PAPILLOMAVIRUS AT 2.4 ANGSTROMS. Its title, without how
+    it was solved and from what, at what resolution -- else the first protein it names
+    (never a bare DNA or RNA). None for a file that names nothing."""
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:400_000]
+    except OSError:
+        return None
+    titles: list[str] = []
+    molecules: list[str] = []
+    entry = None
+    if path.suffix.lower() in (".cif", ".mmcif"):
+        def value(key: str) -> str:
+            found = re.search(rf"^{re.escape(key)}\s+(.+?)\s*$", text, re.MULTILINE)
+            said = found.group(1).strip().strip("'\"").strip() if found else ""
+            return "" if said in ("?", ".") else said
+
+        titles += [value("_struct.title")]
+        molecules += [part.strip() for part in value("_struct.pdbx_descriptor").split(",")]
+        found = re.search(r"^_entry\.id\s+(\S+)", text, re.MULTILINE)
+        entry = found.group(1) if found else None
+    else:
+        title = " ".join(
+            line[10:].strip() for line in text.splitlines() if line.startswith("TITLE ")
+        )
+        if title:
+            titles.append(re.sub(r"\s+", " ", title))
+        compound = re.findall(r"^COMPND.{4}.*?MOLECULE:\s*([^;\n]+)", text, re.MULTILINE)
+        molecules += [found.strip() for found in compound]
+        found = re.match(r"HEADER.{56}([0-9][A-Za-z0-9]{3})", text)
+        entry = found.group(1) if found else None
+    names = [_plain_title(title) for title in titles] + [
+        molecule for molecule in molecules if not re.fullmatch(r"(?i)(5'-)?[DR]NA\b.*", molecule)
+    ]
+    name = next((name for name in names if name), None)
+    stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", path.name, flags=re.IGNORECASE)
+    if entry is None and re.fullmatch(r"[0-9][A-Za-z0-9]{3}", stem):
+        entry = stem
+    if not name:
+        return None
+    # Cut short between words -- and before the phrase the cut fell in ("Acyl-enzyme
+    # intermediate", not "Acyl-enzyme intermediate during").
+    if len(name) > NAMED:
+        words = name[:NAMED + 1].split()[:-1] or [name[:NAMED]]
+        joins = [
+            at for at, word in enumerate(words) if at > 0 and word.upper().strip(",;") in _JOINS
+        ]
+        if joins:
+            words = words[: joins[-1]]
+        while len(words) > 1 and words[-1].upper().strip(",;") in _JOINS:
+            words.pop()
+        name = " ".join(words).rstrip(",;")
+    if name.isupper():
+        # In sentence case: a word in lower case, an acronym (DNA, HIV), a name with a digit
+        # (E2, P53) or a Roman numeral (II) as written.
+        def readable(piece: str) -> str:
+            letters = re.sub(r"[^A-Z]", "", piece)
+            kept = letters in ACRONYMS or re.fullmatch(r"[IVX]{2,4}", letters) is not None
+            return piece if kept or any(ch.isdigit() for ch in piece) else piece.lower()
+
+        words = ("-".join(readable(piece) for piece in word.split("-")) for word in name.split())
+        name = " ".join(words)
+        name = name[:1].upper() + name[1:]
+    return f"{name} ({entry.upper()})" if entry else name
+
+
+def _plain_title(title: str) -> str:
+    """A structure's title without how it was solved, what it was taken from or at what
+    resolution: THE CRYSTAL STRUCTURE OF THE E2 DNA-BINDING DOMAIN FROM HUMAN
+    PAPILLOMAVIRUS AT 2.4 ANGSTROMS is E2 DNA-BINDING DOMAIN."""
+
+    title = re.sub(
+        r"(?i)^(the\s+)?((crystal|solution|nmr|x-ray|cryo-?em|refined|high[- ]resolution)\s+)*"
+        r"(structures?|model)\s+(of|for)\s+(the\s+|a\s+|an\s+)?",
+        "",
+        title.strip(),
+    )
+    title = re.sub(r"(?i)\s+(at|to)\s+[0-9.]+\s*(a|angstroms?|\u00c5)\b.*$", "", title)
+    source = r"(human|mouse|yeast|bovine|bacteri|escherichia|e\.)"
+    title = re.sub(rf"(?i)\s+(from|in|of)\s+{source}.*$", "", title)
+    return title.strip(" ,.;")
+
+
+def _name(node: NodeSpec) -> str:
+    """A structure as its panel names it: a PDB ID in capitals, a file by its name."""
+
+    source = str(node.property("source") or "").strip()
+    stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", Path(source).name, flags=re.IGNORECASE)
+    if re.fullmatch(r"[0-9][A-Za-z0-9]{3}", stem):
+        return stem.upper()
+    return Path(source).name or "the structure"
+
+
+def _called(name: object) -> str:
+    """A molecule by the name mol-sketch reads it as: a PDB ID in capitals."""
+
+    text = str(name or "").strip()
+    if re.fullmatch(r"[0-9][A-Za-z0-9]{3}", text):
+        return text.upper()
+    return text or "the structure"
+
+
+def _sentence(text: str) -> str:
+    text = text.strip()
+    return text if not text or text.endswith((".", "?", "!")) else f"{text}."
 
 
 def structure_png(
     node: NodeSpec, style: LayoutStyle, palette: Palette, width: float, height: float
 ) -> bytes:
     """The molecule, drawn by mol-sketch at ``width`` by ``height`` points, as a PNG with
-    the page taken out."""
+    the page taken out. Should mol-sketch fail to draw it, the panel is left hatched and
+    the failure is said on the structure (structure_problem): the figure is drawn all the
+    same."""
 
     ask = _ask(node, style, palette)
+    if _failed.get(_failing(ask)):
+        return _hatched(width / height)
     try:
-        return _render(ask, width / height)
-    except ImportError:
-        raise _fail(
-            node,
-            "molsketch",
-            "Drawing a structure needs mol-sketch.",
-            hint='pip install "flexo[molecules]", or pip install path/to/mol-sketch/python.',
-        ) from None
-    except _Unknown as error:
-        raise _fail(node, error.code, str(error), hint=error.hint) from None
-    except _NoSuchChain as error:
-        raise _fail(node, "colors", str(error), hint=error.hint) from None
+        return _one_at_a_time(_render, ask, width / height)
+    except Exception as error:
+        # What mol-sketch said, without where in its code it said it.
+        said = re.sub(r"^.*?\b[A-Za-z]*Error: ", "", str(error).split("\n")[0]).strip()
+        _failed[_failing(ask)] = (
+            f"mol-sketch couldn't draw it with these settings ({said})." if said
+            else "mol-sketch couldn't draw it with these settings."
+        )
+        return _hatched(width / height)
+
+
+_failed: dict[tuple, str] = {}
+"""Why mol-sketch failed to draw a structure, by what it was drawn from (its colours aside)."""
+
+
+def _failing(ask: _Ask) -> tuple:
+    """What a structure is drawn from, but its colours and look: one failure said whatever
+    the page it is drawn on."""
+
+    return (ask.source, ask.stamp, ask.view, ask.show, ask.site, ask.group_palette, ask.style,
+            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent)
+
+
+def _hatched(aspect: float) -> bytes:
+    """A panel faintly hatched, where a molecule mol-sketch could not draw would be."""
+
+    import numpy as np
+
+    width = 240
+    height = max(1, round(width / aspect))
+    rows, columns = np.indices((height, width))
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[..., :3] = 128
+    pixels[..., 3] = np.where((rows + columns) % 16 < 2, 70, 0)
+    return _png(pixels)
 
 
 def structure_settings(node: NodeSpec, style: LayoutStyle, palette: Palette) -> dict[str, object]:
     """What the studio shows of a structure's mol-sketch settings: the style it is drawn
     with -- its look's, the figure's colours, and its own settings over them -- by dotted
-    name, and mol-sketch's looks and group palettes to choose from."""
+    name, mol-sketch's looks and group palettes to choose from, and the molecule's chains.
+    A structure that can't be drawn as written says why (``problem``, ``reason``), with
+    what can still be read."""
 
+    problem = _problem(node, style)
+    # A colour for a chain it lacks is said on its row of colours; the rest, on the structure.
+    said = (
+        {} if problem is None or problem.code == "colors"
+        else {"problem": problem.title, "reason": problem.reason}
+    )
+    if problem is not None and not problem.drawn:
+        return {"style": {}, "looks": list(LOOKS), "palettes": {}, "chains": [], **said}
     ask = _ask(node, style, palette)
     try:
-        return _settings(ask)
+        return {**_one_at_a_time(_settings, ask), **said}
     except _Unknown as error:
         raise _fail(node, error.code, str(error), hint=error.hint) from None
-    except _NoSuchChain as error:
-        raise _fail(node, "colors", str(error), hint=error.hint) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +538,8 @@ class _Ask:
     density: str | None = None
     site_within: float | None = None
     site_labels: bool = False
+    solvent: bool = False
+    """Whether its waters and lone ions are drawn (as small dots, floating free)."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -262,6 +605,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         density or None,
         None if within is None else float(within),  # type: ignore[arg-type]
         bool(node.property("site_labels")),
+        bool(node.property("solvent")),
     )
 
 
@@ -301,6 +645,28 @@ class _Unknown(ValueError):
         self.hint = hint
 
 
+_MOLSKETCH = threading.RLock()
+"""mol-sketch's engine is one V8 for the process, made the first time it is asked for with
+no lock of its own: two structures drawn at once (the studio serves each request on a thread)
+would each make one, and a molecule read into the engine let go would be asked of the other
+-- "unknown input in1", for as long as it is kept. Whatever reads or draws a molecule holds
+this, one at a time."""
+
+
+def _one_at_a_time(work, *args):
+    """``work(*args)`` with mol-sketch to itself. A molecule kept from an engine since let go
+    (one made elsewhere, before this lock) is read again, once."""
+
+    with _MOLSKETCH:
+        try:
+            return work(*args)
+        except Exception as error:
+            if "unknown input" not in str(error):
+                raise
+            _loaded.cache_clear()
+            return work(*args)
+
+
 @functools.lru_cache(maxsize=8)
 def _loaded(source: str, stamp: float):
     """The molecule, read once (or fetched) and copied for each way it is drawn."""
@@ -332,7 +698,9 @@ def _drawn(ask: _Ask):
     import molsketch as ms
 
     figure = _loaded(ask.source, ask.stamp).copy()
-    _check_chains(figure, ask.colours)
+    # A colour for a chain the molecule lacks would show nowhere: it is left out, and said
+    # (structure_problem).
+    _, missing = _chains(figure, ask.colours)
     figure = figure.look(ask.look)
     figure.set(
         palette={"paper": ask.paper, **dict(ask.roles)},
@@ -364,9 +732,12 @@ def _drawn(ask: _Ask):
         # The paper is taken out after: it stays the figure's own.
         figure.set(**{"palette.paper": ask.paper})
     for group, colour in ask.colours:
-        figure.color(group, colour)
+        if group not in missing:
+            figure.color(group, colour)
     if ask.show:
         figure.show(**dict(ask.show))
+    if "sticks" not in dict(ask.show):
+        _solvent(figure, ask)
     if ask.view or ask.pan:
         figure.view(**dict(ask.view), **({"pan": ask.pan} if ask.pan else {}))
     if ask.site == "ligand":
@@ -386,6 +757,33 @@ def _drawn(ask: _Ask):
                 "auto (the map the entry was built into), an EMDB ID as EMD-11638, or a map file",
             ) from None
     return figure
+
+
+def _solvent(figure, ask: _Ask) -> None:
+    """Waters and lone ions (a calcium, a chloride) left out of what the look draws as
+    sticks -- they float free of the molecule as stray dots -- unless asked for."""
+
+    sticks = (figure.style.get("reps") or {}).get("sticks") or ""
+    if ask.solvent:
+        figure.show(sticks=f"({sticks}) or water" if sticks else "water")
+        return
+    ions = _ions(ask.source, ask.stamp)
+    if sticks and ions:
+        figure.show(sticks=f"({sticks}) and not resn {'+'.join(ions)}")
+
+
+@functools.lru_cache(maxsize=8)
+def _ions(source: str, stamp: float) -> tuple[str, ...]:
+    """The residues of a structure that are one atom, but for waters: its ions."""
+
+    atoms: dict[tuple[str, int, str], list[_Atom]] = {}
+    for atom in _atoms(source, stamp):
+        if atom.het and atom.element.upper() != "H" and atom.resn not in {"HOH", "WAT"}:
+            atoms.setdefault((atom.chain, atom.resi, atom.resn), []).append(atom)
+    lone = {resn for (_, _, resn), held in atoms.items() if len(held) == 1}
+    # A residue name that is one atom somewhere and more elsewhere is not an ion.
+    more = {resn for (_, _, resn), held in atoms.items() if len(held) > 1}
+    return tuple(sorted(lone - more))
 
 
 @functools.lru_cache(maxsize=32)
@@ -421,12 +819,187 @@ def _settings(ask: _Ask) -> dict[str, object]:
                 out[f"{prefix}{key}"] = item
         return out
 
+    chains = _chains(figure, ())[0]
+    selected = [(f"properties.{name}", text) for name, text in ask.show]
+    if ask.site and ask.site != "ligand":
+        selected.append(("properties.site", ask.site))
+    atoms = _atoms(ask.source, ask.stamp) if selected else ()
+    name = _called((figure._info().get("structure") or {}).get("name"))
+    found = ((key, _selection_problem(text, atoms, name, chains)) for key, text in selected)
     return {
         "style": flat(figure.style, ""),
         "look": ask.look,
         "looks": ms.looks(),
         "palettes": ms.palettes(),
+        "chains": chains,
+        "selections": {key: said for key, said in found if said},
     }
+
+
+# -- selections, checked as mol-sketch reads them --
+
+
+@dataclass(frozen=True, slots=True)
+class _Atom:
+    element: str
+    resn: str
+    resi: int
+    chain: str
+    name: str
+    het: bool
+    ss: str
+    entity: str
+    subunit: str
+
+
+@functools.lru_cache(maxsize=8)
+def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
+    """The molecule's atoms, as a selection is tested on them."""
+
+    from molsketch._engine import engine
+
+    figure = _loaded(source, stamp)
+    atoms = engine().call("sceneJson", figure._spec())["keyframes"][0]["atoms"]
+    return tuple(
+        _Atom(
+            str(atom.get("el") or ""), str(atom.get("resn") or ""), int(atom.get("resi") or 0),
+            str(atom.get("chain") or ""), str(atom.get("name") or ""), bool(atom.get("het")),
+            str(atom.get("ss") or ""), str(atom.get("entity") or ""),
+            str(atom.get("subunit") or ""),
+        )
+        for atom in atoms.values()
+    )
+
+
+_NUCLEIC = frozenset({
+    "A", "C", "G", "U", "I", "DA", "DC", "DG", "DT", "DI", "N", "PSU", "5MC", "7MG", "OMG", "OMC",
+    "1MA", "2MG", "M2G", "4SU", "H2U", "5MU", "YG", "UR3", "MA6", "6MZ", "A2M", "CM0", "G7M", "QUO",
+})
+_BACKBONE = frozenset({"N", "CA", "C", "O", "OXT"})
+_LISTED = {
+    "chain": "chain", "c.": "chain", "resn": "resn", "r.": "resn", "name": "name", "n.": "name",
+    "elem": "element", "e.": "element", "ss": "ss", "subunit": "subunit",
+}
+
+
+class _BadSelection(ValueError):
+    """A selection mol-sketch would read as nothing: a word it does not know, a number that
+    is not one."""
+
+
+def _selection(text: str):
+    """A mol-sketch selection (``resi 57+102``, ``chain A and polymer``) as a test of one
+    atom, read as mol-sketch reads it -- or _BadSelection, where it would quietly select
+    nothing."""
+
+    tokens = re.findall(r"\(|\)|[^\s()]+", text.strip())
+    place = 0
+
+    def peek() -> str | None:
+        return tokens[place] if place < len(tokens) else None
+
+    def take() -> str | None:
+        nonlocal place
+        place += 1
+        return tokens[place - 1] if place - 1 < len(tokens) else None
+
+    def listed(word: str) -> list[str]:
+        token = take()
+        if token is None:
+            example = {"resi": "57", "i.": "57", "resn": "SER", "r.": "SER", "name": "CA",
+                       "n.": "CA", "elem": "C", "e.": "C", "ss": "H", "entity": "1"}.get(word, "A")
+            raise _BadSelection(f"“{word}” needs what to select after it, as in {word} {example}.")
+        return token.split("+")
+
+    def factor():
+        token = take()
+        if token is None:
+            return lambda atom: False
+        word = token.lower()
+        if word == "(":
+            test = expression()
+            if peek() == ")":
+                take()
+            return test
+        if word in {"not", "!"}:
+            inner = factor()
+            return lambda atom: not inner(atom)
+        simple = {
+            "all": lambda atom: True, "*": lambda atom: True, "none": lambda atom: False,
+            "hetatm": lambda atom: atom.het, "het": lambda atom: atom.het,
+            "polymer": lambda atom: not atom.het, "poly": lambda atom: not atom.het,
+            "backbone": lambda atom: atom.name in _BACKBONE,
+            "bb": lambda atom: atom.name in _BACKBONE,
+            "sidechain": lambda atom: not atom.het and atom.name not in _BACKBONE,
+            "nucleic": lambda atom: atom.resn in _NUCLEIC,
+            "protein": lambda atom: not atom.het and atom.resn not in _NUCLEIC,
+            "water": lambda atom: atom.resn in {"HOH", "WAT"},
+            "hydrogens": lambda atom: atom.element == "H",
+        }
+        aliases = {"sc": "sidechain", "na": "nucleic", "prot": "protein", "solvent": "water",
+                   "hydro": "hydrogens", "h.": "hydrogens"}
+        word = aliases.get(word, word)
+        if word in simple:
+            return simple[word]
+        if word in _LISTED:
+            wanted = {value.upper() for value in listed(word)}
+            field = _LISTED[word]
+            return lambda atom: getattr(atom, field).upper() in wanted
+        if word == "entity":
+            entities = set(listed(word))
+            return lambda atom: atom.entity in entities
+        if word in {"resi", "i."}:
+            ranges = []
+            for value in listed(word):
+                match = re.fullmatch(r"(-?\d+)(?:-(-?\d+))?", value)
+                if not match:
+                    raise _BadSelection(
+                        f"“{value}” isn't a residue number. Write resi 57+102, or resi 50-60."
+                    )
+                ranges.append((int(match[1]), int(match[2] or match[1])))
+            return lambda atom: any(low <= atom.resi <= high for low, high in ranges)
+        raise _BadSelection(
+            f"“{token}” isn't a word selections use, such as chain, resi, resn or polymer."
+        )
+
+    def term():
+        test = factor()
+        while (peek() or "").lower() in {"and", "&"}:
+            take()
+            left, right = test, factor()
+            test = lambda atom, left=left, right=right: left(atom) and right(atom)  # noqa: E731
+        return test
+
+    def expression():
+        test = term()
+        while (peek() or "").lower() in {"or", "|"}:
+            take()
+            left, right = test, term()
+            test = lambda atom, left=left, right=right: left(atom) or right(atom)  # noqa: E731
+        return test
+
+    return expression()
+
+
+def _selection_problem(text: str, atoms: tuple[_Atom, ...], name: str, chains: list[str]) -> str:
+    """Why ``text`` selects nothing of the molecule, in a sentence -- or nothing."""
+
+    if not text.strip():
+        return ""
+    try:
+        test = _selection(text)
+    except _BadSelection as error:
+        return str(error)
+    if any(test(atom) for atom in atoms):
+        return ""
+    said = f"Selects nothing in {name}."
+    words = {token.lower() for token in re.findall(r"[^\s()+]+", text)}
+    if words & {"chain", "c."} and chains:
+        said += f" Its chains are {', '.join(chains)}."
+    numbers = [atom.resi for atom in atoms if not atom.het]
+    if words & {"resi", "i."} and numbers:
+        said += f" Its residues are numbered {min(numbers)} to {max(numbers)}."
+    return said
 
 
 class _NoSuchChain(ValueError):
@@ -440,18 +1013,28 @@ class _NoSuchChain(ValueError):
 _RESIDUE = re.compile(r"[A-Za-z]{1,3}-?\d+[A-Za-z]?(\.\w+)?")
 
 
-def _check_chains(figure, colours: tuple[tuple[str, str], ...]) -> None:
-    """Say a colour given to a chain the structure does not have -- mol-sketch would
-    quietly colour nothing -- naming the chains it has."""
+def _chains(figure, colours: tuple[tuple[str, str], ...]) -> tuple[list[str], list[str]]:
+    """The chains the molecule has, and the groups of ``colours`` that name a chain it does
+    not (a residue, an entity or a chain's residue is not checked here)."""
 
     structure = figure._info().get("structure") or {}
     chains = [str(chain) for chain in structure.get("chains") or ()]
     if not chains:
-        return
-    for group, _ in colours:
-        if ":" in group or _RESIDUE.fullmatch(group) or group in chains:
-            continue
-        name = structure.get("name") or "the structure"
+        return chains, []
+    missing = [
+        group for group, _ in colours
+        if not (":" in group or _RESIDUE.fullmatch(group) or group in chains)
+    ]
+    return chains, missing
+
+
+def _check_chains(figure, colours: tuple[tuple[str, str], ...]) -> None:
+    """Say a colour given to a chain the structure does not have -- mol-sketch would
+    quietly colour nothing -- naming the chains it has."""
+
+    chains, missing = _chains(figure, colours)
+    for group in missing[:1]:
+        name = _called((figure._info().get("structure") or {}).get("name"))
         raise _NoSuchChain(
             f'"{group}" names no chain of {name}, so its colour would show nowhere.',
             f"Its chains are {', '.join(chains)} "
@@ -500,7 +1083,7 @@ def structure_view(node: NodeSpec, style: LayoutStyle, palette: Palette) -> dict
         if (value := node.property(name)) is not None
     )
     stamp = path.stat().st_mtime if path.exists() else 0.0
-    return _view(str(path) if path.exists() else source.strip(), stamp, look, view)
+    return _one_at_a_time(_view, str(path) if path.exists() else source.strip(), stamp, look, view)
 
 
 @functools.lru_cache(maxsize=16)
@@ -553,17 +1136,27 @@ def _without_paper(pixels, paper: str):
     import numpy as np
 
     text = paper.lstrip("#")
-    ground = np.array([int(text[i : i + 2], 16) for i in (0, 2, 4)], dtype=np.float64) / 255.0
-    colour = pixels[..., :3].astype(np.float64) / 255.0
-    lighter = np.where(colour > ground, (colour - ground) / np.maximum(1.0 - ground, 1e-6), 0.0)
-    darker = np.where(colour < ground, (ground - colour) / np.maximum(ground, 1e-6), 0.0)
-    alpha = np.clip(np.max(np.maximum(lighter, darker), axis=-1), 0.0, 1.0)
-    safe = np.maximum(alpha, 1e-6)[..., None]
-    restored = np.clip((colour - ground) / safe + ground, 0.0, 1.0)
-    alpha = alpha * (pixels[..., 3].astype(np.float64) / 255.0)
+    ground = np.array([int(text[i : i + 2], 16) for i in (0, 2, 4)], dtype=np.float32) / 255.0
+    # A channel's share of opacity depends on its value alone: looked up from a table of
+    # its 256, and in single precision, not worked out pixel by pixel in double -- ten
+    # times as fast on a molecule's picture (a second and more) and the same to the eye.
+    values = np.arange(256, dtype=np.float32) / 255.0
+    alpha = np.zeros(pixels.shape[:2], dtype=np.float32)
+    for channel, level in enumerate(ground):
+        lighter = (values - level) / max(1.0 - level, 1e-6)
+        darker = (level - values) / max(level, 1e-6)
+        table = np.where(values > level, lighter, np.where(values < level, darker, 0.0))
+        np.maximum(alpha, table.astype(np.float32)[pixels[..., channel]], out=alpha)
+    np.clip(alpha, 0.0, 1.0, out=alpha)
+    restored = pixels[..., :3].astype(np.float32) * np.float32(1.0 / 255.0)
+    restored -= ground
+    restored /= np.maximum(alpha, 1e-6)[..., None]
+    restored += ground
+    np.clip(restored, 0.0, 1.0, out=restored)
+    alpha *= pixels[..., 3].astype(np.float32) * np.float32(1.0 / 255.0)
     out = np.empty(pixels.shape, dtype=np.uint8)
-    out[..., :3] = np.round(restored * 255.0)
-    out[..., 3] = np.round(alpha * 255.0)
+    out[..., :3] = np.rint(restored * 255.0)
+    out[..., 3] = np.rint(alpha * 255.0)
     return out
 
 

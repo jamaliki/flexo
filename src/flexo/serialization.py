@@ -84,6 +84,19 @@ def parse_figure(document: object) -> FigureSpec:
         edge_id = item.get("id") or f"edge.{index}.{source.node_id}-to-{target.node_id}"
         edges.append(_edge(item, edge_id, source, target))
     groups = [_group(item) for item in document.get("groups", [])]
+    held = {child for group in groups for child in group.children}
+    unplaced = tuple(
+        item_id
+        for item_id in [*(group.id for group in groups), *(n["id"] for n in document["nodes"])]
+        if item_id not in held and item_id != root
+    )
+    if unplaced and any(group.id == root for group in groups):
+        # A node (or group) written into the file but into none of its groups -- added by
+        # hand -- is drawn at the end of the root, not left out of the layout it would break.
+        groups = [
+            replace(group, children=(*group.children, *unplaced)) if group.id == root else group
+            for group in groups
+        ]
     if not any(group.id == root for group in groups):
         # No root written: everything no group holds is stacked on the canvas.
         held = {child for group in groups for child in group.children}

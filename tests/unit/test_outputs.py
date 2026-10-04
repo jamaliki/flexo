@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import zlib
 from pathlib import Path
 
 import pytest
@@ -223,7 +225,192 @@ def test_links_are_clickable_in_every_format(tmp_path: Path) -> None:
     with Figure("linked") as figure:
         figure.block("b", label="See [the paper](https://arxiv.org/abs/1706.03762)")
     outputs = flexo.build(figure, tmp_path, formats=("editable", "portable", "pdf")).outputs
-    assert '<a href="https://arxiv.org/abs/1706.03762">' in outputs.editable_svg.read_text()
-    assert 'href="https://arxiv.org/abs/1706.03762"' in outputs.portable_svg.read_text()  # type: ignore[union-attr]
+    editable = outputs.editable_svg.read_text()
+    assert '<a href="https://arxiv.org/abs/1706.03762">' in editable
+    portable = outputs.portable_svg.read_text()  # type: ignore[union-attr]
+    assert 'href="https://arxiv.org/abs/1706.03762"' in portable
     pdf = outputs.pdf.read_bytes()  # type: ignore[union-attr]
     assert b"/Subtype /Link" in pdf and b"/URI (https://arxiv.org/abs/1706.03762)" in pdf
+    # A link is underlined in every format, as the slide's PowerPoint export underlines it.
+    assert 'text-decoration="underline"' in editable
+    link = portable[portable.index("<a href") : portable.index("</a>")]
+    assert re.search(r'<rect [^>]*height="0\.5" fill="#1a5d9b"', link)
+    assert any(re.search(rb"\d re f", stream) for stream in _streams(pdf))
+
+
+def _streams(pdf: bytes) -> list[bytes]:
+    found = re.findall(rb"stream\n(.*?)\nendstream", pdf, re.S)
+    return [zlib.decompress(body) for body in found if body[:1] == b"x"]
+
+
+def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    def spaces_and_wraps(label: str) -> tuple[int, int]:
+        with Figure("wrapped") as figure:
+            figure.root.block("b", label=label, width=80)
+        pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+        wraps = pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().count("\r\n")
+        return sum(stream.count(b" 3 Tr ") for stream in _streams(pdf)), wraps
+
+    # Each soft wrap is given back its space, laid invisibly at the end of the line.
+    assert spaces_and_wraps("Hexamers") == (0, 0)
+    spaces, wraps = spaces_and_wraps("Capsid hexamers assemble across a two-fold axis to build")
+    assert wraps >= 2 and spaces == wraps
+
+
+def test_maths_in_words_and_a_drawn_formula_read_alike_in_a_pdf() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("read") as figure:
+        words = r"$k_{\text{auto}} p$, $k_B p$, $x^2$, $e^{-m}(1+m)$ and $T \approx 24$"
+        figure.root.block("a", label=words)
+        figure.root.block("b", label=r"$\frac{dp}{dt} = k_{\text{auto}} p - k_B p + x^2$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    said = " ".join(pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().split())
+    # Scripts set among words read as a formula's do: digits raised, words after a mark, kept
+    # apart from a letter after them; and an italic letter's lean is no second space.
+    assert "k_auto p, k_B p, x², e^(\u2212m)(1 + m) and T ≈ 24" in said
+    assert "dp/dt = k_auto p \u2212 k_B p + x²" in said
+
+
+def test_a_greek_letter_reads_as_one_letter_in_words_and_in_a_drawn_formula() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("greek") as figure:
+        figure.root.block("a", label=r"Methylation shifts $\epsilon(m)$ by $\alpha \partial x$")
+        figure.root.block("b", label=r"$\frac{\epsilon(m)}{\alpha} = \partial x$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    said = " ".join(pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().split())
+    # Drawn as a variable is (𝜖, slanted), but read as the letter it is, in words as in a
+    # formula: one ϵ, never the mathematical italic one in one place and the letter in another.
+    assert "shifts \u03f5(m) by \u03b1\u2202x" in said
+    assert "(\u03f5(m))/\u03b1 = \u2202x" in said
+    assert not any(0x1D400 <= ord(character) <= 0x1D7FF for character in said)
+
+
+def test_words_after_invisible_ones_on_a_pdf_page_are_still_drawn() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    # A wrapped label (its spaces laid invisibly), a formula (its words laid invisibly), then words.
+    with Figure("hidden") as figure:
+        figure.root.block("a", label="Capsid hexamers assemble across a two-fold axis", width=80)
+        figure.root.block("m", label=r"$\frac{a}{b}$")
+        figure.root.block("z", label="Zebra")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    content = b"".join(_streams(pdf)).decode("latin-1")
+    # The render mode and scaling are graphics state, kept past ET: walk them as a reader does.
+    stack: list[tuple[int, float]] = []
+    mode, scale, shown = 0, 100.0, []
+    for token in re.findall(r"[\d.]+ Tr|[\d.]+ Tz|(?<![\w/])(?:q|Q|TJ|Tj)(?!\w)", content):
+        if token == "q":
+            stack.append((mode, scale))
+        elif token == "Q":
+            mode, scale = stack.pop()
+        elif token.endswith("Tr"):
+            mode = int(token.split()[0])
+        elif token.endswith("Tz"):
+            scale = float(token.split()[0])
+        else:
+            shown.append((mode, scale))
+    objects = re.findall(r"\bBT\s(.*?)\sET\b", content, re.S)
+    hidden = sum(len(re.findall(r"T[Jj]\b", body)) for body in objects if body.startswith("3 Tr"))
+    assert hidden >= 3 and sum(1 for state in shown if state[0] == 3) == hidden
+    assert all(state == (0, 100.0) for state in shown if state[0] != 3)
+    # And it is ink where the last word is, as both a reader and a printer draw it.
+    page = pdfium.PdfDocument(pdf)[0]
+    text = page.get_textpage()
+    at = text.get_text_range().index("Zebra")
+    left, bottom, right, top = text.get_charbox(at)
+    height = page.get_height()
+    picture = page.render(scale=2).to_pil().convert("L")
+    letter = picture.crop(
+        (int(left * 2), int((height - top) * 2), int(right * 2) + 1, int((height - bottom) * 2) + 1)
+    )
+    assert min(letter.getextrema()) < 128
+
+
+def test_a_drawn_formula_is_found_in_a_pdf_as_the_words_it_reads_as() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("ratio") as figure:
+        figure.root.block("b", label=r"$\frac{a+b}{2}$")
+    document = pdfium.PdfDocument(pdf_bytes(compile_figure(figure.spec).document.text))
+    # Drawn as outlines, it reads, is found and is copied as its words, laid invisibly under it.
+    assert "(a + b)/2" in document[0].get_textpage().get_text_range()
+
+
+def test_a_tagged_pdf_has_headings_described_figures_and_decoration_passed_over() -> None:
+    import re
+    import zlib
+
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.drawing import Group, Shape, Text
+    from flexo.pdf import ARTIFACT, Tag, pdf_bytes
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">'
+        '<rect id="band" width="200" height="30" fill="#683476"/>'
+        '<text id="s.title" x="10" y="20" font-family="Figtree" font-size="12">A heading</text>'
+        '<g id="s.figure">'
+        '<rect id="s.figure.box" x="10" y="40" width="40" height="20" fill="#eee"/>'
+        '<text id="s.figure.label" x="12" y="54" font-family="Figtree" font-size="8">Box</text></g>'
+        '<text id="s.words" x="10" y="90" font-family="Figtree" font-size="10">Some words</text>'
+        "</svg>"
+    )
+
+    def tag(item: object, within: Tag | None) -> Tag | None:
+        if isinstance(item, Group) and item.id == "s.figure":
+            return Tag((("Figure", "s.figure"),), alt="A box")
+        if isinstance(item, Text) and item.id == "s.title":
+            return Tag((("H1", "s.title"),))
+        return ARTIFACT if isinstance(item, Shape) and within is None else None
+
+    data = pdf_bytes(svg, title="Tagged", tags=tag, language="en-GB")
+    assert b"/MarkInfo << /Marked true >>" in data and b"/StructTreeRoot" in data
+    assert b"/Lang (en-GB)" in data and b"/StructParents 0" in data
+    kinds = re.findall(rb"/Type /StructElem /S /(\w+)", data)
+    assert kinds == [b"Document", b"Sect", b"H1", b"Figure", b"P"]
+    assert b"/S /Figure" in data and b"/Alt (A box)" in data
+    def streams(pdf: bytes) -> list[bytes]:
+        found = re.findall(rb"stream\n(.*?)\nendstream", pdf, re.S)
+        return [zlib.decompress(body) for body in found if body[:1] == b"x"]
+
+    content = next(stream for stream in streams(data) if b"BDC" in stream)
+    # The band is decoration; the heading, the figure (box and label) and the words are marked.
+    assert content.count(b"/Artifact BMC") == 1 and content.count(b" BDC") == 4
+    assert pdfium.PdfDocument(data)[0].get_textpage().get_text_range().startswith("A heading")
+    # Untagged, as a figure's own PDF is: nothing of the sort.
+    untagged = pdf_bytes(svg)
+    assert b"/StructTreeRoot" not in untagged and b"BDC" not in b"".join(streams(untagged))
+
+
+def test_a_drawn_formula_s_words_are_copied_whole_by_every_reader() -> None:
+    import shutil
+    import subprocess
+
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+    from flexo.texmath import linear
+
+    if shutil.which("pdftotext") is None:
+        pytest.skip("poppler's pdftotext is not installed")
+    source = r"\theta = \frac{[U]^{n_H}}{K_{1/2}^{\,n_H} + [U]^{n_H}}"
+    with Figure("hill") as figure:
+        figure.root.block("a", label=f"${source}$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    read = subprocess.run(["pdftotext", "-", "-"], input=pdf, capture_output=True, check=True)
+    said = read.stdout.decode()
+    # Its words are set no wider than it is drawn: squeezed narrower, letters overlap, and
+    # poppler drops one set over its twin ("))" read as ")") and runs the words together.
+    assert linear(source) in said

@@ -421,6 +421,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     first_base = None
     for number, (track, heading) in enumerate(zip(tracks, names, strict=True), 1):
         key = f"{node.id}.track{number}" if len(tracks) > 1 else node.id
+        before = len(words)
         kept = [item for item in features if _kept(item, track)]
         sites = [item for item in kept if item.kind == "site"]
         spans = [item for item in kept if item.kind in _SPANS]
@@ -479,12 +480,18 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         base = y + above
         first_base = first_base if first_base is not None else base
 
+        # One size for the domains' names inside them: the small size for all of them where
+        # one fits inside only at that size, so they read as names of one kind.
+        smaller = any(
+            item.kind == "domain" and item.label and _inside(item, track, measures, x_of, spans)
+            for item in spans
+        )
         # Under the chain: outside names of spans, then disulfide brackets.
         outside = []
         for item in spans:
             if not item.label:
                 continue
-            if _named_inside(item, track, measures, x_of, spans):
+            if _inside(item, track, measures, x_of, spans, smaller=smaller) is not None:
                 continue
             # A name that does not fit inside the widest piece the track keeps
             # goes under it -- the same piece the inside test measured.
@@ -497,14 +504,15 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     (x_of(low) + x_of(high + 1)) / 2.0,
                 )
             )
+        # In as few rows as keep each name near what it names (a short span's name under it
+        # on the row below, rather than pushed along the row and led to by a long line).
+        rows = _in_rows(outside, 0.4 * u, left, right)
+        line = max((item.metrics.height for item in outside), default=0.0)
+        deep = len(rows) * line + (len(rows) - 1) * 0.15 * u
         below = top_reach
         if outside:
-            below += 0.35 * u + max(item.metrics.height for item in outside)
-        bond_top = (
-            base
-            + top_reach
-            + (0.35 * u + max(i.metrics.height for i in outside) + 0.3 * u if outside else 0.3 * u)
-        )
+            below += 0.35 * u + deep
+        bond_top = base + top_reach + (0.35 * u + deep + 0.3 * u if outside else 0.3 * u)
         bond_lanes = _lanes([(x_of(b.start), x_of(b.end)) for b in bonds], 0.4 * u)
         if bonds:
             below = bond_top - base + (max(bond_lanes) + 1) * 0.6 * u
@@ -556,8 +564,9 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         pen,
                     )
                 )
-        # Spans, the widest first, so a motif inside a domain is drawn over it.
-        for item in sorted(spans, key=lambda item: -(item.end - item.start)):
+        # Spans from the N-terminus on, as they are read; of two from one residue, the wider
+        # first, so a motif inside a domain is drawn over it.
+        for item in sorted(spans, key=lambda item: (item.start, -(item.end - item.start))):
             index = features.index(item) + 1
             tone = feature_tone(item)
             for low, high in _clip(item, track):
@@ -579,10 +588,11 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                 )
             if not item.label:
                 continue
-            metrics = measures.measure(item.label, small=item.kind != "domain")
+            small = _inside(item, track, measures, x_of, spans, smaller=smaller)
+            metrics = measures.measure(item.label, small=bool(small))
             low, high = _widest(item, track)
             x1, x2 = x_of(low), x_of(high + 1)
-            if _named_inside(item, track, measures, x_of, spans):
+            if small is not None:
                 # Centred in the widest stretch nothing drawn over the span covers:
                 # a motif inside a domain keeps clear of the domain's name.
                 free_low, free_high = _name_room(item, track, spans)
@@ -595,15 +605,14 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         base - metrics.height / 2.0 + metrics.baseline,
                         role="tone-ink" if tone else "ink",
                         tone=tone,
-                        size=None if item.kind == "domain" else measures.small_size,
+                        size=measures.small_size if small else None,
                     )
                 )
             if item.id is not None and number == 1:
                 ports.append((item.id, Side.NORTH, (x1 + x2) / 2.0))
-        if outside:
-            spread(outside, 0.4 * u, left, right)
-            top = base + top_reach + 0.35 * u
-            for label in outside:
+        for row, names in enumerate(rows):
+            top = base + top_reach + 0.35 * u + row * (line + 0.15 * u)
+            for label in names:
                 words.append(
                     Words(
                         label.key,
@@ -615,11 +624,23 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         role="muted-ink",
                     )
                 )
-                if abs(label.x - label.want) > 0.2 * u:
+                # A name pushed aside from its span is led to from it, to the name's near end:
+                # a short line, never one sweeping under the chain to the name's middle. A
+                # name still under its span needs none.
+                inset = min(0.3 * u, label.width / 4.0)
+                low, high = label.x - label.width / 2.0 + inset, label.x + label.width / 2.0 - inset
+                if not low <= label.want <= high:
                     shapes.append(
                         Shape(
                             f"{label.key}.leader",
-                            path("M", label.want, base + top_reach, "L", label.x, top),
+                            path(
+                                "M",
+                                label.want,
+                                base + top_reach,
+                                "L",
+                                min(max(label.want, low), high),
+                                top - 0.1 * u,
+                            ),
                             "leader",
                             None,
                             pen * 0.7,
@@ -721,6 +742,14 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                     anchor="end",
                 )
             )
+        # The track's names as they are read: its own, then its parts' from the N-terminus on.
+        starts = {f"{key}.feature{features.index(item) + 1}.label": item.start for item in spans}
+        starts |= {f"{key}.site{index}.label": item.start for index, item in enumerate(sites, 1)}
+        read = [
+            (item.id != f"{key}.label", starts.get(item.id, float(length) + 1), index, item)
+            for index, item in enumerate(words[before:])
+        ]
+        words[before:] = [item for *_, item in sorted(read)]
         y = base + below + 0.9 * u
 
     # The residue axis, under the last track.
@@ -886,20 +915,50 @@ def _name_room(feature: Feature, track: Track, spans: list[Feature]) -> tuple[fl
     return max(free, key=lambda item: item[1] - item[0]) if free else (at, at)
 
 
-def _named_inside(
+def _in_rows(names: list[Name], gap: float, low: float, high: float) -> list[list[Name]]:
+    """``names`` placed in rows under what they name, left to right, ``gap`` apart: each on
+    the first row where it stays near its place (its place under it), else on a row of its
+    own below; within ``low`` and ``high``."""
+
+    rows: list[list[Name]] = []
+    for name in sorted(names, key=lambda item: item.want):
+        half = name.width / 2.0
+        for row in rows:
+            after = row[-1].x + row[-1].width / 2.0 + gap
+            x = min(max(name.want, after + half, low + half), high - half)
+            if abs(x - name.want) <= max(half, gap) and x - half >= after - 1e-6:
+                name.x = x
+                row.append(name)
+                break
+        else:
+            name.x = min(max(name.want, low + half), high - half)
+            rows.append([name])
+    return rows
+
+
+def _inside(
     feature: Feature,
     track: Track,
     measures,
     x_of,
     spans: list[Feature],
-) -> bool:
-    """Whether ``feature``'s name fits inside it, clear of the spans drawn over it."""
+    *,
+    smaller: bool = False,
+) -> bool | None:
+    """Whether ``feature``'s name is set inside it, clear of the spans drawn over it, and
+    how: at the small size (True), at a domain's own (False), or not at all (None). A
+    domain's name too wide at its own size is set at the small size inside it, as a motif's
+    is, before it goes under it: a name is inside whenever it fits, the rule for all.
+    ``smaller``: a domain's only at the small size (its protein's other domains are so)."""
 
     if feature.kind == "transmembrane":
-        return False
-    metrics = measures.measure(feature.label, small=feature.kind != "domain")
+        return None
     low, high = _name_room(feature, track, spans)
-    return metrics.width + 0.6 * measures.u <= x_of(high) - x_of(low)
+    room = x_of(high) - x_of(low) - 0.6 * measures.u
+    for small in (False, True) if feature.kind == "domain" and not smaller else (True,):
+        if measures.measure(feature.label, small=small).width <= room:
+            return small
+    return None
 
 
 def _kept(feature: Feature, track: Track) -> bool:

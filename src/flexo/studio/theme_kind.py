@@ -20,25 +20,65 @@ from typing import Any
 
 import yaml
 
+from flexo.roundtrip import rewrite
 from flexo.studio import Drawing, Message, Page
 
 BUDGET = 0.5
 SAMPLE = {
     "figure": {"id": "sample", "width": "single-column"},
     "nodes": [
-        {"id": "x", "kind": "text", "label": "Input $x$"},
-        {"id": "encoder", "label": "Encoder", "properties": {"tone": "encoder"}},
-        {"id": "attention", "label": "Attention", "properties": {"tone": "attention"}},
-        {"id": "head", "label": "Head", "properties": {"tone": "head"}},
-        {"id": "y", "kind": "text", "label": r"Output $\hat{y}$"},
+        {"id": "request", "kind": "text", "label": "Request $r$"},
+        {"id": "api", "label": "API", "properties": {"tone": "1"}},
+        {"id": "queue", "kind": "queue", "label": "Queue", "properties": {"tone": "2"}},
+        {"id": "worker", "label": "Worker", "properties": {"tone": "3"}},
+        {"id": "store", "kind": "database", "label": "Store", "properties": {"tone": "4"}},
     ],
     "edges": [
-        {"from": "x", "to": "encoder"},
-        {"from": "encoder", "to": "attention"},
-        {"from": "attention", "to": "head"},
-        {"from": "head", "to": "y"},
+        {"from": "request", "to": "api"},
+        {"from": "api", "to": "queue"},
+        {"from": "queue", "to": "worker"},
+        {"from": "worker", "to": "store"},
     ],
 }
+"""A theme's first sample: a pipeline, its steps in the theme's first tones."""
+
+SYSTEM = {
+    "figure": {"id": "system", "width": "double-column"},
+    "nodes": [
+        {"id": "person", "kind": "person", "label": "Customer"},
+        {"id": "web", "label": "Web app", "properties": {"tone": "1"}},
+        {"id": "phone", "label": "Phone app", "properties": {"tone": "1"}},
+        {"id": "api", "kind": "server", "label": "API", "properties": {"tone": "2"}},
+        {"id": "queue", "kind": "queue", "label": "Orders", "properties": {"tone": "3"}},
+        {"id": "worker", "label": "Worker", "properties": {"tone": "3"}},
+        {"id": "db", "kind": "database", "label": "Database", "properties": {"tone": "4"}},
+    ],
+    "groups": [
+        {
+            "id": "root",
+            "role": "canvas",
+            "layout": {"kind": "row"},
+            "children": ["person", "apps", "backend"],
+        },
+        {"id": "apps", "label": "Apps", "layout": {"kind": "column"}, "children": ["web", "phone"]},
+        {
+            "id": "backend",
+            "label": "Backend",
+            "layout": {"kind": "row"},
+            "children": ["api", "queue", "worker", "db"],
+        },
+    ],
+    "edges": [
+        {"from": "person", "to": "web"},
+        {"from": "person", "to": "phone"},
+        {"from": "web", "to": "api", "label": "HTTPS"},
+        {"from": "phone", "to": "api"},
+        {"from": "api", "to": "queue"},
+        {"from": "queue", "to": "worker"},
+        {"from": "worker", "to": "db"},
+    ],
+}
+"""Its second: a system, with groups, labelled lines and the software shapes."""
 
 
 class ThemeKind:
@@ -68,13 +108,15 @@ class ThemeKind:
             raise ValueError(f"{path.name} is not a theme file")
         return data
 
-    def save(self, path: Path, document: dict[str, Any]) -> None:
+    def save(self, path: Path, document: dict[str, Any], previous: str | None = None) -> None:
         if path.suffix.lower() == ".json":
             path.write_text(
                 json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
             )
         else:
-            path.write_text(self.dump(document), encoding="utf-8")
+            # Over the file's words as they were (``previous``): its comments and quoting kept.
+            text = rewrite(previous, document, self.dump, name=str(path.resolve()))
+            path.write_text(text, encoding="utf-8")
 
     def dump(self, document: Any) -> str:
         return yaml.safe_dump(document, sort_keys=False, allow_unicode=True, width=100)
@@ -186,8 +228,8 @@ class ThemeKind:
         messages: list[Message] = []
         if specimen == "figures":
             makers = [
-                ("sample", "A model", lambda: _sample(name)),
-                ("slice", "A paper figure", lambda: _gallery(name)),
+                ("sample", "A pipeline", lambda: _sample(name, SAMPLE)),
+                ("system", "A system", lambda: _sample(name, SYSTEM)),
             ]
         else:
             provider = _specimens().get(specimen)
@@ -196,12 +238,11 @@ class ThemeKind:
             try:
                 makers = provider.pages(name, base, hints)
             except Exception as error:
-                return Drawing(
-                    [],
-                    [Message(f"The {provider.title.lower()} could not be drawn: "
-                             f"{_explain(error)}", "error")],
-                    info=info,
+                # One that says it plainly (a deck that does not read) is said as it says it.
+                said = str(error) if getattr(error, "plain", False) else (
+                    f"The {provider.title.lower()} could not be drawn: {_explain(error)}"
                 )
+                return Drawing([], [Message(said, "error")], info=info)
         pages: list[Page] = []
         started = time.perf_counter()
         drew = False
@@ -228,9 +269,18 @@ class ThemeKind:
         return Drawing(pages, messages, files, info)
 
     def export(
-        self, document: dict[str, Any], base: Path, stem: str, formats: list[str]
+        self,
+        document: dict[str, Any],
+        base: Path,
+        stem: str,
+        formats: list[str],
+        *,
+        into: Path | None = None,
     ) -> list[Path]:
-        target = base / "build" / f"{stem}.yaml"
+        # Never the theme's own name: exported beside it, it would replace it. Named plainly,
+        # as a person would: "Order queue full theme.yaml", not "Order queue.theme (full).yaml".
+        name = stem.removesuffix(".theme") or "theme"
+        target = (into or base / "build") / f"{name} full theme.yaml"
         target.parent.mkdir(parents=True, exist_ok=True)
         from flexo.theme_files import dump_theme
 
@@ -281,23 +331,14 @@ def _tones(name: str) -> list[dict[str, str]]:
     return tones
 
 
-def _sample(name: str) -> str:
+def _sample(name: str, sample: dict[str, Any]) -> str:
     from dataclasses import replace
 
     from flexo.compiler import compile_figure
     from flexo.serialization import parse_figure
 
-    spec = replace(parse_figure(copy.deepcopy(SAMPLE)), style=name)
+    spec = replace(parse_figure(copy.deepcopy(sample)), style=name)
     return compile_figure(spec).document.text
-
-
-def _gallery(name: str) -> str:
-    from dataclasses import replace
-
-    from flexo.compiler import compile_figure
-    from flexo.gallery import gallery_figure
-
-    return compile_figure(replace(gallery_figure("vertical-slice"), style=name)).document.text
 
 
 def _specimens() -> dict[str, Any]:

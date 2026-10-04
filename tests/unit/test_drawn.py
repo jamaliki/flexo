@@ -161,6 +161,36 @@ def test_a_timeline_writes_its_times_and_stacks_its_spans() -> None:
     assert "induce" in ports
 
 
+def test_timeline_spans_that_only_touch_share_a_lane() -> None:
+    def lanes(spans: list[dict]) -> list[float]:
+        with flexo.Figure("assay") as figure:
+            figure.root.timeline("t", events=[{"at": 0}, {"at": 40}], spans=spans)
+        drawing = _drawing(figure, "t")
+        tops = {
+            shape.id: float(re.match(r"M\s*[-\d.]+[ ,]+([-\d.]+)", shape.d).group(1))
+            for shape in drawing.shapes
+            if re.search(r"\.span\d+$", shape.id)
+        }
+        return [round(tops[key], 1) for key in sorted(tops)]
+
+    # Lag, then the burst as it ends, then the plateau as that ends: one lane.
+    touching = [
+        {"start": 0, "end": 8, "label": "Lag"},
+        {"start": 8, "end": 14},
+        {"start": 14, "end": 40, "label": "Plateau"},
+    ]
+    assert len(set(lanes(touching))) == 1
+    # A span too narrow for its words, its words under it: the next span still shares its lane.
+    narrow = [
+        {"start": 0, "end": 1, "label": "Excitation"},
+        {"start": 1, "end": 10, "label": "Adaptation"},
+        {"start": 10, "end": 40, "label": "Adapted"},
+    ]
+    assert len(set(lanes(narrow))) == 1
+    # Spans that overlap are stacked.
+    assert len(set(lanes([{"start": 0, "end": 10}, {"start": 5, "end": 20}]))) == 2
+
+
 @pytest.mark.parametrize(
     ("make", "words"),
     [
@@ -474,3 +504,70 @@ def test_a_timeline_of_whole_days_ticks_whole_days() -> None:
         figure.root.timeline("t", events=[{"at": 0}, {"at": 3}], unit="day")
     ticks = [words.runs[0].text for words in _drawing(figure, "t").words if ".tick" in words.id]
     assert ticks == ["Day 0", "Day 1", "Day 2", "Day 3"]
+
+
+def test_a_domain_s_name_is_inside_it_whenever_it_fits_and_its_domains_names_are_one_size() -> None:
+    from flexo.builder import Figure
+
+    domains = [
+        {"type": "domain", "label": "NTD · DNA binding", "start": 1, "end": 92},
+        {"type": "domain", "label": "CTD · dimerisation", "start": 132, "end": 236},
+    ]
+    with Figure("repressor") as figure:
+        figure.root.protein("ci", 236, domains, label="λ repressor (CI)")
+    svg = compile_figure(figure.spec).document.text
+    names = {
+        identifier: (float(y), size)
+        for identifier, y, size in re.findall(
+            r'<text id="ci\.(feature\d)\.label"[^>]* y="([\d.]+)"[^>]*font-size="([\d.]+)"', svg
+        )
+    }
+    # The narrower domain's name fits inside only at the small size: both are set inside, at
+    # it -- neither under an empty box, nor one larger than the other.
+    assert set(names) == {"feature1", "feature2"}
+    (first_y, first_size), (second_y, second_size) = names["feature1"], names["feature2"]
+    assert first_y == pytest.approx(second_y) and first_size == second_size
+
+
+def test_short_domains_names_sit_near_them_in_rows_not_led_to_from_afar() -> None:
+    from flexo.builder import Figure
+
+    domains = [
+        {"type": "domain", "label": "Signal peptide", "start": 1, "end": 15},
+        {"type": "domain", "label": "Activation peptide", "start": 16, "end": 23},
+        {"type": "domain", "label": "Serine protease domain", "start": 24, "end": 247},
+    ]
+    with Figure("prss1") as figure:
+        figure.root.protein("p", 247, domains, label="PRSS1")
+    svg = compile_figure(figure.spec).document.text
+    # Each name too long for its domain is under it, on a row of its own where the one
+    # before it is in the way -- not pushed along and led back to by a line under the chain.
+    assert 'p.feature1.label.leader' not in svg and 'p.feature2.label.leader' not in svg
+    rows = {
+        name: float(y)
+        for name, y in re.findall(r'<text id="p\.(feature[12])\.label"[^>]* y="([\d.]+)"', svg)
+    }
+    assert rows["feature2"] > rows["feature1"]
+
+
+def test_a_drawn_things_words_are_drawn_as_read_its_name_then_its_parts_in_order() -> None:
+    from flexo.builder import Figure
+
+    features = [
+        {"type": "domain", "label": "P4 kinase", "start": 355, "end": 507},
+        {"type": "domain", "label": "P1", "start": 1, "end": 134},
+        {"type": "domain", "label": "P2", "start": 159, "end": 227},
+        {"type": "phosphorylation", "label": "His48", "at": 48},
+    ]
+    with Figure("chea") as figure:
+        figure.root.protein("p", 654, features, label="CheA")
+    svg = compile_figure(figure.spec).document.text
+    # A PDF's tags, a slide program and a screen reader read words in the order drawn: its
+    # name first, then its parts from the N-terminus on (a site among its domains), then
+    # the residue numbers -- not the widest domain first, nor its name last.
+    said = re.findall(r'<text id="p(?:\.[\w.]+)?"[^>]*>(?:<tspan[^>]*>)?([^<]+)<', svg)
+    assert said[:5] == ["CheA", "P1", "His48", "P2", "P4 kinase"]
+    # Drawn under nothing, as nothing is drawn where it is; the domains from the N-terminus.
+    assert svg.index('id="p.label"') < svg.index('id="p.chain"')
+    shapes = re.findall(r'<path id="p\.(feature\d)"', svg)
+    assert shapes == ["feature2", "feature3", "feature1"]

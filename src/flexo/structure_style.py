@@ -43,10 +43,15 @@ def _number(
     high: float | None = None,
     step: float | None = None,
     hint: str = "",
+    unit: str = "",
 ) -> dict[str, Any]:
+    """A number; ``unit`` is shown beside it (Å, °, px, or TIMES, a multiple)."""
+
     field: dict[str, Any] = {"key": key, "label": label, "type": "number", "hint": hint}
     limits = (("min", low), ("max", high), ("step", step))
     field |= {name: value for name, value in limits if value is not None}
+    if unit:
+        field["unit"] = unit
     return field
 
 
@@ -73,6 +78,9 @@ def _colour(key: str, label: str) -> dict[str, Any]:
 def _words(key: str, label: str, hint: str = "") -> dict[str, Any]:
     return {"key": key, "label": label, "type": "text", "hint": hint}
 
+
+TIMES = "\u00d7"
+"""The unit of a multiple: the multiplication sign."""
 
 FILLS = ("flat", "wash", "pencil", "watercolour", "ink", "ink colour", "chalk")
 GROUPS = ("residue", "chain", "subunit", "entity")
@@ -151,6 +159,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0.1,
                 step=0.1,
                 hint="A multiple of the normal width",
+                unit=TIMES,
             ),
             _choice(
                 "mode",
@@ -165,13 +174,16 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 "Automatic matches the ribbons",
                 labels={"auto": "Automatic", **STROKE_LABELS},
             ),
-            _number("stick_radius", "Stick Radius", low=0.02, step=0.02, hint="In ångströms"),
+            _number(
+                "stick_radius", "Stick Radius", low=0.02, step=0.02, hint="In ångströms", unit="Å"
+            ),
             _number(
                 "sphere_scale",
                 "Sphere Size",
                 low=0,
                 step=0.05,
-                hint="Balls on Cα atoms; 0 for none",  # noqa: RUF001
+                hint="Balls on Cα atoms, a multiple of their size; 0 for none",  # noqa: RUF001
+                unit=TIMES,
             ),
             _number(
                 "probe",
@@ -179,6 +191,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0,
                 step=0.1,
                 hint="In ångströms; larger is smoother",
+                unit="Å",
             ),
             _switch("side_chain_helper", "Side Chains Only", "Leave backbone atoms to the ribbon"),
             _switch("show.H", "Hydrogens"),
@@ -190,7 +203,10 @@ SECTIONS: tuple[dict[str, Any], ...] = (
     {
         "title": "Lines",
         "fields": [
-            _number("line.width", "Line Width", low=0, step=0.1),
+            _number(
+                "line.width", "Line Width", low=0, step=0.1,
+                hint="On a drawing 1920 wide", unit="px",
+            ),
             _number("line.rough", "Roughness", low=0, step=0.1, hint="0 is perfectly straight"),
             _whole("line.passes", "Passes", low=1, high=6, hint="More passes look more sketched"),
             _share("line.pressure", "Pressure", "How much the width swells and thins in a stroke"),
@@ -210,9 +226,14 @@ SECTIONS: tuple[dict[str, Any], ...] = (
         "title": "Shading and Hatching",
         "fields": [
             _share("shading", "Shading", "How dark the shadow side is"),
-            _number("view.light", "Light Angle", step=5, hint="In degrees; -125 is top left"),
-            _number("hatch.spacing", "Hatch Spacing", low=1, step=0.5),
-            _number("hatch.angle", "Hatch Angle", step=5, hint="In degrees"),
+            _number(
+                "view.light", "Light Angle", step=5, hint="-125 is top left", unit="°"
+            ),
+            _number(
+                "hatch.spacing", "Hatch Spacing", low=1, step=0.5,
+                hint="On a drawing 1920 wide", unit="px",
+            ),
+            _number("hatch.angle", "Hatch Angle", step=5, unit="°"),
             _number("hatch.density", "Hatch Density", low=0, step=0.1),
             _share("pencil_fill", "Pencil Density", "For the Pencil fill"),
         ],
@@ -228,7 +249,9 @@ SECTIONS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
-        "title": "Engraved Ribbons",
+        "title": "Ribbons",
+        # Ribbons drawn engraved (in every look; a sketched ribbon has no lines).
+        "show": {"cartoon_style": "engraved"},
         "fields": [
             _whole("engrave.lines", "Line Count", low=1, high=24, hint="Lines along each face"),
             _number("engrave.width", "Line Weight", low=0, step=0.05),
@@ -238,6 +261,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0,
                 step=0.1,
                 hint="In ångströms",
+                unit="Å",
             ),
             _number("engrave.coil_width", "Coil Width", low=0, step=0.05),
             _switch(
@@ -258,6 +282,7 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0.5,
                 step=0.1,
                 hint="How much thicker the site's sticks are",
+                unit=TIMES,
             ),
         ],
     },
@@ -270,7 +295,8 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0,
                 high=90,
                 step=1,
-                hint="In degrees; 0 is flat",
+                hint="0 is flat",
+                unit="°",
             ),
             _share("view.fog", "Fog", "How much the far side fades"),
             _share("view.fog_start", "Fog Start", "As a fraction of the depth"),
@@ -290,14 +316,18 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                     "Plain sans": "Plain sans",
                 },
             ),
-            _number("label_size", "Label Size", low=4, step=1),
+            _number(
+                "label_size", "Label Size", low=4, step=1,
+                hint="On a drawing 1920 wide", unit="px",
+            ),
             _switch("show.res_labels", "Residue Labels", "A label on every residue"),
             _number(
                 "annot",
                 "Mark Size",
                 low=0.2,
                 step=0.1,
-                hint="Dots, charge circles and arrowheads",
+                hint="Dots, charge circles and arrowheads, a multiple of their size",
+                unit=TIMES,
             ),
         ],
     },
@@ -310,8 +340,19 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 ("surface", "layers", "mesh", "slice"),
                 labels={"surface": "Surface", "layers": "Layers", "mesh": "Mesh", "slice": "Slice"},
             ),
-            _number("map.sigma", "Level (σ)", low=0, step=0.5, hint="Above the mean"),  # noqa: RUF001
-            _number("map.level", "Level", step=0.01, hint="In the map's units"),
+            # Left empty, the level is the one the map's depositors recommend (``placeholder``:
+            # what an empty field means, shown in it when the look gives no value of its own).
+            _number(
+                "map.sigma",
+                "Sigma Level",
+                low=0,
+                step=0.5,
+                hint="Standard deviations above the mean",
+                unit="σ",  # noqa: RUF001
+            )
+            | {"placeholder": "Recommended"},
+            _number("map.level", "Absolute Level", step=0.01, hint="In the map's units")
+            | {"placeholder": "Recommended"},
             _choice(
                 "map.finish",
                 "Finish",
@@ -345,8 +386,10 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 low=0,
                 step=0.5,
                 hint="In ångströms from the model; 0 is off",
+                unit="Å",
             ),
-            _words("map.zone", "Close-Up", "A selection, such as resi 57+102"),
+            _words("map.zone", "Close-Up", "A selection, such as resi 57+102")
+            | {"placeholder": "The whole map"},
             _choice(
                 "map.context",
                 "Rest of Map",

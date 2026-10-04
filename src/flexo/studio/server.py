@@ -15,9 +15,13 @@ import json
 import mimetypes
 import queue
 import secrets
+import select
+import signal
+import socket
 import socketserver
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from collections.abc import Sequence
@@ -32,6 +36,13 @@ from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
 STATIC = Path(__file__).parent / "static"
+LEAVE_GRACE = 1.0
+"""Seconds a window whose connection broke without a word is still taken as there: back by
+then (a page reconnecting, half a second after: its ``retry``), its person never left. A window
+closed says so as it goes (``/api/leave``), and goes at once."""
+HANG_UP_CHECK = 0.25
+"""How often, in seconds, a quiet connection is looked at for a window gone without a word
+(crashed, killed, its browser closed under it)."""
 FILE_TYPES = {
     "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf", ".ai"),
     "figure": (".yaml", ".yml", ".json"),
@@ -84,6 +95,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if encoding:
             self.send_header("Content-Encoding", encoding)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -152,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if not self._host_ok() or not self._token_ok(query):
+            # Its body is not read: the connection ends with the answer, so the body is
+            # not taken for the next request on it.
+            self.close_connection = True
             self._fail(HTTPStatus.FORBIDDEN, "missing or wrong studio token")
             return
         body = self._body()
@@ -204,7 +220,8 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/session":
             self._json(self._session())
         elif route == "/api/open":
-            doc = workspace.open(_one(query, "file"), (query.get("kind") or [None])[0])
+            held = (query.get("held") or [""])[0] == "1"
+            doc = workspace.open(_one(query, "file"), (query.get("kind") or [None])[0], held=held)
             self._json({**doc.info(), "catalog": doc.kind.catalog()})
         elif route == "/api/documents":
             self._json({"documents": workspace.documents()})
@@ -223,7 +240,8 @@ class Handler(BaseHTTPRequestHandler):
             body, kind = pictures.shown(path)
             self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
-            self._events(_one(query, "client"), (query.get("name") or ["You"])[0])
+            name, person = (query.get("name") or [""])[0], (query.get("person") or [""])[0]
+            self._events(_one(query, "client"), name, person)
         elif route == "/api/themes":
             from flexo.studio import theming
 
@@ -249,8 +267,20 @@ class Handler(BaseHTTPRequestHandler):
         who = _person(data)
         if route == "/api/update":
             doc = workspace.open(name)
-            version, document = doc.update(data["document"], int(data["base"]), who, who["id"])
-            self._json({"version": version, "document": document})
+            if data.get("instance") not in (None, workspace.instance):
+                # Made from a version of a studio since stopped: this one counts afresh.
+                self._json({"restarted": True})
+                return
+            if data.get("kind") not in (None, doc.kind.name):
+                # Made in another kind's editor: the file has become this kind's since.
+                self._json({"reopen": True, "kind": doc.kind.name})
+                return
+            # Told to the pages with the window it came from, so that window knows its own.
+            client = str(data.get("client") or who["id"])
+            version, document = doc.update(data["document"], int(data["base"]), who, client)
+            # Whose changes it was merged with, for the page to name them.
+            others = doc.author_since(int(data["base"]), who)
+            self._json({"version": version, "document": document, "who": others})
         elif route == "/api/draw":
             self._json(
                 workspace.draw(
@@ -263,29 +293,30 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif route == "/api/save":
             doc = workspace.open(name)
-            if doc.write():
+            workspace.reread(doc)
+            if doc.held:
+                self._fail(HTTPStatus.CONFLICT, doc.problem or f"Can\u2019t read {doc.name}")
+                return
+            wrote = doc.write(again=True)
+            if wrote:
                 workspace.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            if doc.foreign:
+                # Another kind's document (now): it opens again as that kind.
+                workspace.broadcast(doc.said())
+                workspace.open(doc.name)
+                if not wrote:
+                    self._fail(HTTPStatus.CONFLICT, doc.problem or f"{doc.name} was not saved")
+                    return
             self._json({"ok": True, "saved": doc.saved})
+        elif route == "/api/mend":
+            # A file that does not read, put right by its person where the studio shows it.
+            workspace.open(name).mend(str(data.get("text", "")), over=bool(data.get("over")))
+            self._json({"ok": True})
         elif route == "/api/new":
-            doc = workspace.new(name, data.get("kind", ""), data.get("data"))
+            doc = workspace.new(name, data.get("kind", ""), data.get("data"), who)
             self._json({"file": doc.name})
         elif route == "/api/export":
-            doc = workspace.open(name)
-            document = data.get("document", doc.document)
-            formats = list(data.get("formats") or [])
-            # One part of the document, exported by itself (a figure on a slide).
-            part = data.get("part")
-            if part is not None and getattr(doc.kind, "export_part", None) is None:
-                self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
-                return
-            with workspace.drawing, workspace.running():
-                if part is not None:
-                    written = doc.kind.export_part(
-                        document, doc.path.parent, doc.path.stem, part, formats
-                    )
-                else:
-                    written = doc.kind.export(document, doc.path.parent, doc.path.stem, formats)
-            self._json({"files": [workspace.relative(file) for file in written]})
+            self._export(workspace.open(name), data)
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
             # connected, renamed): the kind answers with the document as it would be.
@@ -305,7 +336,22 @@ class Handler(BaseHTTPRequestHandler):
             workspace.trust()
             self._json({"ok": True})
         elif route == "/api/presence":
-            workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
+            file, where, doing = data.get("file"), data.get("where"), data.get("doing")
+            workspace.set_presence(who, file, where, doing, str(data.get("client") or ""))
+            self._json({"ok": True})
+        elif route == "/api/leave":
+            workspace.depart(str(data.get("client") or ""))
+            self._json({"ok": True})
+        elif route == "/api/kept":
+            # What a page's own merge kept against its person's change (an object they
+            # deleted that another was typing in): told to the others' pages, as the studio's
+            # merges are told (Doc._tell), so the one typing hears of it too.
+            items = [item for item in data.get("items") or [] if isinstance(item, dict | str)]
+            notes = [{"kept": item, "by": who, "to": None} for item in items[:20]]
+            if notes:
+                file, client = str(data.get("file") or ""), str(data.get("client") or "")
+                said = {"type": "merged", "file": file, "client": client, "notes": notes}
+                workspace.broadcast(said)
             self._json({"ok": True})
         elif route == "/api/agent/call":
             tools = _agent_tools(workspace, data.get("who") or {})
@@ -363,6 +409,11 @@ class Handler(BaseHTTPRequestHandler):
         return {"files": found[:500]}
 
     def _upload(self, name: str, filename: str, data: bytes) -> dict[str, Any]:
+        # A file dropped from the document's own folder is used where it is, not copied.
+        beside = self.workspace.path(name).parent / Path(filename).name
+        if beside.is_file() and beside.read_bytes() == data:
+            self.workspace.relative(beside)
+            return {"path": beside.name}
         folder = self.workspace.path(name).parent / "assets"
         clean = (
             "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ").strip()
@@ -374,9 +425,108 @@ class Handler(BaseHTTPRequestHandler):
         while target.exists() and target.read_bytes() != data:
             count += 1
             target = target.with_name(f"{stem}-{count}{suffix}")
+        if not target.exists():
+            # A copy of this studio's making: taken away again if, when it closes, no
+            # document uses it (Workspace.tidy_uploads).
+            self.workspace.uploads.add(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return {"path": target.relative_to(self.workspace.path(name).parent).as_posix()}
+
+    def _export(self, doc: Any, data: dict[str, Any]) -> None:
+        """A document's outputs, written into ``build/`` beside it, as agents and the CLI
+        have them; or made aside, for the page to hand to its person (``deliver``):
+        ``"download"`` answers with the file itself, or a zip of several, and ``"staged"``
+        with where the file, or a folder of several, was made, for the Mac app to move
+        where its person says. ``options`` go to the kind's export as far as it takes
+        them (a deck's ``steps``)."""
+
+        import inspect
+        import shutil
+        import tempfile
+
+        workspace = self.workspace
+        document = data.get("document", doc.document)
+        formats = list(data.get("formats") or [])
+        deliver = data.get("deliver") or "build"
+        if deliver not in {"build", "download", "staged"}:
+            raise ValueError(f"An export is delivered to build, download or staged, not {deliver}.")
+        # One part of the document, exported by itself (a figure on a slide).
+        part = data.get("part")
+        write = doc.kind.export if part is None else getattr(doc.kind, "export_part", None)
+        if write is None:
+            self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
+            return
+        takes = inspect.signature(write).parameters
+        extra = {key: value for key, value in (data.get("options") or {}).items()
+                 if key in takes and key != "into"}
+        aside = None if deliver == "build" else Path(tempfile.mkdtemp(prefix="flexo-export-"))
+        into = aside / "files" if aside is not None else None
+        if into is not None and "into" in takes:
+            extra["into"] = into
+        given = (document, doc.path.parent, doc.path.stem, *([] if part is None else [part]))
+        try:
+            with workspace.drawing, workspace.running():
+                # What the export left out and says so (a figure that can't be drawn, left an
+                # empty box): told to the page with what was made.
+                doc.kind.export_notes = []
+                written = write(*given, formats, **extra)
+                notes = [str(note) for note in getattr(doc.kind, "export_notes", None) or []]
+            if into is None:
+                files = [workspace.relative(file) for file in written]
+                self._json({"files": files, "notes": notes})
+                return
+            if "into" not in takes:  # a kind that writes into build/ alone: its files, copied
+                into.mkdir(parents=True, exist_ok=True)
+                for file in written:
+                    shutil.copy2(file, into / Path(file).name)
+            made = _made(into, doc.path.stem)
+            if deliver == "staged":
+                self._json(
+                    {"path": str(made), "name": made.name, "folder": made.is_dir(), "notes": notes}
+                )
+                aside = None  # the Mac app moves it, and clears the rest away
+                return
+            self._attachment(made, aside, notes)
+        finally:
+            if aside is not None:
+                shutil.rmtree(aside, ignore_errors=True)
+
+    def _attachment(
+        self, made: Path, aside: Path | None = None, notes: list[str] | None = None
+    ) -> None:
+        """A file made aside, as a download: itself, or a folder of several as a zip. Read,
+        what was made `aside` is cleared away before it is sent, so nothing is left once the
+        download has come."""
+
+        import io
+        import shutil
+        import zipfile
+
+        if made.is_dir():
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                for file in sorted(made.rglob("*")):
+                    if file.is_file():
+                        archive.write(file, file.relative_to(made).as_posix())
+            data, name, kind = buffer.getvalue(), f"{made.name}.zip", "application/zip"
+        else:
+            data, name = made.read_bytes(), made.name
+            kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if aside is not None:
+            shutil.rmtree(aside, ignore_errors=True)
+        plain = name.encode("ascii", "replace").decode("ascii").replace('"', "'")
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        disposition = f"attachment; filename=\"{plain}\"; filename*=UTF-8''{quote(name)}"
+        self.send_header("Content-Disposition", disposition)
+        if notes:
+            self.send_header("X-Flexo-Notes", quote(json.dumps(notes)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _raw(self, query: dict[str, list[str]]) -> None:
         """A file in the folder, named from a document's own folder (a picture a slide
@@ -404,10 +554,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _events(self, client: str, name: str) -> None:
-        """Server-sent events: everything that happens in the workspace, as it happens."""
+    def _events(self, client: str, name: str, person: str = "") -> None:
+        """Server-sent events: everything that happens in the workspace, as it happens,
+        to one window (``client``) of a ``person``."""
 
-        who = {"id": client, "name": name, "kind": "person"}
+        who = {"id": person or client, "name": name, "kind": "person"}
         listener = self.workspace.listen(client, who)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -415,24 +566,49 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
-            self.wfile.write(b"event: hello\ndata: {}\n\n")
+            # Who is here, as the studio knows it now: a window back after the studio was
+            # started again shows no one gone meanwhile (presence is sent only as it changes).
+            here = {"presence": self.workspace.present()}
+            hello = json.dumps(here, ensure_ascii=False, default=str)
+            # Lost (the studio started again), a window tries again within half a second, not
+            # the browser's three: its edits held meanwhile are said to be saved as soon as
+            # they are.
+            self.wfile.write(f"retry: 500\nevent: hello\ndata: {hello}\n\n".encode())
             self.wfile.flush()
+            quiet = time.monotonic()
             while True:
                 try:
-                    event = listener.events.get(timeout=15)
+                    event = listener.events.get(timeout=HANG_UP_CHECK)
                 except queue.Empty:
-                    self.wfile.write(b": still here\n\n")
-                    self.wfile.flush()
+                    # A window gone without a word (crashed, killed) has closed its end:
+                    # seen in a moment, not at the next heartbeat that fails.
+                    if self._hung_up():
+                        return
+                    if time.monotonic() - quiet >= 15:
+                        quiet = time.monotonic()
+                        self.wfile.write(b": still here\n\n")
+                        self.wfile.flush()
                     continue
                 if event is None:
                     return
+                quiet = time.monotonic()
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 self.wfile.write(f"data: {payload}\n\n".encode())
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             return
         finally:
-            self.workspace.leave(listener)
+            # A moment's break (the page reconnecting) does not make its person flicker out.
+            self.workspace.leave(listener, grace=LEAVE_GRACE)
+
+    def _hung_up(self) -> bool:
+        """Whether the page has closed its end of this connection (it sends nothing else)."""
+
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (OSError, ValueError):
+            return True
 
 
 def _one(query: dict[str, list[str]], key: str) -> str:
@@ -443,9 +619,24 @@ def _one(query: dict[str, list[str]], key: str) -> str:
 
 
 def _person(data: dict[str, Any]) -> dict[str, Any]:
+    """Who made a call: the person (one in every window they have open), else the window."""
+
     who = data.get("who") or {}
-    client = str(data.get("client") or who.get("id") or "someone")
-    return {"id": client, "name": str(who.get("name") or "You"), "kind": "person"}
+    person = str(who.get("id") or data.get("client") or "someone")
+    # Unnamed, a person has no name: each page calls them You to themselves, Someone to others.
+    return {"id": person, "name": str(who.get("name") or ""), "kind": "person"}
+
+
+def _made(into: Path, stem: str) -> Path:
+    """What an export made in ``into`` comes to: its one file or folder, or, of several,
+    the folder holding them, named ``stem``."""
+
+    made = sorted(into.iterdir()) if into.is_dir() else []
+    if not made:
+        raise ValueError("Nothing was exported.")
+    if len(made) == 1:
+        return made[0]
+    return into.rename(into.with_name(stem))
 
 
 _AGENTS: dict[tuple[int, str], Any] = {}
@@ -497,6 +688,10 @@ def start(
     workspace = Workspace(folder, kind=kind, trusted=trusted, offered=offered)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
     server = Server(("127.0.0.1", port), handler)
+    if port:
+        # On a port of its own choosing, a studio started again keeps its token: a page
+        # left open on it goes on where it was.
+        workspace.token = sessions.kept_token(folder, port, workspace.token)
     workspace.address = f"http://127.0.0.1:{server.server_address[1]}/"  # type: ignore[attr-defined]
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]
@@ -520,6 +715,10 @@ def serve(
     print(f"  folder {workspace.root} (Ctrl+C to stop)")
     print("  agents join with: claude mcp add flexo-studio -- flexo studio mcp")
     sys.stdout.flush()
+    # Stopped as Ctrl+C stops it (a `kill`, a session ending): edits it has taken that are
+    # not yet in their files are written first.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _interrupted)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -528,6 +727,11 @@ def serve(
         workspace.close()
         sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
+
+
+def _interrupted(signum: int, frame: object) -> None:
+    signal.signal(signum, signal.SIG_DFL)  # asked again, it stops at once
+    raise KeyboardInterrupt
 
 
 def main(argv: Sequence[str] | None = None, *, kind: str | None = None) -> int:

@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cache
@@ -205,6 +206,9 @@ class _Registry:
         self._environment_loaded = False
         self._system_loaded = False
         self._registered_directories: list[Path] = []
+        # Two drawings at once (two windows of the studio, as it starts) fill it once: the
+        # second waits for the first, not finding it empty and every family missing.
+        self._lock = threading.RLock()
 
     def _add(self, records: Iterable[dict[str, object]]) -> set[str]:
         added: set[str] = set()
@@ -221,25 +225,34 @@ class _Registry:
     def _ensure_bundled(self) -> None:
         if self._bundled_loaded:
             return
-        self._bundled_loaded = True
-        directory = _bundled_directory()
-        for source in sorted(directory.iterdir()):
-            if source.suffix.lower() in FONT_SUFFIXES:
-                self._add(_scan_file(source, bundled=True))
+        with self._lock:
+            if self._bundled_loaded:
+                return
+            directory = _bundled_directory()
+            for source in sorted(directory.iterdir()):
+                if source.suffix.lower() in FONT_SUFFIXES:
+                    self._add(_scan_file(source, bundled=True))
+            self._bundled_loaded = True
 
     def _ensure_environment(self) -> None:
         if self._environment_loaded:
             return
-        self._environment_loaded = True
-        for entry in os.environ.get("FLEXO_FONT_PATH", "").split(os.pathsep):
-            if entry:
-                self.register(Path(entry).expanduser())
+        with self._lock:
+            if self._environment_loaded:
+                return
+            for entry in os.environ.get("FLEXO_FONT_PATH", "").split(os.pathsep):
+                if entry:
+                    self.register(Path(entry).expanduser())
+            self._environment_loaded = True
 
     def _ensure_system(self) -> None:
         if self._system_loaded:
             return
-        self._system_loaded = True
-        self._add(_system_records())
+        with self._lock:
+            if self._system_loaded:
+                return
+            self._add(_system_records())
+            self._system_loaded = True
 
     def register(self, source: Path) -> tuple[str, ...]:
         self._ensure_bundled()

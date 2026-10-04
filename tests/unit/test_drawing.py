@@ -125,3 +125,18 @@ def test_a_plotting_library_svg_is_read() -> None:
     # Absolutely placed tspans are one line; the lowered one is a script.
     runs = maths.lines[0].runs
     assert [r.text for r in runs] == ["L", "t"] and runs[1].italic and runs[1].baseline == 97.0
+
+
+def test_a_regulation_head_is_read_by_its_name_whatever_the_page_puts_before_its_id() -> None:
+    from flexo.builder import Figure
+
+    with Figure("regulated") as figure:
+        repressor = figure.block("a", label="cI")
+        figure.connect(repressor, figure.block("b", label="cro"), head="inhibition")
+    svg = compile_figure(figure.spec).document.text
+    # As a slide sets a figure: every id under the slide's own.
+    svg = svg.replace('id="', 'id="slide7.body.0.').replace("url(#", "url(#slide7.body.0.")
+    lines = [item for item in read_drawing(svg).walk() if isinstance(item, Shape)]
+    heads = [head.shape for line in lines for head in line.arrowheads]
+    # A bar (it represses) is not an open arrowhead (it activates) to a writer reading it.
+    assert heads == ["inhibition"]

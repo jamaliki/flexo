@@ -64,8 +64,9 @@ def test_a_regulation_head_touches_its_target() -> None:
         dy = max(target.top - y, 0.0, y - target.bottom)
         return (dx * dx + dy * dy) ** 0.5
 
-    # The bar stands on the target's edge, not a standoff short of it.
-    assert min(gap(x, y) for x, y in reach) < 1.0
+    # The bar stands at the target's edge, not a standoff short of it -- a hair off it, so it
+    # reads as a bar, not a thick stretch of the edge.
+    assert 0.3 < min(gap(x, y) for x, y in reach) < 3.0
 
 
 def test_a_reversible_step_is_two_harpoons_with_a_rate_constant_each_side() -> None:

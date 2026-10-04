@@ -835,6 +835,14 @@ class _Parser:
             ):
                 prime += "".join(item.char for item in argument)  # y^{\prime}, as y'
                 continue
+            if token.value == "^" and [getattr(item, "char", None) for item in argument] in (
+                ["∘"],
+                ["°"],
+            ):
+                # ``^\circ`` is a degree: the degree sign, which stands high of itself, follows
+                # its letter as a prime does, not a ring operator made small and raised.
+                prime += "°"
+                continue
             if token.value == "^":
                 if sup is not None:
                     self.said("a symbol has two superscripts: group them, as x^{a b}")
@@ -1996,6 +2004,23 @@ class _Layout:
 
     # -- glyphs --
 
+    def minus(self, face: Face, gid: int, size: float) -> Box | None:
+        """A text face's minus drawn as long as its plus's bar, as a maths font's is: a face
+        for words often draws it shorter (Figtree's is five-sixths of its plus), and it then
+        reads as a hyphen beside a plus. None where it is as long already."""
+
+        plus = face.glyph("+")
+        if plus is None:
+            return None
+        left, right, _, _ = face.extents(plus)
+        own_left, own_right, bottom, top = face.extents(gid)
+        if right - left <= own_right - own_left + 0.01 or top <= bottom:
+            return None
+        box = Box(max(face.advance(gid), face.advance(plus)) * size, top * size, 0.0, single=True)
+        bar = RuleItem((right - left) * size, (top - bottom) * size)
+        box.items.append((left * size, bottom * size, bar))
+        return box
+
     def glyph(self, face: Face, gid: int, size: float, slant: bool = False) -> Box:
         left, right, bottom, top = face.extents(gid)
         advance = face.advance(gid)
@@ -2062,6 +2087,8 @@ class _Layout:
             face, slant = self.fonts.text_face(char, False, _REGULAR)
             gid = face.glyph(char)
             if gid is not None and not face.has_math:
+                if char == "−" and (minus := self.minus(face, gid, size)) is not None:
+                    return minus
                 return self.glyph(face, gid, size)
         # Operators, relations, delimiters and the rest: the maths font's, which grow.
         box = self.maths_glyph(char, style)
@@ -3062,6 +3089,136 @@ def breakable(source: str) -> tuple[str, ...]:
             continue
         pieces[-1] += raw
     return tuple(piece for piece in pieces if piece.strip())
+
+
+_RAISED = dict(zip("0123456789+−=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ", strict=True))
+_LOWERED = dict(
+    zip("0123456789+−=()aeoxhijklmnprstuv", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕᵢⱼₖₗₘₙₚᵣₛₜᵤᵥ", strict=True)
+)
+
+
+@lru_cache(maxsize=1024)
+def linear(source: str) -> str:
+    """A formula as one line of plain text: what it reads as where there are only words
+    -- a search, a screen reader, the words under a drawn formula in a PDF. A fraction is
+    set with a solidus, a script raised or lowered in Unicode where it has the characters
+    (``x²``, ``Na⁺``), else after a caret or an underscore (``x_in``)::
+
+        \\frac{a+b}{2}  ->  (a + b)/2
+    """
+
+    items, _ = parse(source.removeprefix("\\displaystyle").strip())
+    return " ".join(_linear(items).split()).replace("( ", "(").replace(" )", ")")
+
+
+def _linear(items: list) -> str:
+    said, before = [], None
+    for item in items:
+        kind = item.kind if isinstance(item, Sym) else None
+        if kind == BIN and before in (None, BIN, REL, OPEN, PUNCT):
+            said.append(item.char)  # a sign, not an operation, as in -x
+            before = ORD
+            continue
+        piece = _linear_one(item)
+        if said and _RUNS_ON.search(said[-1]) and piece[:1].isalnum():
+            piece = f" {piece}"  # a script after its mark is apart from a letter after it: k_B p
+        said.append(piece)
+        before = kind if kind is not None else ORD
+    return "".join(said)
+
+
+_RUNS_ON = re.compile(r"[_^]\w+$")
+"""A script said after its mark, which a letter or digit after it would read as part of."""
+
+
+def _grouped(items: list) -> str:
+    """Items in parentheses when an operation joins them (``(a + b)``, not ``(2)``), or when
+    more than letters stand side by side (``1/(k₂[Z]₀)``, which would read as ``(1/k₂)[Z]₀``;
+    ``dp/dt`` as it is)."""
+
+    said = " ".join(_linear(items).split())
+    parts = [item for item in items if not isinstance(item, Space)]
+    plain = all(
+        isinstance(part, Sym) and (part.char.isalnum() or part.char in "!′") for part in parts
+    )
+    return f"({said})" if " " in said or "/" in said or (len(parts) > 1 and not plain) else said
+
+
+def _scripted_text(items: list, forms: dict[str, str], mark: str) -> str:
+    return scripted(_linear(items), raised=mark == "^")
+
+
+_FIGURES = frozenset("0123456789+−=()")
+"""What a script is said in Unicode's raised or lowered characters when it is made of
+nothing else: digits and signs, which every font has (``x²``, ``Na⁺``, ``k₁``)."""
+
+
+def scripted(words: str, *, raised: bool) -> str:
+    """A superscript or subscript as it reads in a line of plain text -- one rule wherever
+    one is read: a formula's words (``linear``), and a script set in a line of words in a
+    PDF. Digits and signs are raised or lowered in Unicode (``x²``, ``Na⁺``, ``k₁``);
+    anything else follows a caret or an underscore (``k_auto``, ``x^T``), in parentheses
+    where it is more than a word (``e^(−x)``)."""
+
+    said = " ".join(words.split()).replace("-", "−")
+    forms = _RAISED if raised else _LOWERED
+    if not said:
+        return ""
+    if all(character in _FIGURES for character in said):
+        return "".join(forms[character] for character in said)
+    mark = "^" if raised else "_"
+    return f"{mark}{said}" if len(said) <= 1 or said.isalnum() else f"{mark}({said})"
+
+
+def _linear_one(item: object) -> str:
+    if isinstance(item, Sym):
+        if item.kind in (BIN, REL):
+            return f" {item.char} "
+        return f"{item.char} " if item.kind == PUNCT else item.char
+    if isinstance(item, Text | Mistake):
+        return item.words
+    if isinstance(item, Group | Classed | Coloured | Boxed):
+        return _linear(item.body if not isinstance(item, Group) else item.items)
+    if isinstance(item, Scripts):
+        base = _linear_one(item.base) + item.prime
+        lower = _scripted_text(item.sub, _LOWERED, "_") if item.sub else ""
+        upper = _scripted_text(item.sup, _RAISED, "^") if item.sup else ""
+        # A big operator's limits are followed by what it acts on: ∑ᵢ xᵢ.
+        after = " " if isinstance(item.base, Operator) and not item.base.named else ""
+        return base + lower + upper + after
+    if isinstance(item, Operator):
+        if item.body is not None:
+            return f" {_linear(item.body)} "
+        return f" {item.symbol} " if item.named else item.symbol
+    if isinstance(item, Fraction):
+        if not item.rule:
+            return f"{item.left}{_linear(item.numerator)}, {_linear(item.denominator)}{item.right}"
+        return f"{item.left}{_grouped(item.numerator)}/{_grouped(item.denominator)}{item.right}"
+    if isinstance(item, Radical):
+        root = {"2": "√", "3": "∛", "4": "∜"}.get(_linear(item.degree) if item.degree else "2")
+        return (root or f"{_grouped(item.degree)}√") + _grouped(item.body)
+    if isinstance(item, Fenced):
+        left, right = (mark if mark != "." else "" for mark in (item.left, item.right))
+        return f"{left}{_linear(item.body)}{right}"
+    if isinstance(item, Middle | Big):
+        return item.delimiter
+    if isinstance(item, Accent):
+        said = _linear(item.body)
+        return said + item.mark if len(said) == 1 else said
+    if isinstance(item, Line | Brace | Stack):
+        return _linear(item.base if isinstance(item, Stack) else item.body)
+    if isinstance(item, Arrow):
+        return f" {item.char} " if item.body is None else _linear(item.body)
+    if isinstance(item, Array):
+        rows = "; ".join(", ".join(_linear(cell).strip() for cell in row) for row in item.rows)
+        return f"{item.left}{rows}{item.right}"
+    if isinstance(item, Space):
+        return " " if item.em >= 0.15 else ""
+    if isinstance(item, Phantom):
+        return _linear(item.body) if item.shown else ""
+    if isinstance(item, Negated):
+        return _linear_one(item.body) + "\u0338"
+    return ""
 
 
 @lru_cache(maxsize=4096)

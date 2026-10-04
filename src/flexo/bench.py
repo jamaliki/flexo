@@ -408,8 +408,12 @@ def timeline_moments(node: NodeSpec) -> tuple[tuple[_Moment, ...], tuple[_Moment
             raise _fail(node, "time", f"{where} needs a start and an end.")
         start = _number(node, record.get("start"), where)
         end = _number(node, record.get("end"), where)
-        if end <= start:
+        if end < start:
             raise _fail(node, "time", f"{where} ends ({end:g}) before it starts ({start:g}).")
+        if end == start:
+            raise _fail(
+                node, "time", f"{where} ends where it starts ({start:g}): it needs a later end."
+            )
         label = parse_label(str(record.get("label", "")))
         spans.append(_Moment(label, start, end, _tone(label, record.get("tone"))))
     if not events and not spans:
@@ -461,8 +465,17 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         step = 1.0  # whole days stay whole: no "Day 0.5" between them
     first = math.floor(low / step) * step
     last = math.ceil(high / step) * step
-    width = float(node.property("length") or 0) or max(
-        24.0 * u, min(40.0 * u, 3.2 * u * (last - first) / step)
+    # As wide as asked (``length``, in points) or as its times need -- but never so short
+    # that its times overprint one another: each has room beside the next.
+    ticks = round((last - first) / step) + 1
+    widest = max(
+        measures.measure((TextRun(_time_text(first + index * step, unit)),), small=True).width
+        for index in range(ticks)
+    )
+    width = max(
+        float(node.property("length") or 0)
+        or max(24.0 * u, min(40.0 * u, 3.2 * u * (last - first) / step)),
+        (ticks - 1) * (widest + 0.6 * u),
     )
     pad = 0.25 * u
     title = (
@@ -577,48 +590,94 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         )
         if item.id is not None:
             ports.append((item.id, x))
-    # Spans under the times, in lanes where they overlap.
+    # Spans under the times, in lanes where they overlap: by the spans themselves -- spans
+    # that only touch (one ends as the next starts) share a lane, a hair apart. A span too
+    # narrow for its words has them after it, where its lane is free that far; else under
+    # it, its lane made room for them, never another lane for the span.
     lane_height = 1.5 * u
+    bar = 1.05 * u
     lanes: list[float] = []
-    y0 = below_axis + 0.5 * u
-    bottom = below_axis
+    placed_spans: list[tuple] = []
     for index, item in enumerate(sorted(spans, key=lambda moment: moment.start), 1):
         x1, x2 = x_of(item.start), x_of(item.end)
         metrics = measures.measure(item.label, small=True) if item.label else None
         inside = metrics is not None and metrics.width + 0.6 * u <= x2 - x1
-        reach = x2 if inside or metrics is None else x2 + 0.3 * u + metrics.width
-        lane = next((i for i, end in enumerate(lanes) if x1 >= end + 0.3 * u), None)
+        lane = next((i for i, end in enumerate(lanes) if x1 >= end - 1e-6), None)
+        start = x1
         if lane is None:
-            lanes.append(reach)
+            lanes.append(x2)
             lane = len(lanes) - 1
         else:
-            lanes[lane] = reach
-        y = y0 + lane * lane_height
-        bar = 1.05 * u
+            if x1 < lanes[lane] + 0.3 * u:
+                start = min(x1 + 0.15 * u, (x1 + x2) / 2.0)
+            lanes[lane] = x2
+        placed_spans.append((index, item, x1, x2, start, lane, metrics, inside))
+    # Where each outside label goes: after its span, should its lane be free that far.
+    beside: dict[int, bool] = {}
+    reach = list(lanes)
+    for index, _, _, x2, _, lane, metrics, inside in placed_spans:
+        if metrics is None or inside:
+            continue
+        following = [
+            other[2]
+            for other in placed_spans
+            if other[5] == lane and other[2] >= x2 - 1e-6 and other[0] != index
+        ]
+        far = x2 + 0.3 * u + metrics.width
+        beside[index] = not following or min(following) >= far + 0.3 * u
+        if beside[index]:
+            reach[lane] = max(reach[lane], far)
+    below = [
+        max(
+            [
+                metrics.height + 0.2 * u
+                for index, _, _, _, _, lane, metrics, inside in placed_spans
+                if lane == at and metrics is not None and not inside and not beside.get(index, True)
+            ],
+            default=0.0,
+        )
+        for at in range(len(lanes))
+    ]
+    tops = []
+    y = below_axis + 0.5 * u
+    for at in range(len(lanes)):
+        tops.append(y)
+        y += lane_height + below[at]
+    bottom = below_axis
+    for index, item, x1, x2, start, lane, metrics, inside in placed_spans:
+        y = tops[lane]
         shapes.append(
             Shape(
                 f"{node.id}.span{index}",
-                _bar(x1, y, x2 - x1, bar),
+                _bar(start, y, x2 - start, bar),
                 "body" if item.tone else "solid",
                 item.tone,
                 pen,
             )
         )
-        if metrics is not None:
-            words.append(
-                Words(
-                    f"{node.id}.span{index}.label",
-                    item.label,
-                    metrics,
-                    (x1 + x2) / 2.0 if inside else x2 + 0.3 * u,
-                    y + bar / 2.0 - metrics.height / 2.0 + metrics.baseline,
-                    anchor="middle" if inside else "start",
-                    size=measures.small_size,
-                    role="tone-ink" if inside and item.tone else "ink",
-                    tone=item.tone if inside else None,
-                )
-            )
         bottom = max(bottom, y + bar)
+        if metrics is None:
+            continue
+        after = not inside and beside.get(index, True)
+        under = not inside and not after
+        words.append(
+            Words(
+                f"{node.id}.span{index}.label",
+                item.label,
+                metrics,
+                x2 + 0.3 * u if after else (x1 + x2) / 2.0,
+                (y + bar + 0.2 * u + metrics.baseline)
+                if under
+                else y + bar / 2.0 - metrics.height / 2.0 + metrics.baseline,
+                anchor="start" if after else "middle",
+                size=measures.small_size,
+                role="tone-ink" if inside and item.tone else "ink",
+                tone=item.tone if inside else None,
+            )
+        )
+        if under:
+            bottom = max(bottom, y + bar + 0.2 * u + metrics.height)
+    lanes = reach
     right = max([x_of(last) + 0.3 * u] + lanes + [n.x + n.metrics.width / 2.0 for n in names])
     if title is not None:
         words.append(
@@ -633,6 +692,20 @@ def timeline_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
             )
         )
         right = max(right, pad + title.width)
+    # Its names as they are read: the moments and spans in time order (a moment before a span
+    # starting at it), then the times along the axis.
+    when = {
+        f"{node.id}.event{index}.label": (item.start, 0) for index, item in enumerate(events, 1)
+    }
+    when |= {
+        f"{node.id}.span{index}.label": (item.start, 1)
+        for index, item in enumerate(sorted(spans, key=lambda moment: moment.start), 1)
+    }
+    read = [
+        (item.id not in when, when.get(item.id, (0.0, 0)), at, item)
+        for at, item in enumerate(words)
+    ]
+    words = [item for *_, item in sorted(read)]
     size = Size(right + pad + 0.4 * u, bottom + pad)
     placed = [
         PortSpec("input", Side.WEST, axis / size.height),

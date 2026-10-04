@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from dataclasses import replace
 
 import pytest
@@ -31,7 +32,7 @@ from flexo.routing.ink import (
     rail_label_position,
     shorten_start,
 )
-from flexo.style import STYLES
+from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
@@ -779,6 +780,48 @@ def test_the_panel_b_formulas_clear_both_their_run_and_their_riser() -> None:
             )
 
 
+def test_a_decisions_answers_sit_by_it_and_clear_of_every_box() -> None:
+    from flexo.orient import wrapped
+    from flexo.routing.labels import TOUCH, label_box
+
+    with Figure("assay") as figure, figure.row("steps") as row:
+        purify = row.terminal("purify", label="Purify CA")
+        mix = row.block("mix", label="Mix CA with IP6", input=purify)
+        stain = row.block("stain", label="Negative-stain EM", input=mix)
+        check = row.decision("check", label="Tubes formed?", input=stain)
+        grids = row.terminal("grids", label="Cryo-EM grids")
+        movies = row.block("movies", label="Collect movies", input=grids)
+        motion = row.block("motion", label="Motion correction", input=movies)
+        row.block("refine", label="3D refinement", input=motion)
+        figure.connect(check, grids, label="yes")
+        figure.connect(check, mix, label="no")
+    # Folded with its second line run on, "yes" runs the width of the figure back to it.
+    compiled = compile_figure(wrapped(figure.spec, back=False))
+    nodes = compiled.fitted.nodes
+    boxes = [node.bounds for node in nodes if node.measured.spec.kind != "decision"]
+    decision = next(node.bounds for node in nodes if node.measured.spec.id == "steps.check")
+    captions = {
+        edge.spec.label[0].text: label_box(edge.label_position, edge.label_metrics)
+        for edge in compiled.routed.edges
+        if edge.label_metrics is not None
+    }
+    # "yes" by the corner of the diamond it leaves, not a line's length away; and no
+    # caption touching a box.
+    assert _rect_gap(captions["yes"], decision) < 4.0
+    for caption in captions.values():
+        assert min(_rect_gap(caption, box) for box in boxes) >= TOUCH - 1e-6
+    # Run back, as a fold runs, "yes" is a short step down: its caption still sits nearer
+    # where it leaves the question than where it arrives, and touches no box.
+    compiled = compile_figure(wrapped(figure.spec))
+    boxes = [node.bounds for node in compiled.fitted.nodes if node.measured.spec.kind != "decision"]
+    yes = next(edge for edge in compiled.routed.edges if edge.spec.target.node_id == "steps.grids")
+    caption = label_box(yes.label_position, yes.label_metrics).center
+    start, end = yes.centerline[0], yes.centerline[-1]
+    assert caption.distance_to(start) < caption.distance_to(end)
+    box = label_box(yes.label_position, yes.label_metrics)
+    assert min(_rect_gap(box, other) for other in boxes) >= TOUCH - 1e-6
+
+
 def _rect_gap(first: Rect, second: Rect) -> float:
     """Nearest distance between two axis-aligned rectangles, 0 if they touch."""
 
@@ -822,6 +865,50 @@ def _riser_merge_figure(**net_options: object) -> FigureSpec:
             ),
         ),
     )
+
+
+def test_an_arrowhead_stands_clear_of_the_line_leaving_its_side() -> None:
+    """A loop back into the side its forward line leaves: the head is not set by it."""
+
+    with Figure("assay") as figure, figure.row("steps") as row:
+        read = row.block("read", label="Read fluorescence every 30 s")
+        plateau = row.decision("plateau", label="Plateau reached?", input=read)
+        row.block("fit", label="Fit two-step model to F(t)", input=plateau)
+        figure.connect(plateau, read, label="no")
+    compiled = compile_figure(figure.spec)
+    style = LayoutStyle()
+    lines = {
+        (edge.spec.source.node_id, edge.spec.target.node_id): edge.centerline
+        for edge in compiled.routed.edges
+    }
+    forward = lines[("steps.read", "steps.plateau")]
+    back = lines[("steps.plateau", "steps.read")]
+    assert len({point.y for point in forward}) == 1
+    # Both on the east side of "Read", the head a lane and its own width from the line.
+    assert abs(back[-1].x - forward[0].x) < 1e-6
+    gap = abs(back[-1].y - forward[0].y)
+    assert gap >= style.port_spacing.points + style.arrow_width.points - 1e-6
+
+
+def test_the_same_two_parts_joined_twice_are_lines_side_by_side() -> None:
+    """Three lines from one part to another: three drawn, apart, the captioned one outside."""
+
+    with Figure("dup") as figure, figure.column("col") as col:
+        queue = col.block("queue", label="Queue")
+        worker = col.block("worker", label="Worker")
+        figure.connect(queue, worker)
+        figure.connect(queue, worker, label="retry")
+        figure.connect(queue, worker)
+    compiled = compile_figure(figure.spec)
+    style = LayoutStyle()
+    runs = {edge.spec.id: edge.centerline for edge in compiled.routed.edges}
+    across = sorted(line[0].x for line in runs.values())
+    assert len(set(across)) == 3
+    assert min(b - a for a, b in itertools.pairwise(across)) >= style.port_spacing.points - 1e-6
+    retry = next(edge for edge in compiled.routed.edges if edge.spec.label)
+    assert retry.centerline[0].x == max(across)
+    codes = [item.code for item in lint_compilation(compiled).diagnostics]
+    assert "routing.caption.covers-line" not in codes
 
 
 def test_an_unhinted_rail_sits_in_the_middle_of_its_corridor() -> None:
@@ -1253,3 +1340,54 @@ def test_a_search_past_its_ceiling_gives_up_and_a_repair_trial_with_it() -> None
     finally:
         ceiling(None)
     assert compile_figure(vertical_slice()).document.text  # no ceiling: routed in full
+
+
+def test_a_line_never_leaves_from_over_a_name_set_across_a_panel_top(tmp_path) -> None:
+    # A structure named over its panel, the shape it feeds straight above it: its line
+    # leaves from a side, not from the top its name is set across.
+    with Figure("titled") as figure:
+        column = figure.root.column("stack")
+        column.block("above", label="Above")
+        column.structure("model", tmp_path / "missing.cif", width=60, height=40, label="A model")
+        figure.connect("model", "above")
+    compiled = compile_figure(figure.spec)
+    (edge,) = compiled.routed.edges
+    nodes = compiled.fitted.nodes
+    (box,) = [node.bounds for node in nodes if node.measured.spec.id.endswith("model")]
+    start = edge.centerline[0]
+    assert start.y > box.top + 1.0, (start, box)
+
+
+def test_a_loop_back_goes_round_the_free_side_not_across_the_lines() -> None:
+    import yaml
+
+    from flexo.serialization import parse_figure
+
+    # "Keep running" back to "Sample": round the empty left, not through the middle across
+    # the decision's "No".
+    text = """
+figure: {id: loop}
+nodes:
+- {id: swim, kind: terminal, label: Swimming}
+- {id: sample, label: Sample attractant over 1 s}
+- {id: rising, kind: decision, label: 'Concentration rising?'}
+- {id: tumble, label: 'Tumble (CW), new heading'}
+- {id: keep, label: 'Keep running (CCW)'}
+- {id: turn, label: Random reorientation}
+edges:
+- {from: swim, to: sample}
+- {from: sample, to: rising}
+- {from: rising, to: keep, label: 'Yes'}
+- {from: rising, to: tumble, label: 'No'}
+- {from: tumble, to: turn}
+- {from: turn, to: swim}
+- {from: keep, to: sample}
+groups:
+- {id: root, layout: {kind: column, justify: center}, role: canvas,
+   children: [swim, sample, row, keep]}
+- {id: row, layout: {kind: row, align: center}, role: layout, children: [rising, column]}
+- {id: column, layout: {kind: column, align: center}, role: layout, children: [tumble, turn]}
+"""
+    compiled = compile_figure(parse_figure(yaml.safe_load(text)))
+    codes = [item.code for item in lint_compilation(compiled).diagnostics]
+    assert "routing.connector.crossing" not in codes, codes

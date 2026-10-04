@@ -4,11 +4,15 @@
 
 import { h, clear, icon, ui } from "./ui.js";
 
+// A document by its name, as its tab says it: "talk", not "talk.yaml".
+// (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
+const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+
 const SUGGESTIONS = {
   deck: ["Tighten the wording on this slide", "Add a slide that explains the method with a figure", "Make the whole deck shorter and punchier"],
-  figure: ["Group the encoder's parts", "Add a decoder after the encoder", "Label the arrows"],
+  figure: ["Group the encoder’s parts", "Add a decoder after the encoder", "Label the arrows"],
   theme: ["Make it quieter: fewer colours, thinner lines", "A dark version for talks", "Use a serif for titles"],
-  none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab's colours"],
+  none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab’s colours"],
 };
 
 export class AssistantPanel {
@@ -50,12 +54,13 @@ export class AssistantPanel {
     const session = this.workspace.active;
     const where = session?.where?.label;
     clear(this.contextChip, session && this.includeContext
-      ? h("span.context-pill", {}, icon("target"), `${session.file.split("/").pop()}${where ? ` · ${where}` : ""}`,
+      ? h("span.context-pill", {}, icon("target"), `${docName(session.file)}${where ? ` · ${where}` : ""}`,
         h("button", { type: "button", title: "Remove context", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
       : session ? h("button.context-add", { type: "button", onclick: () => { this.includeContext = true; this.renderContext(); } }, icon("plus"), "Add Context") : null);
   }
 
   async send(text = this.input.value.trim()) {
+    if (!this.state.available) return;
     if (this.state.running && !text) { this.stop(); return; }
     if (!text) return;
     this.input.value = "";
@@ -108,16 +113,25 @@ export class AssistantPanel {
   render() {
     const state = this.state;
     this.sendButton.title = state.running ? "Stop" : "Send (↩)";
+    // Where Claude can't be asked, nothing offers to send: the note above says why.
+    this.input.disabled = !state.available && !state.running;
+    this.sendButton.disabled = !state.available && !state.running;
+    this.input.placeholder = state.available || state.running ? "Ask Claude to make or change something…" : "Claude isn’t available here";
     clear(this.sendButton, icon(state.running ? "stop" : "send"));
     this.sendButton.classList.toggle("running", Boolean(state.running));
     this.sendButton.onclick = () => (state.running && !this.input.value.trim() ? this.stop() : this.send());
     this.turns.clear();
     if (!state.transcript.length) {
       const kind = this.workspace.active?.kind || "none";
+      // The Mac app comes with what Claude needs: a copy without it is told so in plain
+      // words, not given a command for Terminal.
+      const why = window.pywebview && /pip install/.test(state.why || "")
+        ? "Claude isn’t included in this copy of Flexo Studio. Download Flexo Studio again to ask Claude here." : state.why;
       clear(this.list, h("div.chat-empty", {},
         h("div.chat-hello", {}, h("span.claude-mark", {}, icon("sparkle")), h("div", {}, h("b", {}, "Claude"), h("div.hint-line", {}, "Works with you on the documents open here"))),
-        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, state.why || "Claude isn't available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
-        h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text)))));
+        state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || "Claude isn’t available here.", " You can still connect Claude Code. See ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
+        // What to ask: only where Claude can be asked.
+        state.available ? h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text))) : null));
       return;
     }
     clear(this.list, state.transcript.map((item) => this.itemView(item)),
@@ -127,7 +141,7 @@ export class AssistantPanel {
 
   itemView(item) {
     if (item.role === "user") {
-      const where = item.context?.file ? [item.context.file.split("/").pop(), item.context.where?.label].filter(Boolean).join(" · ") : "";
+      const where = item.context?.file ? [docName(item.context.file), item.context.where?.label].filter(Boolean).join(" · ") : "";
       return h("div.msg.user", {}, h("div.bubble", {}, item.text), where ? h("div.msg-context", {}, icon("target"), where) : null);
     }
     const node = h("div.msg.claude");

@@ -39,7 +39,13 @@ import copy
 import itertools
 from collections import defaultdict
 
-from flexo.components import CAPTION_KINDS, TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
+from flexo.components import (
+    CAPTION_KINDS,
+    TRANSPARENT_KINDS,
+    TRANSPARENT_ROLES,
+    route_clearance,
+    titled,
+)
 from flexo.geometry import Point, Rect, Side, segment_crosses_rect, segments
 from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -83,7 +89,9 @@ from flexo.routing.trees import (
     arrows_at_joins,
     dots_at_joins,
     edge_cuts,
+    net_reach_outlines,
     point_key,
+    reach_outlines,
     routed_edge,
     routed_net,
     straight_edge,
@@ -267,13 +275,14 @@ def route_figure(
             routed_edges[edge.id] = straight_edge(
                 edge, fitted, layout_style, text_measurer, offset=offset
             )
-    edges = [routed_edges[edge.id] for edge in semantic.edges]
-    nets = [routed_nets[net.id] for net in semantic.nets]
+    # Ink meets a drawn shape's outline, not the box round it.
+    edges = [reach_outlines(routed_edges[edge.id], fitted, layout_style) for edge in semantic.edges]
+    nets = [net_reach_outlines(routed_nets[net.id], fitted, layout_style) for net in semantic.nets]
     edges, nets = place_captions(
         edges,
         nets,
         solids=(
-            *(node.bounds for node in fitted.nodes),
+            *(rect for node in fitted.nodes for rect in caption_solids(node)),
             *(
                 rect
                 for group in fitted.groups
@@ -470,6 +479,19 @@ def _turn_crossing_ends(
             for port in end.node.measured.spec.ports
         )
     }
+    # A line back to a step before it (a loop) is first tried as a C round the rest, both
+    # ends turned at once, while there is time for it: by the time single ends have been
+    # turned, there may be none left -- and the loop drawn through the middle, across the
+    # lines there, with the side beside the figure empty.
+    looped = _on_cycles(members)
+    if best and looped and _within_budget():
+        improved, used = _try_loops(
+            attempt, separated, overrides, bundles, members, ends, free, sides, tried,
+            SIDE_TRIALS, spacing, best, only=looped,
+        )
+        trials = used - SIDE_TRIALS
+        if improved is not None:
+            sides, (pins, bundles, wires), best = improved
     while best and trials < SIDE_TRIALS and _within_budget():
         involved = {index for pair in best for index in pair}
         # A pin is one candidate: the ends that share it move together, or
@@ -493,6 +515,9 @@ def _turn_crossing_ends(
             group = pins_of[key]
             current = key[2]
             turns = [turn for turn in Side if turn.horizontal != current.horizontal]
+            if titled(ends[group[0]].node.measured.spec):
+                # (Never onto a top a name is set across.)
+                turns = [turn for turn in turns if turn is not Side.NORTH]
             if ends[group[0]].node.measured.spec.kind in POINT_KINDS:
                 # A circle's opposite side is as near as any: a skip into a sum
                 # from the left is as natural as from the right.
@@ -540,8 +565,49 @@ def _turn_crossing_ends(
     return pins, bundles, wires
 
 
+def _on_cycles(members) -> set[int]:
+    """The edges (by their index among ``members``) that close a loop: a line back to a
+    step whose lines lead on to where it starts (a decision's "try again")."""
+
+    onward: dict[str, set[str]] = defaultdict(set)
+    edges = [
+        (index, member.spec.source.node_id, member.spec.target.node_id)
+        for index, member in enumerate(members)
+        if isinstance(member.spec, EdgeSpec)
+    ]
+    for _, source, target in edges:
+        onward[source].add(target)
+
+    def reaches(start: str, goal: str) -> bool:
+        seen, stack = {start}, [start]
+        while stack:
+            at = stack.pop()
+            if at == goal:
+                return True
+            for following in onward[at] - seen:
+                seen.add(following)
+                stack.append(following)
+        return False
+
+    return {
+        index for index, source, target in edges if source != target and reaches(target, source)
+    }
+
+
 def _try_loops(
-    attempt, separated, overrides, bundles, members, ends, free, sides, tried, trials, spacing, best
+    attempt,
+    separated,
+    overrides,
+    bundles,
+    members,
+    ends,
+    free,
+    sides,
+    tried,
+    trials,
+    spacing,
+    best,
+    only=None,
 ):
     """Both ends of a defective edge on one side: the edge becomes a C round the rest.
 
@@ -556,7 +622,7 @@ def _try_loops(
     for index in sorted(involved):
         for member in bundles[index].members:
             spec = members[member].spec
-            if not isinstance(spec, EdgeSpec):
+            if not isinstance(spec, EdgeSpec) or (only is not None and member not in only):
                 continue
             first, second = members[member].ends
             if first not in free or second not in free:
@@ -565,6 +631,10 @@ def _try_loops(
             across = abs(there.x - here.x) >= abs(there.y - here.y)
             for side in (Side.NORTH, Side.SOUTH) if across else (Side.WEST, Side.EAST):
                 key = (first, second, side)
+                if side is Side.NORTH and any(
+                    titled(ends[end].node.measured.spec) for end in (first, second)
+                ):
+                    continue  # never onto a top a name is set across
                 if key in tried or trials >= SIDE_TRIALS + LOOP_TRIALS or not _within_budget():
                     continue
                 tried.add(key)
@@ -704,6 +774,26 @@ def _joined(a: Point, b: Point, c: Point, d: Point) -> tuple[Point, Point] | Non
         return None
     points = sorted((a, b, c, d), key=lambda point: point.x if horizontal else point.y)
     return points[0], points[-1]
+
+
+def caption_solids(node: FittedNode) -> tuple[Rect, ...]:
+    """What a caption must keep off of a component: its box -- or, for a decision's
+    diamond, the diamond in steps, so "yes" may sit in the corner beside where it starts."""
+
+    box = node.bounds
+    if node.measured.spec.kind != "decision":
+        return (box,)
+    steps = 6
+    bands = []
+    for index in range(steps):
+        # Each band as wide as the diamond at its edge nearer the middle.
+        near = min(abs(index - steps / 2.0), abs(index + 1 - steps / 2.0))
+        width = box.width * (1.0 - near / (steps / 2.0))
+        bands.append(
+            Rect(box.x + (box.width - width) / 2.0, box.y + box.height * index / steps,
+                 width, box.height / steps)
+        )
+    return tuple(bands)
 
 
 def _outline(bounds: Rect) -> tuple[Point, ...]:

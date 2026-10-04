@@ -54,6 +54,31 @@ def shorten_start(points: tuple[Point, ...], distance: float) -> tuple[Point, ..
     return (points[-1],)
 
 
+def stretch_end(points: tuple[Point, ...], distance: float) -> tuple[Point, ...]:
+    """Carry a polyline's last run on past its end, the way it was going."""
+
+    if len(points) < 2 or distance <= 0.0:
+        return points
+    end = points[-1]
+    # The way it was going: from the last point that is not the end itself.
+    previous = next(
+        (point for point in reversed(points[:-1]) if point.distance_to(end) > _EPSILON), None
+    )
+    if previous is None:
+        return points
+    ratio = distance / previous.distance_to(end)
+    return (
+        *points[:-1],
+        Point(end.x + (end.x - previous.x) * ratio, end.y + (end.y - previous.y) * ratio),
+    )
+
+
+def stretch_start(points: tuple[Point, ...], distance: float) -> tuple[Point, ...]:
+    """Carry a polyline's first run back past its start, the way it was coming."""
+
+    return stretch_end(points[::-1], distance)[::-1]
+
+
 def edge_shaft(
     centerline: tuple[Point, ...],
     *,

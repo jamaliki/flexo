@@ -1297,6 +1297,30 @@ def test_a_slide_stays_inside_its_parent_and_is_skipped_on_request() -> None:
 
 
 
+def test_a_line_back_to_a_part_does_not_slide_it_from_where_its_flow_put_it() -> None:
+    """A part alone in a row over a row of steps sits over the step it feeds; a line
+    drawn back to it from the last step straightens as well only by sliding it there,
+    which would move a part the edit did not touch."""
+
+    def cycle(back: bool) -> dict:
+        with Figure("cycle") as figure, figure.column("cycle") as root:
+            with root.row("top") as top:
+                start = top.block("start", label="Outward-open")
+            with root.row("steps") as steps:
+                first = steps.block("first", label="Occluded", input=start)
+                second = steps.block("second", label="Inward-open", input=first)
+                last = steps.decision("last", label="Sugar released?", input=second)
+            if back:
+                figure.connect(last, start, label="yes")
+        nodes = compile_figure(figure.spec).fitted.nodes
+        return {node.measured.spec.id: node.bounds for node in nodes}
+
+    for boxes in (cycle(False), cycle(True)):
+        start, first = boxes["cycle.top.start"], boxes["cycle.steps.first"]
+        assert start.x < first.center.x < start.right
+        assert start.right < boxes["cycle.steps.second"].x
+
+
 def test_a_box_widens_so_the_arrows_it_shares_a_side_with_meet_its_middle() -> None:
     """Three projections into one block: each leaves its own centre, runs straight,
     and lands within the central spread of a block widened to take them."""

@@ -2,7 +2,9 @@
 
 The studio's figure page builds its insert palette and its inspector from this
 catalogue, so a kind added to flexo is offered by adding an entry here -- the
-page has no form of its own for any kind. A field names the key it edits in the
+page has no form of its own for any kind. A part's ``words`` are what else people
+call it ("cylinder", "storage" and "DB" for a database), which the palette's search
+finds it by as well as by its title and hint. A field names the key it edits in the
 figure file (``label``, ``properties.length``, ``layout.gap``) and how it is
 edited:
 
@@ -18,15 +20,21 @@ edited:
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
   at a time by buttons, as one turns a molecule in a viewer.
 
+A ``records`` column is edited as a field of the same type is, or as a ``chain`` (one of
+the structure's chains, offered from a menu; residues and the like typed) or a ``colour``
+(a colour well, or one of ``options``, a tone, typed).
+
 A field may carry a ``default`` (what the kind does when the key is absent),
 ``more`` (shown folded away, under the rest, for those who look for it),
 ``show`` (``{"key": value}`` or ``{"key": [values]}``: shown only while another key
 has that value), and ``hint``. A ``records`` field's ``row`` is what a new row
-starts as; ``"+N"`` is the last row's value and N more.
+starts as; ``"+N"`` is the last row's value and N more, and ``"@chain"`` a chain of the
+structure's that no row names yet.
 """
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
@@ -107,6 +115,13 @@ def _column(name: str, label: str, type: str = "text", **options: Any) -> dict[s
     return {"name": name, "label": label, "type": type, **options}
 
 
+def _attach() -> dict[str, Any]:
+    """A row's name for lines to end at (a feature's, a part's): said as what it does."""
+
+    title = "A name lines are drawn to, to end at this one"
+    return _column("id", "Attach At", hint="a name", title=title)
+
+
 LABEL = _field("label", "Label", "markup")
 TONE = _field(
     "properties.tone",
@@ -171,17 +186,9 @@ def _genetics() -> list[dict[str, Any]]:
             "Construct",
             "Biology",
             "Genetic parts on a DNA backbone, drawn as SBOL glyphs",
-            {
-                "label": "Reporter",
-                "properties": {
-                    "parts": [
-                        {"type": "promoter", "label": "pTet"},
-                        {"type": "rbs", "label": "RBS"},
-                        {"type": "cds", "label": "GFP"},
-                        {"type": "terminator", "label": "T1"},
-                    ]
-                },
-            },
+            # One part with no name to start from (a construct of none can't be drawn), the
+            # rest its own to add: no example's drawn into a figure.
+            {"label": "Construct", "properties": {"parts": [{"type": "cds"}]}},
             [
                 _field(
                     "properties.parts",
@@ -194,7 +201,7 @@ def _genetics() -> list[dict[str, Any]]:
                         strand,
                         tone,
                         _column("bp", "Length", "integer", hint="In base pairs"),
-                        _column("id", "Port", hint="Name to connect lines to"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -211,18 +218,8 @@ def _genetics() -> list[dict[str, Any]]:
             "Plasmid",
             "Biology",
             "A circular plasmid map with features placed by base pair",
-            {
-                "label": "pExample",
-                "properties": {
-                    "length": 3000,
-                    "features": [
-                        {"type": "promoter", "label": "pLac", "start": 120, "end": 200},
-                        {"type": "cds", "label": "GFP", "start": 220, "end": 940},
-                        {"type": "origin", "label": "ColE1", "start": 1400, "end": 1990},
-                        {"type": "cds", "label": "AmpR", "start": 2100, "end": 2960, "strand": "-"},
-                    ],
-                },
-            },
+            # Its own features to be added: no example's drawn into a figure.
+            {"label": "Plasmid", "properties": {"length": 3000}},
             [
                 _field("properties.length", "Length (bp)", "integer", min=1),
                 _field(
@@ -267,25 +264,18 @@ def _proteins() -> list[dict[str, Any]]:
         "site",
         "disulfide",
     ]
-    kinds += sorted(set(FEATURE_TYPES) - set(kinds))
+    # Each kind once: another name for one offered already (TM, alpha helix) is read in a
+    # file, not offered again.
+    same = {"tm", "alpha-helix", "beta-strand", "signal-peptide"}
+    kinds += sorted(set(FEATURE_TYPES) - set(kinds) - same)
     return [
         _part(
             "protein",
             "Protein",
             "Biology",
             "Domains, sites and secondary structure along a protein",
-            {
-                "label": "Kinase",
-                "properties": {
-                    "length": 420,
-                    "features": [
-                        {"type": "domain", "label": "SH3", "start": 20, "end": 80},
-                        {"type": "domain", "label": "SH2", "start": 95, "end": 185},
-                        {"type": "domain", "label": "Kinase", "start": 220, "end": 400},
-                        {"type": "mutation", "label": "T315I", "at": 315},
-                    ],
-                },
-            },
+            # Its own domains and sites to be added: no example's drawn into a figure.
+            {"label": "Protein", "properties": {"length": 300}},
             [
                 _field("properties.length", "Length (Residues)", "integer", min=1),
                 _field(
@@ -294,13 +284,22 @@ def _proteins() -> list[dict[str, Any]]:
                     "records",
                     row={"type": "domain", "label": "Domain", "start": "+60", "end": "+60"},
                     columns=[
-                        _column("type", "Type", "choice", options=kinds),
+                        # A site is at one residue (At); the rest run from Start to End.
+                        _column(
+                            "type",
+                            "Type",
+                            "choice",
+                            options=kinds,
+                            points=sorted(
+                                kind for kind, drawn in FEATURE_TYPES.items() if drawn == "site"
+                            ),
+                        ),
                         _column("label", "Label"),
                         _column("start", "Start", "integer"),
                         _column("end", "End", "integer"),
                         _column("at", "At", "integer", hint="The residue of a single site"),
                         _column("tone", "Tone", "combo", options=list(TONES)),
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -314,7 +313,7 @@ def _proteins() -> list[dict[str, Any]]:
                         _column("start", "Start", "integer"),
                         _column("end", "End", "integer"),
                         _column("delete", "Deleted", hint="61-121"),
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -390,16 +389,8 @@ def _bench() -> list[dict[str, Any]]:
             "Plate",
             "Biology",
             "A multiwell plate with wells grouped by condition",
-            {
-                "label": "Plate layout",
-                "properties": {
-                    "wells": 96,
-                    "groups": [
-                        {"wells": "A1-A12", "label": "Control"},
-                        {"wells": "B-D", "label": "Treated"},
-                    ],
-                },
-            },
+            # Its own groups of wells to be added: no example's drawn into a figure.
+            {"label": "Plate", "properties": {"wells": 96}},
             [
                 _field("properties.wells", "Wells", "choice", options=sorted(PLATES)),
                 _field(
@@ -420,18 +411,9 @@ def _bench() -> list[dict[str, Any]]:
             "Timeline",
             "Biology",
             "Protocol events on an axis, with spans below",
-            {
-                "label": "Protocol",
-                "properties": {
-                    "events": [
-                        {"at": 0, "label": "Seed"},
-                        {"at": 1, "label": "Treat"},
-                        {"at": 3, "label": "Harvest"},
-                    ],
-                    "spans": [{"start": 1, "end": 3, "label": "Drug"}],
-                    "unit": "day",
-                },
-            },
+            # Its first and next day with nothing named on them, an axis to name its own events
+            # on: no example's drawn into a figure.
+            {"label": "Timeline", "properties": {"events": [{"at": 0}, {"at": 1}], "unit": "day"}},
             [
                 _field(
                     "properties.events",
@@ -442,7 +424,7 @@ def _bench() -> list[dict[str, Any]]:
                         _column("at", "At", "number"),
                         _column("label", "Label"),
                         tone,
-                        _column("id", "Port"),
+                        _attach(),
                     ],
                 ),
                 _field(
@@ -463,7 +445,14 @@ def _bench() -> list[dict[str, Any]]:
                     "combo",
                     options=["", "s", "min", "h", "day", "week", "month", "year"],
                 ),
-                _field("properties.length", "Length", "number"),
+                # (The axis's width on the page, not how long the protocol runs: never so
+                # short that its times overprint.)
+                _field(
+                    "properties.length",
+                    "Axis Width (pt)",
+                    "number",
+                    hint="Auto: as wide as its times need",
+                ),
             ],
         ),
     ]
@@ -482,7 +471,9 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field("properties", "View", "view", hint="Or drag the molecule to rotate it"),
+            _field(
+                "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
+            ),
             _field(
                 "properties.look",
                 "Look",
@@ -503,14 +494,16 @@ def _structure() -> dict[str, Any]:
                 "properties.colors",
                 "Colours",
                 "records",
-                row={"group": "A", "color": "#e69f00"},
+                # A new row colours a chain the structure has that no row colours yet.
+                row={"group": "@chain", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or Residue", hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain or Residue", "chain",
+                            hint="A, SER195, entity:1, subunit:L"),
                     _column(
-                        "color", "Colour", "combo", options=list(TONES), hint="#e69f00 or a tone"
+                        "color", "Colour", "colour", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="These override the palette and the look",
+                hint="These override the palette, the look and its colours (such as Helices)",
             ),
             _field(
                 "properties.cartoon", "Cartoon", "text", hint="Drawn as ribbons: polymer", more=True
@@ -545,18 +538,27 @@ def _structure() -> dict[str, Any]:
                 show={"properties.site": "ligand"},
             ),
             _field("properties.site_labels", "Label site residues", "bool", more=True),
+            # Off, the waters and lone ions a crystal holds are left out: they float free of
+            # the molecule, as stray dots.
+            _field(
+                "properties.solvent",
+                "Waters and Ions",
+                "bool",
+                hint="Draw the waters and lone ions where they lie",
+                more=True,
+            ),
             _field(
                 "properties.density",
-                "Density Map",
+                "Map File",
                 "text",
                 hint="auto for the entry's own map, an EMDB ID, or a map file",
                 more=True,
             ),
             _field("properties.width", "Width", "number", more=True),
             _field("properties.height", "Height", "number", more=True),
-            _field("properties.yaw", "Yaw", "number", hint="In degrees", more=True),
-            _field("properties.pitch", "Pitch", "number", hint="In degrees", more=True),
-            _field("properties.roll", "Roll", "number", hint="In degrees", more=True),
+            _field("properties.yaw", "Yaw", "number", unit="°", more=True),
+            _field("properties.pitch", "Pitch", "number", unit="°", more=True),
+            _field("properties.roll", "Roll", "number", unit="°", more=True),
             _field("properties.zoom", "Zoom", "number", more=True),
             _field(
                 "properties.pan_x", "Offset X", "number", hint="A fraction of the frame", more=True
@@ -631,7 +633,15 @@ def _learning() -> list[dict[str, Any]]:
 
 def _basics() -> list[dict[str, Any]]:
     return [
-        _part("block", "Block", "Basics", "A labelled box", {"label": "Block"}, SIZE),
+        _part(
+            "block",
+            "Block",
+            "Basics",
+            "A labelled box, such as a step of a process",
+            {"label": "Block"},
+            SIZE,
+            words=["process", "step", "task", "action", "activity", "rectangle", "box"],
+        ),
         _part(
             "text",
             "Text",
@@ -677,8 +687,24 @@ def _basics() -> list[dict[str, Any]]:
             "Basics",
             "A rounded start or end of a flowchart",
             {"label": "Start"},
+            words=["start", "end", "begin", "stop", "terminator", "terminal", "pill", "flowchart"],
         ),
-        _part("decision", "Decision", "Basics", "A diamond for a decision", {"label": "Decision?"}),
+        _part(
+            "decision",
+            "Decision",
+            "Basics",
+            "A diamond for a decision",
+            {"label": "Decision?"},
+            words=["if", "branch", "condition", "choice", "question", "yes/no", "diamond"],
+        ),
+        _part(
+            "io",
+            "Input/Output",
+            "Basics",
+            "A parallelogram for data a flowchart reads or writes",
+            {"label": "Input"},
+            words=["input", "output", "i/o", "io", "data", "read", "write", "parallelogram"],
+        ),
         _part(
             "image",
             "Picture",
@@ -730,7 +756,7 @@ def _cells() -> dict[str, Any]:
                     _column("label", "Label", hint="Name in the legend"),
                 ],
             ),
-            _field("properties.cell", "Cell Size", "number", hint="In points"),
+            _field("properties.cell", "Cell Size", "number", unit="pt"),
             _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
             _field(
                 "properties.corner",
@@ -767,6 +793,62 @@ def _cells() -> dict[str, Any]:
             _field("properties.legend", "Show legend", "bool", default=True),
         ],
     )
+
+
+def _software() -> list[dict[str, Any]]:
+    """The shapes of an architecture diagram (``flexo.shapes``), each found by the
+    words people search for it by."""
+
+    return [
+        _part(
+            "database",
+            "Database",
+            "Software",
+            "A cylinder for a database, cache or other store",
+            {"label": "Database"},
+            words=["cylinder", "storage", "store", "cache", "db", "sql", "table", "disk", "data"],
+        ),
+        _part(
+            "server",
+            "Server",
+            "Software",
+            "A server: a host, machine or computer",
+            {"label": "Server"},
+            words=["computer", "host", "machine", "rack", "node", "service", "instance", "vm"],
+        ),
+        _part(
+            "cloud",
+            "Cloud",
+            "Software",
+            "A cloud for the internet or a network",
+            {"label": "Internet"},
+            words=["internet", "network", "web", "online", "provider"],
+        ),
+        _part(
+            "queue",
+            "Queue",
+            "Software",
+            "A message queue, buffer or stream",
+            {"label": "Queue"},
+            words=["message queue", "buffer", "stream", "topic", "bus", "pipe", "fifo", "jobs"],
+        ),
+        _part(
+            "document",
+            "Document",
+            "Software",
+            "A page with a wavy foot: a file or report",
+            {"label": "Document"},
+            words=["file", "report", "page", "paper", "log", "flowchart"],
+        ),
+        _part(
+            "person",
+            "Person",
+            "Software",
+            "A person with the label under it: a user, client or actor",
+            {"label": "User"},
+            words=["user", "client", "actor", "people", "customer", "human", "account", "role"],
+        ),
+    ]
 
 
 GROUPS = [
@@ -812,9 +894,10 @@ GROUP_FIELDS = [
         "role",
         "Frame",
         "choice",
-        options=["container", "module"],
+        options=["layout", "container", "module"],
+        labels={"layout": "None", "container": "Frame", "module": "Module"},
         default="container",
-        hint="A module draws a titled frame around its shapes",
+        hint="Whether a frame is drawn round the shapes; a module's is named for them",
     ),
     SHADOW,
 ]
@@ -841,7 +924,7 @@ EDGE_FIELDS = [
         "Arrowhead",
         "choice",
         options=["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"],
-        labels={"necessary": "Necessary Stimulation"},
+        labels={"inhibition": "Blunt End (Inhibits)", "necessary": "Necessary Stimulation"},
         default="arrow",
         hint="What the arrowhead means, as in SBGN",
         show={"arrow": ["end", "both"]},
@@ -856,13 +939,19 @@ EDGE_FIELDS = [
         "pair",
         labels=["Consumed", "Produced"],
         hint="Shown on an arc beside the reaction: ATP, ADP",
+        more=True,
+        # A reaction's: offered on a figure of biology or chemistry, not a flow chart.
+        science=True,
     ),
 ]
 
 
 def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        _field("figure.id", "Name", "text"),
+        # The figure's name is its file's; what the file calls it is kept under More.
+        _field(
+            "figure.id", "Name in File", "text", hint="What the file calls the figure", more=True
+        ),
         _field(
             "figure.style", "Theme", "theme", options=catalog.get("themes", []), default="paper"
         ),
@@ -879,24 +968,60 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             "Width",
             "combo",
             options=["single-column", "double-column", "120mm", "180mm"],
+            labels={"single-column": "Single Column", "double-column": "Double Column"},
             default="double-column",
         ),
         _field("figure.font", "Font", "combo", options=catalog.get("fonts", [])),
     ]
 
 
-CATEGORIES = ("Basics", "Machine Learning", "Biology")
+CATEGORIES = ("Basics", "Software", "Machine Learning", "Biology")
 
 
 def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
     """The editor's catalogue: parts by category, groups, and the fields of each thing."""
 
-    parts = [*_basics(), *_learning(), *_genetics(), *_proteins(), *_bench(), _structure()]
+    parts = [
+        *_basics(),
+        *_software(),
+        *_learning(),
+        *_genetics(),
+        *_proteins(),
+        *_bench(),
+        _structure(),
+    ]
+    sizes = _sizes()
     return {
         "categories": list(CATEGORIES),
-        "parts": {part["kind"]: part for part in parts},
+        "parts": {
+            part["kind"]: {**part, "size": sizes[part["kind"]]} if part["kind"] in sizes else part
+            for part in parts
+        },
         "groups": GROUPS,
         "group_fields": GROUP_FIELDS,
         "edge_fields": EDGE_FIELDS,
         "figure_fields": figure_fields(catalog or {}),
     }
+
+
+@functools.cache
+def _sizes() -> dict[str, list[float]]:
+    """How large each part is drawn as it is added (with the words it starts with), in ems
+    of the figure's words: so the page can stand it in where it goes at the size it will be,
+    before it is drawn there -- a circle a circle's size, not its neighbour's."""
+
+    from flexo.layout.measure import measure_figure
+    from flexo.serialization import parse_figure
+    from flexo.themes import figure_style
+
+    sizes = {}
+    for part in [*_basics(), *_software(), *_learning(), *_genetics(), *_proteins(), *_bench()]:
+        try:
+            spec = parse_figure({"figure": {"id": "x"}, "nodes": [{"id": "n", **part["node"]}]})
+            style = figure_style(spec)
+            size = measure_figure(spec, style=style).nodes[0].intrinsic_size
+        except Exception:  # (one that can't be drawn bare is stood in as its neighbour's size)
+            continue
+        em = style.typography.size.points
+        sizes[part["kind"]] = [round(size.width / em, 2), round(size.height / em, 2)]
+    return sizes

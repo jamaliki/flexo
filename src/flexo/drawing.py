@@ -33,6 +33,7 @@ import uharfbuzz as hb
 from flexo.bidi import base_level, has_rtl, visual_order
 from flexo.bidi import levels as bidi_levels
 from flexo.fonts import FontFace, family_covering, family_faces, hb_font, load_face, select_face
+from flexo.ir.semantic import EDGE_HEADS
 from flexo.svg import local_name
 from flexo.text import DEFAULT_FALLBACKS
 
@@ -1209,6 +1210,9 @@ def _ellipse(cx: float, cy: float, rx: float, ry: float) -> tuple[Segment, ...]:
 
 _SHAPES = {"triangle", "stealth", "latex", "open"}
 
+_NAMED_HEADS = {*EDGE_HEADS, "harpoon"} - {"arrow"}
+"""The heads a marker's id names (``arrow.flow.inhibition``): what they draw is no arrow."""
+
 
 def _arrowhead(
     marker: ET.Element, segments: tuple[Segment, ...], end: str, line: Paint
@@ -1245,8 +1249,10 @@ def _arrowhead(
     identifier = marker.get("id") or ""
     filled = body.get("fill", "none") != "none"
     named = identifier.removesuffix(".start").split(".")
-    if len(named) == 3 and named[0] == "arrow":
-        shape = named[2]  # an SBGN head, or a harpoon
+    # ``arrow.<role>.<head>``, after whatever a page put before it (a slide's id): an SBGN
+    # head, or a harpoon, which a reader must not take for an open arrowhead.
+    if len(named) >= 3 and named[-3] == "arrow" and named[-1] in _NAMED_HEADS:
+        shape = named[-1]
     else:
         shape = "open" if not filled else _marker_shape(local)
     paint = Paint(

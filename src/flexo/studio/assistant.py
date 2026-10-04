@@ -162,7 +162,11 @@ class Assistant:
                 message = _explain(error)
                 turn["parts"].append({"type": "error", "text": message})
                 self._send({"event": "error", "turn": turn["id"], "text": message})
-            self.workspace.set_presence(WHO, None, None, "")
+            # Done: shown as lately at work where it worked, and not at all if it did nothing.
+            if any(part.get("type") == "tool" for part in turn["parts"]):
+                self.workspace.set_presence(WHO, None, None, "")
+            else:
+                self.workspace.absent(WHO)
 
     def _converse(self, turn: dict[str, Any]) -> None:
         client = self._client()
@@ -326,7 +330,11 @@ def _explain(error: Exception) -> str:
     try:
         import anthropic
     except ImportError:
-        return str(error)
+        # Said as what to do, not as Python's words.
+        return (
+            "Claude isn't set up in this studio: it needs the assistant package "
+            "(pip install 'flexo[assistant]'), then a restart."
+        )
     if isinstance(error, anthropic.AuthenticationError):
         return (
             "Claude could not sign in: set ANTHROPIC_API_KEY, or run `ant auth login`, "

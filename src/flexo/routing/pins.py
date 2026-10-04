@@ -13,7 +13,7 @@ import itertools
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance
+from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance, titled
 from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -323,6 +323,10 @@ def plan_pins(
     repeats = Counter(
         (edge.source.node_id, edge.source.port_name, edge.target.node_id) for edge in edges
     )
+    twins = Counter(
+        (edge.source.node_id, edge.source.port_name, edge.target.node_id, edge.target.port_name)
+        for edge in edges
+    )
     for index, end in enumerate(ends):
         spec = end.node.measured.spec
         port_spec = _authored_port(fitted, spec.id, end.reference.port_name)
@@ -352,6 +356,19 @@ def plan_pins(
         separate = style.conventions.arrivals == "separate"
         span = end.node.bounds.width if side in {Side.NORTH, Side.SOUTH} else end.node.bounds.height
         if (
+            isinstance(member, EdgeSpec)
+            and spec.kind != "op"
+            and twins[
+                (
+                    member.source.node_id, member.source.port_name,
+                    member.target.node_id, member.target.port_name,
+                )
+            ] > 1
+        ):
+            # The same two ports joined more than once: each line its own, side by side,
+            # never one drawn over another as though there were one.
+            name = f"{name}@{member.id}"
+        elif (
             isinstance(member, EdgeSpec)
             and member.label
             and spec.kind != "op"
@@ -388,6 +405,7 @@ def plan_pins(
     _spread_operator_inputs(ends)
     _one_end_per_corner(ends, _straight_sides(fitted, members))
     _self_loops(fitted, members, ends)
+    _off_titles(ends, hints)
     by_side: dict[tuple[str, Side], dict[tuple[str, str, Side, bool], list[End]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -405,12 +423,16 @@ def plan_pins(
     )
     slots: dict[tuple[str, str, Side, bool], _Slot] = {}
     orders: list[list[tuple[str, str, Side, bool]]] = []
+    captioned = frozenset(
+        index for index, member in enumerate(members)
+        if isinstance(member.spec, EdgeSpec) and member.spec.label
+    )
     for (node_id, side), groups in by_side.items():
         node = fitted.node(node_id)
         order = (overrides or {}).get((node_id, side))
         if order is not None and set(order) != set(groups):
             order = None
-        placed = _place_on_side(node, side, groups, style, blockers, order)
+        placed = _place_on_side(node, side, groups, style, blockers, order, captioned)
         orders.append(list(placed))
         if chosen is not None:
             chosen[(node_id, side)] = list(placed)
@@ -421,7 +443,9 @@ def plan_pins(
         for node in fitted.nodes
         if node.measured.spec.kind not in TRANSPARENT_KINDS
     )
-    positions = _align(slots, orders, links, style.port_spacing.points, obstacles)
+    positions = _align(
+        slots, orders, links, style.port_spacing.points, obstacles, style.arrow_width.points
+    )
     pins: dict[tuple[str, str, Side, bool], Pin] = {}
     for key, slot in slots.items():
         coordinate = positions[key]
@@ -582,6 +606,28 @@ def _clear_approaches(
         choice = facing or [candidate for candidate in clear if candidate is not side.opposite]
         if choice:
             end.group = (end.group[0], end.group[1], choice[0], end.group[3])
+
+
+def _off_titles(ends: list[End], hints: dict[tuple[str, str], Side]) -> None:
+    """Move a pin off the top of a component whose name is set across it (a structure's,
+    a protein's): a line there would start in the name. The pin goes to the best other
+    side facing what it joins -- every end sharing it with it."""
+
+    moved: dict[tuple, Side] = {}
+    for end in ends:
+        assert end.group is not None
+        spec = end.node.measured.spec
+        if end.group[2] is not Side.NORTH or not titled(spec):
+            continue
+        if end.fixed or (spec.id, end.reference.port_name) in hints:
+            continue
+        if end.group not in moved:
+            ranked = _facing_sides(end.node.bounds, end.counterpart, Side.EAST)
+            moved[end.group] = next(side for side in ranked if side is not Side.NORTH)
+    for end in ends:
+        assert end.group is not None
+        if end.group in moved:
+            end.group = (end.group[0], end.group[1], moved[end.group], end.group[3])
 
 
 def _approach_clear(bounds: Rect, side: Side, reach: float, boxes: list[Rect]) -> bool:
@@ -846,8 +892,10 @@ A circle and a diamond touch their box at four points; a pin anywhere else on
 the box edge would leave a gap between the arrowhead and the ink.
 """
 
-POINT_KINDS = CORNER_KINDS | {"op"}
-"""Kinds whose pins stay at the middle of their side: operators too."""
+POINT_KINDS = CORNER_KINDS | {"op", "person"}
+"""Kinds whose pins stay at the middle of their side: operators too, and a person,
+whose middle is its shoulders (``flexo.shapes``) -- a pin slid down from there
+would meet its name, and up, the air beside its head."""
 
 
 def _one_end_per_corner(ends: list[End], straight: dict[str, list[Side]] | None = None) -> None:
@@ -1015,11 +1063,14 @@ def _place_on_side(
     style: LayoutStyle,
     blockers: tuple[Rect, ...] = (),
     order: list[tuple[str, str, Side, bool]] | None = None,
+    captioned: frozenset[int] = frozenset(),
 ) -> dict[tuple[str, str, Side, bool], _Slot]:
     """Where each group of ends would attach along one side, in the order they leave.
 
     Groups are ordered by where their lines go, so no two of them cross on the
-    way out. A side whose ports all sit where the layout put them, already in
+    way out; of lines that go the same way, those with captions (``captioned``,
+    by member) last, so a caption sits on the outside rather than over the line
+    beside it. A side whose ports all sit where the layout put them, already in
     that order, keeps those places; otherwise the groups take evenly spaced
     slots. Alignment (``_align``) then moves the movable ones.
     """
@@ -1085,6 +1136,7 @@ def _place_on_side(
         key=lambda key: (
             round(target(key), 6),
             -round(reach(key), 6),
+            any(end.member in captioned for end in groups[key]),
             min(end.member for end in groups[key]),
             key[1],
         ),
@@ -1254,6 +1306,7 @@ def _align(
     links: list[tuple[tuple[str, str, Side, bool], tuple[str, str, Side, bool]]],
     spacing: float,
     obstacles: tuple[Rect, ...] = (),
+    head: float = 0.0,
 ) -> dict[tuple[str, str, Side, bool], float]:
     """Slide pins so facing pairs line up exactly, keeping every side's order.
 
@@ -1265,6 +1318,10 @@ def _align(
     separation solver finds the nearest arrangement. This is ``adapt_ports``
     done once, on pins, with the side orders as constraints rather than a
     repacking loop.
+
+    A pin an arrow arrives at stands a ``head`` (the arrowhead's width) further
+    from the pins beside it, where its side has room: a lane apart, an arrowhead
+    beside a line leaving from the same side all but touched it.
     """
 
     parent = {key: key for key in slots}
@@ -1307,6 +1364,7 @@ def _align(
             continue
         parent[root_two] = root_one
         ranges[root_one] = (low, high)
+    gaps = _lanes(orders, parent, ranges, spacing, head)
     for axis in (True, False):
         keys = [
             key for key, slot in slots.items() if (slot.side in {Side.NORTH, Side.SOUTH}) is axis
@@ -1331,7 +1389,7 @@ def _align(
             for first, second in itertools.pairwise(order):
                 one, two = index[find(first)], index[find(second)]
                 if one != two:
-                    constraints.append((one, two, spacing))
+                    constraints.append((one, two, gaps.get((first, second), spacing)))
         for root in classes:
             low, high = ranges[root]
             position = index[root]
@@ -1399,8 +1457,12 @@ def _orders_fit(
     ranges: dict,
     orders: list[list],
     spacing: float,
+    gaps: dict | None = None,
 ) -> bool:
-    """Whether every side can still hold its pins in order, a lane apart, in their ranges."""
+    """Whether every side can still hold its pins in order, a lane apart, in their ranges.
+
+    ``gaps`` gives the room between two pins next to each other where it is not a lane.
+    """
 
     def find(key):
         while parent[key] != key:
@@ -1410,16 +1472,42 @@ def _orders_fit(
     for order in orders:
         position = float("-inf")
         previous = None
-        for key in order:
+        for before, key in zip([None, *order], order, strict=False):
             root = find(key)
             low, high = ranges[root]
             if root == previous:
                 continue
-            position = max(low, position + spacing)
+            gap = (gaps or {}).get((before, key), spacing)
+            position = max(low, position + gap)
             if position > high + 1e-6:
                 return False
             previous = root
     return True
+
+
+def _lanes(
+    orders: list[list], parent: dict, ranges: dict, spacing: float, head: float
+) -> dict[tuple, float]:
+    """The room between each two pins next to each other on a side.
+
+    A lane; and where an arrow arrives at either of them, its head's width more
+    -- or half of it, or none, as the side has room for: lines stay straight
+    first.
+    """
+
+    gaps: dict[tuple, float] = {}
+    if head <= 0.0:
+        return gaps
+    for order in orders:
+        pairs = [pair for pair in itertools.pairwise(order) if pair[0][3] or pair[1][3]]
+        if not pairs:
+            continue
+        for share in (1.0, 0.5, 0.0):
+            trial = {pair: spacing + share * head for pair in pairs}
+            if _orders_fit(parent, ranges, [order], spacing, trial):
+                break
+        gaps.update(trial)
+    return gaps
 
 
 def _orders_consistent(parent: dict, orders: list[list]) -> bool:

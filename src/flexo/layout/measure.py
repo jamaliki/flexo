@@ -17,6 +17,7 @@ from flexo.layout.flow import lower_flows
 from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.routing.aside import writing_room
+from flexo.shapes import CLOUD_MEASURE, SHAPE_KINDS, label_room
 from flexo.style import LayoutStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
@@ -193,6 +194,11 @@ def _measure_node(
     style: LayoutStyle,
 ) -> MeasuredNode:
     label = measurer.measure(node.label, max_width=_label_width(node, style))
+    if node.kind == "structure" and node.label:
+        # Set over its panel, wrapped to its width, in the title's weight (flexo.structures).
+        from flexo.structures import structure_title
+
+        label = structure_title(node, style)
     if node.kind in DRAWN_KINDS:
         return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)
@@ -264,9 +270,15 @@ WRAPPED_KINDS = frozenset(
         "inset",
         "feature-strip",
         "sequence",
+        "decision",
+        *SHAPE_KINDS,
     }
 )
 """Kinds whose box is sized round their label, so a long label wraps instead."""
+
+DECISION_MEASURE = 8.0
+"""The longest a decision's line of words runs, in ems: a longer question takes two lines,
+so its diamond stays near square rather than a long flat lozenge."""
 
 
 def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
@@ -275,7 +287,14 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
     if node.kind not in WRAPPED_KINDS:
         return None
     if node.width is not None and not isinstance(node.width, CellSpan):
-        return max(1.0, style.resolve_extent(node.width).points - 2.0 * style.padding_x.points)
+        width = style.resolve_extent(node.width).points
+        if node.kind in SHAPE_KINDS:
+            return label_room(node.kind, width, style)
+        return max(1.0, width - 2.0 * style.padding_x.points)
+    if node.kind == "cloud":
+        return CLOUD_MEASURE * style.typography.size.points
+    if node.kind == "decision":
+        return DECISION_MEASURE * style.typography.size.points
     return style.label_measure * style.typography.size.points
 
 

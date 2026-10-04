@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Sequence
-from functools import cache
+from functools import cache, lru_cache
 from importlib import resources
 
 _HEX = frozenset("0123456789abcdef")
 
 
+@lru_cache(maxsize=4096)
 def to_rgb(colour: str) -> tuple[float, float, float]:
     text = colour.strip().lower()
     if len(text) == 4 and text.startswith("#"):
@@ -64,6 +65,7 @@ def from_oklab(lab: Sequence[float]) -> str:
     )
 
 
+@lru_cache(maxsize=4096)
 def luminance(colour: str) -> float:
     r, g, b = (_linear(channel) for channel in to_rgb(colour))
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -134,9 +136,11 @@ def hue_distance(first: str, second: str) -> float:
     return math.hypot(a1 - a2, b1 - b2) + 0.25 * abs(l1 - l2)
 
 
+@lru_cache(maxsize=4096)
 def with_contrast(colour: str, background: str, ratio: float) -> str:
     """``colour`` with its Oklab lightness moved away from ``background`` until
-    their contrast reaches ``ratio``. Hue and chroma are kept."""
+    their contrast reaches ``ratio``. Hue and chroma are kept. (Remembered: a slide asks
+    for the same few hundreds of times.)"""
 
     lightness, a, b = to_oklab(colour)
     step = 0.02 if is_dark(background) else -0.02
@@ -190,22 +194,23 @@ CURATED_PALETTES = frozenset(EXTRA_PALETTES)
 """Palettes whose order is the design: taken as written, not re-sorted for contrast."""
 
 
-_AUTHORED: set[tuple[str, ...]] = set()
-"""Palettes someone wrote down in order -- in a theme file, or registered by name."""
+class Written(tuple):
+    """Colours someone wrote down in order -- a theme file's palette, a palette registered
+    by name -- whose order is the design. The order is these colours', where they were
+    written: the same colours named elsewhere (a stock palette on a deck) are sorted for
+    contrast as ever, whatever theme files have been read."""
 
-
-def keep_order(colours: Sequence[str]) -> None:
-    """Take ``colours`` as written wherever they are used: their order is the design."""
-
-    _AUTHORED.add(tuple(colour.lower() for colour in colours))
+    __slots__ = ()
 
 
 def curated(colours: Sequence[str]) -> bool:
     """Whether ``colours`` is a curated palette, or one written down in order (a theme
     file's, a registered one), to be used in its own order."""
 
+    if isinstance(colours, Written):
+        return True
     wanted = tuple(colour.lower() for colour in colours)
-    return wanted in _AUTHORED or any(wanted == palette for palette in EXTRA_PALETTES.values())
+    return any(wanted == palette for palette in EXTRA_PALETTES.values())
 
 
 @cache

@@ -11,7 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 
-from flexo.drawn import Picture, Shape, picture
+from flexo.drawn import Picture, Shape, Words, picture
 from flexo.ir.fitted import FittedNode
 from flexo.render_common import paint_attributes, render_runs
 from flexo.style import LayoutStyle, Palette
@@ -59,6 +59,12 @@ def render_drawn(
     drawing: Picture = picture(spec, style)
     dx = node.bounds.x + (node.bounds.width - drawing.size.width) / 2.0
     dy = node.bounds.y + (node.bounds.height - drawing.size.height) / 2.0
+    # Its name first, as it is read (a PDF's tags, a slide program and a screen reader read
+    # in the order drawn): before its parts, then theirs. Set apart from them, it is under none.
+    name = f"{spec.id}.label"
+    named = [words for words in drawing.words if words.id == name]
+    for words in named:
+        _words(parent, words, style, palette, dx, dy)
     for shape in drawing.shapes:
         element(
             parent,
@@ -71,27 +77,34 @@ def render_drawn(
     for identifier, x, y, width, height in drawing.images:
         _image(parent, identifier, spec, style, palette, x + dx, y + dy, width, height)
     for words in drawing.words:
-        typography = style.typography
-        if words.size is not None:
-            typography = replace(
-                typography, size=pt(words.size), minimum_size=pt(min(words.size, 6.0))
-            )
-        role = words.role
-        if role == "tone-ink":
-            index = palette.tone_index(words.tone) if words.tone else None
-            role = f"tone-{index}-ink" if index is not None else "ink"
-        render_runs(
-            parent,
-            words.id,
-            words.metrics,
-            x=words.x + dx,
-            y=words.y + dy,
-            typography=typography,
-            palette=palette,
-            fill_role=role,
-            anchor=words.anchor,
-            weight=words.weight,
-        )
+        if words.id != name:
+            _words(parent, words, style, palette, dx, dy)
+
+
+def _words(
+    parent: ET.Element, words: Words, style: LayoutStyle, palette: Palette, dx: float, dy: float
+) -> None:
+    """One of a drawing's labels, moved to where the drawing is."""
+
+    typography = style.typography
+    if words.size is not None:
+        typography = replace(typography, size=pt(words.size), minimum_size=pt(min(words.size, 6.0)))
+    role = words.role
+    if role == "tone-ink":
+        index = palette.tone_index(words.tone) if words.tone else None
+        role = f"tone-{index}-ink" if index is not None else "ink"
+    render_runs(
+        parent,
+        words.id,
+        words.metrics,
+        x=words.x + dx,
+        y=words.y + dy,
+        typography=typography,
+        palette=palette,
+        fill_role=role,
+        anchor=words.anchor,
+        weight=words.weight,
+    )
 
 
 def _roles(shape: Shape, palette: Palette) -> tuple[str, str, str]:

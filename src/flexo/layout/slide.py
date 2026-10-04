@@ -51,6 +51,7 @@ def slide_groups(
     }
     order = {group.measured.spec.id: index for index, group in enumerate(groups)}
     by_node = {node.measured.spec.id: node for node in nodes}
+    written = {node.id: index for index, node in enumerate(figure.nodes)}
     by_group = {group.measured.spec.id: group for group in groups}
     every = layout_connections(figure)
     served = Counter(
@@ -91,6 +92,7 @@ def slide_groups(
             connections,
             by_node,
             style,
+            written,
         )
         if abs(shift) <= _EPSILON:
             continue
@@ -151,8 +153,14 @@ def _best_shift(
     connections: tuple,
     nodes: dict[str, FittedNode],
     style: LayoutStyle,
+    written: dict[str, int] | None = None,
 ) -> float:
-    """The slide that lets the most arrows run straight, centred among them, or 0."""
+    """The slide that lets the most arrows run straight, centred among them, or 0.
+
+    Of slides that straighten as many, one that straightens an arrow running on, from
+    a part written earlier to one written later, beats one that straightens a loop back:
+    a part stays where its flow put it when a line back to it is drawn.
+    """
 
     if across == "x":
         low, high = room.left - bounds.left, room.right - bounds.right
@@ -162,6 +170,7 @@ def _best_shift(
         return 0.0
     low, high = min(low, 0.0), max(high, 0.0)
     pairs = []
+    forward: set[int] = set()
     for connection in connections:
         ends = (connection.source, connection.target)
         inside = [end for end in ends if end.node_id in members]
@@ -181,6 +190,11 @@ def _best_shift(
             nodes, members, other.node_id, bounds, pair[1], across
         ):
             pairs.append(pair)
+            onward = (written or {}).get(connection.source.node_id, 0) <= (written or {}).get(
+                connection.target.node_id, 0
+            )
+            if onward:
+                forward.add(len(pairs) - 1)
     if not pairs:
         return 0.0
     # Each arrow runs straight over a window of slides; the best slide lies at a
@@ -195,9 +209,12 @@ def _best_shift(
     choices = [value for value in candidates if low - _EPSILON <= value <= high + _EPSILON]
 
     def straight(shift: float) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        return [pairs[index] for index in straightened(shift)]
+
+    def straightened(shift: float) -> list[int]:
         return [
-            pair
-            for pair in pairs
+            index
+            for index, pair in enumerate(pairs)
             if pair[0][0] + shift <= pair[1][1] + _EPSILON
             and pair[1][0] <= pair[0][1] + shift + _EPSILON
         ]
@@ -212,7 +229,12 @@ def _best_shift(
     # better for being shorter, and a nudge of a point or two is port adaptation's job.
     best = min(
         choices,
-        key=lambda value: (-len(straight(value)), round(off_centre(value), 3), abs(value)),
+        key=lambda value: (
+            -len(straight(value)),
+            -len(forward.intersection(straightened(value))),
+            round(off_centre(value), 3),
+            abs(value),
+        ),
     )
     return best if len(straight(best)) > len(straight(0.0)) else 0.0
 

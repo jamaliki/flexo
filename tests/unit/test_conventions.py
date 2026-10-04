@@ -202,6 +202,11 @@ def test_math_alphabets_operators_and_relations() -> None:
         (r"$\alpha x$", "\U0001d6fcx"),
         (r"$\log p$", "log p"),
         (r"$\log(x)$", "log(x)"),
+        # A named function is set apart from what it follows too, unless that opens or signs.
+        (r"$-RT \ln K$", "−RT ln K"),
+        (r"$x\sin(x)$", "x sin(x)"),
+        (r"$(\log x)$", "(log x)"),
+        (r"$a + \ln b$", "a + ln b"),
         (r"$q(x_t | x_{t-1})$", "q(xt | xt−1)"),
         (r"$QK^T/\sqrt{d_k}$", "QKT/√dk"),
         (r"$\frac{n_k}{n}$", "nk/n"),

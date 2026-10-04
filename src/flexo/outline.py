@@ -149,3 +149,31 @@ def glyph_outline(run: Run, glyph: Glyph) -> tuple[Segment, ...]:
         )
         for segment in _outline(run.face, run.weight, glyph.gid)
     )
+
+
+def underline(run: Run) -> tuple[float, float, float, float]:
+    """Where a link's underline goes under ``run``: its left, top, width and thickness on
+    the page, as the face says (its ``post`` table), under the run's baseline."""
+
+    position, thickness = _underline_metrics(run.face.source, run.face.index)
+    scale = run.size / load_face(run.face).upem
+    return run.x, run.baseline - position * scale, run.width, max(thickness * scale, 0.5)
+
+
+@lru_cache(maxsize=64)
+def _underline_metrics(source: str, index: int) -> tuple[float, float]:
+    """A face's underline: the top of the line (font units, negative below the baseline)
+    and its thickness -- or a common one, where the face says nothing."""
+
+    from fontTools.ttLib import TTCollection, TTFont
+
+    font = (
+        TTCollection(source, lazy=True).fonts[index]
+        if source.lower().endswith((".ttc", ".otc"))
+        else TTFont(source, lazy=True)
+    )
+    upem = font["head"].unitsPerEm
+    post = font.get("post")
+    position = getattr(post, "underlinePosition", 0) or -0.1 * upem
+    thickness = getattr(post, "underlineThickness", 0) or 0.05 * upem
+    return float(position), float(thickness)

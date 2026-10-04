@@ -355,8 +355,8 @@ class FontStack:
                 covering = [
                     index
                     for index, item in enumerate(loaded)
-                    if all(item.has(character) for character in cluster)
-                ]
+                    if all(item.has(ch) for ch in cluster if not _invisible(ch))
+                ] or [index for index, item in enumerate(loaded) if item.has(cluster[0])]
                 choice = next(
                     (index for index in covering if _places_marks(faces[index], cluster)),
                     covering[0] if covering else 0,
@@ -391,6 +391,12 @@ class FontStack:
             word = clusters[start:end]
             start = end + 1
             if not word or all(all(loaded[0].has(ch) for ch in cluster) for cluster in word):
+                continue
+            # Only a letter the primary face lacks (Vietnamese's) takes the word with it: a
+            # sign it lacks (the ⁺ of Ca²⁺-dependent) falls back alone, the word around it
+            # staying in the primary face, as wide as it is.
+            missing = [cluster for cluster in word if not all(loaded[0].has(ch) for ch in cluster)]
+            if not any(unicodedata.category(cluster[0])[0] in "LM" for cluster in missing):
                 continue
             scripts = {
                 unicodedata.name(cluster[0], "?").split()[0]
@@ -468,15 +474,38 @@ def is_math_italic(character: str) -> bool:
 
 
 def _clusters(text: str) -> list[str]:
-    """``text`` as characters, each with the combining marks that follow it."""
+    """``text`` as characters, each with what joins it: the combining marks after it, and
+    the rest of an emoji sequence (👩🏽‍🔬: a skin tone, a zero-width joiner and what it
+    joins, a variation selector, a keycap, a flag's two letters or its tags), so that one
+    face draws the sequence whole and it can join into one picture."""
 
     clusters: list[str] = []
     for character in text:
-        if clusters and unicodedata.combining(character):
+        if clusters and (unicodedata.combining(character) or _joins(clusters[-1], character)):
             clusters[-1] += character
         else:
             clusters.append(character)
     return clusters
+
+
+def _invisible(character: str) -> bool:
+    """A joiner or selector, which a face may draw nothing for (and so not list)."""
+
+    code = ord(character)
+    return code == 0x200D or 0xFE00 <= code <= 0xFE0F or 0xE0020 <= code <= 0xE007F
+
+
+def _joins(cluster: str, character: str) -> bool:
+    code = ord(character)
+    if cluster.endswith("\u200d"):
+        return True  # what a zero-width joiner joins
+    if code == 0x200D or 0xFE00 <= code <= 0xFE0F or code == 0x20E3 or 0xE0020 <= code <= 0xE007F:
+        return True  # a joiner, a variation selector, a keycap, a tag
+    if 0x1F3FB <= code <= 0x1F3FF:
+        return True  # a skin tone
+    # A flag's second letter.
+    regional = 0x1F1E6 <= code <= 0x1F1FF
+    return regional and len(cluster) == 1 and 0x1F1E6 <= ord(cluster) <= 0x1F1FF
 
 
 @cache

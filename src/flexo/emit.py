@@ -16,7 +16,7 @@ from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
 from flexo.routing.aside import Aside, arrowhead_outline, harpoon_offset
-from flexo.routing.ink import shorten_end, shorten_start
+from flexo.routing.ink import shorten_end, shorten_start, stretch_end, stretch_start
 from flexo.sketch import sketch_svg
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
@@ -196,6 +196,10 @@ class _Hierarchy:
         group_layer = layer(parent, spec.id, spec.text or spec.id)
         group_layer.set("data-flexo-entity", "group")
         group_layer.set("data-flexo-role", spec.role)
+        if group_id == self.routed.fitted.measured.semantic.root:
+            # How long a label's line runs before it wraps, in ems: the studio wraps the
+            # words typed on a part there too.
+            group_layer.set("data-flexo-measure", f"{style.label_measure:g}")
         self._render_container(group_layer, fitted, style, palette)
         component_group = element(
             group_layer,
@@ -388,8 +392,12 @@ def _render_edge(
         head = style.arrow_length.points + style.connector_standoff.points
         standoff = style.connector_standoff.points
         line = edge.centerline
+        # Each carried on to a drawn shape's outline, as a shaft is (routing.trees).
+        start, end = edge.outline_depth
         there = shorten_start(shorten_end(line, head), standoff)
-        back = shorten_start(shorten_end(line, standoff), head)[::-1]
+        there = stretch_start(stretch_end(there, end), start)
+        back = shorten_start(shorten_end(line, standoff), head)
+        back = stretch_start(stretch_end(back, end), start)[::-1]
         for name, points in (("forward", there), ("back", back)):
             element(
                 group,

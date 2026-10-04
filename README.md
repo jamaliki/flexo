@@ -84,7 +84,8 @@ and, unless given a label, draw nothing. Every component is a method on the grou
 | Kind | Methods |
 | --- | --- |
 | Boxes | `block`, `mlp`, `cnn`, `attention`, `add_norm`, `prediction`, `loss`, `tensor`, `matrix`, `sequence`, `feature_strip`, `concat`, `channels` |
-| Shapes | `circle`, `decision`, `terminal`, `volume`, `op` (and `add`, `multiply`) |
+| Shapes | `circle`, `decision`, `terminal`, `io`, `volume`, `op` (and `add`, `multiply`) |
+| Software | `database`, `server`, `cloud`, `queue`, `document`, `person` (see [Flowcharts and architecture diagrams](#flowcharts-and-architecture-diagrams)) |
 | Words and art | `text`, `vector`, `image`, `graph`, `inset`, `legend` |
 | Genetics | `construct`, `plasmid` (see [Genetic designs](#genetic-designs-constructs-and-plasmids)) |
 | Proteins, trees, the bench | `protein`, `tree`, `wellplate`, `timeline` (see [Proteins, trees, plates, and timelines](#proteins-trees-plates-and-timelines)) |
@@ -557,14 +558,37 @@ its channel count, each on a log scale so a whole network fits on a page.
 `shape` is `(channels, height, width)`, or `(height, width)` for one channel.
 The label is set under the box; arrows attach to the box.
 
-### Flowcharts
+### Flowcharts and architecture diagrams
 
 ```python
 start = m.terminal("start", label="Start")          # a pill: start or end
-step = m.block("step", label="Update weights", input=start)
+data = m.io("data", label="Read batch", input=start)  # a parallelogram: input/output
+step = m.block("step", label="Update weights", input=data)
 done = m.decision("done", label="Converged?", input=step)  # a diamond
 m.connect(done, start, label="no")
 ```
+
+A process is a `block`, a start or end a `terminal`, a question a `decision`, and
+data read or written an `io` parallelogram. The shapes of a software diagram are
+components too, each sized round its label and painted in the theme's roles, so a
+palette, a tone, or a dark theme recolours them with the rest:
+
+```python
+user = m.person("user", "User")                # a head and shoulders, the name under them
+web = m.cloud("web", "Internet", input=user)   # a cloud of round puffs
+app = m.server("app", "App server", input=web)  # a box over two rack units
+cache = m.database("cache", "Cache", input=app)  # a cylinder: a database, any store
+jobs = m.queue("jobs", "Jobs", input=app)      # a box whose end is divided into slots
+m.document("report", "Nightly report", input=jobs)  # a page with a wavy foot
+```
+
+A line meets each of these at its drawn outline, not at the box round it: arrows
+into a database from above stop just short of its lid wherever they land on it,
+a line leaves an `io` from its slanted side and arrives under a document's wavy
+foot, and a straight line ends on a cloud's puffs. A person takes lines at its
+shoulders from either side, over its head from above, and under its name from
+below. Each draws as plain paths, so the editable SVG, the PDF, and a slide's
+PowerPoint keep them as shapes.
 
 A line meets a circle or a diamond only at the middle of a side of its box,
 which for a diamond is a corner. Each line gets a corner of its own while
