@@ -193,6 +193,20 @@ def test_a_part_added_has_no_words_but_those_given_and_a_new_file_one_empty_shap
     assert chosen == ["shape"]
 
 
+def test_a_line_is_known_by_its_ends_when_lines_before_it_come_and_go() -> None:
+    # Someone takes the first line away while the second's words are typed: they still go
+    # on the second, known now by its new number.
+    text, _ = edit(SAMPLE_FIGURE, do="delete", ids=["edge.1.x-to-encoder"])
+    line = {"type": "edge", "id": "edge.2.encoder-to-y"}
+    text, chosen = edit(text, do="update", target=line, values={"label": "features"})
+    assert chosen == ["edge.1.encoder-to-y"]
+    assert data(text)["edges"] == [{"from": "encoder", "to": "y", "label": "features"}]
+    # A line gone is said as the parts it joined, never by its id.
+    text, _ = edit(text, do="delete", ids=["edge.1.encoder-to-y"])
+    with pytest.raises(EditError, match="The line from “Encoder” to “Output \\$y\\$” is gone"):
+        edit(text, do="update", target=line, values={"label": "again"})
+
+
 def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
     text, _ = edit(SAMPLE_FIGURE, do="gather", ids=["encoder"], layout="row")
     text, _ = edit(text, do="delete", ids=["encoder"])

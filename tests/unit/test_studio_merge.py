@@ -249,3 +249,33 @@ def test_a_word_made_bold_while_another_types_in_it_keeps_both() -> None:
     )
     # A word written anew is one change, not the letters it shares with the old: the newer stands.
     assert merge3("a paragraph", "a page", "a paraQQgraph") == "a paraQQgraph"
+
+
+def test_an_object_moved_to_another_column_while_typed_in_goes_with_the_typing() -> None:
+    base = {"body": [{"text": "First."}, {"text": "Second paragraph."}]}
+    typed = {"body": [{"text": "First."}, {"text": "Second paragraph. alice"}]}
+    laid = {
+        "layout": "two-columns",
+        "left": [{"text": "First."}],
+        "right": [{"text": "Second paragraph."}],
+    }
+    for ours, theirs in ((typed, laid), (laid, typed)):
+        merged = merge3(base, ours, theirs)
+        # One copy, where it went, with the typing: no body left beside the columns.
+        assert "body" not in merged
+        assert merged["right"] == [{"text": "Second paragraph. alice"}]
+
+
+def test_a_slide_moved_and_changed_while_typed_in_is_one_slide() -> None:
+    def slide(title: str, words: str) -> dict:
+        return {"title": title, "body": [{"text": "First."}, {"text": words}]}
+
+    base = deck({"title": "0"}, {"title": "1"}, slide("The question", "Second paragraph."))
+    typed = deck({"title": "0"}, {"title": "1"}, slide("The question", "Second paragraph. alice"))
+    moved = deck({"title": "0"}, slide("The question moved", "Second paragraph."), {"title": "1"})
+    for ours, theirs in ((typed, moved), (moved, typed)):
+        assert merge3(base, ours, theirs)["slides"] == [
+            {"title": "0"},
+            slide("The question moved", "Second paragraph. alice"),
+            {"title": "1"},
+        ]

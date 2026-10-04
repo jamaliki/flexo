@@ -331,10 +331,22 @@ class Handler(BaseHTTPRequestHandler):
             workspace.trust()
             self._json({"ok": True})
         elif route == "/api/presence":
-            workspace.set_presence(who, data.get("file"), data.get("where"), data.get("doing"))
+            file, where, doing = data.get("file"), data.get("where"), data.get("doing")
+            workspace.set_presence(who, file, where, doing, str(data.get("client") or ""))
             self._json({"ok": True})
         elif route == "/api/leave":
             workspace.depart(str(data.get("client") or ""))
+            self._json({"ok": True})
+        elif route == "/api/kept":
+            # What a page's own merge kept against its person's change (an object they
+            # deleted that another was typing in): told to the others' pages, as the studio's
+            # merges are told (Doc._tell), so the one typing hears of it too.
+            items = [item for item in data.get("items") or [] if isinstance(item, dict | str)]
+            notes = [{"kept": item, "by": who, "to": None} for item in items[:20]]
+            if notes:
+                file, client = str(data.get("file") or ""), str(data.get("client") or "")
+                said = {"type": "merged", "file": file, "client": client, "notes": notes}
+                workspace.broadcast(said)
             self._json({"ok": True})
         elif route == "/api/agent/call":
             tools = _agent_tools(workspace, data.get("who") or {})

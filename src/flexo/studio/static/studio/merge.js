@@ -21,7 +21,8 @@ export function merge3(base, ours, theirs, notes = null) {
     // others is not taken back from under the label someone has since given it, leaving it
     // stranded with the lines it was put in by gone -- the figure stays as they have it.
     const missed = replaying?.length;
-    const merged = mergeMaps(isMap(base) ? base : {}, ours, theirs, notes);
+    const [followedBase, followedOurs, followedTheirs] = followed(isMap(base) ? base : {}, ours, theirs);
+    const merged = mergeMaps(followedBase, followedOurs, followedTheirs, notes);
     return replaying && replaying.length > missed && (Array.isArray(theirs.nodes) || Array.isArray(theirs.edges)) ? theirs : merged;
   }
   if (Array.isArray(ours) && Array.isArray(theirs)) return mergeItems(Array.isArray(base) ? base : [], ours, theirs, notes);
@@ -64,7 +65,11 @@ export function mergeText(base, ours, theirs, notes = null) {
   if (ours === theirs || base === theirs) return ours;
   if (base === ours) return theirs;
   if (replaying) {
+    // Words over several lines -- a file's (a figure's) -- are made again whole or not at all:
+    // part of a change taken back from lines others have changed would leave them half made.
+    const missed = replaying.length;
     const replayed = replayText(base, ours, theirs);
+    if (replayed !== null && replaying.length > missed && base.includes("\n")) return theirs;
     if (replayed !== null) return replayed;
   }
   if (base.includes("\n") || ours.includes("\n") || theirs.includes("\n")) {
@@ -99,6 +104,7 @@ function mergeWords(base, ours, theirs, notes = null) {
 }
 
 const CLOSING = /^[.,;:!?)\]}\u201d\u2019]/;
+const LETTER = /[\p{L}\p{N}_]/u;
 const isWord = (token) => /^[\p{L}\p{N}_]+$/u.test(token);
 
 // Whether `side` is words written anew over `base`: fewer than half of base's words kept,
@@ -166,7 +172,7 @@ function wordsChunk(base, ours, theirs) {
   if (!base.length) {
     // Words both put at one place (two people typing on at the same end): ours, then theirs,
     // never run together into one word.
-    const joins = ours.length && theirs.length && isWord(ours[ours.length - 1]) && isWord(theirs[0]);
+    const joins = ours.length && theirs.length && endsWord(ours) && startsWord(theirs);
     return joins ? [...ours, " ", ...theirs] : [...ours, ...theirs];
   }
   // Words one side took away while the other typed among them: they go, and the typing stays.
@@ -187,13 +193,30 @@ function wordsChunk(base, ours, theirs) {
 function letters(was, ours, theirs) {
   const spaced = (edit) => (/^\s/.test(edit[2]) ? 1 : 0);
   const edits = [...runsOf(was, ours), ...runsOf(was, theirs)].sort((a, b) => a[0] - b[0] || a[1] - b[1] || spaced(a) - spaced(b));
-  let merged = "", at = 0;
+  let merged = "", at = 0, typed = null;
   for (const [start, end, put] of edits) {
     if (start < at) return null;
-    merged += was.slice(at, start).join("") + put;
+    // Two starting words at one place: they never run together into one (two typing on in
+    // one word -- "m" made "m4" and "mc" -- keep its letters together).
+    const fresh = start === 0 || !LETTER.test(was[start - 1]);
+    const both = typed === start && start === end && fresh && put && endsWord([...merged]) && startsWord([...put]);
+    merged += was.slice(at, start).join("") + (both ? " " : "") + put;
+    typed = start === end ? start : null;
     at = end;
   }
   return merged + was.slice(at).join("");
+}
+
+// Whether words (tokens, or letters) end, or start, with a word's letter -- a mark put among
+// them (the page's caret, a private letter) passed over.
+const PRIVATE = /^[\ue000-\uf8ff]$/u;
+function endsWord(tokens) {
+  for (let n = tokens.length - 1; n >= 0; n--) if (!PRIVATE.test(tokens[n])) return LETTER.test(tokens[n].at(-1) ?? "");
+  return false;
+}
+function startsWord(tokens) {
+  for (const token of tokens) if (!PRIVATE.test(token)) return LETTER.test(token[0] ?? "");
+  return false;
 }
 
 // The runs of letters a change put in place of others, `was` to `now` (arrays of letters):
@@ -238,8 +261,30 @@ function replayText(base, target, now) {
     from = end;
     into += [...words].length;
   }
+  const mapped = new Set(where.filter((k) => k >= 0));
   const gone = new Uint8Array(at.length), put = new Map();
   for (const [start, end, words] of runsOf(was, to, toTarget)) {
+    // Words it puts back in place of letters others have changed since (a word it retyped,
+    // retyped again by another): not spliced into theirs -- theirs stand, and that is said.
+    if (words && end > start) {
+      let intact = where[start] >= 0;
+      for (let i = start + 1; i < end && intact; i++) intact = where[i] === where[i - 1] + 1;
+      // (Nor where others have typed onto it, making it a word of theirs: "drafted", made
+      // "redrafted", is not undone to "rewritten".)
+      const theirs = (k) => k >= 0 && k < at.length && !mapped.has(k) && LETTER.test(at[k]);
+      if (intact && ((LETTER.test(was[start]) && theirs(where[start] - 1)) || (LETTER.test(was[end - 1]) && theirs(where[end - 1] + 1)))) intact = false;
+      if (!intact) { replaying?.push({ changed: words }); continue; }
+    }
+    // Lines it put in that others have since typed among (a figure's file: a shape's lines,
+    // its label typed in by another): not taken out from about their letters, left as lines
+    // of nothing whole -- they stay, and that is said.
+    if (!words && was.slice(start, end).includes("\n")) {
+      const own = [];
+      for (let i = start; i < end; i++) if (where[i] >= 0) own.push(where[i]);
+      let among = false;
+      for (let n = 1; n < own.length && !among; n++) for (let k = own[n - 1] + 1; k < own[n] && !among; k++) among = !mapped.has(k);
+      if (among) { replaying?.push({ changed: was.slice(start, end).join("") }); continue; }
+    }
     for (let i = start; i < end; i++) if (where[i] >= 0) gone[where[i]] = 1;
     if (!words) continue;
     let place = -1;
@@ -312,6 +357,7 @@ function lettersKept(first, second, most = 2000) {
 }
 
 function mergeMaps(base, ours, theirs, notes = null) {
+  if (replaying) [base, ours] = reworded(base, ours, theirs);
   const result = {};
   const keys = [...Object.keys(ours), ...Object.keys(theirs).filter((key) => !(key in ours))];
   for (const key of keys) {
@@ -334,6 +380,21 @@ function mergeMaps(base, ours, theirs, notes = null) {
   return result;
 }
 
+// Made again on words made a list since (a paragraph made a list, its lines items): the change
+// is made on them as they now are, line for line -- `base` and `target` (the change) given the
+// words as the list's, the old's taken out. [base, target]
+function reworded(base, target, now) {
+  const words = (value) => Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string");
+  const gone = Object.keys(base).filter((key) => typeof base[key] === "string" && typeof target[key] === "string" && !(key in now));
+  const come = Object.keys(now).filter((key) => !(key in base) && !(key in target) && words(now[key]));
+  if (gone.length !== 1 || come.length !== 1) return [base, target];
+  const [was, into] = [gone[0], come[0]];
+  const made = replayText(base[was], target[was], now[into].join("\n"));
+  if (made === null) return [base, target];
+  const { [was]: _old, ...restBase } = base, { [was]: _gone, ...restTarget } = target;
+  return [{ ...restBase, [into]: now[into] }, { ...restTarget, [into]: made.split("\n") }];
+}
+
 // What stays of `now`, which someone changed since a change being made again took it (`was`)
 // away: words, those others wrote in it, the change's own taken out (none: MISSING); else
 // all of it, as they have it.
@@ -353,8 +414,14 @@ export function mergeLists(base, ours, theirs) {
 // Two edits of a list of items, merged by the items' identities: each side's items are
 // paired with the items of base they were.
 export function mergeItems(base, ours, theirs, notes = null) {
-  // (Made again, items moved and changed at once are still known: follows.)
-  const pairs = replaying ? (before, after) => new Map(follows(before, after).map((j, i) => [i, j]).filter(([, j]) => j >= 0)) : pairsOf;
+  // (Made again, items moved and changed at once are still known: follows; and an object
+  // made another kind where it was -- a paragraph made a list -- is still itself: reworded.)
+  const pairs = replaying ? (before, after) => {
+    const found = new Map(follows(before, after).map((j, i) => [i, j]).filter(([, j]) => j >= 0));
+    const used = new Set(found.values());
+    before.forEach((item, i) => { if (!found.has(i) && isMap(item) && isMap(after[i]) && !used.has(i) && !kin(item, after[i])) { found.set(i, i); used.add(i); } });
+    return found;
+  } : pairsOf;
   const toOurs = pairs(base, ours), toTheirs = pairs(base, theirs);
   const fromOurs = new Map([...toOurs].map(([i, j]) => [j, i]));
   const fromTheirs = new Map([...toTheirs].map(([i, k]) => [k, i]));
@@ -443,7 +510,125 @@ function pairsOf(base, side) {
     come = come.filter((j) => !used.has(j));
     if (gone.length === come.length) gone.forEach((i, m) => { if (kin(base[i], side[come[m]])) { pairs.set(i, come[m]); used.add(come[m]); } });
   }
+  // Moved and changed at once (a slide moved and retitled while typed in): of the mappings
+  // left, the most alike, wherever it went -- one mapping, not one gone and another new.
+  const gone = base.map((_, i) => i).filter((i) => !pairs.has(i) && isMap(base[i]));
+  const come = side.map((_, j) => j).filter((j) => !used.has(j) && isMap(side[j]));
+  const scored = [];
+  for (const i of gone) for (const j of come) {
+    if (!kin(base[i], side[j])) continue;
+    const score = alike(base[i], side[j]);
+    if (score >= MOVED) scored.push([-score, i, j]);
+  }
+  scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  for (const [, i, j] of scored) if (!pairs.has(i) && !used.has(j)) { pairs.set(i, j); used.add(j); }
   return pairs;
+}
+
+// How alike a mapping moved and changed at once must be to the one it was (see pairsOf).
+const MOVED = 0.6;
+
+// A mapping's lists (a slide's body and sides, each of its columns), by where they are:
+// [[key], list] or [[key, index], list] for a list of lists.
+function pools(value) {
+  const found = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (Array.isArray(item) && item.length && item.every((inner) => Array.isArray(inner))) item.forEach((inner, index) => found.push([[key, index], inner]));
+    else if (Array.isArray(item)) found.push([[key], item]);
+  }
+  return found;
+}
+const poolName = (pool) => pool.join("\u0000");
+
+// Whether one mapping could be the other moved to another list: of one kind, with at least
+// half their keys alike (a paragraph and a paragraph, not a shape and a line).
+function movableTo(first, second) {
+  if (!isMap(first) || !isMap(second) || !kin(first, second)) return false;
+  const keys = new Set([...Object.keys(first), ...Object.keys(second)]);
+  const shared = Object.keys(first).filter((key) => Object.hasOwn(second, key)).length;
+  return keys.size > 0 && shared * 2 >= keys.size;
+}
+
+// Items one side moved to another of a mapping's lists while the other side kept (and edited)
+// them where they were -- a paragraph put in the next column, a slide's body set out in two
+// columns: moved for the other side too (and in base), so the merge has each where it went,
+// with both sides' edits, never left behind as a copy in the list it left. (merge.py's
+// _followed.)
+function followed(base, ours, theirs) {
+  [base, ours] = followMoves(base, theirs, ours);
+  [base, theirs] = followMoves(base, ours, theirs);
+  return [base, ours, theirs];
+}
+
+function followMoves(base, side, other) {
+  const listsB = new Map(pools(base).map(([pool, items]) => [poolName(pool), [pool, items]]));
+  const listsS = new Map(pools(side).map(([pool, items]) => [poolName(pool), [pool, items]]));
+  const listsO = new Map(pools(other).map(([pool, items]) => [poolName(pool), [pool, items]]));
+  if (new Set([...listsB.keys(), ...listsS.keys()]).size < 2) return [base, other];
+  const kept = new Map([...listsB].map(([name, [, items]]) => [name, listsS.has(name) ? pairsOf(items, listsS.get(name)[1]) : new Map()]));
+  const gone = [], come = [];
+  for (const [name, [, items]] of listsB) items.forEach((item, i) => { if (!kept.get(name).has(i) && isMap(item)) gone.push([name, i]); });
+  for (const [name, [, items]] of listsS) {
+    const used = new Set(kept.get(name)?.values() || []);
+    items.forEach((item, j) => { if (!used.has(j) && isMap(item)) come.push([name, j]); });
+  }
+  const scored = [];
+  gone.forEach(([from, i], n) => come.forEach(([to, j], m) => {
+    const was = listsB.get(from)[1][i], now = listsS.get(to)[1][j];
+    if (from === to || !movableTo(was, now)) return;
+    const score = alike(was, now);
+    if (score >= ALIKE) scored.push([-score, n, m]);
+  }));
+  scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  const moves = [], takenGone = new Set(), takenCome = new Set();
+  for (const [, n, m] of scored) {
+    if (takenGone.has(n) || takenCome.has(m)) continue;
+    takenGone.add(n); takenCome.add(m);
+    moves.push([...gone[n], ...come[m]]);
+  }
+  if (!moves.length) return [base, other];
+  // Each moved where it went, in the order the side has there: after the item it follows
+  // there that was in that list already (else first).
+  const order = [...listsS.keys()];
+  moves.sort((a, b) => order.indexOf(a[2]) - order.indexOf(b[2]) || a[3] - b[3]);
+  const goneB = new Map(), goneO = new Map(), addedB = new Map(), addedO = new Map();
+  const add = (map, name, entry) => { if (!map.has(name)) map.set(name, []); map.get(name).push(entry); };
+  const drop = (map, name, index) => { if (!map.has(name)) map.set(name, new Set()); map.get(name).add(index); };
+  for (const [from, i, to, j] of moves) {
+    const back = new Map([...(kept.get(to) || new Map())].map(([b, k]) => [k, b]));
+    let after = -1;
+    for (let k = 0; k < j; k++) if (back.has(k)) after = Math.max(after, back.get(k));
+    drop(goneB, from, i);
+    add(addedB, to, [after + 0.5, listsB.get(from)[1][i]]);
+    const theirsNow = listsO.has(from) ? pairsOf(listsB.get(from)[1], listsO.get(from)[1]) : new Map();
+    if (!theirsNow.has(i)) continue;  // the other side took it away: it is not theirs to move
+    drop(goneO, from, theirsNow.get(i));
+    const inOther = pairsOf(listsB.get(to)?.[1] || [], listsO.get(to)?.[1] || []);
+    const place = after >= 0 && inOther.has(after) ? inOther.get(after) : -1;
+    add(addedO, to, [place + 0.5, listsO.get(from)[1][theirsNow.get(i)]]);
+  }
+  const poolOf = new Map([...listsB, ...listsS, ...listsO].map(([name, [pool]]) => [name, pool]));
+  return [repooled(base, listsB, goneB, addedB, poolOf), repooled(other, listsO, goneO, addedO, poolOf)];
+}
+
+// `value` with the items of its lists `gone` taken out and those `added` put in (each at its
+// place, a fraction past the index of the item it follows).
+function repooled(value, lists, gone, added, poolOf) {
+  const result = { ...value };
+  for (const name of [...lists.keys(), ...[...added.keys()].filter((key) => !lists.has(key))]) {
+    const pool = poolOf.get(name), items = lists.get(name)?.[1] || [];
+    const left = gone.get(name) || new Set();
+    const placed = items.map((item, n) => [n, item]).filter(([n]) => !left.has(n)).concat(added.get(name) || []);
+    const made = placed.sort((a, b) => a[0] - b[0]).map(([, item]) => item);
+    if (pool.length === 1) result[pool[0]] = made;
+    else {
+      const outer = (result[pool[0]] || []).map((inner) => [...inner]);
+      while (outer.length <= pool[1]) outer.push([]);
+      outer[pool[1]] = made;
+      result[pool[0]] = outer;
+    }
+  }
+  return result;
 }
 
 // Where each item of `before` is in `after` (its index, or -1 if it is gone): paired as

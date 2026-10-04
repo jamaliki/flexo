@@ -23,6 +23,10 @@
   /* Keyboard focus, as on a Mac: a soft ring of the accent, clear against any panel. */
   --focus-ring: rgba(61, 90, 254, 0.7);
   --focus-halo: rgba(61, 90, 254, 0.28);
+  /* One stroke for every frame on a slide or figure -- pointed at, chosen, typed in, yours
+     or another's: what it is shown by its style and colour (dashed, a halo), not its width.
+     Whole pixels, so it is the same width on every screen. */
+  --frame: 2px;
   /* Selected words: a light blue seen through, clear on the panels and on any slide (white
      paper, a navy band), the words on it still easy to read. */
   --selection: rgba(123, 140, 255, 0.45);
@@ -407,6 +411,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
    their labels: it gives way first, down to a few words. */
 .status { flex: 0 100 auto; }
 .status.problem { min-width: 120px; }
+/* A document that does not read: its file named whole, the bar's tools (inert) giving way. */
+.status.unread { flex: none; }
+.status.unread .status-text, .docbar.tight .status.unread .status-text { display: inline; max-width: none; }
 .docbar > .docbar-slot, .status .dot { flex-shrink: 0; }
 /* "Saving…" and "Saved" take the same room, so nothing beside them shifts as a change saves. */
 .status:not(.problem) { min-width: 66px; }

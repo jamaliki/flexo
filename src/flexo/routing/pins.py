@@ -421,7 +421,9 @@ def plan_pins(
         for node in fitted.nodes
         if node.measured.spec.kind not in TRANSPARENT_KINDS
     )
-    positions = _align(slots, orders, links, style.port_spacing.points, obstacles)
+    positions = _align(
+        slots, orders, links, style.port_spacing.points, obstacles, style.arrow_width.points
+    )
     pins: dict[tuple[str, str, Side, bool], Pin] = {}
     for key, slot in slots.items():
         coordinate = positions[key]
@@ -1256,6 +1258,7 @@ def _align(
     links: list[tuple[tuple[str, str, Side, bool], tuple[str, str, Side, bool]]],
     spacing: float,
     obstacles: tuple[Rect, ...] = (),
+    head: float = 0.0,
 ) -> dict[tuple[str, str, Side, bool], float]:
     """Slide pins so facing pairs line up exactly, keeping every side's order.
 
@@ -1267,6 +1270,10 @@ def _align(
     separation solver finds the nearest arrangement. This is ``adapt_ports``
     done once, on pins, with the side orders as constraints rather than a
     repacking loop.
+
+    A pin an arrow arrives at stands a ``head`` (the arrowhead's width) further
+    from the pins beside it, where its side has room: a lane apart, an arrowhead
+    beside a line leaving from the same side all but touched it.
     """
 
     parent = {key: key for key in slots}
@@ -1309,6 +1316,7 @@ def _align(
             continue
         parent[root_two] = root_one
         ranges[root_one] = (low, high)
+    gaps = _lanes(orders, parent, ranges, spacing, head)
     for axis in (True, False):
         keys = [
             key for key, slot in slots.items() if (slot.side in {Side.NORTH, Side.SOUTH}) is axis
@@ -1333,7 +1341,7 @@ def _align(
             for first, second in itertools.pairwise(order):
                 one, two = index[find(first)], index[find(second)]
                 if one != two:
-                    constraints.append((one, two, spacing))
+                    constraints.append((one, two, gaps.get((first, second), spacing)))
         for root in classes:
             low, high = ranges[root]
             position = index[root]
@@ -1401,8 +1409,12 @@ def _orders_fit(
     ranges: dict,
     orders: list[list],
     spacing: float,
+    gaps: dict | None = None,
 ) -> bool:
-    """Whether every side can still hold its pins in order, a lane apart, in their ranges."""
+    """Whether every side can still hold its pins in order, a lane apart, in their ranges.
+
+    ``gaps`` gives the room between two pins next to each other where it is not a lane.
+    """
 
     def find(key):
         while parent[key] != key:
@@ -1412,16 +1424,42 @@ def _orders_fit(
     for order in orders:
         position = float("-inf")
         previous = None
-        for key in order:
+        for before, key in zip([None, *order], order, strict=False):
             root = find(key)
             low, high = ranges[root]
             if root == previous:
                 continue
-            position = max(low, position + spacing)
+            gap = (gaps or {}).get((before, key), spacing)
+            position = max(low, position + gap)
             if position > high + 1e-6:
                 return False
             previous = root
     return True
+
+
+def _lanes(
+    orders: list[list], parent: dict, ranges: dict, spacing: float, head: float
+) -> dict[tuple, float]:
+    """The room between each two pins next to each other on a side.
+
+    A lane; and where an arrow arrives at either of them, its head's width more
+    -- or half of it, or none, as the side has room for: lines stay straight
+    first.
+    """
+
+    gaps: dict[tuple, float] = {}
+    if head <= 0.0:
+        return gaps
+    for order in orders:
+        pairs = [pair for pair in itertools.pairwise(order) if pair[0][3] or pair[1][3]]
+        if not pairs:
+            continue
+        for share in (1.0, 0.5, 0.0):
+            trial = {pair: spacing + share * head for pair in pairs}
+            if _orders_fit(parent, ranges, [order], spacing, trial):
+                break
+        gaps.update(trial)
+    return gaps
 
 
 def _orders_consistent(parent: dict, orders: list[list]) -> bool:

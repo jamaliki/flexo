@@ -3119,9 +3119,17 @@ def _linear(items: list) -> str:
             said.append(item.char)  # a sign, not an operation, as in -x
             before = ORD
             continue
-        said.append(_linear_one(item))
+        piece = _linear_one(item)
+        if said and _RUNS_ON.search(said[-1]) and (piece[:1].isalnum() or piece[:1] == "("):
+            piece = f" {piece}"  # a script after its mark is apart from what follows: k_B p
+        said.append(piece)
         before = kind if kind is not None else ORD
     return "".join(said)
+
+
+_RUNS_ON = re.compile(r"[_^]\w+$")
+"""A script said after its mark, which a letter, a digit or a bracket after it would read
+as part of."""
 
 
 def _grouped(items: list) -> str:
@@ -3132,10 +3140,29 @@ def _grouped(items: list) -> str:
 
 
 def _scripted_text(items: list, forms: dict[str, str], mark: str) -> str:
-    said = " ".join(_linear(items).split())
-    if said and all(character in forms for character in said):
+    return scripted(_linear(items), raised=mark == "^")
+
+
+_FIGURES = frozenset("0123456789+−=()")
+"""What a script is said in Unicode's raised or lowered characters when it is made of
+nothing else: digits and signs, which every font has (``x²``, ``Na⁺``, ``k₁``)."""
+
+
+def scripted(words: str, *, raised: bool) -> str:
+    """A superscript or subscript as it reads in a line of plain text -- one rule wherever
+    one is read: a formula's words (``linear``), and a script set in a line of words in a
+    PDF. Digits and signs are raised or lowered in Unicode (``x²``, ``Na⁺``, ``k₁``);
+    anything else follows a caret or an underscore (``k_auto``, ``x^T``), in parentheses
+    where it is more than a word (``e^(−x)``)."""
+
+    said = " ".join(words.split()).replace("-", "−")
+    forms = _RAISED if raised else _LOWERED
+    if not said:
+        return ""
+    if all(character in _FIGURES for character in said):
         return "".join(forms[character] for character in said)
-    return f"{mark}{said}" if len(said) <= 1 else f"{mark}({said})"
+    mark = "^" if raised else "_"
+    return f"{mark}{said}" if len(said) <= 1 or said.isalnum() else f"{mark}({said})"
 
 
 def _linear_one(item: object) -> str:

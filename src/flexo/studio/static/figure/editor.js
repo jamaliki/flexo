@@ -118,7 +118,10 @@ export function mount(studio, main) {
     // The figure is named as its file is.
     name: () => String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, ""),
     // Edits held while the studio is away: the document is not saved meanwhile.
-    waiting: (on) => { studio.waiting = on; studio.emit("status"); },
+    waiting: (on) => { studio.waiting = Math.max(0, (studio.waiting || 0) + (on ? 1 : -1)); studio.emit("status"); },
+    // (A label's ⌘Z, once someone else's words came into it, is the document's undo.)
+    undo: () => studio.undo(),
+    redo: () => studio.redo(),
     addAnchor: () => addButton,
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did
@@ -138,6 +141,13 @@ export function mount(studio, main) {
       return null;
     },
   });
+  let greeted = false;  // (a new figure's one shape opened for its words: see the end)
+  // Keys typed while it was on its way, just made, are typed again once it is open: its
+  // one shape's words (shell.js's create).
+  studio.takesKeys = true;
+  // ⌘Z and Undo take back an edit held for the studio while it is away, and say which.
+  studio.takeBack = () => figure.takeBackWaiting();
+  studio.takeBackLabel = () => figure.waitingLabel();
 
   function renderBar() {
     const chosen = figure.selected;
@@ -186,6 +196,10 @@ export function mount(studio, main) {
     const scale = state.zoom ?? fitScale();
     svg.style.width = `${natural.width * scale}px`;
     svg.style.height = `${natural.height * scale}px`;
+    // Zoomed, the canvas runs a view's width and height past the drawing each way: it can be
+    // scrolled to keep any point where it was as the drawing grows or shrinks about it (a
+    // short figure too, which would otherwise sit in the middle). Fitted, it is centred.
+    page.style.margin = state.zoom ? `${stage.clientHeight}px ${stage.clientWidth}px` : "";
     zoomValue.textContent = `${Math.round(scale * 100)}%`;
     placeMarks();
     figure.placeInline();
@@ -505,6 +519,12 @@ export function mount(studio, main) {
     if (page.parentNode !== stage) clear(stage, page);
     fitPage();
     figure.land(before);
+    // A new figure, its one shape with no words yet: chosen, its words typed at once.
+    if (!greeted) {
+      greeted = true;
+      const nodes = figure.model?.nodes || [];
+      if (nodes.length === 1 && !plain(nodes[0].label).trim() && !(figure.model.edges || []).length) figure.typeSoon(nodes[0].id);
+    }
   });
 
   // Someone else's change, or undo: the source follows, keeping the caret on its words.
@@ -549,4 +569,10 @@ export function mount(studio, main) {
 
   renderBar();
   renderInspector();
+  // A new figure -- one shape, with no words yet -- takes its words from the first key, the
+  // keys typed before it is drawn among them, as a new table's first cell does.
+  const text = String(studio.doc?.text || "");
+  const ids = [...text.matchAll(/^\s*- id: (\S+)\s*$/gm)].map((found) => found[1]);
+  const worded = /^\s+label: (?!(''|"")\s*$)\S/m.test(text);
+  if (ids.length === 1 && !worded && !/^(edges|groups|nets):/m.test(text)) { greeted = true; figure.typeSoon(ids[0]); }
 }

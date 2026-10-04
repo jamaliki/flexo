@@ -7,8 +7,9 @@ import { AssistantPanel } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
-// (No blue: the blue of what is chosen here is one's own.)
-const COLOURS = ["#e8590c", "#7048e8", "#0ca678", "#d6336c", "#a0522d", "#f08c00", "#5c940d", "#ae3ec9"];
+// Each far from the others in hue, the first few most of all (they are given in the order
+// people come), and none near the blue of what is chosen here, which is one's own.
+const COLOURS = ["#e8590c", "#0ca678", "#d6336c", "#5c940d", "#ae3ec9", "#1098ad", "#f59f00", "#795548"];
 const MCP_COMMAND = "claude mcp add flexo-studio -- flexo studio mcp";
 
 // Each person here has the colour the studio gave them as they came, none shared with
@@ -66,6 +67,8 @@ function statusWords(session) {
   if (state === "saving") return "Saving…";
   if (state === "offline") return "Not saved: can't reach the studio";
   const problem = session.problem || "";
+  // A document that never read: which file, whole -- why is said on the page under it.
+  if (session.unread) return /^Can't read [^:]+/.exec(problem)?.[0] || problem;
   // The file on disk does not read: "Not saved" only while edits made here wait for it.
   if (session.held) return session.unsaved ? `Not saved: ${problem.replace(/^Can't/, "can't")}` : problem;
   // Nothing made here waiting (a file moved or deleted under it): what is so, not "Not saved".
@@ -222,11 +225,24 @@ export class Workspace {
   rememberedTabs() { try { return JSON.parse(remembered(`tabs:${this.info.folder}`, "[]")); } catch { return []; } }
 
   async create(kind, name) {
-    const result = await this.api("/api/new", { file: name, kind, client: this.client, who: this.me });
-    await this.refreshDocuments();
-    // Its editor knows it is new (and so ready to be typed in at once).
-    this.justMade = result.file;
-    return this.open(result.file);
+    // What is typed while it is on its way -- asked for, opened -- is kept for it.
+    this.held?.stop();
+    const held = this.held = holdKeys();
+    try {
+      const result = await this.api("/api/new", { file: name, kind, client: this.client, who: this.me });
+      await this.refreshDocuments();
+      // Its editor knows it is new (and so ready to be typed in at once).
+      this.justMade = result.file;
+      const session = await this.open(result.file);
+      held.stop();
+      // Its editor, open now, has those keys as though typed there -- if it takes keys typed
+      // before it was ready (it says so as it is mounted: a figure's one shape is typed on).
+      if (session?.takesKeys && session === this.active) typeAgain(held.keys);
+      return session;
+    } finally {
+      held.stop();
+      if (this.held === held) this.held = null;
+    }
   }
 
   async refreshDocuments() {
@@ -269,13 +285,20 @@ export class Workspace {
     // only those back since, and no one gone meanwhile is left shown -- and it is told again
     // where this window is.
     source.addEventListener("hello", (message) => {
+      clearTimeout(this.awayTimer);
       let hello = {};
       try { hello = JSON.parse(message.data || "{}"); } catch { hello = {}; }
       if (Array.isArray(hello.presence)) { this.presence = hello.presence; give(this.presence); this.emit("presence"); }
       if (this.focused) this.reportFocus(...this.focused);
       this.emit("online", true);
     });
-    source.onerror = () => this.emit("online", false);
+    source.onerror = () => {
+      this.emit("online", false);
+      // Out of reach for more than a moment, who is here is not known: no one is shown, rather
+      // than as they were last known, until the studio says again (its hello).
+      clearTimeout(this.awayTimer);
+      this.awayTimer = setTimeout(() => { if (this.presence.length) { this.presence = []; give([]); this.emit("presence"); } }, 1500);
+    };
     this.source = source;
   }
 
@@ -409,6 +432,8 @@ export async function start() {
     const session = workspace.active;
     if (!session) return;
     if (ownUndo()) { document.execCommand(way); return; }
+    // An edit held for the studio while it is away (a figure's) is taken back first.
+    if (way === "undo" && session.takeBack?.()) return;
     await session.settled?.();
     session[way]();
   };
@@ -603,15 +628,19 @@ export async function start() {
     const session = workspace.active;
     docbar.hidden = !session;
     if (!session) { renderUnread(null); return; }
-    undo.disabled = !session.past.length;
-    redo.disabled = !session.future.length;
-    past.disabled = !session.past.length && !session.future.length;
+    // A document that does not read has nothing to undo or redo here (its words are put
+    // right in the sheet, which has its own).
+    // (An edit held for the studio while it is away is what Undo takes back first.)
+    const held = session.takeBackLabel?.();
+    undo.disabled = session.unread || (!session.past.length && !held);
+    redo.disabled = session.unread || !session.future.length;
+    past.disabled = session.unread || (!session.past.length && !session.future.length);
     const last = session.past[session.past.length - 1], next = session.future[session.future.length - 1];
     const what = (entry) => (entry && session.said(entry).text ? ` ${session.said(entry).text}` : "");
-    undo.title = `Undo${what(last)} (⌘Z)`;
+    undo.title = `Undo${held ? ` “${held}”` : what(last)} (⌘Z)`;
     redo.title = `Redo${what(next)} (⇧⌘Z)`;
     const state = session.state;
-    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}`;
+    status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}${session.unread ? " unread" : ""}`;
     const words = statusWords(session);
     status.title = state === "problem" ? session.problem || "" : state === "offline" ? "Your changes are kept here, and saved when the studio is back." : "";
     const text = status.querySelector(".status-text");
@@ -810,6 +839,37 @@ function inField(event) {
   return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "") || Boolean(event.target?.isContentEditable);
 }
 
+// Keys typed with nothing yet to take them (a document just made, its editor still on its
+// way), held, in order: each {text} or {key, shift}, as an editor's early keys are. Not
+// those typed in a field, or with ⌘; and not for long, should nothing come to take them.
+function holdKeys() {
+  const keys = [];
+  const hold = (event) => {
+    if (event.metaKey || event.ctrlKey || event.isComposing || inField(event)) return;
+    const key = event.key;
+    if ([...key].length === 1) keys.push({ text: key });
+    else if (["Backspace", "Delete", "Enter", "Escape"].includes(key)) keys.push({ key, shift: event.shiftKey });
+    else return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  document.addEventListener("keydown", hold, true);
+  const timer = setTimeout(() => stop(), 10000);
+  const stop = () => { clearTimeout(timer); document.removeEventListener("keydown", hold, true); };
+  return { keys, stop };
+}
+
+// Keys held (holdKeys) typed again, where the page now has the keys: into the field typed
+// in, or to the page for its editor to take as it takes a key.
+function typeAgain(keys) {
+  for (const key of keys) {
+    const target = document.activeElement || document.body;
+    if (inField({ target }) && key.text) { document.execCommand("insertText", false, key.text); continue; }
+    if (inField({ target }) && key.key === "Backspace") { document.execCommand("delete"); continue; }
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: key.text ?? key.key, shiftKey: Boolean(key.shift), bubbles: true, cancelable: true }));
+  }
+}
+
 // A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
 const homeShort = (folder) => String(folder || "").replace(/\/+$/, "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 
@@ -919,16 +979,29 @@ const SHORTCUTS = [
 ];
 
 // The first control of the document's inspector (a figure's, a theme's settings), its ring
-// shown: put there by the keys.
+// shown: put there by the keys. Esc there (not taken by a control: a menu, a field put back)
+// goes back to where the keys were, as a deck's inspector does.
 function toInspector() {
   const view = [...document.querySelectorAll(".views > *")].find((node) => !node.hidden);
   const panel = view?.querySelector(".inspector, .fig-inspector, .theme-panel");
   const first = panel && [...panel.querySelectorAll("button:not(:disabled), input, select, textarea, [contenteditable=true], [tabindex='0']")]
     .find((node) => node.offsetParent && node.tabIndex >= 0);
   if (!first) return;
+  const before = document.activeElement;
   first.focus({ focusVisible: true });
   first.dataset.keyed = "";
   first.addEventListener("blur", () => { delete first.dataset.keyed; }, { once: true });
+  const back = (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented || document.querySelector(".menu, .popover, .scrim")) return;
+    event.preventDefault();
+    done();
+    if (before?.isConnected && before !== document.body && !panel.contains(before)) before.focus({ preventScroll: true });
+    else document.activeElement?.blur();
+  };
+  const left = (event) => { if (!panel.contains(event.relatedTarget)) done(); };
+  const done = () => { panel.removeEventListener("keydown", back); panel.removeEventListener("focusout", left); };
+  panel.addEventListener("keydown", back);
+  panel.addEventListener("focusout", left);
 }
 
 function shortcutsDialog() {

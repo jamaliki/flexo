@@ -32,7 +32,12 @@ def test_wrapping_preserves_words(measurer: TextMeasurer) -> None:
     assert all(line.width <= 40.0 for line in metrics.lines)
 
 
-def test_missing_glyph_is_diagnostic(measurer: TextMeasurer) -> None:
+def test_missing_glyph_is_diagnostic(
+    measurer: TextMeasurer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As on a machine with no font that has it: GNU Unifont, where installed, has
+    # outlines for every emoji.
+    monkeypatch.setattr("flexo.text.family_covering", lambda characters: None)
     with pytest.raises(FlexoError, match="contains"):
         measurer.measure((TextRun("\U0001f9ec"),))
 

@@ -262,6 +262,7 @@ export const ui = {
     const entered = () => (key ? entering.get(key) : origin);
     input.addEventListener("focus", () => { if (!key) origin ??= input.value; else if (!entering.has(key)) entering.set(key, input.value); });
     const commit = () => {
+      settle();
       input.typing = false;
       const parsed = read();
       if (parsed === null) { input.classList.remove("invalid"); apply(null); return; }
@@ -275,16 +276,23 @@ export const ui = {
     input.addEventListener("blur", () => setTimeout(() => {
       // Drawn again under the keys, it is still being typed in.
       if (key && document.activeElement?.dataset?.key === key) return;
+      settle();
       if (input.isConnected) commit();
       if (key) entering.delete(key); else origin = null;
     }, 0));
+    // A number typed is taken when it is done, as in Keynote: on Return, Tab or leaving the
+    // field, or a step (↑, ↓, the steppers) -- not at each key ("44" is never 4 on its way,
+    // seen by everyone and written to the file). A press anywhere else is leaving it, taken
+    // before what it presses is done (which may draw the form again, the field gone with it).
+    // (A field drawn again while typed in leaves it to the field that took its place.)
+    const pressed = (event) => { if (!input.isConnected) settle(); else if (!node.contains(event.target)) commit(); };
+    const settle = () => document.removeEventListener("pointerdown", pressed, true);
     input.addEventListener("input", () => {
       hush();
+      if (!input.typing) document.addEventListener("pointerdown", pressed, true);
       input.typing = true;
       const parsed = read();
       input.classList.toggle("invalid", parsed !== null && Number.isNaN(parsed));
-      // On its way to "12" a "1" is out of range: taken once it is in range, or when the field is left.
-      if (parsed === null || (!Number.isNaN(parsed) && clamp(parsed) === parsed)) apply(parsed);
     });
     const stepBy = (sign, big) => {
       hush();
@@ -318,7 +326,9 @@ export const ui = {
         input.select();
       }
     });
-    return ui.numberBox(input, { unit, step: stepBy, note });
+    const node = ui.numberBox(input, { unit, step: stepBy, note });
+    if (input.typing) document.addEventListener("pointerdown", pressed, true);
+    return node;
   },
 
   // A number field's box, as a Mac's: the digits to the right, the unit after them ("12 pt",

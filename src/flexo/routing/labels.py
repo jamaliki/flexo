@@ -47,6 +47,12 @@ Clear of it, but close enough that where lines converge -- the weights into a
 perceptron's sum -- two captions end up side by side between two lines; a
 place with open space round it reads as one line's own."""
 
+AT_HEAD = 150.0
+"""Price of a caption beside the arrowhead its line ends in.
+
+There it reads as naming the part the line comes to, not the line: it goes along
+the line instead, leaving the canvas to grow for it if it must."""
+
 OUTSIDE = 100.0
 """Price of a caption leaving the canvas.
 
@@ -136,8 +142,13 @@ def place_captions(
     def price(index: int, spot: _Spot, captions: Iterable[Rect]) -> float:
         captions = list(captions)
         cost = 0.0
+        item = items[index]
+        ends = isinstance(item, RoutedEdge) and item.spec.arrow == "end"
+        head = item.centerline[-1] if ends else None
         for box in boxes_of(index, spot):
             cost += _price(box, solid, [*fixed, *captions], others, canvas)
+            if head is not None and box.inflated(2.0 * near).contains_point(head):
+                cost += AT_HEAD
             for line in foreign[index]:
                 pieces = list(itertools.pairwise(line))
                 if any(_crosses(box.inflated(near), a, b) for a, b in pieces):

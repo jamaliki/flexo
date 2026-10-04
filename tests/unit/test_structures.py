@@ -412,13 +412,19 @@ def test_a_structure_is_named_for_what_its_file_holds_and_a_long_name_wraps(tmp_
     from flexo.structures import structure_caption
 
     # Its molecule, as a person writes it (the PDB's capitals kept for acronyms), and its ID.
-    assert structure_caption(DATA / "1a7g.cif") == "Regulatory protein E2 (1A7G)"
+    assert structure_caption(DATA / "1a7g.cif") == "E2 DNA-binding domain (1A7G)"
     entry = tmp_path / "capsid.pdb"
     entry.write_text(
         f"{'HEADER    VIRAL PROTEIN':<62}1A8O\n"
         "COMPND    MOL_ID: 1;\nCOMPND   2 MOLECULE: HIV CAPSID;\n"
     )
     assert structure_caption(entry) == "HIV capsid (1A8O)"
+    # A complex with DNA is named for its protein, never "DNA".
+    entry.write_text(
+        f"{'HEADER    TRANSCRIPTION/DNA':<62}1LCD\nCOMPND   2 MOLECULE: DNA (5'-D(*TP*GP)-3');\n"
+        "COMPND   5 MOLECULE: LAC REPRESSOR;\n"
+    )
+    assert structure_caption(entry) == "LAC repressor (1LCD)"
     assert structure_caption(tmp_path / "none.cif") is None
     # A name wider than its panel is set on two lines over it, not across its edges.
     with flexo.Figure("named") as figure:

@@ -448,7 +448,7 @@ class _Content:
             matrix = (cos, sin, -sin, cos, x - cos * x + sin * y, y - sin * x - cos * y)
             self.ops.append("q " + " ".join(_n(value) for value in matrix) + " cm")
         for number, line in enumerate(item.lines):
-            for run in line.runs:
+            for at, run in enumerate(line.runs):
                 if run.face is None:
                     continue
                 if not run.text.strip():
@@ -456,7 +456,7 @@ class _Content:
                     # between the words read out.
                     self.space(run, run.x)
                     continue
-                self.run(run)
+                self.run(run, after=line.runs[at + 1].text[:1] if at + 1 < len(line.runs) else "")
                 if run.link:
                     # A link is underlined, as in the PowerPoint, so it is told from the
                     # words around it by more than its colour.
@@ -490,7 +490,28 @@ class _Content:
             f"{_n(run.baseline)} Tm <{cid:04X}> Tj ET Q"
         )
 
-    def run(self, run: Run) -> None:
+    def run(self, run: Run, after: str = "") -> None:
+        """``run``'s glyphs; a script among words read by ``texmath.scripted``'s rule, apart
+        from a letter or bracket ``after`` it where it follows its mark (k_B p, not k_Bp)."""
+
+        said = run.text
+        if run.shift and run.text.strip():
+            from flexo.texmath import scripted
+
+            said = scripted(run.text, raised=run.shift > 0)
+            joins = after[:1].isalnum() or after[:1] == "("
+            if said[:1] in "_^" and said[-1:].isalnum() and joins:
+                said += " "
+        if said != run.text:
+            # A script among words (k_auto, x²) reads as a formula's words do: its glyphs
+            # are found, copied and read as that.
+            self.ops.append(f"/Span << /ActualText {_string(said)} >> BDC")
+            self.glyphs(run)
+            self.ops.append("EMC")
+            return
+        self.glyphs(run)
+
+    def glyphs(self, run: Run) -> None:
         colour = _colour(run.fill) or "#000000"
         font = self.writer.font(run.face, run.weight)
         size = run.size
@@ -507,6 +528,10 @@ class _Content:
                 shown.clear()
 
         for glyph in shape(run):
+            if glyph.text == "\u200a":
+                # A hair's room (an italic letter's lean before a sign) is left, not written:
+                # read beside the space after it, it would be two.
+                continue
             cid, width = font.use(glyph.gid, glyph.text)
             if pen is None or abs(glyph.y - pen[1]) > 1e-6 or abs(glyph.x - pen[0]) > 0.5 * size:
                 flush()

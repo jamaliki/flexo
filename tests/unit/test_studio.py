@@ -726,7 +726,7 @@ def test_a_file_renamed_while_the_studio_was_away_is_named(tmp_path: Path) -> No
     try:
         workspace.kinds["theme"] = Named(workspace.kinds["theme"])
         doc = workspace.open("gone.yaml", "theme", held=True)
-        assert doc.problem.startswith("gone.yaml was moved or deleted: moved.yaml looks like it")
+        assert doc.moved == "moved.yaml" and doc.problem == "gone.yaml is gone: renamed moved.yaml?"
     finally:
         workspace.close()
 
@@ -1279,6 +1279,7 @@ def test_the_page_merges_as_the_server_does() -> None:
         ["Title", "Title of the talk", "Heading"],
         ["First paragraph w", "First **paragraph** w", "First paraQQgraph w"],
         ["a paragraph", "a page", "a paraQQgraph"],
+        ["What we asked \nWhy\n", "What we asked b\nWhy\n", "What we asked a\nWhy\n"],
         ["A m", "A m4", "A mc"],
         ["First m0 mparagraph by Alice.", "Not that. m0 m", "First m0 m3paragraph by Alice."],
         ["one\ntwo words here\nthree\n", "one\nfirst words here\n three\n", "one\nAll new\n"],
@@ -1286,6 +1287,21 @@ def test_the_page_merges_as_the_server_does() -> None:
             {"s": [{"t": "A"}]},
             {"s": [{"t": "A"}, {"t": "Mine"}]},
             {"s": [{"t": "A"}, {"t": "Theirs"}]},
+        ],
+        [
+            {"body": [{"text": "First."}, {"text": "Second."}]},
+            {"body": [{"text": "First."}, {"text": "Second, typed."}]},
+            {"layout": "two", "left": [{"text": "First."}], "right": [{"text": "Second."}]},
+        ],
+        [
+            {"left": [{"text": "A"}, {"text": "B"}], "right": [{"text": "R"}]},
+            {"left": [{"text": "A"}], "right": [{"text": "R"}, {"text": "B"}]},
+            {"left": [{"text": "A"}, {"text": "B, typed"}], "right": [{"text": "R"}]},
+        ],
+        [
+            {"s": [{"t": "0"}, {"t": "1"}, {"t": "Q", "b": [{"x": "P"}]}]},
+            {"s": [{"t": "0"}, {"t": "1"}, {"t": "Q", "b": [{"x": "P typed"}]}]},
+            {"s": [{"t": "0"}, {"t": "Q moved", "b": [{"x": "P"}]}, {"t": "1"}]},
         ],
     ]
     pairs = [
@@ -1533,6 +1549,40 @@ process.exit(0);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_an_undo_that_can_do_nothing_leaves_the_history_and_is_not_offered_again() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async () => new Promise(() => {}),
+};
+const opened = { file: "a.yaml", version: 1, saved: 1, exists: true, document: { title: "A" } };
+const session = new Session(workspace, opened);
+session.change((d) => { d.title = "A, typed"; }, { label: "Typing" });
+session.change((d) => { d.size = 30; }, { label: "Change Font Size" });
+session.synced = session.document;
+// Another sets the size since: the undo can do nothing.
+const theirs = { title: "A, typed", size: 40 };
+session.remote({ client: "bob", who: { name: "Bob" }, version: 2, document: theirs });
+session.undo();
+const after = [session.document.size, session.past.map((e) => e.label), session.future.length];
+// The step before it is the next undone.
+session.undo();
+console.log(JSON.stringify([after, session.document, session.future.map((e) => e.label)]));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    after, document, future = json.loads(result.stdout)
+    assert after == [40, ["Typing"], 0]
+    assert document == {"title": "A", "size": 40} and future == ["Typing"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_a_change_made_again_never_takes_away_what_others_did_since() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/merge.js"
     code = (
@@ -1573,6 +1623,28 @@ const added = figure(["a", "new", "b"], [{ from: "a", to: "new" }, { from: "new"
 const labelled = structuredClone(added);
 labelled.figure.nodes[1].label = "Bob's";
 see(added, figure(["a", "b"], [{ from: "a", to: "b" }]), labelled);
+// A word retyped here, retyped again by another (or typed onto by them): theirs stands.
+const by = (word) => `First paragraph ${word} by Alice.`;
+see(by("typed"), by("written"), by("composed"));
+see(by("drafted"), by("written"), by("redrafted"));
+// A layout undone after another typed in the slide: the slide as it was, with their words.
+const two = (words) => ({ layout: "two", left: [{ text: "First." }], right: [{ text: words }] });
+see(two("Second."), { body: [{ text: "First." }, { text: "Second." }] }, two("Second. bob"));
+// Words typed in a shape just added (named by them), typed on in by another: only the first
+// person's go -- the shape stays, with the other's words.
+const shape = (id, label) => ({
+  nodes: [{ id: "step" }, { id, ...(label ? { label } : {}) }],
+  edges: [{ from: "step", to: id }],
+});
+const typed = shape("alice-shape", "Alice shape");
+see(typed, shape("block"), shape("alice-shape", "Alice shape and Bob"));
+// So in a figure's file: lines another has typed among are not taken from about their words,
+// leaving a file that no longer reads -- it stays as it is, and that is said.
+const file = (lines) => ({
+  text: ["nodes:", "- id: c", ...lines, "edges:", "- from: c", "  to: b", ""].join("\\n"),
+});
+const label = (words) => ["- id: s", `  label: ${words}`];
+see(file(label("Alice step")), file(["- id: s"]), file(label("Bob Alice step")));
 console.log(JSON.stringify(seen));
 """
     )
@@ -1589,6 +1661,29 @@ console.log(JSON.stringify(seen));
     assert seen[5] == [{"slides": [{"title": "0"}, moved, {"title": "1"}]}, 0]
     assert seen[6][0]["figure"]["nodes"][1] == {"id": "new", "label": "Bob's"}
     assert len(seen[6][0]["figure"]["edges"]) == 2 and seen[6][1] > 0
+    assert seen[7] == ["First paragraph composed by Alice.", 1]
+    assert seen[8] == ["First paragraph redrafted by Alice.", 1]
+    assert seen[9] == [{"body": [{"text": "First."}, {"text": "Second. bob"}]}, 0]
+    kept = {"id": "block", "label": "and Bob"}
+    lines = [{"from": "step", "to": "block"}]
+    assert seen[10] == [{"nodes": [{"id": "step"}, kept], "edges": lines}, 0]
+    assert seen[11][0]["text"].count("label: Bob Alice step") == 1 and seen[11][1] > 0
+
+
+def test_a_window_opened_again_leaves_nothing_of_the_last_one_behind(
+    served: tuple[str, Workspace],
+) -> None:
+    _, workspace = served
+    ada = {"id": "ada", "name": "Ada", "kind": "person"}
+    old = workspace.listen("window-1", ada)
+    typing = {"page": 4, "block": "body[1]", "editing": True}
+    workspace.set_presence(ada, "figure.yaml", typing, None, "window-1")
+    # Reloaded: a new window of the same person, somewhere else; the old one goes.
+    workspace.listen("window-2", ada)
+    workspace.set_presence(ada, "figure.yaml", {"page": 4}, None, "window-2")
+    assert [entry["where"] for entry in workspace.present()] == [{"page": 4}]
+    workspace.leave(old)
+    assert [entry["where"] for entry in workspace.present()] == [{"page": 4}]
 
 
 def test_each_person_here_has_a_colour_of_their_own(served: tuple[str, Workspace]) -> None:
@@ -1781,6 +1876,29 @@ def test_a_part_dragged_on_the_drawing_goes_where_it_is_let_go() -> None:
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
     )
     assert json.loads(result.stdout) == ["stays", 4, 3]
+    # In a row as tall as the column beside its part: under that part, where there is room.
+    tall = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "column"}, "children": ["row", "s"]},
+        {"id": "row", "layout": {"kind": "row"}, "children": ["u", "col"]},
+        {"id": "col", "layout": {"kind": "column"}, "children": ["t", "st"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 300, 260], "row": [0, 0, 300, 170], "col": [150, 0, 290, 170],
+        "u": [10, 10, 90, 50], "t": [160, 10, 280, 50], "st": [160, 120, 280, 160],
+        "s": [100, 200, 200, 240],
+    }
+    code = (
+        f"import {{ dropPlace }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(tall)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        "const place = dropPlace(model, boxes, { x: 50, y: 110 }, 's');\n"
+        "console.log(JSON.stringify(`${place.side} of ${place.of}`));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == "below of u"
     # Level with a part in a column and off to its side: beside it; over it, still in line.
     column = {
         "root": "root",

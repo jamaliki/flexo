@@ -119,6 +119,8 @@ class Doc:
         self.disk_stamp = _stamp(path)
         self.depends: set[Path] = set()
         self.depend_stamps: dict[Path, float] = {}
+        self.moved: str | None = None
+        """Where its file went, as far as the studio can tell (renamed while it was away)."""
 
     def info(self) -> dict[str, Any]:
         with self.lock:
@@ -131,6 +133,7 @@ class Doc:
                 "saved": self.saved,
                 "document": self.document,
                 "problem": self.problem,
+                "moved": self.moved,
                 "held": self.held,
                 "unread": self.unread,
                 "source": self.source(),
@@ -699,11 +702,10 @@ class Workspace:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
                 if held and not doc.exists:
                     doc.saved = doc.version  # nothing of its kind's own is written there
-                    moved = self._moved(doc)
+                    doc.moved = self._moved(doc)
                     doc.problem = (
-                        f"{doc.name} was moved or deleted: {moved} looks like it, renamed — open "
-                        f"it to go on there. Saving writes {doc.name} again."
-                        if moved
+                        f"{doc.name} is gone: renamed {doc.moved}?"
+                        if doc.moved
                         else f"{doc.name} was moved or deleted. Saving writes it again."
                     )
                 self.docs[relative] = doc
@@ -841,17 +843,31 @@ class Workspace:
     # -- who is here --
 
     def set_presence(
-        self, who: dict[str, Any], file: str | None, where: Any, doing: str | None
+        self,
+        who: dict[str, Any],
+        file: str | None,
+        where: Any,
+        doing: str | None,
+        client: str = "",
     ) -> None:
-        key = who.get("id") or who.get("name", "someone")
+        """Where ``who`` is: in a window of theirs (``client``) -- each window its own, gone
+        with it, so a window reloaded or opened again leaves none of its last place behind (the
+        pages show a person once, where their latest window is) -- or, an agent, as itself."""
+
+        person = who.get("id") or who.get("name", "someone")
+        key = f"{person}#{client}" if client else person
         with self.lock:
             entry = self.presence.get(key)
             if entry is None:
-                # A colour of their own while they are here, the first none of the others
-                # here has (given in the order they came): the pages show them by it.
-                used = {other.get("colour") for other in self.presence.values()}
-                colour = next(n for n in range(len(used) + 1) if n not in used)
-                entry = {"who": who, "colour": colour}
+                # A colour of their own while they are here (in all their windows), the first
+                # none of the others here has (given in the order they came): the pages show
+                # them by it.
+                entries = list(self.presence.values())
+                theirs = [other for other in entries if _person(other) == person]
+                used = {other.get("colour") for other in entries if _person(other) != person}
+                free = next(n for n in range(len(used) + 1) if n not in used)
+                colour = theirs[0].get("colour") if theirs else free
+                entry = {"who": who, "colour": colour, "client": client}
             entry.update(who=who, file=file, where=where, at=time.time())
             if doing is not None:
                 entry["doing"] = doing
@@ -883,8 +899,15 @@ class Workspace:
         return max(agents, key=lambda entry: entry["at"])["who"] if agents else None
 
     def present(self) -> list[dict[str, Any]]:
+        """Who is here and where: each person once, where their latest window is."""
+
         with self.lock:
-            return [dict(entry) for entry in self.presence.values()]
+            latest: dict[str, dict[str, Any]] = {}
+            for entry in self.presence.values():
+                person = _person(entry)
+                if person not in latest or entry.get("at", 0) >= latest[person].get("at", 0):
+                    latest[person] = entry
+            return [dict(entry) for entry in latest.values()]
 
     def focus_of_people(self) -> list[dict[str, Any]]:
         return [entry for entry in self.present() if entry["who"].get("kind") == "person"]
@@ -904,24 +927,33 @@ class Workspace:
         with self.lock:
             if self.listeners.get(listener.client) is listener:
                 del self.listeners[listener.client]
-        person = listener.who.get("id") or listener.client
+        person = str(listener.who.get("id") or listener.client)
         if grace <= 0:
-            self._gone(person)
+            self._gone(listener.client, person)
             return
-        timer = threading.Timer(grace, self._gone, args=(person,))
+        timer = threading.Timer(grace, self._gone, args=(listener.client, person))
         timer.daemon = True
         timer.start()
 
-    def _gone(self, person: str) -> None:
-        left = None
+    def _gone(self, client: str, person: str) -> None:
+        """The window ``client`` of ``person`` gone, unless it is back (a page reconnecting):
+        where it was goes with it -- and where they were with no window named, with their last."""
+
         with self.lock:
-            if person in self.presence and not any(
-                other.who.get("id") == person for other in self.listeners.values()
-            ):
-                left = self.presence.pop(person)
+            if client in self.listeners:
+                return
+            last = not any(other.who.get("id") == person for other in self.listeners.values())
+
+            def theirs(entry: dict[str, Any]) -> bool:
+                if entry.get("client"):
+                    return entry["client"] == client
+                return last and _person(entry) == person
+
+            left = [key for key, entry in self.presence.items() if theirs(entry)]
+            entries = [self.presence.pop(key) for key in left]
         self.broadcast({"type": "presence", "presence": self.present()})
-        if left is not None:
-            self._abandoned(left)
+        for entry in entries:
+            self._abandoned(entry)
 
     def _abandoned(self, entry: dict[str, Any]) -> None:
         """What a person gone (their window closed, or lost) left half made where they were
@@ -940,6 +972,7 @@ class Workspace:
                 other.get("where")
                 for other in self.presence.values()
                 if other.get("file") == doc.name and isinstance(other.get("where"), dict)
+                and other.get("where", {}).get("editing")
             ]
         if any((other.get("page"), other.get("block")) == spot for other in others):
             return
@@ -1105,6 +1138,13 @@ class Workspace:
                 entry["doing"] = ""
         if gone or quiet:
             self.broadcast({"type": "presence", "presence": self.present()})
+
+
+def _person(entry: dict[str, Any]) -> str:
+    """Whose a presence entry is: its person's id (else name)."""
+
+    who = entry.get("who") or {}
+    return str(who.get("id") or who.get("name", "someone"))
 
 
 def _walk(folder: Path, depth: int):

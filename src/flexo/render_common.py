@@ -147,6 +147,7 @@ def render_runs(
     fill: str | None = None,
     anchor: str | None = None,
     weight: int | None = None,
+    width: float | None = None,
 ) -> ET.Element | None:
     """One text object, one ``tspan`` per styled run -- wherever Flexo sets text.
 
@@ -167,6 +168,9 @@ def render_runs(
     spelling out ``font-weight="400"`` on top of it would silently unbold the
     title it belongs to -- and it is why ``TextMeasurer.measure`` takes the same
     weight, so the words are measured at the weight they inherit.
+
+    ``width`` is the room the lines are set in, where it is known: a line that is a
+    formula displayed alone (``$$...$$``) is centred in it, as LaTeX centres one.
     """
 
     if not metrics.lines:
@@ -174,7 +178,7 @@ def render_runs(
     if any(run.math for line in metrics.lines for run in line.runs):
         return _with_formulas(
             parent, element_id, metrics, x=x, y=y, typography=typography, palette=palette,
-            fill_role=fill_role, fill=fill, anchor=anchor, weight=weight,
+            fill_role=fill_role, fill=fill, anchor=anchor, weight=weight, width=width,
         )
     stack = font_stack(typography)
     primary = stack.families[0][0].family
@@ -285,10 +289,12 @@ def _with_formulas(
     fill: str | None,
     anchor: str | None,
     weight: int | None,
+    width: float | None = None,
 ) -> ET.Element:
     """Text with formulas in it (``TextRun.math``): each line set as its words, a text
     object for each stretch between formulas, and each formula drawn where the
-    measurement left room for it -- one group, so it moves and recolours as one."""
+    measurement left room for it -- one group, so it moves and recolours as one. A line
+    that is a displayed formula alone is centred in ``width``, where it is given."""
 
     from flexo.texmath import draw
 
@@ -316,6 +322,9 @@ def _with_formulas(
     for line_index, line in enumerate(metrics.lines):
         baseline = y + line_index * metrics.line_height
         pen = x - {"middle": line.width / 2.0, "end": line.width}.get(anchor or "start", 0.0)
+        if width is not None and displayed_alone(line.runs):
+            left = x - {"middle": width / 2.0, "end": width}.get(anchor or "start", 0.0)
+            pen = left + (width - line.width) / 2.0
         stretch: list[TextRun] = []
         for run in line.runs:
             if not run.math:
@@ -334,6 +343,13 @@ def _with_formulas(
         if stretch:
             words(tuple(stretch), pen, line_index, baseline)
     return group
+
+
+def displayed_alone(runs: tuple[TextRun, ...]) -> bool:
+    """Whether ``runs`` are one formula displayed (``$$...$$``) and nothing else to read."""
+
+    shown = [run for run in runs if run.math or run.text.strip()]
+    return len(shown) == 1 and shown[0].math.startswith("\\displaystyle")
 
 
 def _mark(

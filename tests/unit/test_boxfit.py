@@ -74,15 +74,17 @@ def test_a_long_chain_folds_onto_two_evenly_spaced_lines() -> None:
     group = next(group for group in spec.groups if group.id == "steps")
     assert group.layout.kind == "column" and len(group.children) == 2
     lines = [next(item for item in spec.groups if item.id == child) for child in group.children]
-    assert lines[0].children[-1] == "steps.s2" and lines[1].children[0] == "steps.s3"
+    assert lines[0].children[-1] == "steps.s2" and lines[1].children[-1] == "steps.s3"
     _, boxes = _boxes(spec)
     # Each line keeps its own spacing: its arrows are as long as one another, not
     # stretched by the widths of the parts above or below them.
     for line in lines:
         gaps = [boxes[b].x - boxes[a].right for a, b in pairwise(line.children)]
         assert max(gaps) - min(gaps) < 1.0
-    # Read left to right, and then on, from the start of the next line.
-    assert boxes["steps.s3"].x < boxes["steps.s4"].x and boxes["steps.s3"].x < boxes["steps.s1"].x
+    # Turned at the end of the first line, the second runs back under it: the line on
+    # to it is a short step down, not one across the whole figure.
+    assert boxes["steps.s4"].x < boxes["steps.s3"].x
+    assert abs(boxes["steps.s3"].right - boxes["steps.s2"].right) < 1.0
 
 
 def test_a_flow_that_loops_back_folds_with_nothing_crossing() -> None:
@@ -108,26 +110,32 @@ def test_a_flow_that_loops_back_folds_with_nothing_crossing() -> None:
     assert turn < boxes["steps.s1"].width / 2
 
 
-def test_a_flow_folds_where_the_fewest_lines_cross_between_its_lines() -> None:
+def test_a_line_drawn_in_or_taken_away_leaves_a_flow_folded_where_it_was() -> None:
     from flexo.orient import wrapped
 
-    with Figure("consumer") as figure, figure.row("steps") as steps:
-        arrives = steps.terminal("arrives", label="Message arrives")
-        seen = steps.decision("seen", label="Seen this ID?", input=arrives)
-        steps.terminal("skip", label="Skip it", input=seen)
-        update = steps.block("update", label="Update the order")
-        figure.connect(seen, update, label="no")
-        worked = steps.decision("worked", label="Worked?", input=update)
-        figure.connect(worked, update, label="no")
-        done = steps.terminal("done", label="Acknowledge", input=worked)
-        steps.block("log", label="Log it", input=done)
-    spec = wrapped(figure.spec)
-    group = next(group for group in spec.groups if group.id == "steps")
-    second = next(item for item in spec.groups if item.id == group.children[1])
-    # One line between the two lines ("no" to the update) rather than two (on to
-    # "Worked?" and its "no" back): the update starts the second line, as it did
-    # before the last part was added.
-    assert second.children[0] == "steps.update"
+    def folded(loops: bool):
+        with Figure("assay") as figure, figure.row("steps") as steps:
+            express = steps.terminal("express", label="Express sfGFP")
+            pulse = steps.block("pulse", label="Pulse: induce 10 min", input=express)
+            chase = steps.block("chase", label="Chase: add chloramphenicol", input=pulse)
+            read = steps.block("read", label="Read fluorescence every 30 s", input=chase)
+            plateau = steps.decision("plateau", label="Plateau reached?", input=read)
+            fit = steps.block("fit", label="Fit two-step model to F(t)", input=plateau)
+            steps.terminal("report", label="Report k1, k2", input=fit)
+            if loops:
+                figure.connect(plateau, read, label="no")
+                figure.connect(fit, pulse, label="again")
+        spec = wrapped(figure.spec)
+        group = next(group for group in spec.groups if group.id == "steps")
+        lines = [next(item for item in spec.groups if item.id == child) for child in group.children]
+        return [line.children for line in lines], spec
+
+    plain, _ = folded(False)
+    looped, spec = folded(True)
+    # The same parts on each line, in the same order, the loops back or not: the
+    # fold is the parts', not their lines'.
+    assert plain == looped
+    assert plain[0][-1] == "steps.read" and plain[1][-1] == "steps.plateau"
     compile_figure(spec)
 
 
@@ -145,9 +153,12 @@ def test_parts_with_nothing_between_their_halves_fold_into_a_grid() -> None:
     compile_figure(spec)
 
 
-def test_a_fold_whose_lines_cross_is_tried_with_its_second_line_run_the_other_way() -> None:
-    # A flow chart's first step moved to a line of its own below the rest: folded as the
-    # fold would have it, its lines cross; with its second line run back, none do.
+def test_a_fold_runs_its_second_line_back_where_run_on_its_lines_would_cross() -> None:
+    from flexo.boxfit import _crossings
+    from flexo.orient import wrapped
+
+    # A flow chart's first step moved to a line of its own below the rest: folded with
+    # its second line run on, its lines cross; run back, as a fold runs, none do.
     with Figure("assay") as figure, figure.column("steps") as steps:
         with steps.row("row") as row:
             purify = row.terminal("purify", label="Purify CA")
@@ -161,8 +172,10 @@ def test_a_fold_whose_lines_cross_is_tried_with_its_second_line_run_the_other_wa
         figure.connect(stain, check)
         figure.connect(check, grids, label="yes")
         figure.connect(check, mix, label="no")
+    assert _crossings(compile_figure(wrapped(figure.spec, back=False)), None)
     fit = flexo.fit_in_box(figure, 864, 380, words=18, largest=24)
-    assert fit.layout.endswith(", folded back") and fit.words > 15
+    assert fit.layout.endswith(", folded") and fit.words > 15
+    assert not _crossings(fit.compilation, fit.style)
 
 
 def _model() -> Figure:

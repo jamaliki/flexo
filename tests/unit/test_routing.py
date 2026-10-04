@@ -31,7 +31,7 @@ from flexo.routing.ink import (
     rail_label_position,
     shorten_start,
 )
-from flexo.style import STYLES
+from flexo.style import STYLES, LayoutStyle
 from flexo.text import TextMeasurer, ink_descent
 from flexo.units import pt
 
@@ -794,7 +794,8 @@ def test_a_decisions_answers_sit_by_it_and_clear_of_every_box() -> None:
         row.block("refine", label="3D refinement", input=motion)
         figure.connect(check, grids, label="yes")
         figure.connect(check, mix, label="no")
-    compiled = compile_figure(wrapped(figure.spec))
+    # Folded with its second line run on, "yes" runs the width of the figure back to it.
+    compiled = compile_figure(wrapped(figure.spec, back=False))
     nodes = compiled.fitted.nodes
     boxes = [node.bounds for node in nodes if node.measured.spec.kind != "decision"]
     decision = next(node.bounds for node in nodes if node.measured.spec.id == "steps.check")
@@ -808,6 +809,16 @@ def test_a_decisions_answers_sit_by_it_and_clear_of_every_box() -> None:
     assert _rect_gap(captions["yes"], decision) < 4.0
     for caption in captions.values():
         assert min(_rect_gap(caption, box) for box in boxes) >= TOUCH - 1e-6
+    # Run back, as a fold runs, "yes" is a short step down: its caption still sits nearer
+    # where it leaves the question than where it arrives, and touches no box.
+    compiled = compile_figure(wrapped(figure.spec))
+    boxes = [node.bounds for node in compiled.fitted.nodes if node.measured.spec.kind != "decision"]
+    yes = next(edge for edge in compiled.routed.edges if edge.spec.target.node_id == "steps.grids")
+    caption = label_box(yes.label_position, yes.label_metrics).center
+    start, end = yes.centerline[0], yes.centerline[-1]
+    assert caption.distance_to(start) < caption.distance_to(end)
+    box = label_box(yes.label_position, yes.label_metrics)
+    assert min(_rect_gap(box, other) for other in boxes) >= TOUCH - 1e-6
 
 
 def _rect_gap(first: Rect, second: Rect) -> float:
@@ -853,6 +864,29 @@ def _riser_merge_figure(**net_options: object) -> FigureSpec:
             ),
         ),
     )
+
+
+def test_an_arrowhead_stands_clear_of_the_line_leaving_its_side() -> None:
+    """A loop back into the side its forward line leaves: the head is not set by it."""
+
+    with Figure("assay") as figure, figure.row("steps") as row:
+        read = row.block("read", label="Read fluorescence every 30 s")
+        plateau = row.decision("plateau", label="Plateau reached?", input=read)
+        row.block("fit", label="Fit two-step model to F(t)", input=plateau)
+        figure.connect(plateau, read, label="no")
+    compiled = compile_figure(figure.spec)
+    style = LayoutStyle()
+    lines = {
+        (edge.spec.source.node_id, edge.spec.target.node_id): edge.centerline
+        for edge in compiled.routed.edges
+    }
+    forward = lines[("steps.read", "steps.plateau")]
+    back = lines[("steps.plateau", "steps.read")]
+    assert len({point.y for point in forward}) == 1
+    # Both on the east side of "Read", the head a lane and its own width from the line.
+    assert abs(back[-1].x - forward[0].x) < 1e-6
+    gap = abs(back[-1].y - forward[0].y)
+    assert gap >= style.port_spacing.points + style.arrow_width.points - 1e-6
 
 
 def test_an_unhinted_rail_sits_in_the_middle_of_its_corridor() -> None:

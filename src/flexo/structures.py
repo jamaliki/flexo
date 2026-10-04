@@ -323,37 +323,48 @@ NAMED = 32
 
 def structure_caption(path: Path) -> str | None:
     """What a structure file says it holds, as a person would write it, with its PDB ID:
-    ``Regulatory protein E2 (1A7G)`` for a file that names its molecule REGULATORY PROTEIN
-    E2. None for a file that names nothing."""
+    ``E2 DNA-binding domain (1A7G)`` for a file titled THE CRYSTAL STRUCTURE OF THE E2
+    DNA-BINDING DOMAIN FROM HUMAN PAPILLOMAVIRUS AT 2.4 ANGSTROMS. Its title, without how
+    it was solved and from what, at what resolution -- else the first protein it names
+    (never a bare DNA or RNA). None for a file that names nothing."""
 
     try:
         text = path.read_text(encoding="utf-8", errors="replace")[:400_000]
     except OSError:
         return None
-    name = entry = None
+    titles: list[str] = []
+    molecules: list[str] = []
+    entry = None
     if path.suffix.lower() in (".cif", ".mmcif"):
-        for key in ("_struct.pdbx_descriptor", "_struct.title"):
+        def value(key: str) -> str:
             found = re.search(rf"^{re.escape(key)}\s+(.+?)\s*$", text, re.MULTILINE)
-            value = found.group(1).strip().strip("'\"").strip() if found else ""
-            if value and value not in ("?", "."):
-                name = value
-                break
+            said = found.group(1).strip().strip("'\"").strip() if found else ""
+            return "" if said in ("?", ".") else said
+
+        titles += [value("_struct.title")]
+        molecules += [part.strip() for part in value("_struct.pdbx_descriptor").split(",")]
         found = re.search(r"^_entry\.id\s+(\S+)", text, re.MULTILINE)
         entry = found.group(1) if found else None
     else:
-        found = re.search(r"^COMPND.{4}.*?MOLECULE:\s*([^;\n]+)", text, re.MULTILINE)
-        if not found:
-            found = re.search(r"^TITLE\s+(.+?)\s*$", text, re.MULTILINE)
-        name = found.group(1).strip() if found else None
+        title = " ".join(
+            line[10:].strip() for line in text.splitlines() if line.startswith("TITLE ")
+        )
+        if title:
+            titles.append(re.sub(r"\s+", " ", title))
+        compound = re.findall(r"^COMPND.{4}.*?MOLECULE:\s*([^;\n]+)", text, re.MULTILINE)
+        molecules += [found.strip() for found in compound]
         found = re.match(r"HEADER.{56}([0-9][A-Za-z0-9]{3})", text)
         entry = found.group(1) if found else None
+    names = [_plain_title(title) for title in titles] + [
+        molecule for molecule in molecules if not re.fullmatch(r"(?i)(5'-)?[DR]NA\b.*", molecule)
+    ]
+    name = next((name for name in names if name), None)
     stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", path.name, flags=re.IGNORECASE)
     if entry is None and re.fullmatch(r"[0-9][A-Za-z0-9]{3}", stem):
         entry = stem
     if not name:
         return None
-    # The first of the molecules it names, cut short between words.
-    name = name.split(",")[0].strip()
+    # Cut short between words.
     if len(name) > NAMED:
         words = name[:NAMED + 1].split()[:-1] or [name[:NAMED]]
         while len(words) > 1 and words[-1].upper() in _PLAIN:
@@ -369,6 +380,23 @@ def structure_caption(path: Path) -> str | None:
         name = " ".join(words)
         name = name[:1].upper() + name[1:]
     return f"{name} ({entry.upper()})" if entry else name
+
+
+def _plain_title(title: str) -> str:
+    """A structure's title without how it was solved, what it was taken from or at what
+    resolution: THE CRYSTAL STRUCTURE OF THE E2 DNA-BINDING DOMAIN FROM HUMAN
+    PAPILLOMAVIRUS AT 2.4 ANGSTROMS is E2 DNA-BINDING DOMAIN."""
+
+    title = re.sub(
+        r"(?i)^(the\s+)?((crystal|solution|nmr|x-ray|cryo-?em|refined|high[- ]resolution)\s+)*"
+        r"(structures?|model)\s+(of|for)\s+(the\s+|a\s+|an\s+)?",
+        "",
+        title.strip(),
+    )
+    title = re.sub(r"(?i)\s+(at|to)\s+[0-9.]+\s*(a|angstroms?|\u00c5)\b.*$", "", title)
+    source = r"(human|mouse|yeast|bovine|bacteri|escherichia|e\.)"
+    title = re.sub(rf"(?i)\s+(from|in|of)\s+{source}.*$", "", title)
+    return title.strip(" ,.;")
 
 
 def _name(node: NodeSpec) -> str:

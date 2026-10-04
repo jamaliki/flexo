@@ -83,7 +83,7 @@ export class Session {
     this.lastMerge = null;
     this.listeners = {};
     this.sending = null;                  // the document in flight, while one is
-    this.waiting = false;                 // edits made through the studio (a figure's) held while it is away
+    this.waiting = 0;                     // how many editors (figures) hold edits made through the studio while it is away
     this.resyncing = false;
     this.failures = 0;                    // tries to send that failed in a row
     this.failed = null;                   // what the last said, while it stands
@@ -121,7 +121,7 @@ export class Session {
 
   get doc() { return this.document; }
   get catalogue() { return this.catalog; }
-  get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending) || this.waiting; }
+  get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending) || Boolean(this.waiting); }
   // This page's own edits not yet in the file (others' are theirs to show).
   get unsaved() { return this.pendingLocal || this.savedVersion < this.ownVersion; }
   // Saving is those edits on their way to the file; with the studio out of reach, they
@@ -178,7 +178,8 @@ export class Session {
       // own, so that undone it takes back these edits alone -- never folding theirs in.
       if (joins && !same(top.after, before)) top.parts = [...(top.parts || [{ before: top.before, after: top.after }]), { before, after }];
       else if (joins && top.parts) top.parts[top.parts.length - 1].after = after;
-      if (joins) Object.assign(top, { after, at: now, said: null });
+      // (Named as its latest edit says, where it says: "Typing in “Alice step”", not "“A”".)
+      if (joins) Object.assign(top, { after, at: now, said: null }, label ? { label } : {});
       else this.past.push({ before, after, at: now, label });
       if (this.past.length > 300) this.past.shift();
       this.lastMerge = merge ? { key: merge, at: now } : null;
@@ -246,34 +247,63 @@ export class Session {
         }, (error) => {
           const verb = target === "before" ? "undo" : "redo";
           const why = unreachable(error) ? "Can't reach the studio." : error?.message || error;
-          toast(`Couldn't ${verb} “${this.said(entry).text || "Edit"}”. ${why}`, { kind: "error", icon: "error", seconds: 6 });
+          const what = (this.said(entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
+          toast(`Couldn't ${verb} “${what}”. ${why}`, { kind: "error", icon: "error", seconds: 6 });
           this.emit("status");
         });
       }
       const was = this.document;
       const lost = [];
-      this.document = this.travelOne(entry, target, current, lost);
-      // (Undone, what the undo did is kept, for a redo to take it back: see travelOne.)
-      entry.undid = target === "before" ? { from: was, to: this.document } : null;
+      const document = this.travelOne(entry, target, current, lost);
       from.pop();
+      if (same(was, document)) {
+        // Nothing of it can be done now -- others have changed or deleted all it changed (the
+        // words typed in an object deleted since): it leaves the history, not offered to be
+        // made again, and with it every step before it that can do nothing either, one ⌘Z for
+        // them all, said once. The next ⌘Z takes back the step that can be.
+        const skipped = [{ entry, lost }];
+        while (from.length && !from[from.length - 1].apply) {
+          const missed = [];
+          if (!same(this.travelOne(from[from.length - 1], target, current, missed), was)) break;
+          skipped.push({ entry: from.pop(), lost: missed });
+        }
+        this.unmade(skipped, target, false);
+        this.lastMerge = null;
+        this.emit("status");
+        continue;
+      }
+      this.document = document;
+      // (Undone, what the undo did is kept, for a redo to take it back: see travelOne.)
+      entry.undid = target === "before" ? { from: was, to: document } : null;
+      if (lost.length) this.unmade([{ entry, lost }], target, true);
       to.push(entry);
       moved = entry;
-      if (lost.length) this.unmade(entry, target, !same(was, this.document), lost);
     }
     if (moved) this.travelled(moved);
     return null;
   }
 
-  // A change that could not be taken back (or made again) in full, as others have changed
-  // what it changed since (`lost`: merge.js's replay notes): what it could is done, and its
-  // person is told why -- who changed it, or took it away.
-  unmade(entry, target, some, lost) {
-    const who = this.lastWho, name = who?.name || (who?.kind === "agent" ? "An agent" : "Someone else");
-    const what = this.said(entry).text || "Edit", verb = target === "before" ? "undo" : "redo";
-    const did = lost.every((note) => note.removed !== undefined) ? "deleted" : "changed";
-    const words = some ? `Couldn't ${verb} all of “${what}”: ${name} has ${did} some of it since.`
-      : `Couldn't ${verb} “${what}”: ${name} has ${did} it since.`;
-    toast(words, { icon: "info", seconds: 6 });
+  // Changes that could not be taken back (or made again) in full, or at all (`some`: what
+  // could was done), as others have changed what they changed since (`lost`: merge.js's
+  // replay notes): their person is told why, once -- who changed it, or took it away -- in a
+  // notice of its own, not one more stacked on the last.
+  unmade(steps, target, some) {
+    const me = this.workspace.me, who = this.lastWho;
+    const mine = Boolean(who) && ((who.id && who.id === me?.id) || (who.name && who.name === me?.name));
+    // (Changed by this person, in another of their windows: said so, not as another's doing.)
+    const name = mine ? "you" : who?.name || (who?.kind === "agent" ? "An agent" : "Someone else");
+    const verb = target === "before" ? "undo" : "redo";
+    // Named as the history names it, quotation marks within it made single ones.
+    const what = (this.said(steps[0].entry).text || "Edit").replaceAll("“", "‘").replaceAll("”", "’");
+    const notes = steps.flatMap((step) => step.lost);
+    const did = !notes.length || notes.every((note) => note.removed !== undefined) ? "deleted" : "changed";
+    const more = steps.length - 1;
+    const has = mine ? "have" : "has", where = mine ? " in another window" : "";
+    const words = some ? `Couldn't ${verb} all of “${what}”: ${name} ${has} ${did} some of it since${where}.`
+      : more ? `Couldn't ${verb} “${what}” or the ${more === 1 ? "step" : `${more} steps`} before it: ${name} ${has} ${did} what they changed since${where}.`
+        : `Couldn't ${verb} “${what}”: ${name} ${has} ${did} it since${where}.`;
+    this.unmadeNote?.remove();
+    this.unmadeNote = toast(words, { icon: "info", seconds: 6 });
   }
 
   // One change taken back (or made again) on the document as it is now, which wins where
@@ -306,8 +336,11 @@ export class Session {
   said(entry) {
     if (!entry.said && entry.apply) entry.said = { text: entry.label || "", place: entry.place, where: entry.where };
     if (!entry.said) {
+      // Named by its own change, never by others' made during it (a layout changed while it
+      // was typing is not this step's): a run made in parts, by its last.
+      const own = entry.parts ? entry.parts[entry.parts.length - 1] : entry;
       let told = null;
-      try { told = this.describe(entry.before, entry.after); } catch { told = null; }
+      try { told = this.describe(own.before, own.after); } catch { told = null; }
       const said = typeof told === "string" ? { text: told } : told || {};
       entry.said = { text: entry.label || said.text || "", place: said.place, where: said.where };
     }
@@ -420,6 +453,10 @@ export class Session {
     const ours = notes.flatMap((note) => (note.kept === "theirs" ? [{ kept: note.item, by: who }]
       : note.rewritten === "ours" ? [{ rewritten: note.words, typed: note.typed, by: who }] : []));
     if (ours.length) this.emit("merged", { notes: ours });
+    // What this page deleted that another was typing in, kept for them here before it left
+    // (their typing came first): they are told, as the studio tells them of what it keeps.
+    const theirs = notes.filter((note) => note.kept === "ours").map((note) => note.item);
+    if (theirs.length) this.workspace.api("/api/kept", { file: this.file, client: this.workspace.client, who: this.workspace.me, items: theirs }).catch(() => {});
   }
 
   // The file holds `version` (or the studio has stopped holding back: the file reads again).
@@ -481,7 +518,11 @@ export class Session {
     // (Its file gone meanwhile -- moved, renamed, deleted -- it is not written again until
     // its person edits or saves it, told so: a second copy is not made behind their back.)
     if (!same(this.document, this.synced) && !(restarted && !info.exists)) this.schedulePush(0);
-    else if (restarted && !info.exists && info.problem) toast(info.problem, { icon: "info", seconds: 10 });
+    else if (restarted && !info.exists && info.problem) {
+      // Renamed while the studio was away: the file it is now is a click away.
+      const open = info.moved ? h("a", { href: "#", onclick: (event) => { event.preventDefault(); this.workspace.open?.(info.moved); } }, `Open ${info.moved}`) : null;
+      toast(h("span", {}, info.problem, open ? " · " : "", open), { icon: "info", seconds: 12 });
+    }
   }
 
   async saveNow() {

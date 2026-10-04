@@ -178,17 +178,9 @@ def _genetics() -> list[dict[str, Any]]:
             "Construct",
             "Biology",
             "Genetic parts on a DNA backbone, drawn as SBOL glyphs",
-            {
-                "label": "Reporter",
-                "properties": {
-                    "parts": [
-                        {"type": "promoter", "label": "pTet"},
-                        {"type": "rbs", "label": "RBS"},
-                        {"type": "cds", "label": "GFP"},
-                        {"type": "terminator", "label": "T1"},
-                    ]
-                },
-            },
+            # One part with no name to start from (a construct of none can't be drawn), the
+            # rest its own to add: no example's drawn into a figure.
+            {"label": "Construct", "properties": {"parts": [{"type": "cds"}]}},
             [
                 _field(
                     "properties.parts",
@@ -399,18 +391,9 @@ def _bench() -> list[dict[str, Any]]:
             "Timeline",
             "Biology",
             "Protocol events on an axis, with spans below",
-            {
-                "label": "Protocol",
-                "properties": {
-                    "events": [
-                        {"at": 0, "label": "Seed"},
-                        {"at": 1, "label": "Treat"},
-                        {"at": 3, "label": "Harvest"},
-                    ],
-                    "spans": [{"start": 1, "end": 3, "label": "Drug"}],
-                    "unit": "day",
-                },
-            },
+            # Its first and next day with nothing named on them, an axis to name its own events
+            # on: no example's drawn into a figure.
+            {"label": "Timeline", "properties": {"events": [{"at": 0}, {"at": 1}], "unit": "day"}},
             [
                 _field(
                     "properties.events",
@@ -914,11 +897,10 @@ EDGE_FIELDS = [
         "Arrowhead",
         "choice",
         options=["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"],
-        labels={"necessary": "Necessary Stimulation"},
+        labels={"inhibition": "Blunt End (Inhibits)", "necessary": "Necessary Stimulation"},
         default="arrow",
         hint="What the arrowhead means, as in SBGN",
         show={"arrow": ["end", "both"]},
-        more=True,  # pathways' marks: under More, open where one is set
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(

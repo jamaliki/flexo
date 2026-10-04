@@ -261,6 +261,22 @@ def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
     assert wraps >= 2 and spaces == wraps
 
 
+def test_maths_in_words_and_a_drawn_formula_read_alike_in_a_pdf() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    with Figure("read") as figure:
+        figure.root.block("a", label=r"$k_{\text{auto}} p$, $k_B p$, $x^2$ and $T \approx 24$")
+        figure.root.block("b", label=r"$\frac{dp}{dt} = k_{\text{auto}} p - k_B p + x^2$")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    said = " ".join(pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().split())
+    # Scripts set among words read as a formula's do: digits raised, words after a mark, kept
+    # apart from a letter after them; and an italic letter's lean is no second space.
+    assert "k_auto p, k_B p, x² and T ≈ 24" in said
+    assert "dp/dt = k_auto p \u2212 k_B p + x²" in said
+
+
 def test_words_after_invisible_ones_on_a_pdf_page_are_still_drawn() -> None:
     pdfium = pytest.importorskip("pypdfium2")
     from flexo.compiler import compile_figure

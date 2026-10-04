@@ -204,20 +204,18 @@ def _reads_upward(figure: FigureSpec, under: dict[str, set[str]]) -> bool:
 def wrapped(figure: FigureSpec, *, longest: int = 5, back: bool | None = None) -> FigureSpec:
     """``figure`` with each long row or column folded onto two lines.
 
-    A row of ``longest`` or more parts is set on two rows, read left to right
-    and then on to the next row, as a long pipeline is set across a page; a
-    column on two columns, read down and then on. The parts and their wiring are
-    unchanged; only where they sit.
+    A row of ``longest`` or more parts is set on two rows, a column on two
+    columns. The parts and their wiring are unchanged; only where they sit.
 
-    Parts wired across the fold make it a flow: it is folded, near the middle,
-    where the fewest lines cross from one line to the other, and each line keeps
-    its own spacing, so its arrows are even. One whose fold is crossed by more
-    than the line that carries it on (a loop back, as a flow chart's "no") turns
-    at the end of the first line and runs back along the second, a snake, so that
-    line is a short step down and nothing crosses it. Parts with nothing between
-    the two halves (a shelf of panels) keep the columns of a grid. ``back`` says
-    whether a flow's second line runs back (``True``) or on (``False``) whatever
-    the fold: for a figure whose lines cross the one way and not the other.
+    Parts wired across the fold make it a flow. It is folded at the middle, by
+    its parts alone, and turns at the end of its first line to run back along
+    the second, a snake: the line on to the second is a short step, and a loop
+    back across the fold (a flow chart's "no") crosses nothing. So a line drawn
+    in or taken away leaves every part where it was. Each line keeps its own
+    spacing, so its arrows are even. Parts with nothing between the two halves
+    (a shelf of panels) keep the columns of a grid, read left to right and then
+    on. ``back`` says whether a flow's second line runs back (``True``) or on
+    (``False``), read as a page is: for a figure whose lines cross run back.
     """
 
     import math
@@ -235,19 +233,10 @@ def wrapped(figure: FigureSpec, *, longest: int = 5, back: bool | None = None) -
         if not _crossing(group.children, half, under, pairs):
             groups.append(_gridded(group, half))
             continue
-        # Folded where the fewest lines cross between the two lines, as near the middle as
-        # that allows (the earlier, of two as near): a part added at the end of a row does
-        # not move the fold, and the parts before it, unless it must.
-        at = min(
-            (at for at in (half - 1, half, half + 1) if 2 <= at <= count - 2),
-            key=lambda at: (len(_crossing(group.children, at, under, pairs)), abs(at - half), at),
-            default=half,
-        )
-        first, second = group.children[:at], group.children[at:]
-        across = _crossing(group.children, at, under, pairs)
-        last, then = _held(first[-1:], under), _held(second[:1], under)
-        on = [(source, target) for source, target in across if source in last and target in then]
-        snake = (bool(on) and len(across) > len(on)) if back is None else back
+        # Folded at the middle (the first line the longer) by its parts alone, never by its
+        # lines: a line drawn in or taken away (a loop back) leaves the fold where it was.
+        first, second = group.children[:half], group.children[half:]
+        snake = True if back is None else back
         lines = []
         for children in (first, tuple(reversed(second)) if snake else second):
             line = _fresh(f"{group.id}.line", taken)

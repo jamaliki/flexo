@@ -425,6 +425,53 @@ class _Document:
             for index, item in enumerate(self.edges, start=1)
         ]
 
+    def edge_named(self, identifier: str) -> dict[str, Any] | None:
+        """The edge ``identifier`` names: by its id -- or, for a line the figure numbers
+        (unnamed: ``edge.3.check-to-end``), by the parts it joins, should lines have been
+        added or taken away before it since: of the lines between them, the one nearest its
+        number. (A line's number is where it is in the list; its ends are what it is.)"""
+
+        named = dict(self.edge_ids())
+        if identifier in named:
+            return named[identifier]
+        found = re.fullmatch(r"edge\.(\d+)\.(.+)", identifier)
+        if not found:
+            return None
+        number, ends = int(found.group(1)), found.group(2)
+        same = [
+            (index, item)
+            for index, item in enumerate(self.edges, start=1)
+            if not item.get("id")
+            and f"{self.node_of(item['from'])}-to-{self.node_of(item['to'])}" == ends
+        ]
+        return min(same, key=lambda pair: abs(pair[0] - number))[1] if same else None
+
+    def edge_id(self, item: Mapping[str, Any]) -> str | None:
+        """The id the figure gives the edge ``item`` now."""
+
+        return next((name for name, edge in self.edge_ids() if edge is item), None)
+
+    def line_said(self, identifier: str) -> str:
+        """A line as a person knows it, by the parts it joins: the line from “Done?” to
+        “End” -- not its id."""
+
+        found = re.fullmatch(r"edge\.\d+\.(.+)", identifier)
+        ends = found.group(1) if found else ""
+        for node in self.nodes:
+            start = f"{node.get('id')}-to-"
+            other = self.node(ends.removeprefix(start)) if ends.startswith(start) else None
+            if other is not None:
+                return f"the line from “{self.said(node)}” to “{self.said(other)}”"
+        return "that line"
+
+    def said(self, node: Mapping[str, Any]) -> str:
+        """A part as a person knows it: by its words, else its id."""
+
+        label = node.get("label")
+        if isinstance(label, list):
+            label = "".join(str(run.get("text", "")) for run in label)
+        return str(label or node.get("id"))
+
     def holder(self, identifier: str) -> dict[str, Any] | None:
         return next(
             (group for group in self.groups if identifier in (group.get("children") or [])), None
@@ -674,14 +721,19 @@ class _Document:
                 self.written_root() if identifier == self.root else None
             )
         elif kind == "edge":
-            item = dict(self.edge_ids()).get(identifier)
+            item = self.edge_named(identifier)
+            if item is None:
+                said = self.line_said(identifier)
+                raise EditError(f"{said[:1].upper()}{said[1:]} is gone.")
         elif kind == "net":
             item = next((net for net in self.nets if net.get("id") == identifier), None)
         else:
             raise EditError("Can't edit this item.")
         if item is None:
             raise EditError(f"There's no {NOUNS.get(kind, kind)} named “{identifier}”.")
-        chosen = [identifier] if identifier else []
+        # (A line found by its ends is chosen by the name it has now.)
+        now = self.edge_id(item) if kind == "edge" else None
+        chosen = [now or identifier] if identifier else []
         typed_over = action.get("was")
         if isinstance(typed_over, str) and isinstance(values.get("label"), str):
             # Words typed over what a label said when the typing began, while someone else
@@ -831,7 +883,6 @@ class _Document:
 
     def _delete(self, action: Mapping[str, Any]) -> list[str]:
         ids = [str(item) for item in action.get("ids") or []]
-        edges = dict(self.edge_ids())
         nodes: set[str] = set()
         for identifier in ids:
             if identifier == self.root:
@@ -846,9 +897,8 @@ class _Document:
                     self.detach(item)
             elif self.node(identifier) is not None:
                 nodes.add(identifier)
-            elif identifier in edges:
-                if edges[identifier] in self.edges:
-                    self.edges.remove(edges[identifier])
+            elif (edge := self.edge_named(identifier)) is not None:
+                self.edges.remove(edge)
             else:
                 net = next((item for item in self.nets if item.get("id") == identifier), None)
                 if net is None:

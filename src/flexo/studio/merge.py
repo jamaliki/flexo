@@ -39,7 +39,8 @@ def merge3(base: Any, ours: Any, theirs: Any, notes: list | None = None) -> Any:
     if _same(base, ours):
         return theirs
     if isinstance(ours, dict) and isinstance(theirs, dict):
-        return _merge_dicts(base if isinstance(base, dict) else {}, ours, theirs, notes)
+        base, ours, theirs = _followed(base if isinstance(base, dict) else {}, ours, theirs)
+        return _merge_dicts(base, ours, theirs, notes)
     if isinstance(ours, list) and isinstance(theirs, list):
         return merge_items(base if isinstance(base, list) else [], ours, theirs, notes)
     if isinstance(ours, str) and isinstance(theirs, str) and isinstance(base, str):
@@ -172,9 +173,7 @@ def _words_chunk(base: list, ours: list, theirs: list) -> list:
     if not base:
         # Words both put at one place (two people typing on at the same end): ours, then
         # theirs, never run together into one word.
-        joins = (
-            ours and theirs and _WORDS_ONLY.fullmatch(ours[-1]) and _WORDS_ONLY.fullmatch(theirs[0])
-        )
+        joins = ours and theirs and _ends_word(ours) and _starts_word(theirs)
         return [*ours, " ", *theirs] if joins else [*ours, *theirs]
     was = "".join(base)
     # Words one side took away while the other typed among them: they go, and the typing
@@ -198,13 +197,42 @@ def _letters(was: str, ours: str, theirs: str) -> str | None:
         [*_runs_of(was, ours), *_runs_of(was, theirs)],
         key=lambda edit: (edit[0], edit[1], edit[2][:1].isspace()),
     )
-    merged, at = "", 0
+    merged, at, typed = "", 0, None
     for start, end, put in edits:
         if start < at:
             return None
-        merged += was[at:start] + put
+        # Two starting words at one place: they never run together into one (two typing on
+        # in one word -- "m" made "m4" and "mc" -- keep its letters together).
+        fresh = start == 0 or not _LETTER.fullmatch(was[start - 1])
+        both = typed == start == end and fresh and put and _ends_word(list(merged))
+        both = both and _starts_word(list(put))
+        merged += was[at:start] + (" " if both else "") + put
+        typed = start if start == end else None
         at = end
     return merged + was[at:]
+
+
+_PRIVATE = re.compile(r"[\ue000-\uf8ff]")
+_LETTER = re.compile(r"\w")
+
+
+def _ends_word(tokens: list[str]) -> bool:
+    """Whether words (tokens, or letters) end with a word's letter -- a mark put among them
+    (the page's caret, a private letter) passed over."""
+
+    for token in reversed(tokens):
+        if not _PRIVATE.fullmatch(token):
+            return bool(token) and bool(_LETTER.fullmatch(token[-1]))
+    return False
+
+
+def _starts_word(tokens: list[str]) -> bool:
+    """Whether words (tokens, or letters) start with a word's letter (see ``_ends_word``)."""
+
+    for token in tokens:
+        if not _PRIVATE.fullmatch(token):
+            return bool(token) and bool(_LETTER.fullmatch(token[0]))
+    return False
 
 
 def _runs_of(was: str, now: str) -> list[tuple[int, int, str]]:
@@ -369,7 +397,150 @@ def _pairs(base: list, side: list) -> dict[int, int]:
                 if _kin(base[i], side[j]):
                     pairs[i] = j
                     used.add(j)
+    # Moved and changed at once (a slide moved and retitled while typed in): of the mappings
+    # left, the most alike, wherever it went -- one mapping, not one gone and another new.
+    gone = [i for i, item in enumerate(base) if i not in pairs and isinstance(item, dict)]
+    come = [j for j, item in enumerate(side) if j not in used and isinstance(item, dict)]
+    scored = sorted(
+        (-score, i, j)
+        for i in gone
+        for j in come
+        if _kin(base[i], side[j]) and (score := _alike(base[i], side[j])) >= _MOVED
+    )
+    for _, i, j in scored:
+        if i not in pairs and j not in used:
+            pairs[i] = j
+            used.add(j)
     return pairs
+
+
+_MOVED = 0.6
+"""How alike a mapping moved and changed at once must be to the one it was (see ``_pairs``)."""
+
+
+def _pools(value: dict) -> dict[tuple, list]:
+    """A mapping's lists (a slide's body and sides, each of its columns), by where they are:
+    ``(key,)``, or ``(key, index)`` for a list of lists."""
+
+    found: dict[tuple, list] = {}
+    for key, item in value.items():
+        if isinstance(item, list) and item and all(isinstance(inner, list) for inner in item):
+            for index, inner in enumerate(item):
+                found[(key, index)] = inner
+        elif isinstance(item, list):
+            found[(key,)] = item
+    return found
+
+
+def _movable(first: Any, second: Any) -> bool:
+    """Whether one mapping could be the other moved to another list: of one kind, with at
+    least half their keys alike (a paragraph and a paragraph, not a shape and a line)."""
+
+    if not isinstance(first, dict) or not isinstance(second, dict) or not _kin(first, second):
+        return False
+    keys = first.keys() | second.keys()
+    return bool(keys) and len(first.keys() & second.keys()) * 2 >= len(keys)
+
+
+def _followed(base: dict, ours: dict, theirs: dict) -> tuple[dict, dict, dict]:
+    """Items one side moved to another of a mapping's lists while the other side kept (and
+    edited) them where they were -- a paragraph put in the next column, a slide's body set
+    out in two columns: moved for the other side too (and in base), so the merge has each
+    where it went, with both sides' edits, never left behind as a copy in the list it left."""
+
+    base, ours = _follow_moves(base, theirs, ours)
+    base, theirs = _follow_moves(base, ours, theirs)
+    return base, ours, theirs
+
+
+def _follow_moves(base: dict, side: dict, other: dict) -> tuple[dict, dict]:
+    """``base`` and ``other`` with the items ``side`` moved between ``base``'s lists moved
+    alike (see ``_followed``)."""
+
+    pools_b, pools_s, pools_o = _pools(base), _pools(side), _pools(other)
+    if len(pools_b.keys() | pools_s.keys()) < 2:
+        return base, other
+    kept = {
+        pool: _pairs(items, pools_s[pool]) if pool in pools_s else {}
+        for pool, items in pools_b.items()
+    }
+    gone = [
+        (pool, i)
+        for pool, items in pools_b.items()
+        for i, item in enumerate(items)
+        if i not in kept[pool] and isinstance(item, dict)
+    ]
+    come = []
+    for pool, items in pools_s.items():
+        used = set(kept.get(pool, {}).values())
+        come += [
+            (pool, j) for j, item in enumerate(items) if j not in used and isinstance(item, dict)
+        ]
+    scored = sorted(
+        (-score, n, m)
+        for n, (from_pool, i) in enumerate(gone)
+        for m, (to_pool, j) in enumerate(come)
+        if from_pool != to_pool
+        and _movable(pools_b[from_pool][i], pools_s[to_pool][j])
+        and (score := _alike(pools_b[from_pool][i], pools_s[to_pool][j])) >= _ALIKE
+    )
+    moves: list[tuple[tuple, int, tuple, int]] = []
+    taken_gone: set[int] = set()
+    taken_come: set[int] = set()
+    for _, n, m in scored:
+        if n not in taken_gone and m not in taken_come:
+            taken_gone.add(n)
+            taken_come.add(m)
+            moves.append((*gone[n], *come[m]))
+    if not moves:
+        return base, other
+    # Each moved where it went, in the order the side has there: after the item it follows
+    # there that was in that list already (else first).
+    new_b = {pool: list(items) for pool, items in pools_b.items()}
+    new_o = {pool: list(items) for pool, items in pools_o.items()}
+    gone_b: dict[tuple, set[int]] = {}
+    gone_o: dict[tuple, set[int]] = {}
+    added_b: dict[tuple, list[tuple[float, Any]]] = {}
+    added_o: dict[tuple, list[tuple[float, Any]]] = {}
+    order = list(pools_s)
+    for from_pool, i, to_pool, j in sorted(moves, key=lambda move: (order.index(move[2]), move[3])):
+        before = kept.get(to_pool, {})
+        back = {k: b for b, k in before.items()}
+        after = max((back[k] for k in range(j) if k in back), default=-1)
+        gone_b.setdefault(from_pool, set()).add(i)
+        added_b.setdefault(to_pool, []).append((after + 0.5, pools_b[from_pool][i]))
+        theirs_now = _pairs(pools_b[from_pool], pools_o[from_pool]) if from_pool in pools_o else {}
+        if i not in theirs_now:
+            continue  # the other side took it away: it is not theirs to move
+        gone_o.setdefault(from_pool, set()).add(theirs_now[i])
+        in_other = _pairs(pools_b.get(to_pool, []), pools_o.get(to_pool, []))
+        place = in_other.get(after, -1) if after >= 0 else -1
+        added_o.setdefault(to_pool, []).append((place + 0.5, pools_o[from_pool][theirs_now[i]]))
+    return _repooled(base, new_b, gone_b, added_b), _repooled(other, new_o, gone_o, added_o)
+
+
+def _repooled(
+    value: dict, pools: dict[tuple, list], gone: dict[tuple, set[int]], added: dict[tuple, list]
+) -> dict:
+    """``value`` with the items of its lists ``gone`` taken out and those ``added`` put in
+    (each at its place, a fraction past the index of the item it follows)."""
+
+    result = dict(value)
+    for pool in [*pools, *(pool for pool in added if pool not in pools)]:
+        items = pools.get(pool, [])
+        left = gone.get(pool, set())
+        placed = [(float(n), item) for n, item in enumerate(items) if n not in left]
+        placed += added.get(pool, [])
+        made = [item for _, item in sorted(placed, key=lambda entry: entry[0])]
+        if len(pool) == 1:
+            result[pool[0]] = made
+        else:
+            outer = [list(inner) for inner in result.get(pool[0]) or []]
+            while len(outer) <= pool[1]:
+                outer.append([])
+            outer[pool[1]] = made
+            result[pool[0]] = outer
+    return result
 
 
 def _kind(item: Any) -> str:
