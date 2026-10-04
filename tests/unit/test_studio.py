@@ -1638,13 +1638,17 @@ const shape = (id, label) => ({
 });
 const typed = shape("alice-shape", "Alice shape");
 see(typed, shape("block"), shape("alice-shape", "Alice shape and Bob"));
-// So in a figure's file: lines another has typed among are not taken from about their words,
-// leaving a file that no longer reads -- it stays as it is, and that is said.
+// So in a figure's file: the line another has typed in keeps its key, with their words; the
+// shape's own line is not taken from over it (the shape stays, and that is said); nor are
+// lines with no key taken from about their words, leaving a file that no longer reads.
 const file = (lines) => ({
   text: ["nodes:", "- id: c", ...lines, "edges:", "- from: c", "  to: b", ""].join("\\n"),
 });
 const label = (words) => ["- id: s", `  label: ${words}`];
 see(file(label("Alice step")), file(["- id: s"]), file(label("Bob Alice step")));
+see(file(["- id: s"]), file([]), file(label("Bob")));
+const block = (words) => ["- id: s", "  label: |", `    ${words}`];
+see(file(block("Alice step")), file(["- id: s"]), file(block("Bob Alice step")));
 console.log(JSON.stringify(seen));
 """
     )
@@ -1667,7 +1671,9 @@ console.log(JSON.stringify(seen));
     kept = {"id": "block", "label": "and Bob"}
     lines = [{"from": "step", "to": "block"}]
     assert seen[10] == [{"nodes": [{"id": "step"}, kept], "edges": lines}, 0]
-    assert seen[11][0]["text"].count("label: Bob Alice step") == 1 and seen[11][1] > 0
+    assert "\n- id: s\n  label: Bob\nedges:" in seen[11][0]["text"] and seen[11][1] == 0
+    assert "\n- id: s\n  label: Bob\nedges:" in seen[12][0]["text"] and seen[12][1] > 0
+    assert seen[13][0]["text"].count("    Bob Alice step") == 1 and seen[13][1] > 0
 
 
 def test_a_window_opened_again_leaves_nothing_of_the_last_one_behind(

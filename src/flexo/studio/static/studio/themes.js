@@ -79,7 +79,9 @@ export function themeField(session, { value, fallback = "paper", onPick, onCusto
 export function themeUses(session) {
   const holder = h("div.theme-uses", {}, h("div.hint-line", {}, "Loading…"));
   const render = (documents) => {
-    const others = documents.filter((entry) => !entry.uses);
+    // A document that does not read is listed, said to be so, and offered nothing to do:
+    // opened, it says why (and on which line).
+    const others = documents.filter((entry) => !entry.uses && !entry.unread);
     const use = async (targets) => {
       try {
         const result = await session.api("/api/theme/use", { file: session.file, targets });
@@ -96,9 +98,10 @@ export function themeUses(session) {
         icon(entry.kind === "deck" ? "deck" : "figure"),
         h("button.theme-use-name", { type: "button", title: `Open ${entry.file}`, onclick: () => session.workspace.open(entry.file) }, docName(entry.file)),
         entry.uses ? h("span.chip-on", {}, icon("check"), "In Use")
+          : entry.unread ? h("span.hint-line", { title: `Open ${entry.file} to see why and put it right` }, "Can't be read")
           : ui.button("Use", () => use([entry.file]), { small: true, title: `Use this theme in “${docName(entry.file)}” (now ${entry.theme || "the default theme"})` }))))
         : h("div.hint-line", {}, "No figures or decks in this folder yet."),
-      others.length > 1 ? h("div.row", {}, ui.button(useAll(others.length, documents.length), () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
+      others.length > 1 ? h("div.row", {}, ui.button(useAll(others.length, documents.filter((entry) => !entry.unread).length), () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
   };
   session.api(session.url("/api/theme/uses")).then((result) => render(result.documents))
     .catch((error) => clear(holder, h("div.hint-line", {}, `Could not list documents: ${error.message}`)));

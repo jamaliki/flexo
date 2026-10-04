@@ -191,9 +191,17 @@ def test_words_taken_away_while_typed_among_go_and_the_typing_stays() -> None:
     assert merge3("a b c d e f", "a b c x d e f", "a b e f") == "a b x e f"
 
 
-def test_the_same_item_added_by_both_sides_is_kept_once() -> None:
-    assert merge3([1, 2], [1, 2, {"a": 1}], [1, 2, {"a": 1}]) == [1, 2, {"a": 1}]
-    assert merge3(["a"], ["x", "a"], ["a", "x"]) in (["x", "a"], ["a", "x"])
+def test_items_both_sides_added_are_each_kept_however_alike() -> None:
+    # Two people adding a new slide at one place at once: two slides, each typed in by its own.
+    new = {"title": "", "body": [{"bullets": [""]}]}
+    deck = {"slides": [{"title": "One"}, {"title": "Two"}]}
+    both = {"slides": [{"title": "One"}, new, {"title": "Two"}]}
+    assert merge3(deck, both, both)["slides"] == [{"title": "One"}, new, new, {"title": "Two"}]
+    assert merge3([1, 2], [1, 2, {"a": 1}], [1, 2, {"a": 1}]) == [1, 2, {"a": 1}, {"a": 1}]
+    assert merge3(["a"], ["x", "a"], ["a", "x"]) == ["x", "a", "x"]
+    # Both changed alike, words or a setting are one change.
+    assert merge3({"size": 30}, {"size": 40}, {"size": 40}) == {"size": 40}
+    assert merge3(["a", "b"], ["a", "c"], ["a", "c"]) == ["a", "c"]
 
 
 def test_numbers_in_a_list_merge_place_by_place() -> None:

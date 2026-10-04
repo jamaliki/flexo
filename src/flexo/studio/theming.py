@@ -50,11 +50,12 @@ def uses(workspace: Workspace, name: str) -> list[dict[str, Any]]:
             continue
         path = workspace.path(entry["file"])
         open_doc = workspace.docs.get(entry["file"])
+        unread = bool(getattr(open_doc, "unread", False))
         try:
             document = open_doc.document if open_doc is not None else kind.load(path)
-            current = theme_of(document)
-        except Exception:  # a document that does not read: listed, using nothing
-            current = None
+            current = None if unread else theme_of(document)
+        except Exception:  # a document that does not read: listed, using nothing, said so
+            current, unread = None, True
         found.append(
             {
                 "file": entry["file"],
@@ -62,6 +63,7 @@ def uses(workspace: Workspace, name: str) -> list[dict[str, Any]]:
                 "title": entry["title"],
                 "theme": current or "",
                 "uses": _names(current, path.parent, target),
+                "unread": unread,
             }
         )
     return found

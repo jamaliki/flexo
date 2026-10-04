@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from dataclasses import replace
 
 import pytest
@@ -887,6 +888,27 @@ def test_an_arrowhead_stands_clear_of_the_line_leaving_its_side() -> None:
     assert abs(back[-1].x - forward[0].x) < 1e-6
     gap = abs(back[-1].y - forward[0].y)
     assert gap >= style.port_spacing.points + style.arrow_width.points - 1e-6
+
+
+def test_the_same_two_parts_joined_twice_are_lines_side_by_side() -> None:
+    """Three lines from one part to another: three drawn, apart, the captioned one outside."""
+
+    with Figure("dup") as figure, figure.column("col") as col:
+        queue = col.block("queue", label="Queue")
+        worker = col.block("worker", label="Worker")
+        figure.connect(queue, worker)
+        figure.connect(queue, worker, label="retry")
+        figure.connect(queue, worker)
+    compiled = compile_figure(figure.spec)
+    style = LayoutStyle()
+    runs = {edge.spec.id: edge.centerline for edge in compiled.routed.edges}
+    across = sorted(line[0].x for line in runs.values())
+    assert len(set(across)) == 3
+    assert min(b - a for a, b in itertools.pairwise(across)) >= style.port_spacing.points - 1e-6
+    retry = next(edge for edge in compiled.routed.edges if edge.spec.label)
+    assert retry.centerline[0].x == max(across)
+    codes = [item.code for item in lint_compilation(compiled).diagnostics]
+    assert "routing.caption.covers-line" not in codes
 
 
 def test_an_unhinted_rail_sits_in_the_middle_of_its_corridor() -> None:

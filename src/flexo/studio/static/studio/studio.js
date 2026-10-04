@@ -117,8 +117,11 @@ function caretTo(field, [from, to]) {
 // box's width). Small words are set by their outlines, at their true widths: hinted
 // to the pixel, the letters of a thumbnail's words run into each other.
 const pictures = new Map();
+// A picture is the drawing as it presents: an editor's placeholders' hints ("Title", "93%")
+// are the editable slide's alone, never a thumbnail's or a preview's.
 const PICTURE_STYLE = ":host{display:block;position:relative}svg{display:block;text-rendering:geometricPrecision}"
-  + ":host(:not(.natural)) svg{width:100%;height:100%}:host(.natural) svg{max-width:100%;height:auto}";
+  + ":host(:not(.natural)) svg{width:100%;height:100%}:host(.natural) svg{max-width:100%;height:auto}"
+  + "[data-flexo-placeholder]{display:none}";
 
 export function picture(svg, hash, { natural = false } = {}) {
   const key = hash && `${natural ? "n" : "f"}:${hash}`;

@@ -7,7 +7,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .hit-line { fill: none; stroke: transparent; stroke-width: 9; pointer-events: stroke; cursor: pointer; }
 .fig-marks { position: absolute; inset: 0; pointer-events: none; }
 /* A chosen part's frame is where the part is, at once: it never glides there. */
-.fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
+/* Frames as wide as every frame on a slide (--frame): chosen, solid; pointed at, dashed. */
+.fig-mark { position: absolute; pointer-events: none; border: var(--frame, 2px) solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
 .fig-mark.group { background: transparent; border-style: dashed; }
 /* What a shape with no words is, faintly, where its words will go: a grey that reads on the
    drawing's light shapes and its dark ones alike. */
@@ -36,18 +37,21 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-redrawing .spinner { width: 12px; height: 12px; }
 /* A line chosen: marked along its own path. */
 .hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
-.fig-hover { position: absolute; pointer-events: none; border: 1px dashed var(--accent-line); border-radius: 4px; }
+.fig-hover { position: absolute; pointer-events: none; border: var(--frame, 2px) dashed var(--accent-line); border-radius: 4px; }
 .fig-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 99px; background: var(--ink); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-2); white-space: nowrap; }
 .fig-hint svg { width: 14px; height: 14px; }
 .fig-hint .kbd { color: inherit; border-color: currentColor; opacity: 0.7; }
 .fig-inline { position: absolute; z-index: 20; background: var(--raised); border-radius: 10px; box-shadow: var(--shadow-2), 0 0 0 1px var(--accent-line); padding: 6px; display: grid; gap: 4px; line-height: normal; animation: pop 0.1s ease-out; }
 .fig-inline .markup { border: 0; box-shadow: none; }
 /* Typed in place: over the part's words, as they look; the tools float above. */
-.fig-inline.in-place { background: transparent; padding: 0; border-radius: 4px; box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); animation: none; }
+/* Its ring as wide as the chosen frame, and inside it (placeInline keeps the box within). */
+.fig-inline.in-place { background: transparent; padding: 0; border-radius: 3px; box-shadow: 0 0 0 var(--frame, 2px) var(--accent); animation: none; }
 .fig-inline.in-place .markup { background: transparent; }
 .fig-inline.in-place .textarea { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; line-height: 1.2; resize: none; overflow: hidden; caret-color: var(--accent); white-space: pre; }
 .fig-inline.in-place .textarea:focus { box-shadow: none; outline: none; }
 .fig-inline.in-place .markup-tools { position: absolute; bottom: calc(100% + 8px); left: 50%; right: auto; transform: translateX(-50%); opacity: 1; padding: 3px; background: var(--raised); border-radius: 8px; box-shadow: var(--shadow-2), 0 0 0 1px var(--line); white-space: nowrap; width: max-content; }
+/* Shown once words are chosen (placeInline still places it, unseen, meanwhile). */
+.fig-inline.in-place:not(.words-chosen) .markup-tools { opacity: 0; visibility: hidden; pointer-events: none; }
 /* A part added, standing where it will be drawn until it is, in the look of the one before. */
 .fig-standing { position: absolute; z-index: 19; pointer-events: none; box-sizing: border-box; border: 1.5px solid var(--line-strong); border-radius: 6px; background: var(--raised); animation: fig-stand 0.12s ease-out; }
 /* Solid from its first frame: it grows into place, never fading in over what is beside it. */

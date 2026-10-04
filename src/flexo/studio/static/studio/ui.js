@@ -257,10 +257,6 @@ export const ui = {
     };
     const said = key && noted.get(key);
     if (said && said.until > Date.now()) say(said.text, said.until - Date.now());
-    // What it held when it was entered, kept by its key across the form being drawn again.
-    let origin = null;
-    const entered = () => (key ? entering.get(key) : origin);
-    input.addEventListener("focus", () => { if (!key) origin ??= input.value; else if (!entering.has(key)) entering.set(key, input.value); });
     const commit = () => {
       settle();
       input.typing = false;
@@ -278,7 +274,6 @@ export const ui = {
       if (key && document.activeElement?.dataset?.key === key) return;
       settle();
       if (input.isConnected) commit();
-      if (key) entering.delete(key); else origin = null;
     }, 0));
     // A number typed is taken when it is done, as in Keynote: on Return, Tab or leaving the
     // field, or a step (↑, ↓, the steppers) -- not at each key ("44" is never 4 on its way,
@@ -313,16 +308,17 @@ export const ui = {
     input.addEventListener("keydown", (event) => {
       if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); stepBy(event.key === "ArrowUp" ? 1 : -1, event.shiftKey); }
       else if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); commit(); input.select(); }
+      // Esc takes back only what is typed and not yet taken, as a Mac field does: a number
+      // taken (by ↩, a step) stays; with nothing to take back, Esc goes on (out of the panel).
       else if (event.key === "Escape") {
-        const was = entered();
-        if (was === null || was === undefined || was === input.value) return;
+        if (!input.typing || Object.is(read(), applied)) return;
         event.preventDefault();
         event.stopPropagation();
-        input.value = was;
+        settle();
+        input.typing = false;
+        input.value = shown(applied);
         input.classList.remove("invalid");
         hush();
-        const parsed = read();
-        apply(parsed === null || Number.isNaN(parsed) ? null : parsed);
         input.select();
       }
     });
@@ -389,7 +385,15 @@ export const ui = {
       h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
     // As the slide's words' format bar (richtext.js) has them, in its order and its look.
     const palette = colours === true ? { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)", ink: "var(--ink)" } : colours || {};
-    const swatch = (name, title) => (palette[name] ? tool(h("span.rt-swatch", { style: { background: palette[name] } }), title, "[", `]{${name}}`) : null);
+    // Each colour offered once, as there: one that looks as another does (Swiss's second
+    // accent its ink) is left to that one -- the default's dot, or the first of that colour.
+    const offered = new Set([String(palette.ink || "").toLowerCase()]);
+    const swatch = (name, title) => {
+      const colour = String(palette[name] || "").toLowerCase();
+      if (!colour || (name !== "ink" && offered.has(colour))) return null;
+      offered.add(colour);
+      return tool(h("span.rt-swatch", { style: { background: palette[name] } }), title, "[", `]{${name}}`);
+    };
     const tools = h("div.markup-tools", {},
       emphasis ? tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**") : null,
       emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
@@ -591,7 +595,7 @@ export const ui = {
     const buttons = all.map((item) => {
       const chosen = item.value === (value ?? null);
       const button = h("button.swatch", { type: "button", role: "radio", "aria-checked": String(chosen), title: item.title || item.value || "None",
-        class: [chosen ? "on" : "", item.colour ? "" : "none", item.colour && light(item.colour) ? "light" : ""].join(" "),
+        class: [chosen ? "on" : "", item.colour ? "" : "none", item.colour && light(item.colour) ? "light" : "", item.colour && dark(item.colour) ? "dark" : ""].join(" "),
         style: item.colour ? { background: item.colour, ...(item.border ? { borderColor: item.border } : {}) } : {},
         onclick: () => choose(button, item.value) });
       return button;
@@ -632,6 +636,12 @@ function light(colour) {
   if (!HEX.test(colour || "")) return false;
   const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+}
+// A colour near black: ringed clearly on a dark panel, where a faint ring would leave it unseen.
+function dark(colour) {
+  if (!HEX.test(colour || "")) return false;
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(colour.slice(at, at + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.12;
 }
 
 // A group of controls that is one stop for Tab, as a Mac's segmented control, a row of
@@ -690,8 +700,7 @@ ui.roving = roving;
 
 // Units written against their digits, as a Mac writes them: "30°", "0.4×", "50%".
 const TIGHT_UNITS = new Set(["°", "×", "%", "′", "″"]);
-// What each number field (by its key) held when it was entered, and what it says under itself.
-const entering = new Map();
+// What each number field (by its key) says under itself.
 const noted = new Map();
 
 function fit(area) {

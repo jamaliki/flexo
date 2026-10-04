@@ -408,8 +408,12 @@ def timeline_moments(node: NodeSpec) -> tuple[tuple[_Moment, ...], tuple[_Moment
             raise _fail(node, "time", f"{where} needs a start and an end.")
         start = _number(node, record.get("start"), where)
         end = _number(node, record.get("end"), where)
-        if end <= start:
+        if end < start:
             raise _fail(node, "time", f"{where} ends ({end:g}) before it starts ({start:g}).")
+        if end == start:
+            raise _fail(
+                node, "time", f"{where} ends where it starts ({start:g}): it needs a later end."
+            )
         label = parse_label(str(record.get("label", "")))
         spans.append(_Moment(label, start, end, _tone(label, record.get("tone"))))
     if not events and not spans:

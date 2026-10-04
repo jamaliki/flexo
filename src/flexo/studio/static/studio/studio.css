@@ -617,6 +617,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
    not a ring like the chosen one's. */
 .swatch.on::after { content: ""; position: absolute; inset: 0; background: var(--tick-ink, #fff); -webkit-mask: var(--tick) center / 13px no-repeat; mask: var(--tick) center / 13px no-repeat; pointer-events: none; }
 .swatch.light, .swatch.none { --tick-ink: rgba(0, 0, 0, 0.72); }
+/* A swatch near black is ringed as a bar's small swatches are (--chip-ring-strong): seen on
+   a dark panel, faint on a light one. */
+.swatch.dark { box-shadow: var(--chip-ring-strong); }
+.swatch.dark.on { box-shadow: var(--chip-ring-strong), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
 .swatch:focus-visible, .swatch.custom:has(input:focus-visible) { outline: none; box-shadow: var(--chip-ring), 0 0 0 4px var(--focus-ring); }
 .swatch.on:focus-visible, .swatch.custom.on:has(input:focus-visible) { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent), 0 0 0 8px var(--focus-halo); }
 /* A segment with the keys is ringed apart from the chosen one's raised pill. */

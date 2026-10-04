@@ -424,7 +424,13 @@ def test_a_structure_is_named_for_what_its_file_holds_and_a_long_name_wraps(tmp_
         f"{'HEADER    TRANSCRIPTION/DNA':<62}1LCD\nCOMPND   2 MOLECULE: DNA (5'-D(*TP*GP)-3');\n"
         "COMPND   5 MOLECULE: LAC REPRESSOR;\n"
     )
-    assert structure_caption(entry) == "LAC repressor (1LCD)"
+    assert structure_caption(entry) == "Lac repressor (1LCD)"
+    # A title in capitals is set in sentence case, its acronyms kept.
+    entry.write_text(
+        f"{'HEADER    TRANSCRIPTION/DNA':<62}1LCD\n"
+        "TITLE     LAC REPRESSOR HIV GFP II DNA\n"
+    )
+    assert structure_caption(entry) == "Lac repressor HIV GFP II DNA (1LCD)"
     assert structure_caption(tmp_path / "none.cif") is None
     # A name wider than its panel is set on two lines over it, not across its edges.
     with flexo.Figure("named") as figure:

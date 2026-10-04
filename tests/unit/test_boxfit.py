@@ -133,10 +133,60 @@ def test_a_line_drawn_in_or_taken_away_leaves_a_flow_folded_where_it_was() -> No
     plain, _ = folded(False)
     looped, spec = folded(True)
     # The same parts on each line, in the same order, the loops back or not: the
-    # fold is the parts', not their lines'.
+    # fold is the parts', not their lines'. (The decision does not start the second
+    # line: the fold comes a part earlier.)
     assert plain == looped
-    assert plain[0][-1] == "steps.read" and plain[1][-1] == "steps.plateau"
+    assert plain[0][-1] == "steps.chase" and plain[1][-1] == "steps.read"
     compile_figure(spec)
+
+
+def _sequencing(loop: bool, decision_last: bool = False) -> Figure:
+    labels = [
+        "Receive sample", "Extract DNA", "Amplify by PCR", "Purify product", "Sequence it",
+        "Quality ok?", "Align reads", "Call variants", "Write report",
+    ]
+    order = [0, 1, 2, 3, 4, 6, 7, 8, 5] if decision_last else list(range(9))
+    with Figure("sequencing") as figure, figure.row("steps") as steps:
+        made = {}
+        for index in order:
+            add = steps.terminal if index in (0, 8) else steps.block
+            made[index] = (steps.decision if index == 5 else add)(f"s{index}", label=labels[index])
+        for index in range(8):
+            figure.connect(made[index], made[index + 1], label="yes" if index == 5 else None)
+        if loop:
+            figure.connect(made[5], made[1], label="no")
+    return figure
+
+
+def test_a_flow_with_a_loop_back_runs_back_and_its_loop_crosses_nothing() -> None:
+    from flexo.boxfit import _crossings
+    from flexo.orient import wrapped
+
+    spec = wrapped(_sequencing(loop=True).spec)
+    lines = [group.children for group in spec.groups if group.id.startswith("steps.line")]
+    # The decision is not where the line on comes down: its top is free for the "no".
+    assert lines[0][-1] == "steps.s3" and lines[1][-1] == "steps.s4"
+    assert not _crossings(compile_figure(spec), None)
+    fit = flexo.fit_in_box(_sequencing(loop=True), 1100, 420, words=18, largest=24)
+    assert fit.layout.endswith(", folded") and not _crossings(fit.compilation, fit.style)
+
+
+def test_a_flow_listed_out_of_its_order_is_folded_along_its_lines() -> None:
+    from flexo.boxfit import _crossings
+    from flexo.orient import wrapped
+
+    # The decision written last, its lines running back and forth along the row: folded,
+    # it is set where its lines put it, as the flow written in order is.
+    out = wrapped(_sequencing(loop=True, decision_last=True).spec)
+    written = wrapped(_sequencing(loop=True).spec)
+    def lines(spec):
+        return [group.children for group in spec.groups if group.id.startswith("steps.line")]
+
+    assert lines(out) == lines(written)
+    assert not _crossings(compile_figure(out), None)
+    figure = _sequencing(loop=True, decision_last=True)
+    fit = flexo.fit_in_box(figure, 1100, 420, words=18, largest=24)
+    assert "folded" in fit.layout and fit.words > 15
 
 
 def test_parts_with_nothing_between_their_halves_fold_into_a_grid() -> None:

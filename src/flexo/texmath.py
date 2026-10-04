@@ -3120,16 +3120,15 @@ def _linear(items: list) -> str:
             before = ORD
             continue
         piece = _linear_one(item)
-        if said and _RUNS_ON.search(said[-1]) and (piece[:1].isalnum() or piece[:1] == "("):
-            piece = f" {piece}"  # a script after its mark is apart from what follows: k_B p
+        if said and _RUNS_ON.search(said[-1]) and piece[:1].isalnum():
+            piece = f" {piece}"  # a script after its mark is apart from a letter after it: k_B p
         said.append(piece)
         before = kind if kind is not None else ORD
     return "".join(said)
 
 
 _RUNS_ON = re.compile(r"[_^]\w+$")
-"""A script said after its mark, which a letter, a digit or a bracket after it would read
-as part of."""
+"""A script said after its mark, which a letter or digit after it would read as part of."""
 
 
 def _grouped(items: list) -> str:

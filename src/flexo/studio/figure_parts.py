@@ -256,7 +256,10 @@ def _proteins() -> list[dict[str, Any]]:
         "site",
         "disulfide",
     ]
-    kinds += sorted(set(FEATURE_TYPES) - set(kinds))
+    # Each kind once: another name for one offered already (TM, alpha helix) is read in a
+    # file, not offered again.
+    same = {"tm", "alpha-helix", "beta-strand", "signal-peptide"}
+    kinds += sorted(set(FEATURE_TYPES) - set(kinds) - same)
     return [
         _part(
             "protein",

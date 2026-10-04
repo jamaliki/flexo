@@ -7,7 +7,7 @@
 // into this copy, keeping edits not yet sent. Undo takes back this person's own
 // change, and only that: it is a merge too, so others' later edits stay.
 
-import { merge3, replay, same, stable } from "./merge.js";
+import { merge3, mergeAnswer, replay, same, stable } from "./merge.js";
 import { toast, h } from "./ui.js";
 
 // Whether the studio answers, for the page as a whole: while it doesn't, one notice
@@ -83,6 +83,9 @@ export class Session {
     this.lastMerge = null;
     this.listeners = {};
     this.sending = null;                  // the document in flight, while one is
+    this.unanswered = [];                 // documents sent that no answer came for: the studio may have them
+    this.unwritten = [];                  // its answers since `written`: a studio started again may have read them
+    this.echoing = false;                 // started again on the file unread: what of this page's it holds is settled when it reads
     this.waiting = 0;                     // how many editors (figures) hold edits made through the studio while it is away
     this.resyncing = false;
     this.failures = 0;                    // tries to send that failed in a row
@@ -128,7 +131,10 @@ export class Session {
   // wait here ("offline") until it is back.
   get state() {
     if (this.problem) return "problem";
-    if (this.unsaved) return link(this.workspace).away ? "offline" : "saving";
+    // Out of reach, nothing is said to be saved: what was is, but whether it still is (the
+    // file put right by hand meanwhile, another's edits) the studio alone knows.
+    if (link(this.workspace).away) return "offline";
+    if (this.unsaved) return "saving";
     return "saved";
   }
 
@@ -141,7 +147,8 @@ export class Session {
     this.unread = unread;
     this.source = unread ? source : null;
     this.emit("status");
-    if (read) this.requestDraw(0);  // it reads at last: there is something to draw
+    // It reads at last: there is something to draw, and this page's edits made meanwhile go.
+    if (read) { this.requestDraw(0); this.schedulePush(); }
   }
 
   // Put right the words of a file that does not read: written once they read.
@@ -360,7 +367,13 @@ export class Session {
   }
 
   async push() {
-    if (this.sending || this.resyncing || same(this.document, this.synced)) return;
+    // (Not while the file does not read: the studio has nothing to merge it with, and takes
+    // it in when it reads -- see told.)
+    if (this.sending || this.resyncing || this.unread || same(this.document, this.synced)) return;
+    // A send no answer came for may have reached the studio all the same: its document is
+    // taken in first, merged from what of this page's it has (resync), not sent on top again --
+    // a letter typed as it went entered twice.
+    if (this.unanswered.length) { this.resync(); return; }
     const sent = this.document, from = this.synced;
     this.sending = sent;
     this.emit("status");
@@ -372,6 +385,7 @@ export class Session {
     } catch (error) {
       this.sending = null;
       this.failures += 1;
+      if (unreachable(error)) this.unanswered = [...this.unanswered.slice(-19), sent];
       // Out of reach, the page says so once and sends again when it is back; refused,
       // it says why once, not at every try.
       if (unreachable(error)) lost(this.workspace);
@@ -405,8 +419,9 @@ export class Session {
     // same edit (a space both typed at one place), taken as one.
     if (who && from && same(document, sent) && same(local, sent)) this.emit("absorbed", { base: from, incoming: document, before: local, who });
     const notes = [];
-    this.document = same(local, sent) ? document : this.mended(merge3(sent, document, local, notes), notes, sent);
+    this.document = same(local, sent) ? document : this.mended(mergeAnswer(sent, document, local, notes), notes, sent);
     this.synced = document;
+    this.unwritten = [...this.unwritten.slice(-19), document];
     this.version = version;
     this.ownVersion = Math.max(this.ownVersion, version);
     this.exists = true;
@@ -429,7 +444,11 @@ export class Session {
     if (event.client === this.workspace.client && event.version <= this.version) return;
     if (event.version <= this.version) return;
     if (this.sending) { this.lastRemote = event; return; }
-    const before = this.document, base = this.synced, merged = !same(before, base);
+    // (Read at last after the studio started again on it unread: from what of this page's own
+    // the file holds, as resync merges.)
+    const base = this.echoing ? this.ownBase(this.synced, event.document, true) : this.synced;
+    const before = this.document, merged = !same(before, base);
+    this.echoing = false;
     const notes = [];
     this.document = merged ? this.mended(merge3(base, event.document, before, notes), notes, base) : event.document;
     this.synced = event.document;
@@ -462,9 +481,21 @@ export class Session {
   // The file holds `version` (or the studio has stopped holding back: the file reads again).
   saved(version) {
     this.savedVersion = Math.max(this.savedVersion, version);
-    if (version >= this.version) this.written = this.synced;
+    if (version >= this.version) { this.written = this.synced; this.unwritten = []; }
     this.exists = true;
     this.told();
+  }
+
+  // What of this page's own the studio's document (`incoming`) holds beyond `from` -- a send
+  // no answer came for; `restarted`, too, an answer the studio had not yet said was written
+  // when it stopped -- the newest it holds whole: the base this page's edits are merged from,
+  // none of them entered twice (once its own, once the studio's). They are settled with it.
+  ownBase(from, incoming, restarted) {
+    const echoes = [...(restarted ? this.unwritten : []), ...this.unanswered];
+    this.unanswered = [];
+    this.unwritten = [];
+    for (const document of echoes.reverse()) if (!same(document, from) && same(merge3(from, incoming, document), incoming)) return document;
+    return from;
   }
 
   // After the studio was out of reach: take in its document as it is now, keep this
@@ -493,16 +524,27 @@ export class Session {
     }
     // Opened again as another kind since (put right as one): its editor is that kind's.
     if (info.kind !== this.kind) { this.resyncing = false; this.workspace.reopen?.(this.file, info.kind); return; }
-    const restarted = info.instance !== this.instance;
+    const restarted = info.instance !== this.instance, echoing = restarted || this.echoing;
     const local = this.document;
-    // Its file gone, a studio started again has nothing of it: this page's document stands.
-    this.document = restarted && !info.exists ? local : merge3(restarted ? this.written : this.synced, info.document, local);
-    this.synced = info.document;
+    const from = restarted ? this.written : this.synced;
+    if (info.unread) {
+      // Started again on a file that does not read, the studio has nothing of it (an empty
+      // document stands in): this page's stays, and so does what it last had of the file, the
+      // base its edits are merged from once it reads -- not the empty one, beside which all
+      // here would be new, a second copy of each slide edited.
+      this.synced = from;
+      this.echoing = echoing;
+    } else {
+      // Its file gone, a studio started again has nothing of it: this page's document stands.
+      this.document = restarted && !info.exists ? local : merge3(this.ownBase(from, info.document, echoing), info.document, local);
+      this.synced = info.document;
+      this.echoing = false;
+    }
     this.version = info.version;
     this.instance = info.instance;
     this.savedVersion = info.saved;
     if (restarted) this.ownVersion = 0;
-    if (info.saved >= info.version) this.written = info.document;
+    if (info.saved >= info.version && !info.unread) this.written = info.document;
     this.exists = info.exists;
     this.problem = info.problem;
     this.held = Boolean(info.held);
@@ -607,7 +649,8 @@ export class Session {
   // Export, as Keynote's File › Export To does. The kind's entry for a format (in
   // `exports`) asks first, in a sheet, when it has anything to say -- its `hint`, what the
   // file will be; `choose`, the formats to offer for it ([{ format, label }]); and
-  // `options`, settings its export takes ([{ name, label, value }]) -- so each of a
+  // `options`, settings its export takes ([{ name, label, value, onChange }], `onChange` to
+  // keep a setting for next time) -- so each of a
   // deck's exports (PDF…, PowerPoint…, Images…) opens a sheet, as Keynote's each do. Then the Mac app's one save panel puts the file, or a folder of several,
   // where its person says, or the browser downloads it (several files as a zip): nothing
   // is left beside the document. `part` exports one part of the document by itself (a
@@ -628,7 +671,7 @@ export class Session {
           body: [
             entry.hint ? h("p.export-hint", {}, entry.hint.replace(/\.?$/, ".")) : null,
             entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
-            ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; } })),
+            ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; option.onChange?.(value); } })),
           ],
           actions: [{ label: "Cancel" }, { label: app ? "Next…" : "Export", kind: "primary", run: () => { going = true; } }],
           onClose: () => done(going),

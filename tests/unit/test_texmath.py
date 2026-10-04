@@ -520,7 +520,7 @@ def test_maths_in_bold_words_is_regular_all_of_it() -> None:
         (r"[\mathrm{Na^+}]_{in}", "[Na⁺]_in"),
         # One rule for every script: digits and signs raised or lowered, words after a mark.
         (r"k_{\text{auto}} - k_{\text{dephos}} p", "k_auto \u2212 k_dephos p"),
-        (r"k_B (1 - p)", "k_B (1 \u2212 p)"),
+        (r"f_{\mathrm{PRE}}(x) + k_B (1 - p)", "f_PRE(x) + k_B(1 \u2212 p)"),
         (r"x_{i+1}^{-1}", "x_(i + 1)⁻¹"),
         (r"\sqrt{x^2+1}", "√(x² + 1)"),
         (r"\int_0^\infty e^{-x}\,dx", "∫₀^∞ e^(\u2212x) dx"),

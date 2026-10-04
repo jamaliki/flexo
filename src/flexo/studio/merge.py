@@ -34,12 +34,16 @@ _WORDS_ONLY = re.compile(r"\w+")
 
 
 def merge3(base: Any, ours: Any, theirs: Any, notes: list | None = None) -> Any:
-    if _same(ours, theirs) or _same(base, theirs):
+    # (Both changed alike, words or a setting are one change; a list, or what holds one, is
+    # merged all the same: what both added is each's own -- two slides added at one place at
+    # once are two, however alike.)
+    if _same(base, theirs) or (_same(ours, theirs) and not isinstance(ours, (dict, list))):
         return ours
     if _same(base, ours):
         return theirs
     if isinstance(ours, dict) and isinstance(theirs, dict):
-        base, ours, theirs = _followed(base if isinstance(base, dict) else {}, ours, theirs)
+        base, ours, theirs = _followed_across(base if isinstance(base, dict) else {}, ours, theirs)
+        base, ours, theirs = _followed(base, ours, theirs)
         return _merge_dicts(base, ours, theirs, notes)
     if isinstance(ours, list) and isinstance(theirs, list):
         return merge_items(base if isinstance(base, list) else [], ours, theirs, notes)
@@ -289,19 +293,12 @@ def merge_items(base: list, ours: list, theirs: list, notes: list | None = None)
     to_ours, to_theirs = _pairs(base, ours), _pairs(base, theirs)
     from_ours = {j: i for i, j in to_ours.items()}
     from_theirs = {k: i for i, k in to_theirs.items()}
-    # Items both sides added alike are one item.
-    twins: dict[int, int] = {}
-    added: dict[str, list[int]] = {}
-    for j, item in enumerate(ours):
-        if j not in from_ours:
-            added.setdefault(_key(item), []).append(j)
-    for k, item in enumerate(theirs):
-        if k not in from_theirs and added.get(_key(item)):
-            twins[k] = added[_key(item)].pop(0)
+    # Items both sides added are each their own, however alike: two people adding a slide at
+    # one place at once make two. (A page's own edits the studio already has, a send no
+    # answer came for, are settled before they meet: they never come from both sides.)
     seq_ours = [("b", from_ours[j]) if j in from_ours else ("o", j) for j in range(len(ours))]
     seq_theirs = [
-        ("b", from_theirs[k]) if k in from_theirs else ("o", twins[k]) if k in twins else ("t", k)
-        for k in range(len(theirs))
+        ("b", from_theirs[k]) if k in from_theirs else ("t", k) for k in range(len(theirs))
     ]
     content: dict[tuple[str, int], Any] = {}
     for i, was in enumerate(base):
@@ -451,6 +448,65 @@ def _followed(base: dict, ours: dict, theirs: dict) -> tuple[dict, dict, dict]:
     base, ours = _follow_moves(base, theirs, ours)
     base, theirs = _follow_moves(base, ours, theirs)
     return base, ours, theirs
+
+
+def _followed_across(base: dict, ours: dict, theirs: dict) -> tuple[dict, dict, dict]:
+    """Items one side moved from one mapping of a list to another -- a paragraph an agent
+    put on another slide -- while the other side kept (and edited) them where they were:
+    moved for the other side too (and in base), as ``_followed`` moves them between one
+    mapping's lists, so the merge has each where it went, with both sides' edits."""
+
+    for key, items in base.items():
+        if (
+            isinstance(items, list)
+            and len(items) > 1
+            and all(isinstance(item, dict) for item in items)
+            and any(_pools(item) for item in items)
+            and isinstance(ours.get(key), list)
+            and isinstance(theirs.get(key), list)
+        ):
+            base, ours = _follow_across(base, theirs, ours, key)
+            base, theirs = _follow_across(base, ours, theirs, key)
+    return base, ours, theirs
+
+
+def _follow_across(base: dict, side: dict, other: dict, key: str) -> tuple[dict, dict]:
+    """``base`` and ``other`` with the items ``side`` moved between the mappings of their
+    list ``key`` moved alike (see ``_followed_across``): the lists of all its mappings taken
+    as one mapping's, each known by the mapping of base it is in."""
+
+    was, made = base[key], {"side": side[key], "other": other[key]}
+    pairs = {"side": _pairs(was, made["side"]), "other": _pairs(was, made["other"])}
+
+    def spread(items: list, place: dict[int, int] | None) -> dict:
+        found = {}
+        for i in range(len(was)):
+            k = i if place is None else place.get(i)
+            if k is not None and isinstance(items[k], dict):
+                for pool, inner in _pools(items[k]).items():
+                    found[(i, *pool)] = inner
+        return found
+
+    lists_b = spread(was, None)
+    lists_o = spread(made["other"], pairs["other"])
+    moved_b, moved_o = _follow_moves(lists_b, spread(made["side"], pairs["side"]), lists_o)
+    if moved_b is lists_b:
+        return base, other
+
+    def gathered(items: list, place: dict[int, int] | None, lists: dict, moved: dict) -> list:
+        result = list(items)
+        for name, inner in moved.items():
+            i, pool = name[0], name[1:]
+            k = i if place is None else place.get(i)
+            if k is None or (name in lists and _same(lists[name], inner)):
+                continue
+            result[k] = _repooled(result[k], {pool: inner}, {}, {})
+        return result
+
+    return (
+        {**base, key: gathered(was, None, lists_b, moved_b)},
+        {**other, key: gathered(made["other"], pairs["other"], lists_o, moved_o)},
+    )
 
 
 def _follow_moves(base: dict, side: dict, other: dict) -> tuple[dict, dict]:

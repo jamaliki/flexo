@@ -474,3 +474,26 @@ def test_a_timeline_of_whole_days_ticks_whole_days() -> None:
         figure.root.timeline("t", events=[{"at": 0}, {"at": 3}], unit="day")
     ticks = [words.runs[0].text for words in _drawing(figure, "t").words if ".tick" in words.id]
     assert ticks == ["Day 0", "Day 1", "Day 2", "Day 3"]
+
+
+def test_a_domain_s_name_is_inside_it_whenever_it_fits_and_its_domains_names_are_one_size() -> None:
+    from flexo.builder import Figure
+
+    domains = [
+        {"type": "domain", "label": "NTD · DNA binding", "start": 1, "end": 92},
+        {"type": "domain", "label": "CTD · dimerisation", "start": 132, "end": 236},
+    ]
+    with Figure("repressor") as figure:
+        figure.root.protein("ci", 236, domains, label="λ repressor (CI)")
+    svg = compile_figure(figure.spec).document.text
+    names = {
+        identifier: (float(y), size)
+        for identifier, y, size in re.findall(
+            r'<text id="ci\.(feature\d)\.label"[^>]* y="([\d.]+)"[^>]*font-size="([\d.]+)"', svg
+        )
+    }
+    # The narrower domain's name fits inside only at the small size: both are set inside, at
+    # it -- neither under an empty box, nor one larger than the other.
+    assert set(names) == {"feature1", "feature2"}
+    (first_y, first_size), (second_y, second_size) = names["feature1"], names["feature2"]
+    assert first_y == pytest.approx(second_y) and first_size == second_size

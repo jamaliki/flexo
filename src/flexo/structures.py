@@ -317,6 +317,15 @@ _PLAIN = frozenset(
 )
 """Short words a name in capitals has that are English, not an acronym like DNA or HIV."""
 
+ACRONYMS = frozenset(
+    {"DNA", "RNA", "MRNA", "TRNA", "RRNA", "SSDNA", "DSDNA", "HIV", "SIV", "GFP", "YFP", "CFP",
+     "RFP", "ATP", "ADP", "AMP", "GTP", "GDP", "NAD", "NADH", "NADP", "NADPH", "FAD", "FMN",
+     "MHC", "HLA", "TCR", "BCR", "IGG", "IGE", "IGM", "TNF", "EGF", "VEGF", "FGF", "PDGF", "SARS",
+     "COV", "MERS", "CRISPR", "PCR", "LDL", "HDL", "ABC", "PDZ", "SUMO", "HSP", "GPCR", "ERK",
+     "MAP", "JAK", "STAT", "CAP", "TATA", "EGFR", "HER", "PKA", "PKC", "CDK", "ATPASE", "TBP"}
+)
+"""Names in a title in capitals that stay in capitals: acronyms, not words (``LAC`` is a word)."""
+
 NAMED = 32
 """How long (characters) a structure's name from its file may be before it is cut short."""
 
@@ -371,10 +380,12 @@ def structure_caption(path: Path) -> str | None:
             words.pop()
         name = " ".join(words)
     if name.isupper():
+        # In sentence case: a word in lower case, an acronym (DNA, HIV), a name with a digit
+        # (E2, P53) or a Roman numeral (II) as written.
         def readable(piece: str) -> str:
             letters = re.sub(r"[^A-Z]", "", piece)
-            short = len(letters) <= 4 and letters not in _PLAIN
-            return piece if short or any(ch.isdigit() for ch in piece) else piece.lower()
+            kept = letters in ACRONYMS or re.fullmatch(r"[IVX]{2,4}", letters) is not None
+            return piece if kept or any(ch.isdigit() for ch in piece) else piece.lower()
 
         words = ("-".join(readable(piece) for piece in word.split("-")) for word in name.split())
         name = " ".join(words)

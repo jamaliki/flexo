@@ -507,3 +507,31 @@ def test_deleting_one_end_of_a_fan_out_of_two_leaves_a_line() -> None:
     assert "nets" not in data(text)
     assert data(text)["edges"] == [{"from": "a", "to": "b", "label": "splits"}]
     compile_figure(parse(text, Path.cwd()))
+
+
+def test_a_row_folded_to_fit_is_written_as_seen_and_only_the_part_moved_moves() -> None:
+    nodes = "".join(f"- id: {name}\n  label: {name.upper()}\n" for name in "abcdef")
+    pairs = zip("abcde", "bcdef", strict=True)
+    edges = "".join(f"- from: {one}\n  to: {two}\n" for one, two in pairs)
+    text = f"figure:\n  id: flow\nnodes:\n{nodes}edges:\n{edges}"
+    # Seen folded onto two lines, the second run back: written so, lined up at their ends.
+    seen = [["a", "b", "c"], ["f", "e", "d"]]
+    arranged = apply(
+        text, {"do": "arrange", "id": "root", "kind": "row", "lines": seen, "align": "end"}
+    )
+    first, second = arranged["select"]
+    groups = {group["id"]: group for group in yaml.safe_load(arranged["text"])["groups"]}
+    assert groups["root"]["children"] == [first, second]
+    assert groups["root"]["layout"]["kind"] == "column"
+    assert groups["root"]["layout"]["align"] == "end"
+    assert groups[first]["children"] == ["a", "b", "c"]
+    assert groups[second]["children"] == ["f", "e", "d"]
+    # Then the part dragged goes under another, and nothing else moves.
+    moved = apply(arranged["text"], {"do": "move", "id": "f", "line": "below", "of": "b"})
+    groups = {group["id"]: group for group in yaml.safe_load(moved["text"])["groups"]}
+    assert groups[second]["children"] == ["e", "d"]
+    pair = groups[first]["children"][1]
+    assert groups[first]["children"] == ["a", pair, "c"] and groups[pair]["children"] == ["b", "f"]
+    # Parts the figure no longer has (another's edit meanwhile) are not written over.
+    with pytest.raises(EditError):
+        apply(text, {"do": "arrange", "id": "root", "kind": "row", "lines": [["a", "b"], seen[1]]})

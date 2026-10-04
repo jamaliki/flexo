@@ -479,12 +479,18 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
         base = y + above
         first_base = first_base if first_base is not None else base
 
+        # One size for the domains' names inside them: the small size for all of them where
+        # one fits inside only at that size, so they read as names of one kind.
+        smaller = any(
+            item.kind == "domain" and item.label and _inside(item, track, measures, x_of, spans)
+            for item in spans
+        )
         # Under the chain: outside names of spans, then disulfide brackets.
         outside = []
         for item in spans:
             if not item.label:
                 continue
-            if _named_inside(item, track, measures, x_of, spans):
+            if _inside(item, track, measures, x_of, spans, smaller=smaller) is not None:
                 continue
             # A name that does not fit inside the widest piece the track keeps
             # goes under it -- the same piece the inside test measured.
@@ -579,10 +585,11 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                 )
             if not item.label:
                 continue
-            metrics = measures.measure(item.label, small=item.kind != "domain")
+            small = _inside(item, track, measures, x_of, spans, smaller=smaller)
+            metrics = measures.measure(item.label, small=bool(small))
             low, high = _widest(item, track)
             x1, x2 = x_of(low), x_of(high + 1)
-            if _named_inside(item, track, measures, x_of, spans):
+            if small is not None:
                 # Centred in the widest stretch nothing drawn over the span covers:
                 # a motif inside a domain keeps clear of the domain's name.
                 free_low, free_high = _name_room(item, track, spans)
@@ -595,7 +602,7 @@ def protein_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
                         base - metrics.height / 2.0 + metrics.baseline,
                         role="tone-ink" if tone else "ink",
                         tone=tone,
-                        size=None if item.kind == "domain" else measures.small_size,
+                        size=measures.small_size if small else None,
                     )
                 )
             if item.id is not None and number == 1:
@@ -886,20 +893,29 @@ def _name_room(feature: Feature, track: Track, spans: list[Feature]) -> tuple[fl
     return max(free, key=lambda item: item[1] - item[0]) if free else (at, at)
 
 
-def _named_inside(
+def _inside(
     feature: Feature,
     track: Track,
     measures,
     x_of,
     spans: list[Feature],
-) -> bool:
-    """Whether ``feature``'s name fits inside it, clear of the spans drawn over it."""
+    *,
+    smaller: bool = False,
+) -> bool | None:
+    """Whether ``feature``'s name is set inside it, clear of the spans drawn over it, and
+    how: at the small size (True), at a domain's own (False), or not at all (None). A
+    domain's name too wide at its own size is set at the small size inside it, as a motif's
+    is, before it goes under it: a name is inside whenever it fits, the rule for all.
+    ``smaller``: a domain's only at the small size (its protein's other domains are so)."""
 
     if feature.kind == "transmembrane":
-        return False
-    metrics = measures.measure(feature.label, small=feature.kind != "domain")
+        return None
     low, high = _name_room(feature, track, spans)
-    return metrics.width + 0.6 * measures.u <= x_of(high) - x_of(low)
+    room = x_of(high) - x_of(low) - 0.6 * measures.u
+    for small in (False, True) if feature.kind == "domain" and not smaller else (True,):
+        if measures.measure(feature.label, small=small).width <= room:
+            return small
+    return None
 
 
 def _kept(feature: Feature, track: Track) -> bool:

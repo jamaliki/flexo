@@ -202,7 +202,7 @@ class Tools:
                 raise ValueError(
                     f"{file} does not exist; give kind (deck, figure, theme) to make it"
                 )
-            doc = workspace.new(file, kind)
+            doc = workspace.new(file, kind, who=self.who)
         workspace.broadcast({"type": "opened", "file": doc.name, "who": self.who})
         workspace.set_presence(self.who, doc.name, None, None)
         blocks = []

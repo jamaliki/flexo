@@ -323,6 +323,10 @@ def plan_pins(
     repeats = Counter(
         (edge.source.node_id, edge.source.port_name, edge.target.node_id) for edge in edges
     )
+    twins = Counter(
+        (edge.source.node_id, edge.source.port_name, edge.target.node_id, edge.target.port_name)
+        for edge in edges
+    )
     for index, end in enumerate(ends):
         spec = end.node.measured.spec
         port_spec = _authored_port(fitted, spec.id, end.reference.port_name)
@@ -352,6 +356,19 @@ def plan_pins(
         separate = style.conventions.arrivals == "separate"
         span = end.node.bounds.width if side in {Side.NORTH, Side.SOUTH} else end.node.bounds.height
         if (
+            isinstance(member, EdgeSpec)
+            and spec.kind != "op"
+            and twins[
+                (
+                    member.source.node_id, member.source.port_name,
+                    member.target.node_id, member.target.port_name,
+                )
+            ] > 1
+        ):
+            # The same two ports joined more than once: each line its own, side by side,
+            # never one drawn over another as though there were one.
+            name = f"{name}@{member.id}"
+        elif (
             isinstance(member, EdgeSpec)
             and member.label
             and spec.kind != "op"
@@ -405,12 +422,16 @@ def plan_pins(
     )
     slots: dict[tuple[str, str, Side, bool], _Slot] = {}
     orders: list[list[tuple[str, str, Side, bool]]] = []
+    captioned = frozenset(
+        index for index, member in enumerate(members)
+        if isinstance(member.spec, EdgeSpec) and member.spec.label
+    )
     for (node_id, side), groups in by_side.items():
         node = fitted.node(node_id)
         order = (overrides or {}).get((node_id, side))
         if order is not None and set(order) != set(groups):
             order = None
-        placed = _place_on_side(node, side, groups, style, blockers, order)
+        placed = _place_on_side(node, side, groups, style, blockers, order, captioned)
         orders.append(list(placed))
         if chosen is not None:
             chosen[(node_id, side)] = list(placed)
@@ -1019,11 +1040,14 @@ def _place_on_side(
     style: LayoutStyle,
     blockers: tuple[Rect, ...] = (),
     order: list[tuple[str, str, Side, bool]] | None = None,
+    captioned: frozenset[int] = frozenset(),
 ) -> dict[tuple[str, str, Side, bool], _Slot]:
     """Where each group of ends would attach along one side, in the order they leave.
 
     Groups are ordered by where their lines go, so no two of them cross on the
-    way out. A side whose ports all sit where the layout put them, already in
+    way out; of lines that go the same way, those with captions (``captioned``,
+    by member) last, so a caption sits on the outside rather than over the line
+    beside it. A side whose ports all sit where the layout put them, already in
     that order, keeps those places; otherwise the groups take evenly spaced
     slots. Alignment (``_align``) then moves the movable ones.
     """
@@ -1089,6 +1113,7 @@ def _place_on_side(
         key=lambda key: (
             round(target(key), 6),
             -round(reach(key), 6),
+            any(end.member in captioned for end in groups[key]),
             min(end.member for end in groups[key]),
             key[1],
         ),

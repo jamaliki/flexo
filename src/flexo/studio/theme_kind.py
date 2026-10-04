@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from flexo.roundtrip import rewrite
 from flexo.studio import Drawing, Message, Page
 
 BUDGET = 0.5
@@ -107,13 +108,14 @@ class ThemeKind:
             raise ValueError(f"{path.name} is not a theme file")
         return data
 
-    def save(self, path: Path, document: dict[str, Any]) -> None:
+    def save(self, path: Path, document: dict[str, Any], previous: str | None = None) -> None:
         if path.suffix.lower() == ".json":
             path.write_text(
                 json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
             )
         else:
-            path.write_text(self.dump(document), encoding="utf-8")
+            # Over the file's words as they were (``previous``): its comments and quoting kept.
+            path.write_text(rewrite(previous, document, self.dump), encoding="utf-8")
 
     def dump(self, document: Any) -> str:
         return yaml.safe_dump(document, sort_keys=False, allow_unicode=True, width=100)

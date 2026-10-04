@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import functools
 import hashlib
+import inspect
 import json
 import os
 import queue
@@ -285,7 +287,12 @@ class Doc:
                 f".{self.path.name}.{secrets.token_hex(4)}.saving{self.path.suffix}"
             )
             try:
-                self.kind.save(partial, self.document)
+                # Over the file's words as they are (a kind that can keeps its comments and
+                # quoting where the document did not change).
+                if _keeps_words(type(self.kind)):
+                    self.kind.save(partial, self.document, previous=self.disk_text)
+                else:
+                    self.kind.save(partial, self.document)
                 with contextlib.suppress(OSError):
                     os.chmod(partial, self.path.stat().st_mode & 0o7777)
                 os.replace(partial, self.path)
@@ -731,9 +738,12 @@ class Workspace:
                     return self.relative(path)
         return None
 
-    def new(self, name: str, kind_name: str, data: Any = None) -> Doc:
+    def new(
+        self, name: str, kind_name: str, data: Any = None, who: dict[str, Any] | None = None
+    ) -> Doc:
         """Make a file of a kind -- its starting document, or ``data`` (a parsed
-        document of that kind) -- and open it. An existing file is opened as it is."""
+        document of that kind) -- and open it, as made by ``who``. An existing file is
+        opened as it is."""
 
         path = self.path(name)
         kind = self.kinds.get(kind_name)
@@ -748,8 +758,12 @@ class Workspace:
         path.parent.mkdir(parents=True, exist_ok=True)
         kind.save(path, document)
         doc = self.open(name, kind_name)
+        # Said as the person who made it would say it ("You made a new figure"), the document
+        # named by its name (beside it, where the activity is), not its file's.
+        title = str(getattr(kind, "title", "") or kind_name).lower()
         self.record(
-            {"id": "studio", "name": "Studio", "kind": "system"}, doc.name, f"made {path.name}"
+            who or {"id": "studio", "name": "Studio", "kind": "system"}, doc.name,
+            f"made a new {title}",
         )
         self.broadcast({"type": "documents", "documents": self.documents()})
         return doc
@@ -1244,6 +1258,17 @@ def _stamp(path: Path) -> float:
         return path.stat().st_mtime_ns / 1e9
     except OSError:
         return 0.0
+
+
+@functools.cache
+def _keeps_words(kind: type) -> bool:
+    """Whether a kind writes its document over the file's words as they were
+    (its ``save`` takes ``previous``)."""
+
+    try:
+        return "previous" in inspect.signature(kind.save).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _words(path: Path) -> str | None:

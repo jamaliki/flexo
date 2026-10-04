@@ -308,7 +308,7 @@ class Handler(BaseHTTPRequestHandler):
             workspace.open(name).mend(str(data.get("text", "")))
             self._json({"ok": True})
         elif route == "/api/new":
-            doc = workspace.new(name, data.get("kind", ""), data.get("data"))
+            doc = workspace.new(name, data.get("kind", ""), data.get("data"), who)
             self._json({"file": doc.name})
         elif route == "/api/export":
             self._export(workspace.open(name), data)
@@ -554,7 +554,10 @@ class Handler(BaseHTTPRequestHandler):
             # started again shows no one gone meanwhile (presence is sent only as it changes).
             here = {"presence": self.workspace.present()}
             hello = json.dumps(here, ensure_ascii=False, default=str)
-            self.wfile.write(f"event: hello\ndata: {hello}\n\n".encode())
+            # Lost (the studio started again), a window tries again within half a second, not
+            # the browser's three: its edits held meanwhile are said to be saved as soon as
+            # they are.
+            self.wfile.write(f"retry: 500\nevent: hello\ndata: {hello}\n\n".encode())
             self.wfile.flush()
             quiet = 0
             while True:

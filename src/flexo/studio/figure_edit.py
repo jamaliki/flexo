@@ -68,6 +68,7 @@ STRUCTURAL = frozenset(
         "step",
         "duplicate",
         "paste",
+        "arrange",
     }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
@@ -963,6 +964,40 @@ class _Document:
         children.insert(index, identifier)
         self.data.setdefault("groups", []).append(group)
         return [identifier]
+
+    def _arrange(self, action: Mapping[str, Any]) -> list[str]:
+        """A row (or column) written as it is seen folded onto lines to fit (``lines``, each
+        its parts in the order they are seen): each line a group of its own laid out that way
+        (``kind``), the group laying its lines out the other way, lined up as seen (``align``)
+        -- made before a part is moved among them, so that only it moves. Answers the lines,
+        in order."""
+
+        identifier = str(action.get("id") or self.root)
+        group = self.written_root() if identifier == self.root else self.group(identifier)
+        if group is None:
+            raise EditError(f"There's no group named “{identifier}”.")
+        kind = str(action.get("kind", "row"))
+        if kind not in {"row", "column"}:
+            raise EditError(f"“{kind}” isn't a way to lay out a line.")
+        lines = [[str(item) for item in line] for line in action.get("lines") or []]
+        held = [str(child) for child in group.get("children") or []]
+        seen = [item for line in lines for item in line]
+        if len(lines) < 2 or any(not line for line in lines) or sorted(seen) != sorted(held):
+            raise EditError("The figure changed while you dragged: drag again.")
+        made = []
+        for line in lines:
+            name = self.fresh(kind, set(made))
+            # Arrangement only: drawn with no frame of its own.
+            self.data.setdefault("groups", []).append(
+                {"id": name, "children": line, "layout": {"kind": kind}, "role": "layout"}
+            )
+            made.append(name)
+        layout = {**(group.get("layout") or {}), "kind": "column" if kind == "row" else "row"}
+        if action.get("align") in {"start", "center", "end"}:
+            layout["align"] = action["align"]
+        group["layout"] = layout
+        group["children"] = made
+        return made
 
     def _ungroup(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])

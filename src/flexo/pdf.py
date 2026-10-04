@@ -30,7 +30,7 @@ import re
 import struct
 import zlib
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from pathlib import Path
 
@@ -38,7 +38,7 @@ from flexo.colour import to_rgb
 from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
 from flexo.fonts import FontFace, hb_font, load_face
 from flexo.outline import _outline, shape, underline
-from flexo.portable import SYNTHETIC_SLANT
+from flexo.portable import SYNTHETIC_SLANT, run_outline
 
 ARTWORK_DPI = 300.0
 """The resolution nested SVG artwork is rasterised at."""
@@ -50,6 +50,12 @@ _CAPS = {"butt": 0, "round": 1, "square": 2}
 _JOINS = {"miter": 0, "round": 1, "bevel": 2}
 _WORD_BREAKS = frozenset("-\u2010/_")
 """What a word too long for its line is broken after: no space follows it there."""
+
+
+def _beside(run: Run, script: Run) -> bool:
+    """Whether ``run`` is set on the same side of the line as ``script``: one script with it."""
+
+    return run.face is not None and bool(run.text.strip()) and run.shift * script.shift > 0
 
 
 type Pages = str | Drawing | Sequence[str | Drawing]
@@ -448,7 +454,10 @@ class _Content:
             matrix = (cos, sin, -sin, cos, x - cos * x + sin * y, y - sin * x - cos * y)
             self.ops.append("q " + " ".join(_n(value) for value in matrix) + " cm")
         for number, line in enumerate(item.lines):
-            for at, run in enumerate(line.runs):
+            runs, at = line.runs, 0
+            while at < len(runs):
+                run = runs[at]
+                at += 1
                 if run.face is None:
                     continue
                 if not run.text.strip():
@@ -456,7 +465,15 @@ class _Content:
                     # between the words read out.
                     self.space(run, run.x)
                     continue
-                self.run(run, after=line.runs[at + 1].text[:1] if at + 1 < len(line.runs) else "")
+                if run.shift:
+                    # A script, with the runs raised (or lowered) beside it: e^{-m} is one.
+                    together = [run]
+                    while at < len(runs) and _beside(runs[at], run):
+                        together.append(runs[at])
+                        at += 1
+                    self.scripts(together, after=runs[at].text[:1] if at < len(runs) else "")
+                else:
+                    self.glyphs(run)
                 if run.link:
                     # A link is underlined, as in the PowerPoint, so it is told from the
                     # words around it by more than its colour.
@@ -490,26 +507,47 @@ class _Content:
             f"{_n(run.baseline)} Tm <{cid:04X}> Tj ET Q"
         )
 
-    def run(self, run: Run, after: str = "") -> None:
-        """``run``'s glyphs; a script among words read by ``texmath.scripted``'s rule, apart
-        from a letter or bracket ``after`` it where it follows its mark (k_B p, not k_Bp)."""
+    def scripts(self, runs: list[Run], after: str = "") -> None:
+        """A script among words (``k_auto``, ``e^(-m)``, ``x²``), read as a formula's words
+        read (``texmath.scripted``), apart from a letter ``after`` it where it follows its
+        mark (k_B p, not k_Bp): drawn as outlines, the words it reads as laid invisibly over
+        them -- as a formula is, which every reader reads in its place among the words."""
 
-        said = run.text
-        if run.shift and run.text.strip():
-            from flexo.texmath import scripted
+        from flexo.texmath import scripted
 
-            said = scripted(run.text, raised=run.shift > 0)
-            joins = after[:1].isalnum() or after[:1] == "("
-            if said[:1] in "_^" and said[-1:].isalnum() and joins:
-                said += " "
-        if said != run.text:
-            # A script among words (k_auto, x²) reads as a formula's words do: its glyphs
-            # are found, copied and read as that.
-            self.ops.append(f"/Span << /ActualText {_string(said)} >> BDC")
-            self.glyphs(run)
-            self.ops.append("EMC")
+        text = "".join(run.text for run in runs)
+        said = scripted(text, raised=runs[0].shift > 0)
+        if said[:1] in "_^" and said[-1:].isalnum() and after[:1].isalnum():
+            said += " "
+        if said == text:
+            for run in runs:
+                self.glyphs(run)
             return
-        self.glyphs(run)
+        for run in runs:
+            self.paint(Paint(fill=_colour(run.fill) or "#000000"), run_outline(run))
+        first, last = runs[0], runs[-1]
+        # On the line's baseline, not the script's: read on with the words either side of it.
+        on_line = replace(first, baseline=first.baseline + first.shift)
+        self.laid(on_line, said, last.x + last.width - first.x)
+
+    def laid(self, run: Run, words: str, width: float) -> None:
+        """``words`` laid invisibly from ``run``'s pen on its baseline, in its face, as wide
+        as ``width``: found, copied and read in place of what is drawn there."""
+
+        font = self.writer.font(run.face, run.weight)
+        loaded = hb_font(run.face, run.weight)
+        upem = load_face(run.face).upem
+        shown, advance = [], 0.0
+        for character in words:
+            cid, wide = font.use(loaded.get_nominal_glyph(ord(character)) or 0, character)
+            shown.append(f"<{cid:04X}>")
+            advance += wide / upem * run.size
+        stretch = 100.0 * width / advance if advance > 0 and width > 0 else 100.0
+        # Within q ... Q, so the words after it are drawn (see ``hidden_words``).
+        self.ops.append(
+            f"q BT 3 Tr /{font.name} 1 Tf {_n(stretch)} Tz {_n(run.size)} 0 0 {_n(-run.size)} "
+            f"{_n(run.x)} {_n(run.baseline)} Tm [{''.join(shown)}] TJ ET Q"
+        )
 
     def glyphs(self, run: Run) -> None:
         colour = _colour(run.fill) or "#000000"

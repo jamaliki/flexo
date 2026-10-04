@@ -19,6 +19,7 @@ export function mount(studio, main) {
   const catalog = studio.catalog.editor;
   const state = { tab: "parts", zoom: null, closed: new Set() };
   let messages = [];
+  let pointed = null;  // the part the pointer is over (placeHover)
 
   // -- the frame --
   const leftBody = h("div.panel-body.scroll-thin");
@@ -119,6 +120,7 @@ export function mount(studio, main) {
     name: () => String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, ""),
     // Edits held while the studio is away: the document is not saved meanwhile.
     waiting: (on) => { studio.waiting = Math.max(0, (studio.waiting || 0) + (on ? 1 : -1)); studio.emit("status"); },
+    held: () => studio.emit("status"),
     // (A label's ⌘Z, once someone else's words came into it, is the document's undo.)
     undo: () => studio.undo(),
     redo: () => studio.redo(),
@@ -148,6 +150,9 @@ export function mount(studio, main) {
   // ⌘Z and Undo take back an edit held for the studio while it is away, and say which.
   studio.takeBack = () => figure.takeBackWaiting();
   studio.takeBackLabel = () => figure.waitingLabel();
+  // (And made again, ⇧⌘Z and Redo, should nothing else be done meanwhile.)
+  studio.putBack = () => figure.putBackWaiting();
+  studio.putBackLabel = () => figure.takenLabel();
 
   function renderBar() {
     const chosen = figure.selected;
@@ -212,20 +217,26 @@ export function mount(studio, main) {
   }, { passive: false });
 
   function placeMarks() {
+    placeHover();
     clear(marks, figure.markViews());
   }
   page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
   page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
   stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting) figure.select([]); });
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
-  page.addEventListener("mousemove", (event) => {
-    if (figure.dragging) return;
-    const id = figure.idAt(event);
-    const where = id && boxOf(id);
+  // What the pointer is over is framed, dashed -- not what is chosen, framed already -- and
+  // stays framed as the drawing is zoomed under it.
+  function placeHover() {
+    const where = pointed && !figure.selected.includes(pointed) && boxOf(pointed);
     hover.hidden = !where;
     if (where) Object.assign(hover.style, { left: `${where.left}px`, top: `${where.top}px`, width: `${where.width}px`, height: `${where.height}px` });
+  }
+  page.addEventListener("mousemove", (event) => {
+    if (figure.dragging) return;
+    pointed = figure.idAt(event);
+    placeHover();
   });
-  page.addEventListener("mouseleave", () => { hover.hidden = true; });
+  page.addEventListener("mouseleave", () => { pointed = null; hover.hidden = true; });
 
   // -- the outline --
   const outlineBody = h("div.tree");
@@ -284,7 +295,9 @@ export function mount(studio, main) {
       h("span.tree-name", {}, line.net
         ? `${figure.nameOf(figure.nodeOfRef(line.sources?.[0] || ""))} → ${(line.targets || []).map((t) => figure.nameOf(figure.nodeOfRef(t))).join(", ")}`
         : figure.nameOf(line.id)),
-      line.label ? h("span.tree-id", {}, plain(line.label)) : null)) : h("div.empty.small", {}, "Select a shape, then click Connect."));
+      // Its words beside its name -- unless its name says them already (a line beside its twin).
+      line.label && !figure.nameOf(line.id).includes(`“${plain(line.label)}”`) ? h("span.tree-id", {}, plain(line.label)) : null))
+      : h("div.empty.small", {}, "Select a shape, then click Connect."));
   }
 
   let dragging = null;

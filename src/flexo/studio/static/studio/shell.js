@@ -1,7 +1,7 @@
 // The studio's frame: open documents as tabs, who is here, what happened, the
 // assistant, and the command palette. A kind's editor fills a document's view.
 
-import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast } from "./ui.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
 import { Session } from "./session.js";
 import { AssistantPanel } from "./assistant.js";
 
@@ -65,7 +65,7 @@ function statusWords(session) {
   const state = session.state;
   if (state === "saved") return "Saved";
   if (state === "saving") return "Saving…";
-  if (state === "offline") return "Not saved: can't reach the studio";
+  if (state === "offline") return session.unsaved ? "Not saved: can't reach the studio" : "Can't reach the studio";
   const problem = session.problem || "";
   // A document that never read: which file, whole -- why is said on the page under it.
   if (session.unread) return /^Can't read [^:]+/.exec(problem)?.[0] || problem;
@@ -432,8 +432,10 @@ export async function start() {
     const session = workspace.active;
     if (!session) return;
     if (ownUndo()) { document.execCommand(way); return; }
-    // An edit held for the studio while it is away (a figure's) is taken back first.
+    // An edit held for the studio while it is away (a figure's) is taken back first, and
+    // made again first.
     if (way === "undo" && session.takeBack?.()) return;
+    if (way === "redo" && session.putBack?.()) return;
     await session.settled?.();
     session[way]();
   };
@@ -631,18 +633,18 @@ export async function start() {
     // A document that does not read has nothing to undo or redo here (its words are put
     // right in the sheet, which has its own).
     // (An edit held for the studio while it is away is what Undo takes back first.)
-    const held = session.takeBackLabel?.();
+    const held = session.takeBackLabel?.(), again = session.putBackLabel?.();
     undo.disabled = session.unread || (!session.past.length && !held);
-    redo.disabled = session.unread || !session.future.length;
+    redo.disabled = session.unread || (!session.future.length && !again);
     past.disabled = session.unread || (!session.past.length && !session.future.length);
     const last = session.past[session.past.length - 1], next = session.future[session.future.length - 1];
     const what = (entry) => (entry && session.said(entry).text ? ` ${session.said(entry).text}` : "");
     undo.title = `Undo${held ? ` “${held}”` : what(last)} (⌘Z)`;
-    redo.title = `Redo${what(next)} (⇧⌘Z)`;
+    redo.title = `Redo${again ? ` “${again}”` : what(next)} (⇧⌘Z)`;
     const state = session.state;
     status.className = `status ${state === "saved" ? "saved" : state === "problem" ? "problem" : state === "offline" ? "offline" : "busy"}${session.unread ? " unread" : ""}`;
     const words = statusWords(session);
-    status.title = state === "problem" ? session.problem || "" : state === "offline" ? "Your changes are kept here, and saved when the studio is back." : "";
+    status.title = state === "problem" ? session.problem || "" : state === "offline" && session.unsaved ? "Your changes are kept here, and saved when the studio is back." : "";
     const text = status.querySelector(".status-text");
     if (text.textContent !== words) {
       text.textContent = words;
@@ -799,6 +801,18 @@ export async function start() {
     // deck's does), as the shortcuts sheet has it for every document.
     else if (mod && event.altKey && event.code === "KeyI") setTimeout(() => { if (!event.defaultPrevented) toInspector(); });
   });
+  // Tab in a document's inspector goes round it, as in a sheet: from its last control to its
+  // first (⇧⇥ the other way), never off its end to nothing. Esc leaves it.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab" || event.defaultPrevented || event.metaKey || event.altKey || event.ctrlKey) return;
+    const panel = document.activeElement?.closest?.(".inspector, .fig-inspector, .theme-panel");
+    if (!panel || document.querySelector(".scrim")) return;
+    const items = tabbables(panel);
+    const at = items.indexOf(document.activeElement);
+    if (at < 0 || !(event.shiftKey ? at === 0 : at === items.length - 1)) return;
+    event.preventDefault();
+    items[event.shiftKey ? items.length - 1 : 0]?.focus();
+  });
   // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
   // with it: while there are any, the browser asks first.
   // A window closing tells the studio, so the others see it go at once.
@@ -942,7 +956,11 @@ export function askName(workspace, kind, suggestion) {
   const kindTitle = (workspace.info.kinds || []).find((item) => item.name === kind)?.title || kind.charAt(0).toUpperCase() + kind.slice(1);
   const box = dialog({ title: `New ${kindTitle}`, body: [ui.field("Name", input, { hint: "Saved in this folder" }), problem],
     actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: go }] });
-  setTimeout(() => { input.focus(); input.select(); }, 30);
+  // The keys are the name's at once: a key typed straight after the menu's click is its first
+  // letter. (And again once the menu that asked has closed, should it have taken them back.)
+  input.focus();
+  input.select();
+  setTimeout(() => { if (document.activeElement !== input && box && input.isConnected) input.focus(); }, 30);
 }
 
 export function connectDialog(workspace) {
@@ -967,12 +985,12 @@ const SHORTCUTS = [
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
     ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
-  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
+  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Choose All Objects"], ["⇧ Click", "Choose One More (or One Less)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Next Column"]]],
   ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
     ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
     ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
-  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["← → ↑ ↓", "Choose the Shape That Way"],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["⇧ Click", "Choose One More Shape (or One Less)"], ["← → ↑ ↓", "Choose the Shape That Way"],
     ["⌥ ← → ↑ ↓", "Move Back or On in Its Row or Column"], ["↩", "Edit Label"], ["⌫", "Delete Shape"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
   ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
