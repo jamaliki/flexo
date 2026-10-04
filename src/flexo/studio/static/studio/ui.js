@@ -395,7 +395,8 @@ export const ui = {
   // A pop-up button, as a Mac's: what is chosen, and the choices in a menu under it, the
   // one in use ticked. It answers to `value` as a <select> does, and `relabel(value, label)`
   // renames a choice. A choice left as its default -- "" ("Default (On)", "None"), or
-  // `unset`, the value shown being the default's -- reads in grey, as a placeholder does.
+  // `unset`, the value shown being the default's -- reads as any choice does (marked
+  // `.default`): in grey it would look disabled, as a Mac's pop-up never shows a choice.
   // `icons`: a narrow pop-up showing its choice's icon (each option's `icon`), the choice's
   // name in its tooltip after `title`; `actions`: commands under the choices, after a line
   // ({ label, icon, run }), as a column's pop-up in Numbers has. `key` keeps the keys on it
@@ -1030,9 +1031,9 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
 
 const toasts = () => document.querySelector(".toasts") || document.body.appendChild(h("div.toasts"));
 
-// Nothing floats over a sheet, as on a Mac: a toast lies under its backdrop, dimmed with
-// the window (studio.css), and its time stands still while any sheet is open -- one shown a
-// moment before a sheet opened is still there when it closes.
+// Nothing floats over a sheet, as on a Mac: a toast is out of sight while one is open
+// (studio.css), and its time stands still -- one shown a moment before a sheet opened is
+// still there when it closes.
 const sheetOpen = () => Boolean(document.querySelector(".scrim:not(.palette-scrim)"));
 // Toasts stand over the foot of the document's own room when it marks one (`data-toast-area`:
 // a deck's stage, above its notes) -- not over the notes, the inspector or a menu (studio.css)

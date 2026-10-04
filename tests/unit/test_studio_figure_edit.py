@@ -13,7 +13,7 @@ from test_studio import call
 
 from flexo.compiler import compile_figure
 from flexo.studio.figure_edit import EditError, apply, model
-from flexo.studio.figure_kind import NEW_FIGURE, FigureKind, parse
+from flexo.studio.figure_kind import SAMPLE_FIGURE, FigureKind, parse
 from flexo.studio.figure_parts import catalogue
 from flexo.studio.server import start
 
@@ -37,7 +37,7 @@ def edges(text: str) -> list[tuple[str, str]]:
 
 
 def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> None:
-    text, chosen = edit(NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
+    text, chosen = edit(SAMPLE_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
     assert chosen == ["mlp"]
     assert text.startswith("# A flexo figure")
     ids = [node["id"] for node in data(text)["nodes"]]
@@ -49,15 +49,15 @@ def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> No
 
 def test_a_part_added_into_a_chain_takes_its_place_in_the_line() -> None:
     # Between encoder and y: encoder's line to y now runs through the new part.
-    text, _ = edit(NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
+    text, _ = edit(SAMPLE_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
     assert edges(text) == [("x", "encoder"), ("encoder", "mlp"), ("mlp", "y")]
     compile_figure(parse(text, Path.cwd()))
     # Unless asked not to; and at the end of the chain there is no line to go into.
     text, _ = edit(
-        NEW_FIGURE, do="add", kind="mlp", after="encoder", source="encoder", splice=False
+        SAMPLE_FIGURE, do="add", kind="mlp", after="encoder", source="encoder", splice=False
     )
     assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("encoder", "mlp")]
-    text, _ = edit(NEW_FIGURE, do="add", kind="mlp", after="y", source="y")
+    text, _ = edit(SAMPLE_FIGURE, do="add", kind="mlp", after="y", source="y")
     assert edges(text) == [("x", "encoder"), ("encoder", "y"), ("y", "mlp")]
     # A decision's lines are its branches: a part added after it is a branch of its own,
     # the "yes" left as it was.
@@ -74,7 +74,7 @@ def test_a_part_added_into_a_chain_takes_its_place_in_the_line() -> None:
         ("check", chosen[0], None),
     ]
     # Two lines out of a part: which one it would go into is not known, so it is only fed.
-    text, _ = edit(NEW_FIGURE, do="connect", source="encoder", target="x")
+    text, _ = edit(SAMPLE_FIGURE, do="connect", source="encoder", target="x")
     text, _ = edit(text, do="add", kind="mlp", after="encoder", source="encoder")
     assert ("encoder", "y") in edges(text) and ("encoder", "mlp") in edges(text)
 
@@ -89,7 +89,7 @@ def test_every_part_in_the_palette_can_be_added_and_drawn(tmp_path: Path) -> Non
             continue
         node = {"properties": {"source": "picture.svg"}} if part.get("needs_file") else None
         result = apply(
-            NEW_FIGURE,
+            SAMPLE_FIGURE,
             {"do": "add", "kind": kind, "after": "encoder", "source": "encoder", "node": node},
             base=tmp_path,
         )
@@ -97,7 +97,7 @@ def test_every_part_in_the_palette_can_be_added_and_drawn(tmp_path: Path) -> Non
 
 
 def test_gathering_writes_the_root_the_file_only_implied() -> None:
-    text, chosen = edit(NEW_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
+    text, chosen = edit(SAMPLE_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
     groups = {group["id"]: group for group in data(text)["groups"]}
     assert chosen == ["row"]
     assert groups["root"]["children"] == ["x", "row"]
@@ -110,7 +110,7 @@ def test_gathering_writes_the_root_the_file_only_implied() -> None:
 
 
 def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
-    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="row")
+    text, _ = edit(SAMPLE_FIGURE, do="gather", ids=["encoder"], layout="row")
     text += "nets:\n- id: fan\n  kind: fan-out\n  sources: [x]\n  targets: [encoder.input, y]\n"
     text, chosen = edit(text, do="rename", id="encoder", to="backbone")
     assert chosen == ["backbone"]
@@ -123,58 +123,78 @@ def test_a_rename_follows_the_part_everywhere_it_is_named() -> None:
         edit(text, do="rename", id="x", to="2x")
 
 
-def test_a_part_the_figure_named_takes_the_name_of_its_words_once_they_are_typed() -> None:
-    text, (made,) = edit(NEW_FIGURE, do="add", kind="block", after="encoder", source="encoder")
+def test_only_a_part_just_added_is_named_for_its_first_words() -> None:
+    text, (made,) = edit(SAMPLE_FIGURE, do="add", kind="block", after="encoder", source="encoder")
     assert made == "block"
+    # Its first words, typed as it is added (the page says so: no words before them).
     target = {"type": "node", "id": made}
-    text, chosen = edit(
-        text, do="update", target=target, values={"label": "3D refinement"}, name="Block"
-    )
+    words = {"label": "3D refinement"}
+    text, chosen = edit(text, do="update", target=target, values=words, name="")
     assert chosen == ["refinement-3d"]
     assert ("encoder", "refinement-3d") in edges(text)
-    # Named for the words it had (as a template names its parts), it follows them too.
-    text, chosen = edit(
-        text, do="update", target={"type": "node", "id": "x"}, values={"label": "Image"}, name="x"
-    )
-    assert chosen == ["image"]
     # A long label makes an id cut between words, and not after "and".
-    text, chosen = edit(
-        text, do="update", target={"type": "node", "id": "image"}, name="Image",
-        values={"label": "Motion correction and CTF estimation"},
-    )
-    assert chosen == ["motion-correction"]
-    # An id a person or an agent chose stays, whatever the words; and so does any id when
-    # the words are only being typed (no name: the typing has not ended).
-    text, chosen = edit(
-        text, do="update", target={"type": "node", "id": "encoder"},
-        values={"label": "Backbone"}, name="Image encoder",
-    )
-    assert chosen == ["encoder"]
-    motion = {"type": "node", "id": "motion-correction"}
-    text, chosen = edit(text, do="update", target=motion, values={"label": "Pixels"})
+    text, (made,) = edit(text, do="add", kind="block")
+    words = {"label": "Motion correction and CTF estimation"}
+    target = {"type": "node", "id": made}
+    text, chosen = edit(text, do="update", target=target, values=words, name="")
     assert chosen == ["motion-correction"]
 
 
-def test_the_first_flow_charts_step_and_question_take_the_names_of_their_words() -> None:
+def test_a_shapes_id_stays_whatever_its_words_become() -> None:
+    # Others may know a shape by its id (a person, an agent, a line, an export): words
+    # typed over its words never change it -- not even the first flow chart's own step's.
     text = (
         "figure:\n  id: chart\nnodes:\n- id: step\n  label: Step\n"
         "- id: check\n  kind: decision\n  label: Done?\nedges:\n- from: step\n  to: check\n"
     )
     step = {"type": "node", "id": "step"}
-    text, chosen = edit(
-        text, do="update", target=step, values={"label": "Mix CA with IP6"}, name="Step"
-    )
-    assert chosen == ["mix-ca-with-ip6"]
+    text, chosen = edit(text, do="update", target=step, values={"label": "Mix CA"}, name="Step")
+    assert chosen == ["step"]
     check = {"type": "node", "id": "check"}
-    text, chosen = edit(
-        text, do="update", target=check, values={"label": "Tubes formed?"}, name="Done?"
+    text, chosen = edit(text, do="update", target=check, values={"label": "Tubes formed?"})
+    assert chosen == ["check"]
+    assert edges(text) == [("step", "check")]
+    # Two people typing in one label, each sending what they typed over: both kept, one
+    # shape.
+    text, _ = edit(text, do="update", target=step, values={"label": "Mix CA alice"}, was="Mix CA")
+    bob = {"label": "Mix bob CA"}
+    text, chosen = edit(text, do="update", target=step, values=bob, was="Mix CA")
+    assert chosen == ["step"] and [n["id"] for n in data(text)["nodes"]] == ["step", "check"]
+    assert data(text)["nodes"][0]["label"] == "Mix bob CA alice"
+
+
+def test_a_part_added_has_no_words_but_those_given_and_a_new_file_one_empty_shape(
+    tmp_path: Path,
+) -> None:
+    # Never a sample word to be drawn: the editor shows what a part is until it is named.
+    text, (made,) = edit(SAMPLE_FIGURE, do="add", kind="decision", after="encoder")
+    added = next(node for node in data(text)["nodes"] if node["id"] == made)
+    assert made == "decision" and "label" not in added
+    text, (named,) = edit(text, do="add", kind="block", node={"label": "Pooling"})
+    assert named == "pooling"
+    # A protein starts with no example's domains.
+    text, (protein,) = edit(text, do="add", kind="protein")
+    made = next(node for node in data(text)["nodes"] if node["id"] == protein)
+    assert "features" not in made["properties"]
+    # A structure named only for its file is named for what the file holds.
+    (tmp_path / "capsid.pdb").write_text(
+        f"{'HEADER    VIRAL PROTEIN':<62}1A8O\nCOMPND   2 MOLECULE: HIV CAPSID;\n"
     )
-    assert chosen == ["tubes-formed"]
-    assert edges(text) == [("mix-ca-with-ip6", "tubes-formed")]
+    node = {"label": "capsid", "properties": {"source": "capsid.pdb"}}
+    result = apply(SAMPLE_FIGURE, {"do": "add", "kind": "structure", "node": node}, base=tmp_path)
+    [structure] = [n for n in data(result["text"])["nodes"] if n.get("kind") == "structure"]
+    assert structure["label"] == "HIV capsid (1A8O)"
+    # A new figure file is one shape with no words (its id kept as its words are typed).
+    starter = FigureKind().new(tmp_path / "Pipeline.yaml")["text"]
+    assert [node["id"] for node in data(starter)["nodes"]] == ["shape"]
+    assert "label" not in data(starter)["nodes"][0]
+    shape = {"type": "node", "id": "shape"}
+    text, chosen = edit(starter, do="update", target=shape, values={"label": "Encoder"}, was="")
+    assert chosen == ["shape"]
 
 
 def test_deleting_a_part_takes_its_lines_and_an_emptied_group_with_it() -> None:
-    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="row")
+    text, _ = edit(SAMPLE_FIGURE, do="gather", ids=["encoder"], layout="row")
     text, _ = edit(text, do="delete", ids=["encoder"])
     assert edges(text) == []
     assert [group["id"] for group in data(text)["groups"]] == ["root"]
@@ -255,7 +275,7 @@ def test_parts_copied_from_one_figure_are_pasted_into_another_with_their_lines()
             {"from": "x", "to": "encoder"},  # to a part not copied: left behind
         ],
     }
-    text, chosen = edit(NEW_FIGURE, do="paste", after="x", **copied)
+    text, chosen = edit(SAMPLE_FIGURE, do="paste", after="x", **copied)
     # The ids it has already are not taken again; the pasted come after x, in order.
     assert chosen == ["encoder-2", "y-2"]
     assert [node["id"] for node in data(text)["nodes"]] == ["x", "encoder-2", "y-2", "encoder", "y"]
@@ -263,16 +283,16 @@ def test_parts_copied_from_one_figure_are_pasted_into_another_with_their_lines()
     assert "ports" not in data(text)["nodes"][1]
     compile_figure(parse(text, Path.cwd()))
     with pytest.raises(EditError, match="nothing to paste"):
-        edit(NEW_FIGURE, do="paste", top=["gone"], nodes=[])
+        edit(SAMPLE_FIGURE, do="paste", top=["gone"], nodes=[])
 
 
 def test_a_line_is_found_by_the_id_the_drawing_gives_it() -> None:
-    text, _ = edit(NEW_FIGURE, do="delete", ids=["edge.2.encoder-to-y"])
+    text, _ = edit(SAMPLE_FIGURE, do="delete", ids=["edge.2.encoder-to-y"])
     assert edges(text) == [("x", "encoder")]
 
 
 def test_lines_land_where_a_part_takes_them() -> None:
-    text, _ = edit(NEW_FIGURE, do="add", kind="concat", after="encoder")
+    text, _ = edit(SAMPLE_FIGURE, do="add", kind="concat", after="encoder")
     text, _ = edit(text, do="connect", source="x", target="concat")
     text, _ = edit(text, do="connect", source="encoder", target="concat")
     assert {("x", "concat.input1"), ("encoder", "concat.input2")} <= set(edges(text))
@@ -288,13 +308,13 @@ def test_lines_land_where_a_part_takes_them() -> None:
 
 def test_updates_set_and_clear_keys_and_a_new_kind_keeps_what_it_can() -> None:
     target = {"type": "node", "id": "encoder"}
-    text, _ = edit(NEW_FIGURE, do="update", target=target, values={"properties.badge": "frozen"})
+    text, _ = edit(SAMPLE_FIGURE, do="update", target=target, values={"properties.badge": "frozen"})
     encoder = data(text)["nodes"][1]
     assert encoder["properties"] == {"tone": "encoder", "badge": "frozen"}
     text, _ = edit(text, do="update", target=target, values={"kind": "protein"})
     encoder = data(text)["nodes"][1]
     assert list(encoder)[:3] == ["id", "kind", "label"]  # the kind written under the id
-    assert encoder["properties"]["tone"] == "encoder" and encoder["properties"]["length"] == 420
+    assert encoder["properties"]["tone"] == "encoder" and encoder["properties"]["length"] == 300
     text, _ = edit(text, do="update", target=target, values={"kind": "block", "label": ""})
     encoder = data(text)["nodes"][1]
     assert encoder == {"id": "encoder", "properties": {"tone": "encoder", "badge": "frozen"}}
@@ -307,7 +327,7 @@ def test_updates_set_and_clear_keys_and_a_new_kind_keeps_what_it_can() -> None:
 
 
 def test_parts_move_between_groups_and_step_among_their_siblings() -> None:
-    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder"], layout="column")
+    text, _ = edit(SAMPLE_FIGURE, do="gather", ids=["encoder"], layout="column")
     text, _ = edit(text, do="move", id="y", parent="column", index=0)
     groups = {group["id"]: group for group in data(text)["groups"]}
     assert groups["column"]["children"] == ["y", "encoder"]
@@ -319,7 +339,7 @@ def test_parts_move_between_groups_and_step_among_their_siblings() -> None:
 
 
 def test_duplicating_a_group_copies_its_parts_and_the_lines_between_them() -> None:
-    text, _ = edit(NEW_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
+    text, _ = edit(SAMPLE_FIGURE, do="gather", ids=["encoder", "y"], layout="row")
     text, chosen = edit(text, do="duplicate", ids=["row"])
     assert chosen == ["row-2"]
     assert ("encoder-2", "y-2") in edges(text)
@@ -328,14 +348,14 @@ def test_duplicating_a_group_copies_its_parts_and_the_lines_between_them() -> No
 
 def test_an_edit_that_would_break_the_figure_is_refused_and_one_already_broken_is_kept() -> None:
     with pytest.raises(EditError, match="Unknown figure edit"):
-        edit(NEW_FIGURE, do="explode")
-    broken = NEW_FIGURE.replace("to: encoder", "to: nowhere")
+        edit(SAMPLE_FIGURE, do="explode")
+    broken = SAMPLE_FIGURE.replace("to: encoder", "to: nowhere")
     text, _ = edit(broken, do="add", kind="block")  # the file was broken before: made anyway
-    assert "Block" in text
+    assert "- id: block" in text
 
 
 def test_the_model_names_lines_as_the_drawing_does_and_marks_the_implied_root() -> None:
-    found = model(NEW_FIGURE)
+    found = model(SAMPLE_FIGURE)
     assert found is not None
     assert [edge["id"] for edge in found["edges"]] == ["edge.1.x-to-encoder", "edge.2.encoder-to-y"]
     assert found["groups"][-1] == {
@@ -350,7 +370,9 @@ def test_the_model_names_lines_as_the_drawing_does_and_marks_the_implied_root() 
 
 def test_an_indented_file_keeps_its_indentation() -> None:
     indented = (
-        NEW_FIGURE.replace("\n- ", "\n  - ").replace("\n  ", "\n    ").replace("\n    - ", "\n  - ")
+        SAMPLE_FIGURE.replace("\n- ", "\n  - ")
+        .replace("\n  ", "\n    ")
+        .replace("\n    - ", "\n  - ")
     )
     text, _ = edit(indented, do="add", kind="block")
     assert "\n  - id: block" in text
@@ -358,7 +380,7 @@ def test_an_indented_file_keeps_its_indentation() -> None:
 
 @pytest.fixture
 def served(tmp_path: Path) -> Iterator[tuple[str, object]]:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     server, workspace = start(tmp_path / "figure.yaml", browser=False)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -378,8 +400,8 @@ def test_the_page_asks_the_server_for_an_edit_and_gets_the_file_and_its_model(se
     action = {"do": "add", "kind": "protein", "after": "encoder", "source": "encoder"}
     body = {"file": "figure.yaml", "document": opened["document"], "action": action}
     status, result = call(f"{base}/api/act", token, body)
-    assert status == 200 and result["select"] == ["kinase"]
-    assert any(node["id"] == "kinase" for node in result["model"]["nodes"])
+    assert status == 200 and result["select"] == ["protein"]
+    assert any(node["id"] == "protein" for node in result["model"]["nodes"])
     status, failed = call(
         f"{base}/api/act", token, {**body, "action": {"do": "rename", "id": "x", "to": "y"}}
     )
@@ -397,7 +419,7 @@ def test_a_picture_beside_the_figure_is_found_when_it_is_drawn(tmp_path: Path) -
         '<circle cx="10" cy="10" r="8"/></svg>'
     )
     text = apply(
-        NEW_FIGURE,
+        SAMPLE_FIGURE,
         {"do": "add", "kind": "image", "node": {"properties": {"source": "art/logo.svg"}}},
         base=tmp_path,
     )["text"]
@@ -408,9 +430,9 @@ def test_a_picture_beside_the_figure_is_found_when_it_is_drawn(tmp_path: Path) -
 def test_reading_changes_nothing_and_a_figure_inside_another_document_is_edited_as_data() -> None:
     from flexo.studio.figure_edit import apply_to_data
 
-    result = apply(NEW_FIGURE, {"do": "read"})
-    assert result == {"text": NEW_FIGURE, "select": []}
-    inline = yaml.safe_load(NEW_FIGURE)
+    result = apply(SAMPLE_FIGURE, {"do": "read"})
+    assert result == {"text": SAMPLE_FIGURE, "select": []}
+    inline = yaml.safe_load(SAMPLE_FIGURE)
     made = apply_to_data(inline, {"do": "rename", "id": "encoder", "to": "backbone"})
     assert made["select"] == ["backbone"]
     assert [node["id"] for node in made["data"]["nodes"]] == ["x", "backbone", "y"]

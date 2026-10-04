@@ -538,7 +538,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
-            self.wfile.write(b"event: hello\ndata: {}\n\n")
+            # Who is here, as the studio knows it now: a window back after the studio was
+            # started again shows no one gone meanwhile (presence is sent only as it changes).
+            here = {"presence": self.workspace.present()}
+            hello = json.dumps(here, ensure_ascii=False, default=str)
+            self.wfile.write(f"event: hello\ndata: {hello}\n\n".encode())
             self.wfile.flush()
             quiet = 0
             while True:

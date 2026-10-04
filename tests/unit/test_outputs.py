@@ -261,6 +261,49 @@ def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
     assert wraps >= 2 and spaces == wraps
 
 
+def test_words_after_invisible_ones_on_a_pdf_page_are_still_drawn() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    # A wrapped label (its spaces laid invisibly), a formula (its words laid invisibly), then words.
+    with Figure("hidden") as figure:
+        figure.root.block("a", label="Capsid hexamers assemble across a two-fold axis", width=80)
+        figure.root.block("m", label=r"$\frac{a}{b}$")
+        figure.root.block("z", label="Zebra")
+    pdf = pdf_bytes(compile_figure(figure.spec).document.text)
+    content = b"".join(_streams(pdf)).decode("latin-1")
+    # The render mode and scaling are graphics state, kept past ET: walk them as a reader does.
+    stack: list[tuple[int, float]] = []
+    mode, scale, shown = 0, 100.0, []
+    for token in re.findall(r"[\d.]+ Tr|[\d.]+ Tz|(?<![\w/])(?:q|Q|TJ|Tj)(?!\w)", content):
+        if token == "q":
+            stack.append((mode, scale))
+        elif token == "Q":
+            mode, scale = stack.pop()
+        elif token.endswith("Tr"):
+            mode = int(token.split()[0])
+        elif token.endswith("Tz"):
+            scale = float(token.split()[0])
+        else:
+            shown.append((mode, scale))
+    objects = re.findall(r"\bBT\s(.*?)\sET\b", content, re.S)
+    hidden = sum(len(re.findall(r"T[Jj]\b", body)) for body in objects if body.startswith("3 Tr"))
+    assert hidden >= 3 and sum(1 for state in shown if state[0] == 3) == hidden
+    assert all(state == (0, 100.0) for state in shown if state[0] != 3)
+    # And it is ink where the last word is, as both a reader and a printer draw it.
+    page = pdfium.PdfDocument(pdf)[0]
+    text = page.get_textpage()
+    at = text.get_text_range().index("Zebra")
+    left, bottom, right, top = text.get_charbox(at)
+    height = page.get_height()
+    picture = page.render(scale=2).to_pil().convert("L")
+    letter = picture.crop(
+        (int(left * 2), int((height - top) * 2), int(right * 2) + 1, int((height - bottom) * 2) + 1)
+    )
+    assert min(letter.getextrema()) < 128
+
+
 def test_a_drawn_formula_is_found_in_a_pdf_as_the_words_it_reads_as() -> None:
     pdfium = pytest.importorskip("pypdfium2")
     from flexo.compiler import compile_figure

@@ -194,6 +194,11 @@ def _measure_node(
     style: LayoutStyle,
 ) -> MeasuredNode:
     label = measurer.measure(node.label, max_width=_label_width(node, style))
+    if node.kind == "structure" and node.label:
+        # Set over its panel, wrapped to its width, in the title's weight (flexo.structures).
+        from flexo.structures import structure_title
+
+        label = structure_title(node, style)
     if node.kind in DRAWN_KINDS:
         return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)

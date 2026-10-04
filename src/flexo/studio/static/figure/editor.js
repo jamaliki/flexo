@@ -8,16 +8,14 @@
 // be written there.
 
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources } from "/static/studio/studio.js";
-import { figureParts, glyph, groupGlyph, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
+import { figureParts, glyph, groupGlyph, lookFrom, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
 const NARROW = 1000;
 
 export function mount(studio, main) {
-  if (!document.querySelector('link[href="/static/kinds/figure/editor.css"]')) {
-    document.head.append(h("link", { rel: "stylesheet", href: "/static/kinds/figure/editor.css" }));
-  }
+  lookFrom("/static/kinds/figure/editor.css");
   const catalog = studio.catalog.editor;
   const state = { tab: "parts", zoom: null, closed: new Set() };
   let messages = [];
@@ -34,14 +32,22 @@ export function mount(studio, main) {
   const hint = h("div.fig-hint", { hidden: true });
   const zoomValue = h("span.value", {}, "");
   const zoomBar = h("div.zoom", {},
-    ui.button("", () => setZoom((state.zoom ?? fitScale()) / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom Out" }),
+    ui.button("", () => zoomBy(1 / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom Out (⌘−)" }),
     zoomValue,
-    ui.button("", () => setZoom((state.zoom ?? fitScale()) * 1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In" }),
+    ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
     ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
   const center = h("section.fig-center", {}, stage, hint, note, zoomBar);
   const inspectorBody = h("div.panel-body.scroll-thin");
   const inspector = h("aside.panel.fig-inspector", {}, inspectorBody);
+  // A field left ends its run of edits in the history, as the deck's does: typed in again,
+  // however soon, it is another step. (A field drawn again under the keys is not left.)
+  inspector.addEventListener("focusout", (event) => {
+    const key = event.target?.dataset?.key, run = studio.lastMerge?.key;
+    setTimeout(() => Promise.resolve(figure.idle?.()).then(() => {
+      if (run && studio.lastMerge?.key === run && (!key || document.activeElement?.dataset?.key !== key)) studio.step();
+    }), 0);
+  });
   const split = h("div.fig-split");
   const root = h("div.fig", {}, left, split, center, inspector);
   clear(main, root);
@@ -111,6 +117,8 @@ export function mount(studio, main) {
     tones: () => studio.info?.tones,
     // The figure is named as its file is.
     name: () => String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, ""),
+    // Edits held while the studio is away: the document is not saved meanwhile.
+    waiting: (on) => { studio.waiting = on; studio.emit("status"); },
     addAnchor: () => addButton,
     groupAnchor: () => gatherButton,
     // The server makes the edit to the file's words; if the file changed while it did
@@ -151,7 +159,27 @@ export function mount(studio, main) {
     const room = stage.getBoundingClientRect();
     return Math.min((room.width - 96) / natural.width, (room.height - 96) / natural.height, 3);
   };
-  const setZoom = (value) => { state.zoom = value && Math.min(Math.max(value, 0.1), 8); fitPage(); };
+  // Zoomed in or out, the drawing stays put under a point: the pointer's, for a pinch; else
+  // the middle of what is chosen, if it is in sight; else the middle of the view.
+  function setZoom(value, at = null) {
+    const view = stage.getBoundingClientRect(), before = page.getBoundingClientRect();
+    const chosen = figure.selected.map((id) => boxOf(id)).filter(Boolean);
+    let point = at;
+    if (!point && chosen.length) {
+      const middle = { x: before.left + (Math.min(...chosen.map((box) => box.left)) + Math.max(...chosen.map((box) => box.left + box.width))) / 2,
+        y: before.top + (Math.min(...chosen.map((box) => box.top)) + Math.max(...chosen.map((box) => box.top + box.height))) / 2 };
+      if (middle.x > view.left && middle.x < view.right && middle.y > view.top && middle.y < view.bottom) point = middle;
+    }
+    point ??= { x: view.left + stage.clientWidth / 2, y: view.top + stage.clientHeight / 2 };
+    // Where the point is on the drawing, as a share of it, before and after.
+    const share = { x: (point.x - before.left) / (before.width || 1), y: (point.y - before.top) / (before.height || 1) };
+    state.zoom = value && Math.min(Math.max(value, 0.1), 8);
+    fitPage();
+    const after = page.getBoundingClientRect();
+    stage.scrollLeft += after.left + share.x * after.width - point.x;
+    stage.scrollTop += after.top + share.y * after.height - point.y;
+  }
+  const zoomBy = (factor, at = null) => setZoom((state.zoom ?? fitScale()) * factor, at);
   function fitPage() {
     const svg = page.querySelector("svg");
     if (!svg) return;
@@ -163,6 +191,11 @@ export function mount(studio, main) {
     figure.placeInline();
   }
   new ResizeObserver(() => fitPage()).observe(stage);
+  stage.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    zoomBy(Math.exp(-event.deltaY / 200), { x: event.clientX, y: event.clientY });
+  }, { passive: false });
 
   function placeMarks() {
     clear(marks, figure.markViews());
@@ -183,6 +216,16 @@ export function mount(studio, main) {
   // -- the outline --
   const outlineBody = h("div.tree");
   const slug = (words) => String(words).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  // Whether a part's id says something its words do not: not when it is its words run
+  // together, nor words of them ("y" for "Output y"), nor a name the figure gave it for
+  // what it is ("database", "block-2", a group's "row").
+  const MADE = new Set(["shape", "step", "check", "part", "row", "column", "grid", "module", "group"]);
+  function telling(id, item) {
+    const stem = id.replace(/-\d+$/, ""), said = slug(figure.nameOf(id)).split("-");
+    if (stem.split("-").every((word) => said.includes(word))) return false;
+    const kind = item?.kind || "block", part = catalog.parts?.[kind];
+    return !MADE.has(stem) && stem !== kind && stem !== slug(part?.title || "") && stem !== slug(plain(part?.node?.label || ""));
+  }
   function renderOutline() {
     if (state.tab !== "parts") return;
     const found = figure.model;
@@ -211,7 +254,7 @@ export function mount(studio, main) {
       h("span.tree-name", {}, isRoot ? "Layout" : figure.nameOf(id)),
       // A shape is listed by its words; its id, where it says more than they do, is shown
       // when the row is pointed at or chosen.
-      isRoot || slug(figure.nameOf(id)) === id.replace(/-\d+$/, "") ? null : h("span.tree-id.part-id", {}, id));
+      isRoot || !telling(id, node || group) ? null : h("span.tree-id.part-id", {}, id));
       outlineDrop(item, id, isRoot);
       if (!isRoot) outlineDrag(item, id);
       return [item, group && open ? children.map((child) => row(child, depth + 1)) : null];
@@ -371,11 +414,15 @@ export function mount(studio, main) {
       let done = false;
       const input = ui.input({ placeholder: "1UBQ", mono: true });
       const note = h("div.field-problem", { hidden: true });
+      // While it downloads its button says so, and is not pressed twice.
+      const download = ui.button("Download", () => fetchIt(), { kind: "primary" });
+      const busy = (on) => { download.disabled = on; download.querySelector(".btn-label").textContent = on ? "Downloading…" : "Download"; };
       const fetchIt = async () => {
         const id = input.value.trim().toUpperCase();
-        if (!id) { input.focus(); return; }
+        if (!id || download.disabled) { input.focus(); return; }
         clear(note, h("span.spinner"), h("span", {}, `Downloading ${id}…`));
         note.hidden = false;
+        busy(true);
         try {
           const found = await studio.api("/api/act", { file: studio.file, document: studio.doc, action: { do: "structure-fetch", id } });
           if (!done) { done = true; resolve(found.id); box.close(); }
@@ -384,11 +431,12 @@ export function mount(studio, main) {
           input.classList.add("invalid");
           input.focus();
         }
+        busy(false);
       };
       input.addEventListener("input", () => { input.classList.remove("invalid"); note.hidden = true; });
       input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); fetchIt(); } });
       const box = dialog({ title: "Add a Structure from the PDB", body: [ui.field("PDB ID", input, { hint: "Four characters, like 1UBQ" }), note],
-        actions: [{ label: "Cancel", run: () => { done = true; resolve(null); } }, { label: "Download", kind: "primary", run: () => { fetchIt(); return false; } }],
+        actions: [{ label: "Cancel", run: () => { done = true; resolve(null); } }, download],
         onClose: () => { if (!done) { done = true; resolve(null); } } });
       setTimeout(() => input.focus(), 20);
     });
@@ -397,7 +445,20 @@ export function mount(studio, main) {
   // -- keys --
   const typing = (target) => target.closest?.("input, textarea, select, [contenteditable]");
   document.addEventListener("keydown", (event) => {
-    if (!studio.active || typing(event.target) || document.querySelector(".scrim, .menu")) return;
+    if (!studio.active || document.querySelector(".scrim, .menu")) return;
+    // Esc puts the shapes' list away when it is open over the figure.
+    if (event.key === "Escape" && root.classList.contains("list-open")) {
+      event.preventDefault();
+      root.classList.remove("list-open");
+      return;
+    }
+    if (typing(event.target)) return;
+    // ⌘+ and ⌘− zoom the drawing, not the page round it.
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && ["=", "+", "-", "_"].includes(event.key)) {
+      event.preventDefault();
+      zoomBy(["-", "_"].includes(event.key) ? 1 / 1.25 : 1.25);
+      return;
+    }
     figure.key(event);
   });
 
@@ -418,9 +479,12 @@ export function mount(studio, main) {
     if (state.tab === "source") numbers();
   };
 
+  // Drawn after another's edit or an undo, the words of the field being typed in follow too.
+  let afresh = false;
   studio.on("drawn", (result) => {
     messages = result.messages || [];
-    if (result.info?.model) figure.setModel(result.info.model);
+    if (result.info?.model) figure.setModel(result.info.model, { afresh });
+    afresh = false;
     showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
@@ -444,7 +508,8 @@ export function mount(studio, main) {
   });
 
   // Someone else's change, or undo: the source follows, keeping the caret on its words.
-  studio.on("change", ({ quiet }) => {
+  studio.on("change", ({ quiet, source }) => {
+    if (source === "history" || source === "remote") afresh = true;
     if (quiet || area.value === studio.doc.text) return;
     const { selectionStart: start, selectionEnd: end, scrollTop } = area;
     const before = area.value;

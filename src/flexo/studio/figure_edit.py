@@ -54,6 +54,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString, SingleQuotedScalarString
 
 from flexo.ir.semantic import ID_PATTERN
+from flexo.studio.merge import merge_text
 
 STRUCTURAL = frozenset(
     {
@@ -86,6 +87,7 @@ def apply(
     """The figure file's words after ``action``, and the ids to choose next."""
 
     document = _Document(text, suffix)
+    document.base = base
     verb = str(action.get("do", ""))
     handler = getattr(document, f"_{verb}", None)
     if verb not in STRUCTURAL | {"update", "read"} or handler is None:
@@ -288,9 +290,9 @@ def _parts() -> dict[str, Any]:
     return catalogue()["parts"]
 
 
-MADE = {"block": frozenset({"step"}), "decision": frozenset({"check"})}
+MADE = {"block": frozenset({"step", "shape"}), "decision": frozenset({"check"})}
 """Ids the studio gave parts of its own beyond their words: the first flow chart's step
-and its question, named for neither."""
+and its question, and a new figure's first shape, named for none of them."""
 
 _SMALL = frozenset(
     {"a", "an", "and", "the", "of", "on", "in", "at", "to", "for", "with", "or", "by"}
@@ -337,6 +339,9 @@ def _sequence_indent(text: str) -> int:
 
 
 class _Document:
+    base: Path | None = None
+    """The folder the figure's files (pictures, structures) are found from."""
+
     def __init__(self, text: str, suffix: str) -> None:
         self.json = suffix.lower() == ".json"
         if self.json:
@@ -522,12 +527,19 @@ class _Document:
         overrides = dict(action.get("node") or {})
         properties = {**made.get("properties", {}), **overrides.pop("properties", {})}
         made.update(overrides)
-        identifier = self.fresh(overrides.get("id") or made.get("label") or part["title"])
+        # A shape starts with no words, but those it is given: the editor shows what it is,
+        # faintly, until they are typed -- never a sample word that would be drawn.
+        identifier = self.fresh(overrides.get("id") or overrides.get("label") or part["title"])
         item: dict[str, Any] = {"id": identifier}
         if kind != "block":
             item["kind"] = kind
-        if made.get("label"):
-            item["label"] = made["label"]
+        if overrides.get("label"):
+            item["label"] = overrides["label"]
+        # A structure named only for its file (1A7G) is named for what the file says it holds.
+        if kind == "structure":
+            item["label"] = self.structure_label(item.get("label"), properties.get("source"))
+            if not item["label"]:
+                item.pop("label")
         if properties:
             item["properties"] = properties
         self.nodes.append(item)
@@ -545,6 +557,20 @@ class _Document:
                 self.data["edges"].append({"from": identifier, "to": onward})
                 self.spliced = True
         return [identifier]
+
+    def structure_label(self, label: object, source: object) -> str | None:
+        """A new structure's name: the one given, unless that is only its file's -- then what
+        the file says it holds (``Regulatory protein E2 (1A7G)``), where it says."""
+
+        from flexo.structures import structure_caption
+
+        name = str(label or "").strip()
+        stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", Path(str(source or "")).name, flags=re.I)
+        if not source or (name and name.lower() != stem.lower()):
+            return name or None
+        path = Path(str(source))
+        path = path if path.is_absolute() else (self.base or Path.cwd()) / path
+        return structure_caption(path) or name or None
 
     def onward(self, source: str, identifier: str) -> dict[str, Any] | None:
         """The line a part just put after ``source`` goes into: ``source``'s one line,
@@ -656,12 +682,26 @@ class _Document:
         if item is None:
             raise EditError(f"There's no {NOUNS.get(kind, kind)} named “{identifier}”.")
         chosen = [identifier] if identifier else []
-        if kind == "node" and "name" in action and values.get("label") and "id" not in values:
-            # Words typed on a part, done: its id follows them, when it was named for the
-            # words it had (or for its kind) -- as the figure names a part it adds, never
-            # an id a person or an agent chose.
-            was, words = str(action.get("name") or ""), str(values["label"])
-            named = self.named_for(identifier, item, was, words)
+        typed_over = action.get("was")
+        if isinstance(typed_over, str) and isinstance(values.get("label"), str):
+            # Words typed over what a label said when the typing began, while someone else
+            # changed it: both kept, merged as two people's words in one field are.
+            now = item.get("label")
+            if isinstance(now, str) and now != typed_over:
+                values["label"] = merge_text(typed_over, values["label"], now)
+        if (
+            kind == "node"
+            and "name" in action
+            and not str(action.get("name") or "").strip()
+            and values.get("label")
+            and "id" not in values
+        ):
+            # The first words typed on a part just added, done: its id follows them, as the
+            # figure names a part it adds -- before anyone else can have seen it. An id a
+            # shape already has is never changed by its words: others (a person, an agent,
+            # a line, an export) may know it by that name.
+            words = str(values["label"])
+            named = self.named_for(identifier, item, "", words)
             if named != identifier:
                 values["id"] = named
         for key, value in values.items():

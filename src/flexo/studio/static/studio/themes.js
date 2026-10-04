@@ -89,6 +89,8 @@ export function themeUses(session) {
         toast(`Could not change the theme: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
       }
     };
+    // Said as it would be said: Both of two, All of more -- the Other ones when some use it already.
+    const useAll = (count, of) => (count < of ? `Use in the Other ${count} Documents` : count === 2 ? "Use in Both Documents" : `Use in All ${count} Documents`);
     clear(holder,
       documents.length ? h("div.theme-use-list", {}, documents.map((entry) => h("div.theme-use", {},
         icon(entry.kind === "deck" ? "deck" : "figure"),
@@ -96,7 +98,7 @@ export function themeUses(session) {
         entry.uses ? h("span.chip-on", {}, icon("check"), "In Use")
           : ui.button("Use", () => use([entry.file]), { small: true, title: `Use this theme in “${docName(entry.file)}” (now ${entry.theme || "the default theme"})` }))))
         : h("div.hint-line", {}, "No figures or decks in this folder yet."),
-      others.length > 1 ? h("div.row", {}, ui.button(`Use in All ${others.length} Documents`, () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
+      others.length > 1 ? h("div.row", {}, ui.button(useAll(others.length, documents.length), () => use(others.map((entry) => entry.file)), { small: true, icon: "theme" })) : null);
   };
   session.api(session.url("/api/theme/uses")).then((result) => render(result.documents))
     .catch((error) => clear(holder, h("div.hint-line", {}, `Could not list documents: ${error.message}`)));

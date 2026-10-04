@@ -237,3 +237,15 @@ def test_two_typing_at_one_end_keep_their_words_apart() -> None:
     assert merge3("What we asked a", "What we asked a b", "What we asked al") == (
         "What we asked al b"
     )
+
+
+def test_a_word_made_bold_while_another_types_in_it_keeps_both() -> None:
+    # Each run of letters changed is its own: the two ends made bold, the letters typed between.
+    assert merge3("First paragraph w", "First **paragraph** w", "First paraQQgraph w") == (
+        "First **paraQQgraph** w"
+    )
+    assert merge3("First paragraph w", "First paraQQgraph w", "First [paragraph](x.org) w") == (
+        "First [paraQQgraph](x.org) w"
+    )
+    # A word written anew is one change, not the letters it shares with the old: the newer stands.
+    assert merge3("a paragraph", "a page", "a paraQQgraph") == "a paraQQgraph"

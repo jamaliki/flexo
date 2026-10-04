@@ -188,19 +188,51 @@ def _words_chunk(base: list, ours: list, theirs: list) -> list:
 
 
 def _letters(was: str, ours: str, theirs: str) -> str | None:
-    """Two changes to the same words, each in a place of its own (one typing on just after
-    what the other took away; two typing at one place), both made, letter by letter; None
-    where they overlap. At one place, letters that run on from the word before go first
+    """Two changes to the same words, each run of letters they changed in a place of its own
+    (one typing on just after what the other took away; two typing at one place; one making a
+    word bold, at its ends, while the other types in it), all made, letter by letter; None
+    where two overlap. At one place, letters that run on from the word before go first
     (someone typing on in it), then the other's (ours first, if both or neither do)."""
 
-    edits = []
-    for now in (ours, theirs):
-        start, end = _ends(was, now)
-        edits.append((start, len(was) - end, now[start : len(now) - end]))
-    first, second = sorted(edits, key=lambda edit: (edit[0], edit[1], edit[2][:1].isspace()))
-    if first[1] > second[0]:
-        return None
-    return was[: first[0]] + first[2] + was[first[1] : second[0]] + second[2] + was[second[1] :]
+    edits = sorted(
+        [*_runs_of(was, ours), *_runs_of(was, theirs)],
+        key=lambda edit: (edit[0], edit[1], edit[2][:1].isspace()),
+    )
+    merged, at = "", 0
+    for start, end, put in edits:
+        if start < at:
+            return None
+        merged += was[at:start] + put
+        at = end
+    return merged + was[at:]
+
+
+def _runs_of(was: str, now: str) -> list[tuple[int, int, str]]:
+    """The runs of letters a change put in place of others, ``was`` to ``now``: (start, end,
+    put) in order. Letters kept between two runs, no more of them than either run changed,
+    are part of them: a word written anew is one run, not the letters it happens to share
+    with the old."""
+
+    runs: list[tuple[int, int, str]] = []
+    i = j = 0
+    for a, b in [*sorted(_matches(list(was), list(now)).items()), (len(was), len(now))]:
+        if a > i or b > j:
+            runs.append((i, a, now[j:b]))
+        i, j = a + 1, b + 1
+
+    def size(run: tuple[int, int, str]) -> int:
+        return max(run[1] - run[0], len(run[2]))
+
+    n = 0
+    while n + 1 < len(runs):
+        first, second = runs[n], runs[n + 1]
+        between = second[0] - first[1]
+        if between > size(first) or between > size(second):
+            n += 1
+            continue
+        runs[n : n + 2] = [(first[0], second[1], first[2] + was[first[1] : second[0]] + second[2])]
+        n = max(0, n - 1)
+    return runs
 
 
 def _merge_dicts(base: dict, ours: dict, theirs: dict, notes: list | None = None) -> dict:

@@ -23,7 +23,7 @@ import yaml
 from flexo.studio import kinds
 from flexo.studio.agent import Tools
 from flexo.studio.assistant import Assistant
-from flexo.studio.figure_kind import NEW_FIGURE, FigureKind
+from flexo.studio.figure_kind import NEW_FIGURE, SAMPLE_FIGURE, FigureKind
 from flexo.studio.server import start
 from flexo.studio.theme_kind import ThemeKind
 from flexo.studio.workspace import Workspace
@@ -39,7 +39,7 @@ def _sessions(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monk
 
 @pytest.fixture
 def served(tmp_path: Path) -> Iterator[tuple[str, Workspace]]:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     server, workspace = start(tmp_path / "figure.yaml", browser=False)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -109,7 +109,7 @@ def test_files_outside_the_folder_are_refused(served: tuple[str, Workspace]) -> 
 
 def test_a_figure_is_drawn_and_sent_only_when_changed(served: tuple[str, Workspace]) -> None:
     base, workspace = served
-    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    document = {"text": SAMPLE_FIGURE.replace("Encoder", "Decoder")}
     request = {"file": "figure.yaml", "document": document, "version": 1, "known": {}, "hints": {}}
     status, drawn = call(f"{base}/api/draw", workspace.token, request)
     assert status == 200 and not drawn["unfinished"]
@@ -122,7 +122,8 @@ def test_a_figure_is_drawn_and_sent_only_when_changed(served: tuple[str, Workspa
 
 def test_drawings_name_the_fonts_the_page_loads_once(served: tuple[str, Workspace]) -> None:
     base, workspace = served
-    request = {"file": "figure.yaml", "document": {"text": NEW_FIGURE}, "version": 1, "known": {}}
+    document = {"text": SAMPLE_FIGURE}
+    request = {"file": "figure.yaml", "document": document, "version": 1, "known": {}}
     (page,) = call(f"{base}/api/draw", workspace.token, {**request, "hints": {}})[1]["pages"]
     assert "@font-face" not in page["svg"] and "font-family" in page["svg"]
     with OPENER.open(f"{base}/") as response:
@@ -134,13 +135,13 @@ def test_drawings_name_the_fonts_the_page_loads_once(served: tuple[str, Workspac
         assert response.headers["Content-Type"].startswith("font/")
         assert "max-age" in response.headers["Cache-Control"] and len(response.read()) > 10_000
     # Outside the studio a drawing still carries its fonts.
-    assert "@font-face" in FigureKind().draw({"text": NEW_FIGURE}, workspace.root).pages[0].svg
+    assert "@font-face" in FigureKind().draw({"text": SAMPLE_FIGURE}, workspace.root).pages[0].svg
 
 
 def test_an_update_is_saved_and_told_to_everyone(served: tuple[str, Workspace]) -> None:
     base, workspace = served
     listener = workspace.listen("page-b", {"id": "page-b", "name": "Bo", "kind": "person"})
-    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    document = {"text": SAMPLE_FIGURE.replace("Encoder", "Decoder")}
     status, result = call(
         f"{base}/api/update",
         workspace.token,
@@ -212,12 +213,12 @@ def test_pictures_beside_the_document_are_listed_and_uploaded(
 
 
 def test_edits_from_two_places_made_at_once_are_both_kept(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
-        first = NEW_FIGURE.replace("Input $x$", "Input $x_0$")
-        second = NEW_FIGURE.replace("Output $y$", "Output $\\hat{y}$")
+        first = SAMPLE_FIGURE.replace("Input $x$", "Input $x_0$")
+        second = SAMPLE_FIGURE.replace("Output $y$", "Output $\\hat{y}$")
         doc.update({"text": first}, 1, PERSON)
         version, merged = doc.update(
             {"text": second}, 1, {"id": "agent", "name": "Claude", "kind": "agent"}
@@ -231,16 +232,16 @@ def test_edits_from_two_places_made_at_once_are_both_kept(tmp_path: Path) -> Non
 def test_words_rewritten_while_typed_in_are_both_kept_and_said_to_the_typist(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
         listener = workspace.listen("page-a", PERSON)
         line = "# A flexo figure: nodes, then the edges between them. See docs/guide.md."
-        typed = NEW_FIGURE.replace(line, line.replace("figure:", "figure my words:"))
+        typed = SAMPLE_FIGURE.replace(line, line.replace("figure:", "figure my words:"))
         doc.update({"text": typed}, 1, PERSON, "page-a")
         agent = {"id": "agent", "name": "Claude", "kind": "agent"}
-        _, merged = doc.update({"text": NEW_FIGURE.replace(line, "# Not that.")}, 1, agent, "")
+        _, merged = doc.update({"text": SAMPLE_FIGURE.replace(line, "# Not that.")}, 1, agent, "")
         assert merged["text"].startswith("# Not that. my words\nfigure:\n")
         told = []
         while not listener.events.empty():
@@ -267,7 +268,7 @@ def test_words_rewritten_while_typed_in_are_both_kept_and_said_to_the_typist(
 
 
 def test_what_a_merge_kept_is_told_to_whoever_it_was_kept_for(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
@@ -291,7 +292,7 @@ def test_what_a_merge_kept_is_told_to_whoever_it_was_kept_for(tmp_path: Path) ->
 
 
 def test_the_file_changed_on_disk_is_taken_in_and_kept_with_unsaved_edits(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
@@ -299,10 +300,10 @@ def test_the_file_changed_on_disk_is_taken_in_and_kept_with_unsaved_edits(tmp_pa
         workspace.set_presence(agent, "figure.yaml", None, "Renaming things")
         listener = workspace.listen("page", PERSON)
         # An edit here, not yet written, and the agent writes the file with its own tools.
-        doc.update({"text": NEW_FIGURE.replace("Encoder", "Encoder, here")}, 1, PERSON)
+        doc.update({"text": SAMPLE_FIGURE.replace("Encoder", "Encoder, here")}, 1, PERSON)
         time.sleep(0.02)
         (tmp_path / "figure.yaml").write_text(
-            NEW_FIGURE.replace("Output $y$", "Output, there"), encoding="utf-8"
+            SAMPLE_FIGURE.replace("Output $y$", "Output, there"), encoding="utf-8"
         )
         wait_for(lambda: "Output, there" in doc.document["text"])
         assert "Encoder, here" in doc.document["text"]
@@ -361,12 +362,12 @@ def test_a_file_on_disk_that_does_not_read_is_not_written_over(tmp_path: Path) -
 
 
 def test_a_change_on_disk_that_reads_tells_the_pages_the_file_is_saved(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
         listener = workspace.listen("page", PERSON)
-        changed = NEW_FIGURE.replace("Encoder", "There")
+        changed = SAMPLE_FIGURE.replace("Encoder", "There")
         (tmp_path / "figure.yaml").write_text(changed, encoding="utf-8")
         wait_for(lambda: doc.version == 2)
         wait_for(lambda: any(event["type"] == "saved" for event in _drained(listener)))
@@ -377,7 +378,7 @@ def test_a_change_on_disk_that_reads_tells_the_pages_the_file_is_saved(tmp_path:
 
 def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) -> None:
     figure = tmp_path / "figure.yaml"
-    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
@@ -388,7 +389,7 @@ def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) 
         time.sleep(0.6)
         assert not figure.exists()  # not put back behind its person's back
         assert doc.write(again=True)
-        assert figure.read_text(encoding="utf-8") == NEW_FIGURE and doc.problem is None
+        assert figure.read_text(encoding="utf-8") == SAMPLE_FIGURE and doc.problem is None
     finally:
         workspace.close()
 
@@ -417,7 +418,7 @@ def test_a_page_that_heard_from_an_earlier_studio_is_told_to_take_the_document_i
     served: tuple[str, Workspace],
 ) -> None:
     base, workspace = served
-    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    document = {"text": SAMPLE_FIGURE.replace("Encoder", "Decoder")}
     update = {"file": "figure.yaml", "base": 1, "document": document, "who": PERSON}
     status, result = call(f"{base}/api/update", workspace.token, {**update, "instance": "before"})
     assert status == 200 and result == {"restarted": True}
@@ -556,7 +557,7 @@ def test_a_file_put_right_where_the_studio_shows_it_is_written_once_it_reads(
 
 def test_a_kind_never_writes_over_a_file_another_kind_claims(tmp_path: Path) -> None:
     figure = tmp_path / "talk.yaml"
-    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     workspace.kinds["deck"] = _Deck()  # type: ignore[assignment]
     try:
@@ -583,12 +584,12 @@ def test_a_kind_never_writes_over_a_file_another_kind_claims(tmp_path: Path) -> 
         assert figure.read_text(encoding="utf-8") == DECK
         # A figure again on disk (another app's doing): not taken into the deck, but opened
         # again as a figure.
-        figure.write_text(NEW_FIGURE, encoding="utf-8")
+        figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
         wait_for(lambda: workspace.docs["talk.yaml"].kind.name == "figure")
         assert again.held and again.foreign == "figure" and again.document == yaml.safe_load(DECK)
-        assert workspace.open("talk.yaml").document == {"text": NEW_FIGURE}
+        assert workspace.open("talk.yaml").document == {"text": SAMPLE_FIGURE}
         assert {"type": "reopened", "file": "talk.yaml", "kind": "figure"} in _drained(listener)
-        assert figure.read_text(encoding="utf-8") == NEW_FIGURE
+        assert figure.read_text(encoding="utf-8") == SAMPLE_FIGURE
     finally:
         workspace.close()
 
@@ -601,7 +602,7 @@ def test_an_edit_made_in_another_kind_s_editor_is_sent_back_to_open_it_again(
               "document": {"slides": []}, "instance": workspace.instance}
     status, answer = call(f"{base}/api/update", workspace.token, update)
     assert status == 200 and answer == {"reopen": True, "kind": "figure"}
-    assert (workspace.root / "figure.yaml").read_text(encoding="utf-8") == NEW_FIGURE
+    assert (workspace.root / "figure.yaml").read_text(encoding="utf-8") == SAMPLE_FIGURE
 
 
 def test_a_studio_stopped_by_kill_writes_the_edits_it_has_taken_first(tmp_path: Path) -> None:
@@ -612,7 +613,7 @@ def test_a_studio_stopped_by_kill_writes_the_edits_it_has_taken_first(tmp_path: 
     from flexo.studio import sessions
 
     figure = tmp_path / "figure.yaml"
-    figure.write_text(NEW_FIGURE, encoding="utf-8")
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
     studio = subprocess.Popen(
         [sys.executable, "-m", "flexo.studio.server", str(figure), "--no-browser"],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -628,7 +629,7 @@ def test_a_studio_stopped_by_kill_writes_the_edits_it_has_taken_first(tmp_path: 
 
         wait_for(started, 20)
         base, token = f"http://127.0.0.1:{found[0]['port']}", found[0]["token"]
-        changed = {"text": NEW_FIGURE.replace("Encoder", "Taken, then killed")}
+        changed = {"text": SAMPLE_FIGURE.replace("Encoder", "Taken, then killed")}
         update = {"file": "figure.yaml", "base": 1, "document": changed, "who": PERSON}
         status, answer = call(f"{base}/api/update", token, update)
         assert status == 200 and answer["version"] == 2
@@ -663,7 +664,7 @@ def test_one_person_s_windows_are_one_person(served: tuple[str, Workspace]) -> N
     base, workspace = served
     ada = {"id": "ada", "name": "Ada", "kind": "person"}
     first, second = workspace.listen("window-1", ada), workspace.listen("window-2", ada)
-    document = {"text": NEW_FIGURE.replace("Encoder", "Decoder")}
+    document = {"text": SAMPLE_FIGURE.replace("Encoder", "Decoder")}
     update = {"file": "figure.yaml", "base": 1, "document": document, "client": "window-1",
               "who": {"id": "ada", "name": "Ada"}}
     assert call(f"{base}/api/update", workspace.token, update)[0] == 200
@@ -707,6 +708,29 @@ def test_a_studio_started_again_keeps_a_document_whose_file_went_meanwhile(tmp_p
         workspace.close()
 
 
+def test_a_file_renamed_while_the_studio_was_away_is_named(tmp_path: Path) -> None:
+    class Named:
+        name = "theme"
+
+        def __init__(self, kind: object) -> None:
+            self.kind = kind
+
+        def __getattr__(self, key: str) -> object:
+            return getattr(self.kind, key)
+
+        def identity(self, document: object) -> object:
+            return (document or {}).get("theme", {}).get("name")
+
+    (tmp_path / "moved.yaml").write_text("theme:\n  name: gone\n", encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        workspace.kinds["theme"] = Named(workspace.kinds["theme"])
+        doc = workspace.open("gone.yaml", "theme", held=True)
+        assert doc.problem.startswith("gone.yaml was moved or deleted: moved.yaml looks like it")
+    finally:
+        workspace.close()
+
+
 def test_a_window_closing_is_gone_from_the_others_at_once(served: tuple[str, Workspace]) -> None:
     base, workspace = served
     ada = {"id": "ada", "name": "Ada", "kind": "person"}
@@ -730,7 +754,7 @@ def _drained(listener) -> list[dict]:
 
 
 def test_the_agent_tools_read_edit_and_look(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         tools = Tools(workspace, {"id": "agent", "name": "Claude"})
@@ -848,7 +872,7 @@ class _Client:
 
 
 def test_the_assistant_edits_through_the_tools_and_says_so_to_everyone(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     workspace = Workspace(tmp_path)
     try:
         client = _Client(
@@ -903,11 +927,11 @@ def test_the_assistant_edits_through_the_tools_and_says_so_to_everyone(tmp_path:
 def test_a_save_cut_short_leaves_the_file_as_it_was(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE)
     workspace = Workspace(tmp_path)
     try:
         doc = workspace.open("figure.yaml")
-        doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+        doc.update({"text": SAMPLE_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
 
         def full(path: Path, document: dict) -> None:
             path.write_text(document["text"][:20])
@@ -915,7 +939,7 @@ def test_a_save_cut_short_leaves_the_file_as_it_was(
 
         monkeypatch.setattr(doc.kind, "save", full)
         workspace.flush()
-        assert (tmp_path / "figure.yaml").read_text() == NEW_FIGURE
+        assert (tmp_path / "figure.yaml").read_text() == SAMPLE_FIGURE
         assert "could not be saved: no space left on device" in (doc.problem or "")
         assert [path.name for path in tmp_path.iterdir()] == ["figure.yaml"]
     finally:
@@ -926,12 +950,12 @@ def test_a_save_cut_short_leaves_the_file_as_it_was(
 
 def test_a_file_that_cannot_be_written_does_not_stop_the_others(tmp_path: Path) -> None:
     for name in ("a.yaml", "b.yaml"):
-        (tmp_path / name).write_text(NEW_FIGURE)
+        (tmp_path / name).write_text(SAMPLE_FIGURE)
     workspace = Workspace(tmp_path)
     try:
         for name in ("a.yaml", "b.yaml"):
             doc = workspace.open(name)
-            doc.update({"text": NEW_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
+            doc.update({"text": SAMPLE_FIGURE.replace("Encoder", "Changed")}, doc.version, PERSON)
         (tmp_path / "a.yaml").unlink()
         (tmp_path / "a.yaml").mkdir()  # a folder where the file was: it cannot be written
         workspace.flush()
@@ -942,13 +966,13 @@ def test_a_file_that_cannot_be_written_does_not_stop_the_others(tmp_path: Path) 
 
 
 def test_odd_files_in_the_folder_do_not_stop_it_opening(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE)
     (tmp_path / "date.yaml").write_text("released: 2024-02-30\n")
     (tmp_path / "deep.json").write_text("[" * 5000 + "]" * 5000)
     (tmp_path / "binary.yaml").write_bytes(bytes(range(256)))
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
-    (outside / "other.yaml").write_text(NEW_FIGURE)
+    (outside / "other.yaml").write_text(SAMPLE_FIGURE)
     (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
     (tmp_path / "loop").mkdir()
     (tmp_path / "loop" / "again").symlink_to(tmp_path, target_is_directory=True)
@@ -980,7 +1004,7 @@ def test_one_file_named_two_ways_is_one_document(tmp_path: Path) -> None:
     import unicodedata
 
     name = unicodedata.normalize("NFD", "résumé.yaml")
-    (tmp_path / name).write_text(NEW_FIGURE)
+    (tmp_path / name).write_text(SAMPLE_FIGURE)
     workspace = Workspace(tmp_path)
     try:
         first = workspace.open(name)
@@ -1031,7 +1055,7 @@ def test_a_folder_is_trusted_to_run_its_code_when_its_person_says(tmp_path: Path
 
 
 def test_the_studio_offers_to_make_only_the_kinds_it_was_started_with(tmp_path: Path) -> None:
-    (tmp_path / "figure.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE)
     server, workspace = start(tmp_path, browser=False, offered=("theme",))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1172,7 +1196,7 @@ def test_the_themes_offered_are_the_folder_s_files_then_flexo_s_own(tmp_path: Pa
         yaml.safe_dump({"theme": {"name": "lab-offered", "palette": ["#c2410c", "#1d4e89"]}})
     )
     (tmp_path / "figures").mkdir()
-    (tmp_path / "figures" / "a.yaml").write_text(NEW_FIGURE)
+    (tmp_path / "figures" / "a.yaml").write_text(SAMPLE_FIGURE)
     workspace = Workspace(tmp_path)
     try:
         found = theming.cards(workspace, "figures/a.yaml")
@@ -1191,7 +1215,7 @@ def test_a_theme_file_is_put_to_use_in_several_figures_at_once(tmp_path: Path) -
         yaml.safe_dump({"theme": {"name": "lab-used", "palette": ["#c2410c"]}})
     )
     for name in ("a.yaml", "b.yaml"):
-        (tmp_path / name).write_text(NEW_FIGURE)
+        (tmp_path / name).write_text(SAMPLE_FIGURE)
     workspace = Workspace(tmp_path)
     try:
         listed = theming.uses(workspace, "lab.theme.yaml")
@@ -1207,7 +1231,7 @@ def test_a_theme_file_is_put_to_use_in_several_figures_at_once(tmp_path: Path) -
 
 
 def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> None:
-    drawing = FigureKind().draw({"text": NEW_FIGURE}, tmp_path, {})
+    drawing = FigureKind().draw({"text": SAMPLE_FIGURE}, tmp_path, {})
     tones = drawing.info["tones"]
     assert tones["used"] == {"encoder": 1} and len(tones["colours"]) == 8
     assert tones["colours"][0]["fill"].startswith("#")
@@ -1253,6 +1277,8 @@ def test_the_page_merges_as_the_server_does() -> None:
         ["First paragraph written by Alice.", "First m0 paragraph written by Alice.", "New."],
         ["a b c d e f", "a b e f", "a b c x d e f"],
         ["Title", "Title of the talk", "Heading"],
+        ["First paragraph w", "First **paragraph** w", "First paraQQgraph w"],
+        ["a paragraph", "a page", "a paraQQgraph"],
         ["A m", "A m4", "A mc"],
         ["First m0 mparagraph by Alice.", "Not that. m0 m", "First m0 m3paragraph by Alice."],
         ["one\ntwo words here\nthree\n", "one\nfirst words here\n three\n", "one\nAll new\n"],
@@ -1439,6 +1465,143 @@ process.exit(0);
     )
     seen = json.loads(result.stdout)["seen"]
     assert seen[3:] == [f"Second paragraph.{' bobafter'[:n + 1]}" for n in range(3, 9)]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_undo_of_notes_written_where_there_were_none_keeps_the_words_another_added() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async () => new Promise(() => {}),
+};
+const opened = { file: "a.yaml", version: 1, saved: 1, exists: true };
+const slide = (notes) => ({
+  slides: [{ title: "Why" }, { title: "Maturation", ...(notes === undefined ? {} : { notes }) }],
+});
+const session = new Session(workspace, { ...opened, document: slide() });
+const notes = () => session.document.slides[1].notes ?? null;
+const seen = [];
+// Written here, a letter at a time, where the slide had no notes; then sent.
+for (const letter of "Point at sfGFP's row.") {
+  const add = (d) => { d.slides[1].notes = (d.slides[1].notes ?? "") + letter; };
+  session.change(add, { merge: "notes", hold: true });
+}
+session.synced = session.document;
+// Another adds a sentence to them; this page takes back its own.
+const added = "Point at sfGFP's row. Mention mNeonGreen too.";
+session.remote({ client: "bob", version: 2, document: slide(added) });
+session.undo();
+seen.push(notes());
+session.redo();
+seen.push(notes());
+// Taken back again, and another writes on meanwhile: made again, both theirs stay.
+session.undo();
+session.synced = session.document;
+session.remote({ client: "bob", version: 3, document: slide("Mention mNeonGreen too. Soon.") });
+session.redo();
+seen.push(notes());
+// Nobody else wrote in them: taken back, the notes are gone, as they were.
+const alone = new Session(workspace, { ...opened, document: slide() });
+alone.change((d) => { d.slides[1].notes = "Mine alone."; }, { merge: "notes", hold: true });
+alone.undo();
+seen.push("notes" in alone.document.slides[1]);
+// So in a list: a footnote added empty, written in here, and typed on in by another.
+const listed = new Session(workspace, { ...opened, document: { footnotes: ["[1] Old", ""] } });
+listed.change((d) => { d.footnotes[1] = "[2] Ours"; }, { merge: "footnote", hold: true });
+listed.synced = listed.document;
+const footnotes = ["[1] Old", "[2] Ours and theirs"];
+listed.remote({ client: "bob", version: 2, document: { footnotes } });
+listed.undo();
+seen.push(listed.document.footnotes);
+console.log(JSON.stringify(seen));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        "Mention mNeonGreen too.",
+        "Point at sfGFP's row. Mention mNeonGreen too.",
+        "Point at sfGFP's row. Mention mNeonGreen too. Soon.",
+        False,
+        ["[1] Old", "and theirs"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_change_made_again_never_takes_away_what_others_did_since() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/merge.js"
+    code = (
+        f"import {{ replay }} from {json.dumps(script.as_uri())};\n"
+        """
+const seen = [];
+const see = (...made) => {
+  const [document, lost] = replay(...made);
+  seen.push([document, lost.length]);
+};
+// Bold undone: the letters another typed in the word since stay.
+see("First **paragraph** w", "First paragraph w", "First **paraQQgraph** w");
+// Typing undone a run at a time, its letters among another's typed at the same place.
+const runs = [
+  ["Second paragraph.", "Second paragraph.  "],
+  ["Second paragraph. ", "Second paragraph.  a"],
+  ["Second paragraph. b a", "Second paragraph. b al"],
+  ["Second paragraph. bo al", "Second paragraph. bo ali"],
+];
+let now = "Second paragraph. bob types too ali";
+for (const [before, after] of [...runs].reverse()) now = replay(after, before, now)[0];
+seen.push([now, 0]);
+// Words rewritten by another since: nothing of theirs goes.
+see("First paragraph. alpha", "First paragraph.", "Bob rewrote it all.");
+// A setting another changed since stays theirs, and that is said.
+see({ size: 30 }, {}, { size: 40 });
+// An object another deleted since is not brought back.
+const body = (...texts) => ({ body: texts.map((text) => ({ text })) });
+see(body("P", "Second alice"), body("P", "Second"), body("P"));
+// A slide another moved and retitled since is still the slide typed in: no copy of it.
+const slide = (title, text) => ({ title, body: [{ text }] });
+see({ slides: [{ title: "0" }, { title: "1" }, slide("Q", "Typed alice")] },
+  { slides: [{ title: "0" }, { title: "1" }, slide("Q", "Typed")] },
+  { slides: [{ title: "0" }, slide("Q moved", "Typed alice"), { title: "1" }] });
+// A shape put between two, labelled by another since: the figure stays as they have it.
+const figure = (nodes, edges) => ({ figure: { nodes: nodes.map((id) => ({ id })), edges } });
+const added = figure(["a", "new", "b"], [{ from: "a", to: "new" }, { from: "new", to: "b" }]);
+const labelled = structuredClone(added);
+labelled.figure.nodes[1].label = "Bob's";
+see(added, figure(["a", "b"], [{ from: "a", to: "b" }]), labelled);
+console.log(JSON.stringify(seen));
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    seen = json.loads(result.stdout)
+    assert seen[0] == ["First paraQQgraph w", 0]
+    assert seen[1] == ["Second paragraph. bob types too", 0]
+    assert seen[2] == ["Bob rewrote it all.", 0]
+    assert seen[3] == [{"size": 40}, 1]
+    assert seen[4] == [{"body": [{"text": "P"}]}, 1]
+    moved = {"title": "Q moved", "body": [{"text": "Typed"}]}
+    assert seen[5] == [{"slides": [{"title": "0"}, moved, {"title": "1"}]}, 0]
+    assert seen[6][0]["figure"]["nodes"][1] == {"id": "new", "label": "Bob's"}
+    assert len(seen[6][0]["figure"]["edges"]) == 2 and seen[6][1] > 0
+
+
+def test_each_person_here_has_a_colour_of_their_own(served: tuple[str, Workspace]) -> None:
+    _, workspace = served
+    people = [{"id": name, "name": name.title(), "kind": "person"} for name in ("ada", "bo", "cy")]
+    for who in people[:2]:
+        workspace.set_presence(who, "figure.yaml", None, None)
+    assert [entry["colour"] for entry in workspace.present()] == [0, 1]
+    # One gone, the next to come has the colour no one here has.
+    workspace.absent(people[0])
+    workspace.set_presence(people[2], "figure.yaml", None, None)
+    colours = {entry["who"]["id"]: entry["colour"] for entry in workspace.present()}
+    assert colours == {"bo": 1, "cy": 0}
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")

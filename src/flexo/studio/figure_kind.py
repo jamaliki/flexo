@@ -21,6 +21,17 @@ figure:
   id: figure
   style: paper
 nodes:
+- id: shape
+"""
+"""A new figure file: one shape with no words yet, as a new figure on a slide starts. The
+editor shows what it is, faintly, until its words are typed; nothing is drawn for it."""
+
+SAMPLE_FIGURE = """\
+# A flexo figure: nodes, then the edges between them. See docs/guide.md.
+figure:
+  id: figure
+  style: paper
+nodes:
 - id: x
   kind: text
   label: Input $x$
@@ -37,6 +48,7 @@ edges:
 - from: encoder
   to: y
 """
+"""A small figure to try things on: an input, an encoder and an output."""
 
 
 GUIDE = """\

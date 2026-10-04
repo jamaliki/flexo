@@ -176,7 +176,9 @@ class Doc:
         notes: list = []
         with self.lock:
             if base == self.version:
-                merged = document
+                # Nothing to merge it with; put right by the kind all the same, as merged
+                # documents are (an object written with two kinds' words never written so).
+                merged = self._mended(document, notes, self.document)
             else:
                 known = self.history.get(base)
                 start = json.loads(known) if known is not None else self.document
@@ -697,11 +699,35 @@ class Workspace:
                 doc = Doc(self, relative, path, self.kind_of(path, kind))
                 if held and not doc.exists:
                     doc.saved = doc.version  # nothing of its kind's own is written there
-                    doc.problem = f"{doc.name} was moved or deleted. Saving writes it again."
+                    moved = self._moved(doc)
+                    doc.problem = (
+                        f"{doc.name} was moved or deleted: {moved} looks like it, renamed — open "
+                        f"it to go on there. Saving writes {doc.name} again."
+                        if moved
+                        else f"{doc.name} was moved or deleted. Saving writes it again."
+                    )
                 self.docs[relative] = doc
         if reopened:
             self.broadcast({"type": "reopened", "file": doc.name, "kind": doc.kind.name})
         return doc
+
+    def _moved(self, doc: Doc) -> str | None:
+        """The file a document whose own has gone most likely is now: renamed while the
+        studio was away, another file of its kind beside it that names it inside (a deck's id
+        is the name of the file it was made in), if a kind says what names it (``identity``)."""
+
+        identity = getattr(doc.kind, "identity", None)
+        if identity is None or not doc.path.parent.is_dir():
+            return None
+        for path in sorted(doc.path.parent.iterdir()):
+            if path == doc.path or path.suffix != doc.path.suffix:
+                continue
+            if self._claim(path) != doc.kind.name:
+                continue
+            with contextlib.suppress(Exception):
+                if identity(doc.kind.load(path)) == doc.path.stem:
+                    return self.relative(path)
+        return None
 
     def new(self, name: str, kind_name: str, data: Any = None) -> Doc:
         """Make a file of a kind -- its starting document, or ``data`` (a parsed
@@ -819,7 +845,13 @@ class Workspace:
     ) -> None:
         key = who.get("id") or who.get("name", "someone")
         with self.lock:
-            entry = self.presence.get(key, {"who": who})
+            entry = self.presence.get(key)
+            if entry is None:
+                # A colour of their own while they are here, the first none of the others
+                # here has (given in the order they came): the pages show them by it.
+                used = {other.get("colour") for other in self.presence.values()}
+                colour = next(n for n in range(len(used) + 1) if n not in used)
+                entry = {"who": who, "colour": colour}
             entry.update(who=who, file=file, where=where, at=time.time())
             if doing is not None:
                 entry["doing"] = doing
@@ -881,12 +913,42 @@ class Workspace:
         timer.start()
 
     def _gone(self, person: str) -> None:
+        left = None
         with self.lock:
             if person in self.presence and not any(
                 other.who.get("id") == person for other in self.listeners.values()
             ):
-                del self.presence[person]
+                left = self.presence.pop(person)
         self.broadcast({"type": "presence", "presence": self.present()})
+        if left is not None:
+            self._abandoned(left)
+
+    def _abandoned(self, entry: dict[str, Any]) -> None:
+        """What a person gone (their window closed, or lost) left half made where they were
+        typing: an object they added and never wrote in -- which their window takes away when
+        its typing ends -- goes, unless another is at it. A kind that knows its empty objects
+        has ``abandoned(document, where)``."""
+
+        where = entry.get("where")
+        doc = self.docs.get(entry.get("file") or "")
+        tidy = getattr(doc.kind, "abandoned", None) if doc is not None else None
+        if tidy is None or not isinstance(where, dict) or not where.get("editing"):
+            return
+        spot = (where.get("page"), where.get("block"))
+        with self.lock:
+            others = [
+                other.get("where")
+                for other in self.presence.values()
+                if other.get("file") == doc.name and isinstance(other.get("where"), dict)
+            ]
+        if any((other.get("page"), other.get("block")) == spot for other in others):
+            return
+        with doc.lock:
+            document, version = copy.deepcopy(doc.document), doc.version
+        if not doc.held and not doc.unread and tidy(document, where):
+            studio = {"id": "studio", "name": "Flexo Studio", "kind": "system"}
+            with contextlib.suppress(ValueError):
+                doc.update(document, version, studio)
 
     def depart(self, client: str) -> None:
         """A page that closes says so: whoever it was is gone from the others' windows at

@@ -41,7 +41,7 @@
 .tree-row .glyph { color: var(--ink-3); }
 .tree-row.on .glyph { color: var(--accent); }
 .tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; color: var(--ink); }
-.tree-id { font: 11px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 8px; min-width: 0; }
+.tree-id { font: 11px var(--font); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 8px; min-width: 0; }
 .tree-id.part-id { opacity: 0; transition: opacity 0.12s; }
 .tree-row:hover .tree-id.part-id, .tree-row.on .tree-id.part-id { opacity: 1; }
 .tree-caret { width: 16px; height: 16px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: var(--ink-3); cursor: pointer; border-radius: 3px; }
@@ -58,7 +58,7 @@
 /* -- the drawing -- */
 .fig-stage { display: grid; place-items: center; padding: 48px; }
 .fig-stage.connecting .fig-page, .fig-stage.connecting .fig-page [data-flexo-entity] { cursor: crosshair; }
-.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; }
+.fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; user-select: none; -webkit-user-select: none; }
 .fig-page svg { display: block; }
 .fig-page [data-flexo-entity] { cursor: pointer; }
 

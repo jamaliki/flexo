@@ -7,7 +7,7 @@
 // into this copy, keeping edits not yet sent. Undo takes back this person's own
 // change, and only that: it is a merge too, so others' later edits stay.
 
-import { merge3, same, stable } from "./merge.js";
+import { merge3, replay, same, stable } from "./merge.js";
 import { toast, h } from "./ui.js";
 
 // Whether the studio answers, for the page as a whole: while it doesn't, one notice
@@ -83,6 +83,7 @@ export class Session {
     this.lastMerge = null;
     this.listeners = {};
     this.sending = null;                  // the document in flight, while one is
+    this.waiting = false;                 // edits made through the studio (a figure's) held while it is away
     this.resyncing = false;
     this.failures = 0;                    // tries to send that failed in a row
     this.failed = null;                   // what the last said, while it stands
@@ -96,6 +97,7 @@ export class Session {
     this.info = {};
     this.active = false;
     this.lastRemote = null;
+    this.lastWho = null;                  // who made the last change from elsewhere
     this.container = h("div.doc-view");
     this.tools = h("div.docbar-group");
     this.actions = h("div.docbar-group");
@@ -119,7 +121,7 @@ export class Session {
 
   get doc() { return this.document; }
   get catalogue() { return this.catalog; }
-  get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending); }
+  get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending) || this.waiting; }
   // This page's own edits not yet in the file (others' are theirs to show).
   get unsaved() { return this.pendingLocal || this.savedVersion < this.ownVersion; }
   // Saving is those edits on their way to the file; with the studio out of reach, they
@@ -248,21 +250,47 @@ export class Session {
           this.emit("status");
         });
       }
-      this.document = this.travelOne(entry, target, current);
+      const was = this.document;
+      const lost = [];
+      this.document = this.travelOne(entry, target, current, lost);
+      // (Undone, what the undo did is kept, for a redo to take it back: see travelOne.)
+      entry.undid = target === "before" ? { from: was, to: this.document } : null;
       from.pop();
       to.push(entry);
       moved = entry;
+      if (lost.length) this.unmade(entry, target, !same(was, this.document), lost);
     }
     if (moved) this.travelled(moved);
     return null;
   }
 
-  // One change taken back (or made again) on the document as it is now: a run made in parts
-  // part by part, the last first (or the first first), each by itself.
-  travelOne(entry, target, current) {
+  // A change that could not be taken back (or made again) in full, as others have changed
+  // what it changed since (`lost`: merge.js's replay notes): what it could is done, and its
+  // person is told why -- who changed it, or took it away.
+  unmade(entry, target, some, lost) {
+    const who = this.lastWho, name = who?.name || (who?.kind === "agent" ? "An agent" : "Someone else");
+    const what = this.said(entry).text || "Edit", verb = target === "before" ? "undo" : "redo";
+    const did = lost.every((note) => note.removed !== undefined) ? "deleted" : "changed";
+    const words = some ? `Couldn't ${verb} all of “${what}”: ${name} has ${did} some of it since.`
+      : `Couldn't ${verb} “${what}”: ${name} has ${did} it since.`;
+    toast(words, { icon: "info", seconds: 6 });
+  }
+
+  // One change taken back (or made again) on the document as it is now, which wins where
+  // the two meet (merge.js's replay): a run made in parts part by part, the last first (or
+  // the first first), each by itself. Made again, it is its undo taken back -- the words
+  // others wrote meanwhile stay as and where they were, with this person's back among them,
+  // not put after them. What could not be done is put in `lost`.
+  travelOne(entry, target, current, lost = []) {
+    const made = (base, document, to) => {
+      const [result, missed] = replay(base, to, document);
+      lost.push(...missed);
+      return result;
+    };
+    if (target === "after" && entry.undid) return made(entry.undid.to, this.document, entry.undid.from);
     const parts = entry.parts || [entry];
     let document = this.document;
-    for (const part of target === "before" ? [...parts].reverse() : parts) document = merge3(part[current], document, part[target]);
+    for (const part of target === "before" ? [...parts].reverse() : parts) document = made(part[current], document, part[target]);
     return document;
   }
 
@@ -355,6 +383,7 @@ export class Session {
       this.emit("change", { quiet: false, source: "remote", who, before: local, base: sent, incoming: document, merged: true });
       this.requestDraw();
     }
+    if (who && !same(document, sent)) this.lastWho = who;
     this.kept(notes, who);
     const waiting = this.lastRemote;
     if (waiting && waiting.version > this.version) this.remote(waiting);
@@ -373,6 +402,7 @@ export class Session {
     this.synced = event.document;
     this.version = event.version;
     this.exists = true;
+    this.lastWho = event.who || null;
     if (!same(before, this.document)) {
       this.emit("change", { quiet: false, source: "remote", who: event.who, before, base, incoming: event.document, merged });
       this.requestDraw();
@@ -410,7 +440,7 @@ export class Session {
     let info;
     try {
       // As the kind it is open as, and held here: a studio started again on a folder whose
-      // file has gone meanwhile makes nothing new of it -- this page's document is written back.
+      // file has gone meanwhile makes nothing new of it -- this page's document is kept.
       info = await this.workspace.api(this.workspace.url("/api/open", { file: this.file, kind: this.kind, held: "1" }));
     } catch (error) {
       this.resyncing = false;
@@ -448,7 +478,10 @@ export class Session {
     if (waiting && waiting.version > this.version) this.remote(waiting);
     this.emit("status");
     this.requestDraw(0);
-    if (!same(this.document, this.synced)) this.schedulePush(0);
+    // (Its file gone meanwhile -- moved, renamed, deleted -- it is not written again until
+    // its person edits or saves it, told so: a second copy is not made behind their back.)
+    if (!same(this.document, this.synced) && !(restarted && !info.exists)) this.schedulePush(0);
+    else if (restarted && !info.exists && info.problem) toast(info.problem, { icon: "info", seconds: 10 });
   }
 
   async saveNow() {

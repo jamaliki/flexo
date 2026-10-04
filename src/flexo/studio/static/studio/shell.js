@@ -7,11 +7,21 @@ import { AssistantPanel } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
-const COLOURS = ["#e8590c", "#7048e8", "#0ca678", "#d6336c", "#1c7ed6", "#f08c00", "#5c940d", "#ae3ec9"];
+// (No blue: the blue of what is chosen here is one's own.)
+const COLOURS = ["#e8590c", "#7048e8", "#0ca678", "#d6336c", "#a0522d", "#f08c00", "#5c940d", "#ae3ec9"];
 const MCP_COMMAND = "claude mcp add flexo-studio -- flexo studio mcp";
+
+// Each person here has the colour the studio gave them as they came, none shared with
+// another here (see given); one not here (in the activity) has one by their id.
+const given = new Map();
+function give(presence) {
+  given.clear();
+  for (const entry of presence || []) if (entry?.who?.id && Number.isInteger(entry.colour)) given.set(entry.who.id, entry.colour);
+}
 
 export function colourOf(who) {
   if (who?.id === "assistant") return "#d97757";
+  if (given.has(who?.id)) return COLOURS[given.get(who.id) % COLOURS.length];
   let hash = 0;
   for (const ch of String(who?.id || who?.name || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return COLOURS[hash % COLOURS.length];
@@ -27,9 +37,11 @@ export function nameOf(who) {
 
 export function avatar(who, { size = 24, ring = false } = {}) {
   const agent = who?.kind === "agent";
-  const initials = agent ? null : String(who?.id === selfId && !who?.name ? "You" : who?.name || "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  // Someone with no name yet is a person's outline, not a "?" (which reads as Help).
+  const named = who?.name || (who?.id === selfId ? "You" : "");
+  const initials = agent || !named ? null : named.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   return h("span.avatar", { title: nameOf(who), style: { width: `${size}px`, height: `${size}px`, background: colourOf(who), boxShadow: ring ? `0 0 0 2px var(--panel), 0 0 0 3.5px ${colourOf(who)}` : "" } },
-    agent ? icon("sparkle", { weight: "1.3" }) : initials);
+    agent ? icon("sparkle", { weight: "1.3" }) : initials || icon("user", { weight: "1.4" }));
 }
 
 export function ago(seconds) {
@@ -92,6 +104,7 @@ export class Workspace {
     this.order = [];
     this.active = null;
     this.presence = info.presence || [];
+    give(this.presence);
     this.activity = info.activity || [];
     this.documents = info.documents || [];
     this.follow = remembered("follow", "1") === "1";
@@ -224,6 +237,7 @@ export class Workspace {
   // -- who is where --
 
   reportFocus(file, where) {
+    this.focused = [file, where];
     clearTimeout(this.focusTimer);
     this.focusTimer = setTimeout(() => {
       this.api("/api/presence", { client: this.client, who: this.me, file, where }).catch(() => {});
@@ -251,7 +265,16 @@ export class Workspace {
   connect() {
     const source = new EventSource(this.url("/api/events", { client: this.client, person: this.me.id, name: this.me.name }));
     source.onmessage = (message) => this.handle(JSON.parse(message.data));
-    source.addEventListener("hello", () => this.emit("online", true));
+    // Who is here comes with the hello, as the studio knows it now -- started again, it knows
+    // only those back since, and no one gone meanwhile is left shown -- and it is told again
+    // where this window is.
+    source.addEventListener("hello", (message) => {
+      let hello = {};
+      try { hello = JSON.parse(message.data || "{}"); } catch { hello = {}; }
+      if (Array.isArray(hello.presence)) { this.presence = hello.presence; give(this.presence); this.emit("presence"); }
+      if (this.focused) this.reportFocus(...this.focused);
+      this.emit("online", true);
+    });
     source.onerror = () => this.emit("online", false);
     this.source = source;
   }
@@ -283,7 +306,7 @@ export class Workspace {
         break;
       case "reopened": this.reopen(event.file, event.kind); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
-      case "presence": this.presence = event.presence; this.emit("presence"); break;
+      case "presence": this.presence = event.presence; give(this.presence); this.emit("presence"); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
       case "trusted":
         this.info.trusted = true;
@@ -528,6 +551,19 @@ export async function start() {
   clear(root, h("div.studio", {}, bar, body), loading);
 
   // -- keeping the frame current --
+  // A tab is named for its document -- with its kind (Theme, Figure) when another open
+  // document has its name, as a deck and the theme made from it may, and its folder when
+  // that one is of its kind too.
+  const tabName = (file, session) => {
+    const name = docName(file);
+    const twins = workspace.order.filter((other) => other !== file && docName(other) === name);
+    if (!twins.length) return name;
+    if (twins.every((other) => workspace.sessions.get(other)?.kind === session.kind)) {
+      const path = `${String(workspace.info.folder || "").replace(/\/+$/, "")}/${file}`.split("/");
+      return `${name} — ${path[path.length - 2]}`;
+    }
+    return session.kind === "deck" ? name : `${name} ${session.kind[0].toUpperCase()}${session.kind.slice(1)}`;
+  };
   const renderTabs = () => {
     clear(tabs, workspace.order.map((file) => {
       const session = workspace.sessions.get(file);
@@ -537,7 +573,7 @@ export async function start() {
         onauxclick: (event) => { if (event.button === 1) workspace.close(file); },
       },
       icon(KIND_ICONS[session.kind] || "file"),
-      h("span.tab-name", {}, docName(file)),
+      h("span.tab-name", {}, tabName(file, session)),
       session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: statusWords(session) }) : null,
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: nameOf(entry.who) }))) : null,
       h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
@@ -633,12 +669,16 @@ export async function start() {
       return line;
     };
     const chooseLine = (problem) => {
-      let line = Number((problem || "").match(/\bline (\d+)/)?.[1] || 0);
+      const named = Number((problem || "").match(/\bline (\d+)/i)?.[1] || 0);
+      let line = named;
       if (!line || !shown) return;
       requestAnimationFrame(() => {
         const lines = area.value.split("\n");
         while (line > 1 && !(lines[line - 1] || "").trim()) line -= 1;
         line = opened(problem || "", lines, line);
+        // What is said names the line chosen, not the one the reading stopped at (nor its
+        // column there).
+        if (line !== named) said.textContent = said.textContent.replace(new RegExp(`\\b(l)ine ${named}\\b(?:, column \\d+)?`, "gi"), (_, l) => `${l}ine ${line}`);
         const start = lines.slice(0, line - 1).reduce((sum, item) => sum + item.length + 1, 0);
         area.focus({ preventScroll: true });
         area.setSelectionRange(start, start + (lines[line - 1] || "").length);
@@ -726,6 +766,9 @@ export async function start() {
     // Once the page has had the key: a word typed into a shape on its way (a decision's
     // "?") is the shape's.
     else if (key === "?" && !inField(event)) setTimeout(() => { if (!event.defaultPrevented) shortcutsDialog(); });
+    // ⌥⌘I: to the document's inspector, for a kind that does not take the key itself (a
+    // deck's does), as the shortcuts sheet has it for every document.
+    else if (mod && event.altKey && event.code === "KeyI") setTimeout(() => { if (!event.defaultPrevented) toInspector(); });
   });
   // Edits go as the page does. Ones that cannot (the studio is out of reach) would be lost
   // with it: while there are any, the browser asks first.
@@ -849,8 +892,9 @@ export function connectDialog(workspace) {
     h("ol.steps", {},
       h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND)),
       h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
-      // Follow shows in the top bar only once an agent is here: said so, not looked for in vain.
-      h("li", {}, "When an agent joins, turn on ", h("b", {}, "Follow"), " in the top bar to see what it is changing as it works.")),
+      // Follow is on unless turned off; its switch shows in the top bar once an agent is here.
+      h("li", {}, workspace.follow ? [h("b", {}, "Follow"), " is on: you see what agents change as they work. Turn it off in the top bar once one has joined."]
+        : ["When an agent joins, turn on ", h("b", {}, "Follow"), " in the top bar to see what it changes as it works."])),
     h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
     ui.field("Your Name", name, { hint: "Shown to others" }),
   ], actions: [{ label: "Done", kind: "primary" }] });
@@ -864,14 +908,28 @@ const SHORTCUTS = [
     ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
-    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Move Up or Down"], ["← →", "Move to the Next Column"]]],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Next Column"]]],
   ["Text", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
     ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
     ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
-  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["↩", "Edit Label"], ["⌫", "Delete Shape"]]],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["← → ↑ ↓", "Choose the Shape That Way"],
+    ["⌥ ← → ↑ ↓", "Move Back or On in Its Row or Column"], ["↩", "Edit Label"], ["⌫", "Delete Shape"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
   ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
+
+// The first control of the document's inspector (a figure's, a theme's settings), its ring
+// shown: put there by the keys.
+function toInspector() {
+  const view = [...document.querySelectorAll(".views > *")].find((node) => !node.hidden);
+  const panel = view?.querySelector(".inspector, .fig-inspector, .theme-panel");
+  const first = panel && [...panel.querySelectorAll("button:not(:disabled), input, select, textarea, [contenteditable=true], [tabindex='0']")]
+    .find((node) => node.offsetParent && node.tabIndex >= 0);
+  if (!first) return;
+  first.focus({ focusVisible: true });
+  first.dataset.keyed = "";
+  first.addEventListener("blur", () => { delete first.dataset.keyed; }, { once: true });
+}
 
 function shortcutsDialog() {
   // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
@@ -930,7 +988,8 @@ class SidePanel {
     const entries = [...this.workspace.activity].reverse();
     clear(this.activityList, entries.length ? entries.map((entry) => h("button.activity-row", { type: "button", onclick: () => this.workspace.goTo(entry.file, entry.where) },
       avatar(entry.who, { size: 22 }),
-      h("span.activity-text", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, ` ×${entry.count}`) : null,
+      // Who did what, and how many times, one sentence; where, under it.
+      h("span.activity-text", {}, h("span", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, `\u00a0×${entry.count}`) : null),
         h("span.activity-where", {}, [entry.file && docName(entry.file), entry.where?.label].filter(Boolean).join(" · "))),
       h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, Claude and other agents appear here."));
   }

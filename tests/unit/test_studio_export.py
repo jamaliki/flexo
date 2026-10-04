@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from flexo.studio.figure_kind import NEW_FIGURE
+from flexo.studio.figure_kind import SAMPLE_FIGURE
 from flexo.studio.server import start
 from flexo.studio.workspace import Workspace
 
@@ -33,7 +33,7 @@ def _sessions(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monk
 def served(tmp_path: Path) -> Iterator[tuple[str, Workspace, Path]]:
     folder = tmp_path / "folder"
     folder.mkdir()
-    (folder / "figure.yaml").write_text(NEW_FIGURE, encoding="utf-8")
+    (folder / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
     server, workspace = start(folder / "figure.yaml", browser=False)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

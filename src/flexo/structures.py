@@ -43,6 +43,7 @@ from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.drawn import Picture, Shape, Words, path, units
 from flexo.geometry import Side, Size
+from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings, TextRun
 from flexo.style import LayoutStyle, Palette
 
@@ -106,6 +107,17 @@ def structure_tones(node: NodeSpec) -> tuple[str, ...]:
     )
 
 
+def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
+    """A structure's name as it is set over its panel: in the title's weight, wrapped to the
+    panel's width."""
+
+    u = units(style).u
+    width = float(node.property("width") or 20.0 * u)  # type: ignore[arg-type]
+    return units(style).measurer.measure(
+        node.label, weight=style.typography.title_weight, max_width=width
+    )
+
+
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     """The panel: the molecule's box, under the component's name if it has one. A molecule
     that can't be had (a PDB entry not downloaded, a file that does not read) is a dashed
@@ -118,7 +130,8 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     words = []
     top = 0.0
     if node.label:
-        title = measures.measure(node.label, weight=style.typography.title_weight)
+        # A long name is set on as many lines as the panel is wide, not over its edges.
+        title = structure_title(node, style)
         words.append(
             Words(
                 f"{node.id}.label",
@@ -296,6 +309,66 @@ def fetch_structure(pdb_id: str) -> str:
             said = "there is no such entry in the PDB"
         raise ValueError(f"Couldn't download {pid}: {said.rstrip('.')}.") from None
     return pid
+
+
+_PLAIN = frozenset(
+    {"A", "AN", "AND", "AS", "AT", "BY", "FOR", "FROM", "IN", "INTO", "OF", "ON", "OR", "THE",
+     "TO", "WITH"}
+)
+"""Short words a name in capitals has that are English, not an acronym like DNA or HIV."""
+
+NAMED = 32
+"""How long (characters) a structure's name from its file may be before it is cut short."""
+
+
+def structure_caption(path: Path) -> str | None:
+    """What a structure file says it holds, as a person would write it, with its PDB ID:
+    ``Regulatory protein E2 (1A7G)`` for a file that names its molecule REGULATORY PROTEIN
+    E2. None for a file that names nothing."""
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:400_000]
+    except OSError:
+        return None
+    name = entry = None
+    if path.suffix.lower() in (".cif", ".mmcif"):
+        for key in ("_struct.pdbx_descriptor", "_struct.title"):
+            found = re.search(rf"^{re.escape(key)}\s+(.+?)\s*$", text, re.MULTILINE)
+            value = found.group(1).strip().strip("'\"").strip() if found else ""
+            if value and value not in ("?", "."):
+                name = value
+                break
+        found = re.search(r"^_entry\.id\s+(\S+)", text, re.MULTILINE)
+        entry = found.group(1) if found else None
+    else:
+        found = re.search(r"^COMPND.{4}.*?MOLECULE:\s*([^;\n]+)", text, re.MULTILINE)
+        if not found:
+            found = re.search(r"^TITLE\s+(.+?)\s*$", text, re.MULTILINE)
+        name = found.group(1).strip() if found else None
+        found = re.match(r"HEADER.{56}([0-9][A-Za-z0-9]{3})", text)
+        entry = found.group(1) if found else None
+    stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", path.name, flags=re.IGNORECASE)
+    if entry is None and re.fullmatch(r"[0-9][A-Za-z0-9]{3}", stem):
+        entry = stem
+    if not name:
+        return None
+    # The first of the molecules it names, cut short between words.
+    name = name.split(",")[0].strip()
+    if len(name) > NAMED:
+        words = name[:NAMED + 1].split()[:-1] or [name[:NAMED]]
+        while len(words) > 1 and words[-1].upper() in _PLAIN:
+            words.pop()
+        name = " ".join(words)
+    if name.isupper():
+        def readable(piece: str) -> str:
+            letters = re.sub(r"[^A-Z]", "", piece)
+            short = len(letters) <= 4 and letters not in _PLAIN
+            return piece if short or any(ch.isdigit() for ch in piece) else piece.lower()
+
+        words = ("-".join(readable(piece) for piece in word.split("-")) for word in name.split())
+        name = " ".join(words)
+        name = name[:1].upper() + name[1:]
+    return f"{name} ({entry.upper()})" if entry else name
 
 
 def _name(node: NodeSpec) -> str:

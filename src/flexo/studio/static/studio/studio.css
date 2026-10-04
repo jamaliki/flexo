@@ -478,7 +478,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .select:focus-visible, .palette-pick:focus-visible, .type-pick:focus-visible, .select.menu-open, .palette-pick.menu-open, .type-pick.menu-open, .combo.menu-open > .input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
 .select > span, .palette-pick > span:not(.palette-strip), .type-pick > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select > svg, .palette-pick > svg:last-child, .type-pick > svg:last-child { width: 14px; height: 14px; flex: none; color: var(--ink-3); }
-.select.default > span { color: var(--ink-3); }
 /* A pop-up as narrow as its icon: what it is set to is in its tooltip and its menu. */
 .select.icon-select { width: auto; gap: 2px; padding: 0 4px 0 6px; }
 .select.icon-select > span { flex: none; display: grid; place-items: center; overflow: visible; }
@@ -591,6 +590,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .markup-tools, .rt-bar { display: flex; align-items: center; gap: 1px; padding: 3px; border-radius: 8px; background: var(--raised); box-shadow: var(--shadow-2), 0 0 0 1px var(--line); }
 .markup-tools button, .rt-bar button { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; font: var(--text-body); line-height: 1; }
 .markup-tools button:hover, .rt-bar button:hover { background: var(--sunken); }
+/* The ring of the tool with the keys inside the bar's edge, never cut off by it (its last swatch). */
+.markup-tools button:focus-visible, .rt-bar button:focus-visible, .rt-bar button[data-keyed]:focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .markup-tools button svg, .rt-bar button svg { width: 14px; height: 14px; }
 .markup-tools .tool-code, .rt-bar .tool-code { font: 11px var(--mono); }
 .markup-tools .tool-maths, .rt-bar .tool-maths { font-family: Georgia, serif; }
@@ -694,9 +695,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog .switch input:checked + .track { background: var(--accent); box-shadow: none; }
 .dialog .switch input:checked + .track::before { content: ""; position: absolute; inset: 0; background: var(--accent-ink); -webkit-mask: var(--tick) center / 11px no-repeat; mask: var(--tick) center / 11px no-repeat; }
 
-/* Under a sheet's backdrop (.scrim), dimmed with the window: nothing floats over a sheet; and
-   under a menu (z 50), never covering one. */
+/* Under a menu (z 50), never covering one; and out of sight while a sheet is open (its time
+   standing still, ui.js): nothing floats over a sheet, nor peeks from under it. */
 .toasts { position: fixed; z-index: 45; bottom: 16px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+body:has(.scrim:not(.palette-scrim)) .toasts { visibility: hidden; }
 .toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; background: var(--toast); color: var(--toast-ink); border: 1px solid var(--toast-line); padding: 8px 12px; border-radius: var(--radius); box-shadow: var(--shadow-2); animation: rise 0.18s ease-out; max-width: min(640px, 90vw); }
 .toast.error { background: var(--toast-error); color: var(--toast-error-ink); }
 .toast.error svg { color: inherit; }

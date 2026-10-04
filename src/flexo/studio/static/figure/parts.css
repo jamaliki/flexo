@@ -9,6 +9,9 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* A chosen part's frame is where the part is, at once: it never glides there. */
 .fig-mark { position: absolute; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
 .fig-mark.group { background: transparent; border-style: dashed; }
+/* What a shape with no words is, faintly, where its words will go: a grey that reads on the
+   drawing's light shapes and its dark ones alike. */
+.fig-wordless { position: absolute; transform: translate(-50%, -50%); pointer-events: none; white-space: nowrap; color: rgb(128 126 136 / 0.85); line-height: 1; font-style: normal; }
 .fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; background: var(--raised); border: 1.5px solid var(--accent); border-radius: 2px; touch-action: none; }
 .fig-size::before { content: ""; position: absolute; inset: -6px; }
 .fig-size:hover { background: var(--accent); }
@@ -45,7 +48,9 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-inline.in-place .textarea:focus { box-shadow: none; outline: none; }
 .fig-inline.in-place .markup-tools { position: absolute; bottom: calc(100% + 8px); left: 50%; right: auto; transform: translateX(-50%); opacity: 1; padding: 3px; background: var(--raised); border-radius: 8px; box-shadow: var(--shadow-2), 0 0 0 1px var(--line); white-space: nowrap; width: max-content; }
 /* A part added, standing where it will be drawn until it is, in the look of the one before. */
-.fig-standing { position: absolute; z-index: 19; pointer-events: none; box-sizing: border-box; border: 1.5px solid var(--line-strong); border-radius: 6px; background: var(--raised); animation: pop 0.1s ease-out; }
+.fig-standing { position: absolute; z-index: 19; pointer-events: none; box-sizing: border-box; border: 1.5px solid var(--line-strong); border-radius: 6px; background: var(--raised); animation: fig-stand 0.12s ease-out; }
+/* Solid from its first frame: it grows into place, never fading in over what is beside it. */
+@keyframes fig-stand { from { transform: scale(0.94); } }
 /* Done with before its part is drawn, the words wait where they were typed. */
 .fig-inline.kept { pointer-events: none; box-shadow: none; }
 .fig-inline.kept .textarea { caret-color: transparent; }
@@ -127,6 +132,21 @@ details.advanced > .inner { margin-top: 10px; }
 .records-table .input, .records-table .select { height: 26px; font: var(--text-small); padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
 .records-table .select { gap: 2px; padding-right: 3px; }
 .records-table .cell { display: contents; }
+/* A wide table's rows as cards: each cell under its name, as many to a line as there is room. */
+.records-cards { display: grid; gap: 6px; }
+.records-card { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 5px 6px; padding: 6px 30px 7px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); }
+.records-card > .btn { position: absolute; top: 3px; right: 3px; }
+.records-cell { display: grid; gap: 2px; min-width: 0; align-content: start; }
+.records-cell.wide { grid-column: span 2; }
+.records-cell .records-head { padding: 0; }
+.records-cell .cell { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.records-cell .cell > .input { flex: 1; }
+.records-cards .input, .records-cards .select { height: 26px; font: var(--text-small); padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
+.records-cards .select { gap: 2px; padding-right: 3px; }
+.records-cards .number-field { height: 26px; }
+.records-cards .number-field > .input { height: 100%; padding-left: 6px; }
+.records-cards .number-field .unit { display: none; }
+.records-cards .number-field .steppers { margin: 0 2px 0 3px; width: 12px; height: 20px; }
 .field.records { gap: 6px; }
 .field.records > .btn { justify-self: start; }
 /* A switch's setting, as the Mac's settings set one out: its name at the left, the switch at

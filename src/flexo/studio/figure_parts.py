@@ -218,18 +218,8 @@ def _genetics() -> list[dict[str, Any]]:
             "Plasmid",
             "Biology",
             "A circular plasmid map with features placed by base pair",
-            {
-                "label": "pExample",
-                "properties": {
-                    "length": 3000,
-                    "features": [
-                        {"type": "promoter", "label": "pLac", "start": 120, "end": 200},
-                        {"type": "cds", "label": "GFP", "start": 220, "end": 940},
-                        {"type": "origin", "label": "ColE1", "start": 1400, "end": 1990},
-                        {"type": "cds", "label": "AmpR", "start": 2100, "end": 2960, "strand": "-"},
-                    ],
-                },
-            },
+            # Its own features to be added: no example's drawn into a figure.
+            {"label": "Plasmid", "properties": {"length": 3000}},
             [
                 _field("properties.length", "Length (bp)", "integer", min=1),
                 _field(
@@ -281,18 +271,8 @@ def _proteins() -> list[dict[str, Any]]:
             "Protein",
             "Biology",
             "Domains, sites and secondary structure along a protein",
-            {
-                "label": "Kinase",
-                "properties": {
-                    "length": 420,
-                    "features": [
-                        {"type": "domain", "label": "SH3", "start": 20, "end": 80},
-                        {"type": "domain", "label": "SH2", "start": 95, "end": 185},
-                        {"type": "domain", "label": "Kinase", "start": 220, "end": 400},
-                        {"type": "mutation", "label": "T315I", "at": 315},
-                    ],
-                },
-            },
+            # Its own domains and sites to be added: no example's drawn into a figure.
+            {"label": "Protein", "properties": {"length": 300}},
             [
                 _field("properties.length", "Length (Residues)", "integer", min=1),
                 _field(
@@ -397,16 +377,8 @@ def _bench() -> list[dict[str, Any]]:
             "Plate",
             "Biology",
             "A multiwell plate with wells grouped by condition",
-            {
-                "label": "Plate layout",
-                "properties": {
-                    "wells": 96,
-                    "groups": [
-                        {"wells": "A1-A12", "label": "Control"},
-                        {"wells": "B-D", "label": "Treated"},
-                    ],
-                },
-            },
+            # Its own groups of wells to be added: no example's drawn into a figure.
+            {"label": "Plate", "properties": {"wells": 96}},
             [
                 _field("properties.wells", "Wells", "choice", options=sorted(PLATES)),
                 _field(

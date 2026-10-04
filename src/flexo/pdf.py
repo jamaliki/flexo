@@ -405,9 +405,11 @@ class _Content:
             shown.append(f"<{cid:04X}>")
             advance += width / upem * size
         stretch = 100.0 * (right - left) / advance if advance > 0 else 100.0
+        # Within q ... Q: the render mode and scaling are graphics state, which outlasts ET,
+        # and would leave every word after these invisible too.
         self.ops.append(
-            f"BT 3 Tr /{font.name} 1 Tf {_n(stretch)} Tz {_n(size)} 0 0 {_n(-size)} {_n(left)} "
-            f"{_n(bottom - 0.2 * size)} Tm [{''.join(shown)}] TJ ET"
+            f"q BT 3 Tr /{font.name} 1 Tf {_n(stretch)} Tz {_n(size)} 0 0 {_n(-size)} {_n(left)} "
+            f"{_n(bottom - 0.2 * size)} Tm [{''.join(shown)}] TJ ET Q"
         )
 
     def paint(self, paint: Paint, segments: Sequence[Segment]) -> None:
@@ -482,9 +484,10 @@ class _Content:
         font = self.writer.font(run.face, run.weight)
         gid = hb_font(run.face, run.weight).get_nominal_glyph(ord(" ")) or 0
         cid, _ = font.use(gid, " ")
+        # Within q ... Q, so the words after it are drawn (see ``hidden_words``).
         self.ops.append(
-            f"BT 3 Tr /{font.name} 1 Tf {_n(run.size)} 0 0 {_n(-run.size)} {_n(x)} "
-            f"{_n(run.baseline)} Tm <{cid:04X}> Tj ET"
+            f"q BT 3 Tr /{font.name} 1 Tf {_n(run.size)} 0 0 {_n(-run.size)} {_n(x)} "
+            f"{_n(run.baseline)} Tm <{cid:04X}> Tj ET Q"
         )
 
     def run(self, run: Run) -> None:
