@@ -13,6 +13,7 @@ from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
+from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
 from flexo.routing.aside import Aside, arrowhead_outline, harpoon_offset
@@ -30,7 +31,13 @@ from flexo.svg import (
     rounded_polyline_path,
     xml_document,
 )
-from flexo.svg_resources import add_definitions, add_metadata, embed_fonts, head_marker_id
+from flexo.svg_resources import (
+    add_definitions,
+    add_metadata,
+    embed_fonts,
+    head_marker_id,
+    marker_paint,
+)
 from flexo.text import title_typography
 from flexo.theme import retheme_svg as retheme_svg
 from flexo.themes import figure_palette, figure_style
@@ -99,7 +106,7 @@ def emit_svg(
     from flexo.themes import with_tone_roles
 
     paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(semantic, layout_style))
-    fonts = add_definitions(root, layout_style, paint_palette, _heads(routed))
+    fonts = add_definitions(root, layout_style, paint_palette, _heads(routed, paint_palette))
     background = layer(root, "layer.background", "Background")
     # The page is transparent unless asked for: the rectangle stays, unpainted,
     # so an editor can still fill it.
@@ -135,7 +142,7 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
     tone written as a number (``tone=3``) takes that colour outright.
     """
 
-    from flexo.components import node_tone
+    from flexo.components import NEUTRAL_TONES, node_tone
     from flexo.drawn import DRAWN_KINDS, drawn_tones
     from flexo.themes import TONE_COUNT
 
@@ -152,9 +159,20 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
                 claimed.add(int(tone))
             elif tone not in names:
                 names.append(tone)
+    # A coloured line's tone is a tone of the figure's too: the same name, the same colour --
+    # but a line coloured takes no colour from the shapes: theirs stay as they were.
+    lines = [
+        line.tone
+        for line in (*figure.edges, *figure.nets)
+        if line.tone is not None and line.tone.lower() not in NEUTRAL_TONES
+    ]
+    names += [tone for tone in dict.fromkeys(lines) if not tone.isdigit() and tone not in names]
     free = [index for index in range(1, TONE_COUNT + 1) if index not in claimed] or [1]
     mapping = {name: free[position % len(free)] for position, name in enumerate(names)}
     mapping.update({str(index): (index - 1) % TONE_COUNT + 1 for index in claimed})
+    for tone in lines:
+        if tone.isdigit():
+            mapping.setdefault(tone, (int(tone) - 1) % TONE_COUNT + 1)
     return mapping
 
 
@@ -350,19 +368,46 @@ class _Hierarchy:
         )
 
 
-def _heads(routed: RoutedFigure) -> set[str]:
-    """The markers beyond the plain arrow that the figure's connectors end in."""
+def _heads(routed: RoutedFigure, palette: Palette) -> set[str]:
+    """The markers beyond the plain arrow that the figure's connectors end in: other
+    heads, and the plain heads of lines drawn in a colour of their own."""
 
     wanted: set[str] = set()
     for edge in routed.edges:
         spec = edge.spec
+        family = _line_paint(spec, palette)[1]
+        if family not in {"flow", "residual"} and spec.arrow != "none":
+            wanted |= {head_marker_id(family, "arrow"), head_marker_id(family, "arrow", start=True)}
         if spec.arrow == "reversible":
-            wanted.add(head_marker_id(spec.role, "harpoon"))
+            wanted.add(head_marker_id(family, "harpoon"))
         elif spec.head != "arrow" and spec.arrow != "none":
-            wanted.add(head_marker_id(spec.role, spec.head))
+            wanted.add(head_marker_id(family, spec.head))
             if spec.arrow == "both":
-                wanted.add(head_marker_id(spec.role, spec.head, start=True))
+                wanted.add(head_marker_id(family, spec.head, start=True))
+    for net in routed.nets:
+        family = _line_paint(net.spec, palette)[1]
+        if family not in {"flow", "residual"}:
+            wanted.add(head_marker_id(family, "arrow"))
     return wanted
+
+
+def _line_paint(spec: EdgeSpec | NetSpec, palette: Palette) -> tuple[str, str]:
+    """The paint role a line is drawn in, and the family of markers its heads are: its
+    tone's strong colour, the theme's grey (``neutral``), a residual's own, or the
+    connector ink. A tone the palette has no colour for is the connector's."""
+
+    tone = spec.tone
+    if tone is not None:
+        from flexo.components import NEUTRAL_TONES
+
+        if tone.lower() in NEUTRAL_TONES:
+            return marker_paint("neutral"), "neutral"
+        index = palette.tone_index(tone)
+        if index is not None:
+            return marker_paint(f"tone-{index}"), f"tone-{index}"
+    if spec.role == "residual":
+        return "residual", "residual"
+    return "connector", "flow"
 
 
 def _render_edge(
@@ -371,7 +416,7 @@ def _render_edge(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
-    paint_role = "residual" if edge.spec.role == "residual" else "connector"
+    paint_role, family = _line_paint(edge.spec, palette)
     group = element(
         parent,
         "g",
@@ -388,7 +433,7 @@ def _render_edge(
     if edge.spec.arrow == "reversible":
         # Two lines, one each way, each on the left of its own travel and
         # ending in half a head on its outer side: ⇌.
-        harpoon = f"url(#{head_marker_id(edge.spec.role, 'harpoon')})"
+        harpoon = f"url(#{head_marker_id(family, 'harpoon')})"
         head = style.arrow_length.points + style.connector_standoff.points
         standoff = style.connector_standoff.points
         line = edge.centerline
@@ -419,10 +464,10 @@ def _render_edge(
             "path",
             id=f"{edge.spec.id}.shaft",
             d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
-            marker__end=f"url(#{head_marker_id(edge.spec.role, edge.spec.head)})"
+            marker__end=f"url(#{head_marker_id(family, edge.spec.head)})"
             if heads
             else None,
-            marker__start=f"url(#{head_marker_id(edge.spec.role, edge.spec.head, start=True)})"
+            marker__start=f"url(#{head_marker_id(family, edge.spec.head, start=True)})"
             if edge.spec.arrow == "both"
             else None,
             stroke__linecap="round",
@@ -532,8 +577,7 @@ def _render_net(
     style: LayoutStyle,
     palette: Palette,
 ) -> None:
-    paint_role = "residual" if net.spec.role == "residual" else "connector"
-    marker_role = "residual" if net.spec.role == "residual" else "flow"
+    paint_role, marker_role = _line_paint(net.spec, palette)
     group = element(
         parent,
         "g",

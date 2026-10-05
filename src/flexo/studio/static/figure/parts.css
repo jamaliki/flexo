@@ -232,3 +232,17 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-standing.shaped { border-color: transparent; background: transparent; border-radius: 0; }
 /* A group being made: dashed round what it gathers, until it is drawn. */
 .fig-standing.group { border-style: dashed; border-color: var(--accent); background: transparent; }
+/* A shape let go on a line goes into it: the line lit as a chosen one is, and named. */
+.hit-line.target { stroke: var(--accent); stroke-opacity: 0.4; }
+.fig-splice-tag { position: absolute; z-index: 9; pointer-events: none; transform: translateY(-50%); white-space: nowrap; font: 600 10.5px/17px var(--font); color: var(--accent); background: var(--raised); padding: 0 6px; border-radius: 4px; border: 1px solid var(--accent-line); box-shadow: var(--shadow-2); }
+/* A shape dragged out of the palette, by the pointer; faint where it can't be let go. */
+.fig-tile-ghost { position: fixed; z-index: 1000; pointer-events: none; display: grid; justify-items: center; gap: 4px; min-width: 64px; padding: 8px 10px 6px; transform: translate(12px, 12px); box-sizing: border-box; border-radius: 8px; background: var(--raised); box-shadow: var(--shadow-2), 0 0 0 1px var(--accent-line); color: var(--ink); font: 500 11.5px/1.2 var(--font); white-space: nowrap; }
+.fig-tile-ghost .glyph { width: 26px; height: 26px; color: var(--accent); stroke-width: 1.1; }
+.fig-tile-ghost.astray { opacity: 0.55; }
+.fig-over-line { opacity: 0.6; }
+/* A part on its way, its words typed meanwhile on its stand-in (or what it is, faintly). */
+.fig-standing-words { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 2px 6px; text-align: center; white-space: pre-wrap; line-height: 1.2; }
+.fig-standing-words.hint > span:first-child { opacity: 0.45; }
+.fig-standing-words .caret { width: 1.5px; height: 1.15em; margin-left: 1px; background: var(--accent); animation: fig-caret 1s steps(1) infinite; }
+.fig-standing-words.hint .caret { order: -1; margin: 0 1px 0 0; }
+@keyframes fig-caret { 50% { opacity: 0; } }

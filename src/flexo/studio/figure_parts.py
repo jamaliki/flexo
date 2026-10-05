@@ -606,6 +606,7 @@ def _learning() -> list[dict[str, Any]]:
             {"label": "Features", "properties": {"cells": 6}},
             [_field("properties.cells", "Cells", "integer", min=1)],
         ),
+        _vector(),
         _part(
             "sequence",
             "Sequence",
@@ -629,6 +630,47 @@ def _learning() -> list[dict[str, Any]]:
         ),
     ]
     return parts
+
+
+RAMPS = {
+    "ramp-node": "Node Features",
+    "ramp-embedding": "Embedding",
+    "ramp-q": "Query",
+    "ramp-kv": "Key and Value",
+    "ramp-attended": "Attended Value",
+    "ramp-output": "Output",
+}
+"""The theme's ramps for a vector, by the value each is made for (``flexo.style.RAMP_ROLES``)."""
+
+
+def _vector() -> dict[str, Any]:
+    """A feature vector: a stack of cells shaded light to dark, its words under it. Its
+    colour is a tone, chosen as any shape's is (its cells shaded from that colour), or
+    one of the theme's ramps."""
+
+    return _part(
+        "vector",
+        "Vector",
+        "Machine Learning",
+        "A stack of cells shaded light to dark, its name under it: a feature value, Q, K or V",
+        {"label": "Vector", "properties": {"cells": 3}},
+        [
+            _field("properties.cells", "Cells", "integer", min=1, max=12, default=3),
+            _field("properties.columns", "Columns", "integer", min=1, max=6, default=1),
+            _field(
+                "properties.ramp",
+                "Ramp",
+                "choice",
+                options=["", *RAMPS],
+                labels={"": "Automatic", **RAMPS},
+                hint="The theme's shading for this kind of value; a colour above replaces it",
+                more=True,
+            ),
+        ],
+        common=[LABEL, TONE],
+        words=["cells", "stack", "glyph", "feature", "embedding", "query", "key", "value",
+               "q", "k", "v", "activation", "token"],
+    )
 
 
 def _basics() -> list[dict[str, Any]]:
@@ -756,6 +798,14 @@ def _cells() -> dict[str, Any]:
                     _column("label", "Label", hint="Name in the legend"),
                 ],
             ),
+            # Every row of the legend shown, or none: one switch, not a row at a time.
+            _field(
+                "properties.legend",
+                "Legend",
+                "bool",
+                default=True,
+                hint="Shows the symbols named in the key",
+            ),
             _field("properties.cell", "Cell Size", "number", unit="pt"),
             _field("properties.gap", "Gap", "number", hint="A fraction of a cell, 0 to 0.45"),
             _field(
@@ -787,10 +837,14 @@ def _cells() -> dict[str, Any]:
                 options=["top", "bottom"],
                 default="top",
             ),
-            _field("properties.ramp", "Ramp", "text", hint="Two hex colours, low then high"),
-            _field("properties.range", "Range", "text", hint="Low, high"),
+            _field(
+                "properties.ramp",
+                "Ramp",
+                "text",
+                hint="Two colours, low then high, with a space or comma between: #f7fbff #08306b",
+            ),
+            _field("properties.range", "Range", "text", hint="Low then high: 0 1"),
             _field("properties.values", "Show values", "bool", default=False),
-            _field("properties.legend", "Show legend", "bool", default=True),
         ],
     )
 
@@ -946,6 +1000,33 @@ EDGE_FIELDS = [
 ]
 
 
+SIDES = {"": "Automatic", "north": "Top", "east": "Right", "south": "Bottom", "west": "Left"}
+"""The sides of a shape, as a person says them."""
+
+NET_FIELDS = [
+    LABEL,
+    _field(
+        "via",
+        "Side",
+        "choice",
+        options=list(SIDES),
+        labels=SIDES,
+        hint="Where it meets its shape",
+        show={"kind": "merge"},
+    ),
+    _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
+    _field(
+        "rail",
+        "Shared Run",
+        "choice",
+        options=list(SIDES),
+        labels=SIDES,
+        hint="The side the branches meet along",
+    ),
+]
+"""A line that branches: its words, how it is drawn, and where its branches meet."""
+
+
 def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         # The figure's name is its file's; what the file calls it is kept under More.
@@ -1000,6 +1081,7 @@ def catalogue(catalog: dict[str, Any] | None = None) -> dict[str, Any]:
         "groups": GROUPS,
         "group_fields": GROUP_FIELDS,
         "edge_fields": EDGE_FIELDS,
+        "net_fields": NET_FIELDS,
         "figure_fields": figure_fields(catalog or {}),
     }
 

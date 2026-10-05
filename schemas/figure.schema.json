@@ -225,6 +225,7 @@
         "via": {"$ref": "#/$defs/side"},
         "shape": {"enum": ["auto", "orthogonal", "straight"]},
         "line": {"enum": ["solid", "dashed", "dotted"]},
+        "tone": {"type": ["string", "integer"]},
         "arrow": {"enum": ["end", "none", "both", "reversible"]},
         "head": {
           "enum": ["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"]
@@ -263,7 +264,8 @@
         "rail_at": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
         "via": {"$ref": "#/$defs/side"},
         "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"},
-        "line": {"enum": ["solid", "dashed", "dotted"]}
+        "line": {"enum": ["solid", "dashed", "dotted"]},
+        "tone": {"type": ["string", "integer"]}
       },
       "not": {
         "anyOf": [

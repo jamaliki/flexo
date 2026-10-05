@@ -784,9 +784,31 @@ def _publication_diagnostics(
     return tuple(diagnostics)
 
 
-def _tree_depth(root: ET.Element) -> int:
+def _tree_depth(root: ET.Element, *, grouped: bool = False) -> int:
+    """How deeply ``root`` nests its objects, beyond what the figure's own grouping asks.
+
+    Every group an author makes (a module, a row framed in it) is an Inkscape layer
+    holding a sublayer of its parts and one of its lines: two levels each, by design,
+    so a figure grouped in groups in groups is as deep as it was made. Those levels
+    are not the drawing's: only the first group counts, and what nests below it is
+    counted as if it had none -- so the check still finds a drawing whose own pieces
+    nest too deep, not a figure built as its author meant.
+    """
+
+    layer = root.get(f"{{{INKSCAPE_NS}}}groupmode") == "layer" and root.get(
+        "data-flexo-entity"
+    ) == "group"
+    own = 0 if layer and grouped else 1
     children = list(root)
-    return 1 if not children else 1 + max(_tree_depth(child) for child in children)
+    if not children:
+        return own
+    deepest = 0
+    for child in children:
+        holds = layer and str(child.get("id", "")).endswith((".components", ".connectors"))
+        depth = _tree_depth(child, grouped=grouped or layer)
+        # (A group's sublayers are its own: they count as its first did.)
+        deepest = max(deepest, depth - 1 if holds and grouped else depth)
+    return own + deepest
 
 
 def _same_direction(segment: Segment, expected_x: float, expected_y: float) -> bool:

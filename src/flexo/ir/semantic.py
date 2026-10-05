@@ -495,6 +495,11 @@ class EdgeSpec:
 
     line: LineStyle = "solid"
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
+    tone: str | None = None
+    """The colour the line and its arrowhead are drawn in: one of the palette's tones, by
+    number or by name as a component's ``tone`` is (``"3"``, ``"feedback"``), or
+    ``"neutral"`` for the theme's grey. Unset, the line is the theme's connector ink (a
+    residual's, its own). Paint only."""
     arrow: ArrowEnds = "end"
     """Where the arrowheads are: ``"end"`` (the target), ``"none"`` for an
     undirected link, or ``"both"``; ``"reversible"`` draws a reaction's two
@@ -587,6 +592,8 @@ class NetSpec:
 
     line: LineStyle = "solid"
     """How the net's lines are stroked; see ``EdgeSpec.line``."""
+    tone: str | None = None
+    """The colour the net's lines are drawn in; see ``EdgeSpec.tone``."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")

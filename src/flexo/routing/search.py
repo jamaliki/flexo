@@ -26,11 +26,15 @@ the straighter of two equally cheap routes.
 
 from __future__ import annotations
 
+import contextvars
 import heapq
 from bisect import bisect_left, bisect_right
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import count
 
+from flexo.draft import GivenUp, newer_wanted
 from flexo.geometry import Point, Rect
 
 EAST, WEST, SOUTH, NORTH = 0, 1, 2, 3
@@ -92,15 +96,47 @@ class Grid:
         *,
         boundary: Rect | None = None,
         outside_cost: float = 0.0,
+        window: tuple[Rect, ...] = (),
     ) -> None:
         self.xs = _merged(xs)
         self.ys = _merged(ys)
         self.zones = zones
         self.boundary = boundary
         self.outside_cost = outside_cost
+        # The cells a search may step to: all, or (given a ``window`` of rectangles) those
+        # within them -- within their bounds (least x, y, greatest x, y), and marked in
+        # ``inside`` by cell (x * rows + y).
+        rows = len(self.ys)
+        self.within = (0, 0, len(self.xs) - 1, rows - 1)
+        self.inside: bytearray | None = None
+        self.windowed = bool(window)
+        if window:
+            spans = [
+                (
+                    bisect_left(self.xs, rect.left - 1e-6),
+                    bisect_left(self.ys, rect.top - 1e-6),
+                    bisect_right(self.xs, rect.right + 1e-6) - 1,
+                    bisect_right(self.ys, rect.bottom + 1e-6) - 1,
+                )
+                for rect in window
+            ]
+            self.within = (
+                min(span[0] for span in spans),
+                min(span[1] for span in spans),
+                max(span[2] for span in spans),
+                max(span[3] for span in spans),
+            )
+            self.inside = bytearray(len(self.xs) * rows)
+            for left, top, right, bottom in spans:
+                for column in range(left, right + 1):
+                    start = column * rows
+                    self.inside[start + top : start + bottom + 1] = b"\x01" * (bottom - top + 1)
         self._row_zones: dict[int, list[tuple[float, float, float]]] = {}
         self._column_zones: dict[int, list[tuple[float, float, float]]] = {}
-        self._steps: dict[tuple[int, int, int], float] = {}
+        self._steps: dict[int, float] = {}
+        self.reached: tuple[int, int, int, int] | None = None
+        """The cells (least x, y, greatest x, y) searches priced a step out of, with their
+        ``extra`` or in a window: nothing beyond a step from them changed what they found."""
 
     def index(self, point: Point) -> tuple[int, int]:
         return _nearest(self.xs, point.x), _nearest(self.ys, point.y)
@@ -137,10 +173,24 @@ class Grid:
     def step_cost(self, ix: int, iy: int, heading: int) -> float:
         """The price of one grid step from ``(ix, iy)`` along ``heading``."""
 
-        key = (ix, iy, heading)
+        key = self._step(ix, iy, heading)
         cached = self._steps.get(key)
-        if cached is not None:
-            return cached
+        if cached is None:
+            cached = self._steps[key] = self._price(ix, iy, heading)
+        return cached
+
+    def _step(self, ix: int, iy: int, heading: int) -> int:
+        """The step from ``(ix, iy)`` along ``heading`` as a number, the same both ways."""
+
+        if heading == EAST:
+            return (ix * len(self.ys) + iy) << 1
+        if heading == WEST:
+            return ((ix - 1) * len(self.ys) + iy) << 1
+        if heading == SOUTH:
+            return ((ix * len(self.ys) + iy) << 1) | 1
+        return ((ix * len(self.ys) + iy - 1) << 1) | 1
+
+    def _price(self, ix: int, iy: int, heading: int) -> float:
         if heading in (EAST, WEST):
             other = ix + _DX[heading]
             low, high = sorted((self.xs[ix], self.xs[other]))
@@ -165,9 +215,7 @@ class Grid:
             )
         if outside:
             rate += self.outside_cost
-        value = (high - low) * rate
-        self._steps[key] = value
-        return value
+        return (high - low) * rate
 
     def route(
         self,
@@ -199,6 +247,7 @@ class Grid:
         bend: float,
         extra: StepPrice | None = None,
         alternatives: tuple[tuple[Point, float], ...] = (),
+        haste: float = 1.0,
     ) -> tuple[tuple[Point, ...], float]:
         """Cheapest route from any of ``sources`` to ``goal``, arriving heading ``arrive``.
 
@@ -208,126 +257,178 @@ class Grid:
 
         ``alternatives`` are further goals, each ``(point, surcharge)``: the
         route may end at any of them instead, paying the surcharge on top.
+
+        A ``haste`` above 1 weighs the distance still to go that much more: the route
+        found costs at most that many times the cheapest, found searching far less of
+        the grid (a draft's: flexo.draft).
         """
 
+        xs, ys = self.xs, self.ys
+        columns, rows = len(xs), len(ys)
         gx, gy = self.index(goal)
         endings = {(gx, gy): 0.0}
         for point, surcharge in alternatives:
             endings.setdefault(self.index(point), surcharge)
-        targets = [(self.xs[ex], self.ys[ey], charge) for (ex, ey), charge in endings.items()]
+        targets = [(xs[ex], ys[ey], charge) for (ex, ey), charge in endings.items()]
+        # (Cells, steps and states are numbered, for speed: a cell is ``x * rows + y``, a
+        # state ``(cell << 2 | heading) << 1 | turned``.)
+        finishing = {ex * rows + ey: charge for (ex, ey), charge in endings.items()}
 
         # The estimate depends only on the state's cell and heading, and a state is
         # pushed each time its cost improves: remember it rather than recompute it
         # against every goal (a long pin edge is many goals).
-        estimates: dict[tuple[float, float, int], float] = {}
-        single = targets[0] if len(targets) == 1 else None
+        estimates: dict[int, float] = {}
+        estimated = estimates.get
+        inf = float("inf")
+        bends = _minimum_bends
 
         def estimate_from(px: float, py: float, heading: int) -> float:
-            key = (px, py, heading)
-            known = estimates.get(key)
-            if known is None:
-                if single is not None:
-                    tx, ty, charge = single
-                    known = charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
-                else:
-                    known = min(
-                        charge + _heuristic(px, py, heading, tx, ty, arrive, bend)
-                        for tx, ty, charge in targets
-                    )
-                estimates[key] = known
-            return known
+            # The distance to the nearest goal, and the bends still needed to arrive.
+            found = inf
+            for tx, ty, charge in targets:
+                distance = abs(tx - px) + abs(ty - py)
+                if arrive is not None:
+                    distance = distance + bend * bends(px, py, heading, tx, ty, arrive)
+                if charge + distance < found:
+                    found = charge + distance
+            return found if haste == 1.0 else found * haste
 
         # A traffic price depends only on the step: remember it for the search.
-        priced: dict[tuple[int, int, int], float] = {}
-        xs, ys = self.xs, self.ys
-        columns, rows = len(xs), len(ys)
-        step_cost = self.step_cost
+        priced: dict[int, float] = {}
+        priced_of = priced.get
+        steps = self._steps
+        step_of = steps.get
+        price_of = self._price
+        dxs, dys, turns = _DX, _DY, _PERPENDICULAR
         push, pop = heapq.heappush, heapq.heappop
-        inf = float("inf")
         # A state is (x, y, heading, turned): ``turned`` says the last move was a
         # turn in place, and a second one there would reverse the route on itself.
         frontier: list[tuple[float, float, int, int, int, int, int]] = []
-        best: dict[tuple[int, int, int, int], float] = {}
+        best: dict[int, float] = {}
         best_of = best.get
-        previous: dict[tuple[int, int, int, int], tuple[int, int, int, int] | None] = {}
+        previous: dict[int, int | None] = {}
         serial = count()
         for point, heading, initial in sources:
             ix, iy = self.index(point)
             headings = (heading,) if heading is not None else (EAST, WEST, SOUTH, NORTH)
             for current in headings:
-                state = (ix, iy, current, 0)
+                state = ((ix * rows + iy) << 2 | current) << 1
                 if initial < best_of(state, inf):
                     best[state] = initial
                     previous[state] = None
                     estimate = initial + estimate_from(xs[ix], ys[iy], current)
                     push(frontier, (estimate, initial, next(serial), ix, iy, current, 0))
-        final: tuple[int, int, int, int] | None = None
+        final: int | None = None
         final_cost = inf
-        finished: dict[tuple[int, int, int, int], tuple[int, int, int, int]] = {}
-        finished_cost: dict[tuple[int, int, int, int], float] = {}
+        finished: dict[int, int] = {}
+        finished_cost: dict[int, float] = {}
         work = 0
         ceiling = _CEILING[0]
+        least_x, least_y, most_x, most_y = columns, rows, -1, -1
+        first_x, first_y, last_x, last_y = self.within
+        inside = self.inside
+        # (Where the search reached is kept where it says something: priced ink, or a window.)
+        tracked = extra is not None or self.windowed
+        # (A drawing given up for a newer one stops here: flexo.draft.)
+        newer = newer_wanted()
         while frontier:
             _, cost, _, ix, iy, heading, turned = pop(frontier)
             work += 1
-            if ceiling is not None and not work & 1023 and _WORK[0] + work > ceiling:
-                _WORK[0] += work
-                raise TooDear
+            if not work & 1023:
+                if ceiling is not None and _WORK[0] + work > ceiling:
+                    _WORK[0] += work
+                    raise TooDear
+                if newer is not None and newer():
+                    _WORK[0] += work
+                    raise GivenUp
+            cell = ix * rows + iy
             if turned == _DONE:
-                final, final_cost = (ix, iy, heading, 0), cost
-                final = finished[final]
+                final, final_cost = finished[cell << 2 | heading], cost
                 break
-            state = (ix, iy, heading, turned)
+            state = (cell << 2 | heading) << 1 | turned
             if cost > best_of(state, inf) + 1e-9:
                 continue
-            surcharge = endings.get((ix, iy))
+            surcharge = finishing.get(cell)
             if surcharge is not None and (arrive is None or heading == arrive):
                 # Finishing is one more move, priced by where it finishes.
-                done = (ix, iy, heading, 0)
+                done = cell << 2 | heading
                 total = cost + surcharge
                 if total < finished_cost.get(done, inf):
                     finished_cost[done] = total
                     finished[done] = state
                     push(frontier, (total, total, next(serial), ix, iy, heading, _DONE))
-            nx, ny = ix + _DX[heading], iy + _DY[heading]
-            if 0 <= nx < columns and 0 <= ny < rows:
-                price = step_cost(ix, iy, heading)
+            nx, ny = ix + dxs[heading], iy + dys[heading]
+            if (
+                first_x <= nx <= last_x
+                and first_y <= ny <= last_y
+                and (inside is None or inside[nx * rows + ny])
+            ):
+                # The step's price, the same whichever way it is taken.
+                if heading < SOUTH:
+                    step = ((ix if heading == EAST else nx) * rows + iy) << 1
+                else:
+                    step = (ix * rows + (iy if heading == SOUTH else ny)) << 1 | 1
+                price = step_of(step)
+                if price is None:
+                    price = steps[step] = price_of(ix, iy, heading)
+                if tracked:
+                    if ix < least_x:
+                        least_x = ix
+                    if ix > most_x:
+                        most_x = ix
+                    if iy < least_y:
+                        least_y = iy
+                    if iy > most_y:
+                        most_y = iy
                 if extra is not None:
-                    step = (ix, iy, heading)
-                    charge = priced.get(step)
+                    toward = cell << 2 | heading
+                    charge = priced_of(toward)
                     if charge is None:
-                        charge = extra(self, ix, iy, heading)
-                        priced[step] = charge
+                        charge = priced[toward] = extra(self, ix, iy, heading)
                     price += charge
-                following = (nx, ny, heading, 0)
                 total = cost + price
+                ahead = (nx * rows + ny) << 2 | heading
+                following = ahead << 1
                 if total + 1e-9 < best_of(following, inf):
                     best[following] = total
                     previous[following] = state
-                    estimate = total + estimate_from(xs[nx], ys[ny], heading)
-                    push(frontier, (estimate, total, next(serial), nx, ny, heading, 0))
+                    known = estimated(ahead)
+                    if known is None:
+                        known = estimates[ahead] = estimate_from(xs[nx], ys[ny], heading)
+                    push(frontier, (total + known, total, next(serial), nx, ny, heading, 0))
             if not turned:
                 total = cost + bend
-                for turn in _PERPENDICULAR[heading]:
-                    following = (ix, iy, turn, 1)
+                for turn in turns[heading]:
+                    facing = cell << 2 | turn
+                    following = facing << 1 | 1
                     if total + 1e-9 < best_of(following, inf):
                         best[following] = total
                         previous[following] = state
-                        estimate = total + estimate_from(xs[ix], ys[iy], turn)
-                        push(frontier, (estimate, total, next(serial), ix, iy, turn, 1))
+                        known = estimated(facing)
+                        if known is None:
+                            known = estimates[facing] = estimate_from(xs[ix], ys[iy], turn)
+                        push(frontier, (total + known, total, next(serial), ix, iy, turn, 1))
         _WORK[0] += work
+        if most_x >= 0:
+            if self.reached is not None:
+                least_x, least_y = min(least_x, self.reached[0]), min(least_y, self.reached[1])
+                most_x, most_y = max(most_x, self.reached[2]), max(most_y, self.reached[3])
+            self.reached = (least_x, least_y, most_x, most_y)
         if ceiling is not None and _WORK[0] > ceiling:
             raise TooDear
         if final is None:
             raise RuntimeError("routing grid is disconnected")
-        cells: list[tuple[int, int]] = []
-        walk: tuple[int, int, int, int] | None = final
+        counting = _COUNTING.get()
+        if counting is not None:
+            counting.append(work)
+        cells: list[int] = []
+        walk: int | None = final
         while walk is not None:
-            if not cells or cells[-1] != walk[:2]:
-                cells.append(walk[:2])
+            if not cells or cells[-1] != walk >> 3:
+                cells.append(walk >> 3)
             walk = previous[walk]
         cells.reverse()
-        return simplify(tuple(self.point(ix, iy) for ix, iy in cells)), final_cost
+        return simplify(tuple(self.point(*divmod(cell, rows)) for cell in cells)), final_cost
 
 
 type StepPrice = "callable[[Grid, int, int, int], float]"
@@ -349,19 +450,45 @@ def ceiling(limit: int | None) -> None:
     _CEILING[0] = limit
 
 
+_COUNTING: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "flexo_counting", default=None
+)
+
+
+@contextmanager
+def counted() -> Iterator[list[int]]:
+    """The work each search made within took, in order (for ``spend``)."""
+
+    works: list[int] = []
+    token = _COUNTING.set(works)
+    try:
+        yield works
+    finally:
+        _COUNTING.reset(token)
+
+
+def spend(works: list[int]) -> None:
+    """Count searches as made that were not, their routes known (``counted`` when they were
+    made): the search work goes up as theirs did, and gives up (``TooDear``) where theirs
+    would have -- so what a budget of work allows is the same either way."""
+
+    limit = _CEILING[0]
+    for work in works:
+        if limit is not None:
+            # (A search asks every 1024 steps whether it is past the ceiling, and at its end.)
+            asked = max(1024, ((limit - _WORK[0]) // 1024 + 1) * 1024)
+            if asked <= work:
+                _WORK[0] += asked
+                raise TooDear
+        _WORK[0] += work
+        if limit is not None and _WORK[0] > limit:
+            raise TooDear
+
+
 def search_work() -> int:
     """How many search steps have been taken so far (see ``router.REPAIR_WORK``)."""
 
     return _WORK[0]
-
-
-def _heuristic(
-    px: float, py: float, heading: int, gx: float, gy: float, arrive: int | None, bend: float
-) -> float:
-    distance = abs(gx - px) + abs(gy - py)
-    if arrive is None:
-        return distance
-    return distance + bend * _minimum_bends(px, py, heading, gx, gy, arrive)
 
 
 def simplify(points: tuple[Point, ...]) -> tuple[Point, ...]:

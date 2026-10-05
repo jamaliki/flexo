@@ -273,6 +273,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["shape"] = edge.shape
     if edge.line != "solid":
         result["line"] = edge.line
+    if edge.tone is not None:
+        result["tone"] = edge.tone
     if edge.arrow != "end":
         result["arrow"] = edge.arrow
     if edge.head != "arrow":
@@ -313,6 +315,8 @@ def _net_data(net: NetSpec) -> dict[str, object]:
         result["joint"] = net.joint
     if net.line != "solid":
         result["line"] = net.line
+    if net.tone is not None:
+        result["tone"] = net.tone
     return result
 
 
@@ -494,6 +498,7 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         via=Side(data["via"]) if data.get("via") else None,
         shape=data.get("shape", "auto"),
         line=data.get("line", "solid"),
+        tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),
         head=data.get("head", "arrow"),
         back_label=_label(data.get("back_label", "")),
@@ -513,8 +518,17 @@ def _net(data: dict[str, Any], reference: Callable[[str, str], PortRef]) -> NetS
         rail_at=data.get("rail_at"),
         joint=data.get("joint", "auto"),
         line=data.get("line", "solid"),
+        tone=_tone(data.get("tone")),
         via=Side(data["via"]) if data.get("via") else None,
     )
+
+
+def _tone(value: object) -> str | None:
+    """A line's tone as written: a number (``tone: 3``) is read as the tone it names."""
+
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
 
 
 def _waypoint(data: dict[str, Any]) -> Waypoint:

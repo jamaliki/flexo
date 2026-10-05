@@ -13,6 +13,7 @@ import itertools
 from collections import defaultdict, deque
 from dataclasses import replace
 
+from flexo.components import vector_ink_depth
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.geometry import Point, Rect, Side, segments
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -646,6 +647,9 @@ def _depth(
     """How far into ``node`` from ``point`` on its box, going ``inward``, its outline is."""
 
     spec = node.measured.spec
+    if spec.kind == "vector":
+        # A vector with its words under it: carried on to its cells (vector_ink_depth).
+        return vector_ink_depth(spec, node.bounds, node.measured.label, style, point, inward)
     if spec.kind not in SHAPE_KINDS:
         return 0.0
     return ink_depth(spec.kind, node.bounds, node.measured.label, style, point, inward)

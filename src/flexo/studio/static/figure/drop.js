@@ -223,9 +223,66 @@ function ownLine(model, root, all, point, id) {
 // Whether letting go at ``place`` leaves the part where it is.
 export function stays(model, place, id) {
   if (!place) return true;
-  if (place.kind === "line") return false;
+  // Put into a line, it is never where it was.
+  if (place.kind === "line" || place.kind === "splice") return false;
   // Lined up as it is drawn already (under that part, or centred as it is): it stays.
   if (place.kind === "align") return Boolean(place.here);
   const holder = model.groups.find((group) => (group.children || []).includes(id));
   return holder?.id === place.parent && holder.children.indexOf(id) === place.index;
+}
+
+// The line a part let go at `point` would be put into: one of `lines` ({ id, from, to,
+// points }, each a line's path as points along it, in the page's pixels) that passes within
+// `reach` of the point along its body -- away from its ends, where a part let go goes beside
+// the part there instead. Not a line of the part's own (`id`, from or to it). The answer is
+// null, or { id, from, to, at }: the line, and the point on it nearest the pointer.
+const REACH = 9;
+export function lineAt(lines, point, id = null, reach = REACH) {
+  let best = null;
+  for (const line of lines) {
+    if (id !== null && (line.from === id || line.to === id)) continue;
+    const points = line.points || [];
+    if (points.length < 2) continue;
+    // Along the line, how far each point is from its start.
+    const along = [0];
+    for (let at = 1; at < points.length; at += 1) along.push(along[at - 1] + Math.hypot(points[at].x - points[at - 1].x, points[at].y - points[at - 1].y));
+    const length = along[along.length - 1];
+    if (length < 8) continue;
+    // Its ends (where it leaves a part, and where it meets one) are not its body: a short
+    // line's middle third, a long one's all but 18 pixels at each end.
+    const end = Math.min(18, length / 3);
+    for (let at = 1; at < points.length; at += 1) {
+      const a = points[at - 1], b = points[at];
+      const span = Math.hypot(b.x - a.x, b.y - a.y);
+      const t = span ? Math.max(0, Math.min(1, ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / (span * span))) : 0;
+      const near = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      const off = Math.hypot(point.x - near.x, point.y - near.y);
+      const from = along[at - 1] + span * t;
+      if (off > reach || from < end || from > length - end) continue;
+      if (!best || off < best.off) best = { id: line.id, from: line.from, to: line.to, at: near, off };
+    }
+  }
+  if (!best) return null;
+  const { off, ...found } = best;
+  return found;
+}
+
+// The group a point is in, as a part let go there would be: the smallest whose frame holds
+// it (not the part itself, nor a group inside it) -- else the figure's root.
+export function groupAt(model, boxes, point, id = null) {
+  const parent = new Map();
+  for (const group of model.groups) for (const child of group.children || []) parent.set(child, group.id);
+  const inside = (at) => {
+    for (let here = at; here; here = parent.get(here)) if (here === id) return true;
+    return false;
+  };
+  let best = null;
+  for (const group of model.groups) {
+    if (group.id === model.root || inside(group.id)) continue;
+    const box = boxes.get(group.id);
+    if (!box || point.x < box.left - PAD || point.x > box.right + PAD || point.y < box.top - PAD || point.y > box.bottom + PAD) continue;
+    const area = (box.right - box.left) * (box.bottom - box.top);
+    if (!best || area < best.area) best = { id: group.id, area };
+  }
+  return best ? best.id : model.root;
 }

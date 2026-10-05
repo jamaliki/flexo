@@ -371,3 +371,30 @@ def test_a_part_lined_up_with_another_reads_and_writes_back() -> None:
     written = figure_to_document(figure)
     assert next(node for node in written["nodes"] if node["id"] == "e")["align_with"] == "a"
     assert "align_with" not in next(node for node in written["nodes"] if node["id"] == "a")
+
+
+def test_a_line_and_a_net_keep_their_tone_through_their_document() -> None:
+    """A line's colour is a tone, by number or by name, written as it was read: a number
+    written bare (``tone: 3``) is that tone."""
+
+    data = document()
+    data["edges"][0]["tone"] = 3
+    data["nodes"].append({"id": "other", "label": "Other"})
+    data["groups"][0]["children"].append("other")
+    data["nets"] = [
+        {
+            "id": "both",
+            "kind": "fan-out",
+            "sources": ["input"],
+            "targets": ["projection", "other"],
+            "tone": "feedback",
+        }
+    ]
+    figure = parse_figure(data)
+    assert figure.edges[0].tone == "3"
+    assert figure.nets[0].tone == "feedback"
+    again = parse_figure(yaml.safe_load(dump_figure(figure)))
+    assert again.edges[0].tone == "3" and again.nets[0].tone == "feedback"
+    # Unset, nothing is written.
+    data["edges"][0].pop("tone")
+    assert "tone" not in figure_to_document(parse_figure(data))["edges"][0]

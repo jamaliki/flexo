@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from flexo.compiler import Compilation, compile_figure
+from flexo.draft import drafting
 from flexo.drawing import ink_bounds, read_drawing
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation
@@ -79,13 +80,16 @@ def fit_in_box(
     turn: bool = True,
     pad: float = 2.0,
     keep: str | None = None,
+    fold: bool | None = None,
 ) -> BoxFit:
     """``figure`` laid out to fill a ``width`` by ``height`` box (points).
 
     ``words`` is the size the figure's words are laid out for (the theme's size
     by default): the figure is compiled at the width where they are that size
     once drawn across the box. ``largest`` caps how far it is scaled up (twice
-    ``words`` by default). ``turn=False`` keeps the figure as written.
+    ``words`` by default). ``turn=False`` keeps the figure as written -- and unfolded,
+    unless ``fold`` (which is ``turn`` unless given) says it may still be folded onto
+    two lines: a figure kept the way it runs is not kept from folding.
 
     ``keep`` names a layout this returned before (its ``layout``): the figure is
     drawn that way alone, in one compile, rather than every way being tried -- as an
@@ -117,6 +121,16 @@ def fit_in_box(
         kept = _kept(keep, candidates, width, height, most, base, pad)
         if kept is not None:
             return kept
+    # Laid out afresh, every way, a figure is drawn in full: a draft is only ever of the
+    # layout kept (flexo.draft), never what is found best.
+    with drafting(False):
+        folding = turn if fold is None else fold
+        return _afresh(spec, style, candidates, width, height, most, least, base, pad, folding)
+
+
+def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold) -> BoxFit:
+    """The best of ``candidates`` for the box (see ``fit_in_box``)."""
+
     # Measuring is nearly free and routing is not: rank the layouts by the scale
     # their measured size allows (routing only adds to it, so this is an upper
     # bound), compile the written one first, and skip any that cannot win.
@@ -151,7 +165,7 @@ def fit_in_box(
         (fit for fit in usable if fit.scale * PREFERENCE >= top_scale),
         key=lambda fit: order.index(fit.layout),
     )
-    if turn and best.scale < least:
+    if fold and best.scale < least:
         # Smaller than the words were meant to be: fold long rows and columns onto
         # two lines, if that sets them clearly larger. Routing a folded figure is
         # costly, so only the most promising fold is tried -- and, should its lines

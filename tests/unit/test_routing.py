@@ -1342,6 +1342,119 @@ def test_a_search_past_its_ceiling_gives_up_and_a_repair_trial_with_it() -> None
     assert compile_figure(vertical_slice()).document.text  # no ceiling: routed in full
 
 
+def _pipeline(last: str = "Report") -> FigureSpec:
+    """Two rows of steps, each step checked below it, and one check feeding a later step."""
+
+    with Figure("pipeline") as figure:
+        column = figure.root.column("stages")
+        top, bottom = column.row("top"), column.row("bottom")
+        names = ["Load", "Clean", "Split", "Train", "Tune", last]
+        steps = [top.block(f"a{index}", label=name) for index, name in enumerate(names)]
+        checks = [bottom.block(f"b{index}", label=f"Check {index}") for index in range(6)]
+        for one, two in itertools.pairwise(steps):
+            figure.connect(one, two)
+        for step, check in zip(steps, checks, strict=True):
+            figure.connect(step, check)
+        figure.connect(checks[0], steps[2])
+    return figure.spec
+
+
+def test_a_draft_of_a_figure_drawn_before_is_drawn_as_it_was_and_routes_next_to_nothing() -> None:
+    from flexo.draft import drafting
+    from flexo.routing.search import search_work
+
+    for spec in (_pipeline(), gallery_figure("modelangelo-gnn")):
+        before = search_work()
+        settled = compile_figure(spec)
+        full = search_work() - before
+        before = search_work()
+        with drafting():
+            draft = compile_figure(spec)
+        assert draft.document.text == settled.document.text, spec.id
+        assert search_work() - before < full / 100, spec.id
+
+
+def test_a_draft_keeps_every_line_nothing_changed_beside() -> None:
+    from flexo.draft import drafting
+    from flexo.routing.search import search_work
+
+    def shapes(compiled) -> dict:
+        # Each line from its own start: the figure is centred again as it grows.
+        return {
+            edge.spec.id: [
+                (round(point.x - edge.centerline[0].x, 3), round(point.y - edge.centerline[0].y, 3))
+                for point in edge.centerline
+            ]
+            for edge in compiled.routed.edges
+        }
+
+    renamed = compile_figure(_pipeline("Write the report")).document.text
+    before = search_work()
+    settled = compile_figure(_pipeline())
+    full = search_work() - before
+    # The last step renamed longer: its box grows, and everything about it moves along.
+    before = search_work()
+    with drafting():
+        draft = compile_figure(_pipeline("Write the report"))
+    assert search_work() - before < full / 20
+    assert shapes(draft) == shapes(settled)
+    assert lint_compilation(draft).ok
+    # Drawn in full once the changes stop, as it is whatever drafts came before.
+    assert compile_figure(_pipeline("Write the report")).document.text == renamed
+
+
+def test_searches_counted_as_made_run_out_of_work_where_they_would_have() -> None:
+    from flexo.routing.search import EAST, Grid, TooDear, Zone, ceiling, counted, search_work, spend
+
+    # A wall most of the way down: a search past it goes round, a few thousand steps.
+    lines = [float(step * 5) for step in range(81)]
+    grid = Grid(lines, lines, (Zone(Rect(195.0, 0.0, 10.0, 380.0), 50.0),))
+
+    def search() -> None:
+        for goal in (Point(400.0, 0.0), Point(400.0, 200.0), Point(300.0, 100.0)):
+            grid.route(Point(0.0, 0.0), EAST, goal, None, bend=10.0)
+
+    with counted() as works:
+        search()
+    assert len(works) == 3 and max(works) > 2048
+    for limit in (500, 1500, works[0] + 2000, works[0] + 3000, sum(works) - 1, sum(works)):
+        outcomes = []
+        for run in (search, lambda: spend(works)):
+            before = search_work()
+            ceiling(before + limit)
+            try:
+                run()
+                gave_up = False
+            except TooDear:
+                gave_up = True
+            finally:
+                ceiling(None)
+            outcomes.append((gave_up, search_work() - before))
+        assert outcomes[0] == outcomes[1], limit
+
+
+def test_a_drawing_given_up_for_a_newer_one_stops_routing() -> None:
+    from flexo.draft import GivenUp, given_up_when
+    from flexo.routing.search import search_work
+
+    asked = []
+
+    def newer() -> bool:
+        # Wanted once the drawing has begun: its searches ask, and it stops.
+        asked.append(True)
+        return len(asked) > 1
+
+    before = search_work()
+    full = compile_figure(_pipeline())
+    full_work = search_work() - before
+    before = search_work()
+    with pytest.raises(GivenUp), given_up_when(newer):
+        compile_figure(_pipeline("Halfway"))
+    assert search_work() - before < full_work
+    assert len(asked) == 2
+    assert full.document.text == compile_figure(_pipeline()).document.text  # nothing left over
+
+
 def test_a_line_never_leaves_from_over_a_name_set_across_a_panel_top(tmp_path) -> None:
     # A structure named over its panel, the shape it feeds straight above it: its line
     # leaves from a side, not from the top its name is set across.

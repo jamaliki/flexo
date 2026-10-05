@@ -35,6 +35,7 @@ from typing import Any
 
 import yaml
 
+from flexo.draft import GivenUp, given_up_when
 from flexo.roundtrip import writing
 from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
@@ -1124,14 +1125,23 @@ class Workspace:
         # Each page counts its own drawings; an older one waiting its turn is dropped.
         client = f"{name}\0{hints.get('client', '')}"
         self.latest[client] = max(self.latest.get(client, 0), version)
+        # One that may take a while (a deck settling its figures) yields: the page asks for
+        # the next without waiting for it, and it is given up as soon as that is asked for.
+        yields = (
+            given_up_when(lambda: self.latest.get(client, 0) > version)
+            if hints.get("yields")
+            else contextlib.nullcontext()
+        )
         with self.drawing:
             if version < self.latest[client]:
                 return {"version": version, "stale": True}
             started = time.perf_counter()
             try:
                 # The page has every bundled font; drawings name them rather than carry them.
-                with fonts_linked(), self.running(), pictures.linked(self):
+                with fonts_linked(), self.running(), pictures.linked(self), yields:
                     drawing = doc.kind.draw(document, doc.path.parent, hints)
+            except GivenUp:
+                return {"version": version, "stale": True}
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
                 return {

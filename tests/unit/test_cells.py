@@ -134,3 +134,24 @@ def test_the_editor_writes_a_new_grid_as_a_block_the_way_it_reads() -> None:
     kept = 'figure: {id: t}\nnodes:\n- id: a\n  label: "one\\ntwo"\n'
     edited = apply(kept, {"do": "add", "kind": "block"})["text"]
     assert 'label: "one\\ntwo"' in edited
+
+
+def test_a_ramp_is_two_colours_with_a_comma_or_a_space_between() -> None:
+    """Typed in the Ramp field either way -- ``#fff, #000``, ``#fff #000`` -- it reads;
+    so does a range ``0 1``. Anything else says how to write it."""
+
+    for ramp in ("#ffffff, #000000", "#ffffff #000000", " #ffffff,#000000 ", "#fff  #000"):
+        figure = parse_figure(
+            {"figure": {"id": "f"}, "nodes": [{"id": "g", "kind": "cells", "properties": {
+                "grid": "0 1", "ramp": ramp, "range": "0 1"}}]}
+        )
+        drawing = cells_drawing(_node(figure), figure_style(figure))
+        colours = {shape.id: shape.color for shape in drawing.shapes}
+        assert colours["g.r1c1"].lower() in {"#ffffff", "#fff"}
+        assert colours["g.r1c2"].lower() in {"#000000", "#000"}
+    figure = parse_figure(
+        {"figure": {"id": "f"}, "nodes": [{"id": "g", "kind": "cells", "properties": {
+            "grid": "0 1", "ramp": "white black"}}]}
+    )
+    with pytest.raises(FlexoError, match="space or a comma"):
+        cells_drawing(_node(figure), figure_style(figure))

@@ -241,6 +241,16 @@ export function mount(studio, main) {
   page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
   stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting) figure.select([]); });
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
+  // Right-click, as on a slide: what is under the pointer is chosen, and its menu offers what
+  // can be done with it (a line: a shape inserted into it); on nothing, Add Shape.
+  page.addEventListener("contextmenu", (event) => {
+    if (event.target.closest(".fig-inline")) return;
+    event.preventDefault();
+    const point = { x: event.clientX, y: event.clientY }, id = figure.model ? figure.idAt(event) : null;
+    if (id && id !== figure.model.root) { menu(point, figure.menuOf(id, point)); return; }
+    figure.select([]);
+    if (figure.model) menu(point, [{ icon: "plus", label: "Add Shape…", keys: "A", run: () => figure.addPalette(point) }]);
+  });
   // What the pointer is over is framed, dashed -- not what is chosen, framed already -- and
   // stays framed as the drawing is zoomed under it.
   function placeHover() {
@@ -309,9 +319,7 @@ export function mount(studio, main) {
       lines.length ? lines.map((line) => h(`div.tree-row.line${chosen.includes(line.id) ? ".on" : ""}`, {
         dataset: { id: line.id }, onclick: () => figure.select([line.id]),
       }, h("span.tree-caret"), glyph(line.net ? "net" : "edge"),
-      h("span.tree-name", {}, line.net
-        ? `${figure.nameOf(figure.nodeOfRef(line.sources?.[0] || ""))} → ${(line.targets || []).map((t) => figure.nameOf(figure.nodeOfRef(t))).join(", ")}`
-        : figure.nameOf(line.id)),
+      h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
       line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
       : h("div.empty.small", {}, "Select a shape, then click Connect."));

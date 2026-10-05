@@ -816,3 +816,174 @@ def test_motif_less_attention_centres_its_label() -> None:
     assert banded < centred  # the banded label sits higher than the centred one
     mid = top + height / 2.0
     assert abs(centred - mid) < height / 4.0  # centred label straddles the middle
+
+
+def _captioned(*edges: dict, **properties: object) -> Compilation:
+    """A vector given words of its own (as the studio makes one), between two blocks."""
+
+    from flexo.serialization import parse_figure
+
+    document = {
+        "figure": {"id": "captioned"},
+        "nodes": [
+            {"id": "a", "label": "Encoder"},
+            {"id": "v", "kind": "vector", "label": "Node features", "properties": properties},
+            {"id": "b", "label": "Decoder"},
+        ],
+        "groups": [{"id": "root", "children": ["a", "v", "b"], "layout": {"kind": "row"}}],
+        "edges": list(edges) or [{"from": "a", "to": "v"}, {"from": "v", "to": "b"}],
+    }
+    return compile_figure(parse_figure(document))
+
+
+def test_a_vector_with_words_of_its_own_sets_them_under_its_cells() -> None:
+    """One shape in the studio: its caption below, as much room kept above, so its
+    middle -- where lines meet its sides -- is its middle cell."""
+
+    compiled = _captioned()
+    node = compiled.fitted.node("v")
+    grid = vector_grid(node.measured.spec, _STYLE)
+    cells = _cells(compiled.document.text, "v")
+    assert len(cells) == 3
+    tops = sorted(float(cell.get("y", "0")) for cell in cells)
+    middle = tops[1] + float(cells[0].get("height", "0")) / 2.0
+    assert middle == pytest.approx(node.bounds.center.y)
+    assert node.bounds.width >= node.measured.label.width
+    assert node.bounds.height > grid.size.height
+    # The words are under the cells, inside the box.
+    root = ET.fromstring(compiled.document.text)
+    label = next(item for item in root.iter(f"{{{SVG_NS}}}text") if item.get("id") == "v.label")
+    assert float(label.get("y", "0")) > tops[-1] + float(cells[0].get("height", "0"))
+    assert float(label.get("y", "0")) <= node.bounds.bottom
+
+
+def test_a_line_to_a_captioned_vector_is_carried_on_to_its_cells() -> None:
+    """Its box is as wide as its words: a line from the side stops at the cells, not in
+    the air beside them; one from above at its top cell."""
+
+    compiled = _captioned()
+    node = compiled.fitted.node("v")
+    cells = _cells(compiled.document.text, "v")
+    left = min(float(cell.get("x", "0")) for cell in cells)
+    right = max(float(cell.get("x", "0")) + float(cell.get("width", "0")) for cell in cells)
+    into, out = compiled.routed.edges
+    assert node.bounds.left < left - 1.0, "the words make the box wider than the cells"
+    # (Its arrowhead ends a standoff short of the cells, as at any shape's side.)
+    standoff = _STYLE.connector_standoff.points
+    assert into.shaft[-1].x + _STYLE.arrow_length.points == pytest.approx(left - standoff)
+    assert into.centerline[-1].x == pytest.approx(node.bounds.left)
+    assert out.shaft[0].x == pytest.approx(right + standoff)
+    codes = [item.code for item in lint_compilation(compiled).diagnostics]
+    assert not [code for code in codes if code.startswith("routing")]
+
+
+def test_a_vector_given_a_tone_is_shaded_from_that_colour() -> None:
+    """A colour chip on a vector: its cells shaded from the tone's colour, light to dark;
+    neutral, the theme's grey; its words keep their ink."""
+
+    toned = _cells(_captioned(tone="3").document.text, "v")
+    assert {cell.get("data-flexo-fill") for cell in toned} == {"tone-3-stroke"}
+    opacities = [float(cell.get("fill-opacity", "1")) for cell in toned]
+    assert opacities == sorted(opacities) and opacities[0] < opacities[-1]
+    neutral = _cells(_captioned(tone="neutral").document.text, "v")
+    assert {cell.get("data-flexo-fill") for cell in neutral} == {"block-stroke"}
+    ramp = _cells(_captioned(ramp="ramp-q").document.text, "v")
+    assert {cell.get("data-flexo-fill") for cell in ramp} == {"ramp-q"}
+    own = _cells(_captioned(**{"paint-fill": "#123456"}).document.text, "v")
+    assert {cell.get("fill") for cell in own} == {"#123456"}
+
+
+def test_a_line_drawn_in_a_tone_has_heads_of_that_colour_too() -> None:
+    """A line's colour is a tone of the figure's, its arrowhead (a marker) the same, so a
+    PDF or a slide program draws it as one colour; a net's branches too."""
+
+    from flexo.drawing import read_drawing
+    from flexo.serialization import parse_figure
+
+    document = {
+        "figure": {"id": "coloured"},
+        "nodes": [{"id": name, "label": name.upper()} for name in "abcd"],
+        "edges": [
+            {"from": "a", "to": "b", "tone": "3"},
+            {"from": "b", "to": "c", "tone": "neutral", "line": "dashed", "arrow": "both"},
+            {"from": "c", "to": "d", "head": "inhibition", "tone": 2},
+        ],
+        "nets": [
+            {"id": "n", "kind": "fan-out", "sources": ["a"], "targets": ["c", "d"], "tone": "4"}
+        ],
+    }
+    compiled = compile_figure(parse_figure(document))
+    svg = compiled.document.text
+    root = ET.fromstring(svg)
+    markers = {item.get("id") for item in root.iter(f"{{{SVG_NS}}}marker")}
+    wanted = {"arrow.tone-3", "arrow.neutral", "arrow.neutral.start", "arrow.tone-2.inhibition"}
+    assert wanted <= markers
+    shafts = {
+        item.get("id"): item
+        for item in root.iter(f"{{{SVG_NS}}}path")
+        if item.get("id", "").endswith(".shaft")
+    }
+    first = shafts["edge.1.a-to-b.shaft"]
+    assert first.get("data-flexo-stroke") == "tone-3-stroke"
+    assert first.get("marker-end") == "url(#arrow.tone-3)"
+    assert shafts["edge.2.b-to-c.shaft"].get("data-flexo-stroke") == "block-stroke"
+    shaft = next(
+        item
+        for item in read_drawing(svg).walk()
+        if getattr(item, "id", None) == "edge.1.a-to-b.shaft"
+    )
+    assert shaft.arrowheads and shaft.arrowheads[0].paint.fill == first.get("stroke")
+    branch = next(
+        item for item in root.iter(f"{{{SVG_NS}}}path") if item.get("id") == "n.target.1"
+    )
+    assert branch.get("data-flexo-stroke") == "tone-4-stroke"
+    assert branch.get("marker-end") == "url(#arrow.tone-4)"
+
+
+def test_a_captioned_vector_under_the_shape_that_feeds_it_takes_its_line_at_the_top() -> None:
+    """Its input faces what it is wired to, as a block's does: down a column, the line
+    comes in at its top cell, not round to its side."""
+
+    from flexo.serialization import parse_figure
+
+    document = {
+        "figure": {"id": "down"},
+        "nodes": [
+            {"id": "a", "label": "Encoder"},
+            {"id": "v", "kind": "vector", "label": "Node features"},
+        ],
+        "edges": [{"from": "a", "to": "v"}],
+    }
+    compiled = compile_figure(parse_figure(document))
+    node = compiled.fitted.node("v")
+    cells = _cells(compiled.document.text, "v")
+    top = min(float(cell.get("y", "0")) for cell in cells)
+    (edge,) = compiled.routed.edges
+    assert len(edge.centerline) == 2 and edge.centerline[-1].y == pytest.approx(node.bounds.top)
+    tip = edge.shaft[-1].y + _STYLE.arrow_length.points
+    assert tip == pytest.approx(top - _STYLE.connector_standoff.points)
+
+
+def test_a_line_coloured_takes_no_colour_from_the_shapes() -> None:
+    """A shape's colour (its tone, or its kind's) stays as it was when a line is given one
+    of the theme's colours -- even the colour the shapes' kind had."""
+
+    from flexo.serialization import parse_figure
+
+    def fills(**line: object) -> dict[str, str]:
+        document = {
+            "figure": {"id": "kinds", "style": "paper"},
+            "nodes": [{"id": "m", "kind": "mlp", "label": "MLP"}, {"id": "c", "kind": "cnn"}],
+            "edges": [{"from": "m", "to": "c", **line}],
+        }
+        root = ET.fromstring(compile_figure(parse_figure(document)).document.text)
+        return {
+            item.get("id"): item.get("fill")
+            for item in root.iter(f"{{{SVG_NS}}}rect")
+            if item.get("id") in {"m.body", "c.body"}
+        }
+
+    plain = fills()
+    assert len(plain) == 2 and plain["m.body"] != plain["c.body"]
+    for tone in ("1", "2", "feedback"):
+        assert fills(tone=tone) == plain

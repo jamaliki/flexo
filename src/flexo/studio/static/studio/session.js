@@ -171,7 +171,8 @@ export class Session {
     this.failed = null;                   // what the last said, while it stands
     this.pushTimer = null;
     this.drawTimer = null;
-    this.drawBusy = false;
+    this.drawBusy = 0;                    // drawings asked for and not yet back
+    this.drawYields = false;              // the last asked for yields (see requestDraw)
     this.drawWanted = false;
     this.drawVersion = 0;
     this.drawn = 0;
@@ -690,10 +691,12 @@ export class Session {
 
   // Likewise drawing: one drawing at a time, and when it comes back the next
   // starts from the document as it is then. The page follows typing as fast as
-  // the server draws.
+  // the server draws. A drawing whose hints say it `yields` (a deck settling its
+  // figures, which can take a while) is not waited for: the next is asked for at
+  // once, and the studio gives the first up for it.
   requestDraw(delay = 40) {
     this.drawWanted = true;
-    if (this.drawBusy) return;
+    if (this.drawBusy && !this.drawYields) return;
     if (this.drawTimer !== null) {
       if (delay > 0) return;
       clearTimeout(this.drawTimer);
@@ -703,10 +706,10 @@ export class Session {
 
   async draw() {
     this.drawWanted = false;
-    this.drawBusy = true;
+    this.drawBusy += 1;
     try { await this.drawOnce(); } finally {
-      this.drawBusy = false;
-      if (this.drawWanted) this.requestDraw(0);
+      this.drawBusy -= 1;
+      if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
     }
   }
 
@@ -718,13 +721,12 @@ export class Session {
     // counts on from there -- never from one again, its every drawing taken for an old one.)
     const version = this.drawVersion = ++drawings;
     const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
+    const hints = { ...this.hints(), client: this.workspace.client };
+    this.drawYields = Boolean(hints.yields);
     this.emit("drawing", { version });
     let result;
     try {
-      result = await this.workspace.api("/api/draw", {
-        file: this.file, document: this.document, version, known,
-        hints: { ...this.hints(), client: this.workspace.client },
-      });
+      result = await this.workspace.api("/api/draw", { file: this.file, document: this.document, version, known, hints });
     } catch (error) {
       // Out of reach, the drawing stays as it was until the studio is back (and draws again).
       if (unreachable(error)) { lost(this.workspace); return; }
