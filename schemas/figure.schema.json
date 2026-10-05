@@ -265,7 +265,8 @@
         "via": {"$ref": "#/$defs/side"},
         "joint": {"enum": ["dot", "arrow", "auto"], "default": "auto"},
         "line": {"enum": ["solid", "dashed", "dotted"]},
-        "tone": {"type": ["string", "integer"]}
+        "tone": {"type": ["string", "integer"]},
+        "sides": {"type": "object", "additionalProperties": {"$ref": "#/$defs/side"}}
       },
       "not": {
         "anyOf": [

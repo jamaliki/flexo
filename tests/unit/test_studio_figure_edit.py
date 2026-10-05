@@ -978,6 +978,71 @@ def test_a_shape_put_into_a_flow_written_on_two_lines_takes_its_place_on_one() -
     assert lines(moved) == [["start", "ask"], ["end", "check", "skip", "step"]]
 
 
+MODULE = """figure: {id: f}
+nodes:
+- {id: a, label: A}
+- {id: b, label: B}
+- {id: c, label: C}
+- {id: out, label: Out}
+groups:
+- {id: root, layout: {kind: row}, children: [m, out]}
+- {id: m, role: module, label: Steps, layout: {kind: row}, children: [a, b, c]}
+edges:
+- {from: a, to: b}
+- {from: c, to: out}
+"""
+
+
+def test_a_shape_added_by_a_module_goes_where_its_chain_goes_or_beside_it() -> None:
+    def held(text: str) -> dict[str, list[str]]:
+        return {group["id"]: group["children"] for group in data(text)["groups"]}
+
+    # Into the line out of the module (a + on its last shape follows it out): after the module,
+    # where the line goes -- the module as it was.
+    text, chosen = edit(MODULE, do="add", kind="block", into="edge.2.c-to-out")
+    assert held(text) == {"root": ["m", chosen[0], "out"], "m": ["a", "b", "c"]}
+    assert edges(text) == [("a", "b"), ("c", chosen[0]), (chosen[0], "out")]
+    compile_figure(parse(text, Path.cwd()))
+    # The module chosen, a shape added after it: beside it, not inside it.
+    text, chosen = edit(MODULE, do="add", kind="block", after="m")
+    assert held(text) == {"root": ["m", chosen[0], "out"], "m": ["a", "b", "c"]}
+    # After a part with one line on, asked not to go into it (the palette's After): joined to
+    # the part alone, its line on as it was.
+    text, chosen = edit(MODULE, do="add", kind="block", after="a", source="a", splice=False)
+    assert edges(text) == [("a", "b"), ("c", "out"), ("a", chosen[0])]
+
+
+def test_shapes_copied_with_lines_joined_into_one_keep_them_joined() -> None:
+    joined, _ = edit(ATTENTION, do="join", ids=["edge.1.q-to-att", "edge.2.kv-to-att"])
+    gathered, (module,) = edit(joined, do="gather", ids=["q", "kv", "att"], role="module")
+    gathered, _ = edit(gathered, do="update", target={"type": "net", "id": "into-att"},
+                       values={"side:q": "south"})
+    # Duplicated: the joined line with them, its words, colour and sides too.
+    text, _ = edit(gathered, do="duplicate", ids=[module])
+    nets = data(text)["nets"]
+    assert nets[1] == {
+        "id": "into-att-2", "kind": "merge", "sources": ["q-2", "kv-2"], "targets": ["att-2"],
+        "label": "softmax", "tone": "3", "sides": {"q-2": "south"},
+    }
+    compile_figure(parse(text, Path.cwd()))
+    # Pasted (into another figure, say): so too; and of one only partly copied, what joins the
+    # parts copied -- here one line, of the same look.
+    net = data(joined)["nets"][0]
+    copied = {
+        "top": ["q", "att"],
+        "nodes": [{"id": "q", "kind": "vector"}, {"id": "att", "kind": "vector"}],
+        "nets": [net],
+    }
+    text, chosen = edit(SAMPLE_FIGURE, do="paste", **copied)
+    assert chosen == ["q", "att"]
+    assert data(text)["edges"][-1] == {"from": "q", "to": "att", "label": "softmax", "tone": "3"}
+    assert not data(text).get("nets")
+    every = [{"id": part, "kind": "vector"} for part in ("q", "kv", "att")]
+    text, _ = edit(joined, do="paste", **{**copied, "top": ["q", "kv", "att"], "nodes": every})
+    assert data(text)["nets"][1]["sources"] == ["q-2", "kv-2"]
+    assert data(text)["nets"][1]["targets"] == ["att-2"]
+
+
 ATTENTION = """figure: {id: f}
 nodes:
 - {id: q, kind: vector, label: Q}
@@ -1047,6 +1112,50 @@ def test_a_joined_line_meets_its_shape_on_a_side_or_runs_along_one_not_both() ->
     railed, _ = edit(sided, do="update", target=net, values={"rail": "south"})
     assert data(railed)["nets"][0]["rail"] == "south" and "via" not in data(railed)["nets"][0]
     compile_figure(parse(railed, Path.cwd()))
+
+
+def test_a_joined_lines_ends_meet_their_shapes_on_the_sides_asked_and_keep_them() -> None:
+    """A skip line made to leave its block's foot and come into the next one's head: each
+    end of a joined line set on a side, kept when the line is joined with more, parted, or
+    its shape renamed."""
+
+    sided = ATTENTION.replace("- {from: att, to: m1}", "- {from: att, to: m1, depart: south}")
+    text, _ = edit(sided, do="join", ids=["edge.3.att-to-m1", "edge.4.att-to-m2"])
+    net = {"type": "net", "id": "from-att"}
+    assert data(text)["nets"][0]["sides"] == {"att": "south"}
+    text, _ = edit(text, do="update", target=net, values={"side:m2": "north"})
+    assert data(text)["nets"][0]["sides"] == {"att": "south", "m2": "north"}
+    compiled = compile_figure(parse(text, Path.cwd()))
+    (routed,) = compiled.routed.nets
+    stem = next(stem for stem in routed.target_stems if stem.port.node_id == "m2")
+    box = next(node for node in compiled.fitted.nodes if node.measured.spec.id == "m2").bounds
+    assert abs(stem.centerline[-1].y - box.y) < 1.0  # into its top
+    with pytest.raises(EditError, match="isn\u2019t on this line"):
+        apply(text, {"do": "update", "target": net, "values": {"side:q": "north"}})
+    with pytest.raises(EditError, match="no side"):
+        apply(text, {"do": "update", "target": net, "values": {"side:m2": "up"}})
+    # Renamed, the shape keeps its side.
+    renamed, _ = edit(text, do="rename", id="m2", to="head")
+    assert data(renamed)["nets"][0]["sides"] == {"att": "south", "head": "north"}
+    # One branch parted: a line of its own leaving and arriving where it did.
+    more, _ = edit(text, do="join", ids=["from-att"], add="q")
+    fewer, _ = edit(more, do="separate", id="from-att", end="m2")
+    assert data(fewer)["nets"][0]["sides"] == {"att": "south"}
+    parted = {"from": "att", "to": "m2", "depart": "south", "arrive": "north"}
+    assert data(fewer)["edges"][-1] == parted
+    # Back to where the figure puts them: nothing asked, nothing written.
+    text, _ = edit(text, do="update", target=net, values={"side:m2": None, "side:att": None})
+    assert "sides" not in data(text)["nets"][0]
+
+
+def test_the_trunk_of_a_joined_line_is_the_branch_the_person_chooses() -> None:
+    text, _ = edit(ATTENTION, do="join", ids=["edge.1.q-to-att", "edge.2.kv-to-att"])
+    net = {"type": "net", "id": "into-att"}
+    trunked, _ = edit(text, do="update", target=net, values={"trunk": "kv"})
+    assert data(trunked)["nets"][0]["sources"] == ["kv", "q"]
+    with pytest.raises(EditError, match="isn\u2019t on this line"):
+        apply(text, {"do": "update", "target": net, "values": {"trunk": "m1"}})
+    compile_figure(parse(trunked, Path.cwd()))
 
 
 def test_a_line_end_is_set_on_a_side_of_its_shape() -> None:

@@ -26,6 +26,9 @@
 
 const MARGIN = 36;
 const PAD = 2;
+// How far out of the frame of a group it is in a part must be let go to leave it: just past
+// its edge -- a frame drawn small, on a slide -- it stays in, wherever in it is nearest.
+const LEAVE = 10;
 // How far under (or beside) the figure a part may be let go to start a line of its own.
 const LINE = 140;
 // How far past a part's side, level with it, a part is let go to go beside it.
@@ -55,15 +58,17 @@ export function dropPlace(model, boxes, point, id, centre = point) {
   if (under) return under;
   const beside = besidePart(model, groups, parent, boxes, point, id, inside);
   if (beside) return beside;
+  // (The smallest group whose frame holds the point -- a little past the frame of one the
+  // part is in -- not the part itself nor inside it.)
+  const pad = (group) => (id && group.id !== model.root && inside(id, group.id) ? LEAVE : PAD);
   const line = all && ownLine(model, groups.get(model.root), all, point, id);
   if (line) return line;
   if (all && (point.x < all.left - MARGIN || point.x > all.right + MARGIN || point.y < all.top - MARGIN || point.y > all.bottom + MARGIN)) return null;
-  // The smallest group whose frame holds the point, not the part itself nor inside it.
   let target = null;
   for (const group of model.groups) {
     if (group.id === model.root || inside(group.id, id)) continue;
-    const box = boxes.get(group.id);
-    if (!box || point.x < box.left - PAD || point.x > box.right + PAD || point.y < box.top - PAD || point.y > box.bottom + PAD) continue;
+    const box = boxes.get(group.id), room = pad(group);
+    if (!box || point.x < box.left - room || point.x > box.right + room || point.y < box.top - room || point.y > box.bottom + room) continue;
     const area = (box.right - box.left) * (box.bottom - box.top);
     if (!target || area < target.area) target = { group, area };
   }
@@ -81,9 +86,22 @@ export function dropPlace(model, boxes, point, id, centre = point) {
   // Next to the part nearest the point: before or after it, across a row or down a
   // column; in a grid (or any other), across when the point is level with it.
   const distance = (box) => Math.hypot(Math.max(box.left - point.x, 0, point.x - box.right), Math.max(box.top - point.y, 0, point.y - box.bottom));
-  const near = siblings.reduce((best, child) => (distance(boxes.get(child)) < distance(boxes.get(best)) ? child : best));
+  let near = siblings.reduce((best, child) => (distance(boxes.get(child)) < distance(boxes.get(best)) ? child : best));
+  // A flow lays its parts out by their lines, not their order: its order says only which of a
+  // layer's parts comes first -- the higher of a flow right's, the further left of a flow
+  // down's. A part moved in its flow goes before (or after) the part of its own layer nearest
+  // the point that way.
+  const flows = { "flow-right": false, flow: true }[kind];
+  if (flows !== undefined && own && parent.get(id) === group.id) {
+    const mates = siblings.filter((child) => {
+      const other = boxes.get(child);
+      return flows ? other.top < own.bottom && other.bottom > own.top : other.left < own.right && other.right > own.left;
+    });
+    const off = (child) => (flows ? Math.abs(point.x - (boxes.get(child).left + boxes.get(child).right) / 2) : Math.abs(point.y - (boxes.get(child).top + boxes.get(child).bottom) / 2));
+    if (mates.length) near = mates.reduce((best, child) => (off(child) < off(best) ? child : best));
+  }
   const box = boxes.get(near);
-  const across = kind === "column" ? false : kind === "row" ? true : point.y >= box.top && point.y <= box.bottom;
+  const across = kind === "column" ? false : kind === "row" ? true : flows ?? (point.y >= box.top && point.y <= box.bottom);
   // A long row folded onto two lines to fit may run back along its second (`back`): which
   // side of a part is after it is read from the parts beside it on its line.
   const at = siblings.indexOf(near);
@@ -162,13 +180,20 @@ function underPart(model, groups, boxes, point, id, inside) {
 }
 
 // Just past a part's side, level with it, at any depth (a part in a group in a row of the
-// figure's), with nothing between: beside it -- next to it in its row, or, in a column, the
-// two side by side ({ kind: "line", side, of }).
+// figure's), with nothing between: beside it -- next to it in its row (in its flow, its grid),
+// or, in a column, the two side by side ({ kind: "line", side, of }).
 const NEAR = 40;
 function besidePart(model, groups, parent, boxes, point, id, inside) {
+  // (Inside a group's frame, only its own parts are beside the point: never one outside it,
+  // level with the point past the frame's edge.)
+  const holds = (box) => box && point.x >= box.left - PAD && point.x <= box.right + PAD && point.y >= box.top - PAD && point.y <= box.bottom + PAD;
+  const frames = model.groups.filter((group) => group.id !== model.root && !inside(group.id, id) && holds(boxes.get(group.id)));
+  const area = (box) => (box.right - box.left) * (box.bottom - box.top);
+  const frame = frames.reduce((least, group) => (!least || area(boxes.get(group.id)) < area(boxes.get(least.id)) ? group : least), null);
   let found = null;
   for (const [child, box] of boxes) {
     if (child === id || groups.has(child) || inside(child, id) || !parent.has(child) || String(child).includes("~line")) continue;
+    if (frame && !inside(child, frame.id)) continue;
     if (point.y < box.top || point.y > box.bottom) continue;
     const right = point.x - box.right, left = box.left - point.x;
     const off = right >= 2 ? { side: "right", by: right } : left >= 2 ? { side: "left", by: left } : null;
@@ -198,6 +223,13 @@ function besidePart(model, groups, parent, boxes, point, id, inside) {
     const back = Boolean(next && (next.left + next.right) / 2 < (boxes.get(found.child).left + boxes.get(found.child).right) / 2);
     const after = (found.side === "right") !== back;
     return { parent: holder.id, index: at + (after ? 1 : 0), kind: "row", near: found.child, after, across: true, siblings, back };
+  }
+  // In a flow (a grid, a cycle), where a part is drawn is the flow's to say: beside it is next
+  // to it in the flow's order -- never a row made of the two.
+  if (holder && way !== "column") {
+    const siblings = (holder.children || []).filter((child) => child !== id);
+    const at = siblings.indexOf(found.child), after = found.side === "right";
+    return { parent: holder.id, index: at + (after ? 1 : 0), kind: way, near: found.child, after, across: true, siblings };
   }
   return { kind: "line", side: found.side, of: found.child, parent: holder?.id || model.root, index: -1 };
 }

@@ -47,7 +47,7 @@ from flexo.components import (
     route_clearance,
     titled,
 )
-from flexo.draft import DRAFT, recall, remember
+from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.geometry import Point, Rect, Side, segment_crosses_rect, segments
 from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -174,6 +174,7 @@ def route_figure(
         if it was routed between the same pins among the same ink where its search looked
         (the repair trials route the whole figure again, most of it as it was)."""
 
+        give_up_if_newer()  # (a routing given up for a newer drawing: flexo.draft)
         key = (
             bundle.key,
             bundle.hub,
@@ -268,7 +269,7 @@ def route_figure(
         ]
 
     # A figure drawn before is remembered: its draft starts from that drawing (flexo.draft).
-    memory = _memory_key(semantic)
+    memory = _memory_key(semantic, layout_style)
     last = recall("routes", memory)
     if DRAFT.get():
         overrides, sides = _recalled_choices(last, members)
@@ -305,6 +306,7 @@ def route_figure(
         memory,
         _Drawn(fitted, layout_style, members, ends, pins, bundles, wires, overrides, sides),
     )
+    give_up_if_newer()
     wires = separated(wires)
     routed_edges: dict[str, RoutedEdge] = {}
     routed_nets: dict[str, RoutedNet] = {}
@@ -367,6 +369,7 @@ def route_figure(
     # Ink meets a drawn shape's outline, not the box round it.
     edges = [reach_outlines(routed_edges[edge.id], fitted, layout_style) for edge in semantic.edges]
     nets = [net_reach_outlines(routed_nets[net.id], fitted, layout_style) for net in semantic.nets]
+    give_up_if_newer()
     edges, nets = place_captions(
         edges,
         nets,
@@ -1465,11 +1468,11 @@ class _Drawn:
             self.sides[(member.spec.id, member.ends.index(index))] = side
 
 
-def _memory_key(semantic) -> tuple:
-    """Which figure a routing is of, for its drafts: by its id and the way its groups run
-    (a figure turned to fit a slide is another drawing of it)."""
+def _memory_key(semantic, style: LayoutStyle) -> tuple:
+    """Which figure a routing is of, for its drafts: by its id, the way its groups run and
+    its spacing (a figure turned to fit a slide, or set closer, is another drawing of it)."""
 
-    return (semantic.id, tuple((group.id, group.layout.kind) for group in semantic.groups))
+    return (semantic.id, tuple((group.id, group.layout.kind) for group in semantic.groups), style)
 
 
 def _pin_keys(bundle: Bundle, members: list[Member], ends: list[End]) -> list:

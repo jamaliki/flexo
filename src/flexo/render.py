@@ -31,7 +31,7 @@ from flexo.render_common import (
 )
 from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
-from flexo.style import LayoutStyle, Palette
+from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
 
 
@@ -684,6 +684,28 @@ def _ramp_fill_opacity(index: int, count: int, toned: bool = False) -> float:
     return lightest + (darkest - lightest) * index / (count - 1)
 
 
+def _tone_ramp(palette: Palette, tone: str) -> str | None:
+    """The theme's vector ramp made from the same colour as ``tone``, if it has one: its
+    tones and its ramps come from one list of colours, so tone 3 and ``ramp-q`` are both its
+    green. None for the neutral tone, or a theme with no ramp near the tone's colour."""
+
+    from flexo.colour import hue_distance
+    from flexo.components import NEUTRAL_TONES
+
+    if tone.lower() in NEUTRAL_TONES:
+        return None
+    index = palette.tone_index(tone)
+    if index is None:
+        return None
+    colour = palette.get(f"tone-{index}-stroke")
+    distance, role = min((hue_distance(colour, palette.get(role)), role) for role in RAMP_ROLES)
+    return role if distance < _SAME_RAMP else None
+
+
+_SAME_RAMP = 0.17
+"""How near (in Oklab, its lightness counted a quarter) a ramp's colour has to be to a
+tone's to be that tone's ramp: a theme's tone is its ramp colour made darker for words."""
+
 _TONED_RAMP = (0.3, 0.8)
 """The lightest and darkest a toned vector's cells are of its tone's colour."""
 
@@ -745,10 +767,13 @@ def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
     if encoded is not None:
         _preset_vector(parent, node, style, grid, str(encoded))
         return
-    # A vector given a tone is shaded from that tone's colour, as a shape is coloured by
-    # its tone (``neutral``, the theme's grey); else along its ramp.
-    toned = str(spec.property("tone") or "").strip() != ""
-    ramp = "block-stroke" if toned else str(spec.property("ramp", "ramp-node"))
+    # A vector given a tone is shaded along the theme's ramp made from that tone's colour
+    # (paper's green tone is the ramp its Q vectors take), as the theme's own vectors are;
+    # with no ramp of that colour (``neutral``, the theme's grey), from the tone itself.
+    tone = str(spec.property("tone") or "").strip()
+    matched = _tone_ramp(palette, tone) if tone else None
+    toned = bool(tone) and matched is None
+    ramp = matched or ("block-stroke" if toned else str(spec.property("ramp", "ramp-node")))
     fill, stroke = paint_override(spec, "fill"), paint_override(spec, "stroke")
     stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp=ramp)
     for column in range(grid.columns):

@@ -18,7 +18,8 @@ the wiring between them instead, the way a layered graph drawing does:
    of wider layers is one grid in which each place takes the column nearest
    the mean column of the components feeding it -- components first, the
    places of passing arrows around them -- so a branch runs straight down its
-   column.
+   column. A captioned merge's target takes its trunk's column instead (the
+   net's first source), so the caption is written above a straight run.
 
 The compiled flow group is a column (a row, for ``flow-right``) of those rows
 and grids, centred on one another unless the group names an ``align``. The
@@ -143,15 +144,16 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
             result.append(replace(group, layout=replace(group.layout, kind=stack)))  # type: ignore[arg-type]
             continue
         layers, chain = _layers(group, groups, connections, links)
+        trunks = _trunks(group, groups, figure)
         children: list[str] = []
-        for band in _bands(layers):
+        for band in _bands(layers, trunks):
             if len(band) == 1 and len(band[0]) == 1:
                 children.append(band[0][0])
                 continue
             band_id = _fresh(f"{group.id}.layers", taken)
             taken.add(band_id)
             children.append(band_id)
-            columns = _columns(band, chain)
+            columns = _columns(band, chain, trunks)
             width = max(columns.values()) + 1
             placed = []
             for level, layer in enumerate(band):
@@ -192,6 +194,35 @@ def lower_flows(figure: FigureSpec) -> FigureSpec:
             )
         )
     return replace(figure, nodes=(*figure.nodes, *spacers), groups=tuple(result))
+
+
+def _trunks(group: GroupSpec, groups: dict[str, GroupSpec], figure: FigureSpec) -> dict[str, str]:
+    """The child each captioned merge's target follows: the one its first source is in.
+
+    A merge's caption is written above the run its trunk draws straight into
+    the target, as ``softmax(QK^T)V`` sits above Q's arrow into the attended
+    value; the other branches climb into that run. Which branch is the trunk
+    is the person's choice, by the order of the net's sources.
+    """
+
+    owner: dict[str, str] = {}
+
+    def claim(entity: str, child: str) -> None:
+        owner[entity] = child
+        for item in groups[entity].children if entity in groups else ():
+            claim(item, child)
+
+    for child in group.children:
+        claim(child, child)
+    trunks: dict[str, str] = {}
+    for net in figure.nets:
+        if not net.label or len(net.targets) != 1 or len(net.sources) < 2:
+            continue
+        target = owner.get(net.targets[0].node_id)
+        trunk = owner.get(net.sources[0].node_id)
+        if target is not None and trunk is not None and target != trunk:
+            trunks.setdefault(target, trunk)
+    return trunks
 
 
 def _layers(
@@ -316,12 +347,23 @@ def _layers(
     return layers, chain
 
 
-def _bands(layers: list[list[str]]) -> list[list[list[str]]]:
-    """Consecutive layers grouped: each one-child layer alone, wider ones in runs."""
+def _bands(
+    layers: list[list[str]], trunks: dict[str, str] | None = None
+) -> list[list[list[str]]]:
+    """Consecutive layers grouped: each one-child layer alone, wider ones in runs.
+
+    A one-child layer whose child follows a trunk (``_trunks``) stays in the run
+    before it, so it can take its trunk's column rather than the middle.
+    """
+
+    trunks = trunks or {}
+
+    def wide(layer: list[str]) -> bool:
+        return len(layer) > 1 or any(child in trunks for child in layer)
 
     bands: list[list[list[str]]] = []
     for layer in layers:
-        if len(layer) > 1 and bands and len(bands[-1][-1]) > 1:
+        if wide(layer) and bands and wide(bands[-1][-1]):
             bands[-1].append(layer)
         else:
             bands.append([layer])
@@ -332,15 +374,22 @@ PRIORITY = 10.0
 """How much more a component resists leaving its column than an arrow's place."""
 
 
-def _columns(band: list[list[str]], chain: dict[str, list[str]]) -> dict[str, int]:
+def _columns(
+    band: list[list[str]],
+    chain: dict[str, list[str]],
+    trunks: dict[str, str] | None = None,
+) -> dict[str, int]:
     """A grid column for each place in the band, kept in each layer's order.
 
     Each place wants the mean column of what feeds it from the layer before
     -- the middle column, if that is a centred row above the band -- and the
     columns are chosen, in order, to keep components where they want to be
     first and arrows' passing places second, so a chain runs straight down
-    and the arrows that skip past it move aside.
+    and the arrows that skip past it move aside. A place named in ``trunks``
+    wants its trunk's column alone (see ``_trunks``).
     """
+
+    trunks = trunks or {}
 
     width = max(len(layer) for layer in band)
     fed_by: dict[str, list[str]] = defaultdict(list)
@@ -363,6 +412,16 @@ def _columns(band: list[list[str]], chain: dict[str, list[str]]) -> dict[str, in
             ]
             if solid and not child.startswith(_PASSING):
                 sources = solid
+            trunk = trunks.get(child)
+            if trunk is not None:
+                # The trunk itself, or the place its arrow holds in the layer before.
+                along = f"{_PASSING}{trunk}\0{child}\0"
+                straight = [
+                    column[other]
+                    for other in fed_by[child]
+                    if other in column and (other == trunk or other.startswith(along))
+                ]
+                sources = straight or sources
             if sources:
                 wanted.append(sum(sources) / len(sources))
             elif fed_by[child] and level == 0:

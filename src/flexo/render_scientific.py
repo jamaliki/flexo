@@ -71,19 +71,22 @@ def _grid(
         return
     area = _motif_bounds(node, style)
     motif = element(parent, "g", id=f"{node.measured.spec.id}.grid")
-    width = max(0.8, area.width / columns - 0.8)
-    height = max(0.8, area.height / rows - 0.8)
-    radius = min(style.vector_cell_radius.points, min(width, height) / 4)  # as a vector's cells
+    # Square cells, the grid centred in its band: a wide box doesn't stretch them into bars.
+    pitch = min(area.width / columns, area.height / rows)
+    left = area.x + (area.width - pitch * columns) / 2.0
+    top = area.y + (area.height - pitch * rows) / 2.0
+    side = max(0.8, pitch - 0.8)
+    radius = min(style.vector_cell_radius.points, side / 4)  # as a vector's cells
     for row in range(rows):
         for column in range(columns):
             fraction = ((row * 3 + column * 2) % 7) / 8.0 + 0.12
             element(
                 motif,
                 "rect",
-                x=area.x + column * area.width / columns,
-                y=area.y + row * area.height / rows,
-                width=width,
-                height=height,
+                x=left + column * pitch,
+                y=top + row * pitch,
+                width=side,
+                height=side,
                 rx=radius,
                 opacity=fraction,
                 **paint_attributes(palette=palette, fill_role="accent-motif"),

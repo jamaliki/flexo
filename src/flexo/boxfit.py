@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from flexo.compiler import Compilation, compile_figure
-from flexo.draft import drafting
+from flexo.draft import drafting, give_up_if_newer
 from flexo.drawing import ink_bounds, read_drawing
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation
@@ -110,15 +110,18 @@ def fit_in_box(
         compact_gap=Length(style.compact_gap.points * TIGHTER),
     )
     variants = [("as written", spec)]
-    if turn:
+    # (A layout kept is drawn as it is named, turned though the figure is no longer free to
+    # turn -- given another place, say: it is laid out afresh for it once the changes stop.)
+    if turn or (keep or "").startswith("turned"):
         variants += [("turned", turned(spec)), ("turned within", turned(spec, keep_root=True))]
-    candidates = [
+    every = [
         (name if spacing is None else f"{name}, {spacing}", variant, layout_style)
         for spacing, layout_style in ((None, None), ("tighter", tight))
         for name, variant in variants
     ]
+    candidates = [item for item in every if turn or not item[0].startswith("turned")]
     if keep is not None:
-        kept = _kept(keep, candidates, width, height, most, base, pad)
+        kept = _kept(keep, every, width, height, most, base, pad)
         if kept is not None:
             return kept
     # Laid out afresh, every way, a figure is drawn in full: a draft is only ever of the
@@ -151,6 +154,7 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
             if not fits:
                 raise
             continue
+        give_up_if_newer()  # (a drawing given up for a newer one: flexo.draft)
         left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
         ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
         scale = min(most, width / ink[2], height / ink[3])
@@ -248,6 +252,7 @@ def _estimate(spec: FigureSpec, style, width: float, height: float, most: float)
 
     from flexo.layout.measure import measure_figure
 
+    give_up_if_newer()
     try:
         measured = measure_figure(spec, style=style)
     except Exception:

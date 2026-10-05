@@ -182,11 +182,18 @@ def aligned_with(
         if owner is None or box is None or node_id not in by_node or target == node_id:
             continue
         box = box if isinstance(box, Rect) else box.bounds
-        across = {"column": "x", "stack": "x", "row": "y"}.get(kinds.get(owner, ""))
-        if across is None:
-            continue
         own = by_node[node_id].bounds
-        room = _beside_room(owner, node_id, by_node, by_group, across)
+        across = {"column": "x", "stack": "x", "row": "y"}.get(kinds.get(owner, ""))
+        if kinds.get(owner) == "grid":
+            # In a grid, across its column (or row) -- the one the two share: a spine of
+            # blocks down a figure's side, each centred under the last; along it, turned.
+            above = abs(box.center.x - own.center.x) <= abs(box.center.y - own.center.y)
+            across = "x" if above else "y"
+            room = _track_room(owner, node_id, by_node, by_group, across)
+        elif across is None:
+            continue
+        else:
+            room = _beside_room(owner, node_id, by_node, by_group, across)
         if across == "x":
             want = box.center.x - own.width / 2.0
             at = max(room.left, min(want, room.right - own.width))
@@ -197,7 +204,53 @@ def aligned_with(
             shift = (0.0, at - own.y)
         if abs(shift[0]) > _EPSILON or abs(shift[1]) > _EPSILON:
             by_node[node_id] = _moved_node(by_node[node_id], *shift)
+        short = want - at
+        if (
+            kinds.get(owner) == "grid"
+            and abs(short) > _EPSILON
+            and target in by_node
+            and target not in asked
+            and parent.get(target) == owner
+        ):
+            # Too large to move all the way within its track (the tallest of its row), it
+            # is met by the part it lines up with, as far as that part's room allows: a
+            # spine turned to fit a slide stays one straight line.
+            theirs = by_node[target].bounds
+            room = _track_room(owner, target, by_node, by_group, across)
+            if across == "x":
+                to = max(room.left, min(theirs.x - short, room.right - theirs.width))
+                moved = (to - theirs.x, 0.0)
+            else:
+                to = max(room.top, min(theirs.y - short, room.bottom - theirs.height))
+                moved = (0.0, to - theirs.y)
+            if abs(moved[0]) > _EPSILON or abs(moved[1]) > _EPSILON:
+                by_node[target] = _moved_node(by_node[target], *moved)
     return tuple(by_node[node.measured.spec.id] for node in nodes)
+
+
+def _track_room(
+    owner: str,
+    node_id: str,
+    nodes: dict[str, FittedNode],
+    groups: dict[str, FittedGroup],
+    across: str,
+) -> Rect:
+    """Where a part in a grid may go across its column (``across="x"``) or its row: as far
+    as the parts of that track reach, so it never leaves its own cell for a neighbour's."""
+
+    own = nodes[node_id].bounds
+    boxes = [
+        nodes[child].bounds if child in nodes else groups[child].bounds
+        for child in groups[owner].measured.spec.children
+        if child in nodes or child in groups
+    ]
+    if across == "x":
+        track = [box for box in boxes if box.left < own.right and box.right > own.left]
+        low, high = min(box.left for box in track), max(box.right for box in track)
+        return Rect(low, own.y, high - low, own.height)
+    track = [box for box in boxes if box.top < own.bottom and box.bottom > own.top]
+    low, high = min(box.top for box in track), max(box.bottom for box in track)
+    return Rect(own.x, low, own.width, high - low)
 
 
 def _beside_room(

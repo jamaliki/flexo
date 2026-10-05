@@ -877,14 +877,19 @@ def test_a_line_to_a_captioned_vector_is_carried_on_to_its_cells() -> None:
     assert not [code for code in codes if code.startswith("routing")]
 
 
-def test_a_vector_given_a_tone_is_shaded_from_that_colour() -> None:
-    """A colour chip on a vector: its cells shaded from the tone's colour, light to dark;
-    neutral, the theme's grey; its words keep their ink."""
+def test_a_vector_given_a_tone_is_shaded_along_the_ramp_of_that_colour() -> None:
+    """A colour chip on a vector shades it along the theme's own ramp of that colour -- the
+    green chip, the ramp the gallery's Q vectors take -- light to dark; neutral, the theme's
+    grey; its words keep their ink."""
 
-    toned = _cells(_captioned(tone="3").document.text, "v")
-    assert {cell.get("data-flexo-fill") for cell in toned} == {"tone-3-stroke"}
-    opacities = [float(cell.get("fill-opacity", "1")) for cell in toned]
-    assert opacities == sorted(opacities) and opacities[0] < opacities[-1]
+    expected = {"1": "ramp-node", "2": "ramp-embedding", "3": "ramp-q", "4": "ramp-kv"}
+    expected |= {"5": "ramp-attended", "6": "ramp-output"}
+    for tone, ramp in expected.items():
+        toned = _cells(_captioned(tone=tone).document.text, "v")
+        assert {cell.get("data-flexo-fill") for cell in toned} == {ramp}, tone
+        assert {cell.get("fill") for cell in toned} == {_PAINT.get(ramp)}
+        opacities = [float(cell.get("fill-opacity", "1")) for cell in toned]
+        assert opacities == sorted(opacities) and opacities[0] < opacities[-1]
     neutral = _cells(_captioned(tone="neutral").document.text, "v")
     assert {cell.get("data-flexo-fill") for cell in neutral} == {"block-stroke"}
     ramp = _cells(_captioned(ramp="ramp-q").document.text, "v")
@@ -987,3 +992,37 @@ def test_a_line_coloured_takes_no_colour_from_the_shapes() -> None:
     assert len(plain) == 2 and plain["m.body"] != plain["c.body"]
     for tone in ("1", "2", "feedback"):
         assert fills(tone=tone) == plain
+
+
+def test_a_shapes_kind_keeps_its_colour_whatever_colour_another_shape_is_given() -> None:
+    """A theme that colours by kind gives MLPs one colour and CNNs another: a chip (a
+    numbered colour, or Neutral) chosen for any other shape -- or one of them -- moves
+    neither."""
+
+    from flexo.serialization import parse_figure
+
+    def fills(**toned: str) -> dict[str, str]:
+        nodes = [
+            {"id": "first", "label": "Input"},
+            {"id": "m", "kind": "mlp", "label": "MLP"},
+            {"id": "c", "kind": "cnn", "label": "CNN"},
+            {"id": "m2", "kind": "mlp", "label": "MLP"},
+            {"id": "v", "kind": "vector", "label": "Q"},
+        ]
+        for node in nodes:
+            if node["id"] in toned:
+                node["properties"] = {"tone": toned[node["id"]]}
+        document = {"figure": {"id": "kinds", "style": "paper"}, "nodes": nodes}
+        root = ET.fromstring(compile_figure(parse_figure(document)).document.text)
+        return {
+            item.get("id"): item.get("fill")
+            for item in root.iter(f"{{{SVG_NS}}}rect")
+            if item.get("id") in {"m.body", "c.body", "m2.body"}
+        }
+
+    plain = fills()
+    assert len(plain) == 3 and plain["m.body"] == plain["m2.body"] != plain["c.body"]
+    for choice in ({"v": "2"}, {"v": "1"}, {"first": "2"}, {"m": "3"}, {"m": "neutral"}):
+        now = fills(**choice)
+        assert now["c.body"] == plain["c.body"], choice
+        assert now["m2.body"] == plain["m2.body"], choice

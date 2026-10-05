@@ -733,7 +733,12 @@ export class Session {
       this.emit("drawn", { version, pages: [], messages: [{ text: String(error.message || error), severity: "error", where: "" }], failed: true });
       return;
     }
-    if (result.stale || version < this.drawn) return;
+    if (result.stale || version < this.drawn) {
+      // Given up with nothing newer asked for, and no edit on its way to be drawn instead (an
+      // edit given way to is the editor's to draw, or to ask for this again): asked again.
+      if (result.stale && version === this.drawVersion && !result.edited) this.drawWanted = true;
+      return;
+    }
     this.drawn = version;
     const pages = result.pages.map((page) => {
       if (page.svg !== undefined) this.pages.set(page.id, { hash: page.hash, svg: page.svg });

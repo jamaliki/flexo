@@ -4,7 +4,7 @@
    the figure editor (.fig), so the deck looks the same before a figure is chosen and after. */
 
 svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
-.hit-line { fill: none; stroke: transparent; stroke-width: 9; pointer-events: stroke; cursor: pointer; }
+.hit-line { fill: none; stroke: transparent; stroke-width: 9; stroke-dasharray: none; pointer-events: stroke; cursor: pointer; }
 .fig-marks { position: absolute; inset: 0; pointer-events: none; }
 /* A chosen part's frame is where the part is, at once: it never glides there. */
 /* Frames as wide as every frame on a slide (--frame): chosen, solid; pointed at, dashed. */
@@ -246,3 +246,16 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-standing-words .caret { width: 1.5px; height: 1.15em; margin-left: 1px; background: var(--accent); animation: fig-caret 1s steps(1) infinite; }
 .fig-standing-words.hint .caret { order: -1; margin: 0 1px 0 0; }
 @keyframes fig-caret { 50% { opacity: 0; } }
+/* The palette's choice, after a part with one line on: into that line, or after the part. */
+.add-way { display: flex; flex-direction: column; min-width: 0; max-width: 100%; }
+.add-way button { display: block; flex: none; min-width: 0; height: auto; min-height: 24px; padding: 4px 8px; white-space: normal; line-height: 1.3; text-align: left; overflow-wrap: anywhere; }
+/* A joined line's Add a Line To…: the shapes by name, a shape's own ports beside it. */
+.menu.net-menu { padding: 0; width: 300px; }
+.net-pick { display: grid; gap: 8px; padding: 10px; }
+.net-ends { max-height: 260px; overflow-y: auto; display: grid; gap: 1px; }
+.net-end { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.net-end-name { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: var(--text-small); text-align: left; cursor: pointer; }
+.net-end-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net-end-name:hover, .net-end-name:focus-visible { background: var(--accent-soft); }
+.net-end-port { flex: none; height: 20px; padding: 0 6px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink-2); font: var(--text-small); cursor: pointer; }
+.net-end-port:hover { border-color: var(--accent); color: var(--ink); }

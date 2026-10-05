@@ -66,7 +66,16 @@ def turned(figure: FigureSpec, *, keep_root: bool = False) -> FigureSpec:
         )
         for edge in figure.edges
     )
-    nets = tuple(replace(net, rail_hint=side(net.rail_hint)) for net in figure.nets)
+    # (A net's ends asked onto sides turn with it, as an edge's do: a spine's skip line
+    # leaving its block's foot leaves its right side, turned.)
+    nets = tuple(
+        replace(
+            net,
+            rail_hint=side(net.rail_hint),
+            sides=tuple((end, side(value)) for end, value in net.sides),
+        )
+        for net in figure.nets
+    )
     return replace(figure, groups=groups, nodes=nodes, edges=edges, nets=nets)
 
 

@@ -19,6 +19,7 @@ from flexo.components import (
     centred_port,
     route_clearance,
     titled,
+    vector_cells,
 )
 from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import lined_up, lowest_common_group, parent_map
@@ -204,10 +205,11 @@ def _within_span(bounds: Rect, other: Rect, side: Side) -> bool:
 
 
 def _authored_side(member: EdgeSpec | NetSpec, end: End) -> Side | None:
-    """The side this edge's own ``depart=``/``arrive=`` names for this end."""
+    """The side this edge's own ``depart=``/``arrive=`` names for this end (a net's, its
+    ``sides``)."""
 
     if not isinstance(member, EdgeSpec):
-        return None
+        return dict(member.sides).get(str(end.reference))
     return member.arrive if end.arriving else member.depart
 
 
@@ -355,7 +357,9 @@ def plan_pins(
             side = pinned
         elif port_spec.auto_side and not steered:
             side = _facing(end.node.bounds, end.counterpart, flow.get(id(end), port_spec.side))
-        if sides and index in sides:
+        # (Not one its person names, or its line's waypoint does: a draft's sides, kept from
+        # the drawing before, are of ends that were free to turn when it was drawn.)
+        if sides and index in sides and not end.fixed:
             side = sides[index]
             end.fixed = True
         name = _SAME_VALUE.get(spec.kind, {}).get(end.reference.port_name, end.reference.port_name)
@@ -1098,6 +1102,9 @@ def _place_on_side(
     a port of the component's grammar: never slid off centre to meet the line's other
     end. A box that can't be lined up with that end is met by a bend between the two
     (see ``lone_pin``).
+
+    A shape drawn smaller than its box -- a vector's cells, its words under them -- is
+    met where it is drawn (``_ink_span``): a line beside the cells would end in the air.
     """
 
     along_x = side in {Side.NORTH, Side.SOUTH}
@@ -1211,6 +1218,9 @@ def _place_on_side(
         need=(len(keys) - 1) * style.port_spacing.points + 2.0,
     )
     squeeze = any(not open_low - 1e-9 <= value <= open_high + 1e-9 for value in desired)
+    ink = _ink_span(node, side, style)
+    if ink is not None and ink[1] - ink[0] < (len(keys) - 1) * style.port_spacing.points:
+        ink = None  # (Too short for its pins a lane apart: they keep the whole side.)
     result = {}
     for key, value in zip(keys, desired, strict=True):
         free = movable(key)
@@ -1220,17 +1230,32 @@ def _place_on_side(
             # clear keeps its place at the middle.
             fraction = (value - low) / (high - low) if high > low else 0.5
             value = open_low + (open_high - open_low) * fraction
+        least, most = (open_low, open_high) if free else (value, value)
+        if free and ink is not None:
+            # (On the shape as drawn, however it is lined up.)
+            value = min(max(value, ink[0]), ink[1])
+            least, most = max(least, ink[0]), min(most, ink[1])
+            if least > most:
+                least = most = value
         result[key] = _Slot(
-            node,
-            side,
-            edge,
-            value,
-            open_low if free else value,
-            open_high if free else value,
-            free,
-            SPREAD_PIN_WEIGHT if spread else 1.0,
+            node, side, edge, value, least, most, free, SPREAD_PIN_WEIGHT if spread else 1.0
         )
     return result
+
+
+def _ink_span(node: FittedNode, side: Side, style: LayoutStyle) -> tuple[float, float] | None:
+    """The stretch of a side a line meets the shape's ink on, where that is shorter than
+    the side: a captioned vector's cells -- its box is as wide as its words, and as tall as
+    the row it sits in -- met from beside or above. None for any other side."""
+
+    spec = node.measured.spec
+    if spec.kind != "vector" or not node.measured.label.lines or side is Side.SOUTH:
+        return None
+    cells = vector_cells(spec, node.bounds, node.measured.label, style)
+    low, high = (cells.left, cells.right) if side is Side.NORTH else (cells.top, cells.bottom)
+    # (Into a cell, not along the edge of the end ones.)
+    inset = min(style.port_spacing.points / 2.0, (high - low) / 4.0)
+    return low + inset, high - inset
 
 
 def lone_pin(

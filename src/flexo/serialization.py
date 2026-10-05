@@ -317,6 +317,8 @@ def _net_data(net: NetSpec) -> dict[str, object]:
         result["line"] = net.line
     if net.tone is not None:
         result["tone"] = net.tone
+    if net.sides:
+        result["sides"] = {end: side.value for end, side in net.sides}
     return result
 
 
@@ -507,11 +509,23 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
 
 
 def _net(data: dict[str, Any], reference: Callable[[str, str], PortRef]) -> NetSpec:
+    # An end's side is named by the end as written (``add-ln``), read as the port it is;
+    # one for an end the net no longer joins (a shape since taken off it) is let go.
+    ends = {
+        **{str(value): str(reference(value, "output")) for value in data["sources"]},
+        **{str(value): str(reference(value, "input")) for value in data["targets"]},
+    }
+    joined = set(ends.values())
     return NetSpec(
         id=data["id"],
         kind=data["kind"],
         sources=tuple(reference(value, "output") for value in data["sources"]),
         targets=tuple(reference(value, "input") for value in data["targets"]),
+        sides=tuple(
+            (ends.get(str(end), str(end)), Side(side))
+            for end, side in (data.get("sides") or {}).items()
+            if side and ends.get(str(end), str(end)) in joined
+        ),
         role=data.get("role", "flow"),
         label=_label(data.get("label", "")),
         rail_hint=Side(data["rail"]) if data.get("rail") else None,

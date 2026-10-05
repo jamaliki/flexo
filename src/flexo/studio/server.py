@@ -325,6 +325,7 @@ class Handler(BaseHTTPRequestHandler):
             if act is None:
                 self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
                 return
+            workspace.acting(name, data.get("action") or {})
             self._json(act(data.get("document", doc.document), data.get("action") or {},
                            doc.path.parent))
         elif route == "/api/theme/use":

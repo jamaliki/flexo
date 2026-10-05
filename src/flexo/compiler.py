@@ -69,7 +69,9 @@ def compile_figure(
         remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
         document = emit_svg(routed, style=layout_style, palette=paint_palette)
         return Compilation(measured, fitted, routed, document)
+    give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
+    give_up_if_newer()
     routed = route_figure(fitted, style=layout_style)
     fitted, routed, slide = _judged_slides(measured, fitted, routed, layout_style)
     current, measured, fitted, routed = _with_room_rounds(
@@ -80,6 +82,7 @@ def compile_figure(
     )
     # (For a draft of it to start from.)
     remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
+    give_up_if_newer()
     document = emit_svg(routed, style=layout_style, palette=paint_palette)
     return Compilation(measured, fitted, routed, document)
 

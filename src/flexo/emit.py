@@ -140,9 +140,14 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
     The first tone a figure uses takes the palette's most distinct colour and the
     second its next: the palette's colours are already ordered for contrast. A
     tone written as a number (``tone=3``) takes that colour outright.
+
+    A colour chosen for a shape (a number, or neutral: a chip) takes no turn from the
+    others: the shape keeps its kind's place in the order, and its number shares the
+    colours rather than taking one away -- so choosing one never moves another shape's
+    colour, and every MLP stays the colour it was.
     """
 
-    from flexo.components import NEUTRAL_TONES, node_tone
+    from flexo.components import KIND_TONES, NEUTRAL_TONES, node_tone
     from flexo.drawn import DRAWN_KINDS, drawn_tones
     from flexo.themes import TONE_COUNT
 
@@ -152,13 +157,23 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
         # A drawn component's tones (a construct's genes, a protein's domains):
         # each one colour across the figure. Read once per node.
         own = drawn_tones(node) if node.kind in DRAWN_KINDS else ()
-        for tone in (node_tone(node, style.kind_tones), *own):
-            if tone is None:
-                continue
-            if tone.isdigit():
+        tone = node_tone(node, style.kind_tones)
+        authored = node.property("tone")
+        chosen = authored is not None and (
+            str(authored).strip().isdigit() or str(authored).strip().lower() in NEUTRAL_TONES
+        )
+        if chosen:
+            if tone is not None:
                 claimed.add(int(tone))
-            elif tone not in names:
-                names.append(tone)
+            # (Its kind's turn is kept, as though no colour had been chosen.)
+            tone = KIND_TONES.get(node.kind) if style.kind_tones else None
+        for each in (tone, *own):
+            if each is None:
+                continue
+            if each.isdigit():
+                claimed.add(int(each))
+            elif each not in names:
+                names.append(each)
     # A coloured line's tone is a tone of the figure's too: the same name, the same colour --
     # but a line coloured takes no colour from the shapes: theirs stay as they were.
     lines = [
@@ -167,8 +182,8 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
         if line.tone is not None and line.tone.lower() not in NEUTRAL_TONES
     ]
     names += [tone for tone in dict.fromkeys(lines) if not tone.isdigit() and tone not in names]
-    free = [index for index in range(1, TONE_COUNT + 1) if index not in claimed] or [1]
-    mapping = {name: free[position % len(free)] for position, name in enumerate(names)}
+    every = list(range(1, TONE_COUNT + 1))
+    mapping = {name: every[position % len(every)] for position, name in enumerate(names)}
     mapping.update({str(index): (index - 1) % TONE_COUNT + 1 for index in claimed})
     for tone in lines:
         if tone.isdigit():

@@ -594,9 +594,19 @@ class NetSpec:
     """How the net's lines are stroked; see ``EdgeSpec.line``."""
     tone: str | None = None
     """The colour the net's lines are drawn in; see ``EdgeSpec.tone``."""
+    sides: tuple[tuple[str, Side], ...] = ()
+    """The side of its shape each end named here meets, by the end (``add-ln.input``): as an
+    edge's ``depart``/``arrive`` do, a skip line made to leave its block's foot and come
+    into the next one's head. Ends not named are placed as the figure places them."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")
+        ends = {str(end) for end in (*self.sources, *self.targets)}
+        strays = sorted(end for end, _ in self.sides if end not in ends)
+        if strays:
+            raise ValueError(
+                f'net "{self.id}" names a side for {", ".join(strays)}, which it does not join'
+            )
         if self.line not in LINE_STYLES:
             raise ValueError(
                 f'unknown line "{self.line}" for net "{self.id}"; '

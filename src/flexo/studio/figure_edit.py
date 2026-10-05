@@ -49,7 +49,7 @@ import io
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -825,8 +825,11 @@ class _Document:
             while identifier in children:
                 children.remove(identifier)
             back = self.runs_back(group)
-            if before is not None and after is not None and back and (
-                children.index(after) < children.index(before)
+            if (
+                before is not None
+                and after is not None
+                and back
+                and children.index(after) < children.index(before)
             ):
                 at = children.index(after) + 1
             elif before is not None:
@@ -1071,6 +1074,12 @@ class _Document:
             if key in {"depart", "arrive"} and kind == "edge":
                 self.end_side(item, key, value)
                 continue
+            if kind == "net" and key.startswith("side:"):
+                self.net_side(item, key.removeprefix("side:"), value)
+                continue
+            if kind == "net" and key == "trunk":
+                self.net_trunk(item, str(value or ""))
+                continue
             _set(item, key.split("."), value)
             if kind == "edge" and key in {"arrow", "head"}:
                 # A regulation head goes on an arrow with an end; a reversible step has none.
@@ -1198,6 +1207,8 @@ class _Document:
                 values = net.get(side) or []
                 for index, value in enumerate(values):
                     values[index] = moved(str(value))
+            if isinstance(net.get("sides"), dict):
+                net["sides"] = {moved(str(end)): side for end, side in net["sides"].items()}
 
     def _delete(self, action: Mapping[str, Any]) -> list[str]:
         ids = [str(item) for item in action.get("ids") or []]
@@ -1593,6 +1604,12 @@ class _Document:
                 for side, end in zip(("from", "to"), ends, strict=True):
                     twin[side] = renamed[end] + str(edge[side])[len(end) :]
                 self.edges.append(twin)
+
+        def moved(end: str) -> str | None:
+            node = self.node_of(end)
+            return renamed[node] + end[len(node) :] if node in renamed else None
+
+        self.carry_nets(list(self.nets), moved)
         return made
 
     def _paste(self, action: Mapping[str, Any]) -> list[str]:
@@ -1644,7 +1661,61 @@ class _Document:
             for side, end, head in zip(("from", "to"), ends, heads, strict=True):
                 edge[side] = renamed[head] + end[len(head) :]  # type: ignore[index]
             self.data.setdefault("edges", []).append(edge)
+
+        def pasted(end: str) -> str | None:
+            head = next((old for old in renamed if end == old or end.startswith(f"{old}.")), None)
+            return renamed[head] + end[len(head) :] if head is not None else None
+
+        self.carry_nets(written(action.get("nets")), pasted)
         return [renamed[item] for item in top]
+
+    def carry_nets(self, nets: list[dict[str, Any]], moved: Callable[[str], str | None]) -> None:
+        """The joined lines (nets) among parts copied, copied with them -- each end on the copy
+        of its part (``moved``; ``None`` for a part not copied), their look kept: colour,
+        dashes, words, where they run. Of one that reaches parts not copied too, what joins
+        those copied: a joined line still, with two ends or more left on its branching side;
+        a plain line of the same look, with one."""
+
+        for net in nets:
+            sources = [str(end) for end in net.get("sources") or []]
+            targets = [str(end) for end in net.get("targets") or []]
+            kind = net.get("kind")
+            merge = kind == "merge" or (kind != "fan-out" and len(sources) > 1)
+            hubs, branches = (targets, sources) if merge else (sources, targets)
+            hub = moved(hubs[0]) if hubs else None
+            ends = [new for end in branches if (new := moved(end)) is not None]
+            if hub is None or not ends:
+                continue
+            look = {
+                key: copy.deepcopy(value)
+                for key, value in net.items()
+                if key not in {"id", "kind", "sources", "targets", "sides"}
+            }
+            # (The sides its ends meet their shapes on, on the copies' ends.)
+            given = net.get("sides") if isinstance(net.get("sides"), Mapping) else {}
+            sides = {
+                new: str(side)
+                for end, side in given.items()
+                if (new := moved(str(end))) is not None and new in {hub, *ends}
+            }
+            if len(ends) == 1:
+                edge = {"from": ends[0], "to": hub} if merge else {"from": hub, "to": ends[0]}
+                edge.update({key: look[key] for key in ("label", "tone", "line") if key in look})
+                for key, end in (("depart", edge["from"]), ("arrive", edge["to"])):
+                    if end in sides:
+                        edge[key] = sides[end]
+                self.data.setdefault("edges", []).append(edge)
+                continue
+            self.data.setdefault("nets", []).append(
+                {
+                    "id": self.fresh(str(net.get("id") or "line")),
+                    "kind": "merge" if merge else "fan-out",
+                    "sources": ends if merge else [hub],
+                    "targets": [hub] if merge else ends,
+                    **look,
+                    **({"sides": sides} if sides else {}),
+                }
+            )
 
     def copy(self, identifier: str, renamed: dict[str, str]) -> str | None:
         node, group = self.node(identifier), self.group(identifier)
@@ -1741,6 +1812,21 @@ class _Document:
         for key in ("rail", "rail_at", "via", "joint"):
             if nets and key in nets[0]:
                 net[key] = nets[0][key]
+        # Where each end meets its shape, as it did: a line's leaving and arriving sides,
+        # a joined line's ends'.
+        joined = {*net["sources"], *net["targets"]}
+        sides: dict[str, Any] = {}
+        for kind_of, item in items:
+            if kind_of == "net":
+                given = item.get("sides") if isinstance(item.get("sides"), dict) else {}
+                sides.update({str(end): side for end, side in given.items() if side})
+            else:
+                for key, end in (("depart", item["from"]), ("arrive", item["to"])):
+                    if item.get(key):
+                        sides.setdefault(str(end), item[key])
+        sides = {end: side for end, side in sides.items() if end in joined}
+        if sides:
+            net["sides"] = sides
         at = len(self.nets)
         for kind_of, item in items:
             if kind_of == "edge":
@@ -1750,6 +1836,39 @@ class _Document:
                 self.nets.remove(item)
         self.data.setdefault("nets", []).insert(at, net)
         return [str(net["id"])]
+
+    def net_side(self, net: dict[str, Any], end: str, side: Any) -> None:
+        """The side of its shape one end of a joined line meets (``None``: where the figure
+        puts it) -- a skip line made to leave its block's foot and come into the next one's
+        head, down one straight trunk."""
+
+        ends = [str(value) for value in (*(net.get("sources") or []), *(net.get("targets") or []))]
+        if end not in ends:
+            raise EditError("That end isn\u2019t on this line.")
+        sides = net.get("sides") if isinstance(net.get("sides"), dict) else {}
+        if side:
+            if side not in {"north", "south", "east", "west"}:
+                raise EditError(f"There\u2019s no side \u201c{side}\u201d.")
+            sides[end] = side
+        else:
+            sides.pop(end, None)
+        if sides:
+            net["sides"] = sides
+        else:
+            net.pop("sides", None)
+
+    def net_trunk(self, net: dict[str, Any], end: str) -> None:
+        """The branch of a joined line that is its trunk: the one drawn straight into the
+        shape the others join it at (or out of the one they leave), its caption above it --
+        the net's first end on its branching side."""
+
+        side = "sources" if net.get("kind") == "merge" else "targets"
+        branches = [str(value) for value in net.get(side) or []]
+        if end not in branches:
+            raise EditError("That end isn\u2019t on this line.")
+        written = list(net.get(side) or [])
+        written.insert(0, written.pop(branches.index(end)))
+        net[side] = written
 
     def ends(self, kind: str, item: Mapping[str, Any], side: str) -> list[Any]:
         """A line's ends on one ``side`` (``sources`` or ``targets``), a net's or an edge's."""
@@ -1775,6 +1894,7 @@ class _Document:
             raise EditError("That end isn\u2019t on this line.")
         parted = [end] if end is not None and len(branches) > 2 else branches
         look = {key: net[key] for key in ("role", "line", "tone") if key in net}
+        sides = net.get("sides") if isinstance(net.get("sides"), dict) else {}
         made = []
         for index, branch in enumerate(parted):
             ends = (branch, hub) if merge else (hub, branch)
@@ -1782,12 +1902,20 @@ class _Document:
             if net.get("label") and len(parted) == len(branches) and index == 0:
                 edge["label"] = net["label"]
             edge.update(copy.deepcopy(look))
+            # Each end meets its shape where it did.
+            for key, end in (("depart", ends[0]), ("arrive", ends[1])):
+                if sides.get(end):
+                    edge[key] = sides[end]
             self.data.setdefault("edges", []).append(edge)
             made.append(edge)
         if len(parted) == len(branches):
             self.nets.remove(net)
         else:
             net[side] = [branch for branch in branches if branch not in parted]
+            for branch in parted:
+                sides.pop(branch, None)
+            if not sides:
+                net.pop("sides", None)
         return [self.edge_id(edge) or "" for edge in made]
 
     def port_sides(self, identifier: str) -> dict[str, tuple[str, bool]]:

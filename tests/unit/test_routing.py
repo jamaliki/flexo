@@ -942,21 +942,24 @@ def _joint(net) -> Point:
 
 
 def test_a_captioned_rail_leaves_its_caption_the_run() -> None:
-    """A corridor too narrow to halve keeps the rail at its end, not in the words.
+    """A captioned merge's corridor holds its words, and the rail keeps out of them.
 
-    The caption would be written above the run the net reads along, so a rail
-    parked in the middle of the corridor would be drawn straight through it.
-    This run is narrower than the caption, so the caption goes beside the riser
-    instead, clear of both boxes.
+    The caption is written above the run the net reads along -- its trunk's, as
+    ``softmax(QK^T)V`` sits above Q's arrow -- so layout widens the corridor
+    between the trunk and the sink to hold it (flexo.layout.gaps), and the rail
+    keeps to the corridor's end: parked in its middle, it would be drawn
+    straight through the words.
     """
 
     from flexo.routing.labels import label_box
 
     labelled = compile_figure(_riser_merge_figure(label=(TextRun("softmax(QK"),)))
     net = labelled.routed.net("combined")
-    assert _joint(net) == Point(84.0, 28.0), "one escape short of the sink"
+    trunk, sink = labelled.fitted.node("trunk").bounds, labelled.fitted.node("sink").bounds
+    assert _joint(net) == Point(sink.left - 14.0, 28.0), "one escape short of the sink"
     assert net.label_metrics is not None and net.label_position is not None
     caption = label_box(net.label_position, net.label_metrics)
+    assert caption.bottom < 28.0 and trunk.right <= caption.left < caption.right <= _joint(net).x
     assert not any(
         node.bounds.intersects(caption, strict=True) for node in labelled.routed.fitted.nodes
     )
@@ -1403,6 +1406,35 @@ def test_a_draft_keeps_every_line_nothing_changed_beside() -> None:
     assert compile_figure(_pipeline("Write the report")).document.text == renamed
 
 
+def test_a_draft_meets_the_side_its_person_names_where_the_drawing_before_turned_the_end() -> None:
+    from flexo.draft import drafting
+
+    def loops(arrive: Side | None = None) -> FigureSpec:
+        with Figure("loops") as figure:
+            row = figure.root.row("steps")
+            steps = [row.block(f"s{index}", label=f"Step {index}") for index in range(4)]
+            for one, two in itertools.pairwise(steps):
+                figure.connect(one, two)
+            figure.connect(steps[3], steps[1])
+            figure.connect(steps[2], steps[0])
+        spec = figure.spec
+        back = spec.edges[-1]
+        return replace(spec, edges=[*spec.edges[:-1], replace(back, arrive=arrive)])
+
+    def arriving(compiled) -> float:
+        line = compiled.routed.edges[-1].centerline
+        first = next(node for node in compiled.fitted.nodes if node.measured.spec.id.endswith("s0"))
+        assert abs(line[-1].x - first.bounds.center.x) < first.bounds.width / 2
+        return line[-1].y - first.bounds.center.y
+
+    # The line back round the row is turned under it when drawn in full; then its person asks
+    # for it to arrive from above: the draft draws it so, as the drawing in full will.
+    assert arriving(compile_figure(loops())) > 0
+    with drafting():
+        assert arriving(compile_figure(loops(Side.NORTH))) < 0
+    assert arriving(compile_figure(loops(Side.NORTH))) < 0
+
+
 def test_searches_counted_as_made_run_out_of_work_where_they_would_have() -> None:
     from flexo.routing.search import EAST, Grid, TooDear, Zone, ceiling, counted, search_work, spend
 
@@ -1453,6 +1485,43 @@ def test_a_drawing_given_up_for_a_newer_one_stops_routing() -> None:
     assert search_work() - before < full_work
     assert len(asked) == 2
     assert full.document.text == compile_figure(_pipeline()).document.text  # nothing left over
+
+
+def test_lines_into_a_named_vector_meet_its_cells_not_the_air_beside_them() -> None:
+    from flexo.boxfit import fit_in_box
+    from flexo.components import vector_cells
+    from flexo.serialization import parse_figure
+
+    # Two values into one named vector in a row that wraps: its box is as wide as its words
+    # and as tall as the row, its cells a small stack in the middle of it.
+    nodes = [
+        {"id": "q", "kind": "vector", "properties": {"cells": 3}, "label": "Q"},
+        {"id": "kv", "kind": "vector", "properties": {"cells": 3, "columns": 2}, "label": "K, V"},
+        {"id": "attended", "kind": "vector", "properties": {"cells": 3},
+         "label": "Attended\nvalue"},
+        {"id": "mlp", "kind": "mlp", "label": "MLP"},
+        {"id": "cnn", "kind": "cnn", "label": "CNN"},
+        {"id": "next", "kind": "mlp", "label": "MLP"},
+    ]
+    spec = parse_figure({
+        "figure": {"id": "attention"},
+        "nodes": nodes,
+        "groups": [{"id": "root", "layout": {"kind": "flow-right"},
+                    "children": ["mlp", "q", "cnn", "kv", "attended", "next"]}],
+        "edges": [{"from": a, "to": b} for a, b in (
+            ("mlp", "q"), ("cnn", "kv"), ("q", "attended"), ("kv", "attended"), ("attended", "next")
+        )],
+    })
+    compiled = fit_in_box(spec, 864, 430).compilation
+    node = compiled.fitted.node("attended")
+    cells = vector_cells(node.measured.spec, node.bounds, node.measured.label, STYLES["paper"])
+    assert cells.height < node.bounds.height  # (the case: a box taller than its cells)
+    arriving = [edge for edge in compiled.routed.edges if edge.spec.target.node_id == "attended"]
+    assert len(arriving) == 2
+    for edge in arriving:
+        end = edge.centerline[-1]
+        assert end.x == pytest.approx(node.bounds.left)  # from beside, on the left
+        assert cells.top < end.y < cells.bottom, edge.spec.id
 
 
 def test_a_line_never_leaves_from_over_a_name_set_across_a_panel_top(tmp_path) -> None:
@@ -1539,3 +1608,64 @@ def test_a_line_alone_on_its_side_meets_it_at_the_middle_bending_where_the_boxes
     assert start == Point(boxes["a"].center.x, boxes["a"].bottom)
     assert end == Point(boxes["c"].center.x, boxes["c"].top)
     assert len(line.centerline) == 4
+
+
+def test_a_skip_line_runs_down_one_straight_trunk_into_the_next_blocks_head() -> None:
+    """A net's ends asked onto sides (``NetSpec.sides``), as an edge's ``depart`` and
+    ``arrive`` are, and a spine block lined up with the one it hangs from: the skip line
+    leaves the foot of one and runs straight down into the head of the next."""
+
+    from flexo.orient import turned
+    from flexo.serialization import parse_figure
+
+    def spine(add_side: str) -> dict:
+        return {
+            "figure": {"id": "spine"},
+            "groups": [
+                {
+                    "id": "root",
+                    "layout": {"kind": "grid", "columns": 2, "align": "start"},
+                    "children": ["prev", "gap", "add", "a"],
+                }
+            ],
+            "nodes": [
+                {"id": "prev", "label": "Previous layer"},
+                {"id": "gap", "kind": "spacer"},
+                {"id": "add", "kind": "add-norm", "label": "Add LN", "align_with": "prev"},
+                {"id": "a", "kind": "vector", "label": "Node features"},
+            ],
+            "nets": [
+                {
+                    "id": "skip",
+                    "kind": "fan-out",
+                    "sources": ["prev"],
+                    "targets": ["a", "add"],
+                    "sides": {"prev": "south", "add": add_side},
+                }
+            ],
+        }
+
+    compiled = compile_figure(parse_figure(spine("north")))
+    (net,) = compiled.routed.nets
+    prev, add = compiled.fitted.node("prev").bounds, compiled.fitted.node("add").bounds
+    into = next(stem for stem in net.target_stems if stem.port.node_id == "add").centerline
+    trunk = (*net.source_stems[0].centerline, *into)
+    assert {round(point.x, 6) for point in trunk} == {round(prev.center.x, 6)}
+    assert add.center.x == pytest.approx(prev.center.x)
+    assert net.source_stems[0].centerline[0].y == pytest.approx(prev.bottom)
+    assert into[-1].y == pytest.approx(add.top)
+    # Turned to fit a slide, it runs straight across: the block too tall to move within
+    # its row is met by the one it lines up with.
+    compiled = compile_figure(turned(parse_figure(spine("north"))))
+    (net,) = compiled.routed.nets
+    prev, add = compiled.fitted.node("prev").bounds, compiled.fitted.node("add").bounds
+    into = next(stem for stem in net.target_stems if stem.port.node_id == "add").centerline
+    trunk = (*net.source_stems[0].centerline, *into)
+    assert {round(point.y, 6) for point in trunk} == {round(add.center.y, 6)}
+    assert (trunk[0].x, into[-1].x) == (pytest.approx(prev.right), pytest.approx(add.left))
+    # Asked onto the right, it comes in from the right.
+    compiled = compile_figure(parse_figure(spine("east")))
+    (net,) = compiled.routed.nets
+    into = next(stem for stem in net.target_stems if stem.port.node_id == "add").centerline
+    assert into[-1].x == pytest.approx(compiled.fitted.node("add").bounds.right)
+    assert not lint_compilation(compiled).diagnostics

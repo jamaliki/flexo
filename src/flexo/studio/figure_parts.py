@@ -575,23 +575,31 @@ def _structure() -> dict[str, Any]:
 
 def _learning() -> list[dict[str, Any]]:
     simple = [
-        ("mlp", "MLP", "A multilayer perceptron", "MLP", [MOTIF]),
-        ("cnn", "CNN", "A convolutional network", "CNN", [MOTIF]),
+        # (Boxes can be sized: a spine's blocks as wide as the block they hang from, so
+        # its skip lines run straight down their middle.)
+        ("mlp", "MLP", "A multilayer perceptron", "MLP", [MOTIF, *SIZE]),
+        ("cnn", "CNN", "A convolutional network", "CNN", [MOTIF, *SIZE]),
         (
             "attention",
             "Attention",
             "Attention with query, key and value ports",
             "Attention",
-            [MOTIF],
+            [MOTIF, *SIZE],
         ),
-        ("add-norm", "Add & Norm", "A residual sum followed by normalisation", "Add + norm", []),
-        ("concat", "Concat", "Values concatenated side by side", "Concat", []),
+        (
+            "add-norm",
+            "Add & Norm",
+            "A residual sum followed by normalisation",
+            "Add + norm",
+            SIZE,
+        ),
+        ("concat", "Concat", "Values concatenated side by side", "Concat", SIZE),
         ("tensor", "Tensor", "A tensor drawn as a slab", "Tensor", []),
         ("matrix", "Matrix", "A grid of cells", "Matrix", [MOTIF]),
         ("graph", "Graph", "A small graph of nodes and edges", "Graph", [MOTIF]),
         ("inset", "Inset", "A molecule inset", "Molecule", [MOTIF]),
-        ("prediction", "Prediction", "The output of a model", "Prediction", []),
-        ("loss", "Loss", "A loss term", "Loss", []),
+        ("prediction", "Prediction", "The output of a model", "Prediction", SIZE),
+        ("loss", "Loss", "A loss term", "Loss", SIZE),
     ]
     parts = [
         _part(kind, title, "Machine Learning", hint, {"label": label}, fields)

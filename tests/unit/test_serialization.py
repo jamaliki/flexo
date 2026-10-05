@@ -158,6 +158,26 @@ def test_net_rail_placement_and_joint_round_trip() -> None:
     assert figure_to_document(figure)["nets"][0]["rail_at"] == 0.55  # type: ignore[index]
 
 
+def test_a_nets_end_sides_round_trip_by_the_end_as_written() -> None:
+    """A side is named by the end as written; an end the net no longer joins (a shape
+    since taken off it) has its side let go rather than failing the figure."""
+
+    value = _net_document()
+    value["nets"][0]["sources"] = ["input", "residual.output"]  # type: ignore[index]
+    value["nets"][0]["sides"] = {"input": "south", "projection.input": "north"}  # type: ignore[index]
+    figure = parse_figure(value)
+    (net,) = figure.nets
+    assert net.sides == (("input.output", Side.SOUTH), ("projection.input", Side.NORTH))
+    assert parse_figure(yaml.safe_load(dump_figure(figure))) == figure
+    written = figure_to_document(figure)["nets"][0]["sides"]  # type: ignore[index]
+    assert written == {"input.output": "south", "projection.input": "north"}
+    value["nets"][0]["sides"]["gone"] = "west"  # type: ignore[index]
+    assert parse_figure(value).nets[0].sides == net.sides
+    with pytest.raises(FlexoError, match="schema"):
+        value["nets"][0]["sides"] = {"input": "up"}  # type: ignore[index]
+        parse_figure(value)
+
+
 def test_default_net_placement_stays_out_of_the_document() -> None:
     value = _net_document()
     del value["nets"][0]["rail_at"]  # type: ignore[index]
