@@ -45,6 +45,21 @@ def lowest_common_group(parents: Mapping[str, str], entity_ids: Sequence[str]) -
     return next(group_id for group_id in chain if group_id in common)
 
 
+def lined_up(figure: FigureSpec, parents: Mapping[str, str], a: str, b: str) -> bool:
+    """Whether the parts ``a`` and ``b`` are lined up otherwise than centred: the innermost
+    group holding both aligns what it holds by the line their ports live on
+    (``align="ports"``, as an authored figure asks, or as one whose parts are wired to one
+    another is laid out), or by their edges (``start``, ``end``). A line between two such
+    parts runs where that alignment puts it, wherever along their sides that falls; between
+    parts a group centres, it meets each side at its middle."""
+
+    if a == b or a not in parents or b not in parents:
+        return False
+    groups = {group.id: group for group in figure.groups}
+    owner = groups.get(lowest_common_group(parents, (a, b)))
+    return owner is not None and owner.layout.align not in {"center", "auto"}
+
+
 def bounded_owner(
     figure: FigureSpec,
     parents: Mapping[str, str],

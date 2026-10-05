@@ -430,10 +430,18 @@ class NodeSpec:
     properties: tuple[tuple[str, PropertyValue], ...] = ()
     shadow: bool = False
     """Whether this component casts a soft drop shadow. Paint only; off by default."""
+    align_with: str | None = None
+    """A part or group this one is centred on, across the line its row or column runs:
+    a box on a line of its own under a row, centred under one of the row's parts (or
+    under the row itself, named so as asked rather than left to the layout). Unset, its
+    group places it -- centred, or under the one part it is joined to (``flexo.layout.slide``).
+    Only it moves: as far as its group's room allows, the parts it lines up with stay."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Node ID")
         _validate_id(self.kind, "Node kind")
+        if self.align_with is not None:
+            _validate_id(self.align_with, "Aligned-with ID")
         names = [port.name for port in self.ports]
         if len(names) != len(set(names)):
             raise ValueError(f'node "{self.id}" contains duplicate port names')

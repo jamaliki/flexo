@@ -69,6 +69,7 @@ STRUCTURAL = frozenset(
         "duplicate",
         "paste",
         "arrange",
+        "align",
     }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
@@ -95,6 +96,7 @@ def apply(
         raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
+    document.tidy_alignment()
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
@@ -599,6 +601,10 @@ class _Document:
         return candidate
 
     def detach(self, identifier: str) -> None:
+        # (Lined up under a part where it was, it is placed afresh where it goes.)
+        node = self.node(identifier)
+        if node is not None:
+            node.pop("align_with", None)
         for group in self.groups:
             children = group.get("children") or []
             while identifier in children:
@@ -950,6 +956,9 @@ class _Document:
             for placement in (item.get("layout") or {}).get("placements") or []:
                 if placement.get("child") == old:
                     placement["child"] = new
+        for part in self.nodes:
+            if isinstance(part, dict) and part.get("align_with") == old:
+                part["align_with"] = new
         for edge in self.edges:
             edge["from"], edge["to"] = moved(str(edge["from"])), moved(str(edge["to"]))
             for waypoint in edge.get("waypoints") or []:
@@ -1157,6 +1166,40 @@ class _Document:
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
         return [identifier]
+
+    def _align(self, action: Mapping[str, Any]) -> list[str]:
+        """``id``, on a line of its own in a row or column, centred on the part or group
+        ``with`` across the way its line runs (under one part of the row over it, or under
+        the row itself); without ``with``, placed as its group places it."""
+
+        identifier = str(action["id"])
+        node = self.node(identifier)
+        if node is None:
+            raise EditError(f"There\u2019s no shape named “{identifier}”.")
+        self.parent_of(identifier)  # held somewhere written
+        target = action.get("with")
+        if target is None:
+            node.pop("align_with", None)
+            return [identifier]
+        target = str(target)
+        if target == identifier or (self.node(target) is None and self.group(target) is None):
+            raise EditError(f"There\u2019s nothing named “{target}” to line it up with.")
+        node["align_with"] = target
+        return [identifier]
+
+    def tidy_alignment(self) -> None:
+        """No part left lined up with something the figure no longer has."""
+
+        known = {
+            str(item.get("id")) for item in [*self.nodes, *self.groups] if isinstance(item, dict)
+        }
+        for node in self.nodes:
+            if (
+                isinstance(node, dict)
+                and "align_with" in node
+                and str(node["align_with"]) not in known
+            ):
+                del node["align_with"]
 
     def own_line(self, identifier: str, of: str, side: str) -> list[str]:
         """``identifier`` on a line of its own ``side`` of the group ``of``, centred on it

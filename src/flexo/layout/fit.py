@@ -14,7 +14,7 @@ from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.layout.ports import adapt_ports
 from flexo.layout.sides import choose_port_sides
-from flexo.layout.slide import slide_groups
+from flexo.layout.slide import aligned_with, slide_groups
 from flexo.layout.widen import widen_boxes
 from flexo.style import LayoutStyle
 from flexo.themes import figure_style
@@ -63,13 +63,16 @@ class _Fitter:
         # Sides first, offsets second: adaptation slides a port along the side it
         # is on, so it has to be told which side that is before it starts.
         groups = tuple(self.fitted_groups[group.spec.id] for group in self.measured.groups)
-        nodes, diagnostics = choose_port_sides(self.measured.semantic, nodes, groups)
+        # A part lined up with another its person chose: centred on it (again once the
+        # groups have slid, should the other have moved with them).
+        semantic = self.measured.semantic
+        nodes = aligned_with(semantic, nodes, groups, self.kinds)
+        nodes, diagnostics = choose_port_sides(semantic, nodes, groups)
         # A centred row can leave an input outside the reach of the port it feeds;
         # sliding the row is the one fix that moving ports cannot make.
         if self.slide:
-            nodes, groups = slide_groups(
-                self.measured.semantic, nodes, groups, self.kinds, self.style
-            )
+            nodes, groups = slide_groups(semantic, nodes, groups, self.kinds, self.style)
+            nodes = aligned_with(semantic, nodes, groups, self.kinds)
         # Then a box several straight arrows share a side of grows until they meet
         # its middle, so the boxes they come from keep their centres.
         nodes = widen_boxes(self.measured.semantic, nodes, groups, self.kinds, self.style)

@@ -251,7 +251,7 @@ export function figureParts(host) {
       case "ungroup": return `Ungroup ${name(action.id)}`;
       case "paste": return "Paste Shapes";
       case "rename": return `Change ID of ${name(action.id)}`;
-      case "move": case "step": return `Move ${name(action.id)}`;
+      case "move": case "step": case "align": return `Move ${name(action.id)}`;
       case "update": {
         const target = action.target || action.targets?.[0] || {};
         const id = target.id, values = action.values || {}, keys = Object.keys(values);
@@ -344,7 +344,7 @@ export function figureParts(host) {
   // left before the latest keys must not put older words back in the field.
   const typed = new Map();
   let afresh = false;
-  const LANDS = new Set(["move", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
+  const LANDS = new Set(["move", "align", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
   // A molecule changed is drawn again by mol-sketch, which takes a moment: a small
   // spinner shows on it meanwhile, until its new drawing is in.
   const redrawing = new Map();
@@ -361,7 +361,7 @@ export function figureParts(host) {
   // What a change of the figure's parts is, said where it is refused (the studio away):
   // "Can't add shapes while…". Words and settings typed are not refused: they are held.
   const REFUSED = { add: "add shapes", connect: "connect shapes", delete: "delete shapes", paste: "paste shapes", duplicate: "duplicate shapes",
-    gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes" };
+    gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
   function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
     // With the studio away, a host that keeps its drawing as it was (a deck's slide) refuses
@@ -1744,8 +1744,14 @@ export function figureParts(host) {
     for (const { element } of drag.moving) element.classList.toggle("fig-astray", !at);
   }
 
-  const dropAt = (point) => dropPlace(drag.drawn || model(), drag.boxes, point, drag.id);
-  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side && a.of === b.of : a === b);
+  // (Judged by where the pointer is, and where the part's middle now is: lined up under
+  // another part by its middle, however it was picked up.)
+  const dropAt = (point) => {
+    const own = drag.boxes.get(drag.id);
+    const centre = own ? { x: (own.left + own.right) / 2 + point.x - drag.from.x, y: (own.top + own.bottom) / 2 + point.y - drag.from.y } : point;
+    return dropPlace(drag.drawn || model(), drag.boxes, point, drag.id, centre);
+  };
+  const sameDrop = (a, b) => (a && b ? a.parent === b.parent && a.index === b.index && a.side === b.side && a.of === b.of && a.with === b.with : a === b);
   const unchanged = (at, id, drawn = drag?.drawn) => stays(drawn || model(), at, id);
   // The lines `children` are seen on, laid out `way`: those level with one another (beside
   // one another, for a column) together, each line in the order seen.
@@ -1768,10 +1774,42 @@ export function figureParts(host) {
     drag.parted = [];
     if (!at) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
     const origin = host.overlay.getBoundingClientRect();
+    drag.indicator.classList.remove("centre");
+    drag.zone.classList.remove("named-beside", "named-left");
     const room = drag.boxes.get(at.parent) || SVG(host.element(model().root))?.getBoundingClientRect();
     const place = (node, box, extra = {}) => Object.assign(node.style, {
       transform: `translate(${box.left - origin.left}px, ${box.top - origin.top}px)`,
       width: `${Math.max(box.right - box.left, 0)}px`, height: `${Math.max(box.bottom - box.top, 0)}px`, ...extra });
+    if (at.kind === "align") {
+      // Along its own line: a slot where it lands, centred under the part (or the row) it
+      // goes with, named -- and a line down the middle from that to it. Where it is already,
+      // nothing.
+      const own = drag.boxes.get(drag.id), over = drag.boxes.get(at.with);
+      if (at.here || !own || !over) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
+      const width = own.right - own.left, height = own.bottom - own.top;
+      // (Kept within the line it goes with, as the figure keeps it: never wider for it.)
+      const line = drag.boxes.get(at.of);
+      const left = line && line.right - line.left >= width ? Math.max(line.left, Math.min(at.x - width / 2, line.right - width)) : at.x - width / 2;
+      const slot = { left, top: own.top, right: left + width, bottom: own.bottom };
+      const label = at.centred
+        ? `Centred ${at.side} the ${groupOf(at.with) && !plain(groupOf(at.with).label) ? "row" : inQuotes(nameOf(at.with))}`
+        : `${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
+      // (Its name beside it, clear of the line down the middle; on its left at the page's
+      // right edge.)
+      drag.zone.style.setProperty("--label-shift", "0px");
+      drag.zone.classList.remove("named-over");
+      drag.zone.classList.add("named-beside");
+      drag.zone.classList.toggle("named-left", slot.right + label.length * 6.2 + 30 > origin.right);
+      place(drag.zone, slot);
+      drag.zone.dataset.label = label;
+      drag.zone.classList.add("on", "own-line");
+      const [from, to] = at.side === "below" ? [over.bottom + 3, slot.top - 3] : [slot.bottom + 3, over.top - 3];
+      if (to - from > 4 && height > 0) {
+        place(drag.indicator, { left: at.x - 1, right: at.x + 1, top: from, bottom: to });
+        drag.indicator.classList.add("on", "centre");
+      } else drag.indicator.classList.remove("on");
+      return;
+    }
     if (at.kind === "line") {
       // A line of its own: a slot where it lands, centred past the rest of the figure -- or
       // past the part it goes beside.
@@ -1896,6 +1934,12 @@ export function figureParts(host) {
   // a figure folded onto lines to fit is written as seen first, one step with the move,
   // which then goes into the lines as written.
   function moveAsSeen(id, at, { folds = [], drawn = null, failed = null } = {}) {
+    // Lined up under a part of the line it goes with (or the line itself): only it moves.
+    if (at.kind === "align") {
+      const label = at.centred ? `Centre ${inQuotes(nameOf(id))}` : `Place ${inQuotes(nameOf(id))} ${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
+      act({ do: "align", id, with: at.with }, { failed, label });
+      return;
+    }
     if (!folds.length) {
       if (at.kind === "line") ownLine(id, at.of, at.side, { failed, drawn });
       else act({ do: "move", id, parent: at.parent, index: at.index }, { failed });

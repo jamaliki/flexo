@@ -18,6 +18,11 @@
 // its left or right, it is { kind: "line", side, of: that part }: the two side by side;
 // well under a part in a row, in line with it, { kind: "line", side: "below", of: that
 // part }: the two one over the other.
+//
+// A part on a line of its own under a row (or over one), moved along its line: centred
+// under one of the row's parts, or under the row as a whole -- { kind: "align", with,
+// of, centred } (the server's "align"), judged by where the part's middle now is
+// (`centre`, the pointer if not given). Nothing moves but it: the row keeps its places.
 
 const MARGIN = 36;
 const PAD = 2;
@@ -29,7 +34,7 @@ const BESIDE = 12;
 // go under it: just under a row, it goes into the row.
 const UNDER = 20;
 
-export function dropPlace(model, boxes, point, id) {
+export function dropPlace(model, boxes, point, id, centre = point) {
   const groups = new Map(model.groups.map((group) => [group.id, group]));
   const parent = new Map();
   for (const group of model.groups) for (const child of group.children || []) parent.set(child, group.id);
@@ -38,6 +43,9 @@ export function dropPlace(model, boxes, point, id) {
     return false;
   };
   const all = boxes.get(model.root);
+  // Along its own line under a row: centred under one of its parts, or the row.
+  const lined = alignUnder(model, groups, parent, boxes, point, id, centre);
+  if (lined) return lined;
   // Let go over where it was drawn -- a nudge, a press that moved a little -- it stays.
   const own = boxes.get(id), holder = groups.get(parent.get(id));
   if (own && holder && point.x >= own.left && point.x <= own.right && point.y >= own.top && point.y <= own.bottom) {
@@ -85,6 +93,37 @@ export function dropPlace(model, boxes, point, id) {
     || (level(siblings[at - 1]) && middle(siblings[at - 1]) > middle(near))));
   const after = across ? (point.x > (box.left + box.right) / 2) !== back : point.y > (box.top + box.bottom) / 2;
   return { parent: group.id, index: at + (after ? 1 : 0), kind, near, after, across, siblings, back };
+}
+
+// A part alone on its line of a column, under a line of several parts (a row) -- or over
+// one, should it be the first -- and let go on its own line, its middle within that line's
+// width: under the part of it whose middle is nearest its own, or under the line as a
+// whole, should the line's middle be nearer still. (Answers where it already is too: the
+// page reads that as staying.)
+function alignUnder(model, groups, parent, boxes, point, id, centre) {
+  const holder = groups.get(parent.get(id));
+  if (!holder || (holder.layout?.kind || "column") !== "column" || groups.has(id)) return null;
+  const own = boxes.get(id);
+  const lines = (holder.children || []).filter((child) => boxes.get(child));
+  const at = lines.indexOf(id);
+  if (!own || at < 0) return null;
+  const of = lines[at - 1] ?? lines[at + 1];
+  const row = of && groups.get(of);
+  const box = of && boxes.get(of);
+  if (!row || !box || !(row.children || []).length) return null;
+  // On its own line: from just past the line it goes with to the next line on (or a little
+  // past where it is).
+  const above = lines[at - 1] === of;
+  const next = boxes.get(lines[above ? at + 1 : at - 1]);
+  const [low, high] = above ? [box.bottom + 2, next ? next.top - 2 : own.bottom + 40] : [next ? next.bottom + 2 : own.top - 40, box.top - 2];
+  if (point.y < low || point.y > high) return null;
+  if (centre.x < box.left - MARGIN || centre.x > box.right + MARGIN) return null;
+  const middle = (rect) => (rect.left + rect.right) / 2;
+  const targets = [{ with: of, x: middle(box), centred: true },
+    ...(row.children || []).filter((child) => child !== id && boxes.get(child)).map((child) => ({ with: child, x: middle(boxes.get(child)), centred: false }))];
+  const best = targets.reduce((near, each) => (Math.abs(each.x - centre.x) < Math.abs(near.x - centre.x) - 0.5 ? each : near));
+  return { kind: "align", with: best.with, of, centred: best.centred, side: above ? "below" : "above", x: best.x,
+    here: Math.abs(middle(own) - best.x) < 1.5, parent: holder.id, index: holder.children.indexOf(id) };
 }
 
 // Well under a part in a row, and in line with its middle, with nothing else there (no
@@ -185,6 +224,8 @@ function ownLine(model, root, all, point, id) {
 export function stays(model, place, id) {
   if (!place) return true;
   if (place.kind === "line") return false;
+  // Lined up as it is drawn already (under that part, or centred as it is): it stays.
+  if (place.kind === "align") return Boolean(place.here);
   const holder = model.groups.find((group) => (group.children || []).includes(id));
   return holder?.id === place.parent && holder.children.indexOf(id) === place.index;
 }

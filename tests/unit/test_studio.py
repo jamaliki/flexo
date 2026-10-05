@@ -2289,3 +2289,50 @@ def test_a_copy_the_studio_made_goes_when_undone_and_comes_back_when_redone(tmp_
         assert picture.read_bytes() == b"png"
     finally:
         workspace.close()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_under_a_row_is_dragged_to_centre_under_one_of_its_parts_or_the_row() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    model = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "column"}, "children": ["row", "e"]},
+            {"id": "row", "layout": {"kind": "row"}, "children": ["a", "b", "c", "d"]},
+        ],
+    }
+    boxes = {
+        "root": [0, 0, 370, 130],
+        "row": [10, 10, 360, 40],
+        "a": [10, 10, 60, 40],
+        "b": [110, 10, 160, 40],
+        "c": [210, 10, 260, 40],
+        "d": [310, 10, 360, 40],
+        "e": [145, 100, 225, 130],
+    }
+    # (Each: the pointer, and where the part's middle is as it is dragged.)
+    drags = [[140, 115, 136], [190, 115, 186], [330, 110, 338], [60, 118, 30], [190, 400, 186]]
+    code = (
+        f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(model)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([x, y, middle]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, 'e', { x: middle, y });\n"
+        "  if (!place || place.kind !== 'align') return place && place.kind;\n"
+        "  return { with: place.with, centred: place.centred, stays: stays(model, place, 'e') };\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        # Along its own line, under "b", under the row as it is (where it stays), under "d",
+        # and past the row's left end, under "a" -- its middle judged, not the pointer.
+        {"with": "b", "centred": False, "stays": False},
+        {"with": "row", "centred": True, "stays": True},
+        {"with": "d", "centred": False, "stays": False},
+        {"with": "a", "centred": False, "stays": False},
+        # Well under its own line, it is placed in the column as before.
+        None,
+    ]

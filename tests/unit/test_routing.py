@@ -1391,3 +1391,38 @@ groups:
     compiled = compile_figure(parse_figure(yaml.safe_load(text)))
     codes = [item.code for item in lint_compilation(compiled).diagnostics]
     assert "routing.connector.crossing" not in codes, codes
+
+
+def test_a_line_alone_on_its_side_meets_it_at_the_middle_bending_where_the_boxes_differ() -> None:
+    """A box that can't be put under the one it is joined to (asked to sit elsewhere): the
+    line leaves the middle of one side and enters the middle of the other, an elbow between
+    -- never a pin slid off the middle to make it straight."""
+
+    from flexo.serialization import parse_figure
+
+    figure = parse_figure(
+        {
+            "figure": {"id": "s"},
+            "nodes": [
+                {"id": "a", "label": "Collect"},
+                {"id": "b", "label": "Store the samples"},
+                {"id": "c", "label": "Count", "align_with": "row"},
+            ],
+            "edges": [{"from": "a", "to": "c"}],
+            "groups": [
+                {
+                    "id": "root",
+                    "layout": {"kind": "column", "align": "center"},
+                    "children": ["row", "c"],
+                },
+                {"id": "row", "role": "layout", "layout": {"kind": "row"}, "children": ["a", "b"]},
+            ],
+        }
+    )
+    compilation = compile_figure(figure)
+    boxes = {node.measured.spec.id: node.bounds for node in compilation.fitted.nodes}
+    (line,) = compilation.routed.edges
+    start, end = line.centerline[0], line.centerline[-1]
+    assert start == Point(boxes["a"].center.x, boxes["a"].bottom)
+    assert end == Point(boxes["c"].center.x, boxes["c"].top)
+    assert len(line.centerline) == 4

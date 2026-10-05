@@ -358,3 +358,16 @@ def test_a_set_of_settings_is_held_flat_and_written_back_nested() -> None:
     value["nodes"][1]["properties"] = {"style": {"line": {"width": {"too": {"deep": [{}]}}}}}  # type: ignore[index]
     with pytest.raises(FlexoError):
         parse_figure(value)
+
+
+def test_a_part_lined_up_with_another_reads_and_writes_back() -> None:
+    document = {
+        "figure": {"id": "f"},
+        "nodes": [{"id": "a", "label": "A"}, {"id": "e", "label": "E", "align_with": "a"}],
+        "groups": [{"id": "root", "layout": {"kind": "column"}, "children": ["a", "e"]}],
+    }
+    figure = parse_figure(document)
+    assert next(node for node in figure.nodes if node.id == "e").align_with == "a"
+    written = figure_to_document(figure)
+    assert next(node for node in written["nodes"] if node["id"] == "e")["align_with"] == "a"
+    assert "align_with" not in next(node for node in written["nodes"] if node["id"] == "a")

@@ -484,6 +484,28 @@ with flexo.Figure("anchor", width="double-column") as figure:
             panel.mlp("body", label="Encoder")
 ```
 
+### A line alone on its side meets it at the middle
+
+A line that is the only one on a side of a box leaves (or enters) that side at its
+middle, at a port the component gives the box -- it is never slid along the side to
+make it straight. In a group that centres what it holds, a box joined by one line to
+one other is put centred on that other one, so the line runs straight from middle to
+middle (a store under the queue that feeds it); where the two can't be lined up, the
+line bends between the two middles. Several lines on one side still spread evenly
+about its middle, and a group lined up by its ports (`align="ports"`) or its edges
+keeps its lines where that puts them.
+
+To put a box on a line of its own under one part of a row -- or under the row itself,
+whatever it is joined to -- name it with `align_with`:
+
+```yaml
+nodes:
+- {id: e, label: Store, align_with: b}   # centred under b; align_with: row, under the row
+```
+
+Only that box moves, as far as the parts beside it reach: the row neither spreads nor
+shifts.
+
 ### Heights that match a vector stack
 
 To make a box exactly as tall as an N-cell vector stack, set its height to

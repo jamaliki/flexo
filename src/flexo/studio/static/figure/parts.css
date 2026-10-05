@@ -184,11 +184,15 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-drop-line { z-index: 8; background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 3px var(--accent-soft); }
 .fig-drop-zone { z-index: 7; border: 1.5px dashed var(--accent-line); border-radius: 6px; background: var(--accent-soft); }
 .fig-drop-line.on, .fig-drop-zone.on { opacity: 1; }
+/* A part lined up under another: a line down the middle of the two. */
+.fig-drop-line.centre { background: none; box-shadow: none; border-left: 2px dashed var(--accent); border-radius: 0; }
 /* A part let go past the figure's end: the slot it lands in, on a line of its own. */
 .fig-drop-zone.own-line { border-width: 2px; }
 .fig-drop-zone.own-line::after { content: attr(data-label); position: absolute; left: 50%; top: calc(100% + 5px); transform: translateX(calc(-50% + var(--label-shift, 0px))); white-space: nowrap; font: 600 10.5px/17px var(--font); color: var(--accent); background: var(--raised); padding: 0 6px; border-radius: 4px; border: 1px solid var(--accent-line); }
 /* At the page's foot, its name goes over it, on the page. */
 .fig-drop-zone.own-line.named-over::after { top: auto; bottom: calc(100% + 5px); }
+.fig-drop-zone.own-line.named-beside::after { top: 50%; left: calc(100% + 8px); transform: translateY(-50%); }
+.fig-drop-zone.own-line.named-beside.named-left::after { left: auto; right: calc(100% + 8px); }
 
 /* A molecule's view: turn, tilt, and zoom by steps. */
 .view-pad { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }

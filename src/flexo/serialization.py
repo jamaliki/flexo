@@ -245,6 +245,8 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
         result["height"] = _extent_data(node.height)
     if node.shadow:
         result["shadow"] = True
+    if node.align_with is not None:
+        result["align_with"] = node.align_with
     if node.properties:
         result["properties"] = {name: thaw_property(value) for name, value in node.properties}
     return result
@@ -474,6 +476,7 @@ def _node(data: dict[str, Any]) -> NodeSpec:
             )
         ),
         shadow=data.get("shadow", False),
+        align_with=data.get("align_with"),
     )
 
 

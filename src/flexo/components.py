@@ -813,3 +813,17 @@ def intrinsic_node_size(
 
 GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
 """Kinds whose size is their content's own, never grown around a label."""
+
+
+def centred_port(kind: str, port: PortSpec) -> bool:
+    """Whether a line alone on its side at ``port`` meets the side at its middle: a port
+    of the component's grammar (an input, an output, a residual), which says only which
+    side a value comes in by -- not one an author placed, nor one a drawn part names (a
+    construct's part, a protein's feature), which are where their part is."""
+
+    definition = COMPONENTS.get(kind)
+    return (
+        port.auto_side
+        and definition is not None
+        and any(item.name == port.name for item in definition.ports)
+    )

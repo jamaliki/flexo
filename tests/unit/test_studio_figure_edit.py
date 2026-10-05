@@ -731,3 +731,27 @@ def test_a_timeline_asked_for_too_short_an_axis_keeps_its_times_apart() -> None:
 
     # 24 (points, not hours) would set its times one over another: it is as wide as they need.
     assert width(length=24) > 100 and width(length=400) > 400
+
+
+def test_a_shape_is_lined_up_under_a_part_and_placed_afresh_when_moved() -> None:
+    text = (
+        "figure:\n  id: f\nnodes:\n"
+        + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcde")
+        + "groups:\n"
+        "- {id: root, layout: {kind: column, align: center}, children: [row, e]}\n"
+        "- {id: row, layout: {kind: row}, children: [a, b, c, d]}\n"
+    )
+    under = apply(text, {"do": "align", "id": "e", "with": "b"})
+    store = next(node for node in yaml.safe_load(under["text"])["nodes"] if node["id"] == "e")
+    assert store["align_with"] == "b" and under["select"] == ["e"]
+    # Renamed, the part it lines up with is followed; deleted, it is placed as its group places it.
+    renamed = apply(under["text"], {"do": "rename", "id": "b", "to": "beta"})
+    assert "align_with: beta" in renamed["text"]
+    gone = apply(renamed["text"], {"do": "delete", "ids": ["beta"]})
+    assert "align_with" not in gone["text"]
+    # Moved elsewhere, too; and back to its group's own place by "with" left out.
+    moved = apply(under["text"], {"do": "move", "id": "e", "parent": "row", "index": 0})
+    assert "align_with" not in moved["text"]
+    assert "align_with" not in apply(under["text"], {"do": "align", "id": "e"})["text"]
+    with pytest.raises(EditError, match="line it up with"):
+        apply(text, {"do": "align", "id": "e", "with": "nowhere"})

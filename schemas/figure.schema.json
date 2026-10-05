@@ -171,6 +171,7 @@
         "width": {"$ref": "#/$defs/extent"},
         "height": {"$ref": "#/$defs/extent"},
         "shadow": {"type": "boolean", "default": false},
+        "align_with": {"$ref": "#/$defs/identifier"},
         "properties": {
           "type": "object",
           "additionalProperties": {
