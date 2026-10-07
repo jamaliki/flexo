@@ -1759,8 +1759,10 @@ class _Document:
 
     def _join(self, action: Mapping[str, Any]) -> list[str]:
         """Lines into the same shape (or out of the same one) made one line that branches: a
-        trunk they share, with one caption -- the first any of them had. ``add`` puts one
-        more shape (or port) on the branching side of a line that branches already."""
+        trunk they share, with one caption -- what they say, when they say the same or only
+        one says anything; else the words ``label`` gives, the person having chosen them (a
+        joined line has one caption, and no line's words are dropped unasked). ``add`` puts
+        one more shape (or port) on the branching side of a line that branches already."""
 
         items = [self.line_or_net(str(identifier)) for identifier in action.get("ids") or []]
         if not items or (len(items) == 1 and items[0][0] == "edge" and not action.get("add")):
@@ -1792,6 +1794,31 @@ class _Document:
             kept.setdefault(self.end_of(end, usual), end)
         if len(kept) < 2:
             raise EditError("A line that branches needs two ends or more on its branching side.")
+        # What they say: a joined line has one caption, so lines saying different things are
+        # joined only with the words it keeps chosen -- none dropped without a word.
+        for kind_of, item in items:
+            if kind_of == "edge" and (item.get("back_label") or item.get("cofactors")):
+                called = (self.node(self.node_of(str(item[key]))) for key in ("from", "to"))
+                ends = " to ".join(f"“{self.said(node or {})}”" for node in called)
+                extra = [
+                    what
+                    for key, what in (("back_label", "a back label"), ("cofactors", "cofactors"))
+                    if item.get(key)
+                ]
+                raise EditError(
+                    f"The line from {ends} has {' and '.join(extra)}, which a joined line "
+                    "can\u2019t carry. Remove them to join it."
+                )
+        said: list[Any] = []
+        for _, item in items:
+            if item.get("label") and item["label"] not in said:
+                said.append(item["label"])
+        if "label" not in action and len(said) > 1:
+            words = [f"“{self.said({'label': label})}”" for label in said]
+            raise EditError(
+                f"These lines say {', '.join(words[:-1])} and {words[-1]}, but a joined line "
+                "has one label. Choose the words it keeps."
+            )
         nets = [item for kind, item in items if kind == "net"]
         net: dict[str, Any] = {
             "id": str(nets[0]["id"])
@@ -1801,7 +1828,7 @@ class _Document:
             "sources": list(kept.values()) if kind == "merge" else [hub],
             "targets": [hub] if kind == "merge" else list(kept.values()),
         }
-        label = next((item["label"] for _, item in items if item.get("label")), None)
+        label = action.get("label") if "label" in action else (said[0] if said else None)
         if label:
             net["label"] = label
         for key in ("role", "line", "tone"):

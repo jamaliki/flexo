@@ -266,10 +266,12 @@ export function stays(model, place, id) {
 // The line a part let go at `point` would be put into: one of `lines` ({ id, from, to,
 // points }, each a line's path as points along it, in the page's pixels) that passes within
 // `reach` of the point along its body -- away from its ends, where a part let go goes beside
-// the part there instead. Not a line of the part's own (`id`, from or to it). The answer is
+// the part there instead. Not a line of the part's own (`id`, from or to it). (`carried`: the
+// size, { width, height }, of what is let go: closer to an end than half of it, along the
+// line, it would stand over the part there -- it goes beside that part.) The answer is
 // null, or { id, from, to, at }: the line, and the point on it nearest the pointer.
 const REACH = 9;
-export function lineAt(lines, point, id = null, reach = REACH) {
+export function lineAt(lines, point, id = null, reach = REACH, carried = null) {
   let best = null;
   for (const line of lines) {
     if (id !== null && (line.from === id || line.to === id)) continue;
@@ -281,8 +283,8 @@ export function lineAt(lines, point, id = null, reach = REACH) {
     const length = along[along.length - 1];
     if (length < 8) continue;
     // Its ends (where it leaves a part, and where it meets one) are not its body: a short
-    // line's middle third, a long one's all but 18 pixels at each end.
-    const end = Math.min(18, length / 3);
+    // line's middle third, a long one's all but 18 pixels at each end -- or half of what is
+    // carried, along the line, should that be more.
     for (let at = 1; at < points.length; at += 1) {
       const a = points[at - 1], b = points[at];
       const span = Math.hypot(b.x - a.x, b.y - a.y);
@@ -290,6 +292,8 @@ export function lineAt(lines, point, id = null, reach = REACH) {
       const near = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
       const off = Math.hypot(point.x - near.x, point.y - near.y);
       const from = along[at - 1] + span * t;
+      const half = carried ? (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? carried.width : carried.height) / 2 : 0;
+      const end = Math.min(Math.max(18, half), length / 3);
       if (off > reach || from < end || from > length - end) continue;
       if (!best || off < best.off) best = { id: line.id, from: line.from, to: line.to, at: near, off };
     }

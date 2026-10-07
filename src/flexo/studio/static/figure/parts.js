@@ -20,8 +20,8 @@
 // after, and each part slides from where it was to where it is.
 //   chooseFile({ title, types }), focus(where), nothing()  (the panel when nothing is chosen).
 
-import { h, clear, icon, ui, menu, popover, closeMenu, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
-import { mergeText } from "/static/studio/merge.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
+import { mergeText, follows } from "/static/studio/merge.js";
 import { dropPlace, stays, lineAt, groupAt } from "/static/kinds/figure/drop.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
@@ -285,6 +285,8 @@ export function figureParts(host) {
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
   // What several things are called together: "Shapes", "Lines", "Groups", or "Items".
   const isLine = (id) => Boolean(edgeOf(id) || netOf(id));
+  // (A line or a joined line: their words typed alike, at the line.)
+  const lineKind = (kind) => kind === "edge" || kind === "net";
   const pluralNoun = (ids) => (ids.every(isLine) ? "Lines" : ids.every((id) => groupOf(id)) ? "Groups" : ids.some(isLine) ? "Items" : "Shapes");
 
   // The words each run of typing in a label began from, by its run (its `merge`).
@@ -310,7 +312,11 @@ export function figureParts(host) {
       // (A module made of the shapes chosen is said so: "Make Module".)
       case "gather": return action.role === "module" ? "Make Module" : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
-      case "paste": return "Paste Shapes";
+      // (One group pasted is said as it is: a module, a group.)
+      case "paste": {
+        const group = action.top?.length === 1 ? (action.groups || []).find((each) => each.id === action.top[0]) : null;
+        return action.top?.length > 1 ? "Paste Shapes" : group ? `Paste ${group.role === "module" ? "Module" : "Group"}` : "Paste Shape";
+      }
       case "join": return action.add ? `Join ${name(action.add)} to the Line` : "Join Lines";
       case "separate": return action.end ? `Take ${name(action.end)} Out of the Line` : "Separate Lines";
       case "rename": return `Change ID of ${name(action.id)}`;
@@ -392,7 +398,10 @@ export function figureParts(host) {
   // being typed in too (see typing).
   function setModel(next, { afresh: fresh = false } = {}) {
     if (!next) return;
+    const before = state.model;
     state.model = next;
+    if (fresh) followRenamed(before, next);
+    if (fresh && parked.length) unpark();
     // A drawing begun before an edit brings the figure as it was then: what is chosen that it
     // lacks (a part just named anew) is chosen again once the figure has it.
     const wanted = [...new Set([...state.selected, ...state.missing])];
@@ -407,6 +416,46 @@ export function figureParts(host) {
     if (owed && typeOf(owed.id)) { const { id, text } = owed; owed = null; giveWords(id, text); }
     // (Words kept in sight for a part not drawn yet go with it, should it go: an undo, say.)
     if (typedOver?.box) showTyped();
+  }
+
+  // Shapes chosen that another renamed (an agent writing the file, its Name in File changed
+  // in another window), as the figure comes back with them: chosen still under their new
+  // names, and the panel's field typed in for one goes on in it -- its name follows (its
+  // words and caret kept as the panel is drawn again, keepFocus), and so do the edits typed
+  // in it on their way to the studio (renamedTo) -- as the drawing's own typing follows its
+  // shape (the host's shapeGone).
+  const renamedTo = new Map();
+  function followRenamed(before, next) {
+    const old = Array.isArray(before?.nodes) ? before.nodes : [], now = Array.isArray(next?.nodes) ? next.nodes : [];
+    const ids = new Set(now.map((node) => node?.id)), had = new Set(old.map((node) => node?.id));
+    for (const id of new Set([...state.selected, ...state.missing])) {
+      const node = ids.has(id) ? null : old.find((item) => item?.id === id);
+      const to = node ? now[follows([node], now)[0]] : null;
+      if (!to?.id || had.has(to.id)) continue;
+      renamedTo.set(id, to.id);
+      state.selected = state.selected.map((each) => (each === id ? to.id : each));
+      state.missing = state.missing.map((each) => (each === id ? to.id : each));
+      const scoped = new RegExp(`^([\\w-]+):${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=:|$)`);
+      const rename = (key) => (typeof key === "string" ? key.replace(scoped, `$1:${to.id}`) : key);
+      const field = document.activeElement;
+      if (field?.dataset?.key && rename(field.dataset.key) !== field.dataset.key) field.dataset.key = rename(field.dataset.key);
+      for (const map of [typed, drafts]) for (const [key, value] of [...map]) if (rename(key) !== key) { map.delete(key); map.set(rename(key), value); }
+      for (const job of queue) if (job.action.target?.type === "node" && job.action.target.id === id) job.action = { ...job.action, target: { ...job.action.target, id: to.id } };
+    }
+  }
+  // Edits refused for a shape the figure here still had (see run): sent again for it under its
+  // new name -- unless words typed in the field since carry them -- or, not renamed, said.
+  const parked = [];
+  function unpark() {
+    for (const { job, error } of parked.splice(0)) {
+      const target = job.action.target, renamed = renamedTo.get(target.id);
+      if (renamed && job.merge && (lastMade.get(job.merge) ?? 0) > job.made) { if (job.merge) typed.delete(job.merge); continue; }
+      if (renamed) { queue.unshift({ ...job, retried: true, action: { ...job.action, target: { ...target, id: renamed } } }); continue; }
+      toast(error.message, { kind: "error", icon: "error", seconds: 6 });
+      if (job.merge) typed.delete(job.merge);
+      job.failed?.();
+    }
+    run();
   }
 
   function select(ids, { reveal = true } = {}) {
@@ -469,7 +518,8 @@ export function figureParts(host) {
     }
     // (When it was made, and which it is, for the history: a run of typing from its first key.)
     const job = { action, merge, hold, choose, then, failed, follow, fresh, label: action.do === "read" || action.do === "structure-view" ? null : label || said(action, merge),
-      at: older[0]?.at ?? Date.now(), key: older[0]?.key ?? (jobCount += 1) };
+      at: older[0]?.at ?? Date.now(), key: older[0]?.key ?? (jobCount += 1), made: (madeCount += 1) };
+    if (merge) lastMade.set(merge, job.made);
     // Made while the studio is away, behind those held for it: shown as made at once (what
     // it shows put back, should it be taken back, to before the words it replaces).
     if (waiting) job.shown = [...older.flatMap((each) => each.shown || []), ...showWaiting(action)];
@@ -511,6 +561,12 @@ export function figureParts(host) {
             await new Promise((done) => setTimeout(done, 2000));
             continue;
           }
+          // (Sent for a shape another renamed as it went: sent again, for it under its new name
+          // -- once the figure saying so is here, when it is not yet: refused for a shape the
+          // figure here still has, it waits for it a moment, then is said.)
+          const target = job.action.target, renamed = target?.type === "node" && renamedTo.get(target.id);
+          if (renamed && !job.retried) { queue.unshift({ ...job, retried: true, action: { ...job.action, target: { ...target, id: renamed } } }); continue; }
+          if (target?.type === "node" && nodeOf(target.id) && !job.retried) { parked.push({ job, error }); setTimeout(unpark, 2000); continue; }
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           if (job.merge) typed.delete(job.merge);
           job.failed?.();
@@ -574,6 +630,10 @@ export function figureParts(host) {
   const takenBack = [];
   let puttingBack = false;
   let jobCount = 0;
+  // Each edit's turn, and the latest made from each field (by its merge): words typed later
+  // than an edit refused and sent again carry its words already.
+  let madeCount = 0;
+  const lastMade = new Map();
   // The edits held for the studio while it is away, in the order they were made ({ key, at,
   // label }): for one history with the document's own; and those taken back, the latest last.
   function heldEdits() {
@@ -957,8 +1017,10 @@ export function figureParts(host) {
     // to fit (a long flow on two lines), whatever is added to it: the new shape takes its place
     // on its line, and the rest keep theirs -- where folding it afresh, its parts counted
     // again, could move one across the fold.
+    // (Let go beside a part, the same: where its slot said -- "Right of “B”" on a column turned
+    // to fit is right of it as drawn -- as a part dragged there goes: ownLine.)
     const folds = where.folds ?? asSeen().folds;
-    if (plan?.branch) writeAsDrawn({ merge, label: plan.label }, add);
+    if (plan?.branch || (where.side && !folds.length)) writeAsDrawn({ merge, label: where.label || plan?.label || null }, add);
     else if (folds.length) {
       arrangeSeen(folds, { merge, label: where.label || plan?.label || null,
         failed: () => { if (early === mine) { early = null; stand(null); } stepped?.(); if (adding) { adding = 0; host.settled?.(); } } }, add);
@@ -1039,7 +1101,7 @@ export function figureParts(host) {
         return targets.length ? () => ({ do: "update", targets, values: { "layout.kind": kind } }) : null;
       }).filter(Boolean);
     const next = (index) => {
-      if (index >= steps.length) { done(); return; }
+      if (index >= steps.length) { done((id) => real.get(id) || id); return; }
       const { fold, ...action } = steps[index]();
       act(action, { merge, label, select: false, failed: () => done(),
         then: (result) => {
@@ -1341,7 +1403,7 @@ export function figureParts(host) {
     const node = nodeOf(id), group = groupOf(id), edge = edgeOf(id);
     const isRoot = id === model()?.root;
     const items = [];
-    if (!isRoot && (node || group || edge)) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
+    if (!isRoot && (node || group || isLine(id))) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
     if (node) {
       const kind = nextKind(node);
       // A opens the palette of shapes, to add after the shape chosen: it is that item's key.
@@ -1410,10 +1472,16 @@ export function figureParts(host) {
       .map((net) => structuredClone(net));
     return { top, nodes, groups, edges, nets };
   }
+  // After the shape chosen (the one copied, just copied: beside it). A figure seen folded to
+  // fit is written as seen first, one step with the paste, as adding does: the copy takes its
+  // place on its line, and the rest keep theirs.
   function paste(clipped) {
-    const where = placement();
-    act({ do: "paste", top: clipped.top, nodes: clipped.nodes, groups: clipped.groups, edges: clipped.edges, nets: clipped.nets || [],
-      parent: where.parent || null, after: where.after || null });
+    const where = placement(), merge = `paste:${Date.now()}`, label = said({ do: "paste", top: clipped.top, groups: clipped.groups });
+    const send = (written = (id) => id) => act({ do: "paste", top: clipped.top, nodes: clipped.nodes, groups: clipped.groups, edges: clipped.edges, nets: clipped.nets || [],
+      parent: where.parent ? written(where.parent) : null, after: where.after || null }, { merge, label });
+    const folds = asSeen().folds;
+    if (folds.length) arrangeSeen(folds, { merge, label }, send);
+    else send();
   }
 
   function groupMenu(anchor) {
@@ -1518,7 +1586,7 @@ export function figureParts(host) {
   }
   function dblclick(event) {
     const id = idAt(asPressed(event));
-    if (!id || typeOf(id) === "net") return;
+    if (!id) return;
     // The part typed on is the part chosen: its panel shows beside it.
     if (chosenOne() !== id) select([id], { reveal: false });
     openInline(id, { at: { x: event.clientX, y: event.clientY } });
@@ -2179,7 +2247,10 @@ export function figureParts(host) {
   // joins, in the group it is let go in; anywhere else, where dropPlace says (a shape dragged
   // from the palette, as one being moved would go there).
   function dropTarget(point) {
-    const line = lineAt(drag.paths || [], point);
+    // (By a line's end, closer than half of what is carried, it goes beside the part there.)
+    const own = drag.id ? drag.boxes.get(drag.id) : null;
+    const carried = own ? { width: own.right - own.left, height: own.bottom - own.top } : drag.size || null;
+    const line = lineAt(drag.paths || [], point, null, undefined, carried);
     if (line) return { kind: "splice", line: line.id, from: line.from, to: line.to, at: line.at, parent: groupAt(model(), drag.boxes, point, drag.id) };
     return drag.id ? dropAt(point) : dropPlace(drag.drawn || model(), drag.boxes, point, null);
   }
@@ -2906,7 +2977,7 @@ export function figureParts(host) {
   function openInline(id, { at = null, guess = null, fresh = null, after = null } = {}) {
     closeInline(false);
     const kind = typeOf(id);
-    const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : groupOf(id);
+    const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : kind === "net" ? netOf(id) : groupOf(id);
     if (!item || !(host.box(id) || guess)) return;
     const original = words(item.label);
     // A label's words are names and maths, not prose: no spelling, no corrections.
@@ -2917,9 +2988,9 @@ export function figureParts(host) {
     // A shape with no words is typed on where they will go, what it is shown faintly there.
     // So is a line with none: at its middle, where its words will be drawn.
     const bare = (kind === "node" && !original.trim() && Boolean(hintOf(item)) && !host.element(`${id}.label`) && Boolean(host.box(id)))
-      || (kind === "edge" && !host.element(`${id}.label`) && Boolean(lineMiddle(id)));
+      || (lineKind(kind) && !host.element(`${id}.label`) && Boolean(lineMiddle(id)));
     if (kind === "node" && !original.trim()) field.area.placeholder = (fresh && givenWords(item)) || hintOf(item);
-    if (kind === "edge" && !original.trim()) field.area.placeholder = "Label";
+    if (lineKind(kind) && !original.trim()) field.area.placeholder = "Label";
     // Its faint hint gives way to the field's own, said in the same place.
     for (const hint of host.overlay.querySelectorAll(`.fig-wordless[data-id="${CSS.escape(id)}"]`)) hint.remove();
     const label = host.element(`${id}.label`) || (guess && !host.box(id) ? guess : null) || (bare ? "bare" : null);
@@ -2941,13 +3012,15 @@ export function figureParts(host) {
       base: original, mine: new Set([original]) };
     placeInline();
     field.area.focus();
-    // Double-clicked on a word, the word is chosen, as on a Mac; else all of it.
-    const word = at && label?.getScreenCTM ? wordAt(label, at, field.area.value) : null;
+    // Double-clicked on a word, the word is chosen, as on a Mac; else all of it. (A group's
+    // title is a name, typed over whole as a shape's words in it are: all of it, always.)
+    const byWord = at && kind !== "group" && label?.getScreenCTM;
+    const word = byWord ? wordAt(label, at, field.area.value) : null;
     if (word) field.area.setSelectionRange(word.start, word.end);
     else field.area.select();
     // The figure just chosen by that double-click may still be settling where it is drawn:
     // the word is looked for again once it has, unless typing has begun.
-    if (!word && at && label?.getScreenCTM) {
+    if (!word && byWord) {
       setTimeout(() => {
         const area = field.area;
         if (inline?.field !== area || area.selectionStart !== 0 || area.selectionEnd !== area.value.length || area.value !== original) return;
@@ -3237,7 +3310,7 @@ export function figureParts(host) {
     const part = { left: outer.left + where.left, top: outer.top + where.top, bottom: outer.top + where.top + where.height };
     const label = inline.inPlace && !inline.guess && host.element(`${inline.id}.label`);
     // In place on a shape with no words drawn: typed at its middle, as its words will be.
-    const bare = !label && !inline.guess && inline.inPlace && (inline.kind === "node" || inline.kind === "edge");
+    const bare = !label && !inline.guess && inline.inPlace && (inline.kind === "node" || lineKind(inline.kind));
     if (!label && !inline.guess && !bare) {
       // Under the part, kept on the stage -- in sight, clear of what is beside it (a slide's
       // inspector), and over the part should there be no room under it.
@@ -3293,14 +3366,14 @@ export function figureParts(host) {
     // left, a plasmid's over its length): the same place as its faint hint.
     const place = !drawn && !inline.guess && inline.kind === "node"
       ? wordsAt(nodeOf(inline.id), { left: part.left, top: part.top, width: where.width, height: where.height }, size)
-      : !drawn && inline.kind === "edge" ? (({ x, y } = lineMiddle(inline.id) || { x: part.left + where.width / 2, y: part.top + where.height / 2 }) => ({ x, y, anchor: "middle" }))() : null;
+      : !drawn && lineKind(inline.kind) ? (({ x, y } = lineMiddle(inline.id) || { x: part.left + where.width / 2, y: part.top + where.height / 2 }) => ({ x, y, anchor: "middle" }))() : null;
     let middle = drawn?.width ? drawn.left + drawn.width / 2
       : place ? (place.anchor === "start" ? place.x - pad + width / 2 : place.x) : part.left + where.width / 2;
     let top = drawn?.height ? alignedTop(drawn, inline.label, look, size)
       : (place ? place.y : part.top + where.height / 2) - size * 0.7 - 4;
     // A line's first words, on a short line, are typed clear of the parts it joins: over the
     // line or under it, or along it, wherever covers least of them (and of their words).
-    if (!drawn && inline.kind === "edge" && place) {
+    if (!drawn && lineKind(inline.kind) && place) {
       const high = size * 1.4 + 8, parts = (model()?.nodes || []).map((node) => host.box(node.id)).filter(Boolean)
         .map((box) => ({ left: outer.left + box.left, top: outer.top + box.top, right: outer.left + box.left + box.width, bottom: outer.top + box.top + box.height }));
       const covered = ([left, top]) => parts.reduce((sum, box) => sum + Math.max(0, Math.min(left + width, box.right) - Math.max(left, box.left))
@@ -3343,7 +3416,7 @@ export function figureParts(host) {
     inline.box.classList.toggle("spills", spills);
     // (A veil of it, not a sheet: what is under the words -- a shape beside them -- shows through.)
     const paper = getComputedStyle(host.overlay).backgroundColor;
-    inline.box.style.background = (spills || inline.kind === "edge") && paper ? `color-mix(in srgb, ${paper} 72%, transparent)` : "";
+    inline.box.style.background = (spills || lineKind(inline.kind)) && paper ? `color-mix(in srgb, ${paper} 72%, transparent)` : "";
     // Its formatting bar sits over the part, under it or beside it: wherever it covers least
     // of what is drawn around -- the other parts, the lines and their words, the slide's own
     // title and words -- and in sight, on the stage.
@@ -3503,7 +3576,8 @@ export function figureParts(host) {
   function mergeTyping() {
     const typing = inline;
     if (!typing || typing.guess) return;
-    const item = typing.kind === "node" ? nodeOf(typing.id) : typing.kind === "edge" ? edgeOf(typing.id) : typing.kind === "group" ? groupOf(typing.id) : null;
+    const item = typing.kind === "node" ? nodeOf(typing.id) : typing.kind === "edge" ? edgeOf(typing.id) : typing.kind === "net" ? netOf(typing.id)
+      : typing.kind === "group" ? groupOf(typing.id) : null;
     if (!item || typeof (item.label ?? "") !== "string") return;
     const theirs = item.label ?? "";
     if (theirs === typing.base || typing.mine.has(theirs)) return;
@@ -3661,7 +3735,7 @@ export function figureParts(host) {
     if (letter === "g") { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
     if (letter === "enter") {
       const id = chosenOne();
-      if (!id || typeOf(id) === "net") return false;
+      if (!id) return false;
       event.preventDefault();
       openInline(id);
       return true;
@@ -4022,7 +4096,21 @@ export function figureParts(host) {
     const many = (side) => new Set(ends.flatMap((end) => end[side].map(String))).size > 1;
     return (one("to") && many("from")) || (one("from") && many("to"));
   }
-  const joinLines = (ids) => act({ do: "join", ids });
+  // Joined, lines have one label: those saying different things are joined with the words
+  // the person keeps, asked -- none of them dropped unsaid.
+  function joinLines(ids) {
+    const labels = [];
+    for (const id of ids) {
+      const label = (edgeOf(id) || netOf(id))?.label;
+      if (label && !labels.some((each) => JSON.stringify(each) === JSON.stringify(label))) labels.push(label);
+    }
+    if (labels.length < 2) { act({ do: "join", ids }); return; }
+    const words = labels.map((label) => { const text = plain(label); return inQuotes(text.length > 28 ? `${text.slice(0, 27).trimEnd()}…` : text); });
+    const keep = (index) => ({ label: `Keep ${words[index]}`, kind: index ? "" : "primary", run: () => act({ do: "join", ids, label: labels[index] }) });
+    dialog({ title: "Join lines with different labels?",
+      body: [h("p.export-hint", {}, `These lines say ${words.slice(0, -1).join(", ")} and ${words.at(-1)}, but a joined line has one label. Which should it keep?`)],
+      actions: [{ label: "Cancel", cancel: true }, ...labels.slice(1).map((_, index) => keep(index + 1)), keep(0)] });
+  }
   const separateLine = (id, end = null) => act(end ? { do: "separate", id, end } : { do: "separate", id });
 
   // A line's colour, and how it is drawn: the theme's line (Default), its grey (Neutral),

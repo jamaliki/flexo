@@ -1103,6 +1103,23 @@ def test_lines_are_joined_only_where_they_meet() -> None:
         apply(twice, {"do": "join", "ids": ["edge.1.q-to-att", "edge.5.q-to-att"]})
 
 
+def test_lines_saying_different_things_are_joined_only_with_the_words_kept_chosen() -> None:
+    # A joined line has one caption: no line's words are dropped unasked.
+    said = ATTENTION.replace("{from: kv, to: att, tone: '3'}", "{from: kv, to: att, label: keys}")
+    ids = ["edge.1.q-to-att", "edge.2.kv-to-att"]
+    with pytest.raises(EditError, match="“softmax” and “keys”, but a joined line has one label"):
+        apply(said, {"do": "join", "ids": ids})
+    text, _ = edit(said, do="join", ids=ids, label="keys")
+    assert data(text)["nets"][0]["label"] == "keys"
+    # The same words on each, or on one alone, are the joined line's without a question.
+    same = said.replace("label: keys", "label: softmax")
+    assert data(edit(same, do="join", ids=ids)[0])["nets"][0]["label"] == "softmax"
+    # Words a joined line can't carry at all are not lost either.
+    back = ATTENTION.replace("label: softmax,", "label: softmax, arrow: reversible, back_label: k,")
+    with pytest.raises(EditError, match="from “Q” to “Attended” has a back label"):
+        apply(back, {"do": "join", "ids": ids})
+
+
 def test_a_joined_line_meets_its_shape_on_a_side_or_runs_along_one_not_both() -> None:
     text, _ = edit(ATTENTION, do="join", ids=["edge.1.q-to-att", "edge.2.kv-to-att"])
     net = {"type": "net", "id": "into-att"}

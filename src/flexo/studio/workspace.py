@@ -50,6 +50,9 @@ PATIENCE = 3.0
 """Seconds a document changing without rest waits, at most, before it is written anyway."""
 RETRY = 5.0
 """Seconds before a document that could not be written is tried again."""
+LOOK = (1.0, 30.0)
+"""Seconds before a document whose file has gone is looked for again in the folder, at first
+and at most: each look not finding it waits twice as long for the next."""
 AGENT_TIMEOUT = 120.0
 """Seconds after its last action an agent stops being shown as present."""
 DOING_TIMEOUT = 45.0
@@ -129,6 +132,15 @@ class Doc:
         self.depend_stamps: dict[Path, float] = {}
         self.moved: str | None = None
         """Where its file went, as far as the studio can tell (renamed while it was away)."""
+        self.gone = False
+        """Whether its file has gone from where it was (moved, renamed, deleted) and is not
+        found: what is made of it meanwhile is held, never written there but by a save (its
+        person's choice), until the file is found again -- back, or elsewhere in the folder."""
+        self.file = _file(path) if self.exists else None
+        """The file it was last read from or written to, as the disk knows it (its device and
+        inode): the very file, wherever in the folder it is moved."""
+        self.look_at = 0.0
+        self.look_every = LOOK[0]
 
     def info(self) -> dict[str, Any]:
         with self.lock:
@@ -142,6 +154,7 @@ class Doc:
                 "document": self.document,
                 "problem": self.problem,
                 "moved": self.moved,
+                "gone": self.gone,
                 "held": self.held,
                 "unread": self.unread,
                 "source": self.source(),
@@ -167,6 +180,7 @@ class Doc:
                 "file": self.name,
                 "text": self.problem,
                 "moved": self.moved,
+                "gone": self.gone,
                 "held": self.held,
                 "unread": self.unread,
                 "source": self.source(),
@@ -277,15 +291,16 @@ class Doc:
     def write(self, *, again: bool = False) -> bool:
         """Write the document if it has changed since last written (``again``: or if its
         file was moved or deleted); whether it did. A file that does not read is not
-        written over."""
+        written over; one gone from where it was is written there again only by a save
+        (``again``), never by an edit -- a second copy beside the one moved."""
 
         with self.lock:
             if self.held:
                 return False
             if self.saved >= self.version and (self.exists or not again):
                 return False
-            if not self.exists and self.moved and not again:
-                return False  # renamed: written under its old name only by a save
+            if self.gone and not again:
+                return False
             other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
             if other is not None and other != self.kind.name:
                 # Another kind's document now (put right by hand, an agent's): kept as it is.
@@ -315,9 +330,11 @@ class Doc:
                 raise
             self.disk_text = _words(self.path)
             self.disk_stamp = _stamp(self.path)
+            self.file = _file(self.path)
             self.on_disk = copy.deepcopy(self.document)
             self.saved = self.version
             self.exists = True
+            self.gone, self.moved = False, None
             self.problem = None
             other = self.workspace.kind_on_disk(self.path)
             if other is not None and other != self.kind.name:
@@ -382,12 +399,15 @@ class Doc:
             if stamp == 0.0:
                 if not self.exists:
                     return None
-                # Moved or deleted: kept open, and written again by the next edit or a save
-                # (not one that never read: there is nothing of it to write). Renamed -- a
-                # file of its words, or its kind's that names it, beside it -- it is not
-                # written under its old name but by a save: its pages offer the new one.
+                # Moved or deleted: kept open, and followed wherever in the folder it went
+                # (Workspace._follow_rename); not found, its edits are held, written there
+                # again only by a save (not one that never read: there is nothing of it to
+                # write), and it is looked for again now and then. Renamed -- a file of its
+                # words, or its kind's that names it, beside it -- its pages offer the new one.
                 self.exists = False
+                self.gone = True
                 self.held = self.unread
+                self.look_at, self.look_every = time.monotonic() + LOOK[0], LOOK[0]
                 self.moved = self.workspace._moved(self)
                 self.problem = (
                     f"{self.name} was renamed {self.moved}."
@@ -400,6 +420,8 @@ class Doc:
             if text is None:
                 return None
             self.moved = None
+            self.gone = False  # back where it was (or made there): what is held is written there
+            self.file = _file(self.path)
             returned = not self.exists
             if text == self.disk_text and not returned:
                 return None
@@ -477,6 +499,8 @@ class Workspace:
         from another takes the document in again."""
         self.lock = threading.RLock()
         self.docs: dict[str, Doc] = {}
+        self.followed: dict[str, Doc] = {}
+        """The documents followed from each name they had (their files moved, renamed)."""
         self.listeners: dict[str, Listener] = {}
         self.presence: dict[str, dict[str, Any]] = {}
         self.activity: deque[dict[str, Any]] = deque(maxlen=300)
@@ -728,7 +752,7 @@ class Workspace:
         """The document ``name``, opened if it is not (as ``kind``, if its file does not say).
         ``held``: a page holds it already (open before the studio started again) -- a file
         gone meanwhile is not made anew from its kind: it is moved or deleted, and the page's
-        document is written there again."""
+        document is held, written there again by a save."""
 
         path = self.path(name)
         relative = unicodedata.normalize("NFC", self.relative(path))
@@ -738,6 +762,12 @@ class Workspace:
                 # The same file by another spelling (decomposed accents, other capitals, as
                 # macOS allows) is the document already open.
                 doc = next((open_ for open_ in self.docs.values() if _same(open_.path, path)), None)
+            followed = self.followed.get(relative)
+            if doc is None and followed is not None and not path.exists():
+                # A name a document was followed from (its file moved, renamed): a window not
+                # yet told, or a request on its way, still names it so -- it is that document,
+                # not a new one made where it was.
+                doc = followed if self.docs.get(followed.name) is followed else None
             if doc is not None and doc.foreign and self._claim(doc.path) == doc.foreign:
                 # Its file is another kind's document now: opened again as that kind (what
                 # its old kind held was never written over it), and the pages told.
@@ -754,6 +784,7 @@ class Workspace:
                     # Nothing of its kind's own is written there -- nor, renamed while the
                     # studio was away, anything under its old name but by a save.
                     doc.saved = doc.version
+                    doc.gone = True
                     doc.moved = moved
                     doc.problem = (
                         f"{doc.name} is gone: renamed {doc.moved}?"
@@ -796,11 +827,12 @@ class Workspace:
         its kind beside it that names it inside (a deck's id is the name of the file it was
         made in), if a kind says what names it (``identity``). Gone while the studio looked
         on, only a file that has just appeared beside it (or in a folder in its folder) can
-        be it: one there already is another, that a deck's id may name too."""
+        be it: one there already is another, that a deck's id may name too. Anywhere else in
+        the studio's folder -- a folder made for it as it was moved (the Finder's New Folder
+        with Selection), one it was moved up into, its own folder renamed -- only the very
+        file it was can be it, of its words as last read: moved, not a copy."""
 
         identity = getattr(doc.kind, "identity", None)
-        if not doc.path.parent.is_dir():
-            return None
         around = getattr(doc, "around", None)
         folder = doc.path.parent
         places = [folder, *(getattr(doc, "around_folders", []) if around is not None else [])]
@@ -818,6 +850,15 @@ class Workspace:
                 with contextlib.suppress(Exception):
                     if identity(doc.kind.load(path)) == doc.path.stem:
                         found = self.relative(path)
+        if doc.file is not None and doc.disk_text is not None:
+            for count, path in enumerate(walk(self.root, depth=8)):
+                if count >= WALK_LIMIT:
+                    break
+                if path.suffix != doc.path.suffix or _file(path) != doc.file:
+                    continue
+                if _words(path) == doc.disk_text:
+                    with contextlib.suppress(PermissionError):
+                        return self.relative(path)
         return found
 
     def new(
@@ -1253,6 +1294,17 @@ class Workspace:
         if doc.exists and _stamp(doc.path):
             self._around(doc)
         happened = doc.reread()
+        if happened is None and doc.gone and not doc.unread and time.monotonic() >= doc.look_at:
+            # Gone and not found, looked for again now and then (less often as time goes
+            # on): moved back into the folder, or found where it went after all, it follows.
+            doc.look_every = min(doc.look_every * 2, LOOK[1])
+            doc.look_at = time.monotonic() + doc.look_every
+            moved, was = self._moved(doc), doc.moved
+            if moved and moved != was:
+                doc.moved = moved
+                if self._follow_rename(doc):
+                    return
+                doc.moved = was
         if happened == "problem" and self._follow_rename(doc):
             return
         if happened == "problem":
@@ -1264,10 +1316,12 @@ class Workspace:
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
 
     def _follow_rename(self, doc: Doc) -> bool:
-        """A document whose file was renamed as it was open -- a file beside it of its words as
-        last read, word for word, by Finder or an agent -- follows it, as a Mac document does:
-        it is the new file from now on, its edits saved there, and its pages told (a
-        ``renamed`` event), never written again under its old name. Answers whether it did."""
+        """A document whose file was renamed or moved as it was open -- a file of its words as
+        last read, word for word, by Finder or an agent: beside it, or the very file elsewhere
+        in the folder (see _moved) -- follows it, as a Mac document does: it is the new file
+        from now on, its edits saved there (those held meanwhile too), and its pages told (a
+        ``renamed`` event), never written again under its old name -- nor made anew there by
+        a page still naming it so (``open``). Answers whether it did."""
 
         moved = doc.moved
         if not moved or doc.unread or doc.disk_text is None:
@@ -1280,9 +1334,12 @@ class Workspace:
             old = doc.name
             del self.docs[old]
             doc.name, doc.path = moved, path
-            doc.exists, doc.held, doc.problem, doc.moved = True, False, None, None
+            doc.exists, doc.held, doc.problem, doc.moved, doc.gone = True, False, None, None, False
             doc.disk_stamp = _stamp(path)
+            doc.file = _file(path)
             self.docs[moved] = doc
+            self.followed[old] = doc
+            self.followed.pop(moved, None)
             for entry in self.presence.values():
                 if entry.get("file") == old:
                     entry["file"] = moved
@@ -1447,6 +1504,17 @@ def _stamp(path: Path) -> float:
         return path.stat().st_mtime_ns / 1e9
     except OSError:
         return 0.0
+
+
+def _file(path: Path) -> tuple[int, int] | None:
+    """A file as the disk knows it, whatever it is named: moved within a disk, it is the same;
+    written anew beside it and moved over it (as the studio and most editors save), another."""
+
+    try:
+        found = path.stat()
+    except OSError:
+        return None
+    return found.st_dev, found.st_ino
 
 
 def _finder_key(root: Path, file: Path) -> list[Any]:

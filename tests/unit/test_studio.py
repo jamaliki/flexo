@@ -439,6 +439,117 @@ def test_only_a_file_that_just_appeared_can_be_one_renamed_or_moved(tmp_path: Pa
         workspace.close()
 
 
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [("figure.yaml", SAMPLE_FIGURE), ("lab.theme.yaml", "theme:\n  name: lab\n  base: paper\n")],
+    ids=["figure", "theme"],
+)
+def test_a_document_moved_anywhere_in_its_folder_is_followed_and_saved_there(
+    tmp_path: Path, name: str, text: str
+) -> None:
+    (tmp_path / name).write_text(text, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    me = {"id": "me", "name": "Me"}
+
+    def moved(old: str, new: str) -> None:
+        (tmp_path / new).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / old).rename(tmp_path / new)
+
+    # Into a folder made as it is moved (the Finder's New Folder with Selection), up out of it
+    # again, into a folder in a folder, and that folder renamed: followed each time, an edit
+    # saved where it is, never a second copy where it was.
+    steps = [
+        (lambda: moved(name, f"New Folder With Items/{name}"), f"New Folder With Items/{name}"),
+        (lambda: moved(f"New Folder With Items/{name}", name), name),
+        (lambda: moved(name, f"a/b/{name}"), f"a/b/{name}"),
+        (lambda: (tmp_path / "a").rename(tmp_path / "talks"), f"talks/b/{name}"),
+    ]
+    try:
+        doc = workspace.open(name)
+        for step, (move, now) in enumerate(steps):
+            time.sleep(0.3)
+            move()
+            wait_for(lambda now=now: doc.name == now)
+            assert doc.problem is None and not doc.gone and workspace.docs[now] is doc
+            edited = json.loads(json.dumps(doc.document))
+            if doc.kind.name == "figure":
+                edited["text"] = edited["text"].replace("Encoder", f"Encoder {step}")
+            else:
+                edited["theme"]["description"] = f"Step {step}"
+            doc.update(edited, doc.version, me)
+            wait_for(lambda now=now, step=step: f" {step}" in (tmp_path / now).read_text("utf-8"))
+            copies = [found.relative_to(tmp_path).as_posix() for found in tmp_path.rglob(name)]
+            assert copies == [now]
+    finally:
+        workspace.close()
+
+
+def test_a_document_gone_from_its_folder_holds_its_edits_until_it_is_found_or_saved(
+    tmp_path: Path,
+) -> None:
+    folder, outside = tmp_path / "talks", tmp_path / "outside"
+    folder.mkdir()
+    outside.mkdir()
+    figure = folder / "figure.yaml"
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(folder)
+    told: list = []
+    workspace.broadcast = told.append  # type: ignore[method-assign]
+    try:
+        doc = workspace.open("figure.yaml")
+        # Moved out of the studio's folder: nowhere it can find it.
+        figure.rename(outside / "figure.yaml")
+        wait_for(lambda: doc.gone)
+        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.info()["gone"] and doc.said()["gone"]
+        # Edited meanwhile: the edit is held, never written where the file was.
+        text = doc.document["text"].replace("Encoder", "Decoder")
+        doc.update({**doc.document, "text": text}, doc.version, {"id": "me", "name": "Me"})
+        time.sleep(0.8)
+        assert not figure.exists() and doc.saved < doc.version
+        # Brought back, into a folder of its own: found, followed, and the edit written there.
+        (folder / "back").mkdir()
+        (outside / "figure.yaml").rename(folder / "back" / "figure.yaml")
+        wait_for(lambda: doc.name == "back/figure.yaml", seconds=10)
+        wait_for(lambda: "Decoder" in (folder / "back" / "figure.yaml").read_text("utf-8"))
+        assert not figure.exists() and not doc.gone and doc.problem is None
+        assert {"type": "renamed", "file": "figure.yaml", "to": "back/figure.yaml"} in told
+        # Deleted: written again where it was only as its person chooses, by a save.
+        (folder / "back" / "figure.yaml").unlink()
+        wait_for(lambda: doc.gone)
+        assert doc.write(again=True) and not doc.gone
+        assert "Decoder" in (folder / "back" / "figure.yaml").read_text("utf-8")
+    finally:
+        workspace.close()
+
+
+def test_a_page_naming_a_followed_document_by_its_old_name_edits_it_where_it_went(
+    tmp_path: Path,
+) -> None:
+    figure = tmp_path / "figure.yaml"
+    figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        (tmp_path / "New Folder").mkdir()
+        figure.rename(tmp_path / "New Folder" / "figure.yaml")
+        wait_for(lambda: doc.name == "New Folder/figure.yaml")
+        # A window not yet told (or an edit on its way) still names it so: it is the document
+        # where it went, not a new one made where it was.
+        again = workspace.open("figure.yaml")
+        assert again is doc and again.info()["file"] == "New Folder/figure.yaml"
+        text = doc.document["text"].replace("Encoder", "Decoder")
+        again.update({**doc.document, "text": text}, doc.version, {"id": "me", "name": "Me"})
+        wait_for(lambda: "Decoder" in (tmp_path / "New Folder" / "figure.yaml").read_text("utf-8"))
+        time.sleep(0.6)
+        assert not figure.exists()
+        # A new file made under the old name is a document of its own.
+        figure.write_text(SAMPLE_FIGURE, encoding="utf-8")
+        assert workspace.open("figure.yaml") is not doc
+    finally:
+        workspace.close()
+
+
 def test_a_refused_call_ends_its_connection(served: tuple[str, Workspace]) -> None:
     import socket
 
@@ -2547,6 +2658,28 @@ def test_a_shape_let_go_on_a_lines_body_goes_into_the_line() -> None:
         None,
         None,
     ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_shape_carried_near_a_lines_end_goes_beside_the_part_there() -> None:
+    # A line down into "b" (100 pixels): a shape 60 pixels high carried 25 pixels from its
+    # end would stand over "b" -- it goes beside it, the slot there, not into the line; on
+    # the line's middle it goes in. (A small one, or none told, goes in there as before.)
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    down = [{"x": 50, "y": 40}, {"x": 50, "y": 140}]
+    lines = [{"id": "edge.1.a-to-b", "from": "a", "to": "b", "points": down}]
+    drags = [[115, {"width": 120, "height": 60}], [90, {"width": 120, "height": 60}],
+             [115, {"width": 30, "height": 20}], [115, None]]
+    code = (
+        f"import {{ lineAt }} from {json.dumps(script.as_uri())};\n"
+        f"const lines = {json.dumps(lines)};\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([y, carried]) =>"
+        " lineAt(lines, { x: 52, y }, 'd', undefined, carried)?.id ?? null)));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [None, "edge.1.a-to-b", "edge.1.a-to-b", "edge.1.a-to-b"]
 
 
 def test_a_part_dragged_in_a_flow_takes_its_place_among_its_own_layer() -> None:
