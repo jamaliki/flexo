@@ -38,6 +38,7 @@ from __future__ import annotations
 import copy
 import itertools
 from collections import defaultdict
+from dataclasses import dataclass
 
 from flexo.components import (
     CAPTION_KINDS,
@@ -46,6 +47,7 @@ from flexo.components import (
     route_clearance,
     titled,
 )
+from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.geometry import Point, Rect, Side, segment_crosses_rect, segments
 from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -74,8 +76,10 @@ from flexo.routing.search import (
     TooDear,
     Zone,
     ceiling,
+    counted,
     search_work,
     simplify,
+    spend,
 )
 from flexo.routing.separate import (
     CaptionRoom,
@@ -159,23 +163,92 @@ def route_figure(
     members, ends = connections(fitted, straight)
     scene = _Scene(fitted, layout_style, text_measurer)
 
+    # Each plan made, by the pin orders and end sides it was made with: the ends as it left
+    # them, and its routes.
+    plans: dict[tuple, tuple] = {}
+    # Each bundle routed, by its pins, with what it was routed among.
+    routings: dict[tuple, list[_Routing]] = defaultdict(list)
+
+    def routed(index: int, bundle: Bundle, pins: dict, wires: list[Wire] | None) -> Wire:
+        """``bundle`` routed (among ``wires`` but its own, if given) -- as it was before,
+        if it was routed between the same pins among the same ink where its search looked
+        (the repair trials route the whole figure again, most of it as it was)."""
+
+        give_up_if_newer()  # (a routing given up for a newer drawing: flexo.draft)
+        key = (
+            bundle.key,
+            bundle.hub,
+            tuple(bundle.members),
+            bundle.pinned,
+            tuple(
+                (pin.key, pin.side, pin.point, pin.arriving, pin.clearance)
+                for pin in (pins[name] for name in _pin_keys(bundle, members, ends))
+            ),
+        )
+        for before in reversed(routings[key][-RECALLED_ROUTINGS:]):
+            if (before.among is None) != (wires is None):
+                continue
+            if wires is None or (
+                before.index == index
+                and len(before.among) == len(wires)
+                and _unchanged_near(before.among, wires, index, before.region)
+            ):
+                # Its searches counted as made: the repairs' budget is counted in them,
+                # and must run out where it did.
+                spend(before.searched)
+                return before.wire
+        traffic = (
+            _Traffic(
+                [wire for position, wire in enumerate(wires) if position != index],
+                crossing=CROSSING_COST * layout_style.bend_penalty,
+            )
+            if wires is not None
+            else None
+        )
+        reached: list[Rect] = []
+        with counted() as searched:
+            wire = scene.grow(bundle, members, ends, pins, traffic, reached)
+        routings[key].append(
+            _Routing(
+                index,
+                list(wires) if wires is not None else None,
+                reached[0] if reached else None,
+                searched,
+                wire,
+            )
+        )
+        return wire
+
     def attempt(
-        overrides: dict[tuple[str, Side], list], sides: dict[int, Side] | None = None
+        overrides: dict[tuple[str, Side], list],
+        sides: dict[int, Side] | None = None,
+        *,
+        again: bool = False,
     ) -> tuple:
+        key = (
+            frozenset((place, tuple(order)) for place, order in overrides.items()),
+            frozenset((sides or {}).items()),
+        )
+        if again and key in plans:
+            # Made before (the trial the repairs kept): planned and routed again it would be
+            # the same, so it is given as it was, its ends put back as it left them.
+            state, made = plans[key]
+            for end, (group, fixed) in zip(ends, state, strict=True):
+                end.group, end.fixed = group, fixed
+            return made
         orders: dict[tuple[str, Side], list] = {}
         pins = plan_pins(fitted, members, ends, layout_style, overrides, orders, sides)
         bundles = plan_bundles(members, ends)
-        wires = [scene.grow(bundle, members, ends, pins) for bundle in bundles]
+        wires = [routed(index, bundle, pins, None) for index, bundle in enumerate(bundles)]
         # Rip up and reroute: every bundle again, now able to see the others.
         for _ in range(REROUTE_PASSES):
             for index, bundle in enumerate(bundles):
                 if bundle.pinned:
                     continue
-                traffic = _Traffic(
-                    [wire for position, wire in enumerate(wires) if position != index],
-                    crossing=CROSSING_COST * layout_style.bend_penalty,
-                )
-                wires[index] = scene.grow(bundle, members, ends, pins, traffic)
+                wire = routed(index, bundle, pins, wires)
+                if wire != wires[index]:
+                    wires[index] = wire
+        plans[key] = ([(end.group, end.fixed) for end in ends], (pins, bundles, wires, orders))
         return pins, bundles, wires, orders
 
     def separated(wires: list[Wire]) -> list[Wire]:
@@ -195,27 +268,45 @@ def route_figure(
             for spaced, original in zip(wires, routed, strict=True)
         ]
 
-    started = search_work()
-    pins, bundles, wires, orders = attempt({})
-    # Each repair trial routes the whole figure again: one whose routing alone costs
-    # more than the repairs may spend gets none, rather than a trial past the budget;
-    # and the repairs of any figure spend no more than so many routings of it.
-    first = search_work() - started
-    affordable = first <= REPAIR_WORK
-    budget = min(REPAIR_WORK, max(REPAIR_ROUTINGS * first, REPAIR_LEAST))
-    _REPAIR_LIMIT[0] = search_work() + (budget if affordable else 0)
-    _TRIAL_WORK[0] = TRIAL_ROUTINGS * max(first, TRIAL_LEAST)
-    pins, bundles, wires = _reorder_crossing_pins(
-        attempt,
-        separated,
-        pins,
-        bundles,
-        wires,
-        orders,
-        members,
-        ends,
-        layout_style.port_spacing.points,
+    # A figure drawn before is remembered: its draft starts from that drawing (flexo.draft).
+    memory = _memory_key(semantic, layout_style)
+    last = recall("routes", memory)
+    if DRAFT.get():
+        overrides, sides = _recalled_choices(last, members)
+        pins, bundles, wires = _drafted(
+            scene, fitted, members, ends, layout_style, overrides, sides, last
+        )
+    else:
+        started = search_work()
+        pins, bundles, wires, orders = attempt({})
+        # Each repair trial routes the whole figure again: one whose routing alone costs
+        # more than the repairs may spend gets none, rather than a trial past the budget;
+        # and the repairs of any figure spend no more than so many routings of it.
+        first = search_work() - started
+        affordable = first <= REPAIR_WORK
+        budget = min(REPAIR_WORK, max(REPAIR_ROUTINGS * first, REPAIR_LEAST))
+        _REPAIR_LIMIT[0] = search_work() + (budget if affordable else 0)
+        _TRIAL_WORK[0] = TRIAL_ROUTINGS * max(first, TRIAL_LEAST)
+        kept: dict = {}
+        pins, bundles, wires = _reorder_crossing_pins(
+            attempt,
+            separated,
+            pins,
+            bundles,
+            wires,
+            orders,
+            members,
+            ends,
+            layout_style.port_spacing.points,
+            kept,
+        )
+        overrides, sides = kept.get("overrides", {}), kept.get("sides", {})
+    remember(
+        "routes",
+        memory,
+        _Drawn(fitted, layout_style, members, ends, pins, bundles, wires, overrides, sides),
     )
+    give_up_if_newer()
     wires = separated(wires)
     routed_edges: dict[str, RoutedEdge] = {}
     routed_nets: dict[str, RoutedNet] = {}
@@ -278,6 +369,7 @@ def route_figure(
     # Ink meets a drawn shape's outline, not the box round it.
     edges = [reach_outlines(routed_edges[edge.id], fitted, layout_style) for edge in semantic.edges]
     nets = [net_reach_outlines(routed_nets[net.id], fitted, layout_style) for net in semantic.nets]
+    give_up_if_newer()
     edges, nets = place_captions(
         edges,
         nets,
@@ -310,6 +402,52 @@ def route_figure(
         ),
     )
     return RoutedFigure(fitted, tuple(edges), tuple(nets))
+
+
+RECALLED_ROUTINGS = 4
+"""How many of a bundle's last routings between the same pins are looked through for one
+to give again, rather than route it afresh."""
+
+
+@dataclass(slots=True)
+class _Routing:
+    """A bundle as routed: where it sat among the bundles, every wire it was routed among
+    (None, none), where its search priced their ink, the work of its searches, and its wire."""
+
+    index: int
+    among: list[Wire] | None
+    region: Rect | None
+    searched: list[int]
+    wire: Wire
+
+
+def _unchanged_near(seen: list[Wire], wires: list[Wire], index: int, region: Rect | None) -> bool:
+    """Whether every wire but ``index``'s is as it was (``seen``) within ``region``: where
+    its search priced their ink (None, nowhere)."""
+
+    for position, (before, now) in enumerate(zip(seen, wires, strict=True)):
+        if position == index or before is now:
+            continue
+        if region is not None and (_inks(before, region) or _inks(now, region)) and before != now:
+            return False
+    return True
+
+
+def _inks(wire: Wire, region: Rect) -> bool:
+    """Whether any run of ``wire`` comes within a hair of ``region``."""
+
+    left, top = region.left - 1e-6, region.top - 1e-6
+    right, bottom = region.right + 1e-6, region.bottom + 1e-6
+    for path in wire.paths:
+        for start, end in itertools.pairwise(path):
+            if (
+                min(start.x, end.x) <= right
+                and max(start.x, end.x) >= left
+                and min(start.y, end.y) <= bottom
+                and max(start.y, end.y) >= top
+            ):
+                return True
+    return False
 
 
 SIDE_TRIALS = 8
@@ -382,7 +520,7 @@ not trade a crossing for two lines exactly a lane apart.
 
 
 def _reorder_crossing_pins(
-    attempt, separated, pins, bundles, wires, orders, members, ends, spacing
+    attempt, separated, pins, bundles, wires, orders, members, ends, spacing, kept=None
 ):
     """Swap neighbouring pins on the sides crossing routes attach to, while it helps.
 
@@ -444,11 +582,12 @@ def _reorder_crossing_pins(
         members,
         ends,
         spacing,
+        kept,
     )
 
 
 def _turn_crossing_ends(
-    attempt, separated, pins, bundles, wires, overrides, best, members, ends, spacing
+    attempt, separated, pins, bundles, wires, overrides, best, members, ends, spacing, kept=None
 ):
     """Try the other sides of a crossing edge's ends, while that helps.
 
@@ -561,7 +700,10 @@ def _turn_crossing_ends(
     if trials:
         # Every trial re-plans the ends in place; plan once more with the sides
         # that were kept, so the ends agree with the pins returned.
-        pins, bundles, wires, _ = attempt(overrides, sides)
+        pins, bundles, wires, _ = attempt(overrides, sides, again=True)
+    if kept is not None:
+        # (What the repairs kept, for a draft of the figure to keep too: flexo.draft.)
+        kept["overrides"], kept["sides"] = dict(overrides), dict(sides)
     return pins, bundles, wires
 
 
@@ -922,6 +1064,7 @@ class _Scene:
         extra: tuple[Point, ...] = (),
         *,
         lean: Side | None = None,
+        window: tuple[Rect, ...] = (),
     ) -> Grid:
         node_ids = tuple(pin.node.measured.spec.id for pin in pins)
         boundary = routing_boundary(
@@ -943,7 +1086,10 @@ class _Scene:
                 xs.extend((refused.left, refused.right))
             else:
                 ys.extend((refused.top, refused.bottom))
-        return Grid(xs, ys, zones, boundary=boundary, outside_cost=OUTSIDE_COST)
+        for rect in window:
+            xs.extend((rect.left, rect.right))
+            ys.extend((rect.top, rect.bottom))
+        return Grid(xs, ys, zones, boundary=boundary, outside_cost=OUTSIDE_COST, window=window)
 
     def grow(
         self,
@@ -952,12 +1098,18 @@ class _Scene:
         ends: list[End],
         pins: dict[tuple[str, str, Side, bool], Pin],
         others: _Traffic | None = None,
+        reached: list[Rect] | None = None,
+        window: tuple[Rect, ...] = (),
+        haste: float = 1.0,
     ) -> Wire:
         """Route one bundle as a tree rooted at its hub pin.
 
         ``others`` is the ink every other bundle drew in the previous pass;
         crossing it or running on top of it is priced, so the second pass
-        steers around what the first pass could not see.
+        steers around what the first pass could not see. ``reached``, if given,
+        is told the region the search priced that ink in: ink beyond it changed
+        nothing. A ``window`` (of rectangles) keeps the search within it, and
+        ``haste`` hurries it (``Grid.route_from_tree``): a draft's (flexo.draft).
         """
 
         hub = pins[bundle.hub]
@@ -982,7 +1134,7 @@ class _Scene:
             for spoke in spokes
             if spoke.arriving and spoke.clearance > shortest + 1e-6
         }
-        grid = self._grid(everything, tuple(short.values()), lean=lean)
+        grid = self._grid(everything, tuple(short.values()), lean=lean, window=window)
         stubs: dict[tuple[str, str, Side, bool], Point] = {}
         paths: list[list[Point]] = [[hub.point, hub.escape]]
         seeds: list[tuple[Point, int | None, float]] = [(hub.escape, _HEADING[hub.side], 0.0)]
@@ -1005,6 +1157,7 @@ class _Scene:
                     bend=bend,
                     extra=others.price if others is not None else None,
                     alternatives=alternatives,
+                    haste=haste,
                 )
                 if best is None or cost < best[0] - 1e-9:
                     best = (cost, index, path)
@@ -1014,6 +1167,12 @@ class _Scene:
             stubs[spoke.key] = path[-1]
             paths.append(list(simplify((*path, spoke.point))))
             seeds.extend(_tree_seeds(grid, path))
+        if reached is not None and grid.reached is not None:
+            # (A step was priced out of each cell reached: one grid line further.)
+            least_x, least_y, most_x, most_y = grid.reached
+            left, right = grid.xs[max(least_x - 1, 0)], grid.xs[min(most_x + 1, len(grid.xs) - 1)]
+            top, bottom = grid.ys[max(least_y - 1, 0)], grid.ys[min(most_y + 1, len(grid.ys) - 1)]
+            reached.append(Rect(left, top, right - left, bottom - top))
         terminals = []
         for pin in everything:
             stub = stubs.get(pin.key, pin.escape)
@@ -1263,3 +1422,306 @@ def _tree_seeds(grid: Grid, path: tuple[Point, ...]) -> list[tuple[Point, int | 
                 if low - 1e-9 <= y <= high + 1e-9:
                     seeds.append((Point(start.x, y), None, 0.0))
     return seeds
+
+
+# -- drafts --
+# While a figure is drawn as a draft (flexo.draft), its lines are drawn as they were the last
+# time it was drawn wherever nothing about them changed, and only the rest are routed again.
+
+DRAFT_MARGIN = 12.0
+"""How near a line (points) nothing may have changed for it to be drawn as before."""
+
+DRAFT_REACH = 48.0
+"""How far from where it ran, and from its ends, a draft's line may be routed afresh."""
+
+DRAFT_HASTE = 1.6
+"""How hurried a draft's search for a line is (``Grid.route_from_tree``'s ``haste``)."""
+
+DRAFT_NEAR_WORK = 60_000
+"""How much a draft's search for a line near where it ran may take (steps) before it is
+searched for further afield."""
+
+DRAFT_AFIELD = 0.25
+"""How much further afield (a share of the figure's size) a draft's line is searched for when
+near where it ran it would cut through something."""
+
+
+class _Drawn:
+    """A figure's routing, as kept for its next draft: each bundle's wire (as routed, before
+    separation) and the pins it ran between, the boxes about it, and the repairs chosen."""
+
+    def __init__(self, fitted, style, members, ends, pins, bundles, wires, overrides, sides):
+        self.wires = {bundle.key: wire for bundle, wire in zip(bundles, wires, strict=True)}
+        self.pins = {
+            bundle.key: {
+                key: (pins[key].point, pins[key].side) for key in _pin_keys(bundle, members, ends)
+            }
+            for bundle in bundles
+        }
+        self.hubs = {bundle.key: bundle.hub for bundle in bundles}
+        self.boxes = _boxes(fitted, style)
+        self.overrides = dict(overrides)
+        # Ends by their line and place on it, not their index: another line added shifts those.
+        self.sides = {}
+        for index, side in sides.items():
+            member = members[ends[index].member]
+            self.sides[(member.spec.id, member.ends.index(index))] = side
+
+
+def _memory_key(semantic, style: LayoutStyle) -> tuple:
+    """Which figure a routing is of, for its drafts: by its id, the way its groups run and
+    its spacing (a figure turned to fit a slide, or set closer, is another drawing of it)."""
+
+    return (semantic.id, tuple((group.id, group.layout.kind) for group in semantic.groups), style)
+
+
+def _pin_keys(bundle: Bundle, members: list[Member], ends: list[End]) -> list:
+    keys = [bundle.hub]
+    for member in bundle.members:
+        for end in members[member].ends:
+            if ends[end].group not in keys:
+                keys.append(ends[end].group)
+    return keys
+
+
+def _boxes(fitted: FittedFigure, style: LayoutStyle) -> dict[str, tuple[Rect, bool]]:
+    """What a line is routed round, each with whether it is a container: every part, every
+    container drawn, and each one's title."""
+
+    found = {node.measured.spec.id: (node.bounds, False) for node in fitted.nodes}
+    for group in fitted.groups:
+        if group.measured.spec.role in TRANSPARENT_ROLES:
+            continue
+        found[group.measured.spec.id] = (group.bounds, True)
+        title = title_rect(group, style)
+        if title is not None:
+            found[f"{group.measured.spec.id}\0title"] = (title, False)
+    return found
+
+
+def _recalled_choices(last: _Drawn | None, members: list[Member]) -> tuple[dict, dict]:
+    """The pin orders and end sides the last full routing kept, for ends there are still."""
+
+    if last is None:
+        return {}, {}
+    where = {
+        (member.spec.id, position): end
+        for member in members
+        for position, end in enumerate(member.ends)
+    }
+    sides = {where[key]: side for key, side in last.sides.items() if key in where}
+    return dict(last.overrides), sides
+
+
+def _drafted(scene, fitted, members, ends, style, overrides, sides, last):
+    """A draft's routing: each bundle's last wire, moved with its ends, where nothing about
+    it changed; the rest routed once."""
+
+    pins = plan_pins(fitted, members, ends, style, overrides, {}, sides)
+    bundles = plan_bundles(members, ends)
+    boxes = _boxes(fitted, style)
+    changed: dict[tuple[float, float], list] = {}
+    wires: list[Wire | None] = [
+        _moved_wire(bundle, members, ends, pins, last, boxes, changed, scene.canvas)
+        if last
+        else None
+        for bundle in bundles
+    ]
+    for index, bundle in enumerate(bundles):
+        if wires[index] is None:
+            # (Not in view of the others: pricing their ink makes a search wander far, and
+            # the separation that follows spreads what shares a corridor all the same. Nor
+            # far from where it ran, moved with its ends, or from its ends: a line kept from
+            # the long way round a full drawing may take, rather than searched for over the
+            # whole figure.)
+            # Kept near, a line that would cut through a part or a group is searched for
+            # further afield, and then everywhere.
+            # (One not drawn before has nowhere it ran to go by: further afield at once.)
+            corridor = _corridor(bundle, members, ends, pins, last)
+            reach = max(scene.canvas.width, scene.canvas.height) * DRAFT_AFIELD
+            wider = (Rect.union(corridor).inflated(reach),)
+            known = last is not None and bundle.key in last.wires
+            # (Further afield taking in the whole figure, everywhere is no further.)
+            tries = [corridor] if known else []
+            tries += [wider] if wider[0].contains_rect(scene.canvas) else [wider, ()]
+            wire = None
+            for window in tries:
+                # (Near where it ran, a line found at all is found soon: a search that runs
+                # on there is one with no way through, and is given up for one further out.)
+                ceiling(search_work() + DRAFT_NEAR_WORK if window is corridor else None)
+                reached: list[Rect] = []
+                try:
+                    wire = scene.grow(
+                        bundle, members, ends, pins, None, reached, window, DRAFT_HASTE
+                    )
+                except (RuntimeError, TooDear):  # (or its ends too far from where it ran)
+                    continue
+                finally:
+                    ceiling(None)
+                if window is tries[-1] or not _through(scene, wire, bundle, members, ends, pins):
+                    break
+                # (A search that never reached the edge of its window would find the same
+                # line anywhere: it is the line there is.)
+                if window is wider and reached and _within(reached[0], wider[0]):
+                    break
+            wires[index] = wire
+    return pins, bundles, wires
+
+
+def _corridor(bundle, members, ends, pins, last: _Drawn | None) -> tuple[Rect, ...]:
+    """Where a draft's search for ``bundle`` may go: about each run of its last wire, moved
+    with its hub, and from there to each of its ends -- or, with no wire to go by, about
+    all its ends at once."""
+
+    keys = _pin_keys(bundle, members, ends)
+    ends_at = [point for key in keys for point in (pins[key].point, pins[key].escape)]
+    wire = last.wires.get(bundle.key) if last is not None else None
+    before = last.pins.get(bundle.key) if last is not None else None
+    if wire is None or before is None or bundle.hub not in before:
+        return (_around(ends_at),)
+    was, _ = before[bundle.hub]
+    dx, dy = pins[bundle.hub].point.x - was.x, pins[bundle.hub].point.y - was.y
+    moved = _shifted(wire, dx, dy)
+    rects = [
+        _around((start, end))
+        for path in moved.paths
+        for start, end in itertools.pairwise(path)
+        if start is not None and end is not None
+    ]
+    for key in keys:
+        pin = pins[key]
+        old = before.get(key)
+        then = Point(old[0].x + dx, old[0].y + dy) if old is not None else pins[bundle.hub].escape
+        rects.append(_around((then, pin.point, pin.escape)))
+    return tuple(rects)
+
+
+def _through(scene, wire: Wire, bundle, members, ends, pins) -> bool:
+    """Whether ``wire`` runs through a part not its own, or a group that holds none of its
+    ends."""
+
+    nodes = {pins[key].node.measured.spec.id for key in _pin_keys(bundle, members, ends)}
+    owners = {owner for node in nodes for owner in ancestors(scene.parents, node)}
+    runs = [
+        (start, end)
+        for path in wire.paths
+        for start, end in itertools.pairwise(path)
+        if start is not None and end is not None
+    ]
+    boxes = [node.bounds for node in scene.solid if node.measured.spec.id not in nodes]
+    boxes += [
+        group.bounds for group in scene.containers if group.measured.spec.id not in owners
+    ]
+    return any(segment_crosses_rect(start, end, box) for box in boxes for start, end in runs)
+
+
+def _within(inner: Rect, outer: Rect) -> bool:
+    """Whether ``inner`` lies inside ``outer``, clear of its edges."""
+
+    return (
+        outer.left < inner.left - 1e-6
+        and inner.right + 1e-6 < outer.right
+        and outer.top < inner.top - 1e-6
+        and inner.bottom + 1e-6 < outer.bottom
+    )
+
+
+def _around(points) -> Rect:
+    points = list(points)
+    left, top = min(point.x for point in points), min(point.y for point in points)
+    right, bottom = max(point.x for point in points), max(point.y for point in points)
+    return Rect(left, top, right - left, bottom - top).inflated(DRAFT_REACH)
+
+
+def _moved_wire(bundle, members, ends, pins, last: _Drawn, boxes, changed, canvas) -> Wire | None:
+    """``bundle``'s wire as last drawn, moved as its ends moved -- should every one of them
+    have moved alike, and nothing near the line have changed beside it; else None.
+
+    ``changed`` keeps, for each way a line may have moved, what did not move that way."""
+
+    wire = last.wires.get(bundle.key)
+    before = last.pins.get(bundle.key)
+    if wire is None or before is None or bundle.pinned or last.hubs.get(bundle.key) != bundle.hub:
+        return None
+    keys = _pin_keys(bundle, members, ends)
+    if set(keys) != set(before):
+        return None
+    was, _ = before[bundle.hub]
+    dx, dy = pins[bundle.hub].point.x - was.x, pins[bundle.hub].point.y - was.y
+    for key in keys:
+        point, side = before[key]
+        now = pins[key]
+        off = abs(now.point.x - point.x - dx) + abs(now.point.y - point.y - dy)
+        if now.side is not side or off > 1e-6:
+            return None
+    moved = _shifted(wire, dx, dy)
+    runs = [
+        (start, end)
+        for path in moved.paths
+        for start, end in itertools.pairwise(path)
+        if start is not None and end is not None
+    ]
+    if not runs or not all(canvas.contains_point(point) for run in runs for point in run):
+        return None
+    left = min(min(start.x, end.x) for start, end in runs) - DRAFT_MARGIN
+    top = min(min(start.y, end.y) for start, end in runs) - DRAFT_MARGIN
+    right = max(max(start.x, end.x) for start, end in runs) + DRAFT_MARGIN
+    bottom = max(max(start.y, end.y) for start, end in runs) + DRAFT_MARGIN
+    reach = Rect(left, top, right - left, bottom - top)
+    # The line's own ends may have changed about it (a box grown on its far side): the line
+    # need only keep out of them.
+    own = {pins[key].node.measured.spec.id for key in keys}
+    delta = (round(dx, 6), round(dy, 6))
+    if delta not in changed:
+        changed[delta] = [
+            (name, box, container)
+            for name, (box, container) in boxes.items()
+            if not _moved_alike(last.boxes.get(name), box, dx, dy)
+        ]
+    for name, box, container in changed[delta]:
+        if not box.intersects(reach):
+            continue
+        if name in own:
+            if any(segment_crosses_rect(start, end, box) for start, end in runs):
+                return None
+        elif any(_near(start, end, box, container) for start, end in runs):
+            return None
+    return moved
+
+
+def _moved_alike(before: tuple[Rect, bool] | None, box: Rect, dx: float, dy: float) -> bool:
+    if before is None:
+        return False
+    was = before[0]
+    return (
+        abs(was.x + dx - box.x) < 1e-6
+        and abs(was.y + dy - box.y) < 1e-6
+        and abs(was.width - box.width) < 1e-6
+        and abs(was.height - box.height) < 1e-6
+    )
+
+
+def _near(start: Point, end: Point, box: Rect, container: bool) -> bool:
+    """Whether a run passes within ``DRAFT_MARGIN`` of a box -- of a container's outline,
+    for a container: a line may run inside one, as one may run past a part."""
+
+    if not segment_crosses_rect(start, end, box.inflated(DRAFT_MARGIN)):
+        return False
+    if not container or min(box.width, box.height) <= 2 * DRAFT_MARGIN:
+        return True
+    inner = box.inflated(-DRAFT_MARGIN)
+    return not (inner.contains_point(start) and inner.contains_point(end))
+
+
+def _shifted(wire: Wire, dx: float, dy: float) -> Wire:
+    def at(point: Point | None) -> Point | None:
+        return None if point is None else Point(point.x + dx, point.y + dy)
+
+    copied = copy.copy(wire)
+    copied.paths = [[at(point) for point in path] for path in wire.paths]
+    copied.terminals = [
+        Terminal(at(terminal.point), terminal.clearance, at(terminal.escape))
+        for terminal in wire.terminals
+    ]
+    copied.flow_from, copied.flow_to = at(wire.flow_from), at(wire.flow_to)
+    return copied

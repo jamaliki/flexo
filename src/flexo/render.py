@@ -13,6 +13,7 @@ from flexo.components import (
     motif_area,
     motif_enabled,
     node_tone,
+    vector_cells,
     vector_grid,
     volume_geometry,
 )
@@ -30,7 +31,7 @@ from flexo.render_common import (
 )
 from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
-from flexo.style import LayoutStyle, Palette
+from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
 
 
@@ -674,10 +675,42 @@ the pale cells crisp instead of washed out.
 """
 
 
-def _ramp_fill_opacity(index: int, count: int) -> float:
+def _ramp_fill_opacity(index: int, count: int, toned: bool = False) -> float:
+    # A tone's colour is a strong one, made to outline a box: shaded from a lighter start to
+    # short of it, so a vector in a tone reads as light as one along a theme's ramp.
+    lightest, darkest = _TONED_RAMP if toned else (_RAMP_LIGHTEST, _RAMP_DARKEST)
     if count < 2:
-        return _RAMP_DARKEST
-    return _RAMP_LIGHTEST + (_RAMP_DARKEST - _RAMP_LIGHTEST) * index / (count - 1)
+        return darkest
+    return lightest + (darkest - lightest) * index / (count - 1)
+
+
+def _tone_ramp(palette: Palette, tone: str) -> str | None:
+    """The theme's vector ramp made from the same colour as ``tone``, if it has one: its
+    tones and its ramps come from one list of colours, so tone 3 and ``ramp-q`` are both its
+    green. None for the neutral tone, or a theme with no ramp near the tone's colour."""
+
+    from flexo.colour import hue_distance
+    from flexo.components import NEUTRAL_TONES
+
+    if tone.lower() in NEUTRAL_TONES:
+        return None
+    index = palette.tone_index(tone)
+    if index is None:
+        return None
+    colour = palette.get(f"tone-{index}-stroke")
+    distance, role = min((hue_distance(colour, palette.get(role)), role) for role in RAMP_ROLES)
+    return role if distance < _SAME_RAMP else None
+
+
+_SAME_RAMP = 0.17
+"""How near (in Oklab, its lightness counted a quarter) a ramp's colour has to be to a
+tone's to be that tone's ramp: a theme's tone is its ramp colour made darker for words."""
+
+_TONED_RAMP = (0.3, 0.8)
+"""The lightest and darkest a toned vector's cells are of its tone's colour."""
+
+_TONED_OUTLINE = 0.6
+"""How strongly a toned vector's cells are outlined in its colour."""
 
 
 def _preset_vector(
@@ -698,9 +731,10 @@ def _preset_vector(
     if len(shades) != grid.columns or any(len(column) != grid.cells for column in shades):
         raise ValueError(f'vector "{spec.id}" carries shades that do not match its grid')
     stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp="preset")
+    bounds = vector_cells(spec, node.bounds, node.measured.label, style)
     for column in range(grid.columns):
         for row in range(grid.cells):
-            cell = grid.cell_bounds(node.bounds, column, row)
+            cell = grid.cell_bounds(bounds, column, row)
             element(
                 stack,
                 "rect",
@@ -718,16 +752,33 @@ def _preset_vector(
 
 def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
     spec = node.measured.spec
-    grid = vector_grid(spec, style, bounds=node.bounds)
+    # (One with words of its own has them under its cells: vector_cells.)
+    bounds = vector_cells(spec, node.bounds, node.measured.label, style)
+    if bounds != node.bounds:
+        # Its words and the room over its cells are its own too: an unseen box over it all,
+        # to be pointed at -- between two columns of cells, it is still the vector.
+        box = node.bounds
+        element(
+            parent, "rect", id=f"{spec.id}.body", x=box.x, y=box.y, width=box.width,
+            height=box.height, fill="none", stroke="none", pointer_events="all",
+        )
+    grid = vector_grid(spec, style, bounds=bounds)
     encoded = spec.property("shades")
     if encoded is not None:
         _preset_vector(parent, node, style, grid, str(encoded))
         return
-    ramp = str(spec.property("ramp", "ramp-node"))
+    # A vector given a tone is shaded along the theme's ramp made from that tone's colour
+    # (paper's green tone is the ramp its Q vectors take), as the theme's own vectors are;
+    # with no ramp of that colour (``neutral``, the theme's grey), from the tone itself.
+    tone = str(spec.property("tone") or "").strip()
+    matched = _tone_ramp(palette, tone) if tone else None
+    toned = bool(tone) and matched is None
+    ramp = matched or ("block-stroke" if toned else str(spec.property("ramp", "ramp-node")))
+    fill, stroke = paint_override(spec, "fill"), paint_override(spec, "stroke")
     stack = element(parent, "g", id=f"{spec.id}.grid", data__flexo__ramp=ramp)
     for column in range(grid.columns):
         for row in range(grid.cells):
-            cell = grid.cell_bounds(node.bounds, column, row)
+            cell = grid.cell_bounds(bounds, column, row)
             element(
                 stack,
                 "rect",
@@ -737,12 +788,15 @@ def _vector(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: P
                 width=cell.width,
                 height=cell.height,
                 rx=style.vector_cell_radius.points,
-                fill__opacity=_ramp_fill_opacity(row, grid.cells),
+                fill__opacity=_ramp_fill_opacity(row, grid.cells, toned),
+                stroke__opacity=_TONED_OUTLINE if toned else None,
                 **paint_attributes(
                     palette=palette,
                     fill_role=ramp,
                     stroke_role=ramp,
                     stroke_width=style.stroke_width.points * _CELL_STROKE_SCALE,
+                    fill=fill,
+                    stroke=stroke or fill,
                 ),
             )
 
@@ -881,6 +935,10 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
     metrics = node.measured.label
     bounds = node.bounds
     spec = node.measured.spec
+    if spec.kind == "vector" and metrics.lines:
+        # A vector's words are under its cells (vector_caption_band).
+        cells = vector_cells(spec, bounds, metrics, style)
+        return cells.bottom + style.vector_label_gap.points + metrics.baseline
     if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
     if spec.kind in SHAPE_KINDS:

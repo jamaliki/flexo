@@ -428,6 +428,104 @@ def test_a_flow_places_inputs_late_and_ignores_undirected_links_for_layers() -> 
     assert top["m.twin"] == pytest.approx(top["m.g"]), "an undirected link orders no layers"
 
 
+def test_a_captioned_merge_in_a_flow_runs_straight_from_its_trunk_with_its_words_above() -> None:
+    """As ``softmax(QK^T)V`` sits above Q's arrow into the attended value: the target takes
+    its trunk's row -- the net's first source, the person's choice -- the gap between them
+    holds the words, and the other branch climbs into the end of that run."""
+
+    from flexo.serialization import parse_figure
+
+    def figure(sources: list[str]) -> dict:
+        return {
+            "figure": {"id": "attention"},
+            "groups": [{"id": "m", "layout": {"kind": "flow-right"},
+                        "children": ["n", "mlp", "q", "rects", "cnn", "kv", "att", "upd"]}],
+            "nodes": [
+                {"id": "n", "kind": "vector", "label": "Node features"},
+                {"id": "mlp", "kind": "mlp", "label": "MLP"},
+                {"id": "q", "kind": "vector", "label": "Q"},
+                {"id": "rects", "label": "Edge rectangles"},
+                {"id": "cnn", "kind": "cnn", "label": "CNN"},
+                {"id": "kv", "kind": "vector", "label": "K, V", "properties": {"columns": 2}},
+                {"id": "att", "kind": "vector", "label": "Attended value"},
+                {"id": "upd", "kind": "mlp", "label": "MLP"},
+            ],
+            "edges": [
+                {"from": "n", "to": "mlp"}, {"from": "mlp", "to": "q"},
+                {"from": "rects", "to": "cnn"}, {"from": "cnn", "to": "kv"},
+                {"from": "att", "to": "upd"},
+            ],
+            "nets": [{"id": "into-att", "kind": "merge", "sources": sources,
+                      "targets": ["att"], "label": "softmax(QK$^T$)V"}],
+        }
+
+    for trunk, other in (("q", "kv"), ("kv", "q")):
+        compiled = compile_figure(parse_figure(figure([trunk, other])))
+        (net,) = compiled.routed.nets
+        stems = {stem.port.node_id: stem.centerline for stem in net.source_stems}
+        into = net.target_stems[0].centerline
+        # The trunk runs level into the target; the other branch turns to join it.
+        assert {point.y for point in (*stems[trunk], *into)} == {into[-1].y}
+        assert len({point.y for point in stems[other]}) == 2
+        # Its words above that run, between the trunk and the rail, clear of everything.
+        box = label_box(net.label_position, net.label_metrics)
+        assert box.bottom < into[-1].y
+        assert stems[trunk][0].x <= box.left and box.right <= into[0].x
+        assert not [d for d in lint_compilation(compiled).diagnostics if "label" in d.code]
+
+
+def test_a_chain_into_a_captioned_merge_stays_level_through_it() -> None:
+    """Node features -> MLP -> Q points -> attended value -> MLP, the distances climbing
+    in from below: the chain one level line, the target in its trunk's row, the words over
+    the trunk with room made for them."""
+
+    from flexo.serialization import parse_figure
+
+    chain = ["n", "mlp", "qv", "att", "upd"]
+    compiled = compile_figure(
+        parse_figure(
+            {
+                "figure": {"id": "ipa"},
+                "groups": [
+                    {"id": "m", "layout": {"kind": "flow-right"}, "children": [*chain, "d"]}
+                ],
+                "nodes": [
+                    {"id": "n", "kind": "vector", "label": "Node features"},
+                    {"id": "mlp", "kind": "mlp", "label": "MLP"},
+                    {"id": "qv", "kind": "vector", "label": "Q points, V"},
+                    {"id": "att", "kind": "vector", "label": "Attended value"},
+                    {"id": "upd", "kind": "mlp", "label": "MLP"},
+                    {"id": "d", "kind": "graph", "label": "Distances to Q points"},
+                ],
+                "edges": [
+                    {"from": "n", "to": "mlp"},
+                    {"from": "mlp", "to": "qv"},
+                    {"from": "att", "to": "upd"},
+                ],
+                "nets": [
+                    {
+                        "id": "into-att",
+                        "kind": "merge",
+                        "sources": ["qv", "d"],
+                        "targets": ["att"],
+                        "label": "softmax(\u2212\u03a3D)V",
+                    }
+                ],
+            }
+        )
+    )
+    lines = {line.spec.id: line.centerline for line in compiled.routed.edges}
+    level = {point.y for points in lines.values() for point in points}
+    (net,) = compiled.routed.nets
+    trunk, into = net.source_stems[0].centerline, net.target_stems[0].centerline
+    level |= {point.y for point in (*trunk, *into)}
+    assert len(level) == 1
+    # Its words above the run from Q points to where the distances join it.
+    box = label_box(net.label_position, net.label_metrics)
+    assert box.bottom < into[-1].y and trunk[0].x <= box.left and box.right <= into[0].x
+    assert not lint_compilation(compiled).diagnostics
+
+
 def test_a_misspelt_layout_or_width_is_named_with_a_guess() -> None:
     with pytest.raises(ValueError, match=r'unknown layout "flwo" \(did you mean "flow"\?\)'):
         Figure("typo").module("m", layout="flwo")

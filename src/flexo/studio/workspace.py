@@ -35,6 +35,7 @@ from typing import Any
 
 import yaml
 
+from flexo.draft import GivenUp, given_up_when
 from flexo.roundtrip import writing
 from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
 from flexo.studio.merge import merge3
@@ -59,6 +60,10 @@ IGNORED = {
     "Pods", "DerivedData", ".Trash",
 }
 """Folders no document is looked for in: tools' output, caches, and a home's own folders."""
+_READS = frozenset(
+    {"read", "structure-view", "structure-settings", "structure-fetch", "structure-name"}
+)
+"""Edits a page asks of a kind that only read the document (``Workspace.acting``)."""
 DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
 CLAIM_LIMIT = 2_000_000
 """Bytes: a larger file is not read to find out what kind of document it is."""
@@ -486,6 +491,8 @@ class Workspace:
         document uses one again (its picture's adding redone)."""
         self.drawing = threading.Lock()
         self.latest: dict[str, int] = {}
+        self.acts: dict[str, int] = {}
+        """How many edits the pages have asked of each document's kind (``acting``)."""
         self._documents: dict[Path, tuple[float, str | None]] = {}
         self._unread: dict[Path, bool] = {}  # files of a kind that do not read as it has them
         self._stop = threading.Event()
@@ -1117,6 +1124,15 @@ class Workspace:
 
     # -- drawing --
 
+    def acting(self, name: str, action: dict[str, Any]) -> None:
+        """An edit asked of a document's kind (``/api/act``): one that changes it, not one
+        that only reads it, gives way to it whatever drawing of the document yields."""
+
+        edit = action.get("edit")
+        if action.get("do") in _READS or (isinstance(edit, dict) and edit.get("do") in _READS):
+            return
+        self.acts[name] = self.acts.get(name, 0) + 1
+
     def draw(
         self, name: str, document: Any, version: int, known: dict[str, str], hints: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1124,14 +1140,30 @@ class Workspace:
         # Each page counts its own drawings; an older one waiting its turn is dropped.
         client = f"{name}\0{hints.get('client', '')}"
         self.latest[client] = max(self.latest.get(client, 0), version)
+        # One that may take a while (a deck settling its figures) yields: the page asks for
+        # the next without waiting for it, and it is given up as soon as that is asked for --
+        # or as soon as an edit is asked of the document, whose drawing that will be.
+        acted = self.acts.get(name, 0)
+        yields = (
+            given_up_when(
+                lambda: self.latest.get(client, 0) > version or self.acts.get(name, 0) != acted
+            )
+            if hints.get("yields")
+            else contextlib.nullcontext()
+        )
         with self.drawing:
             if version < self.latest[client]:
                 return {"version": version, "stale": True}
             started = time.perf_counter()
             try:
                 # The page has every bundled font; drawings name them rather than carry them.
-                with fonts_linked(), self.running(), pictures.linked(self):
+                with fonts_linked(), self.running(), pictures.linked(self), yields:
                     drawing = doc.kind.draw(document, doc.path.parent, hints)
+            except GivenUp:
+                # (Given up for an edit asked of it, the page is told: that edit's drawing, or
+                # its page, asks again.)
+                edited = self.acts.get(name, 0) != acted
+                return {"version": version, "stale": True, **({"edited": True} if edited else {})}
             except Exception as error:  # the page shows what went wrong, and stays up
                 traceback.print_exc()
                 return {

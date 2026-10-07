@@ -273,3 +273,31 @@ def test_a_layout_kept_while_editing_is_drawn_alone_and_as_the_fit_drew_it(monke
     # A layout it does not know is no layout to keep: the best is found as ever.
     other = flexo.fit_in_box(_stack(), 800, 200, words=12, largest=18, keep="sideways")
     assert other.layout == fit.layout
+
+
+def test_a_nets_end_sides_turn_with_the_figure() -> None:
+    """A skip line asked to leave its block's foot and come into the next one's head
+    leaves its right side and comes into the next one's left, turned."""
+
+    from flexo.geometry import Side
+    from flexo.serialization import parse_figure
+
+    spec = parse_figure(
+        {
+            "figure": {"id": "spine"},
+            "groups": [{"id": "root", "layout": {"kind": "column"}, "children": ["a", "b", "c"]}],
+            "nodes": [{"id": name, "label": name.upper()} for name in ("a", "b", "c")],
+            "nets": [
+                {
+                    "id": "skip",
+                    "kind": "fan-out",
+                    "sources": ["a"],
+                    "targets": ["b", "c"],
+                    "sides": {"a": "south", "c": "north"},
+                }
+            ],
+        }
+    )
+    (net,) = turned(spec).nets
+    assert dict(net.sides) == {"a.output": Side.EAST, "c.input": Side.WEST}
+    compile_figure(turned(spec))

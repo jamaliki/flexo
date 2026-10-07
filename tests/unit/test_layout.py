@@ -1344,3 +1344,69 @@ def test_a_box_widens_so_the_arrows_it_shares_a_side_with_meet_its_middle() -> N
         assert abs(edge.centerline[0].x - source.bounds.center.x) < 0.1  # shared pins weigh 1e-3
         assert heads.bounds.left + margin - 1e-6 <= edge.centerline[-1].x
         assert edge.centerline[-1].x <= heads.bounds.right - margin + 1e-6
+
+
+def _store_under_a_row(align_with: str | None = None, *, joined: tuple[str, ...] = ("b",)):
+    from flexo.serialization import parse_figure
+
+    store = {"id": "e", "label": "Store", **({"align_with": align_with} if align_with else {})}
+    return compile_figure(
+        parse_figure(
+            {
+                "figure": {"id": "s"},
+                "nodes": [{"id": name, "label": name.upper()} for name in "abcd"] + [store],
+                "edges": [{"from": name, "to": "e"} for name in joined],
+                "groups": [
+                    {
+                        "id": "root",
+                        "role": "canvas",
+                        "layout": {"kind": "column", "align": "center"},
+                        "children": ["row", "e"],
+                    },
+                    {
+                        "id": "row",
+                        "role": "layout",
+                        "layout": {"kind": "row"},
+                        "children": list("abcd"),
+                    },
+                ],
+            }
+        )
+    )
+
+
+def _centres(compilation) -> dict[str, float]:
+    found = {node.measured.spec.id: node.bounds.center.x for node in compilation.fitted.nodes}
+    found |= {group.measured.spec.id: group.bounds.center.x for group in compilation.fitted.groups}
+    return found
+
+
+def test_a_box_joined_to_one_part_of_the_row_over_it_is_centred_under_that_part() -> None:
+    """A store under a row of four, joined to the second: under it, its line straight from
+    the middle of one to the middle of the other -- the store moves, not the row."""
+
+    alone, joined = _centres(_store_under_a_row(joined=())), _store_under_a_row()
+    centres = _centres(joined)
+    assert centres["e"] == pytest.approx(centres["b"])
+    assert centres["row"] == pytest.approx(alone["row"])
+    assert centres["b"] == pytest.approx(alone["b"])
+    (line,) = joined.routed.edges
+    assert len(line.centerline) == 2 and line.centerline[0].x == pytest.approx(centres["b"])
+    # Joined to all four, it stays centred under the row.
+    every = _centres(_store_under_a_row(joined=tuple("abcd")))
+    assert every["e"] == pytest.approx(every["row"])
+
+
+def test_a_box_lined_up_with_a_part_is_centred_under_it_however_it_is_joined() -> None:
+    """Placed under "c" (or under the row) by its person: there, its line to "b" bending
+    between the middles of the two -- and nothing else moves."""
+
+    plain = _centres(_store_under_a_row(joined=()))
+    for target in ("c", "row", "a"):
+        compilation = _store_under_a_row(target)
+        centres = _centres(compilation)
+        assert centres["e"] == pytest.approx(centres[target])
+        assert all(centres[name] == pytest.approx(plain[name]) for name in (*"abcd", "row"))
+        (line,) = compilation.routed.edges
+        assert line.centerline[0].x == pytest.approx(centres["b"])
+        assert line.centerline[-1].x == pytest.approx(centres["e"])

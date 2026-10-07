@@ -32,6 +32,9 @@ choose next (the part just added). An action is a mapping with a ``do``:
   ``groups`` and ``edges`` as a file writes them, ``top`` the ones that hold the
   rest -- put after ``after`` or in ``parent``, each with an id of its own, the
   lines between them kept;
+- ``join``: ``ids`` of lines into one shape (or out of one) made one line that
+  branches (a net), with one caption; ``add``, a shape more on its branching side;
+- ``separate``: the net ``id`` made lines again (with ``end``, that one branch);
 - ``read``: nothing; the page asks for the figure as it is.
 
 A figure file that leaves its root group out stacks its parts in a column; the
@@ -46,7 +49,7 @@ import io
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +72,9 @@ STRUCTURAL = frozenset(
         "duplicate",
         "paste",
         "arrange",
+        "align",
+        "join",
+        "separate",
     }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
@@ -80,6 +86,13 @@ class EditError(ValueError):
 
 NOUNS = {"node": "shape", "edge": "line", "net": "line"}
 """What the page calls each thing an edit targets, where it differs from the file."""
+
+WORDS = frozenset({"label", "back_label", "cofactors"})
+"""What a line says, as against how it looks: kept on one line when a part is put into it."""
+
+ROUTE = frozenset({"waypoints", "lane", "via"})
+"""How a line runs between its two ends (not where it leaves or meets them): not kept
+when one of its ends changes."""
 
 
 def apply(
@@ -95,6 +108,7 @@ def apply(
         raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
+    document.tidy_alignment()
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
@@ -319,6 +333,19 @@ def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
         "groups": groups,
         "edges": edges,
         "nets": data.get("nets") or [],
+        # The sides of the ports that keep to one (a vector's four, ports written in the
+        # file): where a line to one of them meets its shape.
+        "sides": {
+            node["id"]: fixed
+            for node in nodes
+            if (
+                fixed := {
+                    name: side
+                    for name, (side, usual) in document.port_sides(str(node["id"])).items()
+                    if not usual
+                }
+            )
+        },
     }
 
 
@@ -599,6 +626,10 @@ class _Document:
         return candidate
 
     def detach(self, identifier: str) -> None:
+        # (Lined up under a part where it was, it is placed afresh where it goes.)
+        node = self.node(identifier)
+        if node is not None:
+            node.pop("align_with", None)
         for group in self.groups:
             children = group.get("children") or []
             while identifier in children:
@@ -662,8 +693,24 @@ class _Document:
                 item.pop("label")
         if properties:
             item["properties"] = properties
+        # Put into a line (``into``, chosen or let go on): between the parts it joins.
+        into = self.line_named(str(action["into"])) if action.get("into") else None
+        if into is not None and self.groups:
+            self.written_root()  # (written before the part is: it would hold it twice)
         self.nodes.append(item)
-        self.place(identifier, action.get("parent"), action.get("after"))
+        if into is not None:
+            self.place_between(identifier, into, action.get("parent"))
+            if action.get("splice", True):
+                self.splice(into, identifier)
+                self.spliced = True
+            else:
+                self.connect(str(into["from"]), identifier)
+            return [identifier]
+        if action.get("parent") and action.get("index") is not None:
+            # Let go at a place in a group (a shape dragged from the palette): there.
+            self.place_at(identifier, str(action["parent"]), int(action["index"]))
+        else:
+            self.place(identifier, action.get("parent"), action.get("after"))
         # A branch (``line``: a side, ``of``: the part or branch it goes beside) is put on a
         # line of its own there: a decision's other outcome under it, never into the line
         # between two parts.
@@ -677,13 +724,192 @@ class _Document:
             else:
                 # The line from source now ends at the new part (its words with it, as a
                 # decision's "yes"), and a new line carries on to where it went.
-                onward = line["to"]
-                line["to"] = self.free_input(identifier)
-                self.data["edges"].append({"from": identifier, "to": onward})
+                self.splice(line, identifier)
                 self.spliced = True
         if branch:
             self.own_line(identifier, str(action.get("of") or action.get("after")), branch)
         return [identifier]
+
+    def line_named(self, identifier: str) -> dict[str, Any]:
+        """The line ``identifier`` names, or why there is none to put a part into."""
+
+        line = self.edge_named(identifier)
+        if line is None:
+            said = self.line_said(identifier)
+            raise EditError(f"{said[:1].upper()}{said[1:]} is gone.")
+        return line
+
+    def splice(self, line: dict[str, Any], identifier: str) -> None:
+        """``identifier`` put into ``line``: the line now ends at it, its words, look and heads
+        kept (a decision's "yes"), and a plain line of the same look carries on from it to
+        where the line went -- arriving there as the line did. How the line ran between its
+        ends (its waypoints, its lane) goes: it runs another way now. Two parts joined
+        already are not joined twice."""
+
+        source, target = self.node_of(str(line["from"])), self.node_of(str(line["to"]))
+        if identifier in (source, target):
+            raise EditError("A shape can\u2019t be put into its own line.")
+        onward = line["to"]
+        arrive = line.pop("arrive", None)
+        for key in ROUTE:
+            line.pop(key, None)
+        look = {
+            key: copy.deepcopy(value)
+            for key, value in line.items()
+            if key not in {"id", "from", "to", "depart"} | WORDS | ROUTE
+        }
+        if self.joined(source, identifier, but=line):
+            self.edges.remove(line)
+        else:
+            line["to"] = self.free_input(identifier)
+        if not self.joined(identifier, target):
+            carried: dict[str, Any] = {"from": identifier, "to": onward, **look}
+            if arrive:
+                carried["arrive"] = arrive
+            self.data.setdefault("edges", []).append(carried)
+
+    def joined(self, source: str, target: str, but: object = None) -> bool:
+        """Whether a line (other than ``but``) runs from ``source`` to ``target``."""
+
+        return any(
+            edge is not but
+            and self.node_of(str(edge["from"])) == source
+            and self.node_of(str(edge["to"])) == target
+            for edge in self.edges
+        )
+
+    def place_between(
+        self, identifier: str, line: Mapping[str, Any], parent: object = None
+    ) -> None:
+        """Put ``identifier``, going into ``line``, where it reads between the parts the line
+        joins: in ``parent`` (the group it was let go in) -- else in the group that holds them
+        both -- down to the smallest group there that holds them both: after what holds the
+        part the line leaves, else before what holds the part it goes to (a part put into the
+        line between two modules goes between them). Across the lines of a flow laid out on
+        several (a long one folded to fit, written as it is seen), on the line the line
+        arrives at, beside the part it goes to. Along a line run back (a fold's second), between
+        the two all the same. In a file of parts alone, after the part the line leaves."""
+
+        source, target = self.node_of(str(line["from"])), self.node_of(str(line["to"]))
+
+        def holding(group: dict[str, Any], part: str) -> str | None:
+            return next(
+                (
+                    child
+                    for child in group.get("children") or []
+                    if child != identifier
+                    and (child == part or part in self.descendants(str(child)))
+                ),
+                None,
+            )
+
+        given = None
+        if parent and (str(parent) != self.root or self.group(self.root) is not None):
+            given = self.group(str(parent)) if str(parent) != self.root else self.written_root()
+        for group in (given, self.both_in(source, target)):
+            if group is None or group.get("id") == identifier:
+                continue
+            before, after = holding(group, source), holding(group, target)
+            inner = self.group(str(before)) if before is not None and before == after else None
+            while inner is not None and inner.get("id") != identifier:
+                group = inner
+                before, after = holding(group, source), holding(group, target)
+                inner = self.group(str(before)) if before is not None and before == after else None
+            if before is None and after is None:
+                continue
+            lines = before is not None and after is not None and before != after
+            if lines and self.flow_line(group, before) and self.flow_line(group, after):
+                group = self.group(str(after)) or group
+                before, after = None, holding(group, target)
+            children = group.setdefault("children", [])
+            while identifier in children:
+                children.remove(identifier)
+            back = self.runs_back(group)
+            if (
+                before is not None
+                and after is not None
+                and back
+                and children.index(after) < children.index(before)
+            ):
+                at = children.index(after) + 1
+            elif before is not None:
+                at = children.index(before) + 1
+            else:
+                # Beside the part it goes to, on the side the flow there comes from.
+                at = children.index(after) + (1 if back else 0)
+            # Should the part after the one the line leaves be another of its branches (a
+            # decision's "yes", where this line is its "no"), it goes just before the one the
+            # line goes to: never into another branch's way.
+            if (
+                before is not None
+                and after is not None
+                and children.index(after) > at
+                and self.joined(source, self.node_of(str(children[at])))
+            ):
+                at = children.index(after)
+            children.insert(at, identifier)
+            return
+        self.place(identifier, None, source)
+
+    def flow_line(self, group: Mapping[str, Any], child: object) -> bool:
+        """Whether ``child`` of ``group`` is one of its lines: a row (column) with no frame of
+        its own in a column (row) -- as a long flow folded to fit is written as it is seen."""
+
+        line = self.group(str(child))
+        if line is None or line.get("role") != "layout" or line.get("label"):
+            return False
+        way = (group.get("layout") or {}).get("kind", "column")
+        return {way, (line.get("layout") or {}).get("kind", "row")} == {"row", "column"}
+
+    def runs_back(self, group: Mapping[str, Any]) -> bool:
+        """Whether more of the lines between ``group``'s parts run from a later part to an
+        earlier one than the other way: a line of a flow run back (a fold's second)."""
+
+        children = [str(child) for child in group.get("children") or []]
+        held = {
+            node: index
+            for index, child in enumerate(children)
+            for node in ([child] if self.node(child) is not None else self.descendants(child))
+        }
+        forward = backward = 0
+        for edge in self.edges:
+            one = held.get(self.node_of(str(edge["from"])))
+            two = held.get(self.node_of(str(edge["to"])))
+            if one is None or two is None or one == two:
+                continue
+            forward += two > one
+            backward += two < one
+        return backward > forward
+
+    def both_in(self, one: str, other: str) -> dict[str, Any] | None:
+        """The smallest group written in the file that holds both ``one`` and ``other``."""
+
+        def size(group: Mapping[str, Any]) -> int:
+            return len(self.descendants(str(group.get("id"))))
+
+        for group in sorted(self.groups, key=size):
+            inside = self.descendants(str(group.get("id")))
+            if one in inside and other in inside:
+                return group
+        return None
+
+    def place_at(self, identifier: str, parent: str, index: int) -> None:
+        """Put ``identifier`` at ``index`` among ``parent``'s parts (a file of parts alone, which
+        lists them in the order it stacks them, at that place in its list)."""
+
+        if parent == self.root and self.group(self.root) is None and not self.groups:
+            node = self.node(identifier)
+            if node is not None:
+                self.nodes.remove(node)
+                self.nodes.insert(max(0, min(index, len(self.nodes))), node)
+            return
+        group = self.written_root() if parent == self.root else self.group(parent)
+        if group is None:
+            raise EditError(f"There\u2019s no group named “{parent}”.")
+        children = group.setdefault("children", [])
+        while identifier in children:  # (a root written just now holds it already)
+            children.remove(identifier)
+        children.insert(max(0, min(index, len(children))), identifier)
 
     def structure_label(self, label: object, source: object) -> str | None:
         """A new structure's name: the one given, unless that is only its file's -- then what
@@ -845,6 +1071,15 @@ class _Document:
             if key == "kind" and kind == "node":
                 self.retype(item, str(value or "block"))
                 continue
+            if key in {"depart", "arrive"} and kind == "edge":
+                self.end_side(item, key, value)
+                continue
+            if kind == "net" and key.startswith("side:"):
+                self.net_side(item, key.removeprefix("side:"), value)
+                continue
+            if kind == "net" and key == "trunk":
+                self.net_trunk(item, str(value or ""))
+                continue
             _set(item, key.split("."), value)
             if kind == "edge" and key in {"arrow", "head"}:
                 # A regulation head goes on an arrow with an end; a reversible step has none.
@@ -856,6 +1091,15 @@ class _Document:
                     and item.get("arrow") in {"reversible", "none"}
                 ):
                     item.pop("arrow", None)
+            if kind == "net" and key in {"rail", "via"} and value:
+                # A net's run is placed one way: along a side, by a share, or by a lean.
+                for other in {"rail", "rail_at", "via"} - {key}:
+                    item.pop(other, None)
+            if kind == "node" and item.get("kind") == "vector" and value not in (None, ""):
+                # A vector is shaded one way: from a colour (a tone) or along a ramp.
+                other = {"properties.tone": "ramp", "properties.ramp": "tone"}.get(key)
+                if other and isinstance(item.get("properties"), dict):
+                    item["properties"].pop(other, None)
             if key == "layout.kind" and kind == "group":
                 layout = item.setdefault("layout", {})
                 if value == "grid" and not layout.get("columns"):
@@ -950,6 +1194,9 @@ class _Document:
             for placement in (item.get("layout") or {}).get("placements") or []:
                 if placement.get("child") == old:
                     placement["child"] = new
+        for part in self.nodes:
+            if isinstance(part, dict) and part.get("align_with") == old:
+                part["align_with"] = new
         for edge in self.edges:
             edge["from"], edge["to"] = moved(str(edge["from"])), moved(str(edge["to"]))
             for waypoint in edge.get("waypoints") or []:
@@ -960,6 +1207,8 @@ class _Document:
                 values = net.get(side) or []
                 for index, value in enumerate(values):
                     values[index] = moved(str(value))
+            if isinstance(net.get("sides"), dict):
+                net["sides"] = {moved(str(end)): side for end, side in net["sides"].items()}
 
     def _delete(self, action: Mapping[str, Any]) -> list[str]:
         ids = [str(item) for item in action.get("ids") or []]
@@ -984,17 +1233,13 @@ class _Document:
                 if net is None:
                     raise EditError(f"There\u2019s nothing named “{identifier}” to delete.")
                 self.nets.remove(net)
+        # A part taken out of a chain leaves the chain joined round it.
+        self.rejoin(nodes)
         pair = None
         if action.get("rejoin") and len(nodes) == 1:
-            # A part put into a line (an Add Shape that spliced it in) and taken out again at
-            # once: the line it was put into is joined up again as it was, its words with it.
+            # A part put beside another as a branch and taken out again at once (an Add Shape
+            # left empty): the pair it made goes with it.
             (only,) = nodes
-            into = [edge for edge in self.edges if self.node_of(str(edge["to"])) == only]
-            out = [edge for edge in self.edges if self.node_of(str(edge["from"])) == only]
-            if len(into) == 1 and len(out) == 1 and self.node_of(str(into[0]["from"])) != only:
-                into[0]["to"] = out[0]["to"]
-                self.edges.remove(out[0])
-            # Put beside a part as a branch, the pair it made goes with it.
             pair = self.holder(only)
         for identifier in nodes:
             node = self.node(identifier)
@@ -1011,6 +1256,51 @@ class _Document:
             mend(self.data)
         self._tidy()
         return []
+
+    def rejoin(self, gone: set[str]) -> None:
+        """The lines through parts about to be taken out, joined up round them: a part with
+        lines in and one line out (or one in and lines out) has each line into it carried on to
+        where the other went -- its words, look and heads kept (a chain's one line, else the
+        words of the line out), leaving where it left and arriving as the other arrived. Never a
+        second line between two parts already joined, nor a line from a part to itself. Parts
+        taken out together that lines join are one run, joined round as one part."""
+
+        def ends(edge: Mapping[str, Any]) -> tuple[str, str]:
+            return self.node_of(str(edge["from"])), self.node_of(str(edge["to"]))
+
+        runs: dict[str, set[str]] = {part: {part} for part in gone}
+        for edge in self.edges:
+            source, target = ends(edge)
+            if source in gone and target in gone and runs[source] is not runs[target]:
+                merged = runs[source] | runs[target]
+                for part in merged:
+                    runs[part] = merged
+        for run in {id(each): each for each in runs.values()}.values():
+            into = [e for e in self.edges if ends(e)[1] in run and ends(e)[0] not in run]
+            out = [e for e in self.edges if ends(e)[0] in run and ends(e)[1] not in run]
+            if not into or not out or (len(into) > 1 and len(out) > 1):
+                continue
+            chain = len(into) == 1 and len(out) == 1
+            for inward in into:
+                used = False
+                for outward in out:
+                    source, target = ends(inward)[0], ends(outward)[1]
+                    if source == target or source in gone or target in gone:
+                        continue
+                    if self.joined(source, target):
+                        continue
+                    line = inward if not used else copy.deepcopy(dict(inward))
+                    for key in {*ROUTE, "arrive"}:
+                        line.pop(key, None)
+                    line["to"] = outward["to"]
+                    if outward.get("arrive"):
+                        line["arrive"] = outward["arrive"]
+                    if chain and not inward.get("label") and outward.get("label"):
+                        line["label"] = copy.deepcopy(outward["label"])
+                    if used:
+                        line.pop("id", None)
+                        self.data["edges"].append(line)
+                    used = True
 
     def unpair(self, pair: dict[str, Any]) -> None:
         """A branch's pair (a part and what was put on a line of its own beside it, laid out
@@ -1140,6 +1430,8 @@ class _Document:
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
+        if action.get("into"):
+            return self.put_into(identifier, str(action["into"]), action.get("parent"))
         if action.get("line"):
             return self.own_line(
                 identifier, str(action.get("of") or self.root), str(action["line"])
@@ -1157,6 +1449,57 @@ class _Document:
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
         return [identifier]
+
+    def put_into(self, identifier: str, into: str, parent: object = None) -> list[str]:
+        """A shape let go on a line (``into``) between two others: put into it, between them
+        (``place_between``, in the group it was let go in), its own other lines kept."""
+
+        if self.node(identifier) is None:
+            raise EditError("Only a shape can be put into a line.")
+        line = self.line_named(into)
+        if identifier in (self.node_of(str(line["from"])), self.node_of(str(line["to"]))):
+            raise EditError("A shape can\u2019t be put into its own line.")
+        if self.groups:
+            self.parent_of(identifier)  # held somewhere written, before it moves
+        self.detach(identifier)
+        self.place_between(identifier, line, parent)
+        self.splice(line, identifier)
+        self._tidy()
+        return [identifier]
+
+    def _align(self, action: Mapping[str, Any]) -> list[str]:
+        """``id``, on a line of its own in a row or column, centred on the part or group
+        ``with`` across the way its line runs (under one part of the row over it, or under
+        the row itself); without ``with``, placed as its group places it."""
+
+        identifier = str(action["id"])
+        node = self.node(identifier)
+        if node is None:
+            raise EditError(f"There\u2019s no shape named “{identifier}”.")
+        self.parent_of(identifier)  # held somewhere written
+        target = action.get("with")
+        if target is None:
+            node.pop("align_with", None)
+            return [identifier]
+        target = str(target)
+        if target == identifier or (self.node(target) is None and self.group(target) is None):
+            raise EditError(f"There\u2019s nothing named “{target}” to line it up with.")
+        node["align_with"] = target
+        return [identifier]
+
+    def tidy_alignment(self) -> None:
+        """No part left lined up with something the figure no longer has."""
+
+        known = {
+            str(item.get("id")) for item in [*self.nodes, *self.groups] if isinstance(item, dict)
+        }
+        for node in self.nodes:
+            if (
+                isinstance(node, dict)
+                and "align_with" in node
+                and str(node["align_with"]) not in known
+            ):
+                del node["align_with"]
 
     def own_line(self, identifier: str, of: str, side: str) -> list[str]:
         """``identifier`` on a line of its own ``side`` of the group ``of``, centred on it
@@ -1261,6 +1604,12 @@ class _Document:
                 for side, end in zip(("from", "to"), ends, strict=True):
                     twin[side] = renamed[end] + str(edge[side])[len(end) :]
                 self.edges.append(twin)
+
+        def moved(end: str) -> str | None:
+            node = self.node_of(end)
+            return renamed[node] + end[len(node) :] if node in renamed else None
+
+        self.carry_nets(list(self.nets), moved)
         return made
 
     def _paste(self, action: Mapping[str, Any]) -> list[str]:
@@ -1312,7 +1661,61 @@ class _Document:
             for side, end, head in zip(("from", "to"), ends, heads, strict=True):
                 edge[side] = renamed[head] + end[len(head) :]  # type: ignore[index]
             self.data.setdefault("edges", []).append(edge)
+
+        def pasted(end: str) -> str | None:
+            head = next((old for old in renamed if end == old or end.startswith(f"{old}.")), None)
+            return renamed[head] + end[len(head) :] if head is not None else None
+
+        self.carry_nets(written(action.get("nets")), pasted)
         return [renamed[item] for item in top]
+
+    def carry_nets(self, nets: list[dict[str, Any]], moved: Callable[[str], str | None]) -> None:
+        """The joined lines (nets) among parts copied, copied with them -- each end on the copy
+        of its part (``moved``; ``None`` for a part not copied), their look kept: colour,
+        dashes, words, where they run. Of one that reaches parts not copied too, what joins
+        those copied: a joined line still, with two ends or more left on its branching side;
+        a plain line of the same look, with one."""
+
+        for net in nets:
+            sources = [str(end) for end in net.get("sources") or []]
+            targets = [str(end) for end in net.get("targets") or []]
+            kind = net.get("kind")
+            merge = kind == "merge" or (kind != "fan-out" and len(sources) > 1)
+            hubs, branches = (targets, sources) if merge else (sources, targets)
+            hub = moved(hubs[0]) if hubs else None
+            ends = [new for end in branches if (new := moved(end)) is not None]
+            if hub is None or not ends:
+                continue
+            look = {
+                key: copy.deepcopy(value)
+                for key, value in net.items()
+                if key not in {"id", "kind", "sources", "targets", "sides"}
+            }
+            # (The sides its ends meet their shapes on, on the copies' ends.)
+            given = net.get("sides") if isinstance(net.get("sides"), Mapping) else {}
+            sides = {
+                new: str(side)
+                for end, side in given.items()
+                if (new := moved(str(end))) is not None and new in {hub, *ends}
+            }
+            if len(ends) == 1:
+                edge = {"from": ends[0], "to": hub} if merge else {"from": hub, "to": ends[0]}
+                edge.update({key: look[key] for key in ("label", "tone", "line") if key in look})
+                for key, end in (("depart", edge["from"]), ("arrive", edge["to"])):
+                    if end in sides:
+                        edge[key] = sides[end]
+                self.data.setdefault("edges", []).append(edge)
+                continue
+            self.data.setdefault("nets", []).append(
+                {
+                    "id": self.fresh(str(net.get("id") or "line")),
+                    "kind": "merge" if merge else "fan-out",
+                    "sources": ends if merge else [hub],
+                    "targets": [hub] if merge else ends,
+                    **look,
+                    **({"sides": sides} if sides else {}),
+                }
+            )
 
     def copy(self, identifier: str, renamed: dict[str, str]) -> str | None:
         node, group = self.node(identifier), self.group(identifier)
@@ -1333,6 +1736,226 @@ class _Document:
         for placement in (twin.get("layout") or {}).get("placements") or []:
             placement["child"] = renamed.get(placement["child"], placement["child"])
         return new
+
+    # -- lines joined into one (a net) and parted again; where a line meets its shape --
+
+    def line_or_net(self, identifier: str) -> tuple[str, dict[str, Any]]:
+        """The line ``identifier`` names: ``("net", …)`` or ``("edge", …)``."""
+
+        net = next((item for item in self.nets if item.get("id") == identifier), None)
+        if net is not None:
+            return "net", net
+        edge = self.edge_named(identifier)
+        if edge is None:
+            said = self.line_said(identifier)
+            raise EditError(f"{said[:1].upper()}{said[1:]} is gone.")
+        return "edge", edge
+
+    def end_of(self, reference: str, usual: str) -> tuple[str, str]:
+        """A line's end as its shape and port: a shape named alone is at its ``usual`` port."""
+
+        node = self.node_of(reference)
+        return node, reference[len(node) + 1 :] if reference != node else usual
+
+    def _join(self, action: Mapping[str, Any]) -> list[str]:
+        """Lines into the same shape (or out of the same one) made one line that branches: a
+        trunk they share, with one caption -- the first any of them had. ``add`` puts one
+        more shape (or port) on the branching side of a line that branches already."""
+
+        items = [self.line_or_net(str(identifier)) for identifier in action.get("ids") or []]
+        if not items or (len(items) == 1 and items[0][0] == "edge" and not action.get("add")):
+            raise EditError("Choose two lines or more to join.")
+        sources = [str(end) for kind, item in items for end in self.ends(kind, item, "sources")]
+        targets = [str(end) for kind, item in items for end in self.ends(kind, item, "targets")]
+        into = {self.end_of(end, "input") for end in targets}
+        out_of = {self.end_of(end, "output") for end in sources}
+        added = str(action["add"]) if action.get("add") else None
+        if len(into) == 1 and (len(out_of) > 1 or added):
+            kind, hub, branches = "merge", targets[0], sources + ([added] if added else [])
+            usual = "output"
+        elif len(out_of) == 1 and (len(into) > 1 or added):
+            kind, hub, branches = "fan-out", sources[0], targets + ([added] if added else [])
+            usual = "input"
+        elif len(into) == 1:
+            raise EditError("These lines run between the same two shapes.")
+        else:
+            raise EditError(
+                "Lines are joined where they meet: choose lines into the same shape, "
+                "or out of the same one."
+            )
+        if added is not None and self.node(self.node_of(added)) is None:
+            raise EditError(f"There\u2019s no shape named \u201c{added}\u201d to join.")
+        kept: dict[tuple[str, str], str] = {}
+        for end in branches:
+            if self.node_of(end) == self.node_of(hub):
+                raise EditError("A shape can\u2019t be joined to itself.")
+            kept.setdefault(self.end_of(end, usual), end)
+        if len(kept) < 2:
+            raise EditError("A line that branches needs two ends or more on its branching side.")
+        nets = [item for kind, item in items if kind == "net"]
+        net: dict[str, Any] = {
+            "id": str(nets[0]["id"])
+            if nets
+            else self.fresh(f"{'into' if kind == 'merge' else 'from'}-{self.node_of(hub)}"),
+            "kind": kind,
+            "sources": list(kept.values()) if kind == "merge" else [hub],
+            "targets": [hub] if kind == "merge" else list(kept.values()),
+        }
+        label = next((item["label"] for _, item in items if item.get("label")), None)
+        if label:
+            net["label"] = label
+        for key in ("role", "line", "tone"):
+            # How they all look, the one line looks: kept where they agree.
+            values = {str(item.get(key)) for _, item in items}
+            if len(values) == 1 and items[0][1].get(key) is not None:
+                net[key] = items[0][1][key]
+        for key in ("rail", "rail_at", "via", "joint"):
+            if nets and key in nets[0]:
+                net[key] = nets[0][key]
+        # Where each end meets its shape, as it did: a line's leaving and arriving sides,
+        # a joined line's ends'.
+        joined = {*net["sources"], *net["targets"]}
+        sides: dict[str, Any] = {}
+        for kind_of, item in items:
+            if kind_of == "net":
+                given = item.get("sides") if isinstance(item.get("sides"), dict) else {}
+                sides.update({str(end): side for end, side in given.items() if side})
+            else:
+                for key, end in (("depart", item["from"]), ("arrive", item["to"])):
+                    if item.get(key):
+                        sides.setdefault(str(end), item[key])
+        sides = {end: side for end, side in sides.items() if end in joined}
+        if sides:
+            net["sides"] = sides
+        at = len(self.nets)
+        for kind_of, item in items:
+            if kind_of == "edge":
+                self.edges.remove(item)
+            else:
+                at = min(at, self.nets.index(item))
+                self.nets.remove(item)
+        self.data.setdefault("nets", []).insert(at, net)
+        return [str(net["id"])]
+
+    def net_side(self, net: dict[str, Any], end: str, side: Any) -> None:
+        """The side of its shape one end of a joined line meets (``None``: where the figure
+        puts it) -- a skip line made to leave its block's foot and come into the next one's
+        head, down one straight trunk."""
+
+        ends = [str(value) for value in (*(net.get("sources") or []), *(net.get("targets") or []))]
+        if end not in ends:
+            raise EditError("That end isn\u2019t on this line.")
+        sides = net.get("sides") if isinstance(net.get("sides"), dict) else {}
+        if side:
+            if side not in {"north", "south", "east", "west"}:
+                raise EditError(f"There\u2019s no side \u201c{side}\u201d.")
+            sides[end] = side
+        else:
+            sides.pop(end, None)
+        if sides:
+            net["sides"] = sides
+        else:
+            net.pop("sides", None)
+
+    def net_trunk(self, net: dict[str, Any], end: str) -> None:
+        """The branch of a joined line that is its trunk: the one drawn straight into the
+        shape the others join it at (or out of the one they leave), its caption above it --
+        the net's first end on its branching side."""
+
+        side = "sources" if net.get("kind") == "merge" else "targets"
+        branches = [str(value) for value in net.get(side) or []]
+        if end not in branches:
+            raise EditError("That end isn\u2019t on this line.")
+        written = list(net.get(side) or [])
+        written.insert(0, written.pop(branches.index(end)))
+        net[side] = written
+
+    def ends(self, kind: str, item: Mapping[str, Any], side: str) -> list[Any]:
+        """A line's ends on one ``side`` (``sources`` or ``targets``), a net's or an edge's."""
+
+        if kind == "net":
+            return list(item.get(side) or [])
+        return [item["from" if side == "sources" else "to"]]
+
+    def _separate(self, action: Mapping[str, Any]) -> list[str]:
+        """A line that branches made lines of their own again, one per branch, the first
+        with its caption; or, with ``end``, that one branch taken out as a line of its own
+        (the rest branching still, while two are left)."""
+
+        kind, net = self.line_or_net(str(action.get("id", "")))
+        if kind != "net":
+            raise EditError("Only a line that branches can be separated.")
+        merge = net.get("kind") == "merge"
+        hub = str((net.get("targets") if merge else net.get("sources"))[0])
+        side = "sources" if merge else "targets"
+        branches = [str(end) for end in net.get(side) or []]
+        end = str(action["end"]) if action.get("end") else None
+        if end is not None and end not in branches:
+            raise EditError("That end isn\u2019t on this line.")
+        parted = [end] if end is not None and len(branches) > 2 else branches
+        look = {key: net[key] for key in ("role", "line", "tone") if key in net}
+        sides = net.get("sides") if isinstance(net.get("sides"), dict) else {}
+        made = []
+        for index, branch in enumerate(parted):
+            ends = (branch, hub) if merge else (hub, branch)
+            edge: dict[str, Any] = {"from": ends[0], "to": ends[1]}
+            if net.get("label") and len(parted) == len(branches) and index == 0:
+                edge["label"] = net["label"]
+            edge.update(copy.deepcopy(look))
+            # Each end meets its shape where it did.
+            for key, end in (("depart", ends[0]), ("arrive", ends[1])):
+                if sides.get(end):
+                    edge[key] = sides[end]
+            self.data.setdefault("edges", []).append(edge)
+            made.append(edge)
+        if len(parted) == len(branches):
+            self.nets.remove(net)
+        else:
+            net[side] = [branch for branch in branches if branch not in parted]
+            for branch in parted:
+                sides.pop(branch, None)
+            if not sides:
+                net.pop("sides", None)
+        return [self.edge_id(edge) or "" for edge in made]
+
+    def port_sides(self, identifier: str) -> dict[str, tuple[str, bool]]:
+        """A shape's ports: each one's side, and whether that is only its kind's usual side
+        (one it turns from, to face what it is joined to)."""
+
+        node = self.node(identifier) or {}
+        written = [port for port in node.get("ports") or [] if isinstance(port, dict)]
+        if written:
+            return {str(port.get("name")): (str(port.get("side")), False) for port in written}
+        from flexo.components import default_ports
+
+        ports = default_ports(str(node.get("kind") or "block"), labelled=bool(node.get("label")))
+        return {port.name: (port.side.value, port.auto_side) for port in ports}
+
+    def end_side(self, edge: dict[str, Any], key: str, side: object) -> None:
+        """One end of ``edge`` (``depart``: where it leaves, ``arrive``: where it arrives)
+        at ``side`` of its shape (``north``, ...; none, where the shape puts it). A port
+        whose side is only its kind's usual one is asked to face it; a shape with a port
+        of its own on that side (a vector's ``north``) has the line end there instead."""
+
+        end, usual = ("from", "output") if key == "depart" else ("to", "input")
+        node, port = self.end_of(str(edge[end]), usual)
+        sides = self.port_sides(node)
+        wanted = str(side or "").strip().lower()
+        if not wanted:
+            edge.pop(key, None)
+            if port in sides and not sides[port][1] and port != usual and usual in sides:
+                edge[end] = node  # (back at its usual port, where a line to it starts)
+            return
+        if wanted not in {"north", "east", "south", "west"}:
+            raise EditError(f"\u201c{side}\u201d isn\u2019t a side.")
+        if port not in sides or sides[port][1]:
+            edge[key] = wanted
+            return
+        there = next((name for name, (at, _) in sides.items() if at == wanted), None)
+        if there is None:
+            raise EditError("This shape takes no line on that side.")
+        edge.pop(key, None)
+        edge[end] = node if there == usual else f"{node}.{there}"
 
 
 def _insert_after_id(item: dict[str, Any], key: str, value: object) -> None:

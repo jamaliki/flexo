@@ -430,10 +430,18 @@ class NodeSpec:
     properties: tuple[tuple[str, PropertyValue], ...] = ()
     shadow: bool = False
     """Whether this component casts a soft drop shadow. Paint only; off by default."""
+    align_with: str | None = None
+    """A part or group this one is centred on, across the line its row or column runs:
+    a box on a line of its own under a row, centred under one of the row's parts (or
+    under the row itself, named so as asked rather than left to the layout). Unset, its
+    group places it -- centred, or under the one part it is joined to (``flexo.layout.slide``).
+    Only it moves: as far as its group's room allows, the parts it lines up with stay."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Node ID")
         _validate_id(self.kind, "Node kind")
+        if self.align_with is not None:
+            _validate_id(self.align_with, "Aligned-with ID")
         names = [port.name for port in self.ports]
         if len(names) != len(set(names)):
             raise ValueError(f'node "{self.id}" contains duplicate port names')
@@ -487,6 +495,11 @@ class EdgeSpec:
 
     line: LineStyle = "solid"
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
+    tone: str | None = None
+    """The colour the line and its arrowhead are drawn in: one of the palette's tones, by
+    number or by name as a component's ``tone`` is (``"3"``, ``"feedback"``), or
+    ``"neutral"`` for the theme's grey. Unset, the line is the theme's connector ink (a
+    residual's, its own). Paint only."""
     arrow: ArrowEnds = "end"
     """Where the arrowheads are: ``"end"`` (the target), ``"none"`` for an
     undirected link, or ``"both"``; ``"reversible"`` draws a reaction's two
@@ -579,9 +592,21 @@ class NetSpec:
 
     line: LineStyle = "solid"
     """How the net's lines are stroked; see ``EdgeSpec.line``."""
+    tone: str | None = None
+    """The colour the net's lines are drawn in; see ``EdgeSpec.tone``."""
+    sides: tuple[tuple[str, Side], ...] = ()
+    """The side of its shape each end named here meets, by the end (``add-ln.input``): as an
+    edge's ``depart``/``arrive`` do, a skip line made to leave its block's foot and come
+    into the next one's head. Ends not named are placed as the figure places them."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Net ID")
+        ends = {str(end) for end in (*self.sources, *self.targets)}
+        strays = sorted(end for end, _ in self.sides if end not in ends)
+        if strays:
+            raise ValueError(
+                f'net "{self.id}" names a side for {", ".join(strays)}, which it does not join'
+            )
         if self.line not in LINE_STYLES:
             raise ValueError(
                 f'unknown line "{self.line}" for net "{self.id}"; '

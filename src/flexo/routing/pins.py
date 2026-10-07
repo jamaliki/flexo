@@ -13,9 +13,16 @@ import itertools
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from flexo.components import TRANSPARENT_KINDS, TRANSPARENT_ROLES, route_clearance, titled
+from flexo.components import (
+    TRANSPARENT_KINDS,
+    TRANSPARENT_ROLES,
+    centred_port,
+    route_clearance,
+    titled,
+    vector_cells,
+)
 from flexo.geometry import Point, Rect, Side
-from flexo.hierarchy import lowest_common_group, parent_map
+from flexo.hierarchy import lined_up, lowest_common_group, parent_map
 from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
 from flexo.routing.vpsc import solve
@@ -198,10 +205,11 @@ def _within_span(bounds: Rect, other: Rect, side: Side) -> bool:
 
 
 def _authored_side(member: EdgeSpec | NetSpec, end: End) -> Side | None:
-    """The side this edge's own ``depart=``/``arrive=`` names for this end."""
+    """The side this edge's own ``depart=``/``arrive=`` names for this end (a net's, its
+    ``sides``)."""
 
     if not isinstance(member, EdgeSpec):
-        return None
+        return dict(member.sides).get(str(end.reference))
     return member.arrive if end.arriving else member.depart
 
 
@@ -349,7 +357,9 @@ def plan_pins(
             side = pinned
         elif port_spec.auto_side and not steered:
             side = _facing(end.node.bounds, end.counterpart, flow.get(id(end), port_spec.side))
-        if sides and index in sides:
+        # (Not one its person names, or its line's waypoint does: a draft's sides, kept from
+        # the drawing before, are of ends that were free to turn when it was drawn.)
+        if sides and index in sides and not end.fixed:
             side = sides[index]
             end.fixed = True
         name = _SAME_VALUE.get(spec.kind, {}).get(end.reference.port_name, end.reference.port_name)
@@ -427,12 +437,24 @@ def plan_pins(
         index for index, member in enumerate(members)
         if isinstance(member.spec, EdgeSpec) and member.spec.label
     )
+    # Lines whose ends meet their sides' middles when they are alone there: all but those
+    # between parts lined up by their ports, which run on that line as the layout set it.
+    semantic = fitted.measured.semantic
+    parents = parent_map(semantic.groups)
+    lines = frozenset(
+        index
+        for index, member in enumerate(members)
+        if isinstance(member.spec, EdgeSpec)
+        and not lined_up(
+            semantic, parents, member.spec.source.node_id, member.spec.target.node_id
+        )
+    )
     for (node_id, side), groups in by_side.items():
         node = fitted.node(node_id)
         order = (overrides or {}).get((node_id, side))
         if order is not None and set(order) != set(groups):
             order = None
-        placed = _place_on_side(node, side, groups, style, blockers, order, captioned)
+        placed = _place_on_side(node, side, groups, style, blockers, order, captioned, lines)
         orders.append(list(placed))
         if chosen is not None:
             chosen[(node_id, side)] = list(placed)
@@ -1064,6 +1086,7 @@ def _place_on_side(
     blockers: tuple[Rect, ...] = (),
     order: list[tuple[str, str, Side, bool]] | None = None,
     captioned: frozenset[int] = frozenset(),
+    lines: frozenset[int] = frozenset(),
 ) -> dict[tuple[str, str, Side, bool], _Slot]:
     """Where each group of ends would attach along one side, in the order they leave.
 
@@ -1073,6 +1096,15 @@ def _place_on_side(
     beside it. A side whose ports all sit where the layout put them, already in
     that order, keeps those places; otherwise the groups take evenly spaced
     slots. Alignment (``_align``) then moves the movable ones.
+
+    A line that is the only one on its side (``lines``: the lines, not nets, but for
+    those between parts lined up by their ports) enters or leaves it at the middle, at
+    a port of the component's grammar: never slid off centre to meet the line's other
+    end. A box that can't be lined up with that end is met by a bend between the two
+    (see ``lone_pin``).
+
+    A shape drawn smaller than its box -- a vector's cells, its words under them -- is
+    met where it is drawn (``_ink_span``): a line beside the cells would end in the air.
     """
 
     along_x = side in {Side.NORTH, Side.SOUTH}
@@ -1092,6 +1124,17 @@ def _place_on_side(
         return sum(values) / len(values)
 
     specs = {port.name: port for port in node.measured.spec.ports}
+    lone = lone_pin(node, groups, lines)
+    if lone is not None:
+        key, at = lone
+        span_low = min(max(at, low), high)
+        open_low, open_high = _open_stretch(
+            node.bounds, side, low, high, blockers, style.arrival_clearance.points
+        )
+        # (Unless something stands just in front of its middle -- a group's title: then it
+        # takes the clear stretch, as any pin does.)
+        if open_low - 1e-9 <= span_low <= open_high + 1e-9:
+            return {key: _Slot(node, side, edge, span_low, span_low, span_low, False)}
 
     def movable(key: tuple[str, str, Side, bool]) -> bool:
         if node.measured.spec.kind in POINT_KINDS:
@@ -1175,6 +1218,9 @@ def _place_on_side(
         need=(len(keys) - 1) * style.port_spacing.points + 2.0,
     )
     squeeze = any(not open_low - 1e-9 <= value <= open_high + 1e-9 for value in desired)
+    ink = _ink_span(node, side, style)
+    if ink is not None and ink[1] - ink[0] < (len(keys) - 1) * style.port_spacing.points:
+        ink = None  # (Too short for its pins a lane apart: they keep the whole side.)
     result = {}
     for key, value in zip(keys, desired, strict=True):
         free = movable(key)
@@ -1184,17 +1230,63 @@ def _place_on_side(
             # clear keeps its place at the middle.
             fraction = (value - low) / (high - low) if high > low else 0.5
             value = open_low + (open_high - open_low) * fraction
+        least, most = (open_low, open_high) if free else (value, value)
+        if free and ink is not None:
+            # (On the shape as drawn, however it is lined up.)
+            value = min(max(value, ink[0]), ink[1])
+            least, most = max(least, ink[0]), min(most, ink[1])
+            if least > most:
+                least = most = value
         result[key] = _Slot(
-            node,
-            side,
-            edge,
-            value,
-            open_low if free else value,
-            open_high if free else value,
-            free,
-            SPREAD_PIN_WEIGHT if spread else 1.0,
+            node, side, edge, value, least, most, free, SPREAD_PIN_WEIGHT if spread else 1.0
         )
     return result
+
+
+def _ink_span(node: FittedNode, side: Side, style: LayoutStyle) -> tuple[float, float] | None:
+    """The stretch of a side a line meets the shape's ink on, where that is shorter than
+    the side: a captioned vector's cells -- its box is as wide as its words, and as tall as
+    the row it sits in -- met from beside or above. None for any other side."""
+
+    spec = node.measured.spec
+    if spec.kind != "vector" or not node.measured.label.lines or side is Side.SOUTH:
+        return None
+    cells = vector_cells(spec, node.bounds, node.measured.label, style)
+    low, high = (cells.left, cells.right) if side is Side.NORTH else (cells.top, cells.bottom)
+    # (Into a cell, not along the edge of the end ones.)
+    inset = min(style.port_spacing.points / 2.0, (high - low) / 4.0)
+    return low + inset, high - inset
+
+
+def lone_pin(
+    node: FittedNode,
+    groups: dict[tuple[str, str, Side, bool], list[End]],
+    lines: frozenset[int],
+) -> tuple[tuple[str, str, Side, bool], float] | None:
+    """The one pin on a side of ``node`` (``groups``, its ends there) that sits at the
+    side's middle -- the only end on the side, of a line (one of ``lines``), at a port
+    the component gives the box (not one an author made to slide) -- and where along
+    the side that is; None for any other side."""
+
+    if len(groups) != 1:
+        return None
+    ((key, ends),) = groups.items()
+    if len(ends) != 1 or ends[0].member not in lines:
+        return None
+    side = key[2]
+    port = next(
+        (item for item in node.measured.spec.ports if item.name == ends[0].reference.port_name),
+        None,
+    )
+    if port is None or not centred_port(node.measured.spec.kind, port):
+        return None
+    bounds = node.bounds
+    low, high = (
+        (bounds.left, bounds.right)
+        if side in {Side.NORTH, Side.SOUTH}
+        else (bounds.top, bounds.bottom)
+    )
+    return key, (low + high) / 2.0
 
 
 def _corner_inset(node: FittedNode, style: LayoutStyle) -> float:

@@ -326,7 +326,9 @@ def _tones(spec) -> dict[str, Any]:
         {"fill": palette.get(f"tone-{index}-fill"), "stroke": palette.get(f"tone-{index}-stroke")}
         for index in range(1, TONE_COUNT + 1)
     ]
-    return {"colours": colours, "used": _tone_map(spec, figure_style(spec))}
+    # The theme's grey, as a shape toned ``neutral`` is painted (its block paint).
+    neutral = {"fill": palette.get("block-fill"), "stroke": palette.get("block-stroke")}
+    return {"colours": colours, "used": _tone_map(spec, figure_style(spec)), "neutral": neutral}
 
 
 def outline(spec) -> dict[str, Any]:
@@ -671,8 +673,21 @@ def _read_figure(data: Any) -> dict[str, Any] | None:
         for group in data.get("groups") or []
         if isinstance(group, dict) and "id" in group
     }
-    rest = {key: value for key, value in data.items() if key not in {"nodes", "edges", "groups"}}
-    return {"nodes": nodes, "edges": edges, "groups": groups, "rest": rest}
+    # A line that branches, by its id: the pairs of parts its branches join, and its hub.
+    nets = {}
+    for net in data.get("nets") or []:
+        if isinstance(net, dict) and net.get("id") and net.get("sources") and net.get("targets"):
+            merge = net.get("kind") == "merge"
+            sources = [end(item) for item in net["sources"]]
+            targets = [end(item) for item in net["targets"]]
+            hub = targets[0] if merge else sources[0]
+            branches = sources if merge else targets
+            pairs = {(item, hub) if merge else (hub, item) for item in branches}
+            nets[str(net["id"])] = {"net": net, "hub": hub, "merge": merge, "pairs": pairs}
+    rest = {
+        key: value for key, value in data.items() if key not in {"nodes", "edges", "groups", "nets"}
+    }
+    return {"nodes": nodes, "edges": edges, "groups": groups, "nets": nets, "rest": rest}
 
 
 def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dict] | None:
@@ -722,9 +737,56 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
         else:
             text = f"changed {name(node)}"
         notes.append({"text": text, "where": {"id": key}})
-    # Lines: a line between two parts made or taken away (not those that went with a part).
+    # A part there before put into a line (let go on it): said as that, not as the lines.
+    kept = [key for key in new["nodes"] if key in old["nodes"]]
+    spliced = [
+        (pair, key)
+        for pair in old["edges"]
+        if pair not in new["edges"]
+        for key in kept
+        if key not in pair
+        and (pair[0], key) in new["edges"]
+        and (key, pair[1]) in new["edges"]
+        and ((pair[0], key) not in old["edges"] or (key, pair[1]) not in old["edges"])
+    ]
+    for pair, key in spliced:
+        notes.append(
+            {
+                "text": f"put {called(key)} between {called(pair[0])} and {called(pair[1])}",
+                "where": {"id": key},
+            }
+        )
+    told = {(pair[0], key) for pair, key in spliced} | {(key, pair[1]) for pair, key in spliced}
+    # Lines joined into one (a net), or one parted into lines: said as that, not line by line.
+    for key, net in new["nets"].items():
+        was = old["nets"].get(key)
+        joined = net["pairs"] & set(old["edges"])
+        way = "into" if net["merge"] else "out of"
+        if was is None and joined:
+            notes.append({"text": f"joined the lines {way} {called(net['hub'])}", "where": None})
+            told |= joined
+        elif was is None:
+            notes.append({"text": f"added a line {way} {called(net['hub'])}", "where": None})
+        elif was["net"] != net["net"]:
+            notes.append({"text": f"changed the line {way} {called(net['hub'])}", "where": None})
+            told |= (net["pairs"] ^ was["pairs"])
+    for key, net in old["nets"].items():
+        if key in new["nets"]:
+            continue
+        parted = net["pairs"] & set(new["edges"])
+        way = "into" if net["merge"] else "out of"
+        verb = "separated" if parted else "removed"
+        notes.append({"text": f"{verb} the line {way} {called(net['hub'])}", "where": None})
+        told |= parted
+    # Lines: a line between two parts made or taken away (not those that went with a part,
+    # nor one joined up round a part taken out of it).
     for pair, edge in new["edges"].items():
-        if pair not in old["edges"] and not set(pair) & set(added):
+        rejoined = any(
+            (pair[0], key) in old["edges"] and (key, pair[1]) in old["edges"] for key in gone
+        )
+        if pair not in old["edges"] and not set(pair) & set(added) and not rejoined:
+            if pair in told:
+                continue
             notes.append(
                 {"text": f"connected {called(pair[0])} to {called(pair[1])}", "where": None}
             )
@@ -741,13 +803,17 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
             (pair[0], key) in new["edges"] and (key, pair[1]) in new["edges"] for key in added
         )
         if pair not in new["edges"] and not set(pair) & set(gone) and not through:
+            if any(pair == each for each, _ in spliced) or pair in told:
+                continue
             notes.append(
                 {
                     "text": f"removed the line from {called(pair[0])} to {called(pair[1])}",
                     "where": None,
                 }
             )
-    if not added and not gone and _order(old) != _order(new):
+    if spliced:
+        pass  # (its place among the parts is the line's: said already)
+    elif not added and not gone and _order(old) != _order(new):
         moved = [
             key
             for key in new["nodes"]

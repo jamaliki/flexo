@@ -57,18 +57,46 @@ def add_definitions(
         # The same head for the start of a line, turned to point back along it.
         _arrow_marker(definitions, role, paint_role, style, palette, start=True)
     for identifier in sorted(set(heads)):
-        _, role, head, *start = identifier.split(".")
-        paint_role = "residual" if role == "residual" else "connector"
-        _head_marker(definitions, identifier, head, paint_role, style, palette, start=bool(start))
+        _, role, *rest = identifier.split(".")
+        start = bool(rest) and rest[-1] == "start"
+        head = rest[0] if rest and rest[0] != "start" else "arrow"
+        if head == "arrow":
+            # A coloured line's plain head (``arrow.tone-3``): flow's and a residual's are
+            # defined above, whatever the figure has.
+            if role not in {"flow", "residual"}:
+                _arrow_marker(definitions, role, marker_paint(role), style, palette, start=start)
+            continue
+        _head_marker(definitions, identifier, head, marker_paint(role), style, palette, start=start)
     return stylesheet
 
 
 def head_marker_id(role: str, head: str, *, start: bool = False) -> str:
-    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``)."""
+    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``).
 
-    base = "residual" if role == "residual" else "flow"
+    ``role`` is the line's marker family: ``residual``, a coloured line's own
+    (``tone-3``, ``neutral``; see ``marker_paint``), or anything else, the flow's.
+    """
+
+    base = role if role == "residual" or _coloured(role) else "flow"
     name = f"arrow.{base}" if head == "arrow" else f"arrow.{base}.{head}"
     return f"{name}.start" if start else name
+
+
+def marker_paint(role: str) -> str:
+    """The paint role a marker family's heads are filled with: a tone's strong colour
+    (``tone-3``), the theme's grey (``neutral``), a residual's, or the connector ink."""
+
+    if role == "residual":
+        return "residual"
+    if role == "neutral":
+        return "block-stroke"
+    if _coloured(role):
+        return f"{role}-stroke"
+    return "connector"
+
+
+def _coloured(role: str) -> bool:
+    return role == "neutral" or (role.startswith("tone-") and role[5:].isdigit())
 
 
 def _head_marker(

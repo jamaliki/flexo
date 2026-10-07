@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from flexo.diagnostics import FlexoError
+from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
-from flexo.ir.semantic import FigureSpec
+from flexo.ir.semantic import FigureSpec, GroupSpec
 from flexo.layout import fit_figure, measure_figure
 from flexo.routing import route_figure
 from flexo.routing.room import crossing_room, crossings, room_needed, with_room
@@ -33,6 +34,7 @@ def compile_figure(
     style: LayoutStyle | None = None,
     palette: Palette | None = None,
 ) -> Compilation:
+    give_up_if_newer()
     layout_style = style or figure_style(figure)
     paint_palette = palette or figure_palette(figure)
     figure = _resolved_shapes(figure, layout_style)
@@ -50,7 +52,26 @@ def compile_figure(
             if not _too_wide(attempt):
                 layout_style, measured = tighter, attempt
                 break
+    if DRAFT.get():
+        # A draft (flexo.draft): laid out with the room, and the slides, the figure's last
+        # drawing had; routed from that drawing; no more room asked for, nor a lane tried.
+        last = recall("layout", _layout_key(figure, layout_style))
+        slide = last[1] if last is not None else True
+        if last is not None and last[0]:
+            figure = _with_recalled_room(figure, last[0])
+            measured = measure_figure(figure, style=layout_style)
+        fitted = fit_figure(measured, style=layout_style, slide=slide)
+        routed = route_figure(fitted, style=layout_style)
+        current, measured, fitted, routed = _with_room_rounds(
+            figure, measured, fitted, routed, layout_style, slide=slide, rounds=DRAFT_ROOM_ROUNDS
+        )
+        # (The next draft starts from this one's room, as its lines are this one's.)
+        remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
+        document = emit_svg(routed, style=layout_style, palette=paint_palette)
+        return Compilation(measured, fitted, routed, document)
+    give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
+    give_up_if_newer()
     routed = route_figure(fitted, style=layout_style)
     fitted, routed, slide = _judged_slides(measured, fitted, routed, layout_style)
     current, measured, fitted, routed = _with_room_rounds(
@@ -59,8 +80,44 @@ def compile_figure(
     current, measured, fitted, routed = _uncrossed(
         current, measured, fitted, routed, layout_style, slide=slide
     )
+    # (For a draft of it to start from.)
+    remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
+    give_up_if_newer()
     document = emit_svg(routed, style=layout_style, palette=paint_palette)
     return Compilation(measured, fitted, routed, document)
+
+
+def _layout_key(figure: FigureSpec, style: LayoutStyle) -> tuple:
+    """Which drawing of a figure a draft's layout follows: the figure, at its width and
+    spacing, its groups running the way they do (turned to fit a slide, another)."""
+
+    kinds = tuple((group.id, group.layout.kind) for group in figure.groups)
+    return (figure.id, figure.width, style, kinds)
+
+
+def _room_of(figure: FigureSpec) -> dict[str, tuple]:
+    """The room routing asked of each group, with how many parts it held then."""
+
+    return {
+        group.id: (group.layout.room, group.layout.gap_room, len(group.children))
+        for group in figure.groups
+        if any(group.layout.room) or any(group.layout.gap_room)
+    }
+
+
+def _with_recalled_room(figure: FigureSpec, room: dict[str, tuple]) -> FigureSpec:
+    """``figure`` given the room its last drawing did: round each group, and between its
+    parts while it holds as many (the gaps between them are the same gaps)."""
+
+    groups = []
+    for group in figure.groups:
+        kept = room.get(group.id)
+        if kept is None:
+            groups.append(group)
+            continue
+        gaps = kept[1] if kept[2] == len(group.children) else group.layout.gap_room
+        groups.append(replace(group, layout=replace(group.layout, room=kept[0], gap_room=gaps)))
+    return replace(figure, groups=tuple(groups))
 
 
 def _judged_slides(measured, fitted, routed, style):
@@ -102,23 +159,51 @@ def _corners(points) -> int:
     return count
 
 
-def _with_room_rounds(figure, measured, fitted, routed, style, *, slide=True):
-    """Lay out again, up to ``ROOM_ROUNDS`` times, with the room routing asked for."""
+def _with_room_rounds(figure, measured, fitted, routed, style, *, slide=True, rounds=None):
+    """Lay out again, up to ``ROOM_ROUNDS`` times (or ``rounds``), with the room routing
+    asked for."""
 
     current = figure
-    for _ in range(ROOM_ROUNDS):
+    for _ in range(ROOM_ROUNDS if rounds is None else rounds):
         needs = room_needed(routed, style)
         if not needs:
             break
         attempt = with_room(current, needs, style)
+        if attempt == current:
+            break  # Room for nothing the figure holds: it would be laid out as it is.
         try:
             next_measured = measure_figure(attempt, style=style)
             next_fitted = fit_figure(next_measured, style=style, slide=slide)
         except FlexoError:
             break  # The room does not fit the figure's width: keep what routed.
+        # Room the layout had to spare moves nothing, and routing it again would draw
+        # every line as it is: they are kept.
+        if _placed_alike(next_fitted, fitted):
+            routed = replace(routed, fitted=next_fitted)
+        else:
+            routed = route_figure(next_fitted, style=style)
         current, measured, fitted = attempt, next_measured, next_fitted
-        routed = route_figure(fitted, style=style)
     return current, measured, fitted, routed
+
+
+def _placed_alike(one: FittedFigure, other: FittedFigure) -> bool:
+    """Whether two layouts of a figure, its groups given different room, put everything
+    in the same place: routing reads where things are, never the room that put them there."""
+
+    if one.canvas_size != other.canvas_size or one.nodes != other.nodes:
+        return False
+    if len(one.groups) != len(other.groups):
+        return False
+    for first, second in zip(one.groups, other.groups, strict=True):
+        if (first.bounds, first.content_bounds) != (second.bounds, second.content_bounds):
+            return False
+        if _unroomed(first.measured.spec) != _unroomed(second.measured.spec):
+            return False
+    return True
+
+
+def _unroomed(group: GroupSpec) -> GroupSpec:
+    return replace(group, layout=replace(group.layout, room=(0.0, 0.0, 0.0, 0.0), gap_room=()))
 
 
 def _uncrossed(figure, measured, fitted, routed, style, *, slide=True):
@@ -191,3 +276,7 @@ CROSSING_ROOM_TRIALS = 2
 
 ROOM_ROUNDS = 3
 """How many times layout may be asked for more room before routing takes what it has."""
+
+DRAFT_ROOM_ROUNDS = 0
+"""How many times a draft's layout may be asked for more room (flexo.draft): none -- it is
+given the room its last drawing had, and is drawn in full once the changes stop."""

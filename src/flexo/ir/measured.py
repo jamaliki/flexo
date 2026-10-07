@@ -74,6 +74,8 @@ class MeasuredFigure:
     """Label metrics, positionally aligned with ``semantic.edges``."""
     diagnostics: tuple[Diagnostic, ...] = ()
     """What measurement had to overrule -- a canvas too narrow for its content."""
+    net_labels: tuple[TextMetrics, ...] = ()
+    """Caption metrics, positionally aligned with ``semantic.nets``."""
 
     def node(self, node_id: str) -> MeasuredNode:
         return next(node for node in self.nodes if node.spec.id == node_id)
@@ -86,10 +88,13 @@ class MeasuredFigure:
 
     @property
     def edge_label_index(self) -> dict[str, TextMetrics]:
-        """Non-empty edge label metrics keyed by edge ID."""
+        """Non-empty caption metrics keyed by edge ID, and by net ID (the two never share one)."""
 
         return {
-            edge.id: metrics
-            for edge, metrics in zip(self.semantic.edges, self.edge_labels, strict=False)
+            connection.id: metrics
+            for connection, metrics in (
+                *zip(self.semantic.edges, self.edge_labels, strict=False),
+                *zip(self.semantic.nets, self.net_labels, strict=False),
+            )
             if metrics.width > 0.0 or metrics.height > 0.0
         }

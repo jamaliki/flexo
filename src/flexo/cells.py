@@ -154,14 +154,17 @@ def _entry(node: NodeSpec, symbol: str, record: Record | None) -> Entry:
 
 
 def _ramp(node: NodeSpec) -> tuple[str, str]:
+    """The two colours a value is shaded between, low then high: written with a comma
+    between them, a space, or both (``#f7fbff #08306b``)."""
+
     value = node.property("ramp")
-    if value is None:
+    if value is None or not str(value).strip():
         return DEFAULT_RAMP
-    ends = [item.strip() for item in str(value).split(",")]
+    ends = [item for item in re.split(r"[\s,;]+", str(value).strip()) if item]
     if len(ends) != 2 or not all(_HEX.fullmatch(item) for item in ends):
         raise _fail(
             node, "ramp", f'ramp is two #hex colours, low then high, not "{value}".',
-            hint='For example ramp: "#f7fbff, #08306b".',
+            hint='For example ramp: "#f7fbff #08306b", with a space or a comma between them.',
         )
     return ends[0], ends[1]
 
@@ -171,7 +174,7 @@ def _range(node: NodeSpec, values: list[float]) -> tuple[float, float]:
     if value is None:
         return (min(values), max(values)) if values else (0.0, 1.0)
     try:
-        low, high = (float(item) for item in str(value).split(","))
+        low, high = (float(item) for item in re.split(r"[\s,;]+", str(value).strip()) if item)
     except ValueError:
         raise _fail(node, "range", f'range is "low, high", not "{value}".') from None
     return low, high

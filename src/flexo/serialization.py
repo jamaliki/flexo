@@ -245,6 +245,8 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
         result["height"] = _extent_data(node.height)
     if node.shadow:
         result["shadow"] = True
+    if node.align_with is not None:
+        result["align_with"] = node.align_with
     if node.properties:
         result["properties"] = {name: thaw_property(value) for name, value in node.properties}
     return result
@@ -271,6 +273,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["shape"] = edge.shape
     if edge.line != "solid":
         result["line"] = edge.line
+    if edge.tone is not None:
+        result["tone"] = edge.tone
     if edge.arrow != "end":
         result["arrow"] = edge.arrow
     if edge.head != "arrow":
@@ -311,6 +315,10 @@ def _net_data(net: NetSpec) -> dict[str, object]:
         result["joint"] = net.joint
     if net.line != "solid":
         result["line"] = net.line
+    if net.tone is not None:
+        result["tone"] = net.tone
+    if net.sides:
+        result["sides"] = {end: side.value for end, side in net.sides}
     return result
 
 
@@ -474,6 +482,7 @@ def _node(data: dict[str, Any]) -> NodeSpec:
             )
         ),
         shadow=data.get("shadow", False),
+        align_with=data.get("align_with"),
     )
 
 
@@ -491,6 +500,7 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         via=Side(data["via"]) if data.get("via") else None,
         shape=data.get("shape", "auto"),
         line=data.get("line", "solid"),
+        tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),
         head=data.get("head", "arrow"),
         back_label=_label(data.get("back_label", "")),
@@ -499,19 +509,40 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
 
 
 def _net(data: dict[str, Any], reference: Callable[[str, str], PortRef]) -> NetSpec:
+    # An end's side is named by the end as written (``add-ln``), read as the port it is;
+    # one for an end the net no longer joins (a shape since taken off it) is let go.
+    ends = {
+        **{str(value): str(reference(value, "output")) for value in data["sources"]},
+        **{str(value): str(reference(value, "input")) for value in data["targets"]},
+    }
+    joined = set(ends.values())
     return NetSpec(
         id=data["id"],
         kind=data["kind"],
         sources=tuple(reference(value, "output") for value in data["sources"]),
         targets=tuple(reference(value, "input") for value in data["targets"]),
+        sides=tuple(
+            (ends.get(str(end), str(end)), Side(side))
+            for end, side in (data.get("sides") or {}).items()
+            if side and ends.get(str(end), str(end)) in joined
+        ),
         role=data.get("role", "flow"),
         label=_label(data.get("label", "")),
         rail_hint=Side(data["rail"]) if data.get("rail") else None,
         rail_at=data.get("rail_at"),
         joint=data.get("joint", "auto"),
         line=data.get("line", "solid"),
+        tone=_tone(data.get("tone")),
         via=Side(data["via"]) if data.get("via") else None,
     )
+
+
+def _tone(value: object) -> str | None:
+    """A line's tone as written: a number (``tone: 3``) is read as the tone it names."""
+
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
 
 
 def _waypoint(data: dict[str, Any]) -> Waypoint:

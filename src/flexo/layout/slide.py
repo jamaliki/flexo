@@ -12,6 +12,14 @@ its parent's content box allows; siblings sit above and below it, so nothing can
 collide. It slides only when that lets more of its arrows reach their ports
 straight, and then by the least distance that does, so a figure that already
 reads straight is left exactly as it was.
+
+So does a box joined by one line to one other (a store under the queue that feeds
+it), in a parent that centres what it holds -- before the groups, and again after:
+it goes centred on that other box, as far as its parent's room allows, so its line
+runs straight from the middle of one side to the middle of the other. A line that is
+the only one on its side meets it at its middle (``flexo.routing.pins``), so that is
+the one way it runs straight. A group still slides as it did, for its lines as the
+ports could meet them: a row over a box several lines come into stays centred over it.
 """
 
 from __future__ import annotations
@@ -19,7 +27,9 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import replace
 
+from flexo.components import centred_port
 from flexo.geometry import Point, Rect, Side
+from flexo.hierarchy import lined_up
 from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
 from flexo.style import LayoutStyle
@@ -76,6 +86,45 @@ def slide_groups(
             for end in (connection.source, connection.target)
         )
     )
+    # A box joined by one line to one other, in a parent that centres what it holds: centred
+    # on that other box, its line straight -- it moves, not the row it goes under.
+    joined = Counter(
+        end.node_id
+        for connection in every
+        if connection.source.node_id != connection.target.node_id
+        for end in (connection.source, connection.target)
+    )
+
+    def lone_boxes() -> None:
+        for node in figure.nodes:
+            owner = parent.get(node.id)
+            # (One its person lined up with a part of their choosing stays there: aligned_with.)
+            if owner is None or joined[node.id] != 1 or owner not in by_group or node.align_with:
+                continue
+            holder = by_group[owner].measured.spec.layout
+            across = (
+                _slide_axis(kinds.get(owner), holder.align) if holder.align == "center" else None
+            )
+            if across is None:
+                continue
+            shift = _best_shift(
+                by_node[node.id].bounds,
+                _beside_room(owner, node.id, by_node, by_group, across),
+                across,
+                {node.id},
+                connections,
+                by_node,
+                style,
+                written,
+                every,
+                figure,
+                parent,
+            )
+            if abs(shift) > _EPSILON:
+                dx, dy = (shift, 0.0) if across == "x" else (0.0, shift)
+                by_node[node.id] = _moved_node(by_node[node.id], dx, dy)
+
+    lone_boxes()
     for group_id in sorted(by_group, key=lambda name: (_depth(name, parent), order[name])):
         owner = parent.get(group_id)
         if owner is None:
@@ -101,10 +150,141 @@ def slide_groups(
             by_node[node_id] = _moved_node(by_node[node_id], dx, dy)
         for inner in _groups_within(group_id, by_group):
             by_group[inner] = _moved_group(by_group[inner], dx, dy)
+    # (Again, should the groups it sits among have slid since.)
+    lone_boxes()
     return (
         tuple(by_node[node.measured.spec.id] for node in nodes),
         tuple(by_group[group.measured.spec.id] for group in groups),
     )
+
+
+def aligned_with(
+    figure: FigureSpec,
+    nodes: tuple[FittedNode, ...],
+    groups: tuple[FittedGroup, ...],
+    kinds: dict[str, LayoutKind],
+) -> tuple[FittedNode, ...]:
+    """Nodes, each one that names a part or group to line up with (``align_with``) centred
+    on it across the way its row or column runs -- as far as its group's room allows, so
+    nothing else moves, and the row it goes under neither spreads nor shifts."""
+
+    asked = {node.id: node.align_with for node in figure.nodes if node.align_with}
+    if not asked:
+        return nodes
+    parent = {
+        child: group.measured.spec.id for group in groups for child in group.measured.spec.children
+    }
+    by_node = {node.measured.spec.id: node for node in nodes}
+    by_group = {group.measured.spec.id: group for group in groups}
+    for node_id, target in asked.items():
+        owner = parent.get(node_id)
+        box = by_node[target].bounds if target in by_node else by_group.get(target)
+        if owner is None or box is None or node_id not in by_node or target == node_id:
+            continue
+        box = box if isinstance(box, Rect) else box.bounds
+        own = by_node[node_id].bounds
+        across = {"column": "x", "stack": "x", "row": "y"}.get(kinds.get(owner, ""))
+        if kinds.get(owner) == "grid":
+            # In a grid, across its column (or row) -- the one the two share: a spine of
+            # blocks down a figure's side, each centred under the last; along it, turned.
+            above = abs(box.center.x - own.center.x) <= abs(box.center.y - own.center.y)
+            across = "x" if above else "y"
+            room = _track_room(owner, node_id, by_node, by_group, across)
+        elif across is None:
+            continue
+        else:
+            room = _beside_room(owner, node_id, by_node, by_group, across)
+        if across == "x":
+            want = box.center.x - own.width / 2.0
+            at = max(room.left, min(want, room.right - own.width))
+            shift = (at - own.x, 0.0)
+        else:
+            want = box.center.y - own.height / 2.0
+            at = max(room.top, min(want, room.bottom - own.height))
+            shift = (0.0, at - own.y)
+        if abs(shift[0]) > _EPSILON or abs(shift[1]) > _EPSILON:
+            by_node[node_id] = _moved_node(by_node[node_id], *shift)
+        short = want - at
+        if (
+            kinds.get(owner) == "grid"
+            and abs(short) > _EPSILON
+            and target in by_node
+            and target not in asked
+            and parent.get(target) == owner
+        ):
+            # Too large to move all the way within its track (the tallest of its row), it
+            # is met by the part it lines up with, as far as that part's room allows: a
+            # spine turned to fit a slide stays one straight line.
+            theirs = by_node[target].bounds
+            room = _track_room(owner, target, by_node, by_group, across)
+            if across == "x":
+                to = max(room.left, min(theirs.x - short, room.right - theirs.width))
+                moved = (to - theirs.x, 0.0)
+            else:
+                to = max(room.top, min(theirs.y - short, room.bottom - theirs.height))
+                moved = (0.0, to - theirs.y)
+            if abs(moved[0]) > _EPSILON or abs(moved[1]) > _EPSILON:
+                by_node[target] = _moved_node(by_node[target], *moved)
+    return tuple(by_node[node.measured.spec.id] for node in nodes)
+
+
+def _track_room(
+    owner: str,
+    node_id: str,
+    nodes: dict[str, FittedNode],
+    groups: dict[str, FittedGroup],
+    across: str,
+) -> Rect:
+    """Where a part in a grid may go across its column (``across="x"``) or its row: as far
+    as the parts of that track reach, so it never leaves its own cell for a neighbour's."""
+
+    own = nodes[node_id].bounds
+    boxes = [
+        nodes[child].bounds if child in nodes else groups[child].bounds
+        for child in groups[owner].measured.spec.children
+        if child in nodes or child in groups
+    ]
+    if across == "x":
+        track = [box for box in boxes if box.left < own.right and box.right > own.left]
+        low, high = min(box.left for box in track), max(box.right for box in track)
+        return Rect(low, own.y, high - low, own.height)
+    track = [box for box in boxes if box.top < own.bottom and box.bottom > own.top]
+    low, high = min(box.top for box in track), max(box.bottom for box in track)
+    return Rect(own.x, low, own.width, high - low)
+
+
+def _beside_room(
+    owner: str,
+    node_id: str,
+    nodes: dict[str, FittedNode],
+    groups: dict[str, FittedGroup],
+    across: str,
+) -> Rect:
+    """Where a part on a line of its own may go across its group: as far as the lines
+    beside it reach (a row over it), so it never makes the figure wider -- nor the figure
+    on a slide smaller, its other parts moving -- or its group's room, should it be wider
+    than they are already."""
+
+    room = groups[owner].content_bounds
+    others = [
+        (nodes[child].bounds if child in nodes else groups[child].content_bounds)
+        for child in groups[owner].measured.spec.children
+        if child != node_id and (child in nodes or child in groups)
+    ]
+    own = nodes[node_id].bounds
+    if not others:
+        return room
+    if across == "x":
+        low, high = min(box.left for box in others), max(box.right for box in others)
+        if high - low < own.width:
+            return room
+        return Rect(
+            max(low, room.left), room.y, min(high, room.right) - max(low, room.left), room.height
+        )
+    low, high = min(box.top for box in others), max(box.bottom for box in others)
+    if high - low < own.height:
+        return room
+    return Rect(room.x, max(low, room.top), room.width, min(high, room.bottom) - max(low, room.top))
 
 
 def _depth(group_id: str, parent: dict[str, str]) -> int:
@@ -154,6 +334,9 @@ def _best_shift(
     nodes: dict[str, FittedNode],
     style: LayoutStyle,
     written: dict[str, int] | None = None,
+    every: tuple = (),
+    figure: FigureSpec | None = None,
+    parents: dict[str, str] | None = None,
 ) -> float:
     """The slide that lets the most arrows run straight, centred among them, or 0.
 
@@ -171,6 +354,10 @@ def _best_shift(
     low, high = min(low, 0.0), max(high, 0.0)
     pairs = []
     forward: set[int] = set()
+    # Lines from several of these into one port of a box beyond are a fan: straight only
+    # all together (Q and K over the product they feed) -- one of a row of four over the
+    # box they all feed is no reason to slide the rest aside.
+    fans: list[tuple[str, str]] = []
     for connection in connections:
         ends = (connection.source, connection.target)
         inside = [end for end in ends if end.node_id in members]
@@ -185,11 +372,20 @@ def _best_shift(
             other.port_name,
             across,
             style,
+            every,
+            nodes,
+            figure is not None and lined_up(figure, parents or {}, mine.node_id, other.node_id),
         )
         if pair is not None and not _blocked(
             nodes, members, other.node_id, bounds, pair[1], across
         ):
             pairs.append(pair)
+            # (Lines coming into the one port; lines it sends out to several are each their own.)
+            fans.append(
+                (other.node_id, other.port_name)
+                if other is connection.target
+                else (str(len(pairs)), "")
+            )
             onward = (written or {}).get(connection.source.node_id, 0) <= (written or {}).get(
                 connection.target.node_id, 0
             )
@@ -212,11 +408,16 @@ def _best_shift(
         return [pairs[index] for index in straightened(shift)]
 
     def straightened(shift: float) -> list[int]:
-        return [
+        straight = {
             index
             for index, pair in enumerate(pairs)
             if pair[0][0] + shift <= pair[1][1] + _EPSILON
             and pair[1][0] <= pair[0][1] + shift + _EPSILON
+        }
+        return [
+            index
+            for index in sorted(straight)
+            if all(other in straight for other, fan in enumerate(fans) if fan == fans[index])
         ]
 
     def off_centre(shift: float) -> float:
@@ -246,13 +447,19 @@ def _reaches(
     other_port: str,
     across: str,
     style: LayoutStyle,
+    every: tuple = (),
+    nodes: dict[str, FittedNode] | None = None,
+    lined: bool = False,
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """Where each end of an arrow can sit along the slide axis, if the arrow runs
     across it: from one box to a box beyond it along the parent's stacking axis.
 
     Judged from where the boxes sit, not from the sides the ports are on yet: a
     port several arrows share takes the side most of them want, and the router
-    still brings an odd one in on the face it arrives at.
+    still brings an odd one in on the face it arrives at. An end that is the only
+    one on the face it arrives at sits at that face's middle (``every``: all the
+    figure's connections, to tell) -- but on a line between parts ``lined`` up
+    otherwise than centred (``flexo.hierarchy.lined_up``), which slides as it can.
     """
 
     if across == "x":
@@ -265,7 +472,42 @@ def _reaches(
     first, second = mine.port(mine_port), other.port(other_port)
     if first.side in faces and first.side is second.side:
         return None
-    return _reach(mine, first, across, faces, style), _reach(other, second, across, faces, style)
+    lone = nodes is not None and bool(every) and not lined
+    return (
+        _reach(
+            mine, first, across, faces, style, lone and _alone(mine, other, across, every, nodes)
+        ),
+        _reach(
+            other, second, across, faces, style, lone and _alone(other, mine, across, every, nodes)
+        ),
+    )
+
+
+def _alone(
+    node: FittedNode, other: FittedNode, across: str, every: tuple, nodes: dict[str, FittedNode]
+) -> bool:
+    """Whether ``node``'s end of its line to ``other`` is the only end on the face of it
+    that faces ``other`` (its top or bottom, for a slide ``across`` x): no other line of
+    its goes that way."""
+
+    me = node.measured.spec.id
+
+    def beyond(box: Rect) -> int:
+        mine = node.bounds
+        if across == "x":
+            return (box.top >= mine.bottom) - (box.bottom <= mine.top)
+        return (box.left >= mine.right) - (box.right <= mine.left)
+
+    way = beyond(other.bounds)
+    count = 0
+    for connection in every:
+        ends = (connection.source.node_id, connection.target.node_id)
+        if me not in ends or ends[0] == ends[1]:
+            continue
+        far = ends[1] if ends[0] == me else ends[0]
+        if far in nodes and beyond(nodes[far].bounds) == way:
+            count += 1
+    return count == 1
 
 
 def _blocked(
@@ -305,15 +547,25 @@ def _blocked(
 
 
 def _reach(
-    node: FittedNode, port: ResolvedPort, across: str, faces: set[Side], style: LayoutStyle
+    node: FittedNode,
+    port: ResolvedPort,
+    across: str,
+    faces: set[Side],
+    style: LayoutStyle,
+    alone: bool = False,
 ) -> tuple[float, float]:
     """The stretch of its face a port may slide to (a point, if it does not adapt).
 
-    A port on another face for now is taken from the middle of the facing one.
+    A port on another face for now is taken from the middle of the facing one; an end
+    ``alone`` on its face at a port the grammar gave the box, from its middle exactly.
     """
 
     bounds = node.bounds
     start, length = (bounds.left, bounds.width) if across == "x" else (bounds.top, bounds.height)
+    spec = next(item for item in node.measured.spec.ports if item.name == port.name)
+    if alone and centred_port(node.measured.spec.kind, spec):
+        at = start + length / 2.0
+        return at, at
     if port.side in faces:
         at = port.position.x if across == "x" else port.position.y
     else:

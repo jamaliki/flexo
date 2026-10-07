@@ -126,6 +126,12 @@ def _authored_gaps(
                     if label_reserves[boundary] == 0.0:
                         label_reserves[boundary] = along_axis
                     label_reserves[boundary] += metrics.height + along_axis
+        if actual_kind == "row":
+            for trunk, target, metrics in _trunk_captions(figure, edge_labels):
+                crossed = crossed_boundaries(trunk, target)
+                if len(crossed) == 1:
+                    reserved = _trunk_room(metrics, style)
+                    label_reserves[crossed[0]] = max(label_reserves[crossed[0]], reserved)
 
     clearance = style.route_clearance.points
     target_clearance = style.arrival_clearance.points
@@ -274,7 +280,42 @@ def _grid_gaps(
             )
     for boundary, height in stacked.items():
         rows[boundary] = max(rows[boundary], height)
+    for trunk, target, metrics in _trunk_captions(figure, edge_labels):
+        source, sink = owner.get(trunk), owner.get(target)
+        if source is None or sink is None:
+            continue
+        (source_row, source_column), (target_row, target_column) = (
+            plan.cells[source],
+            plan.cells[sink],
+        )
+        if source_row == target_row and abs(source_column - target_column) == 1:
+            boundary = min(source_column, target_column)
+            columns[boundary] = max(columns[boundary], _trunk_room(metrics, style))
     return tuple(columns) + tuple(rows)
+
+
+def _trunk_captions(
+    figure: FigureSpec, labels: Mapping[str, TextMetrics]
+) -> list[tuple[str, str, TextMetrics]]:
+    """(trunk node, target node, caption) for every captioned merge.
+
+    A merge's caption is written above its trunk -- the run its first source
+    draws into the target, as ``softmax(QK^T)V`` sits above Q's arrow -- with
+    the other branches climbing into the end of that run.
+    """
+
+    return [
+        (net.sources[0].node_id, net.targets[0].node_id, labels[net.id])
+        for net in figure.nets
+        if net.id in labels and len(net.targets) == 1 and len(net.sources) > 1
+    ]
+
+
+def _trunk_room(metrics: TextMetrics, style: LayoutStyle) -> float:
+    """The gap a merge's trunk needs: its caption, padded, then the rail and arrival."""
+
+    lane = max(style.route_lane_spacing.points, style.port_spacing.points)
+    return metrics.width + 2.0 * style.padding_x.points + lane + style.arrival_clearance.points
 
 
 def split_grid_gaps(

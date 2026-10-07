@@ -546,6 +546,99 @@ def test_a_file_with_a_typo_opens_as_the_kind_its_keys_say_and_is_not_written(
         workspace.close()
 
 
+class _Settling(_Deck):
+    """A deck whose drawing, asked to settle, takes as long as it is let: a large figure laid
+    out at its best."""
+
+    hold = 20.0
+
+    def draw(self, document: dict, base: Path, hints: dict | None = None):
+        from flexo.draft import give_up_if_newer
+        from flexo.studio import Drawing, Page
+
+        if (hints or {}).get("settle"):
+            deadline = time.monotonic() + self.hold
+            while time.monotonic() < deadline:
+                give_up_if_newer()
+                time.sleep(0.01)
+        return Drawing([Page("one", "<svg/>", "One")])
+
+
+def test_a_drawing_that_yields_is_given_up_for_the_next_asked_for(tmp_path: Path) -> None:
+    (tmp_path / "talk.yaml").write_text(DECK, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    kind = _Settling()
+    workspace.kinds["deck"] = kind  # type: ignore[assignment]
+    document = yaml.safe_load(DECK)
+    answers: dict[str, dict] = {}
+
+    def settle() -> None:
+        hints = {"client": "page", "settle": True, "yields": True}
+        answers["settle"] = workspace.draw("talk.yaml", document, 1, {}, hints)
+
+    try:
+        settling = threading.Thread(target=settle)
+        started = time.monotonic()
+        settling.start()
+        wait_for(lambda: workspace.drawing.locked())
+        # Changed again meanwhile: the next drawing is drawn at once, the settling given up.
+        drawn = workspace.draw("talk.yaml", document, 2, {}, {"client": "page"})
+        settling.join(5.0)
+        assert time.monotonic() - started < 10.0
+        assert answers["settle"] == {"version": 1, "stale": True}
+        assert drawn["version"] == 2 and [page["id"] for page in drawn["pages"]] == ["one"]
+        # One that does not yield is drawn to its end, as ever, the next waiting its turn.
+        kind.hold = 1.0
+        hints = {"client": "page", "settle": True}
+
+        def late() -> None:
+            answers["late"] = workspace.draw("talk.yaml", document, 3, {}, hints)
+
+        waited = threading.Thread(target=late)
+        waited.start()
+        wait_for(lambda: workspace.drawing.locked())
+        assert workspace.draw("talk.yaml", document, 4, {}, {"client": "page"})["version"] == 4
+        waited.join(10.0)
+        assert answers["late"]["version"] == 3 and not answers["late"].get("stale")
+    finally:
+        workspace.close()
+
+
+def test_a_drawing_that_yields_gives_way_to_an_edit_asked_of_its_document(tmp_path: Path) -> None:
+    (tmp_path / "talk.yaml").write_text(DECK, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    kind = _Settling()
+    kind.hold = 3.0
+    workspace.kinds["deck"] = kind  # type: ignore[assignment]
+    document = yaml.safe_load(DECK)
+    answers: list[dict] = []
+
+    def settle() -> None:
+        hints = {"client": "page", "settle": True, "yields": True}
+        answers.append(workspace.draw("talk.yaml", document, len(answers) + 1, {}, hints))
+
+    try:
+        # One that only reads it (a figure's parts read to be shown) does not stop it ...
+        settling = threading.Thread(target=settle)
+        started = time.monotonic()
+        settling.start()
+        wait_for(lambda: workspace.drawing.locked())
+        workspace.acting("talk.yaml", {"do": "figure", "edit": {"do": "read"}})
+        settling.join(10.0)
+        assert time.monotonic() - started > 2.5 and not answers[0].get("stale")
+        # ... one that changes it does, at once: its drawing is the one worth waiting for.
+        settling = threading.Thread(target=settle)
+        started = time.monotonic()
+        settling.start()
+        wait_for(lambda: workspace.drawing.locked())
+        workspace.acting("talk.yaml", {"do": "figure", "edit": {"do": "update"}})
+        settling.join(10.0)
+        assert time.monotonic() - started < 2.0
+        assert answers[1] == {"version": 2, "stale": True, "edited": True}
+    finally:
+        workspace.close()
+
+
 @pytest.mark.parametrize(
     ("text", "suffix", "kind"),
     [
@@ -1900,6 +1993,69 @@ process.exit(0);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_page_asks_for_its_next_drawing_without_waiting_on_one_that_yields() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps(script.as_uri())});\n"
+        """
+// The studio answers each drawing when told to: the page's asks are counted meanwhile.
+const asked = [];
+const opened = {
+  file: "a.yaml", kind: "deck", version: 1, saved: 1, exists: true, document: { title: "A" },
+};
+const workspace = {
+  client: "page", me: { id: "me" }, sessions: new Map(), url: (route) => route, on() {},
+  api(route, body) {
+    if (route !== "/api/draw") return Promise.resolve(opened);
+    const { hints, version } = body;
+    return new Promise((answer) => asked.push({ hints, answer, version }));
+  },
+};
+const session = new Session(workspace, opened);
+const tick = () => new Promise((done) => setTimeout(done, 80));
+let settling = true;
+session.hints = () => ({ settle: settling, yields: settling });
+session.requestDraw(0);
+await tick();
+// Changed while it settles: the next drawing is asked for at once, not after it.
+settling = false;
+session.requestDraw(0);
+await tick();
+const overtaken = asked.length;
+// While that one (which does not yield) is drawn, a change waits for it, as ever.
+session.requestDraw(0);
+await tick();
+const waited = asked.length;
+asked[0].answer({ version: asked[0].version, stale: true });
+asked[1].answer({ version: asked[1].version, pages: [], messages: [] });
+await tick();
+asked[2].answer({ version: asked[2].version, pages: [], messages: [] });
+await tick();
+// Settling, given up for an edit that changed nothing (nothing newer asked for): asked again.
+settling = true;
+session.requestDraw(0);
+await tick();
+const before = asked.length;
+asked[before - 1].answer({ version: asked[before - 1].version, stale: true });
+await tick();
+const again = asked.length - before;
+// Given up for an edit asked of the studio: that edit's drawing is the next, not this again.
+const then = asked.length;
+asked[then - 1].answer({ version: asked[then - 1].version, stale: true, edited: true });
+await tick();
+const notAgain = asked.length - then;
+const yielding = asked.map((one) => Boolean(one.hints.yields));
+console.log(JSON.stringify([overtaken, waited, again, notAgain, yielding]));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [2, 2, 1, 0, [True, False, False, True, True]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_a_quotation_within_a_quotation_alternates_its_marks() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/ui.js"
     # (The marks spelled out: double opening and closing, single opening and closing.)
@@ -2289,3 +2445,158 @@ def test_a_copy_the_studio_made_goes_when_undone_and_comes_back_when_redone(tmp_
         assert picture.read_bytes() == b"png"
     finally:
         workspace.close()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_under_a_row_is_dragged_to_centre_under_one_of_its_parts_or_the_row() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    model = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "column"}, "children": ["row", "e"]},
+            {"id": "row", "layout": {"kind": "row"}, "children": ["a", "b", "c", "d"]},
+        ],
+    }
+    boxes = {
+        "root": [0, 0, 370, 130],
+        "row": [10, 10, 360, 40],
+        "a": [10, 10, 60, 40],
+        "b": [110, 10, 160, 40],
+        "c": [210, 10, 260, 40],
+        "d": [310, 10, 360, 40],
+        "e": [145, 100, 225, 130],
+    }
+    # (Each: the pointer, and where the part's middle is as it is dragged.)
+    drags = [[140, 115, 136], [190, 115, 186], [330, 110, 338], [60, 118, 30], [190, 400, 186]]
+    code = (
+        f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(model)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([x, y, middle]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, 'e', { x: middle, y });\n"
+        "  if (!place || place.kind !== 'align') return place && place.kind;\n"
+        "  return { with: place.with, centred: place.centred, stays: stays(model, place, 'e') };\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        # Along its own line, under "b", under the row as it is (where it stays), under "d",
+        # and past the row's left end, under "a" -- its middle judged, not the pointer.
+        {"with": "b", "centred": False, "stays": False},
+        {"with": "row", "centred": True, "stays": True},
+        {"with": "d", "centred": False, "stays": False},
+        {"with": "a", "centred": False, "stays": False},
+        # Well under its own line, it is placed in the column as before.
+        None,
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_shape_let_go_on_a_lines_body_goes_into_the_line() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    # A line down from a to b (100 pixels), and one across from b to c, with a bend.
+    lines = [
+        {"id": "edge.1.a-to-b", "from": "a", "to": "b",
+         "points": [{"x": 50, "y": 40}, {"x": 50, "y": 140}]},
+        {"id": "edge.2.b-to-c", "from": "b", "to": "c",
+         "points": [{"x": 50, "y": 180}, {"x": 50, "y": 220}, {"x": 250, "y": 220}]},
+    ]
+    model = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "column"}, "children": ["top", "c"]},
+            {"id": "top", "layout": {"kind": "column"}, "children": ["a", "b"]},
+        ],
+    }
+    boxes = {"root": [0, 0, 300, 260], "top": [10, 10, 90, 170]}
+    # (Each: the part dragged, and the pointer.)
+    drags = [
+        ["d", 54, 90],  # on the first line's middle, a little to its side
+        ["d", 50, 45],  # by its start, where it leaves "a": not its body
+        ["d", 50, 136],  # by its end, where it meets "b": not its body
+        ["d", 66, 90],  # too far to its side
+        ["d", 150, 224],  # on the second line, along its bend
+        ["a", 54, 90],  # a line of its own: not into it
+        ["d", 120, 300],  # nowhere near a line
+    ]
+    code = (
+        f"import {{ lineAt, groupAt }} from {json.dumps(script.as_uri())};\n"
+        f"const lines = {json.dumps(lines)};\n"
+        f"const model = {json.dumps(model)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+        "  const line = lineAt(lines, { x, y }, id);\n"
+        "  const group = groupAt(model, boxes, { x, y }, id);\n"
+        "  return line && { id: line.id, at: [line.at.x, line.at.y], group };\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        # Lit where the pointer is nearest it, and let go in the group it is in.
+        {"id": "edge.1.a-to-b", "at": [50, 90], "group": "top"},
+        None,
+        None,
+        None,
+        {"id": "edge.2.b-to-c", "at": [150, 220], "group": "root"},
+        None,
+        None,
+    ]
+
+
+def test_a_part_dragged_in_a_flow_takes_its_place_among_its_own_layer() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+
+    def dropped(model: dict, boxes: dict, drags: list) -> list:
+        code = (
+            f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+            f"const model = {json.dumps(model)};\n"
+            f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+            ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+            f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y]) => {{\n"
+            "  const place = dropPlace(model, boxes, { x, y }, id);\n"
+            "  if (place.kind === 'line') return `${place.side} of ${place.of}`;\n"
+            "  return stays(model, place, id) ? 'stays' : `${place.parent} ${place.index}`;\n"
+            "})));\n"
+        )
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+        )
+        return json.loads(result.stdout)
+
+    # A module laid out as a flow right, two of its parts in its first layer (one over the
+    # other), a third in its second; beside the module, outside it, another part.
+    model = {
+        "root": "root",
+        "groups": [
+            {"id": "root", "layout": {"kind": "column"}, "children": ["ln", "m"]},
+            {"id": "m", "role": "module", "layout": {"kind": "flow-right"},
+             "children": ["nf", "seq", "mlp", "q"]},
+        ],
+    }
+    boxes = {
+        "root": [0, 0, 400, 200], "ln": [0, 20, 40, 40], "m": [50, 0, 400, 200],
+        "nf": [60, 50, 90, 80], "seq": [60, 120, 90, 150], "mlp": [150, 50, 190, 80],
+        "q": [250, 50, 270, 80],
+    }
+    drags = [
+        ["seq", 75, 30],  # over the part above it, in its own layer: before it
+        ["seq", 170, 30],  # over a part of the next layer: before the one of its own
+        ["seq", 75, 100],  # between the two: after the one above, where it is
+        ["seq", 46, 45],  # just past the module's edge: still in it
+        ["seq", 55, 30],  # in the module, level with the part outside it: not beside that
+        ["seq", 20, 100],  # well out of the module: out of it
+    ]
+    assert dropped(model, boxes, drags) == ["m 0", "m 0", "stays", "m 0", "m 0", "root 1"]
+    # Let go beside a part of a flow: next to it in the flow's order -- never a row of the two.
+    flow = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "flow-right"}, "children": ["a", "b", "c"]},
+    ]}
+    boxes = {"root": [0, 0, 240, 30], "a": [0, 0, 40, 30], "b": [100, 0, 140, 30],
+             "c": [200, 0, 240, 30]}
+    assert dropped(flow, boxes, [["c", 52, 15], ["a", 188, 15]]) == ["root 1", "root 1"]

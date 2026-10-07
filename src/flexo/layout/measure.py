@@ -53,9 +53,14 @@ def measure_figure(
         writing_room(edge, text_measurer.measure(edge.label), text_measurer.measure, layout_style)
         for edge in semantic.edges
     )
+    # A net's caption is written over its trunk's run (flexo.layout.gaps).
+    measured_net_labels = tuple(text_measurer.measure(net.label) for net in semantic.nets)
     edge_labels = {
-        edge.id: metrics
-        for edge, metrics in zip(semantic.edges, measured_edge_labels, strict=True)
+        connection.id: metrics
+        for connection, metrics in (
+            *zip(semantic.edges, measured_edge_labels, strict=True),
+            *zip(semantic.nets, measured_net_labels, strict=True),
+        )
         if metrics.width > 0.0 or metrics.height > 0.0
     }
     node_kinds = {node.spec.id: node.spec.kind for node in measured_nodes}
@@ -185,6 +190,7 @@ def measure_figure(
         Size(canvas_width, canvas_height),
         measured_edge_labels,
         diagnostics,
+        measured_net_labels,
     )
 
 
@@ -362,6 +368,12 @@ def _group_anchor(
         return Point(centre.x, sum(point.y for point in points) / len(points))
     if layout.kind == "column":
         return Point(sum(point.x for point in points) / len(points), centre.y)
+    if layout.kind == "grid":
+        # In a grid they speak from the line they share, if they share one: a
+        # flow's merge set in line with its trunk keeps the chain into it level.
+        level = max(point.y for point in points) - min(point.y for point in points) < 1e-6
+        plumb = max(point.x for point in points) - min(point.x for point in points) < 1e-6
+        return Point(points[0].x if plumb else centre.x, points[0].y if level else centre.y)
     return centre
 
 

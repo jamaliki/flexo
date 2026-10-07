@@ -347,6 +347,11 @@ def _hint_pins(figure: FigureSpec) -> dict[tuple[str, str], Side]:
         for reference, side in ((edge.source, edge.depart), (edge.target, edge.arrive)):
             if side is not None:
                 pins.setdefault((reference.node_id, reference.port_name), side)
+    for net in figure.nets:
+        # (A net's ends named a side, as an edge's are.)
+        for end, side in net.sides:
+            node_id, _, port = end.rpartition(".")
+            pins.setdefault((node_id, port), side)
     for edge in figure.edges:
         if edge.via is not None:
             pins.setdefault((edge.target.node_id, edge.target.port_name), edge.via)

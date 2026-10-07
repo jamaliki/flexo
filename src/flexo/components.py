@@ -10,7 +10,7 @@ from math import log2
 from flexo.artwork import node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.drawn import DRAWN_KINDS
-from flexo.geometry import Rect, Side, Size
+from flexo.geometry import Point, Rect, Side, Size
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec
 from flexo.shapes import SHAPE_KINDS, shape_size
@@ -235,6 +235,18 @@ handed the choice to the author, who makes it by naming ``north`` rather than
 ``south``. Moving those ports would move the very thing their names promise.
 """
 
+_CAPTIONED_VECTOR_PORTS = (
+    _default_port("input", Side.WEST),
+    _default_port("output", Side.EAST),
+    PortSpec("north", Side.NORTH),
+    PortSpec("south", Side.SOUTH),
+)
+"""A vector with words of its own (one made in the studio): its input and output face
+what they are wired to, as a block's do -- a vector under the shape that feeds it takes
+its line at its top cell, not round its side -- while ``north`` and ``south`` keep to
+theirs. Its box's middle is its middle cell (``vector_caption_band``), so a port turned
+to any side still meets the cells at their middle; none slides, as a block's would."""
+
 _IMAGE_PORTS = (
     PortSpec("input", Side.WEST, auto_side=True),
     PortSpec("output", Side.EAST, auto_side=True),
@@ -371,6 +383,83 @@ def vector_grid(
         row_gap,
         column_gap,
     )
+
+
+def vector_caption_band(label: TextMetrics, style: LayoutStyle) -> float:
+    """How much of a captioned vector's height its words take, with the gap over them.
+
+    A vector given a ``label`` of its own (one made in the studio, rather than
+    ``GroupBuilder.vector``'s, whose caption is a sibling node) sets its words under
+    its cells and keeps as much room again over them -- as a person keeps room over
+    its head -- so the middle of its box, where a line meets each side, is its
+    middle cell, and a row of vectors and boxes lines up on their middles.
+    """
+
+    if not label.lines:
+        return 0.0
+    return style.vector_label_gap.points + label.height
+
+
+def vector_cells(node: NodeSpec, bounds: Rect, label: TextMetrics, style: LayoutStyle) -> Rect:
+    """Where a vector's cells are drawn in its ``bounds``: all of them, with no words
+    of its own; else at their own size, centred, the words under them."""
+
+    if not label.lines:
+        return bounds
+    size = vector_grid(node, style).size
+    centre = bounds.center
+    return Rect(centre.x - size.width / 2.0, centre.y - size.height / 2.0, size.width, size.height)
+
+
+def vector_ink_depth(
+    node: NodeSpec,
+    bounds: Rect,
+    label: TextMetrics,
+    style: LayoutStyle,
+    point: Point,
+    direction: tuple[float, float],
+) -> float:
+    """How far into a captioned vector's box, from ``point`` on it going ``direction``,
+    its ink is: its cells, or the words under them (solid, as a person's name is).
+
+    Its box is as wide as its words, so a line meeting its side is carried on to the
+    cells rather than stopping in the air beside them. Zero for a vector with no
+    words of its own: its box is its cells.
+    """
+
+    if not label.lines:
+        return 0.0
+    dx, dy = direction
+    length = (dx * dx + dy * dy) ** 0.5
+    if length < 1e-9:
+        return 0.0
+    dx, dy = dx / length, dy / length
+    cells = vector_cells(node, bounds, label, style)
+    top = cells.bottom + style.vector_label_gap.points
+    words = Rect(bounds.center.x - label.width / 2.0, top, label.width, label.height)
+    best = None
+    for box in (cells, words):
+        hit = _ray_into(point, dx, dy, box)
+        if hit is not None and (best is None or hit < best):
+            best = hit
+    return 0.0 if best is None else best
+
+
+def _ray_into(point: Point, dx: float, dy: float, box: Rect) -> float | None:
+    """How far along the ray from ``point`` it first meets ``box``, if it does."""
+
+    near, far = 0.0, float("inf")
+    for origin, step, low, high in (
+        (point.x, dx, box.left, box.right),
+        (point.y, dy, box.top, box.bottom),
+    ):
+        if abs(step) < 1e-12:
+            if not low - 1e-9 <= origin <= high + 1e-9:
+                return None
+            continue
+        one, two = (low - origin) / step, (high - origin) / step
+        near, far = max(near, min(one, two)), min(far, max(one, two))
+    return near if near <= far else None
 
 
 COMPONENTS: dict[str, ComponentDefinition] = {
@@ -666,7 +755,17 @@ def normalize_node(node: NodeSpec) -> NodeSpec:
         events, _ = timeline_moments(node)
         named = tuple(PortSpec(event.id, Side.NORTH) for event in events if event.id is not None)
         return replace(node, ports=COMPONENTS["timeline"].ports + named)
-    return replace(node, ports=COMPONENTS[node.kind].ports)
+    return replace(node, ports=default_ports(node.kind, labelled=bool(node.label)))
+
+
+def default_ports(kind: str, *, labelled: bool = False) -> tuple[PortSpec, ...]:
+    """The ports a component of ``kind`` has when its file names none (a drawn kind's
+    parts aside): a ``labelled`` vector's are its own (``_CAPTIONED_VECTOR_PORTS``)."""
+
+    if kind == "vector" and labelled:
+        return _CAPTIONED_VECTOR_PORTS
+    definition = COMPONENTS.get(kind)
+    return definition.ports if definition else ()
 
 
 def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
@@ -744,9 +843,14 @@ def intrinsic_node_size(
     elif node.kind in {"spacer", "icon"}:
         natural = Size(0.0, 0.0)
     elif node.kind == "vector":
-        # Exactly the cell grid: a vector carries no inline label, so nothing
-        # here may pad it. Its label is a sibling node (see GroupBuilder.vector).
+        # Exactly the cell grid: a vector built by GroupBuilder.vector carries no
+        # inline label (its caption is a sibling node), so nothing here may pad it.
+        # One given words of its own sets them under its cells, with as much room
+        # kept over them (vector_caption_band).
         natural = vector_grid(node, style).size
+        if label.lines:
+            band = vector_caption_band(label, style)
+            return Size(max(natural.width, label.width), natural.height + 2.0 * band)
     elif node.kind == "op":
         side = op_diameter(style)
         natural = Size(side, side)
@@ -813,3 +917,17 @@ def intrinsic_node_size(
 
 GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
 """Kinds whose size is their content's own, never grown around a label."""
+
+
+def centred_port(kind: str, port: PortSpec) -> bool:
+    """Whether a line alone on its side at ``port`` meets the side at its middle: a port
+    of the component's grammar (an input, an output, a residual), which says only which
+    side a value comes in by -- not one an author placed, nor one a drawn part names (a
+    construct's part, a protein's feature), which are where their part is."""
+
+    definition = COMPONENTS.get(kind)
+    return (
+        port.auto_side
+        and definition is not None
+        and any(item.name == port.name for item in definition.ports)
+    )
