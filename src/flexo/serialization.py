@@ -279,6 +279,10 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["arrow"] = edge.arrow
     if edge.head != "arrow":
         result["head"] = edge.head
+    if edge.width is not None:
+        result["width"] = edge.width
+    if edge.head_size is not None:
+        result["head_size"] = edge.head_size
     if edge.back_label:
         back: dict[str, object] = {}
         _put_label(back, edge.back_label)
@@ -486,6 +490,16 @@ def _node(data: dict[str, Any]) -> NodeSpec:
     )
 
 
+def _points(value: Any) -> float | None:
+    """A number given as one (``1.5``), else None: what EdgeSpec checks the range of."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"expected a number, not {value!r}")
+    return float(value)
+
+
 def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) -> EdgeSpec:
     return EdgeSpec(
         id=edge_id,
@@ -503,6 +517,8 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),
         head=data.get("head", "arrow"),
+        width=_points(data.get("width")),
+        head_size=_points(data.get("head_size")),
         back_label=_label(data.get("back_label", "")),
         cofactors=tuple(_label(item) for item in data.get("cofactors", ())),
     )

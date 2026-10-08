@@ -993,7 +993,33 @@ EDGE_FIELDS = [
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(
-        "shape", "Routing", "choice", options=["auto", "orthogonal", "straight"], default="auto"
+        "shape",
+        "Routing",
+        "choice",
+        options=["auto", "orthogonal", "straight", "curved"],
+        default="auto",
+        hint="Curved bows away from the figure's middle, or leaves the sides chosen square",
+    ),
+    _field(
+        "width",
+        "Line Width",
+        "number",
+        min=0.1,
+        max=20,
+        step=0.25,
+        unit="pt",
+        hint="Unset, the theme's; its arrowheads grow with it",
+    ),
+    _field(
+        "head_size",
+        "Arrowhead Size",
+        "number",
+        min=0.1,
+        max=10,
+        step=0.25,
+        unit="\u00d7",  # times as large
+        default=1,
+        show={"arrow": ["end", "both", "reversible"]},
     ),
     _field(
         "cofactors",

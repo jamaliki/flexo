@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from functools import cache
 from io import BytesIO
 
@@ -17,6 +18,7 @@ from flexo.render_common import paint_attributes
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, local_name, number
 from flexo.text import font_stack, load_face
+from flexo.units import Length
 
 
 def add_metadata(parent: ET.Element, routed: RoutedFigure, palette: Palette) -> None:
@@ -44,7 +46,8 @@ def add_definitions(
 
     ``heads`` names the other heads the figure's connectors end in, as their
     marker ids (``arrow.flow.inhibition``, ``arrow.flow.harpoon``, with
-    ``.start`` for the head at a line's start); only those are defined.
+    ``.start`` for the head at a line's start, and ``arrow.flow-s150`` for one
+    drawn half as large again); only those are defined.
 
     The stylesheet is filled by ``embed_fonts`` once the document is written,
     because only then is it known which characters the figure actually uses.
@@ -60,24 +63,54 @@ def add_definitions(
         _, role, *rest = identifier.split(".")
         start = bool(rest) and rest[-1] == "start"
         head = rest[0] if rest and rest[0] != "start" else "arrow"
+        family, scale = sized_family(role)
+        drawn = scaled_heads(style, scale)
         if head == "arrow":
-            # A coloured line's plain head (``arrow.tone-3``): flow's and a residual's are
-            # defined above, whatever the figure has.
+            # A coloured line's plain head (``arrow.tone-3``), or one of another size: flow's
+            # and a residual's are defined above, whatever the figure has.
             if role not in {"flow", "residual"}:
-                _arrow_marker(definitions, role, marker_paint(role), style, palette, start=start)
+                _arrow_marker(definitions, role, marker_paint(family), drawn, palette, start=start)
             continue
-        _head_marker(definitions, identifier, head, marker_paint(role), style, palette, start=start)
+        paint = marker_paint(family)
+        _head_marker(definitions, identifier, head, paint, drawn, palette, start=start)
     return stylesheet
 
 
-def head_marker_id(role: str, head: str, *, start: bool = False) -> str:
-    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``).
+def sized_family(role: str) -> tuple[str, float]:
+    """A marker family and the size its heads are drawn at: ``flow-s150`` is the flow's,
+    half as large again; ``tone-3`` a tone's, as the theme draws it."""
+
+    family, _, size = role.rpartition("-s")
+    if family and size.isdigit():
+        return family, int(size) / 100.0
+    return role, 1.0
+
+
+def scaled_heads(style: LayoutStyle, scale: float) -> LayoutStyle:
+    """``style`` with its arrowheads ``scale`` times as large, and the line they are drawn
+    for as much wider (an open head is stroked as wide as its line)."""
+
+    if scale == 1.0:
+        return style
+    return replace(
+        style,
+        arrow_length=Length(style.arrow_length.points * scale),
+        arrow_width=Length(style.arrow_width.points * scale),
+        connector_width=Length(style.connector_width.points * scale),
+    )
+
+
+def head_marker_id(role: str, head: str, *, start: bool = False, scale: float = 1.0) -> str:
+    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``),
+    drawn ``scale`` times as large as the theme draws it (see ``sized_family``).
 
     ``role`` is the line's marker family: ``residual``, a coloured line's own
     (``tone-3``, ``neutral``; see ``marker_paint``), or anything else, the flow's.
     """
 
     base = role if role == "residual" or _coloured(role) else "flow"
+    if round(scale * 100) != 100:
+        base = f"{base}-s{round(scale * 100)}"
     name = f"arrow.{base}" if head == "arrow" else f"arrow.{base}.{head}"
     return f"{name}.start" if start else name
 

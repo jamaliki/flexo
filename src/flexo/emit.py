@@ -17,7 +17,15 @@ from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.render import render_node
 from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
 from flexo.routing.aside import Aside, arrowhead_outline, harpoon_offset
-from flexo.routing.ink import shorten_end, shorten_start, stretch_end, stretch_start
+from flexo.routing.ink import (
+    head_length,
+    head_scale,
+    line_width,
+    shorten_end,
+    shorten_start,
+    stretch_end,
+    stretch_start,
+)
 from flexo.sketch import sketch_svg
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
@@ -106,7 +114,8 @@ def emit_svg(
     from flexo.themes import with_tone_roles
 
     paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(semantic, layout_style))
-    fonts = add_definitions(root, layout_style, paint_palette, _heads(routed, paint_palette))
+    heads = _heads(routed, paint_palette, layout_style)
+    fonts = add_definitions(root, layout_style, paint_palette, heads)
     background = layer(root, "layer.background", "Background")
     # The page is transparent unless asked for: the rectangle stays, unpainted,
     # so an editor can still fill it.
@@ -383,22 +392,27 @@ class _Hierarchy:
         )
 
 
-def _heads(routed: RoutedFigure, palette: Palette) -> set[str]:
+def _heads(routed: RoutedFigure, palette: Palette, style: LayoutStyle) -> set[str]:
     """The markers beyond the plain arrow that the figure's connectors end in: other
-    heads, and the plain heads of lines drawn in a colour of their own."""
+    heads, and the plain heads of lines drawn in a colour of their own, or at a size of
+    their own."""
 
     wanted: set[str] = set()
     for edge in routed.edges:
         spec = edge.spec
         family = _line_paint(spec, palette)[1]
-        if family not in {"flow", "residual"} and spec.arrow != "none":
-            wanted |= {head_marker_id(family, "arrow"), head_marker_id(family, "arrow", start=True)}
+        scale = head_scale(spec, style)
+        if (family not in {"flow", "residual"} or scale != 1.0) and spec.arrow != "none":
+            wanted |= {
+                head_marker_id(family, "arrow", scale=scale),
+                head_marker_id(family, "arrow", start=True, scale=scale),
+            }
         if spec.arrow == "reversible":
-            wanted.add(head_marker_id(family, "harpoon"))
+            wanted.add(head_marker_id(family, "harpoon", scale=scale))
         elif spec.head != "arrow" and spec.arrow != "none":
-            wanted.add(head_marker_id(family, spec.head))
+            wanted.add(head_marker_id(family, spec.head, scale=scale))
             if spec.arrow == "both":
-                wanted.add(head_marker_id(family, spec.head, start=True))
+                wanted.add(head_marker_id(family, spec.head, start=True, scale=scale))
     for net in routed.nets:
         family = _line_paint(net.spec, palette)[1]
         if family not in {"flow", "residual"}:
@@ -432,24 +446,25 @@ def _render_edge(
     palette: Palette,
 ) -> None:
     paint_role, family = _line_paint(edge.spec, palette)
+    width, scale = line_width(edge.spec, style), head_scale(edge.spec, style)
     group = element(
         parent,
         "g",
         id=edge.spec.id,
         data__flexo__entity="connector",
         data__flexo__role=edge.spec.role,
-        stroke__dasharray=_dash(edge.spec.line, style),
+        stroke__dasharray=_dash(edge.spec.line, style, width),
     )
     stroke = paint_attributes(
         palette=palette,
         stroke_role=paint_role,
-        stroke_width=style.connector_width.points,
+        stroke_width=width,
     )
     if edge.spec.arrow == "reversible":
         # Two lines, one each way, each on the left of its own travel and
         # ending in half a head on its outer side: ⇌.
-        harpoon = f"url(#{head_marker_id(family, 'harpoon')})"
-        head = style.arrow_length.points + style.connector_standoff.points
+        harpoon = f"url(#{head_marker_id(family, 'harpoon', scale=scale)})"
+        head = head_length(edge.spec, style) + style.connector_standoff.points
         standoff = style.connector_standoff.points
         line = edge.centerline
         # Each carried on to a drawn shape's outline, as a shaft is (routing.trees).
@@ -474,17 +489,17 @@ def _render_edge(
             )
     else:
         heads = edge.spec.arrow != "none" and (edge.joined_at is None or edge.join_arrow)
+        head = head_marker_id(family, edge.spec.head, scale=scale)
+        tail = head_marker_id(family, edge.spec.head, start=True, scale=scale)
         element(
             group,
             "path",
             id=f"{edge.spec.id}.shaft",
-            d=rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
-            marker__end=f"url(#{head_marker_id(family, edge.spec.head)})"
-            if heads
-            else None,
-            marker__start=f"url(#{head_marker_id(family, edge.spec.head, start=True)})"
-            if edge.spec.arrow == "both"
-            else None,
+            d=_curve_path(edge.curve)
+            if edge.curve is not None
+            else rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
+            marker__end=f"url(#{head})" if heads else None,
+            marker__start=f"url(#{tail})" if edge.spec.arrow == "both" else None,
             stroke__linecap="round",
             stroke__linejoin="round",
             **stroke,
@@ -497,7 +512,7 @@ def _render_edge(
                 id=f"{edge.spec.id}.junction.{index}",
                 cx=point.x,
                 cy=point.y,
-                r=max(1.2, style.connector_width.points * 1.5),
+                r=max(1.2, width * 1.5),
                 **paint_attributes(palette=palette, fill_role=paint_role),
             )
     if edge.label_metrics is not None and edge.label_position is not None:
@@ -926,14 +941,25 @@ def _along(start: Point, toward: Point, distance: float) -> Point:
     )
 
 
-def _dash(line: str, style: LayoutStyle) -> str | None:
-    """The ``stroke-dasharray`` for a line style, scaled to the connector's width.
+def _curve_path(curve: tuple[Point, Point, Point, Point]) -> str:
+    """A curved edge's shaft, as the one cubic it is."""
+
+    start, one, other, end = curve
+    return (
+        f"M {number(start.x)} {number(start.y)} C {number(one.x)} {number(one.y)} "
+        f"{number(other.x)} {number(other.y)} {number(end.x)} {number(end.y)}"
+    )
+
+
+def _dash(line: str, style: LayoutStyle, width: float | None = None) -> str | None:
+    """The ``stroke-dasharray`` for a line style, scaled to the connector's width (a
+    line's own, else the theme's).
 
     It sits on the connector's group, so every piece of its ink inherits it; an
     arrowhead is a marker, which inherits nothing from the line, so it stays solid.
     """
 
-    width = style.connector_width.points
+    width = style.connector_width.points if width is None else width
     if line == "dashed":
         return f"{number(4.0 * width)} {number(3.0 * width)}"
     if line == "dotted":

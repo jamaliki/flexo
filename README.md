@@ -603,11 +603,26 @@ from far down the chart comes in by a corner the flow does not use.
 m.connect(x, z, line="dashed")                  # or "dotted"
 m.connect(top, bottom, arrow="none", label="shared weights")  # undirected
 m.connect(a, b, arrow="both")
+m.connect(a, b, shape="curved")                 # one smooth curve
+m.connect(a, b, width=2, head_size=1.5)         # 2pt wide, heads larger again
 ```
 
 `line=` changes only the stroke. `arrow=` says where the arrowheads go:
 `"end"` (the default, at the target), `"none"` for an undirected link, which
 then meets both components, or `"both"`. Nets take `line=` too.
+
+`shape="curved"` draws one smooth curve from the side of the source that faces
+the target to the side of the target that faces back. It bows away from the
+middle of the figure (round a cycle, outwards), else to the left of its travel,
+so two curves between one pair, one each way, bow apart; `via="south"` bows it
+that way instead, and `depart=` and `arrive=` sides make it leave and meet those
+sides square, as a hand-drawn arrow does. It stays on the canvas, bowing the
+other way or less where it would leave it.
+
+`width=` draws a line wider or thinner than the theme's, in points, and its
+arrowheads grow and shrink with it, as a drawing program's do; `head_size=`
+scales the heads on top of that (`1.5`, half as large again). In the studio
+they are a line's **Routing**, **Line Width** and **Arrowhead Size**.
 
 `connect(a, a)` draws a loop: a recurrent cell's state fed back to itself, a
 state that can stay where it is. It goes on the component's emptiest side.

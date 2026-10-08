@@ -223,13 +223,15 @@
         "depart": {"$ref": "#/$defs/side"},
         "arrive": {"$ref": "#/$defs/side"},
         "via": {"$ref": "#/$defs/side"},
-        "shape": {"enum": ["auto", "orthogonal", "straight"]},
+        "shape": {"enum": ["auto", "orthogonal", "straight", "curved"]},
         "line": {"enum": ["solid", "dashed", "dotted"]},
         "tone": {"type": ["string", "integer"]},
         "arrow": {"enum": ["end", "none", "both", "reversible"]},
         "head": {
           "enum": ["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"]
         },
+        "width": {"type": "number", "minimum": 0.1, "maximum": 20},
+        "head_size": {"type": "number", "minimum": 0.1, "maximum": 10},
         "back_label": {"$ref": "#/$defs/label"},
         "cofactors": {
           "type": "array",

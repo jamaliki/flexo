@@ -480,6 +480,8 @@ class Figure:
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        width: float | None = None,
+        head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
         cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
@@ -503,6 +505,8 @@ class Figure:
             line=line,
             arrow=arrow,
             head=head,
+            width=width,
+            head_size=head_size,
             back_label=back_label,
             cofactors=cofactors,
         )
@@ -2449,6 +2453,8 @@ class GroupBuilder:
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        width: float | None = None,
+        head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
         cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
@@ -2467,9 +2473,12 @@ class GroupBuilder:
         reports ``routing.via.clamped`` if the geometry left it no choice.
 
         ``shape="straight"`` draws one straight segment between the two outlines
-        instead of a routed path; ``"auto"`` follows the figure's ``lines``
-        convention. ``line="dashed"`` or ``"dotted"`` strokes it that way, and
-        ``arrow="none"`` (an undirected link) or ``"both"`` moves its arrowheads.
+        instead of a routed path, and ``"curved"`` one smooth curve; ``"auto"``
+        follows the figure's ``lines`` convention. ``line="dashed"`` or
+        ``"dotted"`` strokes it that way, and ``arrow="none"`` (an undirected
+        link) or ``"both"`` moves its arrowheads. ``width=2`` draws it 2pt wide,
+        its heads grown to match, and ``head_size=1.5`` makes them half as large
+        again.
 
         For pathways, gene circuits, and reactions, ``head=`` says what the
         connector does to its target, after SBGN: ``"inhibition"`` (a bar, ⊣),
@@ -2497,6 +2506,8 @@ class GroupBuilder:
             line=line,
             arrow=arrow,
             head=head,
+            width=width,
+            head_size=head_size,
             back_label=_label(back_label),
             cofactors=tuple(_label(item) for item in cofactors) if cofactors else (),
         )
