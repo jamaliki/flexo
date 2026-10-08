@@ -1196,6 +1196,11 @@ def test_a_line_end_is_set_on_a_side_of_its_shape() -> None:
     compile_figure(parse(text, Path.cwd()))
     text, _ = edit(text, do="update", target=line, values={"depart": None})
     assert data(text)["edges"][2] == {"from": "att", "to": "m1"}
+    # Dragged onto another shape, an end goes to it, on the side it was let go by, in one
+    # edit: the line chosen by the name its new ends give it.
+    text, chosen = edit(ATTENTION, do="update", target=line, values={"to": "m2", "arrive": "west"})
+    assert data(text)["edges"][2] == {"from": "att", "to": "m2", "arrive": "west"}
+    assert chosen == ["edge.3.att-to-m2"]
     # The page knows the sides of the ports that keep to one.
     assert model(ATTENTION)["sides"]["att"] == {"north": "north", "south": "south"}
     sides = {"input": "west", "output": "east", "north": "north", "south": "south"}

@@ -124,17 +124,13 @@ def _flow_defaults(fitted: FittedFigure, members: list[Member], ends: list[End])
 
 
 def _port_hints(figure) -> dict[tuple[str, str], Side]:
-    """Sides that bind a port for every connection on it: ``depart``/``arrive``,
-    and a net's ``via`` on target ports whose side is a default (an authored
-    port side always wins). An edge's ``via`` binds only that edge's ends (see
-    ``_via_side``), so it is left out here -- one hinted edge must not drag a
-    neighbour arriving on the same port round to its side."""
+    """Sides that bind a port for every connection on it: a net's ``via`` on target
+    ports whose side is a default (an authored port side always wins). An edge's
+    ``depart``/``arrive`` and ``via`` bind only that edge's ends (``_authored_side``,
+    ``_via_side``), so they are left out here -- one line sent out of a block's foot
+    must not drag a neighbour leaving the same port round to the foot with it."""
 
     pins: dict[tuple[str, str], Side] = {}
-    for edge in figure.edges:
-        for reference, side in ((edge.source, edge.depart), (edge.target, edge.arrive)):
-            if side is not None:
-                pins.setdefault((reference.node_id, reference.port_name), side)
     for net in figure.nets:
         if net.via is None:
             continue

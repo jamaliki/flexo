@@ -322,3 +322,52 @@ export function groupAt(model, boxes, point, id = null) {
   }
   return best ? best.id : model.root;
 }
+
+// Where a line's end dragged to `point` would meet a shape: of `shapes` ({ id, left, top,
+// right, bottom }, each a shape's drawing in the page's pixels), the one the point is over
+// -- or just outside, within `reach` -- and the side of it the point is nearest, judged
+// across the shape's diagonals, so a wide box's top runs its whole width: { id, side, at },
+// side "north", "east", "south" or "west" and `at` the middle of that side, where the end
+// will meet it. Over a shape's middle, side "" (wherever the figure puts it) at its centre.
+// Over none, null.
+const END_REACH = 12;
+const MIDDLE = 0.35;
+export function endAt(shapes, point, reach = END_REACH) {
+  let best = null;
+  for (const shape of shapes) {
+    const off = Math.hypot(Math.max(shape.left - point.x, 0, point.x - shape.right), Math.max(shape.top - point.y, 0, point.y - shape.bottom));
+    if (off > reach) continue;
+    const area = (shape.right - shape.left) * (shape.bottom - shape.top);
+    if (!best || off < best.off - 0.5 || (Math.abs(off - best.off) <= 0.5 && area < best.area)) best = { shape, off, area };
+  }
+  if (!best) return null;
+  const { id, left, top, right, bottom } = best.shape;
+  const middle = { x: (left + right) / 2, y: (top + bottom) / 2 };
+  const across = (point.x - middle.x) / Math.max((right - left) / 2, 1), down = (point.y - middle.y) / Math.max((bottom - top) / 2, 1);
+  if (Math.max(Math.abs(across), Math.abs(down)) < MIDDLE) return { id, side: "", at: middle };
+  if (Math.abs(across) >= Math.abs(down)) return across > 0 ? { id, side: "east", at: { x: right, y: middle.y } } : { id, side: "west", at: { x: left, y: middle.y } };
+  return down > 0 ? { id, side: "south", at: { x: middle.x, y: bottom } } : { id, side: "north", at: { x: middle.x, y: top } };
+}
+
+// Which of a line's drawn ends is at which of its shapes: `points`, the ends of its pieces
+// ({ x, y, ... }); `ends`, its shapes' ends ({ key, left, top, right, bottom }). Each end
+// is given the point nearest its shape's drawing that a nearer end has not taken -- two
+// lines into one shape's two ports each their own. The answer: a Map from each end's key
+// to its point (an end with no point near it, none).
+export function endsOf(points, ends, reach = 24) {
+  const pairs = [];
+  for (const end of ends) {
+    for (const point of points) {
+      const off = Math.hypot(Math.max(end.left - point.x, 0, point.x - end.right), Math.max(end.top - point.y, 0, point.y - end.bottom));
+      if (off <= reach) pairs.push({ end, point, off });
+    }
+  }
+  pairs.sort((a, b) => a.off - b.off);
+  const found = new Map(), taken = new Set();
+  for (const { end, point } of pairs) {
+    if (found.has(end.key) || taken.has(point)) continue;
+    found.set(end.key, point);
+    taken.add(point);
+  }
+  return found;
+}

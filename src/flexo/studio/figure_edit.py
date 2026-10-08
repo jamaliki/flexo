@@ -1107,6 +1107,9 @@ class _Document:
                     layout["columns"] = max(1, math.ceil(math.sqrt(count)))
                 elif value != "grid":
                     layout.pop("columns", None)
+        if kind == "edge":
+            # (A line given another shape at an end is named by its new ends.)
+            chosen = [self.edge_id(item) or identifier]
         return chosen
 
     def named_for(self, identifier: str, item: Mapping[str, Any], was: str, words: str) -> str:

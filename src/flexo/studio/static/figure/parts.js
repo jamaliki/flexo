@@ -22,7 +22,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
 import { mergeText, follows } from "/static/studio/merge.js";
-import { dropPlace, stays, lineAt, groupAt } from "/static/kinds/figure/drop.js";
+import { dropPlace, stays, lineAt, groupAt, endAt, endsOf } from "/static/kinds/figure/drop.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -1855,6 +1855,18 @@ export function figureParts(host) {
         oncontextmenu: (event) => choose(event, line),
       }, icon("plus")));
     }
+    // A line chosen has a handle at each end: dragged round its shape, to meet it on another
+    // side -- a line's, onto another shape, to go to that one. Double-clicked, the end meets
+    // its shape wherever the figure puts it again.
+    const ended = id && isLine(id) && !state.connecting && !inline ? id : null;
+    for (const end of ended ? endsSeen(ended) : []) {
+      views.push(h("span.fig-end", {
+        style: { left: `${end.at.x}px`, top: `${end.at.y}px` },
+        title: edgeOf(ended) ? "Drag to another side of the shape, or onto another shape · Double-click to reset" : "Drag to another side of the shape · Double-click to reset",
+        onpointerdown: (event) => endStart(event, ended, end), onclick: stop, onmousemove: stop,
+        ondblclick: (event) => { stop(event); endTo(ended, end.key, ""); },
+      }));
+    }
     // A molecule chosen is moved by dragging, like any part; it is turned by its handle
     // (or by ⌥-dragging it).
     const molecule = box && nodeOf(id)?.kind === "structure" ? moleculeOf(id)?.getBoundingClientRect() : null;
@@ -1969,6 +1981,143 @@ export function figureParts(host) {
   function partSizeCancel() {
     const sizing = partSizeFinish();
     if (sizing) sizing.element.style.transform = "";
+  }
+
+  // -- a line's end dragged to another side of its shape --
+  // Where a chosen line's ends are drawn, in the overlay's pixels: [{ key, ref, at, from }]
+  // -- `key` the end's ("from" or "to"; a joined line's, its ref), `at` where it meets its
+  // shape, `from` where the piece of the line into it starts.
+  function shapeSeen(id, outer) {
+    const rect = host.element(id)?.getBoundingClientRect();
+    return rect && (rect.width || rect.height) ? { left: rect.left - outer.left, top: rect.top - outer.top, right: rect.right - outer.left, bottom: rect.bottom - outer.top } : null;
+  }
+  function endsSeen(id) {
+    const element = host.element(id), outer = host.overlay?.getBoundingClientRect();
+    const edge = edgeOf(id), net = netOf(id);
+    if (!element || !outer || !(edge || net)) return [];
+    const points = [];
+    for (const path of element.querySelectorAll("path:not(.hit-line)")) {
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      if (!matrix || !length) continue;
+      const seen = (along) => {
+        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
+        return { x: point.x - outer.left, y: point.y - outer.top };
+      };
+      const start = seen(0), end = seen(length);
+      points.push({ ...start, from: end }, { ...end, from: start });
+    }
+    const refs = edge ? [["from", edge.from], ["to", edge.to]] : [...(net.sources || []), ...(net.targets || [])].map((ref) => [String(ref), ref]);
+    const ends = refs.map(([key, ref]) => ({ key, ref, ...shapeSeen(nodeOfRef(ref), outer) })).filter((end) => end.left !== undefined);
+    const found = endsOf(points, ends);
+    return ends.filter((end) => found.has(end.key)).map(({ key, ref }) => ({ key, ref, at: { x: found.get(key).x, y: found.get(key).y }, from: found.get(key).from }));
+  }
+  // Dragged, the end's way from where the line comes is drawn to the pointer -- to the middle
+  // of the side it would meet, over a shape it may go to, the shape framed and the side named.
+  // Let go there, it goes (endTo); anywhere else, or with Esc, it stays as it was. A line's
+  // end may go to any shape but the one at its other end; a joined line's, round its own.
+  let ending = null;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function endStart(event, id, end) {
+    if (event.button !== 0 || ending) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const edge = edgeOf(id), outer = host.overlay.getBoundingClientRect();
+    const own = nodeOfRef(end.ref), far = edge ? nodeOfRef(edge[end.key === "from" ? "to" : "from"]) : null;
+    const shapes = (edge ? model().nodes.map((node) => node.id).filter((node) => node === own || node !== far) : [own])
+      .map((node) => ({ id: node, ...shapeSeen(node, outer) })).filter((shape) => shape.left !== undefined);
+    ending = { id, end, own, shapes, line: host.element(id), start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, at: null };
+    window.addEventListener("pointermove", endMove);
+    window.addEventListener("pointerup", endUp);
+    window.addEventListener("pointercancel", endCancel);
+    window.addEventListener("keydown", endKey, true);
+  }
+  function endMove(event) {
+    if (!ending) return;
+    ending.pointer = { x: event.clientX, y: event.clientY };
+    if (!ending.moved) {
+      if (Math.hypot(event.clientX - ending.start.x, event.clientY - ending.start.y) < 3) return;
+      ending.moved = true;
+      const drawing = document.createElementNS(SVG_NS, "svg");
+      drawing.classList.add("fig-end-drag");
+      const way = document.createElementNS(SVG_NS, "line"), spot = document.createElementNS(SVG_NS, "circle");
+      spot.setAttribute("r", "4");
+      drawing.append(way, spot);
+      const outline = h("div.fig-end-shape"), tip = h("div.fig-turn-tip");
+      host.overlay.append(drawing, outline, tip);
+      host.overlay.classList.add("fig-ending");
+      ending.line?.classList.add("fig-faded");
+      document.body.classList.add("fig-grabbing");
+      Object.assign(ending, { drawing, way, spot, outline, tip });
+    }
+    event.preventDefault();
+    if (!ending.frame) ending.frame = requestAnimationFrame(endFrame);
+  }
+  function endFrame() {
+    if (!ending?.moved) return;
+    ending.frame = 0;
+    const { drawing, way, spot, outline, tip, end } = ending;
+    const outer = host.overlay.getBoundingClientRect();
+    const point = { x: ending.pointer.x - outer.left, y: ending.pointer.y - outer.top };
+    const at = endAt(ending.shapes, point);
+    ending.at = at;
+    const to = at ? at.at : point;
+    drawing.setAttribute("width", String(outer.width));
+    drawing.setAttribute("height", String(outer.height));
+    for (const [name, value] of [["x1", end.from.x], ["y1", end.from.y], ["x2", to.x], ["y2", to.y]]) way.setAttribute(name, String(value));
+    spot.setAttribute("cx", String(to.x));
+    spot.setAttribute("cy", String(to.y));
+    spot.style.visibility = at ? "" : "hidden";
+    const box = at && host.box(at.id);
+    outline.hidden = !box;
+    if (box) Object.assign(outline.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    tip.hidden = !at;
+    if (at) {
+      const side = SIDES.find(([value]) => value === at.side)?.[1] || "Automatic";
+      tip.textContent = at.id === ending.own ? side : `${nameOf(at.id)} · ${side}`;
+      Object.assign(tip.style, { left: `${point.x}px`, top: `${point.y + 18}px` });
+    }
+  }
+  function endFinish() {
+    window.removeEventListener("pointermove", endMove);
+    window.removeEventListener("pointerup", endUp);
+    window.removeEventListener("pointercancel", endCancel);
+    window.removeEventListener("keydown", endKey, true);
+    document.body.classList.remove("fig-grabbing");
+    const was = ending;
+    ending = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    return was;
+  }
+  function endClear(was) {
+    for (const part of [was.drawing, was.outline, was.tip]) part?.remove();
+    was.line?.classList.remove("fig-faded");
+    host.overlay.classList.remove("fig-ending");
+  }
+  function endUp() {
+    const was = endFinish();
+    if (!was?.moved) return;
+    swallowClick();
+    const at = was.at;
+    const sent = at && endTo(was.id, was.end.key, at.side, { shape: at.id, failed: () => endClear(was) });
+    if (!sent) { endClear(was); return; }
+    // Its way shown where it goes until the line is drawn there (or the edit is refused).
+    was.outline?.remove();
+    was.tip?.remove();
+    const started = Date.now();
+    const wait = () => {
+      if (!was.line?.isConnected || Date.now() - started > 6000) endClear(was);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
+  }
+  function endCancel() { const was = endFinish(); if (was) endClear(was); }
+  function endKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // (Let go after Esc, the pointer chooses nothing where it is.)
+    if (ending?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
+    endCancel();
   }
 
   // -- a structure turned by dragging on it --
@@ -4082,6 +4231,34 @@ export function figureParts(host) {
     const ref = String(edge[key]), node = nodeOfRef(ref);
     return ref !== node ? model().sides?.[node]?.[ref.slice(node.length + 1)] || "" : "";
   }
+  // A joined line's end's side: its own, or (a merge's, where it meets its shape) its `via`,
+  // from before ends had sides.
+  const hubOf = (net) => (net.kind === "merge" ? net.targets : net.sources)?.[0];
+  const netSideOf = (net, ref) => net.sides?.[ref] || (net.kind === "merge" && ref === hubOf(net) ? net.via : "") || "";
+  // One end of line `id` meeting its shape on `side` ("" where the figure puts it) -- a line's
+  // end `key` ("from", "to"), a joined line's by its ref -- or, a line's, meeting `shape`,
+  // another shape, there: one step, the line chosen still. Whether anything was to change.
+  function endTo(id, key, side, { shape = null, failed = null } = {}) {
+    const edge = edgeOf(id), net = netOf(id);
+    if (edge) {
+      const asked = key === "from" ? "depart" : "arrive", other = key === "from" ? "to" : "from";
+      const moved = shape && shape !== nodeOfRef(edge[key]);
+      if (!moved && sideOfEnd(edge, key) === side) return false;
+      const ends = moved ? (key === "from" ? [shape, nodeOfRef(edge.to)] : [nodeOfRef(edge.from), shape]) : [nodeOfRef(edge.from), nodeOfRef(edge.to)];
+      const label = moved ? `Reconnect Line to ${inQuotes(nameOf(shape))}` : null;
+      act({ do: "update", target: { type: "edge", id }, values: { ...(moved ? { [key]: shape } : {}), [asked]: side || null } }, { select: false, label, failed, then: (result) => {
+        // (Ended at another shape, or at a port of that side, it is chosen again by its shapes.)
+        const now = edgeOf(result?.select?.[0]) || edgeOf(id) || model().edges.find((item) => nodeOfRef(item.from) === ends[0] && nodeOfRef(item.to) === ends[1] && (moved || item[other] === edge[other]));
+        select(now ? [now.id] : [], { reveal: false });
+      } });
+      return true;
+    }
+    if (!net || netSideOf(net, key) === side) return false;
+    const merge = net.kind === "merge", hub = hubOf(net);
+    act({ do: "update", target: { type: "net", id }, values: { [`side:${key}`]: side || null, ...(merge && key === hub && net.via ? { via: null } : {}) } },
+      { select: false, failed, label: key === hub ? (merge ? "Change Where the Line Arrives" : "Change Where the Line Leaves") : `Change Where ${inQuotes(endSaid(key))} Meets the Line` });
+    return true;
+  }
   // What each chosen line's ends are: the shapes on its two sides.
   function lineEnds(id) {
     const edge = edgeOf(id), net = netOf(id);
@@ -4162,14 +4339,7 @@ export function figureParts(host) {
     };
     // Where on its shape each end meets it: a side asked for, or wherever the figure puts it.
     const side = (key) => ui.select({ value: sideOfEnd(edge, key), key: `edge:${edge.id}:${key}:side`, options: SIDES.map(([value, label]) => ({ value, label })),
-      onChange: (value) => {
-        const other = key === "from" ? "to" : "from", ends = [nodeOfRef(edge.from), nodeOfRef(edge.to)];
-        act({ do: "update", target: { type: "edge", id: edge.id }, values: { [key === "from" ? "depart" : "arrive"]: value || null } }, { select: false, then: () => {
-          // (Ended at a port of that side instead, it is chosen again by its shapes.)
-          const now = edgeOf(edge.id) || model().edges.find((item) => nodeOfRef(item.from) === ends[0] && nodeOfRef(item.to) === ends[1] && item[other] === edge[other]);
-          select(now ? [now.id] : [], { reveal: false });
-        } });
-      } });
+      onChange: (value) => endTo(edge.id, key, value || "") });
     // Joined with the other lines into (or out of) the same shape, if there are any.
     const fellows = (model().edges || []).filter((other) => other.id !== edge.id && (nodeOfRef(other.to) === nodeOfRef(edge.to) || nodeOfRef(other.from) === nodeOfRef(edge.from)));
     return [
@@ -4205,10 +4375,9 @@ export function figureParts(host) {
     // coming into the next one's head, down one straight trunk -- as a line's ends do.
     // (A merge's own side for where it meets its shape -- its `via`, from before ends had
     // sides -- is shown as its shape's end's, and given way to by it.)
-    const sideOf = (ref) => net.sides?.[ref] || (merge && ref === hub ? net.via : "") || "";
+    const sideOf = (ref) => netSideOf(net, ref);
     const sideSaid = (value) => SIDES.find(([side]) => side === value)?.[1] || "Automatic";
-    const setSide = (ref, value) => act({ do: "update", target: { type: "net", id: net.id }, values: { [`side:${ref}`]: value || null, ...(merge && ref === hub && net.via ? { via: null } : {}) } },
-      { select: false, label: ref === hub ? (merge ? "Change Where the Line Arrives" : "Change Where the Line Leaves") : `Change Where ${inQuotes(endSaid(ref, told))} Meets the Line` });
+    const setSide = (ref, value) => endTo(net.id, ref, value || "");
     const SIDE_ICONS = { "": "more", north: "up", east: "right", south: "down", west: "left" };
     const branchSide = (ref) => ui.select({ value: sideOf(ref), icons: true, title: `Side of ${endSaid(ref, told)}`, key: `net:${net.id}:side:${ref}`,
       options: SIDES.map(([value, label]) => ({ value, label, icon: SIDE_ICONS[value] })), onChange: (value) => setSide(ref, value) });
@@ -4298,6 +4467,8 @@ export function figureParts(host) {
         h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one follows it, joined to it — or, where the selected shape’s one line leads on to the next, goes into that line, between the two."),
         h("li", {}, h("b", {}, "Connect"), " (C): the line starts at the shape selected (with none, click where it starts); then click the shape where it ends."),
         h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
+        figure.edges.length || figure.nets.length
+          ? h("li", {}, "Select a line, then drag the handle at either end to another side of its shape, or onto another shape.") : null,
         figure.nodes.some((node) => node.kind === "structure")
           ? h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule.") : null,
         h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G)."))));
