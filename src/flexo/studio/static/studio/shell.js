@@ -220,11 +220,13 @@ export class Workspace {
           { label: "Cancel", cancel: true }, { label: "Save", kind: "primary", run: save }] });
       return;
     }
-    // Held for any reason -- the studio out of reach, or the file not reading (they are
-    // saved once it reads) -- they are asked about, never lost unasked.
+    // Held for any reason -- the studio out of reach, the file not reading (they are saved
+    // once it reads), or gone from where it was (saved once it is found, or saved again) --
+    // they are asked about, never lost unasked.
     // (Held by the studio, they are lost should it stop before the file reads again.)
     const held = session.state === "offline" ? session.pendingLocal && "the studio can’t be reached. Keep it open until the studio is back?"
-      : (session.held || session.unread) && session.unsaved ? "its file can’t be read. Keep it open until the file is put right?" : null;
+      : (session.held || session.unread) && session.unsaved ? "its file can’t be read. Keep it open until the file is put right?"
+        : session.gone && session.unsaved ? "its file was moved or deleted. Keep it open, to save it again?" : null;
     if (!asked && held) {
       const name = docName(file);
       dialog({ title: `Close “${name}”?`,
@@ -971,7 +973,7 @@ export async function start() {
   addEventListener("pagehide", () => { navigator.sendBeacon?.(workspace.url("/api/leave"), JSON.stringify({ client: workspace.client })); });
   addEventListener("beforeunload", (event) => {
     for (const session of workspace.sessions.values()) session.push();
-    if ([...workspace.sessions.values()].some((session) => session.pendingLocal || session.sourceDraft != null || ((session.held || session.unread) && session.unsaved))) {
+    if ([...workspace.sessions.values()].some((session) => session.pendingLocal || session.sourceDraft != null || ((session.held || session.unread || session.gone) && session.unsaved))) {
       event.preventDefault();
       event.returnValue = "";
     }

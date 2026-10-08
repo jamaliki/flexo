@@ -32,7 +32,7 @@ export function mount(studio, main) {
   const note = h("div.messages.fig-messages.scroll-thin");
   const hint = h("div.fig-hint", { hidden: true });
   const zoomValue = h("span.value", {}, "");
-  const zoomBar = h("div.zoom", {},
+  const zoomBar = h("div.fig-zoom", {},
     ui.button("", () => zoomBy(1 / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom Out (⌘−)" }),
     zoomValue,
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),

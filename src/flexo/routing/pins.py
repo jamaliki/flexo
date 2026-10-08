@@ -495,6 +495,7 @@ def _common_net_sides(
     beyond the hub on that side keeps the side it had.
     """
 
+    parents = parent_map(fitted.measured.semantic.groups)
     for member_index, member in enumerate(members):
         net = member.spec
         if not isinstance(net, NetSpec) or net.rail_hint is not None:
@@ -531,14 +532,29 @@ def _common_net_sides(
         # In line with the hub, the nearest spoke is entered straight on, and
         # the bus to the rest branches off that stem.
         straight: End | None = None
+        through = _along(spread_x >= spread_y)
         if level:
             ahead = [
-                end
-                for end in spokes
-                if any(_faces(hub, end.node.bounds, side) for side in _along(spread_x >= spread_y))
+                end for end in spokes if any(_faces(hub, end.node.bounds, side) for side in through)
             ]
             if ahead:
                 straight = min(ahead, key=lambda end: _gap(hub, end.node.bounds))
+        # So is one beside the hub across that line, in the row (or column) they share -- a
+        # worker next to its queue, the queue's other reader below the row: left any other
+        # way, the hub's line would turn back into it. The rest keep the sides facing it.
+        hub_id = hub_ends[0].node.measured.spec.id
+        beside = [
+            end
+            for end in spokes
+            if parents.get(end.node.measured.spec.id) == parents.get(hub_id)
+            and any(
+                _faces(hub, end.node.bounds, side) and _overlaps(hub, end.node.bounds, side)
+                for side in _along(spread_x < spread_y)
+            )
+        ]
+        if beside:
+            straight = min(beside, key=lambda end: _gap(hub, end.node.bounds))
+            through = _along(spread_x < spread_y)
         # The side the spokes would share already sends the other way -- actors
         # each feeding a queue on the side a learner's parameters would come
         # back in by: the spokes take the far side, and the rail goes round.
@@ -564,11 +580,16 @@ def _common_net_sides(
         for end in spokes:
             if end is straight:
                 continue
-            if movable(end) and (level or _faces(hub, end.node.bounds, toward)):
+            if movable(end) and ((level and not beside) or _faces(hub, end.node.bounds, toward)):
                 end.group = (end.group[0], end.group[1], toward.opposite, end.group[3])  # type: ignore[index]
                 changed = True
         hub_end = hub_ends[0]
-        if changed and movable(hub_end) and _faces(hub, spread, toward):
+        if straight is not None and movable(hub_end):
+            # Toward the spoke entered straight on, the stem the rest branch off: left the
+            # other way, the trunk went out and came back round into it.
+            facing = next(side for side in through if _faces(hub, straight.node.bounds, side))
+            hub_end.group = (hub_end.group[0], hub_end.group[1], facing, hub_end.group[3])  # type: ignore[index]
+        elif changed and movable(hub_end) and _faces(hub, spread, toward):
             hub_end.group = (hub_end.group[0], hub_end.group[1], toward, hub_end.group[3])  # type: ignore[index]
 
 
@@ -576,6 +597,15 @@ def _along(horizontal: bool) -> tuple[Side, Side]:
     """The two sides that face along a row (east, west) or a column (south, north)."""
 
     return (Side.EAST, Side.WEST) if horizontal else (Side.SOUTH, Side.NORTH)
+
+
+def _overlaps(node: Rect, other: Rect, side: Side) -> bool:
+    """Whether ``other``, off ``side`` of ``node``, is in line with it: they share some of
+    the span across that side."""
+
+    if side in {Side.EAST, Side.WEST}:
+        return other.top < node.bottom and other.bottom > node.top
+    return other.left < node.right and other.right > node.left
 
 
 def _gap(a: Rect, b: Rect) -> float:

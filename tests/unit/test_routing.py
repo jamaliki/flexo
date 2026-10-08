@@ -1669,3 +1669,57 @@ def test_a_skip_line_runs_down_one_straight_trunk_into_the_next_blocks_head() ->
     into = next(stem for stem in net.target_stems if stem.port.node_id == "add").centerline
     assert into[-1].x == pytest.approx(compiled.fitted.node("add").bounds.right)
     assert not lint_compilation(compiled).diagnostics
+
+
+def test_a_fan_out_leaves_its_hub_toward_the_spoke_in_line_with_it() -> None:
+    """A queue feeding the worker beside it in its row and a store below the row: the trunk
+    leaves toward the worker, entered straight on, and the branch to the store comes off
+    it -- not out of the queue's foot and back up round into the worker."""
+
+    from flexo.serialization import parse_figure
+
+    compiled = compile_figure(
+        parse_figure(
+            {
+                "figure": {"id": "fan"},
+                "nodes": [
+                    {"id": "api", "kind": "server", "label": "Checkout API"},
+                    {"id": "queue", "kind": "queue", "label": "Order queue"},
+                    {"id": "worker", "kind": "server", "label": "Email worker"},
+                    {"id": "mail", "kind": "document", "label": "Receipt email"},
+                    {"id": "feed", "kind": "cloud", "label": "Warehouse feed"},
+                ],
+                "edges": [{"from": "api", "to": "queue"}, {"from": "worker", "to": "mail"}],
+                "nets": [
+                    {
+                        "id": "from-queue",
+                        "kind": "fan-out",
+                        "sources": ["queue"],
+                        "targets": ["feed", "worker"],
+                    }
+                ],
+                "groups": [
+                    {
+                        "id": "root",
+                        "role": "canvas",
+                        "layout": {"kind": "column", "align": "center"},
+                        "children": ["row", "feed"],
+                    },
+                    {
+                        "id": "row",
+                        "role": "layout",
+                        "layout": {"kind": "row"},
+                        "children": ["api", "queue", "worker", "mail"],
+                    },
+                ],
+            }
+        )
+    )
+    (net,) = compiled.routed.nets
+    queue, worker = compiled.fitted.node("queue").bounds, compiled.fitted.node("worker").bounds
+    trunk = net.source_stems[0].centerline
+    assert trunk[0].x == pytest.approx(queue.right)
+    into = next(stem for stem in net.target_stems if stem.port.node_id == "worker").centerline
+    assert into[-1].x == pytest.approx(worker.left)
+    # Never below the row on its way to the worker.
+    assert max(point.y for point in (*trunk, *into)) <= queue.bottom

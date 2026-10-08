@@ -154,6 +154,7 @@ export class Session {
     this.exists = info.exists;
     this.problem = info.problem;
     this.held = Boolean(info.held);       // the file on disk does not read: nothing is written over it
+    this.gone = Boolean(info.gone);       // its file went (moved, deleted) and is not found: edits wait for it, or a save
     this.unread = Boolean(info.unread);   // nor has it since it was opened: there is nothing to show
     this.source = info.source ?? null;    // the file's words, while it is unread
     this.past = [];
@@ -221,11 +222,13 @@ export class Session {
   }
 
   // What the studio says is wrong with the file (`text`, or nothing now): `held`, it does
-  // not read; `unread`, nor has it since it was opened, and `source` is its words.
-  told({ text = null, held = false, unread = false, source = null } = {}) {
+  // not read; `unread`, nor has it since it was opened, and `source` is its words; `gone`,
+  // it went from where it was and is not found.
+  told({ text = null, held = false, unread = false, source = null, gone = false } = {}) {
     const read = this.unread && !unread;
     this.problem = text;
     this.held = held;
+    this.gone = gone;
     this.unread = unread;
     this.source = unread || held ? source : null;
     this.emit("status");
@@ -662,9 +665,13 @@ export class Session {
     this.exists = info.exists;
     this.problem = info.problem;
     this.held = Boolean(info.held);
+    this.gone = Boolean(info.gone);
     this.unread = Boolean(info.unread);
     this.source = info.source ?? null;
     this.resyncing = false;
+    // Its file moved meanwhile, and the studio followed it (the word of it missed, the page
+    // away): the document is that file now, as when it is told (shell.js renamed).
+    if (info.file !== this.file) this.workspace.renamed?.(this.file, info.file);
     if (!same(local, this.document)) this.emit("change", { quiet: false, source: "remote" });
     const waiting = this.lastRemote;
     this.lastRemote = null;
@@ -672,7 +679,7 @@ export class Session {
     this.emit("status");
     this.requestDraw(0);
     // (Its file gone meanwhile -- moved, renamed, deleted -- it is not written again until
-    // its person edits or saves it, told so: a second copy is not made behind their back.)
+    // its person saves it, told so: a second copy is not made behind their back.)
     if (!same(this.document, this.synced) && !(restarted && !info.exists)) this.schedulePush(0);
     else if (restarted && !info.exists && info.problem) {
       // Renamed while the studio was away: the file it is now is a click away.
