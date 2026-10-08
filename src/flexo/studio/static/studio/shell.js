@@ -417,6 +417,11 @@ export class Workspace {
           session.told(event);
         }
         break;
+      // Saved on two computers at once, the copy the cloud service kept of it merged in
+      // (see Workspace.take_conflicts).
+      case "conflict":
+        if (session) toast(`${event.service || "The cloud service"} had two versions of ${event.file.split("/").pop()}, saved on two computers at once. Both sets of changes are kept.`, { icon: "info", seconds: 8 });
+        break;
       case "reopened": this.reopen(event.file, event.kind); break;
       case "renamed": this.renamed(event.file, event.to); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;

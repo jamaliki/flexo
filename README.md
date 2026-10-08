@@ -971,6 +971,15 @@ changes in words, to go back or forward to any of them.
   documents (as their YAML), *look* at pages as pictures with their warnings,
   see what you are looking at, and say what it is doing. It joins the studio open
   on the folder, or starts one. Any MCP client can run `flexo studio mcp` the same way.
+- **Shared folders**: a folder kept by Dropbox, Google Drive, iCloud Drive,
+  OneDrive or Box can be open in studios on several computers at once. Each
+  studio takes in what the others save as the service brings it, merged with
+  what is being typed there. When two computers save a file at once, the copy
+  the service keeps beside it ("talk (Ben's conflicted copy).yaml", "talk
+  [Conflict].yaml") is merged back in and moved out of the folder, to
+  `~/Library/Application Support/flexo/merged`. In such a folder a document is
+  saved after 1.5 s without typing (at most every 8 s), not 0.35 s, so the
+  service carries fewer versions and two computers save at once less often.
 - ⌘K searches every command, slide, and file; `?` lists the keys.
 
 Other packages add kinds of document through the `flexo.studio` entry-point

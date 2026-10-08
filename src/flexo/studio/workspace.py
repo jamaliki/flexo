@@ -48,6 +48,16 @@ QUIET = 0.35
 """Seconds a document rests unchanged before it is written."""
 PATIENCE = 3.0
 """Seconds a document changing without rest waits, at most, before it is written anyway."""
+SHARED_QUIET = 1.5
+SHARED_PATIENCE = 8.0
+"""The same, in a folder a cloud service keeps (``cloud_service``): written less often while
+it is typed in, each write is one the service has to carry to the others, and one fewer
+written at the moment another Mac writes it too (two such are a conflict: see
+``conflict_copies``)."""
+RECENT = 40
+"""How many of what each document's file held, the last times it was read or written, are
+kept: the one both sides of a conflicting copy were made from is among them
+(``Doc.take_conflict``)."""
 RETRY = 5.0
 """Seconds before a document that could not be written is tried again."""
 LOOK = (1.0, 30.0)
@@ -126,6 +136,12 @@ class Doc:
         self.unsaved_since = 0.0
         self.retry_at = 0.0
         self.on_disk = copy.deepcopy(self.document) if self.exists and not self.unread else None
+        self.recent: deque[tuple[str, bool]] = deque(maxlen=RECENT)
+        """What the file held, the last times it was read or written (as ``_dumps``), and
+        whether this studio wrote it."""
+        if self.on_disk is not None:
+            self.recent.append((_dumps(self.on_disk), False))
+        self.opened_at = time.time()
         self.disk_text = _words(path) if self.exists else None
         self.disk_stamp = _stamp(path)
         self.depends: set[Path] = set()
@@ -332,6 +348,7 @@ class Doc:
             self.disk_stamp = _stamp(self.path)
             self.file = _file(self.path)
             self.on_disk = copy.deepcopy(self.document)
+            self.recent.append((_dumps(self.on_disk), True))
             self.saved = self.version
             self.exists = True
             self.gone, self.moved = False, None
@@ -455,6 +472,7 @@ class Doc:
             notes: list = []
             merged = self._mended(merge3(base, self.document, found, notes), notes, base)
             self.on_disk = found
+            self.recent.append((_dumps(found), False))
             self.disk_text = text
             self.exists = True
             # Changed on disk by something the studio doesn't know (an editor, a script):
@@ -470,6 +488,61 @@ class Doc:
             if not unsaved and _dumps(merged) == _dumps(found):
                 self.saved = self.version
             return "changed"
+
+
+    def take_conflict(self, copy_path: Path, service: str) -> bool:
+        """Take in a conflicting copy of the document's file, made by the cloud service
+        keeping the folder when this computer and another wrote it at once
+        (``conflict_copies``): what is in it is merged with what is here, as a change from
+        another app is, from what both sides had before (see ``_before``). Whether it was:
+        a copy that does not read, of another document, or whose file the service has not
+        yet put the other side's in place of (the copy still all the file holds), is left as
+        it is for now."""
+
+        try:
+            found = self.kind.load(copy_path)
+            _bounded(found)
+            _shaped(self.kind, found)
+        except Exception:
+            return False
+        with self.lock:
+            if self.unread or self.held or self.on_disk is None:
+                return False
+            if not _same_document(found, self.document):
+                return False
+            theirs, now = _dumps(found), _dumps(self.on_disk)
+            if theirs == now:
+                return False
+            base = self._before(theirs, now)
+            if base is None:
+                return False
+            notes: list = []
+            merged = self._mended(merge3(base, self.document, found, notes), notes, base)
+            who = {"id": "conflict", "name": service or "Another computer", "kind": "file"}
+            self._become(merged, who, "")
+        self._tell(notes, who, "", None)
+        return True
+
+    def _before(self, theirs: str, now: str) -> Any:
+        """What both sides of a conflict had before they parted (``theirs``: the copy put
+        aside; ``now``: what the file holds instead), of what this studio last read and
+        wrote. The copy one it wrote itself (the other computer's kept in the file), they
+        parted at one before that write: the nearest what the file holds now. Else, the
+        nearest the copy's. None if nothing here is from before (the document opened at the
+        copy's words)."""
+
+        kept = list(self.recent)
+        mine = [at for at, (text, wrote) in enumerate(kept) if wrote and text == theirs]
+        if mine:
+            kept, aim = kept[: mine[-1]], now
+        else:
+            aim = theirs
+        if not kept:
+            return None
+        aimed = _lines(aim)
+        # (The latest of those alike: the nearer they parted.)
+        text, _ = max(reversed(kept), key=lambda entry: _likeness(_lines(entry[0]), aimed))
+        return json.loads(text)
 
 
 class Workspace:
@@ -523,6 +596,20 @@ class Workspace:
         self.assistant = None
         self.on_close: list[Any] = []
         """What to do when the workspace closes (forget its agents' tools, say)."""
+        self.cloud = cloud_service(self.root)
+        """The service keeping the folder in step with other Macs (Dropbox, Google Drive,
+        iCloud Drive…), if one is: its documents are written less often while typed in, and
+        the copies it makes when two Macs write one at once are merged back in."""
+        shared = self.cloud is not None
+        self.quiet = SHARED_QUIET if shared else QUIET
+        self.patience = SHARED_PATIENCE if shared else PATIENCE
+        self._conflicts_at = 0.0
+        self._looked: dict[Path, tuple[float, float]] = {}
+        """The conflicting copies looked at and left as they were, and when (the copy's time
+        and its document's file's): looked at again only once either changes."""
+        self._taken: dict[Path, float] = {}
+        """The conflicting copies merged in but not yet put aside, and their times: never
+        merged again (from what the file holds now, they would take back edits since)."""
         self._ticker = threading.Thread(target=self._tick, name="studio-tick", daemon=True)
         self._ticker.start()
 
@@ -840,6 +927,8 @@ class Workspace:
         for path in [one for place in places if place.is_dir() for one in sorted(place.iterdir())]:
             if path == doc.path or path.suffix != doc.path.suffix or not path.is_file():
                 continue
+            if self._conflicting(doc, path):
+                continue
             name = path.name if path.parent == folder else f"{path.parent.name}/{path.name}"
             if around is not None and name in around:
                 continue
@@ -856,10 +945,19 @@ class Workspace:
                     break
                 if path.suffix != doc.path.suffix or _file(path) != doc.file:
                     continue
+                if self._conflicting(doc, path):
+                    continue
                 if _words(path) == doc.disk_text:
                     with contextlib.suppress(PermissionError):
                         return self.relative(path)
         return found
+
+    def _conflicting(self, doc: Doc, path: Path) -> bool:
+        """Whether a file is the copy of a document's the cloud service keeping the folder
+        made when two computers wrote it at once: its file renamed so, it is not followed
+        there, but merged back in (``take_conflicts``) once the other's is in its place."""
+
+        return self.cloud is not None and is_conflict_copy(doc.path, path, self.cloud)
 
     def new(
         self, name: str, kind_name: str, data: Any = None, who: dict[str, Any] | None = None
@@ -1349,9 +1447,12 @@ class Workspace:
 
     def _step(self) -> None:
         now = time.monotonic()
+        if self.cloud and now >= self._conflicts_at:
+            self._conflicts_at = now + 2.0
+            self.take_conflicts()
         for doc in list(self.docs.values()):
             self.reread(doc)
-            rested = now - doc.changed_at > QUIET or now - doc.unsaved_since > PATIENCE
+            rested = now - doc.changed_at > self.quiet or now - doc.unsaved_since > self.patience
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
             moved = False
@@ -1381,6 +1482,36 @@ class Workspace:
                 entry["doing"] = ""
         if gone or quiet:
             self.broadcast({"type": "presence", "presence": self.present()})
+
+
+    def take_conflicts(self) -> None:
+        """Merge back the conflicting copies the cloud service made of the open documents'
+        files since they were opened, and say so (``Doc.take_conflict``)."""
+
+        looked: dict[Path, tuple[float, float]] = {}
+        taken: dict[Path, float] = {}
+        for doc in list(self.docs.values()):
+            if not doc.exists or doc.gone:
+                continue
+            found = conflict_copies(doc.path, self.cloud or "", since=doc.opened_at)
+            if not found:
+                continue
+            self.reread(doc)  # what the file holds now, taken in first
+            for path in found:
+                stamps = (_stamp(path), doc.disk_stamp)
+                if self._taken.get(path) == stamps[0]:
+                    if not set_aside(path):
+                        taken[path] = stamps[0]
+                elif self._looked.get(path) == stamps:
+                    looked[path] = stamps
+                elif doc.take_conflict(path, self.cloud or ""):
+                    if not set_aside(path):
+                        taken[path] = stamps[0]
+                    self.broadcast({"type": "conflict", "file": doc.name, "copy": path.name,
+                                    "service": self.cloud})
+                else:
+                    looked[path] = stamps
+        self._looked, self._taken = looked, taken
 
 
 def _person(entry: dict[str, Any]) -> str:
@@ -1592,3 +1723,148 @@ def _outline(text: str) -> dict[str, Any]:
 
 def _dumps(document: Any) -> str:
     return json.dumps(document, sort_keys=True, ensure_ascii=False, default=str)
+
+
+# -- folders kept by a cloud service --
+
+_CLOUD_HOMES = (
+    ("Library/Mobile Documents", "iCloud Drive"),
+    ("Dropbox", "Dropbox"),
+    ("Google Drive", "Google Drive"),
+    ("My Drive", "Google Drive"),
+    ("OneDrive", "OneDrive"),
+    ("Box", "Box"),
+)
+_CLOUD_STORAGE = (
+    ("Dropbox", "Dropbox"),
+    ("GoogleDrive", "Google Drive"),
+    ("OneDrive", "OneDrive"),
+    ("Box", "Box"),
+    ("pCloud", "pCloud"),
+)
+
+
+def cloud_service(folder: Path) -> str | None:
+    """The service keeping ``folder`` in step with other computers, by where it is: a Mac's
+    cloud services keep theirs in ~/Library/CloudStorage (Dropbox, Google Drive, OneDrive,
+    Box), iCloud Drive in ~/Library/Mobile Documents, and older clients in a folder of their
+    own name in the home folder (~/Dropbox). None for a folder of this computer's alone."""
+
+    try:
+        inside = folder.resolve().relative_to(Path.home().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return None
+    parts = inside.parts
+    if len(parts) >= 3 and parts[:2] == ("Library", "CloudStorage"):
+        named = (said for prefix, said in _CLOUD_STORAGE if parts[2].startswith(prefix))
+        return next(named, "Cloud storage")
+    joined = "/".join(parts)
+    for home, said in _CLOUD_HOMES:
+        # (~/Dropbox, or ~/Dropbox (Work) beside it.)
+        if joined == home or joined.startswith(home + "/") or joined.startswith(home + " ("):
+            return said
+    return None
+
+
+_CONFLICTED = re.compile(r"conflict", re.IGNORECASE)
+_NUMBERED = re.compile(r" \d+")
+
+
+def conflict_copies(path: Path, service: str = "", *, since: float = 0.0) -> list[Path]:
+    """The copies of ``path`` a cloud service made beside it, since ``since`` (a time), when
+    two computers wrote it at once (``is_conflict_copy``)."""
+
+    try:
+        siblings = sorted(path.parent.iterdir())
+    except OSError:
+        return []
+    return [
+        sibling
+        for sibling in siblings
+        if is_conflict_copy(path, sibling, service) and sibling.is_file()
+        and _stamp(sibling) >= since
+    ]
+
+
+def is_conflict_copy(path: Path, other: Path, service: str = "") -> bool:
+    """Whether ``other`` is named as a cloud service names the copy of ``path`` it keeps
+    when two computers wrote it at once: the file's name with the word "conflict" added
+    before its extension, as Dropbox ("talk (Ann's conflicted copy 2026-10-08).yaml"),
+    Google Drive ("talk [Conflict].yaml") and Syncthing ("talk.sync-conflict-….yaml") name
+    theirs -- and, in iCloud Drive, numbered as it numbers its ("talk 2.yaml")."""
+
+    name, stem, suffix = other.name, path.stem, path.suffix
+    if other == path or other.parent != path.parent:
+        return False
+    if not name.startswith(stem) or not name.endswith(suffix):
+        return False
+    middle = name[len(stem) : len(name) - len(suffix)]
+    if not middle:
+        return False
+    numbered = service == "iCloud Drive" and _NUMBERED.fullmatch(middle) is not None
+    return numbered or _CONFLICTED.search(middle) is not None
+
+
+def _same_document(one: Any, other: Any) -> bool:
+    """Whether two documents are copies of one (the same id, where they have one): a copy of
+    another deck beside it is not merged into this one."""
+
+    def identity(document: Any) -> Any:
+        if not isinstance(document, dict):
+            return None
+        for key in ("deck", "figure", "theme"):
+            head = document.get(key)
+            if isinstance(head, dict) and head.get("id"):
+                return (key, head["id"])
+        return None
+
+    mine, theirs = identity(one), identity(other)
+    return mine is None or theirs is None or mine == theirs
+
+
+def _lines(text: str) -> list[str]:
+    """A document (as ``_dumps``) a line to each value, to be compared (``_likeness``)."""
+
+    return json.dumps(json.loads(text), sort_keys=True, indent=0, ensure_ascii=False).splitlines()
+
+
+def _likeness(one: list[str], other: list[str]) -> float:
+    """How alike two documents' lines (``_lines``) are, from 0 to 1."""
+
+    import difflib
+
+    return difflib.SequenceMatcher(None, one, other, autojunk=False).ratio()
+
+
+def set_aside(path: Path) -> bool:
+    """Move a file merged into its document out of the folder (where the cloud service would
+    keep handing it round) into this computer's own keeping: ~/Library/Application Support/
+    flexo/merged on a Mac, else $XDG_DATA_HOME/flexo/merged. Whether it went."""
+
+    home = Path.home()
+    mac = home / "Library" / "Application Support"
+    base = mac if mac.is_dir() else Path(os.environ.get("XDG_DATA_HOME", home / ".local/share"))
+    keep = base / "flexo" / "merged" / time.strftime("%Y-%m-%d")
+    try:
+        keep.mkdir(parents=True, exist_ok=True)
+        target = keep / path.name
+        if target.exists():
+            target = keep / f"{path.stem} {secrets.token_hex(3)}{path.suffix}"
+        os.replace(path, target) if _same_device(path, keep) else _move(path, target)
+    except OSError:
+        return False
+    return True
+
+
+def _same_device(path: Path, folder: Path) -> bool:
+    try:
+        return path.stat().st_dev == folder.stat().st_dev
+    except OSError:
+        return False
+
+
+def _move(path: Path, target: Path) -> None:
+    import shutil
+
+    shutil.copy2(path, target)
+    path.unlink()
