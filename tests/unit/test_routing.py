@@ -1610,6 +1610,50 @@ def test_a_line_alone_on_its_side_meets_it_at_the_middle_bending_where_the_boxes
     assert len(line.centerline) == 4
 
 
+def test_a_side_asked_for_one_line_leaves_the_others_on_its_port_where_they_were() -> None:
+    """Two lines out of the first block of a row: one to its neighbour, one to a decision
+    under the row. Sent out of the block's foot (``depart: south``, as dragging its end
+    there writes), that line leaves the foot; the line to the neighbour still runs
+    straight across, not round by the foot with it."""
+
+    from flexo.serialization import parse_figure
+
+    def pipeline(depart: str | None) -> dict:
+        edge = {"from": "x", "to": "check", **({"depart": depart} if depart else {})}
+        return {
+            "figure": {"id": "pipeline"},
+            "nodes": [
+                {"id": "x", "label": "Generated backbones"},
+                {"id": "model", "label": "Sequence design model"},
+                {"id": "out", "label": "Predicted structures"},
+                {"id": "check", "kind": "decision", "label": "RMSD"},
+            ],
+            "groups": [
+                {
+                    "id": "root",
+                    "layout": {"kind": "column", "align": "center"},
+                    "children": ["row", "check"],
+                },
+                {"id": "row", "layout": {"kind": "row"}, "children": ["x", "model", "out"]},
+            ],
+            "edges": [{"from": "x", "to": "model"}, {"from": "model", "to": "out"}, edge],
+        }
+
+    for depart in (None, "south"):
+        compiled = compile_figure(parse_figure(pipeline(depart)))
+        x = compiled.fitted.node("x").bounds
+        lines = {
+            (line.spec.source.node_id, line.spec.target.node_id): line.centerline
+            for line in compiled.routed.edges
+        }
+        across = lines[("x", "model")]
+        assert len(across) == 2
+        assert (across[0].x, across[0].y) == (pytest.approx(x.right), pytest.approx(x.center.y))
+        down = lines[("x", "check")]
+        if depart:
+            assert (down[0].x, down[0].y) == (pytest.approx(x.center.x), pytest.approx(x.bottom))
+
+
 def test_a_skip_line_runs_down_one_straight_trunk_into_the_next_blocks_head() -> None:
     """A net's ends asked onto sides (``NetSpec.sides``), as an edge's ``depart`` and
     ``arrive`` are, and a spine block lined up with the one it hangs from: the skip line

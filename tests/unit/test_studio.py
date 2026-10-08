@@ -2682,6 +2682,67 @@ def test_a_shape_carried_near_a_lines_end_goes_beside_the_part_there() -> None:
     assert json.loads(result.stdout) == [None, "edge.1.a-to-b", "edge.1.a-to-b", "edge.1.a-to-b"]
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_lines_end_dragged_meets_the_side_of_the_shape_it_is_let_go_by() -> None:
+    # A wide box (0..120 across, 0..40 down) and a diamond beside it: let go near the box's
+    # top -- even near its corner, the top runs its whole width -- the end meets the middle
+    # of its top; by its right, the middle of its right; over its middle, wherever the
+    # figure puts it; just outside it, still the box; well away, nothing.
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    shapes = [
+        {"id": "box", "left": 0, "top": 0, "right": 120, "bottom": 40},
+        {"id": "rmsd", "left": 200, "top": 0, "right": 260, "bottom": 30},
+    ]
+    points = [[100, 3], [118, 20], [60, 22], [60, 46], [-5, 20], [160, 20], [230, 28]]
+    code = (
+        f"import {{ endAt }} from {json.dumps(script.as_uri())};\n"
+        f"const shapes = {json.dumps(shapes)};\n"
+        f"console.log(JSON.stringify({json.dumps(points)}.map(([x, y]) => {{\n"
+        "  const at = endAt(shapes, { x, y });\n"
+        "  return at && [at.id, at.side, at.at.x, at.at.y];\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == [
+        ["box", "north", 60, 0],
+        ["box", "east", 120, 20],
+        ["box", "", 60, 20],
+        ["box", "south", 60, 40],
+        ["box", "west", 0, 20],
+        None,
+        ["rmsd", "south", 230, 30],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_lines_drawn_ends_are_told_apart_by_the_shapes_they_meet() -> None:
+    # A joined line's pieces: two stems into one shape's two ports, side by side, and a
+    # rail whose end stops short of a shape -- each end given its own nearest point.
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    points = [
+        {"x": 40, "y": 0, "n": 1}, {"x": 60, "y": 0, "n": 2},
+        {"x": 50, "y": -30, "n": 3}, {"x": 50, "y": -80, "n": 4},
+    ]
+    ends = [
+        {"key": "att.q", "left": 0, "top": 0, "right": 100, "bottom": 20},
+        {"key": "att.k", "left": 0, "top": 0, "right": 100, "bottom": 20},
+        {"key": "q", "left": 30, "top": -120, "right": 70, "bottom": -90},
+    ]
+    code = (
+        f"import {{ endsOf }} from {json.dumps(script.as_uri())};\n"
+        f"const found = endsOf({json.dumps(points)}, {json.dumps(ends)});\n"
+        "console.log(JSON.stringify(Object.fromEntries([...found].map(([key, point]) =>"
+        " [key, point.n]))));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    found = json.loads(result.stdout)
+    assert sorted([found["att.q"], found["att.k"]]) == [1, 2] and found["q"] == 4
+
+
 def test_a_part_dragged_in_a_flow_takes_its_place_among_its_own_layer() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
 

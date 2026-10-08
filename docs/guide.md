@@ -221,9 +221,11 @@ and sideways leaves from two sides.
 
 The rules:
 
-- **An authored `PortSpec` is pinned.** So is a port named by an edge's
+- **An authored `PortSpec` is pinned.** So is the end of an edge named by its
   `depart`/`arrive` hint (fields of `EdgeSpec`), and the arriving end of an
   edge with `via=` (a route that comes round the west arrives from the west).
+  A hint pins that edge's end only: another edge on the same port picks its
+  own side.
 - **A default port without `auto_side` is pinned.** Examples: `add_norm`'s
   `skip` and `branch`, and the four ports of `vector` and `image`.
 - **Ends of one port that leave on the same side share one pin** and are drawn

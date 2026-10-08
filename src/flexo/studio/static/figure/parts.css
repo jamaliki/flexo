@@ -41,6 +41,16 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-redrawing .spinner { width: 12px; height: 12px; }
 /* A line chosen: marked along its own path. */
 .hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
+/* Its ends, each a handle: dragged round its shape, or onto another, the end goes there --
+   its way drawn to the side it would meet, that shape framed. */
+.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: var(--raised); border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+.fig-end::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.fig-end:hover { background: var(--accent); }
+.fig-ending .fig-end, .fig-ending .fig-next { visibility: hidden; }
+.fig-end-drag { position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; overflow: visible; }
+.fig-end-drag line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; }
+.fig-end-drag circle { fill: var(--accent); stroke: var(--raised); stroke-width: 1.5; }
+.fig-end-shape { position: absolute; z-index: 3; pointer-events: none; border: var(--frame, 2px) dashed var(--accent); border-radius: 4px; }
 .fig-hover { position: absolute; pointer-events: none; border: var(--frame, 2px) dashed var(--accent-line); border-radius: 4px; }
 .fig-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 99px; background: var(--ink); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-2); white-space: nowrap; }
 .fig-hint svg { width: 14px; height: 14px; }
