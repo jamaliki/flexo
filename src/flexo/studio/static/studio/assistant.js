@@ -61,8 +61,9 @@ export class AssistantPanel {
       else if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); this.giveBack(); }
     });
     workspace.on("assistant", (event) => this.handle(event));
-    // What it offers to ask is for the document in front, whichever that is now.
-    workspace.on("active", () => { if (!this.state.transcript.length) this.render(); else this.renderContext(); });
+    // What it offers to ask, and what it is asked about, are the document in front's,
+    // whichever that is now (or none).
+    workspace.on("active", () => { if (!this.state.transcript.length) this.render(); this.renderContext(); });
     workspace.on("focus", () => this.renderContext());
     this.render();
     this.restore();
