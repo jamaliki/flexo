@@ -283,7 +283,7 @@ export function mount(studio, main) {
   function renderOutline() {
     if (state.tab !== "parts") return;
     const found = figure.model;
-    if (!found) { clear(outlineBody, h("div.empty", {}, "Shapes appear here once the figure can be read.")); return; }
+    if (!found) { clear(outlineBody, h("div.empty", {}, "No shapes")); return; }
     const chosen = figure.selected;
     const choose = (event, id) => {
       if (event.shiftKey || event.metaKey || event.ctrlKey) figure.select(chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id]);
@@ -324,7 +324,7 @@ export function mount(studio, main) {
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
       line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
-      : h("div.empty.small", {}, "Select a shape, then click Connect."));
+      : h("div.empty.small", {}, "No lines"));
   }
 
   let dragging = null;

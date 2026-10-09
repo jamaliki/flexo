@@ -87,7 +87,7 @@ export function mount(studio, container) {
       if (named.matches?.("input, button.select, [role=radiogroup], .switch") && !named.hasAttribute("aria-label") && !named.hasAttribute("aria-labelledby")) named.setAttribute("aria-labelledby", id);
     }
     return h(`div.setting${changed ? ".changed" : ""}`, {},
-      h("label.setting-label", { id }, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label, hint ? h("span.hint", {}, hint) : null),
+      h("label.setting-label", { id, title: hint || "" }, h("span.setting-dot", { title: changed ? "Differs from the base theme" : "" }), label),
       h("div.setting-control", {}, control),
       h("button.setting-reset", { type: "button", title: "Reset", disabled: !changed, onclick: () => { set(path, null, { quiet: false }); } }, icon("undo")));
   };
@@ -176,13 +176,12 @@ export function mount(studio, container) {
     clear(form,
       section("Theme",
         // What a theme is, said once at the top, as a Mac's settings pane says what it is for.
-        h("p.theme-intro", {}, "How figures and decks look: their colours, type, lines and shapes. Each document that uses this theme changes with it."),
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
         ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
       section("Documents", uses),
       section("Colour",
-        h("div.setting-group-label", {}, "Palette", h("span.hint", {}, "Colours for shapes, in order")),
+        h("div.setting-group-label", { title: "Colours for shapes, in order" }, "Palette"),
         paletteView(),
         choice("Tones", ["tones", "rule"], catalog.tones, { labels: { tinted: "Tinted", solid: "Solid", "accent-then-grey": "Accent Then Grey", greys: "Greys" } }),
         rule === "tinted" ? [slider("Fill Lightness", ["tones", "fill_lightness"], { min: 0.8, max: 0.99 }), slider("Fill Saturation", ["tones", "fill_chroma"], { min: 0, max: 0.15 }),

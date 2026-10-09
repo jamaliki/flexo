@@ -4,7 +4,6 @@
 .theme-panel { border-left: 1px solid var(--line); min-height: 0; }
 .theme-form { overflow: auto; height: 100%; padding-bottom: 60px; }
 .theme-section { gap: 12px; }
-.theme-intro { margin: 0; font: var(--text-small); color: var(--ink-2); }
 /* A setting as every field of the inspector is: its name above it (its note at the right,
    and its Reset button once it differs from the base theme, a dot after the name), its
    control under it, as wide as the panel -- the same gutter at its right as at its left. */

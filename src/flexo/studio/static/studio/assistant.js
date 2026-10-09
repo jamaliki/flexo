@@ -210,7 +210,7 @@ export class AssistantPanel {
     // Where it can't be asked, nothing offers to send: the note above says why.
     this.input.disabled = !state.available && !state.running;
     this.sendButton.disabled = !state.available && !state.running;
-    this.input.placeholder = state.available || state.running ? `Ask ${name} to make or change something…` : `${name} isn’t set up here`;
+    this.input.placeholder = `Ask ${name}…`;
     clear(this.sendButton, icon(state.running ? "stop" : "send"));
     this.sendButton.classList.toggle("running", Boolean(state.running));
     this.sendButton.onclick = () => (state.running && !this.input.value.trim() ? this.stop() : this.send());
@@ -222,12 +222,10 @@ export class AssistantPanel {
       const why = window.pywebview && /pip install/.test(state.why || "")
         ? `${name} isn’t included in this copy of Flexo Studio. Download Flexo Studio again to ask ${name} here.` : state.why;
       const others = (state.providers || []).filter((item) => item.id !== state.provider && !item.why);
+      // Who answers is named at the top: here, only why it can't, or what to ask.
       clear(this.list, h("div.chat-empty", {},
-        h("div.chat-hello", {}, assistantMark(state.provider), h("div", {}, h("b", {}, name), h("div.hint-line", {}, "Works with you on the documents open here"))),
         state.available ? null : h("div.chat-note", {}, icon("info"), h("div", {}, why || `${name} isn’t set up here.`,
-          others.length ? [" Or ask ", others.map((item, i) => [i ? " or " : "", h("a", { href: "#", onclick: (event) => { event.preventDefault(); this.choose(item.id); } }, item.name)]), "."] : null,
-          " You can also connect an agent such as Claude Code or Codex: see ", h("a", { href: "#", onclick: (event) => { event.preventDefault(); document.querySelector(".person.add")?.click(); } }, "Work with Agents"), ".")),
-        // What to ask: only where it can be asked.
+          others.length ? [" Ask ", others.map((item, i) => [i ? " or " : "", h("a", { href: "#", onclick: (event) => { event.preventDefault(); this.choose(item.id); } }, item.name)]), " instead."] : null)),
         state.available ? h("div.suggestions", {}, (SUGGESTIONS[kind] || SUGGESTIONS.none).map((text) => h("button.suggestion", { type: "button", onclick: () => this.send(text) }, text))) : null));
       return;
     }

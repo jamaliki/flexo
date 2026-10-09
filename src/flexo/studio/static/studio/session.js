@@ -802,7 +802,6 @@ export class Session {
         dialog({
           title: `Export ${named}`,
           body: [
-            entry.hint ? h("p.export-hint", {}, entry.hint.replace(/\.?$/, ".")) : null,
             entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
             ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; option.onChange?.(value); } })),
           ],

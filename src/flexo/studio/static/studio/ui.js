@@ -212,8 +212,11 @@ export const ui = {
 
   // A note too long to sit beside its name on a narrow panel goes under it, from the left,
   // rather than wrapping raggedly at the right.
+  // A hint in words is the label's tooltip, as a Mac's inspector keeps them: only one that is
+  // a control of its own (a count, a link) shows beside the label.
   field(label, control, { hint, inline } = {}) {
-    const long = typeof label === "string" && typeof hint === "string" && label.length + hint.length > 40;
+    const said = typeof hint === "string" ? hint : "";
+    if (said) hint = null;
     // Its control named by its label, for VoiceOver -- one in a box of its own (a number's
     // steppers, a switch) or a group (segments) is not inside the label, so not named by it.
     const id = typeof label === "string" && label ? `field-${++fieldCount}` : null;
@@ -224,7 +227,7 @@ export const ui = {
       else target.setAttribute("aria-labelledby", id);
     }
     return h(`div.field${inline ? ".inline" : ""}`, {},
-      label ? h("label.label", {}, id ? h("span", { id }, label) : label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
+      label ? h("label.label", { title: said }, id ? h("span", { id }, label) : label, hint ? h("span.hint", {}, hint) : null) : null, control);
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
@@ -867,12 +870,13 @@ export function menu(anchor, items, { align = "start", className = "" } = {}) {
     if (item.title) { node.append(h("div.menu-title", {}, item.title)); continue; }
     // `show(on)`: what the item would act on, shown while it is under the pointer or keys.
     const shown = item.show ? { onmouseenter: () => item.show(true), onmouseleave: () => item.show(false), onfocus: () => item.show(true), onblur: () => item.show(false) } : {};
-    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}${item.checked ? ".checked" : ""}`, { type: "button", role: ticks ? "menuitemradio" : "menuitem",
+    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}${item.checked ? ".checked" : ""}`, { type: "button", role: ticks ? "menuitemradio" : "menuitem", title: item.hint || "",
       "aria-checked": ticks ? String(Boolean(item.checked)) : undefined, disabled: Boolean(item.disabled),
       onclick: () => { item.show?.(false); closeMenu(); item.run?.(); }, ...shown },
       ticks ? h("span.menu-tick", {}, item.checked ? icon("check") : null) : null,
       item.icon ? icon(item.icon) : null,
-      h("span.menu-text", {}, h("span", { style: item.style }, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
+      // A hint is the item's tooltip; a note (where a document is) shows under its name.
+      h("span.menu-text", {}, h("span", { style: item.style }, item.label), item.note ? h("span.menu-hint", {}, item.note) : null),
       item.keys ? h("span.kbd", {}, item.keys) : null));
   }
   // Closed any way, nothing stays shown.

@@ -918,26 +918,18 @@ export async function start() {
   const welcome = h("div.welcome.scroll-thin");
   const renderWelcome = () => {
     const kinds = info.kinds.filter((kind) => kind.offered !== false).map((kind) => kind.name);
-    const card = (kind, title, note, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
-      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title), h("span.start-note", {}, note)) : null;
+    const card = (kind, title, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title)) : null;
     clear(welcome, h("div.welcome-inner", {},
       h("h1", {}, "New Document"),
-      h("p.lead", {}, "Create decks, figures and themes. You and any agents you invite can edit them at the same time."),
-      h("div.start-cards", {},
-        card("deck", "Deck", "Slides for a talk, with live figures", UNTITLED.deck),
-        card("figure", "Figure", "A diagram that is laid out automatically", UNTITLED.figure),
-        card("theme", "Theme", "Fonts, colours and lines for decks and figures", UNTITLED.theme)),
-      workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
-        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
-          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", { title: item.file }, docName(item.file)),
+      h("div.start-cards", {}, card("deck", "Deck", UNTITLED.deck), card("figure", "Figure", UNTITLED.figure), card("theme", "Theme", UNTITLED.theme)),
+      // What is in the folder, under its name (its whole path in the tooltip).
+      workspace.documents.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, String(info.folder).split("/").filter(Boolean).pop() || "This Folder"),
+        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
+          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, docName(item.file)),
           // One that does not read, or does not draw as written, says so, as the themes' list does.
           item.unread || item.faulty ? h("span.doc-kind.bad", { title: `Open ${docName(item.file)} to see why and put it right` }, item.unread ? "Can’t be read" : "Has problems") : null,
-          h("span.doc-kind", {}, [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · ")))))) : null,
-      h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
-        h("p", {}, "Ask the Assistant (Claude, ChatGPT or another model) in the panel on the right, or connect an agent such as Claude Code or Codex. For Claude Code, run this command once in this folder, then ask it to make something. Its changes appear here as it works:"),
-        copyable(MCP_COMMAND),
-        // Which folder "this folder" is, said as such.
-        h("p.hint-line.folder-line", { title: info.folder }, icon("folder"), h("span", {}, "This folder: ", h("span.folder-path", {}, homeShort(info.folder)))))));
+          item.file.includes("/") ? h("span.doc-kind", {}, item.file.split("/").slice(0, -1).join("/")) : null)))) : null));
   };
 
   workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
@@ -1062,7 +1054,6 @@ function typeAgain(keys) {
 }
 
 // A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
-const homeShort = (folder) => String(folder || "").replace(/\/+$/, "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 
 function markIcon() {
   const node = icon("info");
@@ -1101,7 +1092,7 @@ function newMenu(anchor, workspace) {
       { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
-    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), hint: [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · "), run: () => workspace.open(item.file) }))] : []),
+    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), note: item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : "", hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
 }
 
@@ -1143,16 +1134,11 @@ export function askName(workspace, kind, suggestion) {
 export function connectDialog(workspace) {
   const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
   dialog({ title: "Work with Agents", body: [
-    h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it’s working and what it’s doing, and you can keep editing at the same time."),
-    h("ol.steps", {},
-      h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND),
-        h("div.hint-line", {}, "For Codex, run this instead:"), copyable(CODEX_COMMAND)),
-      h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
-      // Follow is on unless turned off; its switch shows in the top bar once an agent is here.
-      h("li", {}, workspace.follow ? [h("b", {}, "Follow"), " is on: you see what agents change as they work. Turn it off in the top bar once one has joined."]
-        : ["When an agent joins, turn on ", h("b", {}, "Follow"), " in the top bar to see what it changes as it works."])),
-    h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
-    ui.field("Your Name", name, { hint: "Shown to others" }),
+    h("p", {}, "Run one of these once in Terminal, in this folder, then ask the agent for what you want. Its changes appear here as it makes them."),
+    ui.field("Claude Code", copyable(MCP_COMMAND)),
+    ui.field("Codex", copyable(CODEX_COMMAND)),
+    ui.field("Other MCP Clients", copyable("flexo studio mcp")),
+    ui.field("Your Name", name),
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
@@ -1269,7 +1255,7 @@ class SidePanel {
       // Who did what, and how many times, one sentence; where, under it.
       h("span.activity-text", {}, h("span", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, `\u00a0×${entry.count}`) : null),
         h("span.activity-where", {}, [entry.file && docName(entry.file), entry.where?.label].filter(Boolean).join(" · "))),
-      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, the Assistant and other agents appear here."));
+      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet"));
   }
 }
 
@@ -1356,8 +1342,8 @@ export function palette(workspace) {
     const ranked = (command) => { const found = score(command, query); return found === null ? null : found + (command.later ? 15 : 0); };
     shown = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     index = Math.min(index, Math.max(0, shown.length - 1));
-    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
-      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),
+    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", title: command.hint || "", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
+      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.note ? h("span.menu-hint", {}, command.note) : null),
       command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
