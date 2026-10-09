@@ -1265,7 +1265,14 @@ export function figureParts(host) {
   };
   // A key typed while a part just added waits for its editor: answers whether it took it.
   function earlyKey(event) {
-    if (!early || event.metaKey || event.ctrlKey || event.isComposing) return false;
+    if (!early || event.isComposing) return false;
+    // ⌘Return ends the typing once its editor opens, as it does in the editor.
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      if (early.text !== null) early.done = true;
+      return true;
+    }
+    if (event.metaKey || event.ctrlKey) return false;
     const key = event.key;
     if (key === "Tab" || (key.startsWith("F") && key.length > 1)) return false;
     event.preventDefault();
@@ -1279,9 +1286,9 @@ export function figureParts(host) {
       if (was.id && typeInto === was.id) giveWords(was.id, was.text);
       typeInto = null;
     }
-    else if (key === "Enter" && event.shiftKey) early.text = `${early.text ?? ""}\n`;
-    // Return ends the typing once its editor opens (and, with nothing typed, opens it, as it would).
-    else if (key === "Enter") { if (early.text !== null) early.done = true; }
+    // Return starts a new line, as in any text (with nothing typed, it opens the editor, as
+    // it would).
+    else if (key === "Enter") { if (early.text !== null || event.shiftKey) early.text = `${early.text ?? ""}\n`; }
     // Nothing typed yet: the label, chosen whole in its editor, is taken away.
     else if (key === "Backspace" || key === "Delete") early.text = early.text === null ? "" : [...early.text].slice(0, -1).join("");
     else if (key.length === 1 || [...key].length === 1) early.text = `${early.text ?? ""}${key}`;
@@ -3487,7 +3494,7 @@ export function figureParts(host) {
     const original = words(item.label);
     // A label's words are names and maths, not prose: no spelling, no corrections.
     // Its format bar is the slide's words': the theme's colours too.
-    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, spelling: false });
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, spelling: false, lines: true });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     // A shape with no words is typed on where they will go, what it is shown faintly there.
@@ -3499,8 +3506,8 @@ export function figureParts(host) {
     // Its faint hint gives way to the field's own, said in the same place.
     for (const hint of host.overlay.querySelectorAll(`.fig-wordless[data-id="${CSS.escape(id)}"]`)) hint.remove();
     const label = host.element(`${id}.label`) || (guess && !host.box(id) ? guess : null) || (bare ? "bare" : null);
-    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Return or Esc: done · ⇧Return: new line · $maths$ · *emphasis*" }, field,
-      label ? null : h("div.inline-foot", {}, h("span", {}, "Return or Esc: done · ⇧Return: new line"), h("span", {}, "$maths$ · *emphasis*")));
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Esc or ⌘Return: done · $maths$ · *emphasis*" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Esc or ⌘Return: done"), h("span", {}, "$maths$ · *emphasis*")));
     // A shape's words wrap where the drawing wraps them; a line's or a group's break only
     // where they are broken, as the drawing breaks them.
     if (label && kind === "node") field.area.style.whiteSpace = "pre-wrap";
@@ -3540,7 +3547,9 @@ export function figureParts(host) {
     for (const type of ["select", "selectionchange", "keyup", "mouseup", "input", "focus"]) field.area.addEventListener(type, chosenWords);
     chosenWords();
     field.area.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); closeInline(true); }
+      // Return starts a new line, as in any text; Esc or ⌘Return is done (as a click elsewhere
+      // is) -- ⌘Return here, not the slide's Present.
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
       if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
       // Someone else's words come in as it is typed in, the field's own undo knows nothing
       // of them: ⌘Z is the document's, which takes back this person's typing and keeps theirs.
@@ -4935,14 +4944,15 @@ export function figureParts(host) {
     const options = { hint: field.hint };
     switch (field.type) {
       case "markup": {
-        // Return is done, as on the drawing: the words are kept, and nothing is left chosen in
-        // the field, nor its format bar over the panel. ⇧Return starts a new line.
+        // Return starts a new line, as on the drawing; ⌘Return is done: the words are kept,
+        // and nothing is left chosen in the field, nor its format bar over the panel.
         // A shape's words, while it has none, say faintly what it is, as on the drawing.
         const placeholder = field.key === "label" && item?.id && nodeOf(item.id) ? hintOf(item) : "";
-        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, spelling: false, onInput: type });
+        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, spelling: false, lines: true, onInput: type });
         control.area.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.isComposing) return;
           event.preventDefault();
+          event.stopPropagation();
           const end = control.area.value.length;
           control.area.setSelectionRange(end, end);
           control.area.blur();
@@ -4954,7 +4964,7 @@ export function figureParts(host) {
           control.area.value = broken;
           control.area.dispatchEvent(new Event("input", { bubbles: true }));
         });
-        return ui.field(field.label, control, field.key === "label" ? { ...options, hint: options.hint || "⇧Return starts a new line" } : options);
+        return ui.field(field.label, control, options);
       }
       case "text": {
         if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, onInput: type }), options);

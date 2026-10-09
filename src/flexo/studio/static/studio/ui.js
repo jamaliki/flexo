@@ -402,7 +402,9 @@ export const ui = {
   // true for the studio's own as stand-ins, or false for none.
   // `emphasis: false` for words that set no bold or italic -- a figure's labels, which keep
   // their asterisks -- leaves those tools out.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, key, spelling = true } = {}) {
+  // `lines`: Return starts a new line, as in any text, even in a field of one line (a shape's
+  // words); ⌘Return is done.
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, key, spelling = true, lines = false } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
@@ -411,9 +413,9 @@ export const ui = {
       if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
       // ⌥⌘E, as Keynote's Insert › Equation: ⌘M is the Mac's Window › Minimize.
       if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$", onInput); }
-      // A field of one line (a shape's label) takes Return as done, as the label's editor on
-      // the slide does; ⇧Return starts a line of its own.
-      if (rows === 1 && event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); area.blur(); }
+      // A field of one line (a slide's title) takes Return as done; ⇧Return starts a line of
+      // its own. One whose words take new lines (`lines`) is done with ⌘Return.
+      if (event.key === "Enter" && !event.isComposing && (lines ? mod : rows === 1 && !event.shiftKey)) { event.preventDefault(); area.blur(); }
     });
     // The tools show while the field is typed in (studio.css) and are worked by the pointer,
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
