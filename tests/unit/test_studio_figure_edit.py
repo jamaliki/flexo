@@ -39,7 +39,7 @@ def edges(text: str) -> list[tuple[str, str]]:
 def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> None:
     text, chosen = edit(SAMPLE_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
     assert chosen == ["mlp"]
-    assert text.startswith("# A flexo figure")
+    assert text.startswith("# A figure: ")
     ids = [node["id"] for node in data(text)["nodes"]]
     # A file of nodes alone stacks them as listed: the new one comes right after.
     assert ids == ["x", "encoder", "mlp", "y"]
