@@ -1531,14 +1531,17 @@ let closePalette = () => {};
 // in it (titles, text, lists, labels, captions, cells, notes), not its settings -- markup aside.
 const WORDS = new Set(["title", "subtitle", "words", "text", "label", "caption", "callout", "quote", "by", "author", "date", "notes", "footnotes",
   "bullets", "numbered", "items", "rows", "header", "cells", "value", "code", "equation", "footer", "name"]);
-function slideWords(slide) {
+// (`named`: but for the words the slide is named by in the palette -- its title, or a
+// statement's words -- which its row says already.)
+function slideWords(slide, { named = false } = {}) {
   const words = [];
   const walk = (value, key) => {
     if (typeof value === "string") { if (WORDS.has(key) && /\p{L}/u.test(value)) words.push(value); }
     else if (Array.isArray(value)) value.forEach((item) => walk(item, key));
     else if (value && typeof value === "object") for (const [name, item] of Object.entries(value)) walk(item, name);
   };
-  walk(slide, "");
+  const name = slide?.words ? "words" : "title";
+  walk(named && slide && typeof slide === "object" ? Object.fromEntries(Object.entries(slide).filter(([key]) => key !== name)) : slide, "");
   return words.join(" · ").replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1").replace(/\*\*|[*`]/g, "").replace(/\s+/g, " ");
 }
 
@@ -1578,7 +1581,7 @@ export function palette(workspace, { find = false } = {}) {
     { icon: "activity", label: workspace.side?.open === "activity" ? "Hide Activity" : "Show Activity", keys: "⌥⌘A", run: () => workspace.side?.toggle("activity") },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
-    { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
+    { icon: "keyboard", label: "Keyboard Shortcuts", keys: "⌘/", run: () => shortcutsDialog() },
     // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
     ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, name]) => ({ icon: value === "dark" ? "moon" : value === "light" ? "sun" : "appearance",
       label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),
@@ -1593,17 +1596,20 @@ export function palette(workspace, { find = false } = {}) {
     ...own.filter((command) => command.later),
   ];
   // Slides found by their words as well as their titles (Edit › Find… opens the palette to
-  // find words): each with the words around what was found.
-  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map(slideWords) : [];
+  // find words): each with the words around what was found, the title its row names aside.
+  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map((slide) => [slideWords(slide), slideWords(slide, { named: true })]) : [];
   const foundOn = (query) => {
     if (query.length < 2) return [];
-    return slides.flatMap((words, index) => {
-      const at = words.toLowerCase().indexOf(query);
-      if (at < 0) return [];
-      const label = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label || `Slide ${index + 1}`;
-      const from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
-      const note = `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
-      return [{ icon: "slide", label, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
+    return slides.flatMap(([all, rest], index) => {
+      if (!all.toLowerCase().includes(query)) return [];
+      const named = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label;
+      const words = named ? rest : all, at = words.toLowerCase().indexOf(query);
+      // (Whole words, not a word's last letters.)
+      let from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
+      if (from && words.indexOf(" ", from) >= 0 && words.indexOf(" ", from) < at) from = words.indexOf(" ", from) + 1;
+      if (to < words.length && words.lastIndexOf(" ", to) > at + query.length) to = words.lastIndexOf(" ", to);
+      const note = at < 0 ? "" : `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
+      return [{ icon: "slide", label: named || `Slide ${index + 1}`, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
     }).slice(0, 12);
   };
   const input = h("input.palette-input", { placeholder: find && slides.length ? "Find words on the slides, or a command…" : session ? "Search commands, slides, files…" : "Search commands and files…" });
