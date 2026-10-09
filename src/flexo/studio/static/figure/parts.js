@@ -2212,12 +2212,12 @@ export function figureParts(host) {
         }
         views.push(h(`span.fig-size.${corner}`, fits ? {
           style: { left: `${left}px`, top: `${top}px` },
-          title: "Drag to resize (⇧: keep its proportions) · Double-click to fit it to its words",
+          title: "Drag to resize (⇧: keep its proportions; ⌘: without snapping) · Double-click to fit it to its words",
           onpointerdown: (event) => shapeSizeStart(event, id, corner, fits), onclick: stop, onmousemove: stop,
           ondblclick: (event) => { event.stopPropagation(); fitWords(id, fits); },
         } : {
           style: { left: `${left}px`, top: `${top}px` },
-          title: "Drag to resize · Double-click to reset size",
+          title: "Drag to resize (⌘: without snapping) · Double-click to reset size",
           onpointerdown: (event) => partSizeStart(event, id, corner),
           ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
         }));
@@ -2273,7 +2273,8 @@ export function figureParts(host) {
     const dx = handle.x - anchor.x, dy = handle.y - anchor.y;
     let scale = ((event.clientX - anchor.x) * dx + (event.clientY - anchor.y) * dy) / (dx * dx + dy * dy || 1);
     scale = Math.min(Math.max(scale, 24 / Math.min(box.width, box.height)), 6);
-    if (Math.abs(scale - 1) * box.width < 4) scale = 1;
+    // (Back to its size within a few pixels of it -- unless ⌘ is held, without snapping.)
+    if (!event.metaKey && Math.abs(scale - 1) * box.width < 4) scale = 1;
     sizing.scale = scale;
     sizing.element.style.transform = `scale(${scale})`;
     const outer = host.overlay.getBoundingClientRect();
@@ -2331,8 +2332,9 @@ export function figureParts(host) {
     { select: false, label: `Fit ${inQuotes(nameOf(id))} to Its Words`, ...options });
   // Dragged, its outline is drawn at the size it will be, its opposite corner kept: a side
   // within a few pixels of the size that fits its words snaps to it (both: it fits them
-  // again, its size its own no longer), and a side not moved keeps what it was; ⇧ keeps
-  // its proportions. It is never smaller than its words need (a diamond's, wider and
+  // again, its size its own no longer), and a side not moved keeps what it was -- but with
+  // ⌘ held, as a curve's middle is dragged without snapping; ⇧ keeps its proportions. It is
+  // never smaller than its words need (a diamond's, wider and
   // flatter about them as it is drawn so); a circle stays round, and a person keeps its
   // figure's proportions, as they are drawn. Let go, it is that size -- its outline there
   // until it is drawn so -- and the figure is laid out round it again.
@@ -2368,9 +2370,11 @@ export function figureParts(host) {
     window.addEventListener("pointerup", shapeSizeEnd);
     window.addEventListener("pointercancel", shapeSizeCancel);
     window.addEventListener("keydown", shapeSizeKey, true);
+    window.addEventListener("keyup", shapeSizeKey, true);
   }
-  // The size the pointer gives it (in the figure's units), snapped, and what is said of it.
-  function shapeSizeAt(sizing, clientX, clientY, keep) {
+  // The size the pointer gives it (in the figure's units), snapped (unless `free`), and what
+  // is said of it.
+  function shapeSizeAt(sizing, clientX, clientY, keep, free = false) {
     const { anchor, box, unit, fit, kind, band } = sizing;
     let width = Math.max(8, Math.abs(clientX - anchor.x)) / unit, height = Math.max(8, Math.abs(clientY - anchor.y)) / unit;
     const was = { width: box.width / unit, height: box.height / unit };
@@ -2402,7 +2406,7 @@ export function figureParts(host) {
       width = Math.max(width, fit.width);
       height = Math.max(height, fit.height);
     }
-    const near = SIZE_SNAP / unit;
+    const near = free ? 0 : SIZE_SNAP / unit;
     const snapped = { width: false, height: false }, kept = { width: false, height: false };
     if (PROPORTIONED.has(kind)) {
       // (In proportion, both sides fit its words at once.)
@@ -2426,8 +2430,13 @@ export function figureParts(host) {
       host.overlay.append(sizing.drawing, sizing.tip);
       host.overlay.classList.add("fig-sizing");
     }
-    sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey };
-    const size = shapeSizeAt(sizing, event.clientX, event.clientY, event.shiftKey);
+    sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey, free: event.metaKey };
+    shapeSizeDraw(sizing);
+  }
+  // Its outline and its size said, where the pointer is.
+  function shapeSizeDraw(sizing) {
+    const { x, y, keep, free } = sizing.pointer;
+    const size = shapeSizeAt(sizing, x, y, keep, free);
     sizing.size = size;
     const outer = host.overlay.getBoundingClientRect();
     const { anchor, unit, west, north, drawing, outline, tip } = sizing;
@@ -2450,6 +2459,7 @@ export function figureParts(host) {
     window.removeEventListener("pointerup", shapeSizeEnd);
     window.removeEventListener("pointercancel", shapeSizeCancel);
     window.removeEventListener("keydown", shapeSizeKey, true);
+    window.removeEventListener("keyup", shapeSizeKey, true);
     if (sizing?.moved) swallowClick();
     return sizing;
   }
@@ -2487,7 +2497,17 @@ export function figureParts(host) {
   }
   function shapeSizeCancel() { shapeSizeClear(shapeSizeFinish()); }
   function shapeSizeKey(event) {
-    if (event.key !== "Escape") return;
+    // ⌘ (or ⇧) pressed or let go: snapping off or on again (its proportions kept or not), where
+    // the pointer is.
+    if (event.key === "Meta" || event.key === "Shift") {
+      const sizing = shapeSizing;
+      if (sizing?.moved && sizing.pointer) {
+        sizing.pointer[event.key === "Meta" ? "free" : "keep"] = event.type === "keydown";
+        shapeSizeDraw(sizing);
+      }
+      return;
+    }
+    if (event.type !== "keydown" || event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     // (Let go after Esc, the pointer chooses nothing where it is.)
