@@ -311,7 +311,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start-card:active { background: var(--sunken); }
 .start-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .start-icon svg { width: 20px; height: 20px; }
+.start-words { display: grid; gap: 2px; min-width: 0; }
 .start-title { font-weight: 640; font-size: 14px; }
+.start-hint { color: var(--ink-3); font: var(--text-small); }
+.welcome p.start-where { margin: -10px 0 0; color: var(--ink-3); font: var(--text-small); }
+.doc-when { color: var(--ink-3); font-size: 12px; white-space: nowrap; margin-left: 12px; min-width: 120px; text-align: right; }
 .welcome-section { padding: 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
 .doc-list { display: grid; gap: 2px; }
 .doc-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; border: 0; background: transparent; cursor: pointer; text-align: left; color: var(--ink); }

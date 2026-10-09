@@ -56,6 +56,18 @@ export function ago(seconds) {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// When a file was last changed, as the Finder's Date Modified says it: Today at 14:32,
+// Yesterday at 09:10, else its date.
+function changedWhen(seconds) {
+  const when = new Date(seconds * 1000), now = new Date();
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((day(now) - day(when)) / 86400000);
+  if (days === 0) return `Today at ${time}`;
+  if (days === 1) return `Yesterday at ${time}`;
+  return when.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 function remembered(key, fallback) { try { return localStorage.getItem(`flexo-studio-${key}`) ?? fallback; } catch { return fallback; } }
 function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`, value); } catch { /* private window */ } }
 
@@ -907,7 +919,7 @@ export async function start() {
       else child.hidden = owner !== session;
     }
     welcome.hidden = Boolean(session);
-    if (!session) { views.append(welcome); renderWelcome(); }
+    if (!session) { views.append(welcome); renderWelcome(); workspace.refreshDocuments().catch(() => {}); }
     clear(docLeft, session ? session.tools : null);
     clear(docCentre, session ? session.inserts : null);
     clear(docRight, session ? session.actions : null);
@@ -917,20 +929,37 @@ export async function start() {
 
   const welcome = h("div.welcome.scroll-thin");
   const renderWelcome = () => {
-    const kinds = info.kinds.filter((kind) => kind.offered !== false).map((kind) => kind.name);
-    const card = (kind, title, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
-      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title)) : null;
+    const folderName = String(info.folder).split("/").filter(Boolean).pop() || "this folder";
+    // Each kind offered, said as the New menu says it, side by side however many there are.
+    const offered = [["deck", "Deck", "Slides for a talk"], ["figure", "Figure", "A diagram laid out automatically"], ["theme", "Theme", "Fonts, colours and lines"]]
+      .filter(([kind]) => offers(workspace, kind));
+    const card = ([kind, title, hint]) => h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, UNTITLED[kind]) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title), h("span.start-hint", {}, hint)));
+    // The folder's documents by name, as the Finder lists them, each with when it was changed.
+    const listed = [...workspace.documents].sort((a, b) => docName(a.file).localeCompare(docName(b.file), undefined, { numeric: true, sensitivity: "base" }) || a.file.localeCompare(b.file));
     clear(welcome, h("div.welcome-inner", {},
       h("h1", {}, "New Document"),
-      h("div.start-cards", {}, card("deck", "Deck", UNTITLED.deck), card("figure", "Figure", UNTITLED.figure), card("theme", "Theme", UNTITLED.theme)),
-      // What is in the folder, under its name (its whole path in the tooltip).
-      workspace.documents.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, String(info.folder).split("/").filter(Boolean).pop() || "This Folder"),
-        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
+      h("div.start-cards", { style: { gridTemplateColumns: `repeat(${Math.max(2, offered.length)}, minmax(0, 1fr))` } }, offered.map(card)),
+      // Where what is made goes: a file in the folder (its whole path in the tooltip).
+      h("p.start-where", { title: info.folder }, `Each is a file in “${folderName}”, saved as you work.`),
+      listed.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, folderName),
+        h("div.doc-list", {}, listed.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, docName(item.file)),
           // One that does not read, or does not draw as written, says so, as the themes' list does.
           item.unread || item.faulty ? h("span.doc-kind.bad", { title: `Open ${docName(item.file)} to see why and put it right` }, item.unread ? "Can’t be read" : "Has problems") : null,
-          item.file.includes("/") ? h("span.doc-kind", {}, item.file.split("/").slice(0, -1).join("/")) : null)))) : null));
+          item.file.includes("/") ? h("span.doc-kind", {}, item.file.split("/").slice(0, -1).join("/")) : null,
+          item.modified ? h("span.doc-when", {}, changedWhen(item.modified)) : null)))) : null));
   };
+
+  // The side panel's buttons pressed while it shows theirs, each named for what it does next.
+  workspace.on("side", () => {
+    for (const [button, which, name, keys] of [[assistantButton, "assistant", "Assistant", "⌘J"], [activityButton, "activity", "Activity", "⌥⌘A"]]) {
+      const shown = side.open === which;
+      button.classList.toggle("on", shown);
+      button.setAttribute("aria-pressed", String(shown));
+      button.title = `${shown ? "Hide" : "Show"} ${name} (${keys})`;
+    }
+  });
 
   workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
     .on("status", (session) => { if (session === workspace.active) renderStatus(); renderTabs(); })

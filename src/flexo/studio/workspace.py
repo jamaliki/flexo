@@ -830,7 +830,9 @@ class Workspace:
                     if getattr(open_doc, "faulty", False)
                     else {}
                 )
-                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title, **said})
+                # (When it was last changed, for a list of them, as the Finder dates a file.)
+                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title,
+                              "modified": round(_stamp(file)), **said})
             if len(found) >= 300:
                 break
         return found
