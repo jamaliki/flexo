@@ -1,47 +1,52 @@
 /* Flexo studio: the shell every kind of document shares. */
 
 :root {
-  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  /* The Mac's own face (SF Pro) wherever the studio runs on a Mac, as Keynote's is. */
+  --font: -apple-system, BlinkMacSystemFont, ui-sans-serif, "Helvetica Neue", "Inter", "Segoe UI", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
 
-  --bg: #f4f3f0;
-  --stage: #e9e7e2;
-  --stage-dot: rgba(40, 36, 30, 0.07);
-  --panel: #fcfbf9;
+  /* Keynote's greys: the toolbar and side panels one light grey, controls and popovers white
+     on it, the slide on a plain grey stage -- nothing tinted, so the slide's own colours are
+     the only colours there are. */
+  --bg: #f6f6f6;
+  --stage: #e6e6e6;
+  --stage-dot: transparent;
+  --panel: #f6f6f6;
   --raised: #ffffff;
-  --sunken: #f1efeb;
-  --line: rgba(35, 30, 25, 0.10);
-  --line-strong: rgba(35, 30, 25, 0.18);
-  --ink: #1f1d1a;
-  --ink-2: #57524b;
-  --ink-3: #6e685f;
-  --accent: #3d5afe;
+  --sunken: #ececec;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --ink: #1d1d1f;
+  --ink-2: #4a4a4f;
+  --ink-3: #6b6b70;
+  /* The Mac's accent colour (System Settings › Appearance), as its own apps take it; blue
+     wherever the system does not say. What is tinted with it is mixed from it. */
+  --accent: #0a7aff;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(61, 90, 254, 0.10);
-  --accent-line: rgba(61, 90, 254, 0.45);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 50%, transparent);
   --accent-2: #c2410c;
   /* Keyboard focus, as on a Mac: a soft ring of the accent, clear against any panel. */
-  --focus-ring: rgba(61, 90, 254, 0.7);
-  --focus-halo: rgba(61, 90, 254, 0.28);
+  --focus-ring: color-mix(in srgb, var(--accent) 65%, transparent);
+  --focus-halo: color-mix(in srgb, var(--accent) 25%, transparent);
   /* One stroke for every frame on a slide or figure -- pointed at, chosen, typed in, yours
      or another's: what it is shown by its style and colour (dashed, a halo), not its width.
-     Whole pixels, so it is the same width on every screen. */
-  --frame: 2px;
-  /* Selected words: a light blue seen through, clear on the panels and on any slide (white
-     paper, a navy band), the words on it still easy to read. */
-  --selection: rgba(123, 140, 255, 0.45);
+     A hairline, as Keynote's, its handles saying it is chosen. */
+  --frame: 1px;
+  /* Selected words: the accent seen through, the words on it still easy to read. */
+  --selection: color-mix(in srgb, var(--accent) 30%, transparent);
   /* A colour chip's hairline edge, so a chip the colour of the panel still shows. */
   --chip-ring: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
   /* A small swatch on a bar: its edge plain whatever its colour. */
   --chip-ring-strong: inset 0 0 0 1px rgba(0, 0, 0, 0.24);
   /* A segmented control: the chosen segment a raised pill on a tinted track. */
-  --seg-track: rgba(35, 30, 25, 0.075);
+  --seg-track: rgba(0, 0, 0, 0.06);
   --seg-on: #ffffff;
-  --seg-shadow: 0 1px 2px rgba(30, 25, 20, 0.16), 0 0 0 0.5px rgba(30, 25, 20, 0.10);
-  /* Claude's colour where white words or marks sit on it. */
+  --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  /* The assistant's colour, where none has said its own (assistant.js sets --assistant). */
   --claude: #c4623f;
-  --toast: #2a2825;
-  --toast-ink: #f4f3f0;
+  --toast: #2c2c2e;
+  --toast-ink: #f5f5f7;
   --toast-line: transparent;
   --toast-error: #c53030;
   --toast-error-ink: #ffffff;
@@ -50,9 +55,9 @@
   --warn-soft: rgba(214, 158, 46, 0.14);
   --error: #c53030;
   --error-soft: rgba(197, 48, 48, 0.10);
-  --shadow-1: 0 1px 2px rgba(30, 25, 20, 0.06), 0 1px 1px rgba(30, 25, 20, 0.04);
-  --shadow-2: 0 6px 24px rgba(30, 25, 20, 0.12), 0 2px 6px rgba(30, 25, 20, 0.06);
-  --shadow-page: 0 1px 2px rgba(30, 25, 20, 0.10), 0 8px 30px rgba(30, 25, 20, 0.10);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 6px 24px rgba(0, 0, 0, 0.08);
   --radius: 8px;
   --radius-s: 6px;
   --bar: 48px;
@@ -68,34 +73,39 @@
   color-scheme: light;
 }
 
+
+/* The accent as the Mac has it, where the browser can say (Safari, the app's own window). */
+@supports (color: AccentColor) {
+  :root { --accent: AccentColor; }
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #17181b;
-    --stage: #111214;
-    --stage-dot: rgba(255, 255, 255, 0.05);
-    --panel: #1c1d21;
-    --raised: #24262b;
-    --sunken: #16171a;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-strong: rgba(255, 255, 255, 0.15);
-    --ink: #ecebe8;
-    --ink-2: #b3b0aa;
-    --ink-3: #8f8b85;
-    --accent: #7b8cff;
-    --accent-ink: #0f1020;
-    --accent-soft: rgba(123, 140, 255, 0.14);
-    --accent-line: rgba(123, 140, 255, 0.55);
+    --bg: #2b2b2d;
+    --stage: #1c1c1e;
+    --stage-dot: transparent;
+    --panel: #262628;
+    --raised: #323235;
+    --sunken: #1f1f21;
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --ink: #f2f2f4;
+    --ink-2: #c4c4c8;
+    --ink-3: #9a9a9f;
+    --accent-ink: #ffffff;
+    --accent-soft: color-mix(in srgb, var(--accent) 22%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 60%, transparent);
     --accent-2: #f0895e;
-    --focus-ring: rgba(123, 140, 255, 0.75);
-    --focus-halo: rgba(123, 140, 255, 0.32);
-    --selection: rgba(123, 140, 255, 0.45);
+    --focus-ring: color-mix(in srgb, var(--accent) 75%, transparent);
+    --focus-halo: color-mix(in srgb, var(--accent) 32%, transparent);
+    --selection: color-mix(in srgb, var(--accent) 45%, transparent);
     --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
     --chip-ring-strong: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
-    --seg-track: #141518;
-    --seg-on: #3a3c42;
+    --seg-track: rgba(255, 255, 255, 0.07);
+    --seg-on: #5a5a5e;
     --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
-    --toast: #2f3136;
-    --toast-ink: #ecebe8;
+    --toast: #3a3a3c;
+    --toast-ink: #f2f2f4;
     --toast-line: rgba(255, 255, 255, 0.10);
     --toast-error: #3d2124;
     --toast-error-ink: #f8d4d4;
@@ -111,32 +121,31 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #17181b;
-  --stage: #111214;
-  --stage-dot: rgba(255, 255, 255, 0.05);
-  --panel: #1c1d21;
-  --raised: #24262b;
-  --sunken: #16171a;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.15);
-  --ink: #ecebe8;
-  --ink-2: #b3b0aa;
-  --ink-3: #8f8b85;
-  --accent: #7b8cff;
-  --accent-ink: #0f1020;
-  --accent-soft: rgba(123, 140, 255, 0.14);
-  --accent-line: rgba(123, 140, 255, 0.55);
+  --bg: #2b2b2d;
+  --stage: #1c1c1e;
+  --stage-dot: transparent;
+  --panel: #262628;
+  --raised: #323235;
+  --sunken: #1f1f21;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #f2f2f4;
+  --ink-2: #c4c4c8;
+  --ink-3: #9a9a9f;
+  --accent-ink: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 22%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 60%, transparent);
   --accent-2: #f0895e;
-  --focus-ring: rgba(123, 140, 255, 0.75);
-  --focus-halo: rgba(123, 140, 255, 0.32);
-  --selection: rgba(123, 140, 255, 0.45);
+  --focus-ring: color-mix(in srgb, var(--accent) 75%, transparent);
+  --focus-halo: color-mix(in srgb, var(--accent) 32%, transparent);
+  --selection: color-mix(in srgb, var(--accent) 45%, transparent);
   --chip-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
   --chip-ring-strong: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
-  --seg-track: #141518;
-  --seg-on: #3a3c42;
+  --seg-track: rgba(255, 255, 255, 0.07);
+  --seg-on: #5a5a5e;
   --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
-  --toast: #2f3136;
-  --toast-ink: #ecebe8;
+  --toast: #3a3a3c;
+  --toast-ink: #f2f2f4;
   --toast-line: rgba(255, 255, 255, 0.10);
   --toast-error: #3d2124;
   --toast-error-ink: #f8d4d4;
@@ -227,21 +236,35 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .chip-toggle { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink-3); cursor: pointer; font-size: 12px; font-weight: 560; margin-left: 6px; }
 .chip-toggle svg { width: 13px; height: 13px; }
 .chip-toggle.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-.btn.claude-button { background: var(--claude); border-color: var(--claude); color: #fff; }
-.btn.claude-button:hover { filter: brightness(1.06); border-color: var(--claude); }
+/* The assistant: a plain button, only its sparkle in colour, so it is found at a glance
+   without outshining the slide. */
+.btn.assistant-button { gap: 6px; padding: 0 11px 0 9px; }
+.btn.assistant-button svg { color: var(--assistant, var(--claude)); }
 .badge-count { position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 9.5px; font-weight: 700; display: grid; place-items: center; padding: 0 3px; }
 .btn { position: relative; }
 
 /* the document bar and the workbench */
 .workbench { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
 .center { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; position: relative; }
-/* A document bar too wide for the window gives up its tools' labels, then all its words (shell.js). */
-.docbar .btn:not(.icon) { padding: 0 8px; gap: 5px; }
-.docbar.compact .docbar-slot:first-child .btn:not(.keep-label) .btn-label { display: none; }
-.docbar.compact .docbar-slot:first-child .btn:not(.keep-label) { padding: 0 7px; }
+/* The document bar, as Keynote's toolbar: each tool its icon over its name, the document's own
+   tools at the left, what adds to it in the middle, the rest at the right. Too wide for the
+   window, it gives up its tools' names, then all its words (shell.js). */
+.docbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 12px; height: 56px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
+.docbar > .docbar-slot:first-child { justify-self: start; }
+.docbar-centre { justify-self: center; }
+.docbar.shifted { grid-template-columns: auto minmax(0, 1fr) auto; }
+.docbar-end { justify-self: end; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.docbar .docbar-slot .btn.ghost:not(.icon) { flex-direction: column; justify-content: center; gap: 3px; height: 48px; min-width: 48px; padding: 5px 7px 3px; border-radius: 7px; font: 400 11px/1.15 var(--font); color: var(--ink-2); }
+.docbar .docbar-slot .btn.ghost:not(.icon) svg { width: 19px; height: 19px; }
+.docbar .docbar-slot .btn.ghost:not(.icon):hover:not(:disabled) { background: var(--line); color: var(--ink); }
+.docbar .docbar-slot .btn.ghost.on { background: var(--line); color: var(--ink); }
+.docbar .docbar-slot .btn.ghost.on svg { color: var(--accent); }
+/* (A tool that opens a menu says so by its name alone, as Keynote's do: no chevron under it.) */
+.docbar .docbar-slot .btn.ghost.pulldown > svg:last-child:not(:first-child) { display: none; }
+.docbar.compact .docbar-slot .btn:not(.keep-label) .btn-label { display: none; }
+.docbar.compact .docbar-slot .btn.ghost:not(.icon) { height: 36px; min-width: 34px; }
 .docbar.tight .btn-label, .docbar.tight .status-text, .docbar.tight .bar-label { display: none; }
 .docbar.tight .status:not(.problem) { min-width: 0; }
-.docbar { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
 .docbar-slot, .docbar-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .docbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; flex: none; }
 .docbar { grid-row: 1; }
@@ -273,7 +296,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .doing { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 99px; box-shadow: var(--shadow-2); cursor: pointer; font-size: 12.5px; color: var(--ink-2); max-width: 520px; animation: rise 0.2s ease-out; }
 .doing b { color: var(--ink); }
 .doing span:not(.pulse):not(.avatar) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pulse { width: 7px; height: 7px; border-radius: 50%; background: #d97757; animation: pulse 1s ease-in-out infinite; flex: none; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; flex: none; }
 
 /* welcome */
 .welcome { position: absolute; inset: 0; overflow: auto; background-color: var(--stage); background-image: radial-gradient(var(--stage-dot) 1px, transparent 1px); background-size: 16px 16px; }
@@ -340,17 +363,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .times { color: var(--ink-3); }
 
 /* the assistant */
-.assistant { position: absolute; inset: 0; display: grid; grid-template-rows: 1fr auto; }
+.assistant { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr auto; }
+/* Who answers, and in what model: a pop-up button at the panel's top. */
+.assistant-head { display: flex; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); min-width: 0; }
+.who-pick { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; height: 28px; padding: 0 8px 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: 590 12.5px var(--font); cursor: pointer; }
+.who-pick:hover:not(:disabled), .who-pick.menu-open { background: var(--line); }
+.who-pick:disabled { cursor: default; opacity: 0.6; }
+.who-pick.loading { cursor: progress; }
+.who-pick > svg { width: 12px; height: 12px; color: var(--ink-3); flex: none; }
+.who-name { flex: none; }
+.who-model { color: var(--ink-3); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.who-menu { min-width: 220px; max-height: min(70vh, 520px); }
+.chat-switch { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 11.5px; }
+.chat-switch::before, .chat-switch::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .chat { overflow: auto; padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 14px; }
 .chat-empty { margin: auto 0; display: grid; gap: 16px; padding-bottom: 10vh; }
 .chat-hello { display: flex; align-items: center; gap: 10px; }
-.claude-mark { width: 30px; height: 30px; border-radius: 9px; background: #d97757; color: #fff; display: grid; place-items: center; flex: none; }
-.claude-mark svg { width: 17px; height: 17px; }
-.claude-mark.small { width: 18px; height: 18px; border-radius: 5px; }
-.claude-mark.small svg { width: 11px; height: 11px; }
+.assistant-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--ink-2); color: #fff; display: grid; place-items: center; flex: none; }
+.assistant-mark svg { width: 17px; height: 17px; }
+.assistant-mark.small { width: 18px; height: 18px; border-radius: 5px; }
+.assistant-mark.small svg { width: 11px; height: 11px; }
 .suggestions { display: grid; gap: 6px; }
 .suggestion { text-align: left; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--raised); cursor: pointer; color: var(--ink-2); }
-.suggestion:hover { border-color: #d97757; color: var(--ink); }
+.suggestion:hover { border-color: var(--accent-line); color: var(--ink); }
 .msg { display: grid; gap: 6px; }
 .msg.user { justify-items: end; }
 .msg.user .bubble { background: var(--accent); color: var(--accent-ink); padding: 8px 12px; border-radius: 14px 14px 4px 14px; max-width: 88%; white-space: pre-wrap; }
@@ -389,9 +424,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .context-add { border: 0; background: transparent; color: var(--ink-3); font-size: 11.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .context-add svg { width: 11px; height: 11px; }
 .composer-row { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--raised); padding: 6px 6px 6px 12px; transition: border-color 0.12s, box-shadow 0.12s; }
-.composer-row:focus-within { border-color: #d97757; box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.15); }
+.composer-row:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--focus-halo); }
 .chat-input { flex: 1; border: 0; outline: none; resize: none; background: transparent; line-height: 1.45; padding: 4px 0; max-height: 180px; }
-.chat-send { width: 30px; height: 30px; border-radius: 8px; border: 0; background: var(--claude); color: #fff; cursor: pointer; display: grid; place-items: center; flex: none; }
+.chat-send { width: 30px; height: 30px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink); cursor: pointer; display: grid; place-items: center; flex: none; }
 .chat-send svg { width: 15px; height: 15px; }
 .chat-send.running { background: var(--ink); }
 .chat-send:disabled { background: var(--line-strong); cursor: default; }
@@ -453,7 +488,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Pressed, a button darkens, as a Mac button does: it doesn't move. */
 .btn:active:not(:disabled) { background: var(--sunken); }
 .btn.primary:active:not(:disabled) { background: var(--accent); filter: brightness(0.92); }
-.btn.claude-button:active:not(:disabled) { background: var(--claude); filter: brightness(0.92); }
+.btn.assistant-button:active:not(:disabled) { background: var(--sunken); }
 .btn.ghost:active:not(:disabled) { background: var(--line); }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }

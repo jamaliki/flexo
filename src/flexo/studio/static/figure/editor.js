@@ -74,11 +74,13 @@ export function mount(studio, main) {
   });
 
   // -- the bar --
-  const addButton = ui.button("Add Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "primary", title: "Add Shape (A)" });
+  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add Shape (A)" });
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
-  const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
-  studio.tools.append(listButton, h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
+  // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
+  studio.tools.append(listButton);
+  studio.inserts.append(addButton, connectButton, gatherButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
   // ("…" only where the Mac app's save panel follows: in a browser each is saved at once.)
   studio.exports = [

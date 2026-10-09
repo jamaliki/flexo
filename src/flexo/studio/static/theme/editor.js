@@ -264,7 +264,8 @@ export function mount(studio, container) {
     // A few, side by side; more (a folder of decks), a pop-up, which keeps to its width.
     clear(showOn, h("span.show-on-label", {}, "Preview"), options.length > 3 ? ui.select({ value, options, onChange }) : ui.segmented({ value, options, onChange }));
   };
-  studio.tools.append(h("span.docbar-title", {}, icon("theme"), "Theme"), h("span.sep"), showOn);
+  // What the theme is shown on, in the middle of the bar (the tab names the theme).
+  studio.inserts.append(showOn);
   // Straight to the file, as an export with nothing to choose is ("…" in the Mac app, whose
   // save panel asks where).
   studio.exports = [{ format: "yaml", label: exportLabel("Full Theme"), hint: "The theme with every setting written out, those it takes from its base theme too" }];

@@ -2332,7 +2332,11 @@ export function figureParts(host) {
     const pad = 0.08 * Math.min(canvas.width, canvas.height);
     const scale = Math.min((canvas.width - 2 * pad) / Math.max(right - left, 1), (canvas.height - 2 * pad) / Math.max(bottom - top, 1));
     const at = ([x, y]) => [canvas.width / 2 + (x - (left + right) / 2) * scale, canvas.height / 2 + (y - (top + bottom) / 2) * scale];
-    const ink = getComputedStyle(host.overlay).getPropertyValue("--accent").trim() || "#3d5afe";
+    // (The accent as a colour a canvas takes: the Mac's may be named, AccentColor, not given.)
+    const probe = h("span", { style: { color: "var(--accent)", display: "none" } });
+    host.overlay.append(probe);
+    const ink = getComputedStyle(probe).color || "#0a7aff";
+    probe.remove();
     context.lineCap = "round";
     context.lineJoin = "round";
     // Segments far to near, the near ones darker and thicker: the trace reads in depth.

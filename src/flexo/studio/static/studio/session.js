@@ -184,6 +184,9 @@ export class Session {
     this.lastWho = null;                  // who made the last change from elsewhere
     this.container = h("div.doc-view");
     this.tools = h("div.docbar-group");
+    // What adds to the document (a deck's Text, Table, Figure...), in the middle of the bar,
+    // as Keynote's are.
+    this.inserts = h("div.docbar-group");
     this.actions = h("div.docbar-group");
     this.commands = () => [];
     this.exports = [];      // what the kind exports: [{ format, label }], for the Mac app's menu

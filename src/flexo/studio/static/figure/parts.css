@@ -8,7 +8,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-marks { position: absolute; inset: 0; pointer-events: none; }
 /* A chosen part's frame is where the part is, at once: it never glides there. */
 /* Frames as wide as every frame on a slide (--frame): chosen, solid; pointed at, dashed. */
-.fig-mark { position: absolute; pointer-events: none; border: var(--frame, 2px) solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
+.fig-mark { position: absolute; pointer-events: none; border: var(--frame, 1px) solid var(--accent); border-radius: 3px; }
 .fig-mark.group { background: transparent; border-style: dashed; }
 /* What a shape with no words is, faintly, where its words will go: a grey that reads on the
    drawing's light shapes and its dark ones alike. */
@@ -18,7 +18,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
    said only as its shape is pointed at or chosen, on a slip of the page's paper. */
 .fig-wordless.tight { visibility: hidden; }
 .fig-wordless.tight.pointed { visibility: visible; z-index: 2; color: var(--text-small); background: var(--raised); padding: 2px 5px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
-.fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; background: var(--raised); border: 1.5px solid var(--accent); border-radius: 2px; touch-action: none; }
+.fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 8px; height: 8px; margin: -4px 0 0 -4px; box-sizing: border-box; background: #ffffff; border: 1px solid var(--accent); border-radius: 1.5px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18); touch-action: none; }
 .fig-size::before { content: ""; position: absolute; inset: -6px; }
 .fig-size:hover { background: var(--accent); }
 .fig-size.nw, .fig-size.se { cursor: nwse-resize; }
@@ -43,12 +43,12 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
 /* Its ends, each a handle: dragged round its shape, or onto another, the end goes there --
    its way drawn to the side it would meet, that shape framed. */
-.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: var(--raised); border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: #ffffff; border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
 .fig-end::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
 .fig-end:hover { background: var(--accent); }
 .fig-ending .fig-end, .fig-ending .fig-next { visibility: hidden; }
 /* A curved line's middle, dragged to bend it: a square handle, as a drawing program's. */
-.fig-bend { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; border-radius: 2px; transform: rotate(45deg); background: var(--raised); border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+.fig-bend { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; border-radius: 2px; transform: rotate(45deg); background: #ffffff; border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
 .fig-bend::before { content: ""; position: absolute; inset: -6px; }
 .fig-bend:hover { background: var(--accent); }
 .fig-ending .fig-bend { visibility: hidden; }
@@ -189,8 +189,8 @@ details.advanced > .inner { margin-top: 10px; }
 .fig-marks { transition: opacity 0.16s ease-out; }
 .fig-dragging .fig-marks, .fig-dragging .fig-hover, .fig-landing .fig-marks { opacity: 0; transition: none; }
 body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-select: none; }
-.fig-lifted { filter: drop-shadow(0 6px 10px rgba(30, 25, 20, 0.22)); }
-.fig-settling { filter: drop-shadow(0 3px 6px rgba(30, 25, 20, 0.16)); }
+.fig-lifted { filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22)); }
+.fig-settling { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.16)); }
 .fig-astray { opacity: 0.5; }
 .fig-faded { opacity: 0.18; transition: opacity 0.15s ease-out; }
 [data-flexo-entity] { transition: transform 0.16s cubic-bezier(.2, .8, .2, 1); }

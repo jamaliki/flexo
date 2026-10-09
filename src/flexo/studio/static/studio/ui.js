@@ -506,8 +506,12 @@ export const ui = {
   },
 
   // A font, from a pop-up button: its menu lists the fonts there are, each name in its own
-  // face, and typing finds one -- or names one not listed. Empty is `placeholder`.
+  // face, those most often wanted first, and typing finds one -- or names one not listed.
+  // Empty is `placeholder`.
   font({ value, options = [], placeholder = "Default", onChange, key } = {}) {
+    // The system's own faces (".SF NS") are not for documents: not offered.
+    options = options.filter((name) => !String(name).startsWith("."));
+    const suggested = suggestedFonts(options);
     const label = h("span");
     const node = h("button.select.font-pick", { type: "button", "aria-haspopup": "menu", title: "Choose a Font" }, label, icon("chevron-down"));
     if (key) node.dataset.key = key;
@@ -530,10 +534,12 @@ export const ui = {
       const render = () => {
         const typed = search.value.trim();
         const query = typed.toLowerCase();
+        const all = [...new Set([...options, ...suggested])].sort((a, b) => a.localeCompare(b));
         clear(list,
           query ? null : item("", placeholder),
-          options.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
-          typed && !options.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);
+          query || !suggested.length ? null : [h("div.menu-title", {}, "Suggested"), suggested.map((name) => item(name, name, true)), h("div.menu-title", {}, "All Fonts")],
+          all.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
+          typed && !all.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);
       };
       search.addEventListener("input", render);
       search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); list.querySelector(".menu-item")?.click(); } });
@@ -823,6 +829,20 @@ function nextField(from, step) {
   const items = tabbables(from.closest(".dialog") || document);
   const at = items.indexOf(from);
   items[(at + step + items.length) % items.length]?.focus();
+}
+
+// -- fonts ----------------------------------------------------------------------------
+
+// The faces most often wanted for slides and figures, in the order offered: those of them
+// there are. Helvetica is always there: where it isn't installed, flexo sets it in Liberation
+// Sans, drawn to its widths.
+export const SUGGESTED_FONTS = ["Helvetica", "Helvetica Neue", "Avenir Next", "Gill Sans", "Futura", "Optima",
+  "Inter", "IBM Plex Sans", "Figtree", "Source Sans 3", "Georgia", "Palatino", "Baskerville", "Charter",
+  "Iowan Old Style", "Latin Modern Roman"];
+const EVERYWHERE = new Set(["helvetica"]);
+export function suggestedFonts(options) {
+  const there = new Set(options.map((name) => String(name).toLowerCase()));
+  return SUGGESTED_FONTS.filter((name) => there.has(name.toLowerCase()) || EVERYWHERE.has(name.toLowerCase()));
 }
 
 // -- popovers -------------------------------------------------------------------------

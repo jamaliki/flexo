@@ -173,6 +173,7 @@ def _pretty(name: str) -> str:
         "claude-ai": "Claude",
         "cursor": "Cursor",
         "codex": "Codex",
+        "codex-mcp-client": "Codex",
     }
     return known.get(name.lower(), name.replace("-", " ").strip().title() or "Agent")
 

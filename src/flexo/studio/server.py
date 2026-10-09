@@ -254,6 +254,8 @@ class Handler(BaseHTTPRequestHandler):
             from flexo.studio.agent import TOOLS
 
             self._json({"tools": TOOLS})
+        elif route == "/api/assistant/models":
+            self._json(_assistant(workspace).models(_one(query, "provider")))
         else:
             self._fail(HTTPStatus.NOT_FOUND, "not found")
 
@@ -368,14 +370,20 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/assistant/clear":
             _assistant(workspace).clear()
             self._json({"ok": True})
+        elif route == "/api/assistant/provider":
+            model = data.get("model")
+            why = _assistant(workspace).choose(
+                str(data.get("provider") or ""), None if model is None else str(model)
+            )
+            if why:
+                self._fail(HTTPStatus.CONFLICT, why)
+            else:
+                self._json({"ok": True})
         else:
             self._fail(HTTPStatus.NOT_FOUND, "not found")
 
     def _session(self) -> dict[str, Any]:
         workspace = self.workspace
-        from flexo.studio.assistant import unavailable
-
-        assistant = workspace.assistant
         return {
             "folder": str(workspace.root),
             "address": getattr(workspace, "address", ""),
@@ -388,14 +396,7 @@ class Handler(BaseHTTPRequestHandler):
             "open": sorted(workspace.docs),
             "presence": workspace.present(),
             "activity": list(workspace.activity)[-120:],
-            "assistant": assistant.state()
-            if assistant
-            else {
-                "available": unavailable() is None,
-                "why": unavailable(),
-                "running": False,
-                "transcript": [],
-            },
+            "assistant": _assistant(workspace).state(),
             "start": self.start_file,
         }
 
