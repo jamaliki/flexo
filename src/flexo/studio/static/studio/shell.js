@@ -1424,26 +1424,28 @@ export function connectDialog(workspace) {
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them. A
 // row marked `app` is the Mac app's menus' own (a browser keeps those keys for itself).
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
+  ["General", [["⌘ K", "Show or Hide the Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
-    ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌘ W", "Close Tab", "app"],
+    ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
   ["In the Slide List", [["↩", "New Slide"], ["⇧ ↑ ↓", "Select the Slide Above or Below Too"], ["⌘ A", "Select All Slides"], ["⌫", "Delete"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌥ ↑ ↓", "Move the Slides Up or Down"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Select All Objects"], ["⇧ or ⌘ Click", "Select One More (or One Less)"], ["Drag", "Select the Objects It Touches (from an Empty Spot)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
-    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["Type", "Type Over a Chosen Text’s Words"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"]]],
-  ["While Typing", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"],
-    ["↩", "New Line (in a List: New Item; in a Table: the Cell Below)"], ["⇧ ↩", "New Line in a List’s Item or a Cell (or ⌥ ↩)"],
-    ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["Esc or ⌘ ↩", "Done"]]],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["Type", "Type Over a Chosen Text’s Words"], ["↑ ↓", "Previous or Next Object"], ["← →", "Object in the Column Beside It"],
+    ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"], ["Esc", "Cancel a Drag (While Dragging)"]]],
+  ["While Typing", [["↩", "New Line (in a List: New Item; in a Table: the Cell Below)"], ["⇧ ↩", "New Line in a List’s Item or a Cell (or ⌥↩)"],
+    ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["⌥ ⌘ E", "Inline Equation"], ["Esc or ⌘ ↩", "Done"]]],
+  // (A figure's labels are drawn as typed, but for maths: none of these is theirs.)
+  ["Styling a Slide’s Words (Not a Figure’s Labels)", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group the Selected Shapes"], ["⇥", "Next Shape (⇧⇥: Previous), Also While Typing a Label"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"],
     ["Drag", "Select the Shapes It Touches (from an Empty Spot, in a Figure File)"], ["⌘ A", "Select All Shapes"], ["← → ↑ ↓", "Select the Shape That Way"],
-    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘ ↩: Done)"],
-    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy the Shape to Where It Is Let Go"], ["⌘ Drag", "Place a Handle Freely, Without Snapping"],
-    ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
+    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘↩: Done)"],
+    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go (a Structure Turns Instead)"], ["⌘ Drag", "Place a Handle Freely, Without Snapping"],
+    ["⇧ Drag", "Keep a Shape’s Proportions (on a Corner Handle)"], ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle)"], ["Esc", "Cancel a Drag (While Dragging)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
     ["⌘ D", "Duplicate Shape"], ["⌫", "Delete Shape"], ["Esc", "Deselect"], ["⌘ + −", "Zoom In or Out (a Figure File)"], ["⌘ 0", "Actual Size (a Figure File)"], ["⇧ ⌘ 0", "Zoom to Fit (a Figure File)"]]],
   ["Presenting", [["→ Space ↩", "Next Build or Slide"], ["PgDn", "Next (a Clicker’s Forward)"], ["← ⌫", "Previous"], ["PgUp", "Previous (a Clicker’s Back)"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
@@ -1479,16 +1481,18 @@ function toInspector() {
 function shortcutsDialog() {
   // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
   // them, and keys given side by side ("↑ ↓", "Home End") are each a keycap of their own.
-  // "or" between modifiers ("⌥ or ⇧ ← →") is a word between keycaps, the modifiers then
-  // each a keycap of their own and the keys after them too; "Click" (and "Drag",
-  // "Double-Click", "Type") is a word, after its modifier's keycap ("⇧ Click").
+  // "or" is a word between keycaps: between two chords ("Esc or ⌘ ↩") each is as it would
+  // be alone; between modifiers ("⌥ or ⇧ ← →") the modifiers are each a keycap of their own
+  // and the keys after them too. "Click" (and "Drag", "Double-Click", "Type") is a word,
+  // after its modifier's keycap ("⇧ Click").
   const chords = (keys) => {
     const out = [];
     const words = keys.split(" ").filter(Boolean);
-    const alone = words.includes("or");
+    const modifier = (key) => /^[⌘⇧⌥⌃]$/.test(key || "");
+    const alone = words.some((key, at) => key === "or" && modifier(words[at - 1]) && modifier(words[at + 1]));
     let held = "";
     for (const key of words) {
-      if (/^[⌘⇧⌥⌃]$/.test(key)) { if (alone) out.push({ key }); else held += key; }
+      if (modifier(key)) { if (alone) out.push({ key }); else held += key; }
       else if (["or", "Click", "Drag", "Double-Click", "Type"].includes(key)) { if (held) out.push({ key: held }); held = ""; out.push({ word: key === "or" ? "or" : key.toLowerCase() }); }
       else out.push({ key: held + key });
     }
