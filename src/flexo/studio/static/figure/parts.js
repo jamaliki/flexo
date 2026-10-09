@@ -281,6 +281,8 @@ export function figureParts(host) {
     return id;
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
+  // A shape that is the whole figure: the only part its layout holds (a structure added alone).
+  const lone = (id) => Boolean(nodeOf(id)) && parentOf(id)?.id === model()?.root && (parentOf(id)?.children || []).length === 1;
   // What several things are called together: "Shapes", "Lines", "Groups", or "Items".
   const isLine = (id) => Boolean(edgeOf(id) || netOf(id));
   // (A line or a joined line: their words typed alike, at the line.)
@@ -1423,6 +1425,10 @@ export function figureParts(host) {
   function remove(ids = state.selected, keep = [], { cut = false } = {}) {
     const gone = ids.filter((id) => id !== model()?.root);
     if (!gone.length) return;
+    // Every shape of a figure on a slide taken out -- a structure added on its own, deleted --
+    // the figure goes with them, as a group goes whose objects are all deleted: never left an
+    // empty object on the slide. (The host says so: a figure file stays, empty.)
+    if (host.emptied && (model()?.nodes || []).every((node) => gone.some((id) => inside(node.id, id)))) { host.emptied({ cut }); return; }
     const kept = keep.filter((id) => typeOf(id) && !gone.includes(id));
     act({ do: "delete", ids: gone }, { select: false, label: cut ? said({ do: "delete", ids: gone }).replace(/^Delete\b/, "Cut") : null });
     // (At once: a ⌫ pressed again before the figure comes back acts on nothing.)
@@ -1455,15 +1461,26 @@ export function figureParts(host) {
       return items;
     }
     if (!isRoot && (node || group || isLine(id))) items.push({ icon: "pencil", label: "Edit Text", keys: "↩", run: () => openInline(id) });
+    // A molecule turned a step at a time, and its view reset, as its View buttons do.
+    if (node?.kind === "structure") {
+      const turn = (by) => {
+        const next = ((((Number(node.properties?.yaw ?? 0) + by) % 360) + 540) % 360) - 180;
+        update({ type: "node", id }, { "properties.yaw": next || null });
+      };
+      items.push({ icon: "left", label: "Rotate Left 30°", run: () => turn(-30) }, { icon: "right", label: "Rotate Right 30°", run: () => turn(30) },
+        { icon: "refresh", label: "Reset View", run: () => update({ type: "node", id }, { "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }) });
+    }
     if (node) {
       const kind = nextKind(node);
       // A opens the palette of shapes, to add after the shape chosen: it is that item's key.
       const word = addWhere(id, true, kind).branch?.word || "after";
       // (Into its one line on: inserted there, between the two.)
       const verb = !addWhere(id, true, kind).branch && splices(id, kind) ? "Insert" : "Add";
-      items.push({ icon: "plus", label: `${verb} ${titled(parts[kind].title)} ${titled(word)}${parts[kind].needs_file ? "…" : ""}`, run: () => addPart(kind, { after: id, source: id }) },
-        { icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) },
-        { icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
+      // (A shape that is the whole figure -- a structure on its own -- is grown into a figure
+      // from the palette, not given a block or a line of a diagram's at once.)
+      if (!lone(id)) items.push({ icon: "plus", label: `${verb} ${titled(parts[kind].title)} ${titled(word)}${parts[kind].needs_file ? "…" : ""}`, run: () => addPart(kind, { after: id, source: id }) });
+      items.push({ icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) });
+      if (!lone(id)) items.push({ icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
     }
     // A line: a shape put into it, between the two it joins -- a block, or one chosen from the
     // palette -- ready for its words.
@@ -4569,6 +4586,9 @@ export function figureParts(host) {
   function crumbs(id) {
     const trail = [];
     for (let at = parentOf(id); at; at = parentOf(at.id)) trail.unshift(at.id);
+    // (A figure of one shape -- a structure added on its own -- is that shape, on a slide: no
+    // figure round it to go up to.)
+    if (host.crumbs && lone(id)) trail.length = 0;
     if (!host.crumbs && !trail.length) return null;
     return h("div.crumbs", {}, host.crumbs ? host.crumbs() : null, trail.map((group, index) => [
       index || host.crumbs ? icon("chevron") : null,
@@ -4644,7 +4664,8 @@ export function figureParts(host) {
         h("div.insp-row", {}, titleBlock(glyph(kind), part.title, null, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
       kind === "structure" ? structureProblem(node) : null,
       shapeProblem(node, part),
-      colourSection([{ type: "node", id: node.id, item: node }]),
+      // (A structure is drawn in its own colours, by mol-sketch: no tone or colours of a shape's.)
+      kind === "structure" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length + joined.length)),
@@ -5313,15 +5334,15 @@ export function figureParts(host) {
         };
         const button = (glyphName, title, run) => ui.button("", run, { small: true, icon: glyphName, title });
         return ui.field(field.label, h("div.view-pad", {},
-          button("left", "Rotate left 30°", () => turn("yaw", -30)),
-          button("right", "Rotate right 30°", () => turn("yaw", 30)),
-          button("up", "Tilt back 30°", () => turn("pitch", -30)),
-          button("down", "Tilt forward 30°", () => turn("pitch", 30)),
+          button("left", "Rotate Left 30°", () => turn("yaw", -30)),
+          button("right", "Rotate Right 30°", () => turn("yaw", 30)),
+          button("up", "Tilt Back 30°", () => turn("pitch", -30)),
+          button("down", "Tilt Forward 30°", () => turn("pitch", 30)),
           h("span.sep"),
           button("minus", "Zoom Out", () => zoom(1 / 1.25)),
           button("plus", "Zoom In", () => zoom(1.25)),
           h("span.sep"),
-          button("refresh", "Reset rotation and zoom", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
+          button("refresh", "Reset View", () => write({ "properties.yaw": null, "properties.pitch": null, "properties.roll": null, "properties.zoom": null }, null))), options);
       }
       case "integer":
       case "number":
@@ -5930,7 +5951,7 @@ export function figureParts(host) {
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, turnable,
-    addPalette, addPart, gather, groupMenu, canGroup, band, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
+    addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }
