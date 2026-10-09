@@ -477,9 +477,13 @@ class Figure:
         lane: str | None = None,
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
+        bend: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        tail: EdgeHead | None = None,
+        width: float | None = None,
+        head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
         cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
@@ -500,9 +504,13 @@ class Figure:
             lane=lane,
             via=via,
             shape=shape,
+            bend=bend,
             line=line,
             arrow=arrow,
             head=head,
+            tail=tail,
+            width=width,
+            head_size=head_size,
             back_label=back_label,
             cofactors=cofactors,
         )
@@ -2446,9 +2454,13 @@ class GroupBuilder:
         lane: str | None = None,
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
+        bend: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        tail: EdgeHead | None = None,
+        width: float | None = None,
+        head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
         cofactors: tuple[str | tuple[TextRun, ...], str | tuple[TextRun, ...]] | None = None,
     ) -> EdgeSpec:
@@ -2467,12 +2479,20 @@ class GroupBuilder:
         reports ``routing.via.clamped`` if the geometry left it no choice.
 
         ``shape="straight"`` draws one straight segment between the two outlines
-        instead of a routed path; ``"auto"`` follows the figure's ``lines``
-        convention. ``line="dashed"`` or ``"dotted"`` strokes it that way, and
-        ``arrow="none"`` (an undirected link) or ``"both"`` moves its arrowheads.
+        instead of a routed path, and ``"curved"`` one smooth curve (``bend=0.2``
+        bows its middle a fifth of its length to the left of its travel); ``"auto"``
+        follows the figure's ``lines`` convention. ``line="dashed"`` or
+        ``"dotted"`` strokes it that way, and ``arrow="none"`` (an undirected
+        link) or ``"both"`` moves its arrowheads. ``width=2`` draws it 2pt wide,
+        its heads grown to match, and ``head_size=1.5`` makes them half as large
+        again.
 
-        For pathways, gene circuits, and reactions, ``head=`` says what the
-        connector does to its target, after SBGN: ``"inhibition"`` (a bar, ⊣),
+        ``head=`` draws its head in a shape of its own: one of the theme's --
+        ``"triangle"``, ``"stealth"``, ``"latex"``, ``"open"`` -- or a filled
+        ``"dot"``, ``"diamond"`` or ``"square"``; ``tail=`` the head at its start,
+        with ``arrow="both"``, when that one differs. For pathways, gene circuits,
+        and reactions, ``head=`` says what the connector does to its target, after
+        SBGN: ``"inhibition"`` (a bar, ⊣),
         ``"catalysis"`` (an open circle), ``"stimulation"`` (an open triangle),
         ``"necessary"`` (a bar and an open triangle), or ``"modulation"`` (an
         open diamond). ``arrow="reversible"`` draws a reversible step as two
@@ -2494,9 +2514,13 @@ class GroupBuilder:
             lane,
             via=_side(via, "via side"),
             shape=shape,
+            bend=bend,
             line=line,
             arrow=arrow,
             head=head,
+            tail=tail,
+            width=width,
+            head_size=head_size,
             back_label=_label(back_label),
             cofactors=tuple(_label(item) for item in cofactors) if cofactors else (),
         )

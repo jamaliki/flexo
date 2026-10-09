@@ -603,11 +603,37 @@ from far down the chart comes in by a corner the flow does not use.
 m.connect(x, z, line="dashed")                  # or "dotted"
 m.connect(top, bottom, arrow="none", label="shared weights")  # undirected
 m.connect(a, b, arrow="both")
+m.connect(a, b, shape="curved")                 # one smooth curve
+m.connect(a, b, width=2, head_size=1.5)         # 2pt wide, heads larger again
 ```
 
 `line=` changes only the stroke. `arrow=` says where the arrowheads go:
 `"end"` (the default, at the target), `"none"` for an undirected link, which
 then meets both components, or `"both"`. Nets take `line=` too.
+
+`shape="curved"` draws one smooth curve from the side of the source that faces
+the target to the side of the target that faces back. It bows away from the
+middle of the figure (round a cycle, outwards), else to the left of its travel,
+so two curves between one pair, one each way, bow apart; `via="south"` bows it
+that way instead, and `depart=` and `arrive=` sides make it leave and meet those
+sides square, as a hand-drawn arrow does. `bend=` says how far it bows: its
+middle stood off the straight line between its ends by that share of the line's
+length, to the left of its travel (`0.3`) or the right (`-0.3`); in the studio,
+drag the square handle on a curved or straight line's middle (double-click it to
+let the line bow of itself again). Where a curve bows out of its container, the
+container makes room for it, as it does for any line.
+
+`width=` draws a line wider or thinner than the theme's, in points, and its
+arrowheads grow and shrink with it, as a drawing program's do; `head_size=`
+scales the heads on top of that (`1.5`, half as large again). In the studio
+they are a line's **Routing**, **Line Width** and **Arrowhead Size**.
+
+`head=` draws a line's head in a shape of its own: one of the theme's arrow
+shapes by name, whatever the theme (`"triangle"`, `"stealth"`, `"latex"`,
+`"open"`), or a filled `"dot"`, `"diamond"` or `"square"`; the SBGN heads (above)
+say what a line does. With `arrow="both"`, `tail=` gives its start a head of
+its own (`connect(a, b, arrow="both", head="triangle", tail="dot")`). In the
+studio they are **Arrowhead** and **Start Arrowhead**, each shown as it looks.
 
 `connect(a, a)` draws a loop: a recurrent cell's state fed back to itself, a
 state that can stay where it is. It goes on the component's emptiest side.
@@ -971,6 +997,15 @@ changes in words, to go back or forward to any of them.
   documents (as their YAML), *look* at pages as pictures with their warnings,
   see what you are looking at, and say what it is doing. It joins the studio open
   on the folder, or starts one. Any MCP client can run `flexo studio mcp` the same way.
+- **Shared folders**: a folder kept by Dropbox, Google Drive, iCloud Drive,
+  OneDrive or Box can be open in studios on several computers at once. Each
+  studio takes in what the others save as the service brings it, merged with
+  what is being typed there. When two computers save a file at once, the copy
+  the service keeps beside it ("talk (Ben's conflicted copy).yaml", "talk
+  [Conflict].yaml") is merged back in and moved out of the folder, to
+  `~/Library/Application Support/flexo/merged`. In such a folder a document is
+  saved after 1.5 s without typing (at most every 8 s), not 0.35 s, so the
+  service carries fewer versions and two computers save at once less often.
 - ⌘K searches every command, slide, and file; `?` lists the keys.
 
 Other packages add kinds of document through the `flexo.studio` entry-point

@@ -39,7 +39,14 @@ class RoutedEdge:
     draws straight through, which reads as a smudge at the joint.
     """
     straight: bool = False
-    """Whether this edge is one straight segment rather than a routed path."""
+    """Whether this edge is drawn between its outlines rather than routed: one straight
+    segment, or one curve (``curve``)."""
+    curve: tuple[Point, Point, Point, Point] | None = None
+    """A curved edge's shaft as one cubic Bézier (its start, two controls, and end);
+    ``shaft`` is the same read as pieces."""
+    chord: tuple[Point, Point] | None = None
+    """The two points a curved edge's ``bend`` is measured from: the middles of the sides
+    it runs between (an editor's handle on its middle measures from them too)."""
     joined_at: Point | None = None
     """Where this edge merges into another of its bundle and its ink stops."""
     join_arrow: bool = True

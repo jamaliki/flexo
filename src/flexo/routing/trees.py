@@ -4,7 +4,8 @@ A bundle's routed tree is read as a graph (``WireGraph``) and cut into the
 edges and nets it carries, each with its shaft, caption position and
 diagnostics; the joins where its lines meet get their marks -- a plain T, an
 arrowhead into the joined line, or a dot. Straight edges, which skip the grid,
-are drawn here too: one segment from outline to outline.
+are drawn here too: one segment from outline to outline -- and curved edges, one
+smooth curve.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from flexo.routing.hints import SideBias, via_diagnostics
 from flexo.routing.ink import (
     edge_label_position,
     edge_shaft,
+    head_length,
     rail_label_position,
     shorten_end,
     shorten_start,
@@ -317,8 +319,8 @@ def routed_edge(
         start = {
             "none": 0.0,
             "end": style.connector_standoff.points,
-            "both": style.arrow_length.points + style.connector_standoff.points,
-            "reversible": style.arrow_length.points + style.connector_standoff.points,
+            "both": head_length(edge, style) + style.connector_standoff.points,
+            "reversible": head_length(edge, style) + style.connector_standoff.points,
         }[edge.arrow]
         shaft = shorten_start(drawn, start)
     metrics = measurer.measure(edge.label) if edge.label else None
@@ -358,12 +360,12 @@ def _shaft(edge: EdgeSpec, drawn: tuple[Point, ...], style: LayoutStyle) -> tupl
     head's length plus ``connector_standoff`` short, so the tip lands just clear.
     """
 
-    head = style.arrow_length.points + style.connector_standoff.points
+    head = head_length(edge, style) + style.connector_standoff.points
     if edge.arrow == "none":
         return drawn
     shaft = edge_shaft(
         drawn,
-        arrow_length=style.arrow_length.points,
+        arrow_length=head_length(edge, style),
         standoff=style.connector_standoff.points,
     )
     if edge.arrow in {"both", "reversible"}:
@@ -590,6 +592,268 @@ def straight_edge(
     start = _outline_along(source, first.translated(shift.x, shift.y), (dx, dy), style)
     end = _outline_along(target, second.translated(shift.x, shift.y), (-dx, -dy), style)
     return replace(routed_edge(edge, (start, end), style, measurer), straight=True)
+
+
+CURVE_BEND = 0.25
+"""How far a curved edge's two control points stand off the line between its ends, as a
+share of its length: its middle bows out three quarters of that (3/16 of its length)."""
+CURVE_REACH = 0.45
+"""How far a curved edge leaving or meeting a side square runs out from it before it
+turns, as a share of the distance between its ends."""
+CURVE_SAMPLES = 32
+"""How many pieces a curve is read as, for lint, captions and its shaft's trims."""
+
+type Cubic = tuple[Point, Point, Point, Point]
+
+
+def curved_edge(
+    edge: EdgeSpec,
+    fitted: FittedFigure,
+    style: LayoutStyle,
+    measurer: TextMeasurer,
+    *,
+    offset: float = 0.0,
+    paired: bool = False,
+    middle: Point | None = None,
+) -> RoutedEdge:
+    """One smooth curve from outline to outline: a cubic Bézier between the sides of the
+    two that face each other, bowed to one side (see ``EdgeSpec.shape``), or leaving and
+    meeting square the sides ``depart`` and ``arrive`` name. ``offset`` moves it sideways
+    as a straight edge's; ``paired``, it shares its two ends with another, and bows to the
+    left of its travel (the other way, the other way); ``middle`` is the figure's, which
+    it bows away from. Where it bows out of its container, the container is given the room
+    (``flexo.routing.room``), as for any line.
+
+    Its centerline is the curve read as ``CURVE_SAMPLES`` pieces, which lint, the caption
+    and the shaft's trims read as any line's; ``curve`` is the shaft, as one cubic.
+    """
+
+    source = fitted.node(edge.source.node_id)
+    target = fitted.node(edge.target.node_id)
+    controls = _curve(edge, source, target, offset=offset, paired=paired, middle=middle)
+    first = _leaving(source, controls, style, at_start=True)
+    last = _leaving(target, controls, style, at_start=False)
+    if last - first < 1e-6:
+        first, last = 0.0, 1.0  # the two overlap: drawn centre to centre
+    curve = _between(controls, first, last)
+    centerline = tuple(_at(curve, step / CURVE_SAMPLES) for step in range(CURVE_SAMPLES + 1))
+    routed = routed_edge(edge, centerline, style, measurer)
+    shaft = routed.shaft
+    drawn = _between(curve, _parameter(centerline, shaft[0]), _parameter(centerline, shaft[-1]))
+    # (Its caption is placed by its middle: see ``flexo.routing.labels``.)
+    return replace(routed, straight=True, curve=drawn, chord=(controls[0], controls[3]))
+
+
+def _curve(
+    edge: EdgeSpec,
+    source: FittedNode,
+    target: FittedNode,
+    *,
+    offset: float,
+    paired: bool,
+    middle: Point | None,
+) -> Cubic:
+    """The curve a curved edge is drawn on, side to side: leaving its source and meeting
+    its target square to the sides named (``depart``, ``arrive``), else along the line
+    between them, its middle stood off that line as far as ``bend`` says -- else bowed of
+    itself (``_bow``), or as the sides alone carry it."""
+
+    a, b = source.bounds.center, target.bounds.center
+    leave = edge.depart or _facing(source.bounds, b)
+    meet = edge.arrive or _facing(target.bounds, a)
+    start, end = _side_middle(source.bounds, leave), _side_middle(target.bounds, meet)
+    square = edge.depart is not None or edge.arrive is not None
+    dx, dy = end.x - start.x, end.y - start.y
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
+    if not square:
+        # Offsets in one fixed frame per pair, as a straight edge's.
+        if (start.x, start.y) > (end.x, end.y):
+            offset = -offset
+        start = start.translated(-dy / length * offset, dx / length * offset)
+        end = end.translated(-dy / length * offset, dx / length * offset)
+    left = Point(dy / length, -dx / length)  # to the left of its travel, y growing down
+    if square:
+        out, into = leave.vector, meet.vector
+        reach = max(length * CURVE_REACH, 12.0)
+    else:
+        out, into = Point(dx / length, dy / length), Point(-dx / length, -dy / length)
+        reach = length / 3.0
+    # How far the way it leaves and meets carries its middle off the line, of itself.
+    lean = left.x * (out.x + into.x) + left.y * (out.y + into.y)
+
+    def shaped(rise: float, run: float = reach) -> Cubic:
+        """The curve whose middle stands ``rise`` to the left of the line between its ends
+        (a cubic's middle is 3/8 of the way to its controls' sum: both are moved across)."""
+
+        across = (8.0 * rise / 3.0 - run * lean) / 2.0
+        return (
+            start,
+            Point(start.x + out.x * run + left.x * across, start.y + out.y * run + left.y * across),
+            Point(end.x + into.x * run + left.x * across, end.y + into.y * run + left.y * across),
+            end,
+        )
+
+    if edge.bend is not None:
+        return shaped(edge.bend * length)
+    if square:
+        return shaped(3.0 * reach * lean / 8.0)
+    way = _bow(edge, start, end, left, length, paired=paired, middle=middle)
+    return shaped(way * 0.75 * CURVE_BEND * length)
+
+
+def _bow(
+    edge: EdgeSpec,
+    a: Point,
+    b: Point,
+    left: Point,
+    length: float,
+    *,
+    paired: bool,
+    middle: Point | None,
+) -> float:
+    """Which way a curved edge bows: 1 to the left of its travel, -1 to the right."""
+
+    if edge.via is not None:
+        toward = edge.via.vector
+        along = left.x * toward.x + left.y * toward.y
+        if abs(along) > 1e-9:
+            return 1.0 if along > 0.0 else -1.0
+    if not paired and middle is not None:
+        centre = Point((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+        away = left.x * (centre.x - middle.x) + left.y * (centre.y - middle.y)
+        if abs(away) > 0.1 * length:
+            return 1.0 if away > 0.0 else -1.0
+    return 1.0
+
+
+def _facing(bounds: Rect, toward: Point) -> Side:
+    """The side of ``bounds`` that faces ``toward``."""
+
+    centre = bounds.center
+    dx, dy = toward.x - centre.x, toward.y - centre.y
+    if abs(dx) * bounds.height >= abs(dy) * bounds.width:
+        return Side.EAST if dx >= 0.0 else Side.WEST
+    return Side.SOUTH if dy >= 0.0 else Side.NORTH
+
+
+def _side_middle(bounds: Rect, side: Side) -> Point:
+    out = side.vector
+    centre = bounds.center
+    return centre.translated(out.x * bounds.width / 2.0, out.y * bounds.height / 2.0)
+
+
+def _leaving(node: FittedNode, curve: Cubic, style: LayoutStyle, *, at_start: bool) -> float:
+    """Where along ``curve`` (0 to 1) it crosses ``node``'s outline: leaving it, from its
+    start; else meeting it, at its end. A drawn shape's outline inside its box is reached
+    as a straight edge reaches it."""
+
+    steps = 64
+    order = [step / steps for step in range(steps + 1)]
+    if not at_start:
+        order.reverse()
+    inner = order[0]
+    for t in order[1:]:
+        if not _inside(node, _at(curve, t)):
+            outer = t
+            break
+        inner = t
+    else:
+        return order[0]
+    for _ in range(30):
+        half = (inner + outer) / 2.0
+        if _inside(node, _at(curve, half)):
+            inner = half
+        else:
+            outer = half
+    t = (inner + outer) / 2.0
+    pace = _speed(curve, t)
+    if pace > 1e-9:
+        point, ahead = _at(curve, t), _tangent(curve, t)
+        inward = (-ahead.x, -ahead.y) if at_start else (ahead.x, ahead.y)
+        depth = _depth(node, point, inward, style)
+        t = t - depth / pace if at_start else t + depth / pace
+    return min(max(t, 0.0), 1.0)
+
+
+def _inside(node: FittedNode, point: Point) -> bool:
+    bounds = node.bounds
+    kind = node.measured.spec.kind
+    centre = bounds.center
+    if kind in ROUND_KINDS:
+        radius = min(bounds.width, bounds.height) / 2.0
+        return point.distance_to(centre) <= radius
+    if kind == "decision":
+        a, b = bounds.width / 2.0, bounds.height / 2.0
+        return abs(point.x - centre.x) / a + abs(point.y - centre.y) / b <= 1.0
+    return bounds.contains_point(point)
+
+
+def _at(curve: Cubic, t: float) -> Point:
+    p0, p1, p2, p3 = curve
+    u = 1.0 - t
+    a, b, c, d = u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t
+    return Point(
+        a * p0.x + b * p1.x + c * p2.x + d * p3.x, a * p0.y + b * p1.y + c * p2.y + d * p3.y
+    )
+
+
+def _derivative(curve: Cubic, t: float) -> Point:
+    p0, p1, p2, p3 = curve
+    u = 1.0 - t
+    a, b, c = 3.0 * u * u, 6.0 * u * t, 3.0 * t * t
+    return Point(
+        a * (p1.x - p0.x) + b * (p2.x - p1.x) + c * (p3.x - p2.x),
+        a * (p1.y - p0.y) + b * (p2.y - p1.y) + c * (p3.y - p2.y),
+    )
+
+
+def _speed(curve: Cubic, t: float) -> float:
+    pace = _derivative(curve, t)
+    return (pace.x * pace.x + pace.y * pace.y) ** 0.5
+
+
+def _tangent(curve: Cubic, t: float) -> Point:
+    pace, speed = _derivative(curve, t), _speed(curve, t)
+    return Point(pace.x / speed, pace.y / speed) if speed > 1e-12 else Point(0.0, 0.0)
+
+
+def _split(curve: Cubic, t: float) -> tuple[Cubic, Cubic]:
+    """``curve`` cut in two at ``t`` (de Casteljau)."""
+
+    def mix(one: Point, other: Point) -> Point:
+        return Point(one.x + (other.x - one.x) * t, one.y + (other.y - one.y) * t)
+
+    p0, p1, p2, p3 = curve
+    p01, p12, p23 = mix(p0, p1), mix(p1, p2), mix(p2, p3)
+    p012, p123 = mix(p01, p12), mix(p12, p23)
+    middle = mix(p012, p123)
+    return (p0, p01, p012, middle), (middle, p123, p23, p3)
+
+
+def _between(curve: Cubic, first: float, last: float) -> Cubic:
+    """The piece of ``curve`` from ``first`` to ``last`` (0 to 1), as a cubic of its own."""
+
+    if last < 1.0:
+        curve = _split(curve, last)[0]
+    if first > 0.0 and last > 1e-12:
+        curve = _split(curve, min(first / last, 1.0))[1]
+    return curve
+
+
+def _parameter(points: tuple[Point, ...], point: Point) -> float:
+    """Where on a curve read as ``points`` (evenly, 0 to 1) a point on them lies."""
+
+    best, found = float("inf"), 0.0
+    pieces = len(points) - 1
+    for index, (one, other) in enumerate(itertools.pairwise(points)):
+        dx, dy = other.x - one.x, other.y - one.y
+        span = dx * dx + dy * dy
+        share = 0.0 if span < 1e-18 else ((point.x - one.x) * dx + (point.y - one.y) * dy) / span
+        share = min(max(share, 0.0), 1.0)
+        miss = point.distance_to(Point(one.x + dx * share, one.y + dy * share))
+        if miss < best - 1e-9:
+            best, found = miss, (index + share) / pieces
+    return found
 
 
 def _outline_along(

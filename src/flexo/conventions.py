@@ -29,6 +29,13 @@ one net.
     ``"straight"`` draws one segment between the two outlines, the way a
     fully connected layer or a graphical model is drawn.
 
+``arrowheads``
+    The shape of an arrow's head that has none of its own (``head=``).
+    ``"theme"`` (default) draws the theme's (its ``arrow_shape``);
+    ``"triangle"``, ``"stealth"``, ``"latex"`` or ``"open"`` draws that one
+    whatever the theme -- every arrow of a deck's figures a plain triangle,
+    say.
+
 ``pin_spread``
     Where arrows meet a side of a box. The central ``pin_spread`` of the
     side is cut into equal shares, one per arrow, and each arrow meets the
@@ -56,12 +63,14 @@ type BranchMark = Literal["plain", "dot"]
 type MergeMark = Literal["auto", "arrow", "plain", "dot"]
 type Arrivals = Literal["separate", "joined"]
 type Lines = Literal["orthogonal", "straight"]
+type Arrowheads = Literal["theme", "triangle", "stealth", "latex", "open"]
 
 CHOICES: dict[str, tuple[str, ...]] = {
     "branch": ("plain", "dot"),
     "merge": ("auto", "arrow", "plain", "dot"),
     "arrivals": ("separate", "joined"),
     "lines": ("orthogonal", "straight"),
+    "arrowheads": ("theme", "triangle", "stealth", "latex", "open"),
 }
 
 
@@ -73,6 +82,7 @@ class Conventions:
     merge: MergeMark = "auto"
     arrivals: Arrivals = "separate"
     lines: Lines = "orthogonal"
+    arrowheads: Arrowheads = "theme"
     pin_spread: float = 0.8
 
     def __post_init__(self) -> None:

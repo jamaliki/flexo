@@ -47,6 +47,12 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-end::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
 .fig-end:hover { background: var(--accent); }
 .fig-ending .fig-end, .fig-ending .fig-next { visibility: hidden; }
+/* A curved line's middle, dragged to bend it: a square handle, as a drawing program's. */
+.fig-bend { position: absolute; z-index: 3; pointer-events: auto; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; box-sizing: border-box; border-radius: 2px; transform: rotate(45deg); background: var(--raised); border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+.fig-bend::before { content: ""; position: absolute; inset: -6px; }
+.fig-bend:hover { background: var(--accent); }
+.fig-ending .fig-bend { visibility: hidden; }
+.fig-end-drag path { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .fig-end-drag { position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; overflow: visible; }
 .fig-end-drag line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; }
 .fig-end-drag circle { fill: var(--accent); stroke: var(--raised); stroke-width: 1.5; }

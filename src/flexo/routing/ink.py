@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flexo.geometry import Point, Segment, segments
 from flexo.ir.measured import TextMetrics
+from flexo.ir.semantic import EdgeSpec
 from flexo.style import LayoutStyle
 from flexo.text import ink_descent
 
@@ -77,6 +78,30 @@ def stretch_start(points: tuple[Point, ...], distance: float) -> tuple[Point, ..
     """Carry a polyline's first run back past its start, the way it was coming."""
 
     return stretch_end(points[::-1], distance)[::-1]
+
+
+def line_width(edge: EdgeSpec, style: LayoutStyle) -> float:
+    """How wide an edge is drawn, in points: its own ``width``, else the theme's."""
+
+    return edge.width if edge.width is not None else style.connector_width.points
+
+
+def head_scale(edge: EdgeSpec, style: LayoutStyle) -> float:
+    """How much larger than the theme's an edge's arrowheads are: as its line is wider
+    than the theme's (a drawing program's heads grow with the line), times its own
+    ``head_size``."""
+
+    theme = style.connector_width.points
+    wider = edge.width / theme if edge.width is not None and theme > 0 else 1.0
+    # (To a hundredth: each size drawn is a marker of its own, named for it.)
+    return round(wider * (edge.head_size if edge.head_size is not None else 1.0), 2)
+
+
+def head_length(edge: EdgeSpec, style: LayoutStyle) -> float:
+    """How far an edge's arrowhead reaches past the end of its shaft (``arrow_length``,
+    grown as its heads are)."""
+
+    return style.arrow_length.points * head_scale(edge, style)
 
 
 def edge_shaft(

@@ -141,17 +141,52 @@ type NetKind = Literal["fan-out", "merge"]
 type ArrowEnds = Literal["end", "none", "both", "reversible"]
 ARROW_ENDS = ("end", "none", "both", "reversible")
 type EdgeHead = Literal[
-    "arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"
+    "arrow",
+    "triangle",
+    "stealth",
+    "latex",
+    "open",
+    "dot",
+    "diamond",
+    "square",
+    "inhibition",
+    "catalysis",
+    "stimulation",
+    "necessary",
+    "modulation",
 ]
-EDGE_HEADS = ("arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation")
-"""What an arrowhead says, after SBGN: an ordinary arrow; a bar for inhibition
-(a repressor on its promoter); an open circle for catalysis; an open triangle for
-stimulation, with a bar behind it for necessary stimulation; an open diamond for
-modulation."""
+EDGE_HEADS = (
+    "arrow",
+    "triangle",
+    "stealth",
+    "latex",
+    "open",
+    "dot",
+    "diamond",
+    "square",
+    "inhibition",
+    "catalysis",
+    "stimulation",
+    "necessary",
+    "modulation",
+)
+"""An arrowhead's shape: ``arrow``, the theme's (its ``arrow_shape``); one of those
+shapes by name whatever the theme -- ``triangle``, ``stealth`` (a notched dart),
+``latex`` (convex flanks), ``open`` (two strokes); a filled ``dot``, ``diamond`` or
+``square``; or one that says what the line does, after SBGN: a bar for
+``inhibition`` (a repressor on its promoter), an open circle for ``catalysis``, an
+open triangle for ``stimulation`` (with a bar behind it, ``necessary``), an open
+diamond for ``modulation``."""
 type LineStyle = Literal["solid", "dashed", "dotted"]
 LINE_STYLES = ("solid", "dashed", "dotted")
-type EdgeShape = Literal["auto", "orthogonal", "straight"]
-EDGE_SHAPES = ("auto", "orthogonal", "straight")
+type EdgeShape = Literal["auto", "orthogonal", "straight", "curved"]
+EDGE_SHAPES = ("auto", "orthogonal", "straight", "curved")
+LINE_WIDTHS = (0.1, 20.0)
+"""The narrowest and widest an edge's own ``width`` may be, in points."""
+BENDS = (-1.0, 1.0)
+"""How far a curved edge's ``bend`` may stand its middle off its line, either way."""
+HEAD_SIZES = (0.1, 10.0)
+"""The smallest and largest an edge's own ``head_size`` may be, times the theme's."""
 type JointStyle = Literal["dot", "arrow", "auto"]
 JOINT_STYLES = ("dot", "arrow", "auto")
 """How a branch is marked where it meets the trunk of its net."""
@@ -485,13 +520,27 @@ class EdgeSpec:
     """
     shape: EdgeShape = "auto"
     """How the line is drawn: ``"orthogonal"`` (routed, right angles only),
-    ``"straight"`` (one segment, centre to centre, clipped to both outlines), or
-    ``"auto"`` to follow the figure's ``lines`` convention.
+    ``"straight"`` (one segment, centre to centre, clipped to both outlines),
+    ``"curved"`` (one smooth curve between them), or ``"auto"`` to follow the
+    figure's ``lines`` convention.
 
     A straight edge is not routed: it goes through whatever lies between its
     ends, which lint reports. It suits node-link figures -- a fully connected
     layer of neurons, a graphical model -- where the diagonal is the drawing.
+
+    A curved edge is not routed either. It runs from the side of its source that
+    faces its target to the side of its target that faces back, bowed to one side:
+    the side ``via`` names, else away from the middle of the figure (round a
+    cycle, outwards), else to the left of its travel -- so two edges between one
+    pair, one each way, bow apart. Given a ``depart`` or ``arrive`` side, it
+    leaves and meets those sides square, as a hand-drawn arrow does. ``bend``
+    says how far it bows instead.
     """
+    bend: float | None = None
+    """How far a curved edge's middle stands off the straight line between its ends, as
+    a share of that line's length: positive to the left of its travel (from its source
+    to its target, on the page), negative to the right, ``0`` not at all. Unset, it bows
+    of itself (see ``shape``). Where it bows out of its container, the container grows."""
 
     line: LineStyle = "solid"
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
@@ -506,6 +555,15 @@ class EdgeSpec:
     directions as two half-headed lines side by side (⇌)."""
     head: EdgeHead = "arrow"
     """The head's shape and meaning; see ``EDGE_HEADS``."""
+    tail: EdgeHead | None = None
+    """The head at its start, for an edge with heads at both ends (``arrow`` ``"both"``):
+    one of ``EDGE_HEADS``; unset, the same as ``head``. Unused otherwise."""
+    width: float | None = None
+    """How wide the line is drawn, in points; unset, the theme's ``connector_width``.
+    Its arrowheads grow and shrink with it, as a drawing program's do. Paint only."""
+    head_size: float | None = None
+    """How large its arrowheads are, times what they would be (``1.5`` half as large
+    again); unset, ``1``. Paint only."""
     back_label: tuple[TextRun, ...] = ()
     """A second caption, on the other side of the line from ``label``: the rate
     constant of a reversible reaction's way back, say."""
@@ -523,6 +581,8 @@ class EdgeSpec:
             )
         if self.head not in EDGE_HEADS:
             raise ValueError(f'edge "{self.id}": ' + _unknown("head", self.head, EDGE_HEADS))
+        if self.tail is not None and self.tail not in EDGE_HEADS:
+            raise ValueError(f'edge "{self.id}": ' + _unknown("tail", self.tail, EDGE_HEADS))
         if self.head != "arrow" and self.arrow in {"none", "reversible"}:
             raise ValueError(
                 f'edge "{self.id}" has head "{self.head}" but arrow "{self.arrow}"; '
@@ -550,6 +610,16 @@ class EdgeSpec:
                 f'unknown shape "{self.shape}" for edge "{self.id}"; '
                 f"valid shapes: {', '.join(EDGE_SHAPES)}"
             )
+        for name, value, (least, most), unit in (
+            ("bend", self.bend, BENDS, ""),
+            ("width", self.width, LINE_WIDTHS, "pt"),
+            ("head_size", self.head_size, HEAD_SIZES, ""),
+        ):
+            if value is not None and not least <= value <= most:
+                raise ValueError(
+                    f'edge "{self.id}": {name} {value:g} is out of range; '
+                    f"it is {least:g}{unit} to {most:g}{unit}"
+                )
 
 
 @dataclass(frozen=True, slots=True)

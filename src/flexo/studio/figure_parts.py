@@ -39,6 +39,8 @@ from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
+from flexo.ir.semantic import EDGE_HEADS
+
 TONES = (
     "encoder",
     "decoder",
@@ -964,6 +966,19 @@ GROUP_FIELDS = [
     SHADOW,
 ]
 
+HEAD_NAMES = {
+    "arrow": "Theme\u2019s Arrow",
+    "latex": "LaTeX",
+    "open": "Open Arrow",
+    "inhibition": "Bar (Inhibits)",
+    "catalysis": "Open Circle (Catalysis)",
+    "stimulation": "Open Triangle (Stimulates)",
+    "necessary": "Bar and Open Triangle (Necessary)",
+    "modulation": "Open Diamond (Modulates)",
+}
+"""What each arrowhead is called in the inspector: by its look, and an SBGN head by what it
+says too."""
+
 EDGE_FIELDS = [
     LABEL,
     _field(
@@ -985,15 +1000,62 @@ EDGE_FIELDS = [
         "head",
         "Arrowhead",
         "choice",
-        options=["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"],
-        labels={"inhibition": "Blunt End (Inhibits)", "necessary": "Necessary Stimulation"},
+        options=list(EDGE_HEADS),
+        labels=HEAD_NAMES,
+        icons={head: f"head-{head}" for head in EDGE_HEADS},
         default="arrow",
-        hint="What the arrowhead means, as in SBGN",
+        hint="The open ones and the bar say what the line does, as in SBGN",
         show={"arrow": ["end", "both"]},
+    ),
+    _field(
+        "tail",
+        "Start Arrowhead",
+        "choice",
+        options=["", *EDGE_HEADS],
+        labels={"": "Same as End", **HEAD_NAMES},
+        icons={head: f"head-{head}" for head in EDGE_HEADS},
+        default="",
+        show={"arrow": "both"},
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(
-        "shape", "Routing", "choice", options=["auto", "orthogonal", "straight"], default="auto"
+        "shape",
+        "Routing",
+        "choice",
+        options=["auto", "orthogonal", "straight", "curved"],
+        default="auto",
+        hint="Curved bows away from the figure's middle, or leaves the sides chosen square",
+    ),
+    _field(
+        "bend",
+        "Bend",
+        "number",
+        min=-1,
+        max=1,
+        step=0.05,
+        show={"shape": "curved"},
+        hint="Drag the handle on its middle; a share of its length, to the left of its travel",
+    ),
+    _field(
+        "width",
+        "Line Width",
+        "number",
+        min=0.1,
+        max=20,
+        step=0.25,
+        unit="pt",
+        hint="Unset, the theme's; its arrowheads grow with it",
+    ),
+    _field(
+        "head_size",
+        "Arrowhead Size",
+        "number",
+        min=0.1,
+        max=10,
+        step=0.25,
+        unit="\u00d7",  # times as large
+        default=1,
+        show={"arrow": ["end", "both", "reversible"]},
     ),
     _field(
         "cofactors",

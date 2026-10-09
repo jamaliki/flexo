@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from functools import cache
 from io import BytesIO
 
@@ -17,6 +18,7 @@ from flexo.render_common import paint_attributes
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import element, local_name, number
 from flexo.text import font_stack, load_face
+from flexo.units import Length
 
 
 def add_metadata(parent: ET.Element, routed: RoutedFigure, palette: Palette) -> None:
@@ -44,7 +46,8 @@ def add_definitions(
 
     ``heads`` names the other heads the figure's connectors end in, as their
     marker ids (``arrow.flow.inhibition``, ``arrow.flow.harpoon``, with
-    ``.start`` for the head at a line's start); only those are defined.
+    ``.start`` for the head at a line's start, and ``arrow.flow-s150`` for one
+    drawn half as large again); only those are defined.
 
     The stylesheet is filled by ``embed_fonts`` once the document is written,
     because only then is it known which characters the figure actually uses.
@@ -60,24 +63,61 @@ def add_definitions(
         _, role, *rest = identifier.split(".")
         start = bool(rest) and rest[-1] == "start"
         head = rest[0] if rest and rest[0] != "start" else "arrow"
+        family, scale = sized_family(role)
+        drawn = scaled_heads(style, scale)
         if head == "arrow":
-            # A coloured line's plain head (``arrow.tone-3``): flow's and a residual's are
-            # defined above, whatever the figure has.
+            # A coloured line's plain head (``arrow.tone-3``), or one of another size: flow's
+            # and a residual's are defined above, whatever the figure has.
             if role not in {"flow", "residual"}:
-                _arrow_marker(definitions, role, marker_paint(role), style, palette, start=start)
+                _arrow_marker(definitions, role, marker_paint(family), drawn, palette, start=start)
             continue
-        _head_marker(definitions, identifier, head, marker_paint(role), style, palette, start=start)
+        if head in ARROW_SHAPES:
+            # One of the theme's shapes, by name, whatever the theme draws.
+            _arrow_marker(
+                definitions, role, marker_paint(family), drawn, palette, start=start,
+                shape=head, identifier=identifier,
+            )
+            continue
+        paint = marker_paint(family)
+        _head_marker(definitions, identifier, head, paint, drawn, palette, start=start)
     return stylesheet
 
 
-def head_marker_id(role: str, head: str, *, start: bool = False) -> str:
-    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``).
+def sized_family(role: str) -> tuple[str, float]:
+    """A marker family and the size its heads are drawn at: ``flow-s150`` is the flow's,
+    half as large again; ``tone-3`` a tone's, as the theme draws it."""
+
+    family, _, size = role.rpartition("-s")
+    if family and size.isdigit():
+        return family, int(size) / 100.0
+    return role, 1.0
+
+
+def scaled_heads(style: LayoutStyle, scale: float) -> LayoutStyle:
+    """``style`` with its arrowheads ``scale`` times as large, and the line they are drawn
+    for as much wider (an open head is stroked as wide as its line)."""
+
+    if scale == 1.0:
+        return style
+    return replace(
+        style,
+        arrow_length=Length(style.arrow_length.points * scale),
+        arrow_width=Length(style.arrow_width.points * scale),
+        connector_width=Length(style.connector_width.points * scale),
+    )
+
+
+def head_marker_id(role: str, head: str, *, start: bool = False, scale: float = 1.0) -> str:
+    """The marker a connector of ``role`` ends in, for ``head`` (see ``EDGE_HEADS``),
+    drawn ``scale`` times as large as the theme draws it (see ``sized_family``).
 
     ``role`` is the line's marker family: ``residual``, a coloured line's own
     (``tone-3``, ``neutral``; see ``marker_paint``), or anything else, the flow's.
     """
 
     base = role if role == "residual" or _coloured(role) else "flow"
+    if round(scale * 100) != 100:
+        base = f"{base}-s{round(scale * 100)}"
     name = f"arrow.{base}" if head == "arrow" else f"arrow.{base}.{head}"
     return f"{name}.start" if start else name
 
@@ -119,7 +159,9 @@ def _head_marker(
     - ``stimulation``: an open triangle; ``necessary``: a bar, then one;
     - ``modulation``: an open diamond;
     - ``harpoon``: half an arrowhead, on the left of the line's travel -- one
-      of the two lines of a reversible reaction (⇌).
+      of the two lines of a reversible reaction (⇌);
+    - ``dot``, ``diamond``, ``square``: a filled one, its tip where an arrow's is
+      (these say nothing of their own).
     """
 
     length = style.arrow_length.points
@@ -176,6 +218,26 @@ def _head_marker(
             f"L {n(tip)} 0 L {n(middle)} {n(wide)} Z"
         )
         paint = hollow
+    elif head == "dot":
+        radius = length / 2.0
+        data = (
+            f"M 0 0 A {n(radius)} {n(radius)} 0 1 1 {n(length)} 0 "
+            f"A {n(radius)} {n(radius)} 0 1 1 0 0 Z"
+        )
+        paint = {"fill_role": paint_role}
+    elif head == "diamond":
+        # As long again as it is wide, back over the end of the shaft: as weighty as a dot.
+        back, wide = -0.4 * length, 0.5 * length
+        middle = (back + length) / 2.0
+        data = (
+            f"M {n(back)} 0 L {n(middle)} {n(-wide)} L {n(length)} 0 "
+            f"L {n(middle)} {n(wide)} Z"
+        )
+        paint = {"fill_role": paint_role}
+    elif head == "square":
+        side = length / 2.0
+        data = f"M 0 {n(-side)} L {n(length)} {n(-side)} L {n(length)} {n(side)} L 0 {n(side)} Z"
+        paint = {"fill_role": paint_role}
     elif head == "harpoon":
         if style.arrow_shape == "open":
             data = f"M 0 0 L {n(length)} 0 L 0 {n(-half)}"
@@ -191,9 +253,13 @@ def _head_marker(
         id=f"{identifier}.shape",
         d=data,
         stroke__linecap="round",
-        stroke__linejoin="round" if head != "harpoon" else "miter",
+        stroke__linejoin="miter" if head in {"harpoon", "diamond", "square"} else "round",
         **paint_attributes(palette=palette, **paint),  # type: ignore[arg-type]
     )
+
+
+ARROW_SHAPES = ("triangle", "stealth", "latex", "open")
+"""The shapes an arrow's head is drawn in: a theme's ``arrow_shape``, or one line's own."""
 
 
 def _arrow_marker(
@@ -204,8 +270,11 @@ def _arrow_marker(
     palette: Palette,
     *,
     start: bool = False,
+    shape: str | None = None,
+    identifier: str | None = None,
 ) -> None:
-    """One arrowhead, in the style's shape, tip ``arrow_length`` beyond the path end.
+    """One arrowhead, in the style's shape (or ``shape``), tip ``arrow_length`` beyond the
+    path end, as ``identifier`` (else ``arrow.<role>``).
 
     ``start=True`` makes the marker for the other end of a line
     (``arrow.<role>.start``), turned round with ``auto-start-reverse``.
@@ -219,10 +288,11 @@ def _arrow_marker(
     length = style.arrow_length.points
     half = style.arrow_width.points / 2.0
     width = style.connector_width.points
+    name = identifier or (f"arrow.{role}.start" if start else f"arrow.{role}")
     marker = element(
         definitions,
         "marker",
-        id=f"arrow.{role}.start" if start else f"arrow.{role}",
+        id=name,
         viewBox=f"{number(-width)} {number(-half - width)} "
         f"{number(length + 2 * width)} {number(2 * half + 2 * width)}",
         refX=0.0,
@@ -233,14 +303,12 @@ def _arrow_marker(
         orient="auto-start-reverse" if start else "auto",
         overflow="visible",
     )
-    if start:
-        role = f"{role}.start"
-    shape = style.arrow_shape
+    shape = shape or style.arrow_shape
     if shape == "open":
         element(
             marker,
             "path",
-            id=f"arrow.{role}.shape",
+            id=f"{name}.shape",
             d=f"M 0 {number(-half)} L {number(length)} 0 L 0 {number(half)}",
             stroke__linecap="round",
             stroke__linejoin="round",
@@ -262,7 +330,7 @@ def _arrow_marker(
     element(
         marker,
         "path",
-        id=f"arrow.{role}.shape",
+        id=f"{name}.shape",
         d=data,
         stroke__linejoin="miter",
         **paint_attributes(palette=palette, fill_role=paint_role),

@@ -118,6 +118,9 @@ def place_captions(
                 style,
                 from_start=item.spec.id in from_start,
             )
+            if item.curve is not None:
+                # A curve's caption by its middle first: outside its bow, then in it.
+                places = [*_beside_curve(item.curve, item.label_metrics, style), *places]
         else:
             places = [item.label_position, *_candidates(item.pieces, item.label_metrics, style)]
         candidates[index] = [_Spot(place) for place in places]
@@ -311,6 +314,36 @@ def _beside(
     distance = extra + caption_reach(metrics, style) + half
     centre = Point(at.x + side.x * distance, at.y + side.y * distance)
     return Point(centre.x, centre.y - metrics.height / 2.0 + metrics.baseline)
+
+
+def _beside_curve(
+    curve: tuple[Point, Point, Point, Point], metrics: TextMetrics, style: LayoutStyle
+) -> list[Point]:
+    """Places for a caption by a curve's middle, stepped out along its normal far enough
+    that the caption's nearest corner clears it: on the outside of its bow, then inside."""
+
+    p0, p1, p2, p3 = curve
+    middle = Point(
+        (p0.x + 3.0 * p1.x + 3.0 * p2.x + p3.x) / 8.0,
+        (p0.y + 3.0 * p1.y + 3.0 * p2.y + p3.y) / 8.0,
+    )
+    dx, dy = (p2.x + p3.x - p0.x - p1.x) / 2.0, (p2.y + p3.y - p0.y - p1.y) / 2.0
+    length = (dx * dx + dy * dy) ** 0.5
+    if length < 1e-9:
+        return []
+    nx, ny = -dy / length, dx / length
+    # Outside: the side the middle stands off the line between its ends.
+    if nx * (middle.x - (p0.x + p3.x) / 2.0) + ny * (middle.y - (p0.y + p3.y) / 2.0) < 0.0:
+        nx, ny = -nx, -ny
+    reach = caption_reach(metrics, style)
+    half = abs(nx) * metrics.width / 2.0 + abs(ny) * metrics.height / 2.0
+    return [
+        Point(
+            middle.x + sign * nx * (reach + half),
+            middle.y + sign * ny * (reach + half) - metrics.height / 2.0 + metrics.baseline,
+        )
+        for sign in (1.0, -1.0)
+    ]
 
 
 def _candidates(

@@ -271,6 +271,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["via"] = edge.via.value
     if edge.shape != "auto":
         result["shape"] = edge.shape
+    if edge.bend is not None:
+        result["bend"] = edge.bend
     if edge.line != "solid":
         result["line"] = edge.line
     if edge.tone is not None:
@@ -279,6 +281,12 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["arrow"] = edge.arrow
     if edge.head != "arrow":
         result["head"] = edge.head
+    if edge.tail is not None:
+        result["tail"] = edge.tail
+    if edge.width is not None:
+        result["width"] = edge.width
+    if edge.head_size is not None:
+        result["head_size"] = edge.head_size
     if edge.back_label:
         back: dict[str, object] = {}
         _put_label(back, edge.back_label)
@@ -486,6 +494,16 @@ def _node(data: dict[str, Any]) -> NodeSpec:
     )
 
 
+def _points(value: Any) -> float | None:
+    """A number given as one (``1.5``), else None: what EdgeSpec checks the range of."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"expected a number, not {value!r}")
+    return float(value)
+
+
 def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) -> EdgeSpec:
     return EdgeSpec(
         id=edge_id,
@@ -499,10 +517,14 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
         via=Side(data["via"]) if data.get("via") else None,
         shape=data.get("shape", "auto"),
+        bend=_points(data.get("bend")),
         line=data.get("line", "solid"),
         tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),
         head=data.get("head", "arrow"),
+        tail=data.get("tail"),
+        width=_points(data.get("width")),
+        head_size=_points(data.get("head_size")),
         back_label=_label(data.get("back_label", "")),
         cofactors=tuple(_label(item) for item in data.get("cofactors", ())),
     )

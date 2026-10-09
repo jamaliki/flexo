@@ -1081,8 +1081,13 @@ class _Document:
                 self.net_trunk(item, str(value or ""))
                 continue
             _set(item, key.split("."), value)
+            if kind == "edge" and key == "shape" and value != "curved":
+                item.pop("bend", None)  # (only a curve bends)
             if kind == "edge" and key in {"arrow", "head"}:
-                # A regulation head goes on an arrow with an end; a reversible step has none.
+                # A regulation head goes on an arrow with an end; a reversible step has none
+                # (and only an arrow with heads at both ends has a head at its start).
+                if key == "arrow" and value != "both":
+                    item.pop("tail", None)
                 if key == "arrow" and value in {"reversible", "none"}:
                     item.pop("head", None)
                 elif (

@@ -91,6 +91,7 @@ from flexo.routing.separate import (
 from flexo.routing.trees import (
     WireGraph,
     arrows_at_joins,
+    curved_edge,
     dots_at_joins,
     edge_cuts,
     net_reach_outlines,
@@ -358,11 +359,19 @@ def route_figure(
     for edge in semantic.edges:
         if edge.id in straight:
             pairs[frozenset((edge.source.node_id, edge.target.node_id))].append(edge)
+    # (A curved edge bows away from the figure's middle.)
+    middle = Rect.union(node.bounds for node in fitted.nodes).center if fitted.nodes else None
     for together in pairs.values():
         # Straight edges between one pair of components run side by side,
         # a lane apart, rather than on top of each other.
         for index, edge in enumerate(together):
             offset = (index - (len(together) - 1) / 2.0) * layout_style.port_spacing.points
+            if edge.shape == "curved":
+                routed_edges[edge.id] = curved_edge(
+                    edge, fitted, layout_style, text_measurer, offset=offset,
+                    paired=len(together) > 1, middle=middle,
+                )
+                continue
             routed_edges[edge.id] = straight_edge(
                 edge, fitted, layout_style, text_measurer, offset=offset
             )
@@ -949,8 +958,13 @@ def _outline(bounds: Rect) -> tuple[Point, ...]:
 
 
 def _is_straight(edge: EdgeSpec, style: LayoutStyle, fitted: FittedFigure) -> bool:
+    """Whether an edge is drawn between its outlines rather than routed: straight, or
+    curved."""
+
     if edge.source.node_id == edge.target.node_id:
         return False  # a loop has no line between two outlines to draw
+    if edge.shape == "curved":
+        return True
     if edge.shape == "auto":
         wanted = style.conventions.lines == "straight"
     else:

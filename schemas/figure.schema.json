@@ -124,6 +124,7 @@
             "merge": {"enum": ["auto", "arrow", "plain", "dot"]},
             "arrivals": {"enum": ["separate", "joined"]},
             "lines": {"enum": ["orthogonal", "straight"]},
+            "arrowheads": {"enum": ["theme", "triangle", "stealth", "latex", "open"]},
             "pin_spread": {"type": "number", "minimum": 0, "maximum": 1}
           }
         },
@@ -208,6 +209,12 @@
         {"required": ["x", "y"]}
       ]
     },
+    "head": {
+      "enum": [
+        "arrow", "triangle", "stealth", "latex", "open", "dot", "diamond", "square",
+        "inhibition", "catalysis", "stimulation", "necessary", "modulation"
+      ]
+    },
     "edge": {
       "type": "object",
       "additionalProperties": false,
@@ -223,13 +230,15 @@
         "depart": {"$ref": "#/$defs/side"},
         "arrive": {"$ref": "#/$defs/side"},
         "via": {"$ref": "#/$defs/side"},
-        "shape": {"enum": ["auto", "orthogonal", "straight"]},
+        "shape": {"enum": ["auto", "orthogonal", "straight", "curved"]},
+        "bend": {"type": "number", "minimum": -1, "maximum": 1},
         "line": {"enum": ["solid", "dashed", "dotted"]},
         "tone": {"type": ["string", "integer"]},
         "arrow": {"enum": ["end", "none", "both", "reversible"]},
-        "head": {
-          "enum": ["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"]
-        },
+        "head": {"$ref": "#/$defs/head"},
+        "tail": {"$ref": "#/$defs/head"},
+        "width": {"type": "number", "minimum": 0.1, "maximum": 20},
+        "head_size": {"type": "number", "minimum": 0.1, "maximum": 10},
         "back_label": {"$ref": "#/$defs/label"},
         "cofactors": {
           "type": "array",

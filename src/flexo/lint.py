@@ -13,6 +13,7 @@ from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.geometry import Point, Rect, Segment, Side, segment_crosses_rect, segments
 from flexo.hierarchy import bounded_owner, parent_map
 from flexo.ir.fitted import FittedNode, ResolvedPort
+from flexo.routing.ink import head_length
 from flexo.style import LayoutStyle
 from flexo.svg import INKSCAPE_NS, SVG_NS, local_name
 from flexo.themes import figure_style
@@ -224,7 +225,7 @@ def _routing_diagnostics(
         shaft_length = sum(segment.length for segment in segments(edge.shaft))
         # Each arrowhead reserves its length plus the standoff; the start gives
         # up a standoff of air even without one, unless the edge has no heads.
-        head = style.arrow_length.points + style.connector_standoff.points
+        head = head_length(edge.spec, style) + style.connector_standoff.points
         reserved = {
             "end": head + style.connector_standoff.points,
             "both": 2.0 * head,
@@ -390,22 +391,29 @@ def _caption_diagnostics(compilation: Compilation) -> list[Diagnostic]:
 
 
 def _straight_edge_diagnostics(edge, fitted, canvas: Rect) -> list[Diagnostic]:
-    """A straight edge is one diagonal by design: only what it runs through is a defect."""
+    """A straight edge is one diagonal by design, and a curved one one curve: only what
+    it runs through is a defect."""
 
     diagnostics = []
     ends = {edge.spec.source.node_id, edge.spec.target.node_id}
-    start, end = edge.centerline[0], edge.centerline[-1]
+    curved = edge.curve is not None
     for node in fitted.nodes:
         spec = node.measured.spec
         if spec.id in ends or spec.kind in TRANSPARENT_KINDS:
             continue
-        if segment_crosses_rect(start, end, node.bounds):
+        if any(
+            segment_crosses_rect(start, end, node.bounds)
+            for start, end in pairwise(edge.centerline)
+        ):
             diagnostics.append(
                 Diagnostic(
                     "routing.obstacle.intersection",
-                    f'Straight edge crosses component "{spec.id}".',
+                    f'{"Curved" if curved else "Straight"} edge crosses component "{spec.id}".',
                     entity_id=edge.spec.id,
-                    hint="Move the component off the line, or draw this edge orthogonal.",
+                    hint="Move the component off the line, or draw this edge orthogonal."
+                    if not curved
+                    else "Move the component off the curve, bend it the other way (via), "
+                    "or draw this edge orthogonal.",
                 )
             )
     if any(not canvas.contains_point(point) for point in edge.centerline):
