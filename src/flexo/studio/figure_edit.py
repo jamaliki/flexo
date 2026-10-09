@@ -1730,7 +1730,16 @@ class _Document:
         node, group = self.node(identifier), self.group(identifier)
         if node is None and group is None:
             return None
-        new = self.fresh(identifier)
+        # A copy of a copy is numbered on from it, as the copies of one part are: ``fix-3``
+        # after ``fix-2``, never ``fix-2-2``.
+        numbered = re.fullmatch(r"(.+)-(\d+)", identifier)
+        if numbered:
+            stem, number, taken = _slug(numbered[1]), int(numbered[2]) + 1, self.taken()
+            while f"{stem}-{number}" in taken:
+                number += 1
+            new = f"{stem}-{number}"
+        else:
+            new = self.fresh(identifier)
         renamed[identifier] = new
         if node is not None:
             twin = copy.deepcopy(dict(node))
