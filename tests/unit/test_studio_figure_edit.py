@@ -1279,3 +1279,13 @@ def test_activity_says_lines_joined_and_parted_as_one() -> None:
     assert said == ["joined the lines into “Attended”"]
     said = [note["text"] for note in kind.describe({"text": joined}, {"text": ATTENTION})]
     assert said == ["separated the line into “Attended”"]
+
+
+def test_a_copy_of_a_copy_is_numbered_on_from_it() -> None:
+    text, chosen = edit(SAMPLE_FIGURE, do="duplicate", ids=["encoder"])
+    assert chosen == ["encoder-2"]
+    text, chosen = edit(text, do="duplicate", ids=["encoder-2"])
+    assert chosen == ["encoder-3"]
+    text, chosen = edit(text, do="duplicate", ids=["encoder-2"])
+    assert chosen == ["encoder-4"]
+    compile_figure(parse(text, Path.cwd()))
