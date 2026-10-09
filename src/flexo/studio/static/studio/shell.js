@@ -3,7 +3,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
 import { Session } from "./session.js";
-import { AssistantPanel, MARK_COLOURS } from "./assistant.js";
+import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -26,7 +26,7 @@ function give(presence) {
 }
 
 export function colourOf(who) {
-  if (who?.id === "assistant") return MARK_COLOURS[who.provider || "claude"] || "#6b6b70";
+  if (who?.id === "assistant") return MARK_COLOURS[who.provider || "claude"] || OTHER_MARK;
   if (given.has(who?.id)) return COLOURS[given.get(who.id) % COLOURS.length];
   let hash = 0;
   for (const ch of String(who?.id || who?.name || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;

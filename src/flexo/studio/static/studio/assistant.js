@@ -31,10 +31,12 @@ export function modelName(id) {
   return model;
 }
 
-// Each answerer's mark, in its own colour (white on it).
+// Each answerer's mark, in its own colour (white on it): another model's a grey dark enough
+// for white in either appearance (the ink's grey is pale in Dark).
 export const MARK_COLOURS = { claude: "#d97757", chatgpt: "#10a37f" };
+export const OTHER_MARK = "#6b6b70";
 export function assistantMark(provider, small = false) {
-  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || "var(--ink-2)" } }, icon("sparkle"));
+  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || OTHER_MARK } }, icon("sparkle"));
 }
 
 function remembered() { try { return JSON.parse(localStorage.getItem("flexo-studio-assistant") || "null"); } catch { return null; } }
