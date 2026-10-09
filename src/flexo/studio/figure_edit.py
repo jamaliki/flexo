@@ -54,7 +54,13 @@ from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
-from ruamel.yaml.scalarstring import LiteralScalarString, SingleQuotedScalarString
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.compat import ordereddict
+from ruamel.yaml.scalarstring import (
+    DoubleQuotedScalarString,
+    LiteralScalarString,
+    SingleQuotedScalarString,
+)
 
 from flexo.ir.semantic import ID_PATTERN
 from flexo.studio.merge import merge_text
@@ -1041,12 +1047,13 @@ class _Document:
         now = self.edge_id(item) if kind == "edge" else None
         chosen = [now or identifier] if identifier else []
         typed_over = action.get("was")
-        if isinstance(typed_over, str) and isinstance(values.get("label"), str):
-            # Words typed over what a label said when the typing began, while someone else
-            # changed it: both kept, merged as two people's words in one field are.
-            now = item.get("label")
-            if isinstance(now, str) and now != typed_over:
-                values["label"] = merge_text(typed_over, values["label"], now)
+        for words in ("label", "back_label"):
+            if isinstance(typed_over, str) and isinstance(values.get(words), str):
+                # Words typed over what a label said when the typing began, while someone
+                # else changed it: both kept, merged as two people's words in one field are.
+                now = item.get(words)
+                if isinstance(now, str) and now != typed_over:
+                    values[words] = merge_text(typed_over, values[words], now)
         if (
             kind == "node"
             and "name" in action
@@ -2024,8 +2031,27 @@ def _set(item: dict[str, Any], path: list[str], value: object) -> None:
         for parent, key in zip(reversed(trail[:-1]), reversed(path[:-1]), strict=True):
             if not parent[key] and key != "layout":
                 del parent[key]
+    elif isinstance(value, str) and isinstance(trail[-1], CommentedMap) and last in trail[-1]:
+        # (Set as it is: ruamel would give new words the quotes of the old ones.)
+        here = trail[-1]
+        ordereddict.__setitem__(here, last, _requoted(here[last], value))
+        here._ok.add(last)
     else:
         trail[-1][last] = value
+
+
+def _requoted(old: object, words: str) -> str:
+    """Words typed over words the file quoted: in the quotes the person chose for them --
+    not in quotes YAML needed for what was there before (a "no", a '12'), which the new
+    words may not need (``_blocks`` quotes them again if they do)."""
+
+    import yaml
+
+    quoted = (SingleQuotedScalarString, DoubleQuotedScalarString)
+    plain = yaml.safe_dump(str(old), width=10**6).lstrip()[:1] not in ("'", '"')
+    if isinstance(old, quoted) and "\n" not in words and plain:
+        return type(old)(words)
+    return words
 
 
 def _misread(text: str) -> bool:
@@ -2064,6 +2090,14 @@ def _blocks(value: Any, *, words: bool = False) -> Any:
         for key in list(value):
             value[key] = _blocks(value[key], words=key in WORDS)
     elif isinstance(value, list):
+        # A part added among parts the file writes a line each ({id: a, label: A}) is
+        # written so too, not as a block among them.
+        flow = isinstance(value, CommentedSeq) and any(
+            isinstance(item, CommentedMap) and item.fa.flow_style() for item in value
+        )
         for index, item in enumerate(value):
+            if flow and type(item) is dict:
+                item = CommentedMap(item)
+                item.fa.set_flow_style()
             value[index] = _blocks(item)
     return value
