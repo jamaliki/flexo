@@ -3,7 +3,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
 import { Session } from "./session.js";
-import { AssistantPanel, MARK_COLOURS } from "./assistant.js";
+import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -26,7 +26,7 @@ function give(presence) {
 }
 
 export function colourOf(who) {
-  if (who?.id === "assistant") return MARK_COLOURS[who.provider || "claude"] || "#6b6b70";
+  if (who?.id === "assistant") return MARK_COLOURS[who.provider || "claude"] || OTHER_MARK;
   if (given.has(who?.id)) return COLOURS[given.get(who.id) % COLOURS.length];
   let hash = 0;
   for (const ch of String(who?.id || who?.name || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -758,12 +758,17 @@ export async function start() {
   const doable = (session) => {
     try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
   };
+  // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
+  const doesKey = (session, keys) => {
+    try { return Boolean(session?.commands().some((command) => !command.disabled && command.keys === keys)); } catch { return false; }
+  };
   let reporting = null;
   const report = () => {
     if (reporting) return;
     reporting = setTimeout(() => {
       reporting = null;
       const session = workspace.active;
+      const field = typingIn(document.activeElement) ? document.activeElement : null;
       window.pywebview?.api?.studio_state?.({
         file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
         can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
@@ -776,6 +781,8 @@ export async function start() {
         tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
         sheet: Boolean(document.querySelector(".scrim:not(.palette-scrim)")),
         side: side.open || "",
+        // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
+        deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
       });
     }, 80);
   };
@@ -784,6 +791,24 @@ export async function start() {
   for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
   document.addEventListener("focusin", report);
   document.addEventListener("focusout", report);
+  // (So does choosing words in a field, or no longer: Edit › Delete is for them.)
+  let wordsChosen = false;
+  document.addEventListener("selectionchange", () => {
+    const now = typingIn(document.activeElement) && chosenIn(document.activeElement);
+    if (now !== wordsChosen) { wordsChosen = now; report(); }
+  });
+  // Edit › Cut, Copy and Paste, chosen with the pointer in the Mac app, for what is chosen in
+  // the document (an object, a figure's shapes, a slide): the web view offers them only for
+  // words chosen, unless the page says first that it has something of its own to cut, copy or
+  // paste (its beforecut, beforecopy and beforepaste, as WebKit asks before its Edit menu
+  // shows); the page's own cut, copy and paste then do it, as for ⌘X, ⌘C and ⌘V. Words typed
+  // or chosen keep the web view's own.
+  for (const [name, keys] of [["beforecut", "⌘X"], ["beforecopy", "⌘C"], ["beforepaste", "⌘V"]]) {
+    document.addEventListener(name, (event) => {
+      if (typingIn(document.activeElement) || !getSelection().isCollapsed || document.querySelector(".scrim, .present")) return;
+      if (doesKey(workspace.active, keys)) event.preventDefault();
+    });
+  }
   window.addEventListener("pywebviewready", report);
   new MutationObserver(report).observe(document.body, { childList: true });
   const docHead = h("div", {}, docbar, trustBar);
@@ -918,7 +943,7 @@ export async function start() {
       fitDocbar();
     }
     // A document that has never read has nothing to edit, export or present.
-    for (const slot of [docLeft, docRight]) slot.inert = unreadable(session);
+    for (const slot of [docLeft, docCentre, docRight]) slot.inert = unreadable(session);
     renderUnread(session);
   };
 
@@ -981,8 +1006,10 @@ export async function start() {
     // left open at the end), the last line with words before it. A bracket or quote never
     // closed is named where the reading gave up: the line it was opened on is chosen.
     const opened = (problem, lines, line) => {
-      const marks = /expected ',' or '\]'/.test(problem) ? ["[", "]"] : /expected ',' or '\}'/.test(problem) ? ["{", "}"]
-        : /quoted scalar|end of stream/.test(problem) ? ["\"", "'"] : null;
+      // (Said in the writer's words -- "a list in square brackets isn’t closed" -- or the reader's.)
+      const marks = /expected ',' or '\]'|square brackets isn[’']t closed/.test(problem) ? ["[", "]"]
+        : /expected ',' or '\}'|braces isn[’']t closed/.test(problem) ? ["{", "}"]
+          : /quoted scalar|end of stream|quote isn[’']t closed/.test(problem) ? ["\"", "'"] : null;
       if (!marks) return line;
       const count = (text, mark) => text.split(mark).length - 1;
       for (let at = Math.min(line, lines.length); at >= 1; at -= 1) {
@@ -1102,7 +1129,15 @@ export async function start() {
       else if (!typingIn(event.target) && !document.querySelector(".scrim:not(.palette-scrim), .present")) palette(workspace);
       return;
     }
-    if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
+    // ⌘J: the assistant, the palette put away for it -- but nothing behind a sheet, as the Mac
+    // app's View menu waits for one, nor during a show.
+    if (mod && key === "j" && !event.altKey) {
+      event.preventDefault();
+      if (document.querySelector(".scrim:not(.palette-scrim), .present")) return;
+      closePalette();
+      side.toggle("assistant");
+      return;
+    }
     if (document.querySelector(".scrim, .present")) return;
     if (mod && event.altKey && event.code === "KeyA") { event.preventDefault(); side.toggle("activity"); return; }
     // ⇧⌘] and ⇧⌘[: the next or the previous document, as a Mac app's tabs are gone through.
@@ -1192,10 +1227,13 @@ function inField(event) {
 // own, as its keys are. Delete takes the words chosen, and nothing with none chosen.
 function editField(field, name) {
   if (name === "undo" || name === "redo") { document.execCommand(name); return; }
-  const plain = !field.isContentEditable;
-  if (name === "select-all") { if (plain) field.select(); else document.execCommand("selectAll"); return; }
-  const chosen = plain ? field.selectionStart !== field.selectionEnd : !getSelection().isCollapsed;
-  if (chosen) document.execCommand("delete");
+  if (name === "select-all") { if (field.isContentEditable) document.execCommand("selectAll"); else field.select(); return; }
+  if (chosenIn(field)) document.execCommand("delete");
+}
+
+// Words chosen in a field typed in, not the caret alone.
+function chosenIn(field) {
+  return field.isContentEditable ? !getSelection().isCollapsed : field.selectionStart !== field.selectionEnd;
 }
 
 // A key pressed where the keys are, as if typed (Edit › Delete is ⌫ there): `mod` is ⌘ on a
@@ -1386,26 +1424,28 @@ export function connectDialog(workspace) {
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them. A
 // row marked `app` is the Mac app's menus' own (a browser keeps those keys for itself).
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
+  ["General", [["⌘ K", "Show or Hide the Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
-    ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌘ W", "Close Tab", "app"],
+    ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
   ["In the Slide List", [["↩", "New Slide"], ["⇧ ↑ ↓", "Select the Slide Above or Below Too"], ["⌘ A", "Select All Slides"], ["⌫", "Delete"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌥ ↑ ↓", "Move the Slides Up or Down"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Select All Objects"], ["⇧ or ⌘ Click", "Select One More (or One Less)"], ["Drag", "Select the Objects It Touches (from an Empty Spot)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
-    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["Type", "Type Over a Chosen Text’s Words"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"]]],
-  ["While Typing", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"],
-    ["↩", "New Line (in a List: New Item; in a Table: the Cell Below)"], ["⇧ ↩", "New Line in a List’s Item or a Cell (or ⌥ ↩)"],
-    ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["Esc or ⌘ ↩", "Done"]]],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["Type", "Type Over a Chosen Text’s Words"], ["↑ ↓", "Previous or Next Object"], ["← →", "Object in the Column Beside It"],
+    ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"], ["Esc", "Cancel a Drag (While Dragging)"]]],
+  ["While Typing", [["↩", "New Line (in a List: New Item; in a Table: the Cell Below)"], ["⇧ ↩", "New Line in a List’s Item or a Cell (or ⌥↩)"],
+    ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["⌥ ⌘ E", "Inline Equation"], ["Esc or ⌘ ↩", "Done"]]],
+  // (A figure's labels are drawn as typed, but for maths: none of these is theirs.)
+  ["Styling a Slide’s Words (Not a Figure’s Labels)", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"]]],
   ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group the Selected Shapes"], ["⇥", "Next Shape (⇧⇥: Previous), Also While Typing a Label"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"],
     ["Drag", "Select the Shapes It Touches (from an Empty Spot, in a Figure File)"], ["⌘ A", "Select All Shapes"], ["← → ↑ ↓", "Select the Shape That Way"],
-    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘ ↩: Done)"],
-    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy the Shape to Where It Is Let Go"], ["⌘ Drag", "Place a Handle Freely, Without Snapping"],
-    ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
+    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘↩: Done)"],
+    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go"], ["⌘ Drag", "Drag a Handle Without Snapping (a Curve’s Middle, a Shape’s Corners)"],
+    ["⇧ Drag", "Keep a Shape’s Proportions (on a Corner Handle)"], ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle)"], ["Esc", "Cancel a Drag (While Dragging)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
     ["⌘ D", "Duplicate Shape"], ["⌫", "Delete Shape"], ["Esc", "Deselect"], ["⌘ + −", "Zoom In or Out (a Figure File)"], ["⌘ 0", "Actual Size (a Figure File)"], ["⇧ ⌘ 0", "Zoom to Fit (a Figure File)"]]],
   ["Presenting", [["→ Space ↩", "Next Build or Slide"], ["PgDn", "Next (a Clicker’s Forward)"], ["← ⌫", "Previous"], ["PgUp", "Previous (a Clicker’s Back)"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
@@ -1441,16 +1481,18 @@ function toInspector() {
 function shortcutsDialog() {
   // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
   // them, and keys given side by side ("↑ ↓", "Home End") are each a keycap of their own.
-  // "or" between modifiers ("⌥ or ⇧ ← →") is a word between keycaps, the modifiers then
-  // each a keycap of their own and the keys after them too; "Click" (and "Drag",
-  // "Double-Click", "Type") is a word, after its modifier's keycap ("⇧ Click").
+  // "or" is a word between keycaps: between two chords ("Esc or ⌘ ↩") each is as it would
+  // be alone; between modifiers ("⌥ or ⇧ ← →") the modifiers are each a keycap of their own
+  // and the keys after them too. "Click" (and "Drag", "Double-Click", "Type") is a word,
+  // after its modifier's keycap ("⇧ Click").
   const chords = (keys) => {
     const out = [];
     const words = keys.split(" ").filter(Boolean);
-    const alone = words.includes("or");
+    const modifier = (key) => /^[⌘⇧⌥⌃]$/.test(key || "");
+    const alone = words.some((key, at) => key === "or" && modifier(words[at - 1]) && modifier(words[at + 1]));
     let held = "";
     for (const key of words) {
-      if (/^[⌘⇧⌥⌃]$/.test(key)) { if (alone) out.push({ key }); else held += key; }
+      if (modifier(key)) { if (alone) out.push({ key }); else held += key; }
       else if (["or", "Click", "Drag", "Double-Click", "Type"].includes(key)) { if (held) out.push({ key: held }); held = ""; out.push({ word: key === "or" ? "or" : key.toLowerCase() }); }
       else out.push({ key: held + key });
     }
@@ -1523,14 +1565,17 @@ let closePalette = () => {};
 // in it (titles, text, lists, labels, captions, cells, notes), not its settings -- markup aside.
 const WORDS = new Set(["title", "subtitle", "words", "text", "label", "caption", "callout", "quote", "by", "author", "date", "notes", "footnotes",
   "bullets", "numbered", "items", "rows", "header", "cells", "value", "code", "equation", "footer", "name"]);
-function slideWords(slide) {
+// (`named`: but for the words the slide is named by in the palette -- its title, or a
+// statement's words -- which its row says already.)
+function slideWords(slide, { named = false } = {}) {
   const words = [];
   const walk = (value, key) => {
     if (typeof value === "string") { if (WORDS.has(key) && /\p{L}/u.test(value)) words.push(value); }
     else if (Array.isArray(value)) value.forEach((item) => walk(item, key));
     else if (value && typeof value === "object") for (const [name, item] of Object.entries(value)) walk(item, name);
   };
-  walk(slide, "");
+  const name = slide?.words ? "words" : "title";
+  walk(named && slide && typeof slide === "object" ? Object.fromEntries(Object.entries(slide).filter(([key]) => key !== name)) : slide, "");
   return words.join(" · ").replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1").replace(/\*\*|[*`]/g, "").replace(/\s+/g, " ");
 }
 
@@ -1570,7 +1615,7 @@ export function palette(workspace, { find = false } = {}) {
     { icon: "activity", label: workspace.side?.open === "activity" ? "Hide Activity" : "Show Activity", keys: "⌥⌘A", run: () => workspace.side?.toggle("activity") },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
-    { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
+    { icon: "keyboard", label: "Keyboard Shortcuts", keys: "⌘/", run: () => shortcutsDialog() },
     // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
     ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, name]) => ({ icon: value === "dark" ? "moon" : value === "light" ? "sun" : "appearance",
       label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),
@@ -1585,17 +1630,20 @@ export function palette(workspace, { find = false } = {}) {
     ...own.filter((command) => command.later),
   ];
   // Slides found by their words as well as their titles (Edit › Find… opens the palette to
-  // find words): each with the words around what was found.
-  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map(slideWords) : [];
+  // find words): each with the words around what was found, the title its row names aside.
+  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map((slide) => [slideWords(slide), slideWords(slide, { named: true })]) : [];
   const foundOn = (query) => {
     if (query.length < 2) return [];
-    return slides.flatMap((words, index) => {
-      const at = words.toLowerCase().indexOf(query);
-      if (at < 0) return [];
-      const label = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label || `Slide ${index + 1}`;
-      const from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
-      const note = `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
-      return [{ icon: "slide", label, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
+    return slides.flatMap(([all, rest], index) => {
+      if (!all.toLowerCase().includes(query)) return [];
+      const named = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label;
+      const words = named ? rest : all, at = words.toLowerCase().indexOf(query);
+      // (Whole words, not a word's last letters.)
+      let from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
+      if (from && words.indexOf(" ", from) >= 0 && words.indexOf(" ", from) < at) from = words.indexOf(" ", from) + 1;
+      if (to < words.length && words.lastIndexOf(" ", to) > at + query.length) to = words.lastIndexOf(" ", to);
+      const note = at < 0 ? "" : `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
+      return [{ icon: "slide", label: named || `Slide ${index + 1}`, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
     }).slice(0, 12);
   };
   const input = h("input.palette-input", { placeholder: find && slides.length ? "Find words on the slides, or a command…" : session ? "Search commands, slides, files…" : "Search commands and files…" });

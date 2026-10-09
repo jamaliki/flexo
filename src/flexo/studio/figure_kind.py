@@ -115,7 +115,10 @@ class FigureKind:
         return {"text": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
 
     def load(self, path: Path) -> dict[str, Any]:
-        return {"text": path.read_text(encoding="utf-8")}
+        # A file that does not read is not opened as words to draw (said "Saved", with
+        # nothing drawn): it is a document whose file can't be read, as a deck's or a
+        # theme's is, its line chosen to put right.
+        return self.parse(path.read_text(encoding="utf-8"))
 
     def save(self, path: Path, document: dict[str, Any]) -> None:
         path.write_text(document["text"], encoding="utf-8")
@@ -649,14 +652,24 @@ _YAML_SAID = (
 )
 
 
-def _yaml_problem(error: Exception) -> str:
-    """Why a figure's file can't be read, in its writer's words, never the reader's."""
+def yaml_said(error: Exception) -> str | None:
+    """What the YAML reader found wrong in a file, in its writer's words ("a quote is not
+    closed"); None if it is none of those it is known to say."""
 
     problem = str(getattr(error, "problem", None) or error)
     context = str(getattr(error, "context", None) or "")
-    for pattern, said in _YAML_SAID:
-        if re.search(pattern, f"{context} {problem}"):
-            return f"The file can\u2019t be read: {said}."
+    return next(
+        (said for pattern, said in _YAML_SAID if re.search(pattern, f"{context} {problem}")), None
+    )
+
+
+def _yaml_problem(error: Exception) -> str:
+    """Why a figure's file can't be read, in its writer's words, never the reader's."""
+
+    said = yaml_said(error)
+    if said:
+        return f"The file can\u2019t be read: {said}."
+    problem = str(getattr(error, "problem", None) or error)
     return f"The file can\u2019t be read as written: {problem}."
 
 

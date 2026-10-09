@@ -760,6 +760,13 @@ export function mount(studio, main) {
     const shapes = figure.selected.filter((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root)).length;
     return shapes > 1 ? `${shapes} Shapes` : shapes ? "Shape" : null;
   };
+  // What ⌫ deletes, named for it ("Delete Shape", "Delete 2 Lines") -- the Mac app's Edit ›
+  // Delete is enabled by it.
+  const deleteName = () => {
+    const chosen = figure.selected;
+    if (!chosen.length || chosen.includes(figure.model?.root)) return null;
+    return chosenName() || (chosen.length > 1 ? `${chosen.length} Lines` : "Line");
+  };
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
@@ -767,6 +774,7 @@ export function mount(studio, main) {
       { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),
     ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => figure.paste(clipboard.parts) }] : []),
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
+    ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
     // View › Zoom, as a deck's slide is zoomed: by steps, a point to a point, or fitted.
     { icon: "plus", label: "Zoom In", keys: "⌘+", run: () => zoomBy(1.25) },

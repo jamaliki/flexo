@@ -31,10 +31,12 @@ export function modelName(id) {
   return model;
 }
 
-// Each answerer's mark, in its own colour (white on it).
+// Each answerer's mark, in its own colour (white on it): another model's a grey dark enough
+// for white in either appearance (the ink's grey is pale in Dark).
 export const MARK_COLOURS = { claude: "#d97757", chatgpt: "#10a37f" };
+export const OTHER_MARK = "#6b6b70";
 export function assistantMark(provider, small = false) {
-  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || "var(--ink-2)" } }, icon("sparkle"));
+  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || OTHER_MARK } }, icon("sparkle"));
 }
 
 function remembered() { try { return JSON.parse(localStorage.getItem("flexo-studio-assistant") || "null"); } catch { return null; } }
@@ -61,8 +63,9 @@ export class AssistantPanel {
       else if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); this.giveBack(); }
     });
     workspace.on("assistant", (event) => this.handle(event));
-    // What it offers to ask is for the document in front, whichever that is now.
-    workspace.on("active", () => { if (!this.state.transcript.length) this.render(); else this.renderContext(); });
+    // What it offers to ask, and what it is asked about, are the document in front's,
+    // whichever that is now (or none).
+    workspace.on("active", () => { if (!this.state.transcript.length) this.render(); this.renderContext(); });
     workspace.on("focus", () => this.renderContext());
     this.render();
     this.restore();

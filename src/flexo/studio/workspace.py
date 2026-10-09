@@ -1659,8 +1659,15 @@ def _shaped(kind: Kind, document: Any) -> None:
 
 
 def _unread(error: BaseException, name: str) -> str:
-    """Why a file does not read, in words that do not name it again."""
+    """Why a file does not read, in words that do not name it again -- in its writer's
+    words where the YAML reader's are known ("line 4: a quote is not closed")."""
 
+    from flexo.studio.figure_kind import yaml_said
+
+    plain = yaml_said(error) if isinstance(error, yaml.YAMLError) else None
+    mark = getattr(error, "problem_mark", None)
+    if plain:
+        return f"line {mark.line + 1}: {plain}" if mark is not None else plain
     said = explain(error)
     for lead in (f"{name}: ", f"{name}, "):
         if said.startswith(lead):
