@@ -578,11 +578,11 @@ export function mount(studio, main) {
   const clipName = (clip) => clip.label.replace(/(^|\s)\p{L}/gu, (first) => first.toUpperCase());
   const copied = (clip) => toast(`${clip.label.charAt(0).toUpperCase()}${clip.label.slice(1)} copied`, { icon: "copy", seconds: 1.5 });
   // (Lines chosen alone: why nothing was copied is said, not left to look done.)
-  const uncopied = () => { const why = figure.uncopied(); if (why) toast(why, { icon: "info", seconds: 3 }); };
+  const uncopied = (cut = false) => { const why = figure.uncopied(cut); if (why) toast(why, { icon: "info", seconds: 3 }); };
   const ownsClip = () => studio.active && !typingNow() && !wordsChosen() && Boolean(figure.model);
   function clipChosen(cut) {
     const clip = clipOf();
-    if (!clip) { uncopied(); return; }
+    if (!clip) { uncopied(cut); return; }
     clipboard = clip;
     navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
     if (cut) figure.remove(undefined, [], { cut: true }); else copied(clip);
@@ -610,7 +610,7 @@ export function mount(studio, main) {
   document.addEventListener("cut", (event) => {
     keyed = null;
     const clip = copyNow(event);
-    if (clip) figure.remove(undefined, [], { cut: true }); else if (ownsClip()) uncopied();
+    if (clip) figure.remove(undefined, [], { cut: true }); else if (ownsClip()) uncopied(true);
   });
   document.addEventListener("paste", (event) => {
     keyed = null;

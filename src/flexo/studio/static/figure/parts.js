@@ -1703,7 +1703,8 @@ export function figureParts(host) {
   // A line goes with the shapes it joins: chosen alone, it is not copied (a paste of a line
   // between no shapes would be nothing), nor duplicated -- and that is said.
   const linesGoWith = (done) => `A line is ${done} with the shapes it joins. Select them too.`;
-  const uncopied = () => (state.selected.length && state.selected.every(isLine) ? linesGoWith("copied") : null);
+  // (`cut`: said as cut, not copied.)
+  const uncopied = (cut = false) => (state.selected.length && state.selected.every(isLine) ? linesGoWith(cut ? "cut" : "copied") : null);
   // The parts and groups chosen, with what they hold and the lines between them.
   function clip() {
     const figure = model();
