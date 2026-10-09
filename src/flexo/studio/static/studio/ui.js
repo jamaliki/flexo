@@ -1250,6 +1250,9 @@ const grouped = (tex) => {
   return /[\s+−\-=/·×]/.test(words) || several ? `(${words})` : words;
 };
 
+// The marks Unicode sets over the letter before them, for TeX's accents.
+const ACCENTS = { hat: "\u0302", widehat: "\u0302", bar: "\u0304", overline: "\u0304", tilde: "\u0303", widetilde: "\u0303", vec: "\u20d7", dot: "\u0307", ddot: "\u0308" };
+
 // A formula as a line of words: Greek and signs as themselves, fractions as a/b,
 // scripts raised or lowered where Unicode can, commands without their backslashes.
 export function mathWords(tex) {
@@ -1264,6 +1267,8 @@ export function mathWords(tex) {
     .replace(/\\begin\{pmatrix\}/g, "(").replace(/\\end\{pmatrix\}/g, ")")
     .replace(/\\begin\{bmatrix\}/g, "[").replace(/\\end\{bmatrix\}/g, "]")
     .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, "").replace(/&/g, ",\u0007").replace(/\\\\/g, ";\u0007")
+    // An accent or a face given one letter unbraced (\bar\alpha, \hat x), as TeX takes it: braced.
+    .replace(/\\(hat|widehat|bar|overline|tilde|widetilde|vec|dot|ddot|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol|bm|mathcal|mathbb|mathfrak)(?![A-Za-z])\s*(\\[A-Za-z]+|[A-Za-z0-9])/g, "\\$1{$2}")
     // Greek and signs first, so a script of one (p_{\theta}, x^{\prime}) is set as one; not
     // a command taking an argument (\sqrt{…}, set below).
     .replace(/\\([A-Za-z]+)(?![A-Za-z{])/g, (whole, name) => TEX_WORDS[name] ?? whole)
@@ -1273,6 +1278,8 @@ export function mathWords(tex) {
     text = text
       .replace(/\\[dtc]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a, b) => `${grouped(a)}/${grouped(b)}`)
       .replace(/\\sqrt\{([^{}]*)\}/g, (_, a) => `√${grouped(a)}`)
+      // An accent over one letter is drawn over it (x̂, ᾱ); over more, the letters alone.
+      .replace(/\\(hat|widehat|bar|overline|tilde|widetilde|vec|dot|ddot)\{([^{}]*)\}/g, (_, accent, x) => ([...x].length === 1 ? x + ACCENTS[accent] : x))
       .replace(/\\(mathcal|mathbb)\{([A-Z])\}/g, (_, font, ch) => ALPHABET[font][1][ch] || String.fromCodePoint(ALPHABET[font][0] + ch.charCodeAt(0) - 65))
       .replace(/\\(mathrm|mathbf|mathit|mathsf|mathtt|text|textrm|textbf|operatorname\*?|boldsymbol|bm|hat|bar|tilde|vec|dot|overline|underline|mathcal|mathbb|mathfrak|ce)\{([^{}]*)\}/g, "$2")
       .replace(/_\{([^{}]*)\}/g, (_, a) => script(a, SUB, "_"))
@@ -1291,7 +1298,7 @@ export function mathWords(tex) {
     .replace(/\u0008(?=[\p{L}\p{N}])/gu, " ").replace(/\u0008/g, "")
     // Relations spaced, and an operation between two terms -- a sign before one (−x) not.
     .replace(/\s*([=<>≤≥≠≈≡∼≃∝→←⇒⟹⟺↦∈∉⊂⊆])\s*/g, " $1 ")
-    .replace(/([\p{L}\p{N})\]′!⁺⁻₊₋])\s*([+−×·±∓÷])\s*/gu, "$1 $2 ")
+    .replace(/([\p{L}\p{N}\p{M})\]′!⁺⁻₊₋])\s*([+−×·±∓÷])\s*/gu, "$1 $2 ")
     .replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")").trim();
 }
 
