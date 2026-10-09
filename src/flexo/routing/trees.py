@@ -640,8 +640,20 @@ def curved_edge(
     routed = routed_edge(edge, centerline, style, measurer)
     shaft = routed.shaft
     drawn = _between(curve, _parameter(centerline, shaft[0]), _parameter(centerline, shaft[-1]))
-    # (Its caption is placed by its middle: see ``flexo.routing.labels``.)
-    return replace(routed, straight=True, curve=drawn, chord=(controls[0], controls[3]))
+    # Where its middle would be, bent and leaned not at all: an editor's handle goes back
+    # there. (Its caption is placed by its middle: see ``flexo.routing.labels``.)
+    rest = None
+    if edge.bend is not None or edge.lean:
+        bare = replace(edge, bend=None, lean=None)
+        rest = _at(_curve(bare, source, target, offset=offset, paired=paired, middle=middle), 0.5)
+    return replace(
+        routed,
+        straight=True,
+        curve=drawn,
+        chord=(controls[0], controls[3]),
+        whole=controls,
+        rest=rest,
+    )
 
 
 def _curve(
@@ -694,11 +706,20 @@ def _curve(
         )
 
     if edge.bend is not None:
-        return shaped(edge.bend * length)
-    if square:
-        return shaped(3.0 * reach * lean / 8.0)
-    way = _bow(edge, start, end, left, length, paired=paired, middle=middle)
-    return shaped(way * 0.75 * CURVE_BEND * length)
+        curve = shaped(edge.bend * length)
+    elif square:
+        curve = shaped(3.0 * reach * lean / 8.0)
+    else:
+        way = _bow(edge, start, end, left, length, paired=paired, middle=middle)
+        curve = shaped(way * 0.75 * CURVE_BEND * length)
+    if not edge.lean:
+        return curve
+    # Leaning, its middle moves along the line: both controls move 4/3 as far that way
+    # (a cubic's middle is 3/4 of the way to the controls' common move).
+    move = 4.0 * edge.lean * length / 3.0
+    shift = Point(dx / length * move, dy / length * move)
+    first, near, far, last = curve
+    return first, near.translated(shift.x, shift.y), far.translated(shift.x, shift.y), last
 
 
 def _bow(

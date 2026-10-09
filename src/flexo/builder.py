@@ -478,6 +478,7 @@ class Figure:
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
         bend: float | None = None,
+        lean: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
@@ -505,6 +506,7 @@ class Figure:
             via=via,
             shape=shape,
             bend=bend,
+            lean=lean,
             line=line,
             arrow=arrow,
             head=head,
@@ -2455,6 +2457,7 @@ class GroupBuilder:
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
         bend: float | None = None,
+        lean: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
@@ -2480,7 +2483,8 @@ class GroupBuilder:
 
         ``shape="straight"`` draws one straight segment between the two outlines
         instead of a routed path, and ``"curved"`` one smooth curve (``bend=0.2``
-        bows its middle a fifth of its length to the left of its travel); ``"auto"``
+        bows its middle a fifth of its length to the left of its travel, ``lean=0.25``
+        moves that middle a quarter of the way on toward its target); ``"auto"``
         follows the figure's ``lines`` convention. ``line="dashed"`` or
         ``"dotted"`` strokes it that way, and ``arrow="none"`` (an undirected
         link) or ``"both"`` moves its arrowheads. ``width=2`` draws it 2pt wide,
@@ -2515,6 +2519,7 @@ class GroupBuilder:
             via=_side(via, "via side"),
             shape=shape,
             bend=bend,
+            lean=lean,
             line=line,
             arrow=arrow,
             head=head,

@@ -6,7 +6,14 @@ import itertools
 from collections.abc import Callable
 from dataclasses import replace
 
-from flexo.components import intrinsic_node_size
+from flexo.components import (
+    DIAMOND_PADDING,
+    FIT_NEVER,
+    decision_fit,
+    decision_room,
+    decision_size,
+    intrinsic_node_size,
+)
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.drawn import DRAWN_KINDS, picture
 from flexo.geometry import Point, Rect, Size
@@ -200,6 +207,8 @@ def _measure_node(
     style: LayoutStyle,
 ) -> MeasuredNode:
     label = measurer.measure(node.label, max_width=_label_width(node, style))
+    if node.kind == "decision" and node.width is not None and not isinstance(node.width, CellSpan):
+        label = _decision_words(node, measurer, style)
     if node.kind == "structure" and node.label:
         # Set over its panel, wrapped to its width, in the title's weight (flexo.structures).
         from flexo.structures import structure_title
@@ -208,10 +217,46 @@ def _measure_node(
     if node.kind in DRAWN_KINDS:
         return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)
+    # Given a size of its own, the size it would be without (round its words) is kept
+    # too: what an editor's handles snap to.
+    # (A decision's is the diamond that hugs its words, smaller than it is of itself.)
+    fit = size
+    sized = node.width is not None or node.height is not None
+    if node.kind == "decision" or (sized and node.kind not in FIT_NEVER):
+        bare = replace(node, width=None, height=None)
+        words = label
+        if sized:
+            words = measurer.measure(bare.label, max_width=_label_width(bare, style))
+        if node.kind == "decision":
+            fit = decision_fit(words, style)
+        else:
+            fit = intrinsic_node_size(bare, words, style)
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
     # cell grid because the caption is a sibling node rather than padding.
-    return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0))
+    return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0), fit=fit)
+
+
+def _decision_words(node: NodeSpec, measurer: TextMeasurer, style: LayoutStyle) -> TextMetrics:
+    """A decision given a width: its words in as few lines as fit its diamond -- as tall as
+    it is given, else as short as it can be -- of a few ways of wrapping them, widest first."""
+
+    width = style.resolve_extent(node.width).points  # type: ignore[arg-type]
+    height = style.resolve_extent(node.height).points if node.height is not None else None
+    widest = width - 2.0 * DIAMOND_PADDING * style.padding_x.points
+    best: tuple[float, TextMetrics] | None = None
+    for room in (widest, 0.75 * width, decision_room(width, style), width / 3.0):
+        words = measurer.measure(node.label, max_width=max(1.0, room))
+        size = decision_size(node, words, style)
+        if size.width > width + 0.5:
+            continue  # (a line too long for it: it would widen)
+        if height is not None and size.height <= height + 0.5:
+            return words
+        if best is None or size.height < best[0]:
+            best = (size.height, words)
+    if best is not None:
+        return best[1]
+    return measurer.measure(node.label, max_width=decision_room(width, style))
 
 
 def _measure_drawn(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> MeasuredNode:
@@ -296,6 +341,8 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
         width = style.resolve_extent(node.width).points
         if node.kind in SHAPE_KINDS:
             return label_room(node.kind, width, style)
+        if node.kind == "decision":
+            return decision_room(width, style)
         return max(1.0, width - 2.0 * style.padding_x.points)
     if node.kind == "cloud":
         return CLOUD_MEASURE * style.typography.size.points

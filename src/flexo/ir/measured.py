@@ -47,6 +47,10 @@ class MeasuredNode:
     children up on. A component answers with its own centre, which is where the
     grammar puts a side-centre port.
     """
+    fit: Size | None = None
+    """The size it would be round its words, without a width or height of its own (unset,
+    ``intrinsic_size``) -- a decision's, the diamond that hugs them: what an editor's
+    handles snap to."""
 
 
 @dataclass(frozen=True, slots=True)

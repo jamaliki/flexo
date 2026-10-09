@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from flexo.artwork import node_artwork, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
+    FIT_NEVER,
     MOTIF_LABEL_KINDS,
     OP_SYMBOLS,
     VectorGrid,
@@ -43,6 +44,7 @@ def render_node(
 ) -> ET.Element:
     spec = node.measured.spec
     palette = toned(palette, spec, style)
+    fit = node.measured.fit
     group = element(
         parent,
         "g",
@@ -50,6 +52,11 @@ def render_node(
         data__flexo__entity="component",
         data__flexo__kind=spec.kind,
         data__flexo__role=spec.role,
+        # (The size it is round its words, for an editor's handles to snap to: a shape's
+        # that takes a width and height of its own.)
+        data__flexo__fit=f"{number(fit.width)} {number(fit.height)}"
+        if fit is not None and spec.kind not in FIT_NEVER and spec.kind not in DRAWN_KINDS
+        else None,
     )
     if spec.kind in DRAWN_KINDS:
         from flexo.render_drawn import render_drawn

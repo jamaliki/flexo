@@ -232,6 +232,7 @@
         "via": {"$ref": "#/$defs/side"},
         "shape": {"enum": ["auto", "orthogonal", "straight", "curved"]},
         "bend": {"type": "number", "minimum": -1, "maximum": 1},
+        "lean": {"type": "number", "minimum": -0.5, "maximum": 0.5},
         "line": {"enum": ["solid", "dashed", "dotted"]},
         "tone": {"type": ["string", "integer"]},
         "arrow": {"enum": ["end", "none", "both", "reversible"]},

@@ -509,6 +509,14 @@ def _render_edge(
             )
             if edge.chord is not None
             else None,
+            data__flexo__curve=" ".join(
+                number(value) for point in edge.whole for value in (point.x, point.y)
+            )
+            if edge.whole is not None
+            else None,
+            data__flexo__rest=f"{number(edge.rest.x)} {number(edge.rest.y)}"
+            if edge.rest is not None
+            else None,
             stroke__linecap="round",
             stroke__linejoin="round",
             **stroke,

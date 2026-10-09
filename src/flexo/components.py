@@ -857,11 +857,7 @@ def intrinsic_node_size(
     elif node.kind == "volume":
         return volume_geometry(node).size
     elif node.kind == "decision":
-        # The label's box inscribed in a diamond of the same proportions: each
-        # half-diagonal is twice the padded half-extent of the words.
-        half_width = label.width / 2.0 + style.padding_x.points
-        half_height = label.height / 2.0 + style.padding_y.points
-        return Size(4.0 * half_width, 4.0 * half_height)
+        return decision_size(node, label, style)
     elif node.kind == "circle":
         # The label's box inscribed in the circle, with the type's padding round it.
         inscribed = (label.width**2 + label.height**2) ** 0.5 + style.padding_y.points
@@ -914,6 +910,133 @@ def intrinsic_node_size(
             height = max(height, min(natural.height, label.height + style.padding_y.points))
     return Size(width, height)
 
+
+DIAMOND_PADDING = 0.5
+"""How much of a box's padding a decision hugging its words keeps round them (one given
+a size of its own, or snapped to them in an editor): its outline runs away from them on
+the slant, so only their corners come near it. Of itself it keeps all of it."""
+
+
+def decision_room(width: float, style: LayoutStyle) -> float:
+    """How wide a decision's words may run in a diamond ``width`` wide: the width one line
+    has in the least diamond round it, half the diamond's, less its padding."""
+
+    return max(1.0, width / 2.0 - DIAMOND_PADDING * style.padding_x.points)
+
+
+def decision_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
+    """A decision's diamond round its words, each line's corners inside its outline: as
+    small as it can be with a box's padding -- or as wide (or tall) as it is given, and the
+    other way as small as its words let it be, hugging them (``decision_fit``). Given both,
+    both, as far as its words fit; it is never smaller than they need."""
+
+    width = style.resolve_extent(node.width).points if node.width is not None else None
+    height = style.resolve_extent(node.height).points if node.height is not None else None
+    if width is None and height is None:
+        return _least_diamond(_diamond_corners(label, style), DIAMOND_ASPECT)
+    corners = _diamond_corners(label, style, snug=True)
+    if width is not None:
+        width = max(width, 2.0 * max(across for across, _ in corners) * 1.05)
+        least = _diamond_height(corners, width)
+        return Size(width, least if height is None else max(height, least))
+    assert height is not None
+    height = max(height, 2.0 * max(up for _, up in corners) * 1.05)
+    return Size(_diamond_width(corners, height), height)
+
+
+def decision_fit(label: TextMetrics, style: LayoutStyle) -> Size:
+    """The diamond that hugs a decision's words: the least that holds them with
+    ``DIAMOND_PADDING`` of a box's padding, no flatter (or narrower) than ``SNUG_ASPECT``.
+    An editor's handles snap to it."""
+
+    return _least_diamond(_diamond_corners(label, style, snug=True), SNUG_ASPECT)
+
+
+def _diamond_corners(
+    label: TextMetrics, style: LayoutStyle, *, snug: bool = False
+) -> list[tuple[float, float]]:
+    """Each line's outer corner, padded, from the middle of the words (how far across,
+    how far up or down): what a diamond round them must hold. Hugging them (``snug``),
+    with less padding, and the words' outer lines keep none of the room their line
+    height leaves over and under the letters."""
+
+    share = DIAMOND_PADDING if snug else 1.0
+    pad_x, pad_y = share * style.padding_x.points, share * style.padding_y.points
+    if not label.lines:
+        # No words yet: as a box's padding alone would be.
+        return [(style.padding_x.points, style.padding_y.points)]
+    step = label.height / len(label.lines)
+    spare = max(0.0, (step - (label.ascent + label.descent)) / 2.0) if snug else 0.0
+    top = -label.height / 2.0
+    corners = []
+    for index, line in enumerate(label.lines):
+        far = max(abs(top + index * step), abs(top + (index + 1) * step)) - spare
+        corners.append((line.width / 2.0 + pad_x, max(far, 0.0) + pad_y))
+    return corners
+
+
+def _diamond_height(corners: list[tuple[float, float]], width: float) -> float:
+    """The least height of a diamond ``width`` wide holding ``corners``: each corner
+    (a, b) inside it when a / (width / 2) + b / (height / 2) <= 1."""
+
+    half = width / 2.0
+    return max(2.0 * up / (1.0 - across / half) for across, up in corners)
+
+
+def _diamond_width(corners: list[tuple[float, float]], height: float) -> float:
+    half = height / 2.0
+    return max(2.0 * across / (1.0 - up / half) for across, up in corners)
+
+
+DIAMOND_ASPECT = 3.5
+"""The flattest a decision's diamond is of itself, width to height (and the narrowest,
+height to width): one line of words in the least diamond round it would be a lozenge."""
+SNUG_ASPECT = 2.5
+"""The flattest (or narrowest) a diamond hugging its words is: closer, it is flatter."""
+
+
+def _least_diamond(corners: list[tuple[float, float]], aspect: float) -> Size:
+    """The diamond of least area holding ``corners``, as flat (or narrow) as ``aspect``
+    at most: else, of those that hold them, the one that is just so.
+    (Its area, width times least height, is the largest of shapes convex in the width: a
+    third-split search finds it. One corner (a, b) alone gives 4a by 4b, its own box
+    inscribed half-way out.)"""
+
+    widest = max(across for across, _ in corners)
+    low, high = 2.0 * widest * 1.0001, 2.0 * widest * 8.0
+
+    def area(width: float) -> float:
+        return width * _diamond_height(corners, width)
+
+    for _ in range(90):
+        one, two = low + (high - low) / 3.0, high - (high - low) / 3.0
+        if area(one) <= area(two):
+            high = two
+        else:
+            low = one
+    width = (low + high) / 2.0
+    height = _diamond_height(corners, width)
+    if width > aspect * height or height > aspect * width:
+        # Narrower (or wider) along the diamonds that hold them, to the aspect: the least
+        # height falls as the width grows, so the width it is at is found by halves.
+        flat = width > height
+        low, high = (2.0 * widest * 1.0001, width) if flat else (width, 2.0 * widest * 64.0)
+        for _ in range(90):
+            middle = (low + high) / 2.0
+            tall = _diamond_height(corners, middle)
+            if (middle > aspect * tall) == flat:
+                high, low = (middle, low) if flat else (high, middle)
+            else:
+                low, high = (middle, high) if flat else (low, middle)
+        width = (low + high) / 2.0
+        height = _diamond_height(corners, width)
+    return Size(width, height)
+
+
+FIT_NEVER = frozenset(
+    {"label", "text", "spacer", "icon", "op", "vector", "volume", "image", "structure"}
+)
+"""Kinds sized by their content alone, or by handles of their own: no size to fit."""
 
 GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
 """Kinds whose size is their content's own, never grown around a label."""
