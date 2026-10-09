@@ -1289,3 +1289,10 @@ def test_a_copy_of_a_copy_is_numbered_on_from_it() -> None:
     text, chosen = edit(text, do="duplicate", ids=["encoder-2"])
     assert chosen == ["encoder-4"]
     compile_figure(parse(text, Path.cwd()))
+    # So is one pasted where its id is taken; pasted where it is not, it keeps it.
+    copied = {"top": ["encoder-2"], "nodes": [{"id": "encoder-2", "label": "Encoder"}]}
+    text, chosen = edit(text, do="paste", after="x", **copied)
+    assert chosen == ["encoder-5"]
+    compile_figure(parse(text, Path.cwd()))
+    _, chosen = edit(SAMPLE_FIGURE, do="paste", after="x", **copied)
+    assert chosen == ["encoder-2"]

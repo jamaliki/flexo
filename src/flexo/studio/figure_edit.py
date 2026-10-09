@@ -631,6 +631,20 @@ class _Document:
             candidate, number = f"{slug}-{number}", number + 1
         return candidate
 
+    def fresh_copy(self, identifier: str, also: set[str] | frozenset[str] = frozenset()) -> str:
+        """An unused id for a copy of ``identifier`` (duplicated, or pasted where it is taken):
+        a copy of a copy numbered on from it, as the copies of one part are -- ``fix-3``
+        after ``fix-2``, never ``fix-2-2``; none of ``also`` either."""
+
+        taken = self.taken() | set(also)
+        numbered = re.fullmatch(r"(.+)-(\d+)", identifier)
+        if not numbered or identifier not in taken:
+            return self.fresh(identifier, also)
+        stem, number = _slug(numbered[1]), int(numbered[2]) + 1
+        while f"{stem}-{number}" in taken:
+            number += 1
+        return f"{stem}-{number}"
+
     def detach(self, identifier: str) -> None:
         # (Lined up under a part where it was, it is placed afresh where it goes.)
         node = self.node(identifier)
@@ -1643,7 +1657,7 @@ class _Document:
             raise EditError("There\u2019s nothing to paste.")
         renamed: dict[str, str] = {}
         for item in [*nodes, *groups]:
-            renamed[str(item["id"])] = self.fresh(str(item["id"]), set(renamed.values()))
+            renamed[str(item["id"])] = self.fresh_copy(str(item["id"]), set(renamed.values()))
         for node in nodes:
             node["id"] = renamed[str(node["id"])]
             # The page's model lists port names where a file writes ports.
@@ -1724,7 +1738,7 @@ class _Document:
                 continue
             self.data.setdefault("nets", []).append(
                 {
-                    "id": self.fresh(str(net.get("id") or "line")),
+                    "id": self.fresh_copy(str(net.get("id") or "line")),
                     "kind": "merge" if merge else "fan-out",
                     "sources": ends if merge else [hub],
                     "targets": [hub] if merge else ends,
@@ -1737,16 +1751,7 @@ class _Document:
         node, group = self.node(identifier), self.group(identifier)
         if node is None and group is None:
             return None
-        # A copy of a copy is numbered on from it, as the copies of one part are: ``fix-3``
-        # after ``fix-2``, never ``fix-2-2``.
-        numbered = re.fullmatch(r"(.+)-(\d+)", identifier)
-        if numbered:
-            stem, number, taken = _slug(numbered[1]), int(numbered[2]) + 1, self.taken()
-            while f"{stem}-{number}" in taken:
-                number += 1
-            new = f"{stem}-{number}"
-        else:
-            new = self.fresh(identifier)
+        new = self.fresh_copy(identifier)
         renamed[identifier] = new
         if node is not None:
             twin = copy.deepcopy(dict(node))
