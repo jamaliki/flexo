@@ -138,6 +138,9 @@ export function widenLines(svg) {
       twin.setAttribute("fill", "none");
       twin.setAttribute("stroke", "transparent");
       twin.setAttribute("stroke-width", "9");
+      // (Nine of the window's pixels however far the drawing is zoomed: as easy to click on a
+      // slide shown small as on a figure zoomed in.)
+      twin.setAttribute("vector-effect", "non-scaling-stroke");
       // (Whole, a dashed line's too: clicked between its dashes, it is clicked all the same.)
       twin.setAttribute("stroke-dasharray", "none");
       twin.dataset.hitFor = id;
@@ -1645,9 +1648,22 @@ export function figureParts(host) {
     for (let at = target; at && at !== host.overlay; at = at.parentElement) {
       if (!at.matches?.("[data-flexo-entity][id]")) continue;
       const id = host.idOf(at.id);
+      // (A group's frame seen through a gap in a shape it holds -- between a person's head and
+      // shoulders, inside a ring -- is the shape's: the smallest whose box holds the point.)
+      if (id && groupOf(id)) return shapeAround(event, id) || id;
       if (id && typeOf(id)) return id;
     }
     return around(event);
+  }
+  function shapeAround(event, group) {
+    let best = null;
+    for (const node of model()?.nodes || []) {
+      if (!inside(node.id, group)) continue;
+      const box = host.element(node.id)?.getBoundingClientRect();
+      if (!box?.width || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) continue;
+      if (!best || box.width * box.height < best.area) best = { id: node.id, area: box.width * box.height };
+    }
+    return best?.id || null;
   }
   function click(event) {
     if (state.swallow) { state.swallow = false; return; }  // the end of a drag, not a click
@@ -1789,8 +1805,9 @@ export function figureParts(host) {
     const matrix = path?.getScreenCTM?.();
     if (!path || !matrix || !outer) return null;
     const screen = (point) => new DOMPoint(point.x, point.y).matrixTransform(matrix);
-    // (How far either side of a line a click on it reaches: half its twin's width.)
-    const reach = Math.max(3, 4.5 * Math.hypot(matrix.a, matrix.b));
+    // (How far either side of a line a click on it reaches: half its twin's width, in the
+    // window's pixels.)
+    const reach = 4.5;
     const radius = 12;
     // (All its words: its label, and the words under it the other way, a reversible step's.)
     const words = [...element.querySelectorAll("text")].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width);
@@ -1919,8 +1936,8 @@ export function figureParts(host) {
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: splices(id, kind) ? `Insert ${article(parts[kind].title)} ${inSentence(parts[kind].title)} between ${inQuotes(nameOf(id))} and ${inQuotes(nameOf(splices(id, kind)))} (⌥-click for other shapes)`
-          : `Add a connected ${inSentence(parts[kind].title)} ${branch?.word || "after"} ${inQuotes(nameOf(id))} (⌥-click for other shapes)`,
-        onpointerdown: stop, ondblclick: stop, onmousemove: stop,
+          : `Add a connected ${inSentence(parts[kind].title)} ${branch?.word || "after"} ${inQuotes(nameOf(id))} (⌥-click for other shapes; drag to a shape to connect to it)`,
+        onpointerdown: (event) => { stop(event); if (event.button === 0 && !event.altKey) linkStart(event, id); }, ondblclick: stop, onmousemove: stop,
         onclick: (event) => { if (event.altKey) { choose(event); return; } stop(event); addPart(kind, { after: id, source: id }); },
         oncontextmenu: (event) => choose(event),
       }, icon("plus")));
@@ -2295,6 +2312,104 @@ export function figureParts(host) {
     // (Let go after Esc, the pointer chooses nothing where it is.)
     if (shapeSizing?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
     shapeSizeCancel();
+  }
+
+  // -- a line drawn from a shape's + to another --
+  // As Keynote draws a connection from an object's blue dot: the + dragged, a line runs from
+  // its shape to the pointer -- to the shape under it, framed and named -- and let go there, the
+  // two are connected. Let go anywhere else, or with Esc, nothing is drawn; a click on the +
+  // still adds the shape it adds.
+  let linking = null;
+  function linkStart(event, id) {
+    if (linking || ending || bendingNow) return;
+    const outer = host.overlay.getBoundingClientRect();
+    const shapes = (model()?.nodes || []).filter((node) => node.id !== id).map((node) => ({ id: node.id, ...shapeSeen(node.id, outer) })).filter((shape) => shape.left !== undefined);
+    linking = { id, from: shapeSeen(id, outer), shapes, start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, to: null };
+    window.addEventListener("pointermove", linkMove);
+    window.addEventListener("pointerup", linkUp);
+    window.addEventListener("pointercancel", linkCancel);
+    window.addEventListener("keydown", linkKey, true);
+  }
+  function linkMove(event) {
+    if (!linking) return;
+    linking.pointer = { x: event.clientX, y: event.clientY };
+    if (!linking.moved) {
+      if (Math.hypot(event.clientX - linking.start.x, event.clientY - linking.start.y) < 4) return;
+      linking.moved = true;
+      const drawing = document.createElementNS(SVG_NS, "svg");
+      drawing.classList.add("fig-end-drag");
+      const way = document.createElementNS(SVG_NS, "line"), head = document.createElementNS(SVG_NS, "polygon");
+      head.classList.add("fig-head");
+      drawing.append(way, head);
+      const outline = h("div.fig-end-shape", { hidden: true }), tip = h("div.fig-turn-tip", { hidden: true });
+      host.overlay.append(drawing, outline, tip);
+      host.overlay.classList.add("fig-ending");
+      document.body.classList.add("fig-grabbing");
+      Object.assign(linking, { drawing, way, head, outline, tip });
+    }
+    event.preventDefault();
+    if (!linking.frame) linking.frame = requestAnimationFrame(linkFrame);
+  }
+  function linkFrame() {
+    if (!linking?.moved) return;
+    linking.frame = 0;
+    const { drawing, way, head, outline, tip, from, shapes } = linking;
+    const outer = host.overlay.getBoundingClientRect();
+    const point = { x: linking.pointer.x - outer.left, y: linking.pointer.y - outer.top };
+    // The shape under the pointer: the smallest that holds it.
+    const under = shapes.filter((shape) => point.x >= shape.left && point.x <= shape.right && point.y >= shape.top && point.y <= shape.bottom)
+      .sort((a, b) => (a.right - a.left) * (a.bottom - a.top) - (b.right - b.left) * (b.bottom - b.top))[0] || null;
+    linking.to = under?.id || null;
+    // From its shape's edge, toward the pointer -- to the other's edge, over one.
+    const middle = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
+    const edge = (box, toward) => {
+      const centre = middle(box), dx = toward.x - centre.x, dy = toward.y - centre.y;
+      const reach = Math.min(Math.abs(dx) > 1e-6 ? (box.right - box.left) / 2 / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-6 ? (box.bottom - box.top) / 2 / Math.abs(dy) : Infinity, 1);
+      return { x: centre.x + dx * reach, y: centre.y + dy * reach };
+    };
+    const end = under ? edge(under, middle(from)) : point;
+    const start = edge(from, under ? middle(under) : point);
+    drawing.setAttribute("width", String(outer.width));
+    drawing.setAttribute("height", String(outer.height));
+    for (const [name, value] of [["x1", start.x], ["y1", start.y], ["x2", end.x], ["y2", end.y]]) way.setAttribute(name, String(value));
+    const run = Math.hypot(end.x - start.x, end.y - start.y) || 1, ux = (end.x - start.x) / run, uy = (end.y - start.y) / run;
+    head.setAttribute("points", [[0, 0], [-8, 3.5], [-8, -3.5]].map(([along, across]) => `${end.x + ux * along - uy * across},${end.y + uy * along + ux * across}`).join(" "));
+    const box = under && host.box(under.id);
+    outline.hidden = !box;
+    if (box) Object.assign(outline.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    tip.hidden = !under;
+    if (under) {
+      tip.textContent = `Connect to ${inQuotes(nameOf(under.id))}`;
+      Object.assign(tip.style, { left: `${point.x}px`, top: `${point.y + 18}px` });
+    }
+  }
+  function linkFinish() {
+    window.removeEventListener("pointermove", linkMove);
+    window.removeEventListener("pointerup", linkUp);
+    window.removeEventListener("pointercancel", linkCancel);
+    window.removeEventListener("keydown", linkKey, true);
+    document.body.classList.remove("fig-grabbing");
+    const was = linking;
+    linking = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    for (const part of [was?.drawing, was?.outline, was?.tip]) part?.remove();
+    host.overlay.classList.remove("fig-ending");
+    return was;
+  }
+  function linkUp(event) {
+    if (linking?.moved && event) { linking.pointer = { x: event.clientX, y: event.clientY }; linkFrame(); }
+    const was = linkFinish();
+    if (!was?.moved) return;
+    swallowClick();
+    if (was.to) act({ do: "connect", source: was.id, target: was.to });
+  }
+  function linkCancel() { linkFinish(); }
+  function linkKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (linking?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
+    linkCancel();
   }
 
   // -- a line's end dragged to another side of its shape --
@@ -2875,9 +2990,10 @@ export function figureParts(host) {
     // Pressed where nothing is drawn, in a figure that is the whole document (the figure
     // editor's): a drag chooses what it touches. (On a slide it moves the figure: the deck's.)
     if (host.whole && (!id || id === model()?.root) && !event.metaKey && !event.ctrlKey && !event.altKey) { band(event); return; }
-    if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    // (⌥ held, as it is let go, a copy goes there: see dragEnd.)
+    if (event.shiftKey || event.metaKey || event.ctrlKey) return;
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
-    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
+    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
     window.addEventListener("pointercancel", dragCancel);
@@ -2995,6 +3111,7 @@ export function figureParts(host) {
     // Where every part is now, and every group's room, from the drawing as it stands.
     const { boxes, drawn, folds } = asSeen();
     const moving = elementsOf(id).map((element) => ({ element, base: element.getAttribute("transform") || "", scale: unitsPerPixel(element) }));
+    lift(moving);
     const nodes = new Set(model().nodes.filter((node) => inside(node.id, id)).map((node) => node.id));
     const touches = (ref) => nodes.has(nodeOfRef(ref));
     const lines = [...model().edges.filter((edge) => touches(edge.from) || touches(edge.to)),
@@ -3016,6 +3133,8 @@ export function figureParts(host) {
   function dragMove(event) {
     if (!drag) return;
     drag.pointer = { x: event.clientX, y: event.clientY };
+    // (⌥ held, it is a copy that is carried: the pointer says so.)
+    if (drag.id) { drag.copy = event.altKey; document.body.classList.toggle("fig-copying", event.altKey); }
     if (!drag.started) {
       if (Math.hypot(event.clientX - drag.from.x, event.clientY - drag.from.y) < 4) return;
       dragStart();
@@ -3081,14 +3200,23 @@ export function figureParts(host) {
     host.overlay.append(drag.tag);
     placeTag(at);
   }
+  // (Beside what is carried, level with the line -- or, should a shape be there (the one the
+  // line goes to), on its other side, or over or under it: never over the shapes it names.)
   function placeTag(at) {
     const tag = drag?.tag;
     if (!tag) return;
-    const outer = host.overlay.getBoundingClientRect(), wide = tag.offsetWidth;
+    const outer = host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
     const carried = [...drag.moving.map((item) => item.element), drag.ghost].filter(Boolean).map((element) => element.getBoundingClientRect());
     const right = Math.max(at.at.x + 12, ...carried.map((rect) => rect.right + 10));
-    const left = right + wide < outer.right - 4 ? right : Math.min(at.at.x - 12, ...carried.map((rect) => rect.left - 10)) - wide;
-    Object.assign(tag.style, { left: `${left - outer.left}px`, top: `${at.at.y - outer.top}px` });
+    const left = Math.min(at.at.x - 12, ...carried.map((rect) => rect.left - 10)) - wide;
+    const top = Math.min(at.at.y - 12, ...carried.map((rect) => rect.top - 8)) - high / 2, bottom = Math.max(at.at.y + 12, ...carried.map((rect) => rect.bottom + 8)) + high / 2;
+    const shapes = (model()?.nodes || []).filter((node) => node.id !== drag.id).map((node) => host.element(node.id)?.getBoundingClientRect()).filter((rect) => rect?.width);
+    const clear = ([x, y]) => x > outer.left && x + wide < outer.right - 4
+      && !shapes.some((rect) => x < rect.right && x + wide > rect.left && y - high / 2 < rect.bottom && y + high / 2 > rect.top);
+    const middle = at.at.x - wide / 2;
+    const spots = [[right, at.at.y], [left, at.at.y], [middle, top], [middle, bottom]];
+    const [x, y] = spots.find(clear) || (right + wide < outer.right - 4 ? spots[0] : spots[1]);
+    Object.assign(tag.style, { left: `${x - outer.left}px`, top: `${y - outer.top}px` });
   }
 
   // (Judged by where the pointer is, and where the part's middle now is: lined up under
@@ -3248,15 +3376,43 @@ export function figureParts(host) {
     was.indicator.remove();
     was.zone.remove();
     was.ghost?.remove();
-    document.body.classList.remove("fig-grabbing");
+    document.body.classList.remove("fig-grabbing", "fig-copying");
     for (const { element } of was.parted) element.style.transform = "";
     // A drag ends in a click on whatever is under the pointer: that click is not one.
     swallowClick();
     return was;
   }
+  // What is carried is drawn over the rest of the figure -- over the groups drawn after it, as
+  // Keynote lifts what it moves -- each element last in the drawing, in a group that keeps it
+  // where it was drawn; and put back in its place (`land`) should it go home.
+  function lift(moving) {
+    for (const item of moving) {
+      const { element } = item, parent = element.parentNode, svg = element.ownerSVGElement;
+      const into = svg?.getScreenCTM?.(), from = parent?.getScreenCTM?.();
+      if (!svg || !into || !from || parent === svg) continue;
+      const at = into.inverse().multiply(from);
+      const holder = document.createElementNS(SVG_NS, "g");
+      holder.setAttribute("transform", `matrix(${at.a} ${at.b} ${at.c} ${at.d} ${at.e} ${at.f})`);
+      holder.setAttribute("class", "fig-lift");
+      item.home = { parent, next: element.nextSibling, holder };
+      svg.append(holder);
+      holder.append(element);
+    }
+  }
+  function unlift(moving) {
+    // (The last first: each put back before what came after it, itself back already.)
+    for (const item of [...moving].reverse()) {
+      const home = item.home;
+      if (!home) continue;
+      item.home = null;
+      if (home.parent.isConnected) home.parent.insertBefore(item.element, home.next?.parentNode === home.parent ? home.next : null);
+      home.holder.remove();
+    }
+  }
   // Home again: the part slides back to where it was drawn, the lines come back.
   function sendHome(was) {
     clearTimeout(was.wait);
+    unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
     for (const { element, base } of was.moving) {
       const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(element.getAttribute("transform") || "");
@@ -3274,9 +3430,13 @@ export function figureParts(host) {
   function dragEnd(event) {
     if (drag?.started && event) drag.pointer = { x: event.clientX, y: event.clientY };
     if (drag?.started) dragFrame();
+    const copy = Boolean(event?.altKey ?? drag?.copy);
     const was = dragFinish();
     if (!was) return;
     const at = was.at;
+    // ⌥ held as it is let go, as Keynote's ⌥-drag: it goes home, and a copy of it goes where it
+    // was let go -- or, let go where it was, beside it.
+    if (copy && at) { sendHome(was); copyAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn }); return; }
     if (!at || unchanged(at, was.id, was.drawn)) { sendHome(was); return; }
     // It stays where it was let go until the drawing it makes comes back and lands.
     for (const { element } of was.moving) { element.classList.add("fig-settling"); element.classList.remove("fig-over-line"); }
@@ -3314,6 +3474,29 @@ export function figureParts(host) {
       if (at.kind === "line") ownLine(id, written(at.of), at.side, { failed, merge, label });
       else act({ do: "move", id, parent: written(at.parent), index: at.index }, { merge, label, failed });
     });
+  }
+  // A copy of a part put at `at` (as moveAsSeen puts the part itself), one step: the part
+  // duplicated -- the copy just after it, where it is -- then the copy moved there. Its place
+  // among the parts is as they were seen, the part itself one of them still: in its own line,
+  // past the part, one more along.
+  function copyAsSeen(id, at, { folds = [], drawn = null } = {}) {
+    const merge = `copy:${id}:${Date.now()}`, label = said({ do: "duplicate", ids: [id] });
+    const holder = (drawn || model()).groups.find((group) => (group.children || []).includes(id));
+    const duplicateThen = (written = (each) => each) => act({ do: "duplicate", ids: [id] }, { merge, label, select: false, then: (result) => {
+      const copy = result.select?.[0];
+      if (!copy) return;
+      const options = { merge, label };
+      if (at.kind === "splice") act({ do: "move", id: copy, into: at.line, parent: at.parent }, options);
+      else if (at.kind === "align") act({ do: "align", id: copy, with: at.with }, options);
+      else if (at.kind === "line") ownLine(copy, written(at.of), at.side, options);
+      else {
+        const own = holder && at.parent === holder.id ? holder.children.indexOf(id) : -1;
+        const index = own >= 0 && at.index >= own ? at.index + 1 : at.index;
+        act({ do: "move", id: copy, parent: written(at.parent), index }, options);
+      }
+    } });
+    if (folds.length) arrangeSeen(folds, { merge, label }, duplicateThen);
+    else duplicateThen();
   }
   // The rows (columns) of a figure folded onto lines to fit, written as they are seen (`folds`,
   // asSeen's), one step (`merge`) with what is done after them: `done(written)`, `written`
@@ -4888,16 +5071,20 @@ export function figureParts(host) {
     }
     return told;
   }
-  // A line's end, said: its shape's name, and its port's after it ("Add LN — 2nd · Skip").
+  // A line's end, said: its shape's name, and its port's after it ("Add LN — 2nd · Skip") --
+  // but for a shape's plain way in or out (its input, its output), which is the shape itself.
   function endSaid(ref, told = namesTold()) {
-    const node = nodeOfRef(ref);
-    const port = String(ref) !== node ? ` · ${titled(String(ref).slice(node.length + 1))}` : "";
-    return `${told.get(node) || nameOf(node)}${port}`;
+    const node = nodeOfRef(ref), port = String(ref) !== node ? String(ref).slice(node.length + 1) : "";
+    return `${told.get(node) || nameOf(node)}${port && !PLAIN_PORTS.has(port) ? ` · ${titled(port)}` : ""}`;
   }
-  // Every end a line may have: each shape, then each of its ports.
-  function endOptions(told = namesTold()) {
-    return model().nodes.flatMap((node) => [{ value: node.id, label: told.get(node.id) },
-      ...(node.ports || []).map((port) => ({ value: `${node.id}.${port}`, label: `${told.get(node.id)} · ${titled(port)}` }))]);
+  // Every end a line may have: each shape, then each of its ports -- its plain way in or out
+  // only where a line's end (`current`) is written so, in the shape's place, by its name.
+  function endOptions(told = namesTold(), current = null) {
+    return model().nodes.flatMap((node) => {
+      const plain = (node.ports || []).find((port) => PLAIN_PORTS.has(port) && current === `${node.id}.${port}`);
+      return [{ value: plain ? current : node.id, label: told.get(node.id) },
+        ...(node.ports || []).filter((port) => !PLAIN_PORTS.has(port)).map((port) => ({ value: `${node.id}.${port}`, label: `${told.get(node.id)} · ${titled(port)}` }))];
+    });
   }
   // Which side of its shape a line's end meets it on, as its panel says it: one it was
   // asked to (``depart``, ``arrive``), or the side of a port that keeps to one (a
@@ -4999,11 +5186,11 @@ export function figureParts(host) {
     // Its ends by the shapes' names (and ports'), as they are seen -- shapes with the same
     // words told apart; their IDs are the file's.
     const told = namesTold();
-    const options = endOptions(told);
     // An end at a shape the figure has none of (mistyped, or deleted): said, and its field
     // marked -- the one to choose a shape in.
     const lost = ["to", "from"].filter((key) => !nodeOf(nodeOfRef(edge[key])));
     const end = (key) => {
+      const options = endOptions(told, String(edge[key]));
       const known = options.some((option) => option.value === edge[key]);
       return ui.select({ value: edge[key], key: `edge:${edge.id}:${key}`, options: known ? options : [{ value: edge[key], label: lost.includes(key) ? `\u201c${edge[key]}\u201d (no such shape)` : edge[key] }, ...options], onChange: (value) => {
         if (value === edge[key]) return;

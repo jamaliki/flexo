@@ -290,3 +290,10 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 body.fig-banding, body.fig-banding * { user-select: none; }
 /* A curve's arrowheads as it is bent, where they will be drawn. */
 .fig-end-drag .fig-heads polygon { fill: var(--accent); stroke: none; }
+/* A slide's figure carried to another place: its chosen shape's frame and handles go with
+   the rest of what is chosen, not left where it was. */
+.block-dragging .fig-marks { visibility: hidden; }
+/* What is carried is seen whole, past the page's edge too, until it is let go. */
+.fig-dragging svg { overflow: visible; }
+body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !important; }
+.fig-end-drag .fig-head { fill: var(--accent); stroke: none; }
