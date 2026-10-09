@@ -1102,7 +1102,15 @@ export async function start() {
       else if (!typingIn(event.target) && !document.querySelector(".scrim:not(.palette-scrim), .present")) palette(workspace);
       return;
     }
-    if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
+    // ⌘J: the assistant, the palette put away for it -- but nothing behind a sheet, as the Mac
+    // app's View menu waits for one, nor during a show.
+    if (mod && key === "j" && !event.altKey) {
+      event.preventDefault();
+      if (document.querySelector(".scrim:not(.palette-scrim), .present")) return;
+      closePalette();
+      side.toggle("assistant");
+      return;
+    }
     if (document.querySelector(".scrim, .present")) return;
     if (mod && event.altKey && event.code === "KeyA") { event.preventDefault(); side.toggle("activity"); return; }
     // ⇧⌘] and ⇧⌘[: the next or the previous document, as a Mac app's tabs are gone through.
