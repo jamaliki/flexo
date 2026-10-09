@@ -2130,7 +2130,9 @@ export function figureParts(host) {
     const ended = id && isLine(id) && !state.connecting && !inline ? id : null;
     const ends = ended ? endsSeen(ended) : [];
     const apart = ends.length === 2 ? Math.hypot(ends[0].at.x - ends[1].at.x, ends[0].at.y - ends[1].at.y) : Infinity;
-    const endsShown = apart >= 18 ? ends : [];
+    // (Each end's reach is 11 pixels round it: closer than 30 apart, the two would cover the
+    // middle between them.)
+    const endsShown = apart >= 30 ? ends : [];
     const curving = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
     const bending = curving && apart >= 56 && ends.every((end) => Math.hypot(end.at.x - curving.at.x, end.at.y - curving.at.y) >= 22) ? curving : null;
     const line = id && edgeOf(id) && !state.connecting && !inline ? id : null;
