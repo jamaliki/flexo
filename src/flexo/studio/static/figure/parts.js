@@ -253,11 +253,14 @@ export function figureParts(host) {
   const typeOf = (id) => (nodeOf(id) ? "node" : groupOf(id) ? "group" : edgeOf(id) ? "edge" : netOf(id) ? "net" : null);
   const parentOf = (id) => model()?.groups.find((g) => (g.children || []).includes(id));
   const partOf = (node) => parts[node?.kind || "block"];
+  // A kind of shape by the one name it has everywhere -- its type, the palette, the menus and
+  // the history: "Block", "Decision".
+  const kindTitle = (kind) => titled(parts[kind || "block"]?.title || "Shape");
   // (A name with no port and no shape of it -- a line "to: nowhere" -- is itself.)
   const nodeOfRef = (ref) => (nodeOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
   const nameOf = (id) => {
     const node = nodeOf(id);
-    // A shape with no words is called what it shows faintly on the drawing ("Shape").
+    // A shape with no words is called what it shows faintly on the drawing ("Block").
     if (node) return plain(node.label).trim() || hintOf(node) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
     if (group) return plain(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
@@ -296,10 +299,11 @@ export function figureParts(host) {
       case "add": {
         // After a part, as the Add Shape menu says it: into the line on from it, under it as
         // a branch, or after it -- or into a line: between the two it joins.
-        if (action.into && edgeOf(action.into)) return lineWhere(action.into).label;
+        // (Named for the kind of shape it is, as the menus and its type name it: "Add Block".)
+        if (action.into && edgeOf(action.into)) return lineWhere(action.into, { kind: action.kind }).label;
         if (action.after && !action.parent && nodeOf(action.after)) return addWhere(action.after, Boolean(action.source), action.kind).label;
-        if (action.after && groupOf(action.after)) return `Add Shape After ${name(action.after)}`;
-        return "Add Shape";
+        if (action.after && groupOf(action.after)) return `Add ${kindTitle(action.kind)} After ${name(action.after)}`;
+        return `Add ${kindTitle(action.kind)}`;
       }
       case "connect": return `Connect ${name(action.source)} to ${name(action.target)}`;
       case "delete": return many(action.ids, "Delete");
@@ -317,6 +321,11 @@ export function figureParts(host) {
       case "rename": return `Change ID of ${name(action.id)}`;
       // A part put on a line of its own beside another makes a row (a column) of the two: said so.
       case "move": {
+        // Out of its own row (column), onto a line of its own beside it: said as its menu says it.
+        if (action.line && action.of && action.of === parentOf(action.id)?.id) {
+          const own = { below: "Row Below", above: "Row Above", left: "Column on the Left", right: "Column on the Right" }[action.line];
+          if (own) return `Move ${name(action.id)} to Own ${own}`;
+        }
         if (action.line && action.of && action.of !== model()?.root && (nodeOf(action.of) || groupOf(action.of))) {
           const way = { left: "Row", right: "Row", below: "Column", above: "Column" }[action.line];
           if (way) return `Put ${name(action.id)} in a ${way} with ${name(action.of)}`;
@@ -354,7 +363,8 @@ export function figureParts(host) {
         if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Rotate ${name(id)}`;
         if (all("properties.yaw", "properties.pitch", "properties.roll", "properties.zoom")) return `Reset View of ${name(id)}`;
         if (all("properties.width", "properties.height")) return `Resize ${name(id)}`;
-        if (all("width", "height")) return values.width === null && values.height === null ? `Fit ${name(id)} to Its Words` : `Resize ${name(id)}`;
+        // (A line's width is how thick it is drawn: its field's name, "Change Line Width".)
+        if (all("width", "height") && target.type === "node") return values.width === null && values.height === null ? `Fit ${name(id)} to Its Words` : `Resize ${name(id)}`;
         if (all("bend", "lean")) return values.bend === null && values.lean === null ? "Reset Bend" : "Bend Line";
         // mol-sketch's settings, by the setting's label: "Change Line Width".
         const style = keys.filter((key) => key.startsWith("properties.style"));
@@ -740,7 +750,7 @@ export function figureParts(host) {
   // by the Add Shape palette and by Undo alike. (`at`: where on the drawing it was let go, in
   // the overlay's pixels, its stand-in there until it is drawn; else it stands beside the
   // part the line leaves, those after it stepping aside, as a + there puts one.)
-  function lineWhere(id, { parent = null, at = null } = {}) {
+  function lineWhere(id, { parent = null, at = null, kind = "block" } = {}) {
     const edge = edgeOf(id), source = nodeOfRef(edge.from), target = nodeOfRef(edge.to);
     const from = inQuotes(nameOf(source)), to = inQuotes(nameOf(target));
     // (It goes in the group that holds both ends, after what there holds the one the line
@@ -749,7 +759,7 @@ export function figureParts(host) {
     while (both && !inside(target, both.id)) both = parentOf(both.id);
     const holder = (both?.children || []).find((child) => child === source || inside(source, child));
     const beside = holder && host.box(holder) ? holder : source;
-    return { into: id, parent, at, beside, text: `Adds between ${from} and ${to}`, label: `Insert Shape Between ${from} and ${to}` };
+    return { into: id, parent, at, beside, text: `Adds between ${from} and ${to}`, label: `Insert ${kindTitle(kind)} Between ${from} and ${to}` };
   }
   // The line a shape added after `source`, joined to it, goes into: `source`'s one line out,
   // wherever it leads -- to the part after it, or to one in another group -- the new shape a
@@ -776,10 +786,10 @@ export function figureParts(host) {
     const into = joined && insert ? splices(id, kind) : null;
     const branch = into ? null : branchOf(id, joined, kind);
     if (branch) {
-      return { branch, text: `Adds ${branch.word} ${name}${joined ? ", joined to it" : ""}`, label: `Add Shape ${titled(branch.word)} ${name}` };
+      return { branch, text: `Adds ${branch.word} ${name}${joined ? ", joined to it" : ""}`, label: `Add ${kindTitle(kind)} ${titled(branch.word)} ${name}` };
     }
-    if (into) return { branch: null, text: `Adds between ${name} and ${inQuotes(nameOf(into))}, joined to both`, label: `Insert Shape Between ${name} and ${inQuotes(nameOf(into))}` };
-    return { branch: null, text: `Adds after ${name}${joined ? ", joined to it" : ""}`, label: `Add Shape After ${name}` };
+    if (into) return { branch: null, text: `Adds between ${name} and ${inQuotes(nameOf(into))}, joined to both`, label: `Insert ${kindTitle(kind)} Between ${name} and ${inQuotes(nameOf(into))}` };
+    return { branch: null, text: `Adds after ${name}${joined ? ", joined to it" : ""}`, label: `Add ${kindTitle(kind)} After ${name}` };
   }
   function branchOf(id, joined, kind) {
     const holder = parentOf(id);
@@ -1021,7 +1031,7 @@ export function figureParts(host) {
     // the name it is written with once the figure is written as seen.)
     const add = (written = (id) => id) => act({ ...action, ...(action.parent ? { parent: written(action.parent) } : {}), ...(action.of ? { of: written(action.of) } : {}) }, {
       merge,
-      label: where.label || plan?.label || null,
+      label: (where.into ? lineWhere(where.into, { kind }).label : where.label) || plan?.label || null,
       // (Not chosen, should another have been chosen meanwhile: see leaveWith.)
       select: () => !mine?.left,
       then: (result) => {
@@ -1038,9 +1048,10 @@ export function figureParts(host) {
     // (Let go beside a part, the same: where its slot said -- "Right of “B”" on a column turned
     // to fit is right of it as drawn -- as a part dragged there goes: ownLine.)
     const folds = where.folds ?? asSeen().folds;
-    if (plan?.branch || (where.side && !folds.length)) writeAsDrawn({ merge, label: where.label || plan?.label || null }, add);
+    const label = (where.into ? lineWhere(where.into, { kind }).label : where.label) || plan?.label || null;
+    if (plan?.branch || (where.side && !folds.length)) writeAsDrawn({ merge, label }, add);
     else if (folds.length) {
-      arrangeSeen(folds, { merge, label: where.label || plan?.label || null,
+      arrangeSeen(folds, { merge, label,
         failed: () => { if (early === mine) { early = null; stand(null); } stepped?.(); if (adding) { adding = 0; host.settled?.(); } } }, add);
     } else add();
   }
@@ -1247,7 +1258,8 @@ export function figureParts(host) {
   }
   // What a part with no words is, said faintly where they will go while it is edited --
   // never drawn. Only a part whose kind is worded: a junction or a picture says nothing.
-  const HINTS = { block: "Shape", terminal: "Start", decision: "Decision" };
+  // (A block's is its name, "Block", as its type and the menus call it.)
+  const HINTS = { terminal: "Start", decision: "Decision" };
   // The least size (in the window's pixels) a hint is said at.
   const HINT_SIZE = 11;
   // Where a part's words go while it has none, as the figure will draw them once it has: in
@@ -1440,7 +1452,7 @@ export function figureParts(host) {
       items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove(chosen) });
       return items;
     }
-    if (!isRoot && (node || group || isLine(id))) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
+    if (!isRoot && (node || group || isLine(id))) items.push({ icon: "pencil", label: "Edit Text", keys: "↩", run: () => openInline(id) });
     if (node) {
       const kind = nextKind(node);
       // A opens the palette of shapes, to add after the shape chosen: it is that item's key.
@@ -1454,7 +1466,7 @@ export function figureParts(host) {
     // A line: a shape put into it, between the two it joins -- a block, or one chosen from the
     // palette -- ready for its words.
     if (edge) {
-      items.push({ icon: "plus", label: "Insert Shape", run: () => addPart("block", lineWhere(id)) },
+      items.push({ icon: "plus", label: `Insert ${kindTitle("block")}`, run: () => addPart("block", lineWhere(id)) },
         { icon: "plus", label: "Insert Shape…", keys: "A", run: () => addPalette(anchor, { into: id }) });
     }
     // A line joined of several made lines again.
@@ -1963,7 +1975,7 @@ export function figureParts(host) {
           style: { left: `${left}px`, top: `${top}px` },
           title: "Drag to resize (⇧: keep its proportions) · Double-click to fit it to its words",
           onpointerdown: (event) => shapeSizeStart(event, id, corner, fits), onclick: stop, onmousemove: stop,
-          ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, fitValues(id, fits)); },
+          ondblclick: (event) => { event.stopPropagation(); fitWords(id, fits); },
         } : {
           style: { left: `${left}px`, top: `${top}px` },
           title: "Drag to resize · Double-click to reset size",
@@ -2063,6 +2075,9 @@ export function figureParts(host) {
   // its own); a diamond's hugs its words closer than it does of itself, so is written.
   const fitValues = (id, fit) => (nodeOf(id)?.kind === "decision"
     ? { width: `${Math.ceil(fit.width)}pt`, height: `${Math.ceil(fit.height)}pt` } : { width: null, height: null });
+  // A shape fitted to its words, said so -- a diamond's too, though its size is written.
+  const fitWords = (id, fit, options = {}) => act({ do: "update", target: { type: "node", id }, values: fitValues(id, fit) },
+    { select: false, label: `Fit ${inQuotes(nameOf(id))} to Its Words`, ...options });
   // Dragged, its outline is drawn at the size it will be, its opposite corner kept: a side
   // within a few pixels of the size that fits its words snaps to it (both: it fits them
   // again, its size its own no longer), and a side not moved keeps what it was; ⇧ keeps
@@ -2165,6 +2180,7 @@ export function figureParts(host) {
       : size.snapped[side] ? null : size.kept[side] ? sizing.had[side] : own(side));
     const values = size.fitted ? fitValues(sizing.id, sizing.fit) : { width: value("width"), height: value("height") };
     if (values.width === sizing.had.width && values.height === sizing.had.height) return;
+    if (size.fitted) { fitWords(sizing.id, sizing.fit, { then: () => { state.landing = Date.now(); } }); return; }
     act({ do: "update", target: { type: "node", id: sizing.id }, values }, { then: () => { state.landing = Date.now(); } });
   }
   function shapeSizeCancel() { shapeSizeFinish(); }
@@ -3229,14 +3245,15 @@ export function figureParts(host) {
     if (!at || at.kind === "align") return;
     const outer = host.overlay.getBoundingClientRect();
     const point = (spot) => ({ x: spot.x - outer.left, y: spot.y - outer.top });
-    // (Named for Undo by where it went, as the slot was named: "Add Shape Right of “D”".)
+    // (Named for Undo by where it went, as the slot was named: "Add Block Right of “D”".)
     const near = (id) => (typeOf(id) ? inQuotes(nameOf(id)) : null);
-    if (at.kind === "splice") addPart(was.kind, lineWhere(at.line, { parent: at.parent, at: point(at.at) }));
+    const added = `Add ${kindTitle(was.kind)}`;
+    if (at.kind === "splice") addPart(was.kind, lineWhere(at.line, { parent: at.parent, at: point(at.at), kind: was.kind }));
     else if (at.kind === "line") {
       const side = { below: "Under", above: "Over", right: "Right of", left: "Left of" }[at.side];
-      addPart(was.kind, { side: at.side, of: at.of, folds: was.folds, at: point(was.pointer), label: at.of !== model().root && near(at.of) ? `Add Shape ${side} ${near(at.of)}` : "Add Shape" });
+      addPart(was.kind, { side: at.side, of: at.of, folds: was.folds, at: point(was.pointer), label: at.of !== model().root && near(at.of) ? `${added} ${side} ${near(at.of)}` : added });
     } else {
-      const label = at.near && near(at.near) ? `Add Shape ${at.after ? "After" : "Before"} ${near(at.near)}` : groupOf(at.parent) && at.parent !== model().root ? `Add Shape Inside ${near(at.parent)}` : "Add Shape";
+      const label = at.near && near(at.near) ? `${added} ${at.after ? "After" : "Before"} ${near(at.near)}` : groupOf(at.parent) && at.parent !== model().root ? `${added} Inside ${near(at.parent)}` : added;
       addPart(was.kind, { parent: at.parent, index: at.index, folds: was.folds, at: point(was.pointer), label });
     }
   }
@@ -4626,7 +4643,7 @@ export function figureParts(host) {
     const move = (merge = null) => act({ do: "move", id, line: side, of }, { merge: merge || joined, label: told, failed });
     if (!turnedGroups.length) { move(); return; }
     // One step, said as the move it is: its groups written as drawn are part of it.
-    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id });
+    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, line: side, of });
     const steps = ["row", "column"].map((kind) => ({ kind, targets: turnedGroups.filter((group) => shown(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
       .filter((step) => step.targets.length);
     const next = (index) => {
