@@ -106,6 +106,9 @@ export function painted(tone) {
 export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.text ?? "").join("") : label ?? "");
 // (A figure draws an asterisk as typed: no emphasis.)
 export const plain = (label) => readable(words(label).replace(/(?<!\\)\*/g, "\\*"));
+// A label as a name -- in the history, a menu, the list of shapes: its lines one line, as
+// the words read ("Sequence design model").
+export const oneLine = (label) => plain(label).replace(/\s+/g, " ").trim();
 
 // A label kept as runs (a figure made in Python, or a deck's, writes its words so: each run
 // its look -- maths, a script, code, a colour) as the markup that reads back as the same runs
@@ -410,9 +413,9 @@ export function figureParts(host) {
   const nameOf = (id) => {
     const node = nodeOf(id);
     // A shape with no words is called what it shows faintly on the drawing ("Block").
-    if (node) return plain(node.label).trim() || hintOf(node) || partOf(node)?.title || node.kind;
+    if (node) return oneLine(node.label) || hintOf(node) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
-    if (group) return plain(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
+    if (group) return oneLine(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) {
       const ends = `${nameOf(nodeOfRef(edge.from))} → ${nameOf(nodeOfRef(edge.to))}`;
@@ -420,8 +423,8 @@ export function figureParts(host) {
       const twins = model().edges.filter((other) => nodeOfRef(other.from) === nodeOfRef(edge.from) && nodeOfRef(other.to) === nodeOfRef(edge.to));
       if (twins.length < 2) return ends;
       // (Numbered among those with no words: one, two -- no number skipped for one that has.)
-      const said = plain(edge.label);
-      return said ? `${ends} ${inQuotes(said)}` : `${ends} (${twins.filter((other) => !plain(other.label)).indexOf(edge) + 1})`;
+      const said = oneLine(edge.label);
+      return said ? `${ends} ${inQuotes(said)}` : `${ends} (${twins.filter((other) => !oneLine(other.label)).indexOf(edge) + 1})`;
     }
     // A line that branches, by all its ends: "Q and K, V → Attended value".
     const net = netOf(id);
@@ -4883,7 +4886,7 @@ export function figureParts(host) {
       box.remove();
       stand(null);
       act({ do: "delete", ids: [id], rejoin: true }, { merge: sent === original ? null : merge, hold: true, select: false,
-        label: `Delete ${inQuotes(plain(typedBreaks(original)).trim() || nameOf(id))}` });
+        label: `Delete ${inQuotes(oneLine(typedBreaks(original)) || nameOf(id))}` });
       select([]);
       return;
     }
@@ -5421,7 +5424,7 @@ export function figureParts(host) {
       if (label && !labels.some((each) => JSON.stringify(each) === JSON.stringify(label))) labels.push(label);
     }
     if (labels.length < 2) { act({ do: "join", ids }); return; }
-    const words = labels.map((label) => { const text = plain(label); return inQuotes(text.length > 28 ? `${text.slice(0, 27).trimEnd()}…` : text); });
+    const words = labels.map((label) => { const text = oneLine(label); return inQuotes(text.length > 28 ? `${text.slice(0, 27).trimEnd()}…` : text); });
     const keep = (index) => ({ label: `Keep ${words[index]}`, kind: index ? "" : "primary", run: () => act({ do: "join", ids, label: labels[index] }) });
     dialog({ title: "Join lines with different labels?",
       body: [h("p.export-hint", {}, `These lines say ${words.slice(0, -1).join(", ")} and ${words.at(-1)}, but a joined line has one label. Which should it keep?`)],

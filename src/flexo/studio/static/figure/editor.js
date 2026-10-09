@@ -8,7 +8,7 @@
 // be written there.
 
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel } from "/static/studio/studio.js";
-import { figureParts, glyph, groupGlyph, lookFrom, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
+import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -353,7 +353,7 @@ export function mount(studio, main) {
       }, h("span.tree-caret"), glyph(line.net ? "net" : "edge"),
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
-      line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
+      line.label && !figure.nameOf(line.id).includes(inQuotes(oneLine(line.label))) ? h("span.tree-id", {}, oneLine(line.label)) : null))
       : h("div.empty.small", {}, "No lines"));
   }
 
