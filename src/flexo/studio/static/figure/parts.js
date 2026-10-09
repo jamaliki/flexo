@@ -379,9 +379,11 @@ export function figureParts(host) {
         if (keys.includes("kind")) return "Change Shape Type";
         // One field of the inspector's, by its label: "Change Width"; a switch to show
         // something, "Show Ticks" or "Hide Ticks".
-        const field = keys.length === 1 ? fieldOf(target, keys[0]) : null;
+        // (A choice with the values it had hidden given back with it: named by the choice.)
+        const lead = keys.length > 1 ? keys.find((key) => keys.every((other) => other === key || fieldOf(target, other)?.show?.[key] !== undefined)) : null;
+        const field = keys.length === 1 ? fieldOf(target, keys[0]) : lead ? fieldOf(target, lead) : null;
         if (field?.type === "bool" && /^show /i.test(field.label)) {
-          return `${(values[keys[0]] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
+          return `${(values[field.key] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
         }
         if (field?.label) return `Change ${titled(field.label)}`;
         return id ? `Edit ${name(id)}` : "Edit";
@@ -1761,7 +1763,8 @@ export function figureParts(host) {
   // never where the line is clicked, so that a double-click on it (to give it words) is the
   // line's -- clear of its words, of the shapes and of every other line; else beside it a
   // little along it either way. (Should nowhere be clear, off its own path all the same.)
-  function plusOnLine(id) {
+  // (`handles`: where its handles are, in the overlay's pixels, which it keeps clear of too.)
+  function plusOnLine(id, handles = []) {
     const element = host.element(id), outer = host.overlay?.getBoundingClientRect();
     const longest = (holder) => [...(holder?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength?.())
       .sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
@@ -1772,8 +1775,10 @@ export function figureParts(host) {
     // (How far either side of a line a click on it reaches: half its twin's width.)
     const reach = Math.max(3, 4.5 * Math.hypot(matrix.a, matrix.b));
     const radius = 12;
-    const words = element.querySelector('[id$=".label"]')?.getBoundingClientRect();
+    // (All its words: its label, and the words under it the other way, a reversible step's.)
+    const words = [...element.querySelectorAll("text")].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width);
     const shapes = (model()?.nodes || []).map((node) => host.element(node.id)?.getBoundingClientRect()).filter((rect) => rect?.width);
+    const offHandles = (spot) => handles.every((handle) => Math.hypot(spot.x - outer.left - handle.x, spot.y - outer.top - handle.y) >= radius + 9);
     const meets = (spot, rect, room = radius) => rect && rect.width && spot.x + room > rect.left && spot.x - room < rect.right && spot.y + room > rect.top && spot.y - room < rect.bottom;
     // Every line's points, in the window's pixels: its own, and the others'.
     const points = [];
@@ -1801,9 +1806,10 @@ export function figureParts(host) {
         for (const sign of [first, -first]) spots.push({ x: middle.x + sign * across.x * off, y: middle.y + sign * across.y * off });
       }
     }
-    const clear = spots.find((spot) => onPage(spot) && offLines(spot) && !meets(spot, words) && !shapes.some((rect) => meets(spot, rect)))
-      || spots.find((spot) => onPage(spot) && offOwn(spot) && !meets(spot, words) && !shapes.some((rect) => meets(spot, rect)))
-      || spots.find((spot) => onPage(spot) && offOwn(spot)) || spots[0];
+    const clearOf = (spot) => offHandles(spot) && !words.some((rect) => meets(spot, rect)) && !shapes.some((rect) => meets(spot, rect));
+    const clear = spots.find((spot) => onPage(spot) && offLines(spot) && clearOf(spot))
+      || spots.find((spot) => onPage(spot) && offOwn(spot) && clearOf(spot))
+      || spots.find((spot) => onPage(spot) && offOwn(spot) && offHandles(spot)) || spots.find((spot) => onPage(spot) && offOwn(spot)) || spots[0];
     return { x: clear.x - outer.left, y: clear.y - outer.top };
   }
   // A hint said only when its shape is pointed at (too small, or too crowded, to be said
@@ -1905,8 +1911,17 @@ export function figureParts(host) {
     // A line chosen has its + beside its middle (off its path, clear of its words): a block put
     // into it, between the two it joins, ready for its words. A click that is the second of a
     // double-click is the line's, not the +'s: its words are typed, nothing is put in.
+    // A line's handles, each where it is clear of the others: on a line too short for them all
+    // (zoomed far out), its middle's goes first, then its ends' -- never one over another, nor
+    // over the middle a double-click types its words at. (Its inspector sets them all.)
+    const ended = id && isLine(id) && !state.connecting && !inline ? id : null;
+    const ends = ended ? endsSeen(ended) : [];
+    const apart = ends.length === 2 ? Math.hypot(ends[0].at.x - ends[1].at.x, ends[0].at.y - ends[1].at.y) : Infinity;
+    const endsShown = apart >= 18 ? ends : [];
+    const curving = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
+    const bending = curving && apart >= 56 && ends.every((end) => Math.hypot(end.at.x - curving.at.x, end.at.y - curving.at.y) >= 22) ? curving : null;
     const line = id && edgeOf(id) && !state.connecting && !inline ? id : null;
-    const spot = line && plusOnLine(line);
+    const spot = line && plusOnLine(line, [...endsShown.map((end) => end.at), ...(bending ? [bending.at] : [])]);
     if (spot) {
       const edge = edgeOf(line);
       views.push(h("button.fig-next.on-line", {
@@ -1926,8 +1941,7 @@ export function figureParts(host) {
     // A line chosen has a handle at each end: dragged round its shape, to meet it on another
     // side -- a line's, onto another shape, to go to that one. Double-clicked, the end meets
     // its shape wherever the figure puts it again.
-    const ended = id && isLine(id) && !state.connecting && !inline ? id : null;
-    for (const end of ended ? endsSeen(ended) : []) {
+    for (const end of endsShown) {
       views.push(h("span.fig-end", {
         style: { left: `${end.at.x}px`, top: `${end.at.y}px` },
         title: edgeOf(ended) ? "Drag to another side of the shape, or onto another shape · Double-click to reset" : "Drag to another side of the shape · Double-click to reset",
@@ -1938,7 +1952,6 @@ export function figureParts(host) {
     // A curved line chosen -- or a straight one -- has a handle on its middle: dragged, the
     // line bends through it (a straight one turning curved); double-clicked, it bows as it
     // would of itself again.
-    const bending = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
     if (bending) {
       views.push(h("span.fig-bend", {
         style: { left: `${bending.at.x}px`, top: `${bending.at.y}px` },
@@ -2451,7 +2464,8 @@ export function figureParts(host) {
     const along = { x: (to.x - from.x) / length, y: (to.y - from.y) / length };
     const left = { x: along.y, y: -along.x };
     const near = BEND_SNAP / (Math.hypot(bending.matrix.a, bending.matrix.b) || 1);
-    const lean = edge?.lean || 0;
+    // (A lean kept for a line drawn straight, hidden while it is, leans nothing.)
+    const lean = edge?.shape === "curved" ? edge?.lean || 0 : 0;
     // Half way between its ends: the line its middle is centred on.
     const centre = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
     const guides = [];
@@ -2467,10 +2481,10 @@ export function figureParts(host) {
           guides.push({ at: centre, way: left });
           centred = true;
         }
+        // (Straight, it is drawn as it will be, straight: no guide along it besides.)
         const rise = (point.x - from.x) * left.x + (point.y - from.y) * left.y;
         if (Math.abs(rise) < near) {
           point = { x: point.x - rise * left.x, y: point.y - rise * left.y };
-          guides.push({ at: from, way: along });
           straight = true;
         }
         // Level with either end: across from it, or over or under it.
@@ -2485,10 +2499,13 @@ export function figureParts(host) {
       }
     }
     const clamp = (value, most) => Math.round(Math.max(-most, Math.min(most, value)) * 100) / 100;
-    const bend = straight ? 0 : clamp(((point.x - from.x) * left.x + (point.y - from.y) * left.y) / length, 1);
+    const bend = clamp(((point.x - from.x) * left.x + (point.y - from.y) * left.y) / length, 1);
     const leaning = clamp(lean + ((point.x - bending.middle.x) * along.x + (point.y - bending.middle.y) * along.y) / length, 0.5);
-    const said = rest ? "As Drawn of Itself" : straight ? "Straight" : centred ? "Centred" : "";
-    return { point, guides, said, values: rest ? null : { bend, lean: leaning } };
+    // Snapped straight, it is a straight line, as its Routing names one -- no bend of nothing,
+    // no lean -- and back where it bows of itself, it bows so (as its Bend field says,
+    // Automatic).
+    const said = rest ? "Automatic" : straight ? "Straight" : centred ? "Centred" : "";
+    return { point, guides, said, values: rest ? null : straight ? { straight: true } : { bend, lean: leaning } };
   }
   function bendTo(id, values) {
     const edge = edgeOf(id);
@@ -2496,6 +2513,11 @@ export function figureParts(host) {
     if (values === null) {
       if (edge.bend === undefined && edge.lean === undefined) return false;
       act({ do: "update", target: { type: "edge", id }, values: { bend: null, lean: null } }, { select: false, label: "Reset Bend" });
+      return true;
+    }
+    if (values.straight) {
+      if (edge.shape === "straight" && edge.bend === undefined && edge.lean === undefined) return false;
+      act({ do: "update", target: { type: "edge", id }, values: { shape: "straight", bend: null, lean: null } }, { select: false, label: "Straighten Line" });
       return true;
     }
     const lean = values.lean || null;
@@ -2508,7 +2530,11 @@ export function figureParts(host) {
     if (event.button !== 0 || bendingNow || ending) return;
     event.preventDefault();
     event.stopPropagation();
-    bendingNow = { id, bending, edge: edgeOf(id), start: { x: event.clientX, y: event.clientY }, pointer: null, free: false, moved: false, frame: 0, line: host.element(id) };
+    // (The shapes it joins, where they are drawn: its curve is shown from where it leaves one to
+    // where it meets the other, as it is drawn -- not from inside them.)
+    const edge = edgeOf(id), outer = host.overlay.getBoundingClientRect();
+    const shapes = edge ? [shapeSeen(nodeOfRef(edge.from), outer), shapeSeen(nodeOfRef(edge.to), outer)] : [];
+    bendingNow = { id, bending, edge, shapes, start: { x: event.clientX, y: event.clientY }, pointer: null, free: false, moved: false, frame: 0, line: host.element(id) };
     window.addEventListener("pointermove", bendMove);
     window.addEventListener("pointerup", bendUp);
     window.addEventListener("pointercancel", bendCancel);
@@ -2525,15 +2551,17 @@ export function figureParts(host) {
       const drawing = document.createElementNS(SVG_NS, "svg");
       drawing.classList.add("fig-end-drag");
       const guides = document.createElementNS(SVG_NS, "g"), way = document.createElementNS(SVG_NS, "path"), spot = document.createElementNS(SVG_NS, "circle");
+      const heads = document.createElementNS(SVG_NS, "g");
       guides.classList.add("fig-guides");
+      heads.classList.add("fig-heads");
       spot.setAttribute("r", "4");
-      drawing.append(guides, way, spot);
+      drawing.append(guides, way, heads, spot);
       const tip = h("div.fig-turn-tip");
       host.overlay.append(drawing, tip);
       host.overlay.classList.add("fig-ending");
       bendingNow.line?.classList.add("fig-faded");
       document.body.classList.add("fig-grabbing");
-      Object.assign(bendingNow, { drawing, guides, way, spot, tip });
+      Object.assign(bendingNow, { drawing, guides, way, heads, spot, tip });
     }
     event.preventDefault();
     if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame);
@@ -2541,7 +2569,7 @@ export function figureParts(host) {
   function bendFrame() {
     if (!bendingNow?.moved) return;
     bendingNow.frame = 0;
-    const { drawing, guides, way, spot, tip, bending, edge } = bendingNow;
+    const { drawing, guides, way, heads, spot, tip, bending, edge, shapes } = bendingNow;
     const outer = host.overlay.getBoundingClientRect();
     drawing.setAttribute("width", String(outer.width));
     drawing.setAttribute("height", String(outer.height));
@@ -2550,8 +2578,28 @@ export function figureParts(host) {
     // The curve it will be: both controls moved 4/3 as far as its middle is.
     const shift = { x: (4 / 3) * (placed.point.x - bending.middle.x), y: (4 / 3) * (placed.point.y - bending.middle.y) };
     const [a, b, c, d] = bending.curve;
-    const [p0, p1, p2, p3] = [a, { x: b.x + shift.x, y: b.y + shift.y }, { x: c.x + shift.x, y: c.y + shift.y }, d].map(bending.seen);
-    way.setAttribute("d", `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`);
+    const curve = [a, { x: b.x + shift.x, y: b.y + shift.y }, { x: c.x + shift.x, y: c.y + shift.y }, d].map(bending.seen);
+    // From where it leaves the shape it starts at to where it meets the other, as it will be
+    // drawn, its arrowheads on it.
+    // (Snapped straight, it is drawn straight: between its shapes' middles.)
+    const middle = (box) => (box ? { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 } : null);
+    const ends = placed.values?.straight && shapes[0] && shapes[1] ? [middle(shapes[0]), middle(shapes[1])] : null;
+    const points = Array.from({ length: 65 }, (_, step) => (ends
+      ? { x: ends[0].x + ((ends[1].x - ends[0].x) * step) / 64, y: ends[0].y + ((ends[1].y - ends[0].y) * step) / 64 } : cubicAt(curve, step / 64)));
+    const within = (point, box) => box && point.x > box.left && point.x < box.right && point.y > box.top && point.y < box.bottom;
+    let first = points.findIndex((point) => !within(point, shapes[0])), last = points.findLastIndex((point) => !within(point, shapes[1]));
+    if (first < 0 || last <= first) { first = 0; last = points.length - 1; }
+    const shown = points.slice(first, last + 1);
+    way.setAttribute("d", `M ${shown.map((point) => `${point.x} ${point.y}`).join(" L ")}`);
+    const head = (tip, from) => {
+      const run = Math.hypot(tip.x - from.x, tip.y - from.y) || 1, ux = (tip.x - from.x) / run, uy = (tip.y - from.y) / run;
+      const polygon = document.createElementNS(SVG_NS, "polygon");
+      polygon.setAttribute("points", [[0, 0], [-8, 3.5], [-8, -3.5]].map(([along, across]) => `${tip.x + ux * along - uy * across},${tip.y + uy * along + ux * across}`).join(" "));
+      return polygon;
+    };
+    const arrow = edge?.arrow || "end", count = shown.length;
+    heads.replaceChildren(...(count > 3 && arrow !== "none" ? [head(shown[count - 1], shown[count - 3])] : []),
+      ...(count > 3 && ["both", "reversible"].includes(arrow) ? [head(shown[0], shown[2])] : []));
     const at = bending.seen(placed.point);
     spot.setAttribute("cx", String(at.x));
     spot.setAttribute("cy", String(at.y));
@@ -3338,10 +3386,15 @@ export function figureParts(host) {
   // Answers whether it moved (at the end of its line, it does not, and nothing is recorded).
   function nudge(id, key) {
     const place = nudgePlace(id, key);
-    if (place) moveAsSeen(id, place.at, place);
-    // At the end of its line already: said, not nothing at all.
-    else toast(`${inQuotes(nameOf(id))} is at the end of its ${drawnKind(parentOf(id)) === "column" ? "column" : "row"} already.`, { icon: "info", seconds: 2 });
-    return Boolean(place);
+    if (place) { moveAsSeen(id, place.at, place); return true; }
+    // At the end of its line already (the start, the way it was pressed): said, not nothing
+    // at all -- or, across its line, that it goes no further that way.
+    const way = drawnKind(parentOf(id)) === "column" ? "column" : "row";
+    const along = way === "row" ? ["ArrowLeft", "ArrowRight"] : ["ArrowUp", "ArrowDown"];
+    const said = along.includes(key) ? `is at the ${key === along[0] ? "start" : "end"} of its ${way} already`
+      : `can’t move further ${{ ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[key]}`;
+    toast(`${inQuotes(nameOf(id))} ${said}.`, { icon: "info", seconds: 2 });
+    return false;
   }
   function nudgePlace(id, key) {
     const { boxes, drawn, folds } = asSeen();
@@ -4451,6 +4504,8 @@ export function figureParts(host) {
       const id = chosenOne();
       if (!id) return false;
       event.preventDefault();
+      // (A line goes where the shapes it joins go: it is not moved of itself.)
+      if (isLine(id)) { toast("A line moves with the shapes it joins.", { icon: "info", seconds: 2 }); return true; }
       // (One at a time: the next from where the last is drawn.)
       if (!running && !queue.length) nudge(id, event.key);
       return true;
@@ -5155,6 +5210,7 @@ export function figureParts(host) {
       return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
     };
     const shown = list.filter((field) => !field.show || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
+    write = keepingHidden(list, item, write, scope);
     // Fields few reach for are folded away under the rest -- open, if one of them is set.
     const more = shown.filter((field) => field.more);
     const set = more.some((field) => valueAt(item, field.key) !== undefined && valueAt(item, field.key) !== null && valueAt(item, field.key) !== "");
@@ -5163,6 +5219,27 @@ export function figureParts(host) {
         h("div.inner.fields", {}, more.map((field) => fieldControl(field, item, write, scope)))) : null);
   }
 
+  // A choice that hides fields of its own (a line's Arrow its arrowheads, its Routing its bend,
+  // a group's Layout its columns): the values they had, which the file drops with them, are
+  // kept here -- and given back as the choice comes back, as Keynote keeps a line's ends.
+  const hiddenValues = new Map();
+  function keepingHidden(list, item, write, scope) {
+    const shownBy = (field, values) => Object.entries(field.show).every(([key, wanted]) => {
+      const value = (key in values ? values[key] : valueAt(item, key)) ?? list.find((each) => each.key === key)?.default;
+      return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
+    });
+    const given = (value) => value !== undefined && value !== null && value !== "";
+    return (values, ...rest) => {
+      const next = { ...values };
+      for (const field of list) {
+        if (!field.show || field.key in values || !Object.keys(field.show).some((key) => key in values)) continue;
+        const now = shownBy(field, {}), then = shownBy(field, values), had = valueAt(item, field.key), kept = `${scope}:${field.key}`;
+        if (now && !then && given(had)) hiddenValues.set(kept, had);
+        else if (!now && then && !given(had) && hiddenValues.has(kept)) next[field.key] = hiddenValues.get(kept);
+      }
+      return write(next, ...rest);
+    };
+  }
   let themeColours = [];
   function fieldControl(field, item, write, scope) {
     const key = `${scope}:${field.key}`;

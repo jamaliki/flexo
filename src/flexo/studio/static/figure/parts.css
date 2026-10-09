@@ -49,7 +49,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
 /* Its ends, each a handle: dragged round its shape, or onto another, the end goes there --
    its way drawn to the side it would meet, that shape framed. */
-.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: #ffffff; border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+/* (A ring: the arrowhead it sits on shows through it.) */
+.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: transparent; border: 1.5px solid var(--accent); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85); cursor: grab; touch-action: none; }
 .fig-end::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
 .fig-end:hover { background: var(--accent); }
 .fig-ending .fig-end, .fig-ending .fig-next { visibility: hidden; }
@@ -287,3 +288,5 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 /* A band dragged from where nothing is drawn: the shapes it touches are chosen. */
 .fig-band { position: absolute; z-index: 6; pointer-events: none; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 1px; }
 body.fig-banding, body.fig-banding * { user-select: none; }
+/* A curve's arrowheads as it is bent, where they will be drawn. */
+.fig-end-drag .fig-heads polygon { fill: var(--accent); stroke: none; }
