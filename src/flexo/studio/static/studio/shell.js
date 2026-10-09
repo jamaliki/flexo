@@ -12,8 +12,10 @@ const UNTITLED = { deck: "Untitled.yaml", figure: "Untitled Figure.yaml", theme:
 // Each far from the others in hue, the first few most of all (they are given in the order
 // people come), and none near the blue of what is chosen here, which is one's own.
 const COLOURS = ["#e8590c", "#0ca678", "#d6336c", "#5c940d", "#ae3ec9", "#1098ad", "#f59f00", "#795548"];
-const MCP_COMMAND = "claude mcp add flexo-studio -- flexo studio mcp";
-const CODEX_COMMAND = "codex mcp add flexo-studio -- flexo studio mcp";
+// What gives an agent the studio's tools: `flexo studio mcp` -- or, in the Mac app, which
+// puts no flexo command in Terminal, the app itself, as its address says (`mcp`), read
+// before the address is made the document's.
+const MCP = new URLSearchParams(location.search).get("mcp") || "flexo studio mcp";
 
 // Each person here has the colour the studio gave them as they came, none shared with
 // another here (see given); one not here (in the activity) has one by their id.
@@ -255,7 +257,7 @@ export class Workspace {
       this.active = null;
       const next = this.order[this.order.length - 1];
       if (next) this.activate(next);
-      else { history.replaceState(null, "", "?"); this.emit("active", null); }
+      else { history.replaceState(null, "", "?"); document.title = "Flexo Studio"; this.emit("active", null); }
     }
     this.emit("closed", session);
     this.remember();
@@ -299,6 +301,15 @@ export class Workspace {
     }
     this.remember();
     this.emit("status", session);
+  }
+
+  // The document `by` tabs on from the one in front (-1: the one before), round from the
+  // last to the first.
+  step(by) {
+    if (!this.order.length) return;
+    const at = this.active ? this.order.indexOf(this.active.file) : -1;
+    const next = this.order[(Math.max(at, by > 0 ? -1 : 0) + by + this.order.length) % this.order.length];
+    if (next && next !== this.active?.file) this.activate(next);
   }
 
   remember() { remember(`tabs:${this.info.folder}`, JSON.stringify(this.order)); }
@@ -504,30 +515,47 @@ export async function start() {
   workspace.ready = new Promise((done) => { settled = done; });
 
   // -- the top bar --
-  const tabs = h("nav.tabs.scroll-thin");
+  const tabs = h("nav.tabs.scroll-thin", { role: "tablist", "aria-label": "Documents" });
+  // New, after the tabs and never scrolled out of sight with them.
+  const newTab = h("button.tab-new", { type: "button", title: "New Document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus"));
   const people = h("div.people");
   const followChip = h("button.chip-toggle", { type: "button", title: "Follow agents as they work", onclick: () => workspace.setFollow(!workspace.follow) }, icon("target"), "Follow");
-  const activityButton = ui.button("", () => side.toggle("activity"), { kind: "ghost", icon: "activity", title: "Activity" });
+  const activityButton = ui.button("", () => side.toggle("activity"), { kind: "ghost", icon: "activity", title: "Show Activity (⌥⌘A)" });
   const activityCount = h("span.badge-count", { hidden: true });
   activityButton.append(activityCount);
   // The assistant -- Claude, ChatGPT or another, whichever is set up (assistant.js) -- a plain
   // button among the others, its mark in colour: the slide stays the brightest thing there is.
-  const assistantButton = h("button.btn.assistant-button", { type: "button", title: "Ask the Assistant (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), h("span.btn-label", {}, "Assistant"));
+  const assistantButton = h("button.btn.assistant-button", { type: "button", title: "Show Assistant (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), h("span.btn-label", {}, "Assistant"));
   // Pressed, it leaves the keys where they were (words being typed, the slide list) until
   // the palette has seen what they are on: its commands are for that.
-  const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
+  const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Command Palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
   // Appearance as a Mac's: Automatic, Light or Dark, the one in use ticked.
   const themeButton = ui.button("", (event) => {
     const now = remembered("theme", "auto");
-    const choose = (value) => () => { remember("theme", value); applyTheme(value); showTheme(); };
+    const choose = (value) => () => workspace.appearance(value);
     menu(event.currentTarget, [{ title: "Appearance" },
       ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, label]) => ({ label, checked: now === value, run: choose(value) }))], { align: "end" });
   }, { kind: "ghost", title: "Appearance" });
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "appearance"));
   showTheme();
+  // In the Mac app the appearance is the app's, every window's (its welcome and Settings
+  // too): told to it when chosen here, and taken from it as this window opens or is looked at.
+  workspace.appearance = (value, { tell = true } = {}) => {
+    remember("theme", value); applyTheme(value); showTheme();
+    if (tell) window.pywebview?.api?.appearance?.(value)?.catch?.(() => {});
+  };
+  const appAppearance = () => Promise.resolve(window.pywebview?.api?.appearance?.()).then((mode) => {
+    const mine = remembered("theme", "auto");
+    // (The app with none chosen yet takes this window's.)
+    if (mode === "" && mine !== "auto") window.pywebview.api.appearance(mine);
+    else if (["auto", "light", "dark"].includes(mode) && mode !== mine) workspace.appearance(mode, { tell: false });
+  }).catch(() => {});
+  window.addEventListener("pywebviewready", appAppearance);
+  window.addEventListener("focus", appAppearance);
+  if (window.pywebview?.api) appAppearance();
   const bar = h("header.bar", {},
     h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon())),
-    tabs,
+    tabs, newTab,
     h("div.spacer"),
     paletteButton,
     people, followChip,
@@ -567,6 +595,15 @@ export async function start() {
   // middle, saving, its history and the rest at the right.
   const docEnd = h("div.docbar-end", {}, status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
   const docbar = h("div.docbar", {}, docLeft, docCentre, docEnd);
+  // In a narrow window the side panel lies over the inspector (studio.css): the inspector's
+  // own buttons (a deck's Format and Design) are not shown pressed under it, and one pressed
+  // puts the panel away and shows the inspector -- never hides it, unseen.
+  docRight.addEventListener("click", (event) => {
+    const button = event.target.closest?.("button[aria-pressed]");
+    if (!button || side.node.hidden || !matchMedia("(max-width: 1239px)").matches) return;
+    side.hide();
+    if (button.getAttribute("aria-pressed") === "true") { event.preventDefault(); event.stopPropagation(); }
+  }, true);
   // A toolbar button clicked does not take the keys, as a Mac toolbar's doesn't: they stay
   // with the document (Delete deletes what is chosen, not the button's next press).
   docbar.addEventListener("mousedown", (event) => { if (event.target.closest("button") && !event.target.closest("input, select, textarea")) event.preventDefault(); });
@@ -639,10 +676,12 @@ export async function start() {
   const views = h("main.views");
   const doing = h("div.doing-strip");
   const side = new SidePanel(workspace);
-  // A folder someone else made runs none of its own Python until its person says so.
+  workspace.side = side;
+  // A folder someone else made runs none of its own Python until its person says so: said
+  // here, once, for every slide whose plot waits (each slide only marks where it goes).
   const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
-    h("div.trust-words", {}, h("b", {}, "Python files in this folder haven’t been run. "),
-      "Decks in this folder use them to draw plots and figures. Run them only if you trust where the folder came from."),
+    h("div.trust-words", {}, h("b", {}, "This folder’s Python hasn’t been run. "),
+      "Its plots and figures appear once you trust the folder. Trust it only if you know where it came from."),
     ui.button("Trust and Run", async () => {
       try { await workspace.api("/api/trust", {}); }
       catch (error) { toast(`Could not trust the folder: ${error.message}`, { kind: "error", icon: "error" }); }
@@ -656,6 +695,20 @@ export async function start() {
   // -- the Mac app: its menus do what the page does, and it is told what they may do --
   workspace.command = (name, arg) => {
     const session = workspace.active;
+    const field = typingIn(document.activeElement) ? document.activeElement : null;
+    // A sheet open (a name asked for, the shortcuts): the menus wait, as a Mac's do while a
+    // sheet is up -- all but Edit's, which are its field's then.
+    if (document.querySelector(".scrim:not(.palette-scrim)")) {
+      if (field && ["undo", "redo", "delete", "select-all"].includes(name)) editField(field, name);
+      report();
+      return;
+    }
+    // The palette open: closed first (⌘K, Find… again: only that), the command then run on
+    // the document under it.
+    if (document.querySelector(".palette")) {
+      closePalette();
+      if (name === "palette" || name === "find") { report(); return; }
+    }
     switch (name) {
       case "undo": travel("undo"); break;
       case "redo": travel("redo"); break;
@@ -675,10 +728,23 @@ export async function start() {
         break;
       }
       case "palette": palette(workspace); break;
+      case "find": palette(workspace, { find: true }); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
       case "new": askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
       case "close-tab": if (session) workspace.close(session.file); break;
+      case "rename": if (session) nameDocument(workspace, session.file); break;
+      case "duplicate-document": if (session) nameDocument(workspace, session.file, { copy: true }); break;
+      // Window › Show Next Tab, Show Previous Tab, and a document by its name.
+      case "next-tab": workspace.step(1); break;
+      case "previous-tab": workspace.step(-1); break;
+      case "show": if (workspace.sessions.has(arg)) workspace.activate(arg); break;
+      // Edit › Delete and Select All, chosen with the mouse: what ⌫ and ⌘A do here -- to the
+      // words being typed, else to what is chosen in the document (its objects, its shapes).
+      case "delete": case "select-all":
+        if (field) editField(field, name);
+        else pressKey(name === "delete" ? { key: "Backspace" } : { key: "a", mod: true });
+        break;
       case "agents": connectDialog(workspace); break;
       case "shortcuts": shortcutsDialog(); break;
       default: break;
@@ -705,15 +771,21 @@ export async function start() {
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
         commands: doable(session),
+        // The open documents, for the Window menu (their names as their tabs have them); a
+        // sheet up, which the menus wait for; and the side panel shown (Show or Hide Assistant).
+        tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
+        sheet: Boolean(document.querySelector(".scrim:not(.palette-scrim)")),
+        side: side.open || "",
       });
     }, 80);
   };
   // A slide or part chosen changes what can be done; so does a field taking the keys
-  // (⌘D is then the field's).
-  for (const event of ["status", "active", "opened", "closed", "documents", "focus"]) workspace.on(event, report);
+  // (⌘D is then the field's), and a sheet opening or closing.
+  for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
   document.addEventListener("focusin", report);
   document.addEventListener("focusout", report);
   window.addEventListener("pywebviewready", report);
+  new MutationObserver(report).observe(document.body, { childList: true });
   const docHead = h("div", {}, docbar, trustBar);
   const unreadView = h("div.unread-view.scroll-thin", { hidden: true });
   const body = h("div.workbench", {}, h("div.center", {}, docHead, views, unreadView, doing), side.node);
@@ -739,22 +811,67 @@ export async function start() {
     }
     return session.kind === "deck" ? name : `${name} ${session.kind[0].toUpperCase()}${session.kind.slice(1)}`;
   };
+  // The tabs as a Mac's: one stop for Tab (the one in front), ← and → to the others, Return or
+  // Space to show one; a tab's × for the pointer alone (⌘W closes it). A right-click offers
+  // what the File menu does to a document.
+  const tabMenu = (event, file) => {
+    event.preventDefault();
+    workspace.activate(file);
+    const path = `${String(workspace.info.folder || "").replace(/\/+$/, "")}/${file}`;
+    menu({ x: event.clientX, y: event.clientY }, [
+      { icon: "pencil", label: "Rename…", run: () => nameDocument(workspace, file) },
+      { icon: "duplicate", label: "Duplicate…", keys: "⇧⌘S", run: () => nameDocument(workspace, file, { copy: true }) },
+      ...(window.pywebview?.api?.show_in_finder ? [{ icon: "folder", label: "Show in Finder", run: () => window.pywebview.api.show_in_finder(path) }] : []),
+      "-",
+      { icon: "close", label: "Close Tab", keys: window.pywebview ? "⌘W" : undefined, run: () => workspace.close(file) },
+    ]);
+  };
+  const tabKeys = (event, file) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); workspace.activate(file); return; }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const at = workspace.order.indexOf(file), last = workspace.order.length - 1;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? last : Math.max(0, Math.min(last, at + (event.key === "ArrowRight" ? 1 : -1)));
+    workspace.activate(workspace.order[next]);
+    tabs.querySelector(`.tab[data-file="${CSS.escape(workspace.order[next])}"]`)?.focus();
+  };
   const renderTabs = () => {
+    // A tab with the keys has them still once the tabs are drawn again.
+    const keyed = tabs.contains(document.activeElement) ? document.activeElement.closest(".tab")?.dataset.file : null;
     clear(tabs, workspace.order.map((file) => {
       const session = workspace.sessions.get(file);
       const here = workspace.presenceOn(file);
-      const tab = h(`div.tab${workspace.active === session ? ".on" : ""}`, {
+      const on = workspace.active === session;
+      const tab = h(`div.tab${on ? ".on" : ""}`, {
+        role: "tab", tabIndex: on ? 0 : -1, "aria-selected": String(on), dataset: { file },
         title: `${String(workspace.info.folder || "").replace(/\/+$/, "")}/${file}`, onclick: () => workspace.activate(file),
         onauxclick: (event) => { if (event.button === 1) workspace.close(file); },
+        oncontextmenu: (event) => tabMenu(event, file), onkeydown: (event) => tabKeys(event, file),
       },
       icon(KIND_ICONS[session.kind] || "file"),
       h("span.tab-name", {}, tabName(file, session)),
       session.state !== "saved" ? h(`span.tab-dot.${session.state}`, { title: statusWords(session) }) : null,
       here.length ? h("span.tab-people", {}, here.slice(0, 3).map((entry) => h("span.mini", { style: { background: colourOf(entry.who) }, title: nameOf(entry.who) }))) : null,
-      h("button.tab-close", { type: "button", title: "Close", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
+      h("button.tab-close", { type: "button", tabIndex: -1, title: "Close Tab", onclick: (event) => { event.stopPropagation(); workspace.close(file); } }, icon("close")));
       return tab;
-    }), h("button.tab-new", { type: "button", title: "New Document", onclick: (event) => newMenu(event.currentTarget, workspace) }, icon("plus")));
+    }));
+    if (keyed) tabs.querySelector(`.tab[data-file="${CSS.escape(keyed)}"]`)?.focus();
+    // The one in front is in view, however many there are.
+    const shown = tabs.querySelector(".tab.on");
+    if (shown) {
+      const strip = tabs.getBoundingClientRect(), box = shown.getBoundingClientRect();
+      if (box.left < strip.left + 24) tabs.scrollLeft -= strip.left + 24 - box.left;
+      else if (box.right > strip.right - 24) tabs.scrollLeft += box.right - strip.right + 24;
+    }
+    fadeTabs();
   };
+  // Where tabs are out of sight, the strip's end fades (studio.css).
+  const fadeTabs = () => {
+    tabs.classList.toggle("more-before", tabs.scrollLeft > 1);
+    tabs.classList.toggle("more-after", tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1);
+  };
+  tabs.addEventListener("scroll", fadeTabs, { passive: true });
+  new ResizeObserver(fadeTabs).observe(tabs);
 
   const renderPeople = () => {
     const others = workspace.others();
@@ -765,7 +882,7 @@ export async function start() {
         avatar(entry.who, { ring: entry.who.kind === "agent" && Boolean(entry.doing) }));
         return button;
       }),
-      h("button.person.add", { type: "button", title: "Work with agents", onclick: () => connectDialog(workspace) }, icon("collaborate")));
+      h("button.person.add", { type: "button", title: "Work with Agents…", onclick: () => connectDialog(workspace) }, icon("collaborate")));
     followChip.hidden = !others.some((entry) => entry.who.kind === "agent");
     followChip.classList.toggle("on", workspace.follow);
     const working = others.filter((entry) => entry.who.kind === "agent" && entry.doing);
@@ -972,13 +1089,31 @@ export async function start() {
 
   // -- keys --
   document.addEventListener("keydown", (event) => {
+    // A key the page has taken already (a field's ⌘K, Link; a shape's ⌘Z) is not the frame's too.
+    if (event.defaultPrevented) return;
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key.toLowerCase();
     const session = workspace.active;
-    if (mod && key === "k") { event.preventDefault(); palette(workspace); return; }
+    // ⌘K again closes the palette, as Spotlight's key does. While words are typed it opens
+    // nothing (it is Link where words can have one), and not the Mac app's menu item either.
+    if (mod && key === "k" && !event.altKey) {
+      event.preventDefault();
+      if (document.querySelector(".palette")) closePalette();
+      else if (!typingIn(event.target) && !document.querySelector(".scrim:not(.palette-scrim), .present")) palette(workspace);
+      return;
+    }
     if (mod && key === "j") { event.preventDefault(); side.toggle("assistant"); return; }
     if (document.querySelector(".scrim, .present")) return;
-    if (mod && key === "s") {
+    if (mod && event.altKey && event.code === "KeyA") { event.preventDefault(); side.toggle("activity"); return; }
+    // ⇧⌘] and ⇧⌘[: the next or the previous document, as a Mac app's tabs are gone through.
+    if (mod && event.shiftKey && !event.altKey && (event.code === "BracketRight" || event.code === "BracketLeft")) {
+      event.preventDefault();
+      workspace.step(event.code === "BracketRight" ? 1 : -1);
+      return;
+    }
+    // ⇧⌘S: File › Duplicate, as Keynote's.
+    if (mod && event.shiftKey && key === "s") { event.preventDefault(); if (session) nameDocument(workspace, session.file, { copy: true }); }
+    else if (mod && key === "s") {
       event.preventDefault();
       // A file that does not read is saved as it has been put right, once it reads.
       if (session?.unread) unread?.mend();
@@ -992,6 +1127,8 @@ export async function start() {
     // Once the page has had the key: a word typed into a shape on its way (a decision's
     // "?") is the shape's.
     else if (key === "?" && !inField(event)) setTimeout(() => { if (!event.defaultPrevented) shortcutsDialog(); });
+    // ⌘/: Help › Keyboard Shortcuts, as the Mac app's menu has it.
+    else if (mod && key === "/" && !event.altKey) { event.preventDefault(); shortcutsDialog(); }
     // ⌥⌘I: to the document's inspector, for a kind that does not take the key itself (a
     // deck's does), as the shortcuts sheet has it for every document.
     else if (mod && event.altKey && event.code === "KeyI") setTimeout(() => { if (!event.defaultPrevented) toInspector(); });
@@ -1049,6 +1186,33 @@ export async function start() {
 
 function inField(event) {
   return /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "") || Boolean(event.target?.isContentEditable);
+}
+
+// Edit › Undo, Redo, Delete and Select All on the words of the field being typed in: its
+// own, as its keys are. Delete takes the words chosen, and nothing with none chosen.
+function editField(field, name) {
+  if (name === "undo" || name === "redo") { document.execCommand(name); return; }
+  const plain = !field.isContentEditable;
+  if (name === "select-all") { if (plain) field.select(); else document.execCommand("selectAll"); return; }
+  const chosen = plain ? field.selectionStart !== field.selectionEnd : !getSelection().isCollapsed;
+  if (chosen) document.execCommand("delete");
+}
+
+// A key pressed where the keys are, as if typed (Edit › Delete is ⌫ there): `mod` is ⌘ on a
+// Mac, Control elsewhere, as the editors take either.
+function pressKey({ key, mod = false }) {
+  const mac = /Mac|iP/.test(navigator.platform);
+  const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
+  (document.activeElement || document.body).dispatchEvent(new KeyboardEvent("keydown", {
+    key, code, metaKey: mod && mac, ctrlKey: mod && !mac, bubbles: true, cancelable: true }));
+}
+
+// Words being typed there: a text field, a text area or words edited in place -- not a
+// switch, a slider or a pop-up, which take no words.
+function typingIn(node) {
+  if (!node) return false;
+  if (node.isContentEditable || node.tagName === "TEXTAREA") return true;
+  return node.tagName === "INPUT" && /^(text|search|email|url|tel|password|number|)$/.test(node.type || "");
 }
 
 // Keys typed with nothing yet to take them (a document just made, its editor still on its
@@ -1160,33 +1324,86 @@ export function askName(workspace, kind, suggestion) {
   setTimeout(() => { if (document.activeElement !== input && box && input.isConnected) input.focus(); }, 30);
 }
 
+// File › Rename… and File › Duplicate: a name for the document's file, asked in a sheet as
+// New asks one -- its folder and its ending (".theme.yaml") kept -- then renamed on disk (its
+// tab follows, as one renamed in the Finder does) or copied there and opened.
+export function nameDocument(workspace, file, { copy = false } = {}) {
+  const base = file.split("/").pop();
+  const folder = file.slice(0, file.length - base.length);
+  const ending = /(\.theme)?\.(ya?ml|json)$/i.exec(base)?.[0] || ".yaml";
+  const fileOf = (name) => `${folder}${name}${ending}`;
+  const taken = new Set(workspace.documents.map((item) => item.file.toLowerCase()).filter((name) => copy || name !== file.toLowerCase()));
+  const stem = docName(file);
+  let suggested = copy ? `${stem} copy` : stem;
+  for (let n = 2; copy && taken.has(fileOf(suggested).toLowerCase()); n++) suggested = `${stem} copy ${n}`;
+  const input = ui.input({ value: suggested });
+  const problem = h("div.field-problem", { hidden: true });
+  const check = () => {
+    const name = input.value.trim();
+    const why = !name ? "Enter a name." : /[/\\:]/.test(name) ? "A name can’t contain / \\ or :."
+      : taken.has(fileOf(name).toLowerCase()) ? `“${name}” is already used in this folder. Choose a different name.` : "";
+    problem.textContent = why;
+    problem.hidden = !why;
+    return !why;
+  };
+  input.addEventListener("input", () => { if (!problem.hidden) check(); });
+  const go = () => {
+    if (!check()) { input.focus(); return false; }
+    const to = fileOf(input.value.trim());
+    if (!copy && to === file) return true;
+    workspace.api(copy ? "/api/duplicate" : "/api/rename", { file, to, client: workspace.client, who: workspace.me })
+      .then(async (result) => {
+        if (copy) { await workspace.refreshDocuments(); await workspace.open(result.file); }
+        else { workspace.renamed(file, result.file); await workspace.refreshDocuments(); }
+      })
+      .catch((error) => toast(`${copy ? "Not duplicated" : "Not renamed"}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 }));
+    return true;
+  };
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); if (go()) box.close(); } });
+  const box = dialog({ title: copy ? `Duplicate “${stem}”` : `Rename “${stem}”`, body: [ui.field("Name", input, { hint: copy ? "Saved beside it, in this folder" : "" }), problem],
+    actions: [{ label: "Cancel" }, { label: copy ? "Duplicate" : "Rename", kind: "primary", run: go }] });
+  input.focus();
+  input.select();
+}
+
+// Words for Terminal as typed there: in single quotes when they hold anything a shell reads.
+const shellWords = (text) => (/^[\w@%+=:,./~-]+$/.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`);
+
 export function connectDialog(workspace) {
   const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
+  // Each a whole command to paste: the folder to go to first, then the agent told, once,
+  // where the studio's tools are.
   dialog({ title: "Work with Agents", body: [
-    h("p", {}, "Run one of these once in Terminal, in this folder, then ask the agent for what you want. Its changes appear here as it makes them."),
-    ui.field("Claude Code", copyable(MCP_COMMAND)),
-    ui.field("Codex", copyable(CODEX_COMMAND)),
-    ui.field("Other MCP Clients", copyable("flexo studio mcp")),
+    h("p", {}, "In Terminal, go to this folder and add Flexo Studio to your agent, once. Then ask the agent there for what you want: its changes appear here as it makes them."),
+    ui.field("This Folder", copyable(`cd ${shellWords(String(workspace.info.folder || "."))}`)),
+    ui.field("Claude Code", copyable(`claude mcp add flexo-studio -- ${MCP}`)),
+    ui.field("Codex", copyable(`codex mcp add flexo-studio -- ${MCP}`)),
+    ui.field("Other MCP Clients", copyable(MCP)),
     ui.field("Your Name", name),
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
-// Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
+// Every key the studio answers to, by what it works on, as a Mac app's Help lists them. A
+// row marked `app` is the Mac app's menus' own (a browser keeps those keys for itself).
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ J", "Ask the Assistant"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
-    ["⌘ S", "Save (documents also save as you work)"], ["⌥ ⌘ I", "Go to the Inspector (Esc: back)"], ["?", "Keyboard Shortcuts"]]],
-  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
-    ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
-    ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ ↩", "Play from Start"],
+  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
+    ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
+    ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌘ W", "Close Tab", "app"],
+    ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"]]],
+  ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
+    ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
-  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Choose All Objects"], ["⇧ or ⌘ Click", "Choose One More (or One Less)"], ["Drag", "From Where Nothing Is: Choose the Objects It Touches"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
-    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Next Column"]]],
-  ["While Typing", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: back)"],
+  ["In the Slide List", [["↩", "New Slide"], ["⇧ ↑ ↓", "Select the Slide Above or Below Too"], ["⌘ A", "Select All Slides"], ["⌫", "Delete"],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"]]],
+  ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape"], ["⌘ A", "Select All Objects"], ["⇧ or ⌘ Click", "Select One More (or One Less)"], ["Drag", "Select the Objects It Touches (from an Empty Spot)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
+    ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["↑ ↓", "Previous or Next Object"], ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"]]],
+  ["While Typing", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌥ ⌘ E", "Inline Equation"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"],
     ["↩", "New Item (in a List) or Done (in a Title)"], ["⇥", "In a List: Indent (⇧⇥: Outdent)"],
     ["⇥", "Elsewhere: Next Title, Text, Object or Cell (⇧⇥: Previous)"], ["Esc", "Done"]]],
-  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["⇧ or ⌘ Click", "Choose One More Shape (or One Less)"], ["← → ↑ ↓", "Choose the Shape That Way"],
-    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘ ↩: Done)"], ["⌫", "Delete Shape"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
-  ["Presenting", [["→ Space", "Next Build or Slide"], ["←", "Previous"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
+  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group"], ["⇥", "Next Shape (⇧⇥: Previous)"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"], ["← → ↑ ↓", "Select the Shape That Way"],
+    ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘ ↩: Done)"], ["⌘ D", "Duplicate Shape"], ["⌫", "Delete Shape"], ["Esc", "Deselect"], ["⌘ + −", "Zoom In or Out (a Figure File)"]]],
+  ["Presenting", [["→ Space ↩", "Next Build or Slide"], ["PgDn", "Next (a Clicker’s Forward)"], ["← ⌫", "Previous"], ["PgUp", "Previous (a Clicker’s Back)"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
 
@@ -1235,8 +1452,9 @@ function shortcutsDialog() {
     return out;
   };
   const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span.shortcut-keys", {}, chords(keys).map((part) => (part.word ? h("span.shortcut-word", {}, part.word) : h("span.kbd", {}, part.key)))));
+  const app = Boolean(window.pywebview);
   dialog({ title: "Keyboard Shortcuts", wide: true, body: [h("div.shortcut-groups", {}, SHORTCUTS.map(([title, rows]) =>
-    h("div.shortcuts", {}, h("div.section-title", {}, title), rows.map(([keys, what]) => row(keys, what)))))],
+    h("div.shortcuts", {}, h("div.section-title", {}, title), rows.filter(([, , only]) => app || only !== "app").map(([keys, what]) => row(keys, what)))))],
   // Closed as a Mac's sheet is: by its Done (Return, Esc), not an ×.
   actions: [{ label: "Done", kind: "primary" }] });
 }
@@ -1268,13 +1486,16 @@ class SidePanel {
     if (which === "assistant") { clear(this.body, this.assistant.node); this.assistant.focus(); }
     else { this.workspace.unseen = 0; this.workspace.emit("activity"); this.renderActivity(); clear(this.body, this.activityList); }
     document.body.classList.toggle("side-open", true);
+    this.workspace.emit("side");
   }
 
   hide() {
+    if (this.node.contains(document.activeElement)) this.assistant.giveBack();
     this.open = null;
     remember("side", "");
     this.node.hidden = true;
     document.body.classList.remove("side-open");
+    this.workspace.emit("side");
   }
 
   renderActivity() {
@@ -1290,7 +1511,25 @@ class SidePanel {
 
 // -- the command palette --------------------------------------------------------------
 
-export function palette(workspace) {
+// The palette open now, closed (⌘K again, or a menu command run while it is open).
+let closePalette = () => {};
+
+// A deck's slides by their words, for Find: each slide's words as one line -- what was typed
+// in it (titles, text, lists, labels, captions, cells, notes), not its settings -- markup aside.
+const WORDS = new Set(["title", "subtitle", "words", "text", "label", "caption", "callout", "quote", "by", "author", "date", "notes", "footnotes",
+  "bullets", "numbered", "items", "rows", "header", "cells", "value", "code", "equation", "footer", "name"]);
+function slideWords(slide) {
+  const words = [];
+  const walk = (value, key) => {
+    if (typeof value === "string") { if (WORDS.has(key) && /\p{L}/u.test(value)) words.push(value); }
+    else if (Array.isArray(value)) value.forEach((item) => walk(item, key));
+    else if (value && typeof value === "object") for (const [name, item] of Object.entries(value)) walk(item, name);
+  };
+  walk(slide, "");
+  return words.join(" · ").replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1").replace(/\*\*|[*`]/g, "").replace(/\s+/g, " ");
+}
+
+export function palette(workspace, { find = false } = {}) {
   if (document.querySelector(".palette")) return;
   const session = workspace.active;
   const own = session ? session.commands() : [];
@@ -1315,10 +1554,21 @@ export function palette(workspace) {
       { icon: "redo", label: "Redo", keys: "⇧⌘Z", disabled: !session.future.length, hint: session.future.length ? session.said(session.future[session.future.length - 1]).text : "Nothing to redo", run: () => workspace.command("redo") },
       { icon: "history", label: "Show History", keys: "⌥⌘Z", disabled: !session.past.length && !session.future.length, hint: session.past.length || session.future.length ? "" : "No changes yet", run: () => workspace.command("history") },
     ] : []),
-    { icon: "sparkle", label: "Ask the Assistant", keys: "⌘J", run: () => document.querySelector(".assistant-button")?.click() },
+    // The document itself, as the File menu has it.
+    ...(session ? [
+      { icon: "pencil", label: "Rename…", hint: `Rename “${docName(session.file)}”`, run: () => nameDocument(workspace, session.file) },
+      { icon: "duplicate", label: "Duplicate Document…", keys: "⇧⌘S", hint: `A copy of “${docName(session.file)}”`, run: () => nameDocument(workspace, session.file, { copy: true }) },
+      ...(window.pywebview?.api?.show_in_finder ? [{ icon: "folder", label: "Show in Finder", keys: "⌥⌘R", run: () => window.pywebview.api.show_in_finder(`${String(workspace.info.folder).replace(/\/+$/, "")}/${session.file}`) }] : []),
+      { icon: "close", label: "Close Tab", keys: window.pywebview ? "⌘W" : undefined, hint: `Close “${docName(session.file)}”`, run: () => workspace.close(session.file) },
+    ] : []),
+    { icon: "sparkle", label: workspace.side?.open === "assistant" ? "Hide Assistant" : "Show Assistant", keys: "⌘J", run: () => workspace.side?.toggle("assistant") },
+    { icon: "activity", label: workspace.side?.open === "activity" ? "Hide Activity" : "Show Activity", keys: "⌥⌘A", run: () => workspace.side?.toggle("activity") },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
+    // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
+    ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, name]) => ({ icon: value === "dark" ? "moon" : value === "light" ? "sun" : "appearance",
+      label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),
     ...[
       // Each said as the New menu says it.
       { icon: "deck", label: "New Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
@@ -1329,7 +1579,21 @@ export function palette(workspace) {
     ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),
     ...own.filter((command) => command.later),
   ];
-  const input = h("input.palette-input", { placeholder: session ? `Search commands, slides, files…` : "Search commands and files…" });
+  // Slides found by their words as well as their titles (Edit › Find… opens the palette to
+  // find words): each with the words around what was found.
+  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map(slideWords) : [];
+  const foundOn = (query) => {
+    if (query.length < 2) return [];
+    return slides.flatMap((words, index) => {
+      const at = words.toLowerCase().indexOf(query);
+      if (at < 0) return [];
+      const label = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label || `Slide ${index + 1}`;
+      const from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
+      const note = `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
+      return [{ icon: "slide", label, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
+    }).slice(0, 12);
+  };
+  const input = h("input.palette-input", { placeholder: find && slides.length ? "Find words on the slides, or a command…" : session ? "Search commands, slides, files…" : "Search commands and files…" });
   input.spellcheck = false;
   const list = h("div.command-list.scroll-thin");
   let shown = [];
@@ -1370,6 +1634,8 @@ export function palette(workspace) {
     // A place to go (a slide) found as well as a command, after it: "slide" is New Slide first.
     const ranked = (command) => { const found = score(command, query); return found === null ? null : found + (command.later ? 15 : 0); };
     shown = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
+    // (A slide found by its title already is not listed again for its words.)
+    if (query) shown = [...shown, ...foundOn(query).filter((slide) => !shown.some((command) => command.label === slide.label))];
     index = Math.min(index, Math.max(0, shown.length - 1));
     clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", title: command.hint || "", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
       command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.note ? h("span.menu-hint", {}, command.note) : null),
@@ -1382,7 +1648,9 @@ export function palette(workspace) {
   // Words being typed get their words chosen back too: Bold, run from here, is for them.
   const chosenWords = before?.isContentEditable && getSelection().rangeCount ? getSelection().getRangeAt(0).cloneRange() : null;
   const close = () => {
+    if (!scrim.isConnected) return;
     scrim.remove();
+    closePalette = () => {};
     const under = [...document.querySelectorAll(".scrim")].pop();
     if (before?.isConnected && before !== document.body && (!under || under.contains(before))) {
       before.focus({ preventScroll: true });
@@ -1403,6 +1671,7 @@ export function palette(workspace) {
   const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } },
     h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list));
   document.body.append(scrim);
+  closePalette = close;
   render();
   input.focus();
 }

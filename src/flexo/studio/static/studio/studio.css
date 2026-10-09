@@ -197,11 +197,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* tabs */
 /* Room above and below the tabs for a focused tab's ring, which the scrolling strip would cut. */
 .tabs { display: flex; align-items: center; gap: 3px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 5px 4px; scrollbar-width: none; }
-.tab { position: relative; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 5px 0 10px; border-radius: 8px; color: var(--ink-2); cursor: pointer; white-space: nowrap; border: 1px solid transparent; flex: none; max-width: 240px; transition: background 0.12s; }
+/* Many open, the tabs narrow (their names cut short, as Safari's are) before the strip
+   scrolls; the one in front is kept in view (shell.js). */
+.tab { position: relative; display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 5px 0 10px; border-radius: 8px; color: var(--ink-2); cursor: pointer; white-space: nowrap; border: 1px solid transparent; flex: 0 1 auto; min-width: 72px; max-width: 240px; transition: background 0.12s; }
+.tab > svg, .tab-close, .tab-people { flex: none; }
+/* A tab behind takes no room for its ×: under the pointer the × comes over its end, on the
+   tab's own colour, and nothing moves. */
+.tab:not(.on) { padding-right: 10px; }
+/* The one in front keeps its name whole (to its widest); those behind give way. */
+.tab.on { flex-shrink: 0; }
+.tab:not(.on) .tab-close { position: absolute; right: 5px; top: 50%; margin-top: -10px; background: var(--sunken); }
+.tab:not(.on) .tab-close:hover { background: var(--line-strong); }
+/* More tabs than there is room for, even narrowed: the strip scrolls, its ends fading where
+   more are out of sight. */
+.tabs.more-before { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
+.tabs.more-after { -webkit-mask-image: linear-gradient(to left, transparent, #000 28px); mask-image: linear-gradient(to left, transparent, #000 28px); }
+.tabs.more-before.more-after { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .tab:hover { background: var(--sunken); color: var(--ink); }
 .tab.on { background: var(--raised); color: var(--ink); border-color: var(--line-strong); box-shadow: var(--shadow-1); font-weight: 580; }
 .tab svg { width: 15px; height: 15px; flex: none; }
-.tab-name { overflow: hidden; text-overflow: ellipsis; }
+.tab-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
 /* A change on its way to the file: a dot where the close button is (it comes back under the
    pointer), so the tab and the tabs after it stay put while a change saves. */
 .tab-dot { position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: var(--accent); pointer-events: none; }
@@ -218,7 +233,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tab-new:hover { background: var(--sunken); color: var(--ink); }
 .tab-new svg { width: 16px; height: 16px; }
 
-.search-button { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--sunken); color: var(--ink-3); cursor: pointer; min-width: 0; }
+.search-button { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--sunken); color: var(--ink-3); cursor: pointer; min-width: 0; flex: none; }
 .search-button:hover { border-color: var(--line-strong); color: var(--ink-2); }
 .search-button svg { width: 14px; height: 14px; flex: none; }
 .search-button span:not(.kbd) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -327,8 +342,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .doc-name { font-size: 13px; font-weight: 500; flex: 1; text-align: left; }
 .doc-kind { color: var(--ink-3); font-size: 12px; }
 .doc-kind.bad { color: var(--error); }
-.copyable { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); margin: 6px 0; }
-.copyable code { flex: 1; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; }
+.copyable { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); margin: 6px 0; contain: inline-size; }
+/* A long command (a folder's whole path) scrolls in its box, never widens the sheet. */
+.copyable code { flex: 1; min-width: 0; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 10px; color: var(--ink-2); }
 .shortcuts { display: grid; gap: 2px; align-content: start; }
 .shortcut-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; }
@@ -337,6 +353,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .shortcut /* A word between a shortcut's keycaps ("or", "click"). */
 .shortcut-word { color: var(--ink-3); font: var(--text-small); }
 .kbd { color: var(--ink-2); }
+/* A sheet's default button, given the keys as it opens: blue, Return's, not ringed besides. */
+.dialog-foot .btn.primary[data-default-focus]:focus-visible { outline: none; }
 
 /* the side panel */
 .side { width: 360px; border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 44px 1fr; min-height: 0; }
@@ -448,7 +466,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .command-list .menu-item[aria-disabled] { color: var(--ink-3); cursor: default; }
 .command-list .menu-item[aria-disabled] svg, .command-list .menu-item[aria-disabled] .kbd { opacity: 0.55; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: 8px; font-weight: 600; letter-spacing: -0.01em; }
-.brand-mark { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+/* The app's mark, in its icon's blue: a sign of whose window this is, not a button to press. */
+.brand { cursor: default; }
+.brand-mark { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(180deg, #6a86ff, #3a52e6); color: #fff; display: grid; place-items: center; }
 .brand-mark svg { width: 14px; height: 14px; }
 .file { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
