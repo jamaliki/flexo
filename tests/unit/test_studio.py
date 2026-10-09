@@ -1189,6 +1189,112 @@ def test_the_assistant_edits_through_the_tools_and_says_so_to_everyone(tmp_path:
         workspace.close()
 
 
+def _chunk(content=None, calls=None, finish=None):
+    delta = NS(content=content, refusal=None, tool_calls=calls)
+    return NS(choices=[NS(delta=delta, finish_reason=finish)])
+
+
+def _call(index, *, id=None, name=None, arguments=None):
+    return NS(index=index, id=id, function=NS(name=name, arguments=arguments))
+
+
+class _OpenAIClient:
+    """Chat Completions, streamed: each reply a list of chunks."""
+
+    def __init__(self, script):
+        self.script, self.requests = list(script), []
+        self.chat = NS(completions=NS(create=self._create))
+        self.models = NS(list=lambda: [NS(id="gpt-5-mini"), NS(id="gpt-5.2"), NS(id="tts-1")])
+
+    def _create(self, **request):
+        self.requests.append({**request, "messages": list(request["messages"])})
+        return iter(self.script.pop(0))
+
+
+def test_chatgpt_answers_and_edits_through_the_same_tools(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        edit = '{"file": "figure.yaml", "old": "Encoder", "new": "Decoder"}'
+        client = _OpenAIClient(
+            [
+                [
+                    _chunk("I'll rename it."),
+                    # Its call arrives in pieces, as a stream sends it.
+                    _chunk(calls=[_call(0, id="call_1", name="edit_document", arguments="")]),
+                    _chunk(calls=[_call(0, arguments=edit[:20])]),
+                    _chunk(calls=[_call(0, arguments=edit[20:])], finish="tool_calls"),
+                ],
+                [_chunk("Renamed."), _chunk(finish="stop")],
+            ]
+        )
+        assistant = Assistant(workspace)
+        chatgpt = assistant.providers["chatgpt"]
+        chatgpt.client, chatgpt.given = client, True
+        assert assistant.choose("chatgpt") is None
+        assert assistant.who["name"] == "ChatGPT"
+        listener = workspace.listen("page", PERSON)
+        assistant.ask("Rename the encoder", {"file": "figure.yaml"}, PERSON)
+        wait_for(lambda: not assistant.running)
+        assert "Decoder" in workspace.open("figure.yaml").document["text"]
+        first, second = client.requests
+        # The newest full GPT its list holds, as no model was set.
+        assert first["model"] == "gpt-5.2" and first["stream"] is True
+        assert first["messages"][0]["role"] == "system"
+        assert "You are ChatGPT" in first["messages"][0]["content"]
+        assert {tool["function"]["name"] for tool in first["tools"]} >= {"edit_document", "look"}
+        answered = [message for message in second["messages"] if message["role"] == "tool"]
+        assert len(answered) == 1 and answered[0]["tool_call_id"] == "call_1"
+        assert "version 2" in answered[0]["content"]
+        turn = assistant.transcript[-1]
+        assert turn["name"] == "ChatGPT" and turn["provider"] == "chatgpt"
+        assert [part["type"] for part in turn["parts"]] == ["text", "tool", "text"]
+        events = []
+        while not listener.events.empty():
+            events.append(listener.events.get())
+        assert any(e["type"] == "doc" and e["who"]["name"] == "ChatGPT" for e in events)
+    finally:
+        workspace.close()
+
+
+def test_who_answers_can_change_and_the_conversation_goes_with_it(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        claude = _Client([("It has two blocks.", [])])
+        assistant = Assistant(workspace, client=claude)
+        assistant.ask("What is in it?", {"file": "figure.yaml"}, PERSON)
+        wait_for(lambda: not assistant.running)
+        openai = _OpenAIClient([[_chunk("Yes: Encoder and Decoder."), _chunk(finish="stop")]])
+        chatgpt = assistant.providers["chatgpt"]
+        chatgpt.client, chatgpt.given = openai, True
+        assert assistant.choose("chatgpt", "gpt-5-mini") is None
+        assert assistant.transcript[-1]["role"] == "switch"
+        assistant.ask("Both of them?", {"file": "figure.yaml"}, PERSON)
+        wait_for(lambda: not assistant.running)
+        (request,) = openai.requests
+        assert request["model"] == "gpt-5-mini"
+        # Claude's words, carried over as words.
+        roles = [message["role"] for message in request["messages"]]
+        assert roles == ["system", "user", "assistant", "user"]
+        assert request["messages"][2]["content"] == "It has two blocks."
+        state = assistant.state()
+        assert state["provider"] == "chatgpt" and state["model"] == "gpt-5-mini"
+        assert [item["id"] for item in state["providers"]] == ["claude", "chatgpt", "other"]
+        assert assistant.choose("nobody") is not None
+        assert assistant.models("chatgpt")["models"] == ["gpt-5-mini", "gpt-5.2"]
+    finally:
+        workspace.close()
+
+
+def test_the_newest_full_gpt_is_chosen_when_none_is_set() -> None:
+    from flexo.studio.assistant import _newest_gpt
+
+    names = ["gpt-4o", "gpt-5", "gpt-5.1-mini", "gpt-5.1", "gpt-5.1-2026-01-10", "o3"]
+    assert _newest_gpt(names) == "gpt-5.1"
+    assert _newest_gpt(["o3"]) is None
+
+
 # -- keeping files safe ----------------------------------------------------------------------
 
 

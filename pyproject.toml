@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-assistant = ["anthropic>=1.9"]
+assistant = ["anthropic>=1.9", "openai>=1.60"]  # Claude; ChatGPT and other models
 structures = ["gemmi>=0.6"]
 molecules = ["molsketch @ git+https://github.com/jamaliki/mol-sketch#subdirectory=python"]
 pdf = ["pypdfium2>=4.30", "pillow>=10"]  # PDF pages and Illustrator files as artwork
@@ -39,6 +39,7 @@ flexo = "flexo.cli:main"
 [dependency-groups]
 dev = [
   "anthropic>=1.9",
+  "openai>=1.60",
   "gemmi>=0.6",
   "hypothesis>=6.138",
   "pillow>=10",

@@ -184,6 +184,9 @@ export class Session {
     this.lastWho = null;                  // who made the last change from elsewhere
     this.container = h("div.doc-view");
     this.tools = h("div.docbar-group");
+    // What adds to the document (a deck's Text, Table, Figure...), in the middle of the bar,
+    // as Keynote's are.
+    this.inserts = h("div.docbar-group");
     this.actions = h("div.docbar-group");
     this.commands = () => [];
     this.exports = [];      // what the kind exports: [{ format, label }], for the Mac app's menu
@@ -799,7 +802,6 @@ export class Session {
         dialog({
           title: `Export ${named}`,
           body: [
-            entry.hint ? h("p.export-hint", {}, entry.hint.replace(/\.?$/, ".")) : null,
             entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
             ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; option.onChange?.(value); } })),
           ],

@@ -212,8 +212,11 @@ export const ui = {
 
   // A note too long to sit beside its name on a narrow panel goes under it, from the left,
   // rather than wrapping raggedly at the right.
+  // A hint in words is the label's tooltip, as a Mac's inspector keeps them: only one that is
+  // a control of its own (a count, a link) shows beside the label.
   field(label, control, { hint, inline } = {}) {
-    const long = typeof label === "string" && typeof hint === "string" && label.length + hint.length > 40;
+    const said = typeof hint === "string" ? hint : "";
+    if (said) hint = null;
     // Its control named by its label, for VoiceOver -- one in a box of its own (a number's
     // steppers, a switch) or a group (segments) is not inside the label, so not named by it.
     const id = typeof label === "string" && label ? `field-${++fieldCount}` : null;
@@ -224,7 +227,7 @@ export const ui = {
       else target.setAttribute("aria-labelledby", id);
     }
     return h(`div.field${inline ? ".inline" : ""}`, {},
-      label ? h("label.label", {}, id ? h("span", { id }, label) : label, hint ? h(`span.hint${long ? ".below" : ""}`, {}, hint) : null) : null, control);
+      label ? h("label.label", { title: said }, id ? h("span", { id }, label) : label, hint ? h("span.hint", {}, hint) : null) : null, control);
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
@@ -506,8 +509,12 @@ export const ui = {
   },
 
   // A font, from a pop-up button: its menu lists the fonts there are, each name in its own
-  // face, and typing finds one -- or names one not listed. Empty is `placeholder`.
+  // face, those most often wanted first, and typing finds one -- or names one not listed.
+  // Empty is `placeholder`.
   font({ value, options = [], placeholder = "Default", onChange, key } = {}) {
+    // The system's own faces (".SF NS") are not for documents: not offered.
+    options = options.filter((name) => !String(name).startsWith("."));
+    const suggested = suggestedFonts(options);
     const label = h("span");
     const node = h("button.select.font-pick", { type: "button", "aria-haspopup": "menu", title: "Choose a Font" }, label, icon("chevron-down"));
     if (key) node.dataset.key = key;
@@ -530,10 +537,12 @@ export const ui = {
       const render = () => {
         const typed = search.value.trim();
         const query = typed.toLowerCase();
+        const all = [...new Set([...options, ...suggested])].sort((a, b) => a.localeCompare(b));
         clear(list,
           query ? null : item("", placeholder),
-          options.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
-          typed && !options.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);
+          query || !suggested.length ? null : [h("div.menu-title", {}, "Suggested"), suggested.map((name) => item(name, name, true)), h("div.menu-title", {}, "All Fonts")],
+          all.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
+          typed && !all.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);
       };
       search.addEventListener("input", render);
       search.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); list.querySelector(".menu-item")?.click(); } });
@@ -825,6 +834,20 @@ function nextField(from, step) {
   items[(at + step + items.length) % items.length]?.focus();
 }
 
+// -- fonts ----------------------------------------------------------------------------
+
+// The faces most often wanted for slides and figures, in the order offered: those of them
+// there are. Helvetica is always there: where it isn't installed, flexo sets it in Liberation
+// Sans, drawn to its widths.
+export const SUGGESTED_FONTS = ["Helvetica", "Helvetica Neue", "Avenir Next", "Gill Sans", "Futura", "Optima",
+  "Inter", "IBM Plex Sans", "Figtree", "Source Sans 3", "Georgia", "Palatino", "Baskerville", "Charter",
+  "Iowan Old Style", "Latin Modern Roman"];
+const EVERYWHERE = new Set(["helvetica"]);
+export function suggestedFonts(options) {
+  const there = new Set(options.map((name) => String(name).toLowerCase()));
+  return SUGGESTED_FONTS.filter((name) => there.has(name.toLowerCase()) || EVERYWHERE.has(name.toLowerCase()));
+}
+
 // -- popovers -------------------------------------------------------------------------
 
 let openMenu = null;
@@ -847,12 +870,13 @@ export function menu(anchor, items, { align = "start", className = "" } = {}) {
     if (item.title) { node.append(h("div.menu-title", {}, item.title)); continue; }
     // `show(on)`: what the item would act on, shown while it is under the pointer or keys.
     const shown = item.show ? { onmouseenter: () => item.show(true), onmouseleave: () => item.show(false), onfocus: () => item.show(true), onblur: () => item.show(false) } : {};
-    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}${item.checked ? ".checked" : ""}`, { type: "button", role: ticks ? "menuitemradio" : "menuitem",
+    node.append(h(`button.menu-item${item.danger ? ".danger" : ""}${item.checked ? ".checked" : ""}`, { type: "button", role: ticks ? "menuitemradio" : "menuitem", title: item.hint || "",
       "aria-checked": ticks ? String(Boolean(item.checked)) : undefined, disabled: Boolean(item.disabled),
       onclick: () => { item.show?.(false); closeMenu(); item.run?.(); }, ...shown },
       ticks ? h("span.menu-tick", {}, item.checked ? icon("check") : null) : null,
       item.icon ? icon(item.icon) : null,
-      h("span.menu-text", {}, h("span", { style: item.style }, item.label), item.hint ? h("span.menu-hint", {}, item.hint) : null),
+      // A hint is the item's tooltip; a note (where a document is) shows under its name.
+      h("span.menu-text", {}, h("span", { style: item.style }, item.label), item.note ? h("span.menu-hint", {}, item.note) : null),
       item.keys ? h("span.kbd", {}, item.keys) : null));
   }
   // Closed any way, nothing stays shown.

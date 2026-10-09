@@ -990,14 +990,23 @@ changes in words, to go back or forward to any of them.
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.
-- **Claude**: ⌘J opens a conversation with Claude that works on the open
-  documents, told what you are looking at. It needs `pip install 'flexo[assistant]'`
-  and credentials the Anthropic SDK finds (`ANTHROPIC_API_KEY`, or `ant auth login`).
+- **Assistant**: ⌘J opens a conversation that works on the open documents, told
+  what you are looking at, answered by Claude, ChatGPT or another model (chosen,
+  with its model, at the top of the panel; the conversation goes with a change).
+  It needs `pip install 'flexo[assistant]'`, then: for Claude, credentials the
+  Anthropic SDK finds (`ANTHROPIC_API_KEY`, or `ant auth login`); for ChatGPT,
+  `OPENAI_API_KEY`; for another model served as OpenAI's API serves them (Ollama,
+  LM Studio, OpenRouter), `FLEXO_STUDIO_OTHER_URL` (Ollama's is
+  `http://localhost:11434/v1`), with `FLEXO_STUDIO_OTHER_MODEL`,
+  `FLEXO_STUDIO_OTHER_KEY` if it asks for one, and `FLEXO_STUDIO_OTHER_NAME` to call
+  it by. `FLEXO_STUDIO_PROVIDER` (`claude`, `chatgpt` or `other`) says which answers
+  first.
 - **Agents**: `claude mcp add flexo-studio -- flexo studio mcp` (once, in the
   folder) gives Claude Code the studio's tools: list, open, read, and edit
   documents (as their YAML), *look* at pages as pictures with their warnings,
   see what you are looking at, and say what it is doing. It joins the studio open
-  on the folder, or starts one. Any MCP client can run `flexo studio mcp` the same way.
+  on the folder, or starts one. For Codex, `codex mcp add flexo-studio -- flexo
+  studio mcp`; any MCP client can run `flexo studio mcp` the same way.
 - **Shared folders**: a folder kept by Dropbox, Google Drive, iCloud Drive,
   OneDrive or Box can be open in studios on several computers at once. Each
   studio takes in what the others save as the service brings it, merged with

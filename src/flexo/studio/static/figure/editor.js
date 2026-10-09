@@ -74,11 +74,13 @@ export function mount(studio, main) {
   });
 
   // -- the bar --
-  const addButton = ui.button("Add Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "primary", title: "Add Shape (A)" });
+  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add Shape (A)" });
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
-  const deleteButton = ui.button("", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
-  studio.tools.append(listButton, h("span.docbar-title", {}, icon("figure"), "Figure"), h("span.sep"), addButton, connectButton, gatherButton, deleteButton);
+  const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
+  // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
+  studio.tools.append(listButton);
+  studio.inserts.append(addButton, connectButton, gatherButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
   // ("…" only where the Mac app's save panel follows: in a browser each is saved at once.)
   studio.exports = [
@@ -281,7 +283,7 @@ export function mount(studio, main) {
   function renderOutline() {
     if (state.tab !== "parts") return;
     const found = figure.model;
-    if (!found) { clear(outlineBody, h("div.empty", {}, "Shapes appear here once the figure can be read.")); return; }
+    if (!found) { clear(outlineBody, h("div.empty", {}, "No shapes")); return; }
     const chosen = figure.selected;
     const choose = (event, id) => {
       if (event.shiftKey || event.metaKey || event.ctrlKey) figure.select(chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id]);
@@ -322,7 +324,7 @@ export function mount(studio, main) {
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
       line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
-      : h("div.empty.small", {}, "Select a shape, then click Connect."));
+      : h("div.empty.small", {}, "No lines"));
   }
 
   let dragging = null;

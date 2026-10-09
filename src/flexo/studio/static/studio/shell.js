@@ -3,7 +3,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
 import { Session } from "./session.js";
-import { AssistantPanel } from "./assistant.js";
+import { AssistantPanel, MARK_COLOURS } from "./assistant.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -13,6 +13,7 @@ const UNTITLED = { deck: "Untitled.yaml", figure: "Untitled Figure.yaml", theme:
 // people come), and none near the blue of what is chosen here, which is one's own.
 const COLOURS = ["#e8590c", "#0ca678", "#d6336c", "#5c940d", "#ae3ec9", "#1098ad", "#f59f00", "#795548"];
 const MCP_COMMAND = "claude mcp add flexo-studio -- flexo studio mcp";
+const CODEX_COMMAND = "codex mcp add flexo-studio -- flexo studio mcp";
 
 // Each person here has the colour the studio gave them as they came, none shared with
 // another here (see given); one not here (in the activity) has one by their id.
@@ -23,7 +24,7 @@ function give(presence) {
 }
 
 export function colourOf(who) {
-  if (who?.id === "assistant") return "#d97757";
+  if (who?.id === "assistant") return MARK_COLOURS[who.provider || "claude"] || "#6b6b70";
   if (given.has(who?.id)) return COLOURS[given.get(who.id) % COLOURS.length];
   let hash = 0;
   for (const ch of String(who?.id || who?.name || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -497,7 +498,9 @@ export async function start() {
   const activityButton = ui.button("", () => side.toggle("activity"), { kind: "ghost", icon: "activity", title: "Activity" });
   const activityCount = h("span.badge-count", { hidden: true });
   activityButton.append(activityCount);
-  const claudeButton = h("button.btn.claude-button", { type: "button", title: "Ask Claude (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), "Claude");
+  // The assistant -- Claude, ChatGPT or another, whichever is set up (assistant.js) -- a plain
+  // button among the others, its mark in colour: the slide stays the brightest thing there is.
+  const assistantButton = h("button.btn.assistant-button", { type: "button", title: "Ask the Assistant (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), h("span.btn-label", {}, "Assistant"));
   // Pressed, it leaves the keys where they were (words being typed, the slide list) until
   // the palette has seen what they are on: its commands are for that.
   const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Command palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
@@ -511,16 +514,17 @@ export async function start() {
   const showTheme = () => clear(themeButton, icon(remembered("theme", "auto") === "dark" ? "moon" : remembered("theme", "auto") === "light" ? "sun" : "appearance"));
   showTheme();
   const bar = h("header.bar", {},
-    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon()), h("span.brand-name", {}, "Flexo Studio")),
+    h("div.brand", { title: info.folder }, h("div.brand-mark", {}, markIcon())),
     tabs,
     h("div.spacer"),
     paletteButton,
     people, followChip,
     h("div.bar-sep"),
-    activityButton, themeButton, claudeButton);
+    activityButton, themeButton, assistantButton);
 
   // -- the document bar --
   const docLeft = h("div.docbar-slot");
+  const docCentre = h("div.docbar-slot.docbar-centre");
   const docRight = h("div.docbar-slot");
   const status = h("div.status", {}, h("span.dot"), h("span.status-text"));
   // Undo and redo wait for edits still on their way (a figure's typing), so they take
@@ -547,21 +551,31 @@ export async function start() {
   const redo = ui.button("", () => travel("redo"), { kind: "ghost", icon: "redo", title: "Redo (⇧⌘Z)" });
   const past = ui.button("", (event) => { const session = workspace.active; if (session) historyMenu(event.currentTarget, session); },
     { kind: "ghost", icon: "history", title: "Show History (⌥⌘Z)" });
-  const docbar = h("div.docbar", {}, docLeft, h("div.spacer"), status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+  // As Keynote's toolbar: the document's own tools at the left, what adds to it in the
+  // middle, saving, its history and the rest at the right.
+  const docEnd = h("div.docbar-end", {}, status, h("div.bar-group", {}, undo, redo, past), h("div.bar-sep"), docRight);
+  const docbar = h("div.docbar", {}, docLeft, docCentre, docEnd);
   // A toolbar button clicked does not take the keys, as a Mac toolbar's doesn't: they stay
   // with the document (Delete deletes what is chosen, not the button's next press).
   docbar.addEventListener("mousedown", (event) => { if (event.target.closest("button") && !event.target.closest("input, select, textarea")) event.preventDefault(); });
-  // Too wide for the window (or beside the side panel), the bar shows its tools as icons
-  // alone, and then its other buttons too, rather than run off the edge.
-  const crowded = () => [docbar, docLeft, docRight].some((node) => node.scrollWidth > node.clientWidth + 1);
+  // Too wide for the window (or beside the side panel), the bar's middle group moves off
+  // the centre to make room, then its tools show as icons alone, and then its other
+  // buttons too, rather than run into each other or off the edge.
+  const groups = [docLeft, docCentre, docEnd];
+  const crowded = () => {
+    if ([docbar, ...groups, docRight].some((node) => node.scrollWidth > node.clientWidth + 1)) return true;
+    const boxes = groups.map((node) => node.getBoundingClientRect());
+    return boxes[0].right > boxes[1].left - 8 || boxes[1].right > boxes[2].left - 8;
+  };
   const fitDocbar = () => {
-    docbar.classList.remove("compact", "tight");
-    if (!crowded()) return;
-    docbar.classList.add("compact");
-    if (crowded()) docbar.classList.add("tight");
+    docbar.classList.remove("shifted", "compact", "tight");
+    for (const step of ["shifted", "compact", "tight"]) {
+      if (!crowded()) return;
+      docbar.classList.add(step);
+    }
   };
   const fitting = new ResizeObserver(fitDocbar);
-  for (const node of [docbar, docLeft, docRight]) fitting.observe(node);
+  for (const node of [docbar, ...groups, docRight]) fitting.observe(node);
 
   // The document's history, newest first: each row is the document as a change left
   // it, the one it is now marked; a click goes back (or forward) to that point.
@@ -895,6 +909,7 @@ export async function start() {
     welcome.hidden = Boolean(session);
     if (!session) { views.append(welcome); renderWelcome(); }
     clear(docLeft, session ? session.tools : null);
+    clear(docCentre, session ? session.inserts : null);
     clear(docRight, session ? session.actions : null);
     renderTabs();
     renderStatus();
@@ -903,26 +918,18 @@ export async function start() {
   const welcome = h("div.welcome.scroll-thin");
   const renderWelcome = () => {
     const kinds = info.kinds.filter((kind) => kind.offered !== false).map((kind) => kind.name);
-    const card = (kind, title, note, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
-      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title), h("span.start-note", {}, note)) : null;
+    const card = (kind, title, name) => kinds.includes(kind) ? h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, name) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-title", {}, title)) : null;
     clear(welcome, h("div.welcome-inner", {},
       h("h1", {}, "New Document"),
-      h("p.lead", {}, "Create decks, figures and themes. You and any agents you invite can edit them at the same time."),
-      h("div.start-cards", {},
-        card("deck", "Deck", "Slides for a talk, with live figures", UNTITLED.deck),
-        card("figure", "Figure", "A diagram that is laid out automatically", UNTITLED.figure),
-        card("theme", "Theme", "Fonts, colours and lines for decks and figures", UNTITLED.theme)),
-      workspace.documents.length ? h("div.welcome-section", {}, h("h2", {}, "In This Folder"),
-        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", onclick: () => workspace.open(item.file) },
-          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", { title: item.file }, docName(item.file)),
+      h("div.start-cards", {}, card("deck", "Deck", UNTITLED.deck), card("figure", "Figure", UNTITLED.figure), card("theme", "Theme", UNTITLED.theme)),
+      // What is in the folder, under its name (its whole path in the tooltip).
+      workspace.documents.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, String(info.folder).split("/").filter(Boolean).pop() || "This Folder"),
+        h("div.doc-list", {}, workspace.documents.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
+          icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, docName(item.file)),
           // One that does not read, or does not draw as written, says so, as the themes' list does.
           item.unread || item.faulty ? h("span.doc-kind.bad", { title: `Open ${docName(item.file)} to see why and put it right` }, item.unread ? "Can’t be read" : "Has problems") : null,
-          h("span.doc-kind", {}, [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · ")))))) : null,
-      h("div.welcome-section", {}, h("h2", {}, "Work with Agents"),
-        h("p", {}, "Ask Claude in the panel on the right, or connect Claude Code or another MCP agent. Run this command once in this folder, then ask the agent to make something. Its changes appear here as it works:"),
-        copyable(MCP_COMMAND),
-        // Which folder "this folder" is, said as such.
-        h("p.hint-line.folder-line", { title: info.folder }, icon("folder"), h("span", {}, "This folder: ", h("span.folder-path", {}, homeShort(info.folder)))))));
+          item.file.includes("/") ? h("span.doc-kind", {}, item.file.split("/").slice(0, -1).join("/")) : null)))) : null));
   };
 
   workspace.on("opened", renderViews).on("closed", renderViews).on("active", renderViews)
@@ -1047,7 +1054,6 @@ function typeAgain(keys) {
 }
 
 // A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
-const homeShort = (folder) => String(folder || "").replace(/\/+$/, "").replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, "~");
 
 function markIcon() {
   const node = icon("info");
@@ -1086,7 +1092,7 @@ function newMenu(anchor, workspace) {
       { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
-    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), hint: [item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : null, item.title].filter(Boolean).join(" · "), run: () => workspace.open(item.file) }))] : []),
+    ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), note: item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : "", hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
 }
 
@@ -1128,21 +1134,17 @@ export function askName(workspace, kind, suggestion) {
 export function connectDialog(workspace) {
   const name = ui.input({ value: workspace.me.name, placeholder: "Your name, as others see it", onChange: (value) => workspace.setName(value.trim()) });
   dialog({ title: "Work with Agents", body: [
-    h("p", {}, "Any MCP agent can work in this folder. You see its changes as it makes them, where it’s working and what it’s doing, and you can keep editing at the same time."),
-    h("ol.steps", {},
-      h("li", {}, "In Terminal, run this command once in this folder to add Flexo Studio to Claude Code:", copyable(MCP_COMMAND)),
-      h("li", {}, "Ask for what you want, for example “Make a 6-slide talk from the README with a figure of the model”. Its changes appear here as it works."),
-      // Follow is on unless turned off; its switch shows in the top bar once an agent is here.
-      h("li", {}, workspace.follow ? [h("b", {}, "Follow"), " is on: you see what agents change as they work. Turn it off in the top bar once one has joined."]
-        : ["When an agent joins, turn on ", h("b", {}, "Follow"), " in the top bar to see what it changes as it works."])),
-    h("p.hint-line", {}, "Other MCP clients: run ", h("code", {}, "flexo studio mcp"), " as a stdio server in this folder."),
-    ui.field("Your Name", name, { hint: "Shown to others" }),
+    h("p", {}, "Run one of these once in Terminal, in this folder, then ask the agent for what you want. Its changes appear here as it makes them."),
+    ui.field("Claude Code", copyable(MCP_COMMAND)),
+    ui.field("Codex", copyable(CODEX_COMMAND)),
+    ui.field("Other MCP Clients", copyable("flexo studio mcp")),
+    ui.field("Your Name", name),
   ], actions: [{ label: "Done", kind: "primary" }] });
 }
 
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them.
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ J", "Ask Claude"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
+  ["General", [["⌘ K", "Command Palette (Except While Typing)"], ["⌘ J", "Ask the Assistant"], ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (documents also save as you work)"], ["⌥ ⌘ I", "Go to the Inspector (Esc: back)"], ["?", "Keyboard Shortcuts"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↩", "New Slide (in the Slide List)"], ["↑ ↓", "Previous or Next Slide"],
     ["⇧ ↑ ↓", "Choose a Run of Slides"], ["Home End", "First or Last Slide"],
@@ -1232,7 +1234,7 @@ class SidePanel {
     remember("side", which);
     this.node.hidden = false;
     clear(this.tabs,
-      h(`button.side-tab${which === "assistant" ? ".on" : ""}`, { type: "button", onclick: () => this.show("assistant") }, icon("sparkle"), "Claude"),
+      h(`button.side-tab${which === "assistant" ? ".on" : ""}`, { type: "button", onclick: () => this.show("assistant") }, icon("sparkle"), "Assistant"),
       h(`button.side-tab${which === "activity" ? ".on" : ""}`, { type: "button", onclick: () => this.show("activity") }, icon("activity"), "Activity"));
     if (which === "assistant") { clear(this.body, this.assistant.node); this.assistant.focus(); }
     else { this.workspace.unseen = 0; this.workspace.emit("activity"); this.renderActivity(); clear(this.body, this.activityList); }
@@ -1253,7 +1255,7 @@ class SidePanel {
       // Who did what, and how many times, one sentence; where, under it.
       h("span.activity-text", {}, h("span", {}, h("b", {}, nameOf(entry.who)), " ", entry.text, entry.count > 1 ? h("span.times", {}, `\u00a0×${entry.count}`) : null),
         h("span.activity-where", {}, [entry.file && docName(entry.file), entry.where?.label].filter(Boolean).join(" · "))),
-      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet. Changes made by you, Claude and other agents appear here."));
+      h("span.activity-time", {}, ago(entry.at)))) : h("div.empty", {}, "No activity yet"));
   }
 }
 
@@ -1284,7 +1286,7 @@ export function palette(workspace) {
       { icon: "redo", label: "Redo", keys: "⇧⌘Z", disabled: !session.future.length, hint: session.future.length ? session.said(session.future[session.future.length - 1]).text : "Nothing to redo", run: () => workspace.command("redo") },
       { icon: "history", label: "Show History", keys: "⌥⌘Z", disabled: !session.past.length && !session.future.length, hint: session.past.length || session.future.length ? "" : "No changes yet", run: () => workspace.command("history") },
     ] : []),
-    { icon: "sparkle", label: "Ask Claude", keys: "⌘J", run: () => document.querySelector(".claude-button")?.click() },
+    { icon: "sparkle", label: "Ask the Assistant", keys: "⌘J", run: () => document.querySelector(".assistant-button")?.click() },
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "?", run: () => shortcutsDialog() },
@@ -1340,8 +1342,8 @@ export function palette(workspace) {
     const ranked = (command) => { const found = score(command, query); return found === null ? null : found + (command.later ? 15 : 0); };
     shown = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
     index = Math.min(index, Math.max(0, shown.length - 1));
-    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
-      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.hint ? h("span.menu-hint", {}, command.hint) : null),
+    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", title: command.hint || "", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
+      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.note ? h("span.menu-hint", {}, command.note) : null),
       command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });

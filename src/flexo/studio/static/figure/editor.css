@@ -78,7 +78,7 @@
 .fig-messages .message.note { background-image: linear-gradient(var(--sunken), var(--sunken)); }
 .fig-empty { color: var(--ink-3); display: grid; gap: 8px; justify-items: center; }
 .fig-page.flash { animation: fig-flash 0.9s ease-out; }
-@keyframes fig-flash { 0% { box-shadow: 0 0 0 3px #d97757, var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }
+@keyframes fig-flash { 0% { box-shadow: 0 0 0 3px var(--accent-line), var(--shadow-page); } 100% { box-shadow: var(--shadow-page); } }
 
 /* -- adding -- */
 

@@ -222,11 +222,6 @@ function throttled(run, ms = 100) {
   return (...args) => { waiting = args; if (!timer) fire(); };
 }
 
-// What this person left as they left it (the tips folded away), kept in the page's storage;
-// a page without storage forgets.
-function remembered(name) { try { return localStorage.getItem(`flexo.figure.${name}`); } catch { return null; } }
-function remember(name, value) { try { localStorage.setItem(`flexo.figure.${name}`, value); } catch { /* none kept */ } }
-
 // A stylesheet of the figure's, asked for once -- and again, should the studio not have
 // answered (a figure first chosen while it was away), until it does: never a page of
 // unstyled parts (a glyph drawn as a great black square) once it is back.
@@ -2332,7 +2327,11 @@ export function figureParts(host) {
     const pad = 0.08 * Math.min(canvas.width, canvas.height);
     const scale = Math.min((canvas.width - 2 * pad) / Math.max(right - left, 1), (canvas.height - 2 * pad) / Math.max(bottom - top, 1));
     const at = ([x, y]) => [canvas.width / 2 + (x - (left + right) / 2) * scale, canvas.height / 2 + (y - (top + bottom) / 2) * scale];
-    const ink = getComputedStyle(host.overlay).getPropertyValue("--accent").trim() || "#3d5afe";
+    // (The accent as a colour a canvas takes: the Mac's may be named, AccentColor, not given.)
+    const probe = h("span", { style: { color: "var(--accent)", display: "none" } });
+    host.overlay.append(probe);
+    const ink = getComputedStyle(probe).color || "#0a7aff";
+    probe.remove();
     context.lineCap = "round";
     context.lineJoin = "round";
     // Segments far to near, the near ones darker and thicker: the trace reads in depth.
@@ -4042,13 +4041,15 @@ export function figureParts(host) {
     return Boolean(one && nodeOf(one) && (partOf(nodeOf(one))?.fields || []).some((field) => field.type === "records"));
   }
 
+  // The way back up: what it is in, each a click away (what it is, its title under says).
   function crumbs(id) {
     const trail = [];
     for (let at = parentOf(id); at; at = parentOf(at.id)) trail.unshift(at.id);
-    return h("div.crumbs", {}, host.crumbs ? [host.crumbs(), icon("chevron")] : null, trail.map((group, index) => [
-      index ? icon("chevron") : null,
+    if (!host.crumbs && !trail.length) return null;
+    return h("div.crumbs", {}, host.crumbs ? host.crumbs() : null, trail.map((group, index) => [
+      index || host.crumbs ? icon("chevron") : null,
       h("button.crumb", { type: "button", onclick: () => select(group === model().root ? [] : [group]) }, group === model().root ? "Figure" : nameOf(group)),
-    ]), trail.length ? icon("chevron") : null, h("span.crumb.here", {}, nameOf(id)));
+    ]));
   }
 
   function headActions(id) {
@@ -4084,8 +4085,9 @@ export function figureParts(host) {
     h("summary", {}, icon("chevron"), "Advanced"), h("div.inner.fields", {}, content));
   let openAdvanced = false;
 
-  const titleBlock = (picture, name, hintText) =>
-    h("div.insp-title", {}, picture, h("div.insp-words", {}, h("div.insp-name", {}, name), hintText ? h("div.insp-hint", {}, hintText) : null));
+  // What is chosen: its kind (what it is, in its tooltip), and what is not said again below it.
+  const titleBlock = (picture, name, hintText, tip = "") =>
+    h("div.insp-title", { title: tip }, picture, h("div.insp-words", {}, h("div.insp-name", {}, name), hintText ? h("div.insp-hint", {}, hintText) : null));
 
   // A part made another kind of shape keeps its words and its lines; one drawn from a
   // file (a structure, a picture) asks for the file first.
@@ -4115,7 +4117,7 @@ export function figureParts(host) {
     const shown = part.fields.filter((field) => field.key !== "properties.tone");
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
-        h("div.insp-row", {}, titleBlock(glyph(kind), part.title, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
+        h("div.insp-row", {}, titleBlock(glyph(kind), part.title, null, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
       kind === "structure" ? structureProblem(node) : null,
       shapeProblem(node, part),
       colourSection([{ type: "node", id: node.id, item: node }]),
@@ -4269,8 +4271,7 @@ export function figureParts(host) {
     return h("div.section", {}, h("div.section-title", {}, "Move to Own Row"),
       h("div.row", {}, [["below", "Below", "down"], ["above", "Above", "up"]].map(([side, label, glyphName]) =>
         ui.button(label, () => ownLine(id, holder.id, side),
-          { small: true, icon: glyphName, title: `Move to a new row ${side}, centred on this one` }))),
-      h("div.hint-line", {}, "You can also drag it below or above the figure."));
+          { small: true, icon: glyphName, title: `Move to a new row ${side}, centred on this one` }))));
   }
 
   function groupPanel(group) {
@@ -4446,7 +4447,7 @@ export function figureParts(host) {
       options: [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"]].map(([value, label]) => ({ value, label })),
       onChange: (value) => act({ do: "update", targets: targets.map(({ type, id }) => ({ type, id })), values: { line: value === "solid" ? null : value } }, { select: false }) });
     return h("div.section", {}, h("div.section-title", {}, "Colour"), ui.field("Theme", chips, mixed ? { hint: "Mixed" } : {}),
-      ui.field("Line", style));
+      ui.field("Dash", style));
   }
 
   function edgePanel(edge) {
@@ -4473,10 +4474,9 @@ export function figureParts(host) {
     const side = (key) => ui.select({ value: sideOfEnd(edge, key), key: `edge:${edge.id}:${key}:side`, options: SIDES.map(([value, label]) => ({ value, label })),
       onChange: (value) => endTo(edge.id, key, value || "") });
     // Joined with the other lines into (or out of) the same shape, if there are any.
-    const fellows = (model().edges || []).filter((other) => other.id !== edge.id && (nodeOfRef(other.to) === nodeOfRef(edge.to) || nodeOfRef(other.from) === nodeOfRef(edge.from)));
     return [
-      h("div.section.insp-top", {}, host.crumbs ? h("div.crumbs", {}, host.crumbs(), icon("chevron"), h("span.crumb.here", {}, "Line")) : null,
-        h("div.insp-row", {}, titleBlock(glyph("edge"), "Line", lost.length ? nameOf(edge.id) : `${endSaid(edge.from, told)} → ${endSaid(edge.to, told)}`),
+      h("div.section.insp-top", {}, host.crumbs ? h("div.crumbs", {}, host.crumbs()) : null,
+        h("div.insp-row", {}, titleBlock(glyph("edge"), "Line", lost.length ? nameOf(edge.id) : null, `${endSaid(edge.from, told)} → ${endSaid(edge.to, told)}`),
           h("div.insp-actions", {}, ui.button("", () => remove([edge.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       lost.length ? h("div.section", {}, h("div.field-problem.warning", {}, icon("warning"), h("span", {},
         `There is no shape \u201c${edge[lost[0]]}\u201d for it to ${lost[0] === "to" ? "go to" : "start from"}: choose one from ${lost[0] === "to" ? "To" : "From"} below.`))) : null,
@@ -4489,7 +4489,6 @@ export function figureParts(host) {
       }),
         fields(edgeFields(edge).filter((field) => field.key !== "line"), edge, (values, merge, hold) => update({ type: "edge", id: edge.id }, values, merge, hold), `edge:${edge.id}`)),
       lineLookSection([{ type: "edge", id: edge.id, item: edge }]),
-      fellows.length ? h("div.section", {}, h("div.hint-line", {}, "To join it with other lines into the same shape (or out of the same one), ⇧-click them too, then choose Join Lines.")) : null,
     ];
   }
 
@@ -4520,7 +4519,7 @@ export function figureParts(host) {
         { select: false, label: `Make ${inQuotes(endSaid(value, told))} the Trunk` }) }),
     { hint: `Runs straight into ${endSaid(hub, told)}; the others join it, and its words go above it` }) : null;
     return [
-      h("div.section.insp-top", {}, host.crumbs ? h("div.crumbs", {}, host.crumbs(), icon("chevron"), h("span.crumb.here", {}, "Line")) : null,
+      h("div.section.insp-top", {}, host.crumbs ? h("div.crumbs", {}, host.crumbs()) : null,
         h("div.insp-row", {}, titleBlock(glyph("net"), "Joined Line", merge ? `${branches.length} lines into ${endSaid(hub, told)}` : `${endSaid(hub, told)} to ${branches.length} shapes`),
           h("div.insp-actions", {}, ui.button("", () => remove([net.id]), { kind: "ghost", small: true, icon: "trash", title: "Delete (⌫)" })))),
       h("div.section", {}, ui.field(merge ? "To" : "From", h("div.fixed-end", {}, endSaid(hub, told))),
@@ -4536,8 +4535,7 @@ export function figureParts(host) {
         more, trunk),
       h("div.section", {}, fields((catalog.net_fields || [catalog.edge_fields[0]]).filter((field) => field.key !== "line" && field.key !== "via"), net, write, `net:${net.id}`)),
       lineLookSection([{ type: "net", id: net.id, item: net }]),
-      h("div.section", {}, h("div.row", {}, ui.button("Separate Lines", () => separateLine(net.id), { small: true, title: "Make each branch a line of its own again" })),
-        h("div.hint-line", {}, merge ? "One line that gathers several into one shape, as attention gathers its query and key." : "One line that branches to several shapes from a shared trunk.")),
+      h("div.section", {}, h("div.row", {}, ui.button("Separate Lines", () => separateLine(net.id), { small: true, title: "Make each branch a line of its own again" }))),
     ];
   }
 
@@ -4583,31 +4581,9 @@ export function figureParts(host) {
       // Named as its file is, where it has one of its own.
       h("div.section.insp-top", {}, titleBlock(icon("figure"), host.name?.() || "Figure", counts)),
       h("div.section", {}, fields(catalog.figure_fields, { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
-      howTo(),
     ];
   }
 
-  // The tips are folded away, to be opened when wanted -- and stay as their person last
-  // left them, as a Mac's disclosure triangle remembers.
-  function howTo() {
-    const figure = model();
-    const open = remembered("tips") === "open";
-    const tips = h("details.more.tips", { open },
-      h("summary", { onclick: (event) => { const shown = event.currentTarget.parentElement; setTimeout(() => remember("tips", shown.open ? "open" : "closed"), 0); } },
-        icon("chevron"), "Tips"),
-      h("div.inner", {}, h("ul.how", {},
-        h("li", {}, h("b", {}, "Add"), " a shape (A). If a shape is selected, the new one follows it, joined to it — or, where the selected shape’s one line leads on to the next, goes into that line, between the two."),
-        h("li", {}, h("b", {}, "Connect"), " (C): the line starts at the shape selected (with none, click where it starts); then click the shape where it ends."),
-        h("li", {}, h("b", {}, "Drag"), " a shape to move it within its row or column, or into another group. Press Esc to cancel."),
-        figure.edges.length || figure.nets.length
-          ? h("li", {}, "Select a line, then drag the handle at either end to another side of its shape, or onto another shape.") : null,
-        figure.nodes.some((node) => node.kind === "structure")
-          ? h("li", {}, h("b", {}, "Rotate"), " a structure by dragging the round handle on it, or by ⌥-dragging the molecule.") : null,
-        h("li", {}, "Double-click a shape to edit its text. Shift-click to select several, then ", h("b", {}, "Group"), " them (G)."))));
-    return h("div.section", {}, tips,
-      h("div.row", {}, ui.button("Add Shape…", (event) => addPalette(event.currentTarget), { small: true, icon: "plus" }),
-        figure ? ui.button("Edit Layout", () => select([figure.root]), { small: true, icon: "layout" }) : null));
-  }
 
   function manyPanel(ids) {
     const gatherable = ids.every((id) => nodeOf(id) || (groupOf(id) && id !== model().root));
@@ -4622,8 +4598,7 @@ export function figureParts(host) {
         h("div.section.insp-top", {}, titleBlock(glyph("edge"), `${ids.length} Lines Selected`, ids.map(called).join("; "))),
         lineLookSection(lines),
         h("div.section", {}, h("div.row", {}, ui.button("Join Lines", () => joinLines(ids), { small: true, disabled: !join, title: "One line, with a trunk they share" }),
-          ui.button("Delete", () => remove(ids), { small: true, icon: "trash", kind: "danger" })),
-        h("div.hint-line", {}, join ? "Joined, they share one trunk and one label." : "Lines can be joined where they meet: into the same shape, or out of the same one.")),
+          ui.button("Delete", () => remove(ids), { small: true, icon: "trash", kind: "danger" }))),
       ];
     }
     return [
@@ -4803,8 +4778,7 @@ export function figureParts(host) {
         const on = value ?? field.default ?? false;
         // A switch's hint is said beside it: the label column is narrow.
         return ui.field(field.label, h("div.switch-row", { title: field.hint || "" },
-          ui.toggle({ value: on, onChange: (next) => set(next === (field.default ?? false) ? null : next) }),
-          field.hint ? h("span.switch-hint", {}, field.hint) : null), { inline: true });
+          ui.toggle({ value: on, onChange: (next) => set(next === (field.default ?? false) ? null : next) })), { inline: true });
       }
       case "choice":
         // Left as it is by default, the choice reads in grey, as an empty field's placeholder does.
@@ -5096,9 +5070,8 @@ export function figureParts(host) {
         h("summary", {}, icon("chevron"), section.title, count ? h("span.count", {}, count) : null),
         h("div.inner", {},
           rest.length ? h("div.mol-grid", {}, rest.map(control)) : null,
-          colours.length ? h("div.mol-colours", {}, colours.map(control)) : null,
-          coloured && colours.some((each) => each.key.startsWith("palette.")) ? h("div.hint-line", {},
-            "Chains and residues given a colour under Colours are drawn in it; these colours show where none is given.") : null));
+          colours.length ? h("div.mol-colours", { title: coloured && colours.some((each) => each.key.startsWith("palette."))
+            ? "Chains and residues given a colour under Colours are drawn in it; these colours show where none is given." : "" }, colours.map(control)) : null));
       details.addEventListener("toggle", () => { if (details.open) openSections.add(section.title); else openSections.delete(section.title); });
       // A section for one way of drawing (engraved ribbons) shows while it is drawn that way.
       if (section.show && !count) {
@@ -5307,8 +5280,7 @@ export function figureParts(host) {
       });
     }
     return h("div.field.records", {},
-      h("label.label", {}, field.label, h("span.hint", {}, `${rows.length}`)),
-      field.hint ? h("div.hint-line", {}, field.hint) : null,
+      h("label.label", { title: field.hint || "" }, field.label, h("span.hint", {}, `${rows.length}`)),
       h("div.records-scroll.scroll-thin", {}, table),
       refused.has(key) ? h("div.field-problem", {}, icon("warning"), h("span", {}, refused.get(key))) : null,
       warnings,
@@ -5403,7 +5375,7 @@ export function figureParts(host) {
     // (A part on its way, till it lands: a slide's frame round the figure waits for it.)
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, howTo, turnable,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, turnable,
     addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf, revealProblem,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
