@@ -1006,8 +1006,10 @@ export async function start() {
     // left open at the end), the last line with words before it. A bracket or quote never
     // closed is named where the reading gave up: the line it was opened on is chosen.
     const opened = (problem, lines, line) => {
-      const marks = /expected ',' or '\]'/.test(problem) ? ["[", "]"] : /expected ',' or '\}'/.test(problem) ? ["{", "}"]
-        : /quoted scalar|end of stream/.test(problem) ? ["\"", "'"] : null;
+      // (Said in the writer's words -- "a list in square brackets isn’t closed" -- or the reader's.)
+      const marks = /expected ',' or '\]'|square brackets isn[’']t closed/.test(problem) ? ["[", "]"]
+        : /expected ',' or '\}'|braces isn[’']t closed/.test(problem) ? ["{", "}"]
+          : /quoted scalar|end of stream|quote isn[’']t closed/.test(problem) ? ["\"", "'"] : null;
       if (!marks) return line;
       const count = (text, mark) => text.split(mark).length - 1;
       for (let at = Math.min(line, lines.length); at >= 1; at -= 1) {

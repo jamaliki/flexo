@@ -657,6 +657,30 @@ def test_a_file_with_a_typo_opens_as_the_kind_its_keys_say_and_is_not_written(
         workspace.close()
 
 
+def test_a_figure_file_with_a_typo_is_one_that_cant_be_read_not_saved(tmp_path: Path) -> None:
+    typo = "figure:\n  id: f\nnodes:\n  - {id: a, label: A\n  - {id: b}\n"
+    figure = tmp_path / "flow.yaml"
+    figure.write_text(typo, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("flow.yaml")
+        # Said as a deck's or a theme's is, in its writer's words, its line named.
+        assert doc.kind.name == "figure" and doc.unread and doc.held
+        assert doc.problem == (
+            "Can\u2019t read flow.yaml: line 5: a set of settings in braces isn\u2019t closed, "
+            "or a word in it needs quotes"
+        )
+        assert doc.info()["source"] == typo
+        assert not doc.write(again=True)
+        assert figure.read_text(encoding="utf-8") == typo
+        # Put right: it opens as it reads.
+        figure.write_text(typo.replace("label: A\n", "label: A}\n"), encoding="utf-8")
+        wait_for(lambda: not doc.unread)
+        assert doc.problem is None and "label: A}" in doc.document["text"]
+    finally:
+        workspace.close()
+
+
 class _Settling(_Deck):
     """A deck whose drawing, asked to settle, takes as long as it is let: a large figure laid
     out at its best."""
