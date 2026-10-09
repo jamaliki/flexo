@@ -1217,7 +1217,9 @@ export function figureParts(host) {
     if (mine) mine.id = id;
     if (!mine?.left) { typeInto = id; placeInline(); return; }
     if (early === mine) early = null;
-    giveWords(id, mine.text);
+    giveWords(id, mine.text, mine);
+    // (Left by Tab: the shape after it is chosen, now it is known where it is.)
+    if (mine.tab) tabFrom(id, mine.tab);
   }
   // A part asked for, not yet known to the figure (the studio slow), stands where it will be
   // drawn -- a new figure's one shape, drawn before the figure is read, where it is -- the
@@ -1241,25 +1243,43 @@ export function figureParts(host) {
   // (Named for them, as a part just added is: see closeInline. A figure not read yet -- just
   // made -- is given them once it is: setModel.)
   let owed = null;
-  function giveWords(id, text) {
-    if (!text?.trim()) return;
+  // (`mine`: the typing on it as it was asked for. A Text given no words goes with the step
+  // that added it, as one left empty in its editor does: see closeInline.)
+  function giveWords(id, text, mine = null) {
+    if (!text?.trim()) {
+      if (!mine?.merge || nodeOf(id)?.kind !== "text") return;
+      act({ do: "delete", ids: [id], rejoin: true }, { merge: mine.merge, hold: true, select: false });
+      // (Chosen, the part it was added after is chosen again, as it was.)
+      if (state.selected.includes(id)) select(mine.after && typeOf(mine.after) ? [mine.after] : []);
+      return;
+    }
     if (!typeOf(id)) { if (!model()) owed = { id, text }; return; }
     act({ do: "update", target: { type: "node", id }, values: { label: text }, name: "" }, { select: false, follow: id });
   }
+  // Typing on a part asked for and not yet drawn, done before its editor opens (Esc, Tab, a
+  // press elsewhere): the keys are the page's again, and what was typed on it so far is its
+  // words when it comes -- now, should it be drawn already.
+  function endEarly(mine) {
+    if (early === mine) early = null;
+    mine.left = true;
+    if (!inline) stand(null);
+    for (const text of mine.hid || []) text.style.visibility = "";
+    if (mine.id && typeInto === mine.id) { typeInto = null; giveWords(mine.id, mine.text, mine); }
+  }
+  // Tab from a shape: the next (⇧Tab, `step` -1, the one before), as Tab goes from shape to shape.
+  function tabFrom(id, step) {
+    const ids = (model()?.nodes || []).map((node) => node.id), from = ids.indexOf(id);
+    const next = !ids.length ? null : from < 0 ? ids[step < 0 ? ids.length - 1 : 0] : ids[(from + step + ids.length) % ids.length];
+    if (next && next !== id) select([next]);
+  }
   // A part asked for and not yet drawn: a press anywhere but on it (another shape chosen, the
-  // slide, a panel) ends its typing -- the keys are the page's again -- and what was typed on it
-  // so far is its words when it comes. (So does Esc: see earlyKey.)
+  // slide, a panel) ends its typing. (So do Esc and Tab: see earlyKey.)
   function leaveWith(mine) {
     const leave = (event) => {
       window.removeEventListener("pointerdown", leave, true);
       if (early !== mine) return;
       if (event.target?.closest?.(".fig-inline, .fig-standing")) { window.addEventListener("pointerdown", leave, true); return; }
-      mine.left = true;
-      early = null;
-      if (!inline) stand(null);
-      for (const text of mine.hid || []) text.style.visibility = "";
-      // (Drawn already, its words go to it now.)
-      if (mine.id && typeInto === mine.id) { typeInto = null; giveWords(mine.id, mine.text); }
+      endEarly(mine);
     };
     window.addEventListener("pointerdown", leave, true);
   }
@@ -1463,17 +1483,16 @@ export function figureParts(host) {
     }
     if (event.metaKey || event.ctrlKey) return false;
     const key = event.key;
-    if (key === "Tab" || (key.startsWith("F") && key.length > 1)) return false;
+    if (key.startsWith("F") && key.length > 1) return false;
     event.preventDefault();
-    if (key === "Escape") {
-      // Done typing: what was typed is its words when it comes, its editor not opened for it.
+    // Done typing: what was typed is its words when it comes, its editor not opened for it.
+    // Tab is done too, and chooses the next shape (⇧Tab the one before), as from its editor --
+    // once the part is known, should it not be yet.
+    if (key === "Escape" || key === "Tab") {
       const was = early;
-      early = null;
-      was.left = true;
-      if (!inline) stand(null);
-      for (const text of was.hid || []) text.style.visibility = "";
-      if (was.id && typeInto === was.id) giveWords(was.id, was.text);
+      endEarly(was);
       typeInto = null;
+      if (key === "Tab") { if (was.id && typeOf(was.id)) tabFrom(was.id, event.shiftKey ? -1 : 1); else was.tab = event.shiftKey ? -1 : 1; }
     }
     // Return starts a new line, as in any text (with nothing typed, it opens the editor, as
     // it would).
