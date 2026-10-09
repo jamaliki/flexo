@@ -831,6 +831,7 @@ def intrinsic_node_size(
     style: LayoutStyle,
 ) -> Size:
     definition = COMPONENTS[node.kind]
+    needed: Size | None = None
     if node.kind == "label":
         natural = Size(label.width, label.height)
     elif node.kind == "text":
@@ -859,16 +860,22 @@ def intrinsic_node_size(
     elif node.kind == "decision":
         return decision_size(node, label, style)
     elif node.kind == "circle":
-        # The label's box inscribed in the circle, with the type's padding round it.
+        # The label's box inscribed in the circle, with the type's padding round it -- given a
+        # size, that, but never so small that its words run over its edge.
         inscribed = (label.width**2 + label.height**2) ** 0.5 + style.padding_y.points
-        side = max(1.6 * op_diameter(style), inscribed)
-        width = style.resolve_extent(node.width).points if node.width is not None else side
-        height = style.resolve_extent(node.height).points if node.height is not None else side
-        side = max(width, height)
+        given = [
+            style.resolve_extent(extent).points
+            for extent in (node.width, node.height)
+            if extent is not None
+        ]
+        if not given:
+            side = max(1.6 * op_diameter(style), inscribed)
+        else:
+            side = max(*given, inscribed if label.lines else 0.0)
         return Size(side, side)
     elif node.kind in SHAPE_KINDS:
         # A cylinder, a cloud, a page...: the label in the room its outline leaves.
-        natural = shape_size(node.kind, label, style)
+        natural = needed = shape_size(node.kind, label, style)
     elif node.kind in DRAWN_KINDS:
         # A drawn component (a genetic design, a protein, a tree, a plate) is as
         # big as its picture: its outlines and their words.
@@ -891,23 +898,25 @@ def intrinsic_node_size(
             if node.kind in MOTIF_LABEL_KINDS and label.lines
             else label.height + 2.0 * style.padding_y.points
         )
+        # (Words with a drawing under them need room for the words: given too little for
+        # both, the drawing is made smaller.)
+        needed = Size(
+            label.width + 2.0 * style.padding_x.points,
+            label.height + 2.0 * style.padding_y.points,
+        )
         natural = Size(
-            max(
-                definition.minimum_size.width,
-                label.width + 2.0 * style.padding_x.points,
-            ),
+            max(definition.minimum_size.width, needed.width),
             max(definition.minimum_size.height, stacked),
         )
     width = style.resolve_extent(node.width).points if node.width is not None else natural.width
     height = style.resolve_extent(node.height).points if node.height is not None else natural.height
-    if label.lines and node.kind not in GROWN_NEVER:
-        # An authored size is a design, not a clip: when the words no longer fit
-        # it -- the same figure set in a larger theme -- the box grows around
-        # them rather than printing them over its edge (measurement says so).
-        if label.width + 2.0 > width:
-            width = max(width, min(natural.width, label.width + 2.0 * style.padding_x.points))
-        if label.height > height:
-            height = max(height, min(natural.height, label.height + style.padding_y.points))
+    if label.lines and node.kind not in GROWN_NEVER and needed is not None:
+        # An authored size is a design, not a clip: words that no longer fit it -- more of
+        # them typed, the same figure set in a larger theme -- grow it to what they need at
+        # its width (wrapped to it, padded as of itself, in the room a cylinder's lid and foot
+        # leave them), rather than printing them over its edge (measurement says so).
+        width = max(width, needed.width)
+        height = max(height, needed.height)
     return Size(width, height)
 
 

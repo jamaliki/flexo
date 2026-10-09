@@ -51,6 +51,9 @@ class MeasuredNode:
     """The size it would be round its words, without a width or height of its own (unset,
     ``intrinsic_size``) -- a decision's, the diamond that hugs them: what an editor's
     handles snap to."""
+    room: float | None = None
+    """How wide a line of its words may run before they wrap, in points (``None``: they
+    never wrap): what an editor's box for typing them wraps them at, as they will be drawn."""
 
 
 @dataclass(frozen=True, slots=True)
