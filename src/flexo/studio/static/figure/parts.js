@@ -4203,7 +4203,9 @@ export function figureParts(host) {
       guess: label === guess ? guess : null, look: guess?.look || null, fresh, after, waiting: null,
       // The words as the figure has them, that what is typed is typed over; and every
       // version of them sent from here (one coming back late is not someone else's).
-      base: original, mine: new Set([original]) };
+      base: original, mine: new Set([original]),
+      // (And as they were written: runs, should they be -- see closeInline.)
+      had: structuredClone(item[key] ?? null) };
     placeInline();
     // (Marked again at once: the part's own frame gives way to its words' box.)
     host.settled?.();
@@ -4968,7 +4970,11 @@ export function figureParts(host) {
     // do one someone else has typed in meanwhile (their words came into these).
     const named = keep && kind === "node" && Boolean(fresh) && !original.trim() && Boolean(field.value.trim()) && !closing.merged;
     if (keep && (field.value !== sent || named)) {
-      sendWords(closing, field.value, { merge: sent === original ? null : merge, hold: true, select: false, follow: id, ...(named ? { name: "" } : {}) });
+      // Back to the words it had (a new line typed, then taken back as it was done): nothing
+      // typed changes nothing -- they are put back as they were written, runs and all, and
+      // the typing goes from the history with them.
+      const back = !named && field.value === original && Array.isArray(closing.had) ? closing.had : field.value;
+      sendWords(closing, back, { merge: sent === original ? null : merge, hold: true, select: false, follow: id, ...(named ? { name: "" } : {}) });
     }
     if (waits || (keep && inPlace && kind === "node" && field.value !== original)) {
       // (A part not drawn yet is waited for as long as a slow studio takes -- its words in
