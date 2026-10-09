@@ -4108,6 +4108,9 @@ export function figureParts(host) {
     // What was typed here and not yet sent goes, over their words.
     if (merged !== theirs) drawSoon();
   }
+  // "\n" typed in words -- not in maths or code, where \nu and \n are their own -- as the
+  // new line it means (⇧Return is the key for one).
+  const typedBreaks = (text) => String(text).split(/(\$[^$]*\$|`[^`]*`)/).map((part, at) => (at % 2 ? part : part.replace(/\\n/g, "\n"))).join("");
   function closeInline(keep) {
     if (!inline) return;
     if (!keep && inline === undoing) { inline.undone = true; return; }
@@ -4128,6 +4131,8 @@ export function figureParts(host) {
       select(after && typeOf(after) ? [after] : []);
       return;
     }
+    // "\n" typed in its words (as Graphviz has it) is the new line it means, kept as one.
+    if (keep) field.value = typedBreaks(field.value);
     // A part just added, done with no words typed (Return, Esc, a click elsewhere): its kind's
     // own words, as its field showed them -- an MLP's "MLP" -- not none.
     const given = keep && fresh && kind === "node" && !original.trim() && !field.value.trim() ? givenWords(nodeOf(id)) : "";
@@ -4942,7 +4947,14 @@ export function figureParts(host) {
           control.area.setSelectionRange(end, end);
           control.area.blur();
         });
-        return ui.field(field.label, control, options);
+        // Left, a "\n" typed in it is the new line it means.
+        control.area.addEventListener("blur", () => {
+          const broken = typedBreaks(control.area.value);
+          if (broken === control.area.value) return;
+          control.area.value = broken;
+          control.area.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        return ui.field(field.label, control, field.key === "label" ? { ...options, hint: options.hint || "⇧Return starts a new line" } : options);
       }
       case "text": {
         if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, onInput: type }), options);

@@ -245,18 +245,23 @@ _CONTROLS = {code: None for code in range(32) if code != 10} | {9: " ", 127: Non
 
 def parse_label(text: str) -> tuple[TextRun, ...]:
     """The runs a string label stands for: plain text, with math between ``$``
-    and code between backticks (set in the monospace family)."""
+    and code between backticks (set in the monospace family). ``\\n`` typed in its words
+    (not in its maths or code, where ``\\nu`` and ``\\n`` are their own) starts a new
+    line, as Graphviz reads it."""
 
+    # A tab in words is a space between them; other control characters (a stray \r)
+    # draw nothing -- a font has no glyph for either. A new line after the last words
+    # (as a block in YAML ends) is no line of its own.
+    text = text.translate(_CONTROLS).rstrip("\n")
+    while text.endswith("\\n") and not text.endswith("\\\\n"):
+        text = text[:-2].rstrip("\n")
     if not text:
         return ()
-    # A tab in words is a space between them; other control characters (a stray \r)
-    # draw nothing -- a font has no glyph for either.
-    text = text.translate(_CONTROLS)
     if (
         "$" not in text and "`" not in text and "](" not in text and "]{" not in text
         and "\\(" not in text and "\\[" not in text
     ):
-        return (TextRun(text),)
+        return (TextRun(text.replace("\\n", "\n")),)
     runs: list[TextRun] = []
     plain: list[str] = []
     index = 0
@@ -268,6 +273,10 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
             continue
         if character == "\\" and text[index + 1 : index + 2] == "`":
             plain.append("`")
+            index += 2
+            continue
+        if character == "\\" and text[index + 1 : index + 2] == "n":
+            plain.append("\n")
             index += 2
             continue
         if character == "[" and (coloured := _COLOURED.match(text, index)):

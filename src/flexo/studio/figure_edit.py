@@ -2038,12 +2038,18 @@ def _misread(text: str) -> bool:
     )
 
 
-def _blocks(value: Any) -> Any:
+WORDS = frozenset({"label", "back_label", "caption", "title", "description", "text"})
+"""Keys whose strings are words: written as typed, a new line in them no more (a block's
+closing new line would be a line of their own)."""
+
+
+def _blocks(value: Any, *, words: bool = False) -> Any:
     """``value`` with every new multi-line string written as a block (``|``), and every
     new string that would read back as something else (``Yes``, ``off``, ``12``) quoted.
 
     A grid of cells or a Newick tree typed into the page reads line by line in
-    the file only as a block; a quoted string with ``\\n`` in it reads as noise.
+    the file only as a block; a quoted string with ``\\n`` in it reads as noise. A block
+    ends in a new line -- but words (``WORDS``) end where they were typed to end.
     The file is written as YAML 1.2 writes it but read as YAML 1.1 reads it, where a
     plain ``Yes`` or ``no`` is true or false: a label typed as "Yes" stays the word.
     Only plain strings change: what the file already held keeps the quoting it
@@ -2051,12 +2057,12 @@ def _blocks(value: Any) -> Any:
     """
 
     if type(value) is str and "\n" in value:
-        return LiteralScalarString(value if value.endswith("\n") else value + "\n")
+        return LiteralScalarString(value if words or value.endswith("\n") else value + "\n")
     if type(value) is str and _misread(value):
         return SingleQuotedScalarString(value)
     if isinstance(value, dict):
         for key in list(value):
-            value[key] = _blocks(value[key])
+            value[key] = _blocks(value[key], words=key in WORDS)
     elif isinstance(value, list):
         for index, item in enumerate(value):
             value[index] = _blocks(item)
