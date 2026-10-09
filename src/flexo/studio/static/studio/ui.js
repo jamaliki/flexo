@@ -1162,8 +1162,17 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
   document.body.append(scrim);
   // The dialog has the keys at once, on its default button when it has one (Return chooses
   // it, Space too), else on what it says (Esc, Tab, and the arrows scroll it); a caller that
-  // wants a field focused focuses it.
-  (panel.querySelector(".dialog-foot .btn.primary:not(:disabled)") || panel.querySelector(".dialog-body")).focus({ preventScroll: true });
+  // wants a field focused focuses it. The default button, blue already, is not ringed too
+  // (as a Mac sheet's is not) until Tab comes to it.
+  const primary = panel.querySelector(".dialog-foot .btn.primary:not(:disabled)");
+  if (primary) {
+    primary.dataset.defaultFocus = "";
+    const plain = () => { delete primary.dataset.defaultFocus; panel.removeEventListener("keydown", tabbed, true); };
+    const tabbed = (event) => { if (event.key === "Tab") plain(); };
+    panel.addEventListener("keydown", tabbed, true);
+    primary.addEventListener("blur", plain, { once: true });
+  }
+  (primary || panel.querySelector(".dialog-body")).focus({ preventScroll: true });
   return { close };
 }
 
@@ -1214,9 +1223,16 @@ export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
   const box = toasts();
   placeToasts(box);
+  // The same words said again while they are still shown (Saved, saved again): the one there
+  // stays for longer, rather than a second under it.
+  const said = `${kind}\n${node.textContent}`;
+  const shown = [...box.children].find((other) => other.said === said && other.style.opacity !== "0");
+  if (shown?.renew) { shown.renew(seconds); return shown; }
+  node.said = said;
   box.append(node);
   const fade = () => { node.style.transition = "opacity .3s"; node.style.opacity = "0"; setTimeout(() => node.remove(), 300); };
   let left = seconds * 1000;
+  node.renew = (again) => { left = Math.max(left, again * 1000); };
   const tick = () => {
     if (!node.isConnected) return;
     if (!sheetOpen()) left -= 250;

@@ -237,7 +237,7 @@ def test_words_rewritten_while_typed_in_are_both_kept_and_said_to_the_typist(
     try:
         doc = workspace.open("figure.yaml")
         listener = workspace.listen("page-a", PERSON)
-        line = "# A flexo figure: nodes, then the edges between them. See docs/guide.md."
+        line = "# A figure: its shapes (nodes), then the lines between them (edges)."
         typed = SAMPLE_FIGURE.replace(line, line.replace("figure:", "figure my words:"))
         doc.update({"text": typed}, 1, PERSON, "page-a")
         agent = {"id": "agent", "name": "Claude", "kind": "agent"}
@@ -384,7 +384,7 @@ def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) 
         doc = workspace.open("figure.yaml")
         figure.unlink()
         wait_for(lambda: doc.problem is not None)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.info()["problem"] == doc.problem  # a page opened now says so too
         time.sleep(0.6)
         assert not figure.exists()  # not put back behind its person's back
@@ -428,7 +428,7 @@ def test_only_a_file_that_just_appeared_can_be_one_renamed_or_moved(tmp_path: Pa
         doc = workspace.open("figure.yaml")
         figure.unlink()
         wait_for(lambda: doc.problem is not None)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.write(again=True) and doc.problem is None
         # Moved into a folder in its folder: followed there.
         time.sleep(0.6)
@@ -500,7 +500,7 @@ def test_a_document_gone_from_its_folder_holds_its_edits_until_it_is_found_or_sa
         # Moved out of the studio's folder: nowhere it can find it.
         figure.rename(outside / "figure.yaml")
         wait_for(lambda: doc.gone)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.info()["gone"] and doc.said()["gone"]
         # Edited meanwhile: the edit is held, never written where the file was.
         text = doc.document["text"].replace("Encoder", "Decoder")
@@ -950,7 +950,7 @@ def test_a_studio_started_again_keeps_a_document_whose_file_went_meanwhile(tmp_p
         # The page that held it asks for it as the kind it is open as: nothing is made anew.
         doc = workspace.open("gone.yaml", "theme", held=True)
         assert doc.kind.name == "theme" and not doc.exists
-        assert doc.problem == "gone.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "gone.yaml was moved or deleted. Save (⌘S) to put it back."
         time.sleep(0.6)
         assert not (tmp_path / "gone.yaml").exists()
     finally:
@@ -2971,3 +2971,117 @@ def test_a_label_kept_as_runs_is_typed_as_the_markup_that_writes_them() -> None:
     assert written[len(kept) + typed.index(r"$\alpha + \beta$")] == r"$\alpha + \beta$"
     # Words written as words are themselves.
     assert _markup_of(["Plain *words*", None]) == ["Plain *words*", ""]
+
+
+# -- the File menu's Rename and Duplicate --------------------------------------------
+
+
+def test_a_document_renamed_follows_its_file_with_its_edits(served) -> None:
+    url, workspace = served
+    doc = workspace.open("figure.yaml")
+    listener = workspace.listen("page-b", PERSON)
+    typed = SAMPLE_FIGURE.replace("Encoder", "Coder")
+    doc.update({"text": typed}, doc.version, PERSON, "page-a")
+    asked = {"file": "figure.yaml", "to": "Pipeline.yaml", "who": PERSON}
+    status, answer = call(f"{url}/api/rename", workspace.token, asked)
+    assert (status, answer) == (200, {"file": "Pipeline.yaml"})
+    folder = workspace.root
+    assert not (folder / "figure.yaml").exists()
+    # What was typed and not yet written is in the renamed file, not left under the old name.
+    assert "Coder" in (folder / "Pipeline.yaml").read_text(encoding="utf-8")
+    assert workspace.docs["Pipeline.yaml"] is doc and "figure.yaml" not in workspace.docs
+    events = []
+    while not listener.events.empty():
+        events.append(listener.events.get())
+    assert {"type": "renamed", "file": "figure.yaml", "to": "Pipeline.yaml"} in events
+    assert any(entry["text"] == "renamed “figure” to “Pipeline”" for entry in workspace.activity)
+    # Never over another file, and only as a document's name.
+    (folder / "other.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    asked = {"file": "Pipeline.yaml", "to": "other.yaml"}
+    status, answer = call(f"{url}/api/rename", workspace.token, asked)
+    assert status == 409 and "already used" in answer["error"]
+    asked = {"file": "Pipeline.yaml", "to": "notes.txt"}
+    status, _ = call(f"{url}/api/rename", workspace.token, asked)
+    assert status == 400
+    assert (folder / "Pipeline.yaml").exists()
+
+
+def test_a_document_duplicated_is_a_copy_beside_it_opened(served) -> None:
+    url, workspace = served
+    doc = workspace.open("figure.yaml")
+    typed = SAMPLE_FIGURE.replace("Encoder", "Coder")
+    doc.update({"text": typed}, doc.version, PERSON, "page-a")
+    asked = {"file": "figure.yaml", "to": "figure copy.yaml"}
+    status, answer = call(f"{url}/api/duplicate", workspace.token, asked)
+    assert (status, answer) == (200, {"file": "figure copy.yaml"})
+    folder = workspace.root
+    assert "Coder" in (folder / "figure copy.yaml").read_text(encoding="utf-8")
+    assert "Coder" in (folder / "figure.yaml").read_text(encoding="utf-8")
+    assert "figure copy.yaml" in workspace.docs and workspace.docs["figure.yaml"] is doc
+    status, _ = call(f"{url}/api/duplicate", workspace.token, asked)
+    assert status == 409
+
+
+# -- the assistant's words when it can't answer ----------------------------------------
+
+
+def _stand_in_sdk(name: str) -> NS:
+    """An SDK's errors, as the assistant tells them apart (the SDK itself not needed)."""
+
+    class APIStatusError(Exception):
+        status_code, message = 400, ""
+
+    errors = {
+        "APIStatusError": APIStatusError,
+        "AuthenticationError": type("AuthenticationError", (APIStatusError,), {}),
+        "RateLimitError": type("RateLimitError", (APIStatusError,), {}),
+        "NotFoundError": type("NotFoundError", (APIStatusError,), {}),
+        "APIConnectionError": type("APIConnectionError", (Exception,), {}),
+    }
+    return NS(__name__=name, **errors)
+
+
+def test_a_refused_key_and_a_server_not_running_are_said_as_they_are(monkeypatch) -> None:
+    import sys
+
+    from flexo.studio import assistant
+
+    openai, anthropic = _stand_in_sdk("openai"), _stand_in_sdk("anthropic")
+    monkeypatch.setitem(sys.modules, "openai", openai)
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic)
+    monkeypatch.setenv("FLEXO_STUDIO_OTHER_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("FLEXO_STUDIO_OTHER_NAME", "Ollama")
+    monkeypatch.delenv("FLEXO_STUDIO_OTHER_MODEL", raising=False)
+    monkeypatch.delenv("FLEXO_STUDIO_SETTINGS", raising=False)
+    found = assistant.providers()
+    other, chatgpt, claude = found["other"], found["chatgpt"], found["claude"]
+    # A key there, refused: never "add a key".
+    assert claude.explain(anthropic.AuthenticationError()).startswith(
+        "Claude didn\u2019t accept the API key: it may be mistyped, expired or revoked. "
+        "Set ANTHROPIC_API_KEY"
+    )
+    assert chatgpt.explain(openai.APIConnectionError()) == (
+        "Couldn\u2019t reach ChatGPT: check your internet connection."
+    )
+    assert other.explain(openai.APIConnectionError()) == (
+        "Couldn\u2019t reach Ollama at http://localhost:11434/v1. Check that it\u2019s running, "
+        "and its address (FLEXO_STUDIO_OTHER_URL)."
+    )
+    # In the Mac app, where its Settings put it right.
+    monkeypatch.setenv("FLEXO_STUDIO_SETTINGS", "the app's Settings")
+    assert chatgpt.explain(openai.AuthenticationError()).endswith(
+        "Put in a new one in the app's Settings."
+    )
+    assert other.explain(openai.APIConnectionError()).endswith(
+        "and its address in the app's Settings."
+    )
+
+    # Asked with its server not running, it says so -- not "choose a model" from a list that
+    # couldn't be read.
+    def unreachable() -> list[str]:
+        raise openai.APIConnectionError()
+
+    other.client = NS()
+    monkeypatch.setattr(other, "list_models", unreachable)
+    with pytest.raises(openai.APIConnectionError):
+        other.converse(None, {})
