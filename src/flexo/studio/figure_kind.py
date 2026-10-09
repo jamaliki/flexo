@@ -727,6 +727,7 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
 
     if old is None or new is None:
         return None
+    old = _same_shapes(old, new)
 
     def name(node: dict[str, Any]) -> str:
         words = re.sub(r"\s+", " ", str(node.get("label") or "")).strip()
@@ -861,6 +862,50 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
     if old["rest"] != new["rest"]:
         notes.append({"text": "changed the figure's settings", "where": None})
     return notes[:4] if notes else None
+
+
+def _same_shapes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """``old`` with each shape whose id alone has changed -- a new shape's made from the words
+    typed in it, say -- under its new id: the same shape, not one deleted and another added
+    (an id is the file's business, not news)."""
+
+    gone = [key for key in old["nodes"] if key not in new["nodes"]]
+    added = [key for key in new["nodes"] if key not in old["nodes"]]
+
+    def without_id(node: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in node.items() if key != "id"}
+
+    ids: dict[str, str] = {}
+    for key in gone:
+        twin = next(
+            (
+                item
+                for item in added
+                if item not in ids.values()
+                and without_id(new["nodes"][item]) == without_id(old["nodes"][key])
+            ),
+            None,
+        )
+        if twin is not None:
+            ids[key] = twin
+    if not ids:
+        return old
+
+    def swap(value: Any) -> Any:
+        if isinstance(value, str):
+            head, dot, tail = value.partition(".")
+            return ids[head] + dot + tail if head in ids else value
+        if isinstance(value, (list, tuple, set)):
+            return type(value)(swap(item) for item in value)
+        if isinstance(value, dict):
+            return {swap(key): swap(item) for key, item in value.items()}
+        return value
+
+    nodes = {
+        ids.get(key, key): {**node, "id": ids.get(key, key)} for key, node in old["nodes"].items()
+    }
+    parts = {part: swap(old[part]) for part in ("edges", "groups", "nets")}
+    return {**old, "nodes": nodes, **parts}
 
 
 def _order(figure: dict[str, Any]) -> list[str]:

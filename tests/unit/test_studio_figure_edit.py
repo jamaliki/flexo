@@ -687,6 +687,13 @@ def test_a_figure_file_with_a_shape_that_cannot_be_drawn_exports_with_a_plain_bo
     after = yaml.safe_load(SAMPLE_FIGURE)
     after["nodes"].append({"id": "extra", "label": "Extra step"})
     assert figure_changes(before, after) == ["added “Extra step”"]
+    # A shape whose id alone changed (made from the words typed in it) is the same shape:
+    # nothing to say, not one deleted and another added -- nor its lines taken away.
+    renamed = yaml.safe_load(
+        SAMPLE_FIGURE.replace("id: encoder", "id: coder").replace("to: encoder", "to: coder")
+        .replace("from: encoder", "from: coder")
+    )
+    assert figure_changes(before, renamed) == []
 
 
 def test_a_structure_that_cannot_be_downloaded_is_an_answer_not_a_failed_request(
