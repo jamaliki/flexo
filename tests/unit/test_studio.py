@@ -1740,7 +1740,7 @@ class Node {
 globalThis.Node = Node;
 globalThis.SVGElement = class extends Node {};
 globalThis.document = {
-  body: new Node("body"), documentElement: new Node("html"),
+  body: new Node("body"), head: new Node("head"), documentElement: new Node("html"),
   addEventListener() {}, querySelector() { return null; },
   createElement: (tag) => new Node(tag), createElementNS: (_, tag) => new SVGElement(tag),
   createTextNode: (text) => Object.assign(new Node("#text"), { text }),
@@ -2900,3 +2900,74 @@ def test_a_part_dragged_in_a_flow_takes_its_place_among_its_own_layer() -> None:
     boxes = {"root": [0, 0, 240, 30], "a": [0, 0, 40, 30], "b": [100, 0, 140, 30],
              "c": [200, 0, 240, 30]}
     assert dropped(flow, boxes, [["c", 52, 15], ["a", 188, 15]]) == ["root 1", "root 1"]
+
+
+# The figure's parts (figure/parts.js) as a page imports them: from the studio's addresses.
+STATIC_ADDRESSES = """
+import { register } from "node:module";
+const STATIC = %s;
+register("data:text/javascript," + encodeURIComponent(`
+export async function resolve(specifier, context, next) {
+  const at = (path) => ({ url: STATIC + path, shortCircuit: true });
+  if (specifier.startsWith("/static/kinds/figure/")) return at("figure/" + specifier.slice(21));
+  if (specifier === "/static/studio/studio.js") return at("studio/ui.js");
+  if (specifier.startsWith("/static/studio/")) return at("studio/" + specifier.slice(15));
+  return next(specifier, context);
+}`.replace("STATIC", JSON.stringify(STATIC))));
+"""
+
+
+def _markup_of(labels: list) -> list[str]:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/parts.js"
+    code = FAKE_PAGE + STATIC_ADDRESSES % json.dumps(script.parents[1].as_uri() + "/") + (
+        f"const {{ markupOf }} = await import({json.dumps(script.as_uri())});\n"
+        f"const labels = {json.dumps(labels)};\n"
+        "console.log(JSON.stringify(labels.map((label) => markupOf(label))));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_label_kept_as_runs_is_typed_as_the_markup_that_writes_them() -> None:
+    import dataclasses
+
+    from flexo.ir.semantic import TextRun
+    from flexo.markup import parse_label
+
+    # A deck's labels as its figures write them (talk.yaml's), and labels as typed.
+    maths = {"maths": True}
+    kept = [
+        [
+            {"text": "Denoiser ", "weight": 400, "italic": False, "baseline_shift": "normal"},
+            {"text": "\U0001d716", "weight": 400, "baseline_shift": "normal", **maths},
+            {"text": "\U0001d703", "weight": 400, "baseline_shift": "sub", **maths},
+        ],
+        [
+            {"text": "x", "italic": True, **maths},
+            {"text": "t", "italic": True, "baseline_shift": "sub", **maths},
+            {"text": "\u22121", "baseline_shift": "sub", **maths},
+        ],
+    ]
+    typed = [
+        r"$p_\theta(x_{t-1} | x_t)$", r"$q(x_t | x_{t-1})$", "Structure $x_0$",
+        r"$\alpha + \beta$", r"$\frac{a}{b}$", r"$\mathbf{h}$", r"$\vec{h}$", "$e^{-x}$",
+        r"$\sum_i x_i$", r"Loss $\mathcal{L}$", "MLP `relu`", "[red]{accent} words",
+        "price \\$5", r"$\hat{y}$", r"$W_{q}^{T}$", r"$\sqrt{d_k}$", r"$\mathrm{softmax}(x)$",
+        r"$10^{-3}$", r"$RT \ln K$", r"$\arg\max_i f$", r"$f(x, y)$", r"$\text{out of} x$",
+        r"$\mathrm{H_2O}$", r"$\ell_2$", r"$\vec{\alpha}$", r"$\texttt{relu}(x)$", r"$a\,b$",
+        r"$\nabla_\theta L$", r"[$x_t$]{accent} next", "Two\nlines $x$", r"$\sigma^2_B$",
+        r"$\Delta G^\circ$", "$x$2",
+    ]
+    labels = kept + [[dataclasses.asdict(run) for run in parse_label(text)] for text in typed]
+    written = _markup_of(labels)
+    # Each reads back as the runs it was, look and all: a letter typed keeps the rest so.
+    for label, markup in zip(labels, written, strict=True):
+        assert parse_label(markup) == tuple(TextRun(**run) for run in label), markup
+    # As a person would type them: maths by its commands, its spaces as TeX sets them.
+    assert written[:3] == [r"Denoiser $\epsilon_\theta$", "$x_{t-1}$", r"$p_\theta(x_{t-1} | x_t)$"]
+    assert written[len(kept) + typed.index(r"$\alpha + \beta$")] == r"$\alpha + \beta$"
+    # Words written as words are themselves.
+    assert _markup_of(["Plain *words*", None]) == ["Plain *words*", ""]

@@ -930,7 +930,8 @@ GROUPS = [
 """What parts can be gathered into; each takes the parts chosen, or a first block."""
 
 GROUP_FIELDS = [
-    LABEL,
+    # (A group's words are its title, as its colours call them.)
+    _field("label", "Title", "markup"),
     _field(
         "layout.kind",
         "Layout",
@@ -995,7 +996,8 @@ EDGE_FIELDS = [
         "Back Label",
         "markup",
         show={"arrow": "reversible"},
-        hint="The rate shown under a reversible step",
+        # (Shown too wherever it has words: they are drawn under any line.)
+        hint="Words under the line: a reversible step's rate back",
     ),
     _field(
         "head",
