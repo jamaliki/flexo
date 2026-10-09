@@ -1577,15 +1577,23 @@ export function figureParts(host) {
   function remove(ids = state.selected, keep = [], { cut = false } = {}) {
     const gone = ids.filter((id) => id !== model()?.root);
     if (!gone.length) return;
-    // Every shape of a figure on a slide taken out -- a structure added on its own, deleted --
-    // the figure goes with them, as a group goes whose objects are all deleted: never left an
-    // empty object on the slide. (The host says so: a figure file stays, empty.)
-    if (host.emptied && (model()?.nodes || []).every((node) => gone.some((id) => inside(node.id, id)))) { host.emptied({ cut }); return; }
+    if (emptied(gone, { cut })) return;
     const kept = keep.filter((id) => typeOf(id) && !gone.includes(id));
     act({ do: "delete", ids: gone }, { select: false, label: cut ? said({ do: "delete", ids: gone }).replace(/^Delete\b/, "Cut") : null });
     // (At once: a ⌫ pressed again before the figure comes back acts on nothing.)
     select(kept, { reveal: false });
     if (!kept.length) open();
+  }
+  // Every shape of a figure on a slide taken out -- a structure added on its own, deleted, or
+  // its only Text's words all taken away -- the figure goes with them, as a group goes whose
+  // objects are all deleted: never left an empty object on the slide. (The host says so: a
+  // figure file stays, empty.) Answers whether it went.
+  // (`merge`: the typing that emptied it, one step with its going -- once that has been sent.)
+  function emptied(gone, { cut = false, merge = null } = {}) {
+    if (!host.emptied || !(model()?.nodes || []).every((node) => gone.some((id) => inside(node.id, id)))) return false;
+    if (merge) idle().then(() => host.emptied({ cut, merge }));
+    else host.emptied({ cut });
+    return true;
   }
   // Nothing chosen in the figure, the figure itself not chosen either: its shapes are being
   // edited (see remove).
@@ -4885,6 +4893,7 @@ export function figureParts(host) {
     if (keep && kind === "node" && nodeOf(id)?.kind === "text" && original.trim() && !field.value.trim()) {
       box.remove();
       stand(null);
+      if (emptied([id], { merge: sent === original ? null : merge })) return;
       act({ do: "delete", ids: [id], rejoin: true }, { merge: sent === original ? null : merge, hold: true, select: false,
         label: `Delete ${inQuotes(oneLine(typedBreaks(original)) || nameOf(id))}` });
       select([]);
