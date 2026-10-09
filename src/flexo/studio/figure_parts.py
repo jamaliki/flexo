@@ -473,9 +473,7 @@ def _structure() -> dict[str, Any]:
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field(
-                "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
-            ),
+            _field("properties", "View", "view", hint="Or drag its rotate handle"),
             # (The theme's look, named so: not "Default", which reads as a look of its own
             # beside the one it is -- Engraved Colour, on a light theme.)
             _field(

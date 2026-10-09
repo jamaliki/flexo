@@ -202,6 +202,9 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-lifted { filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22)); }
 .fig-settling { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.16)); }
 .fig-astray { opacity: 0.5; }
+/* What stays where it was while a copy of it is carried (⌥-drag), and the copy let go until
+   it is drawn: likenesses, never pressed. */
+.fig-stay, .fig-stay * { pointer-events: none; }
 .fig-faded { opacity: 0.18; transition: opacity 0.15s ease-out; }
 [data-flexo-entity] { transition: transform 0.16s cubic-bezier(.2, .8, .2, 1); }
 .fig-dragging .fig-lifted, .fig-dragging .fig-lifted * { transition: none; }

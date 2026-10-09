@@ -2175,12 +2175,12 @@ export function figureParts(host) {
         ondblclick: (event) => { stop(event); bendTo(ended, null); },
       }));
     }
-    // A molecule chosen is moved by dragging, like any part; it is turned by its handle
-    // (or by ⌥-dragging it).
+    // A molecule chosen is moved by dragging, and copied by ⌥-dragging, like any part; it is
+    // turned by its handle.
     const molecule = box && nodeOf(id)?.kind === "structure" ? moleculeOf(id)?.getBoundingClientRect() : null;
     if (molecule?.width) {
       views.push(h("button.fig-rotate", {
-        type: "button", title: "Drag to rotate the molecule (or ⌥-drag it)",
+        type: "button", title: "Drag to rotate the molecule",
         style: { left: `${molecule.right - outer.left - 13}px`, top: `${molecule.top - outer.top + 13}px` },
         onpointerdown: (event) => { if (event.button === 0) turnStart(event, id); }, ondblclick: stop, onclick: stop,
       }, icon("refresh")));
@@ -2997,21 +2997,13 @@ export function figureParts(host) {
     bendCancel();
   }
 
-  // -- a structure turned by dragging on it --
-  // Chosen, a molecule is grabbed and turned as in a viewer: across turns it (yaw), up
+  // -- a structure turned by dragging its handle --
+  // Chosen, a molecule is turned by its handle as in a viewer: across turns it (yaw), up
   // and down tilts it (pitch). While it turns, its chains' trace is drawn turning over
   // it -- in mol-sketch's own frame, so it lies as the molecule will -- and once let go,
   // the molecule is drawn at the new turn.
   const views = new Map();
   const moleculeOf = (id) => host.element(`${id}.molecule`);
-  // A press that turns the molecule chosen: ⌥ held, over the molecule. (Pressed
-  // without, it is moved like any part.)
-  function turnable(event) {
-    const id = chosenOne();
-    if (!event.altKey || !id || nodeOf(id)?.kind !== "structure") return false;
-    const box = moleculeOf(id)?.getBoundingClientRect();
-    return Boolean(box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom);
-  }
   async function viewOf(id) {
     const node = nodeOf(id);
     const key = JSON.stringify([id, node?.properties]);
@@ -3186,7 +3178,6 @@ export function figureParts(host) {
 
   function pointerdown(event) {
     if (event.button !== 0 || state.connecting || inline) return;
-    if (turnable(event)) { turnStart(event, chosenOne()); return; }
     const id = idAt(event);
     // Pressed where nothing is drawn, in a figure that is the whole document (the figure
     // editor's): a drag chooses what it touches. (On a slide it moves the figure: the deck's.)
@@ -3328,7 +3319,33 @@ export function figureParts(host) {
     // (A shape, not a group, may be let go on a line -- one not its own -- to go into it.)
     const paths = nodeOf(id) ? linePaths(nodes) : [];
     Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn, folds, paths });
+    carryCopy(drag.copy);
     select([id], { reveal: false });
+  }
+  // ⌥ held, a copy is what is carried, as in Keynote: the part itself stays where it is drawn,
+  // its lines with it -- a likeness of it there, while what is lifted is the copy. Let go of
+  // ⌥ on the way, it is the part itself that is carried again.
+  // (A likeness with no ids of its own, so that it is never taken for the part; the patterns
+  // and clips its drawing refers to keep theirs.)
+  const REFERRED = "defs, clipPath, mask, linearGradient, radialGradient, pattern, filter, marker, symbol";
+  function carryCopy(on) {
+    if (!drag?.started || Boolean(drag.stays) === Boolean(on)) return;
+    if (on) {
+      drag.stays = drag.moving.map(({ element, base }) => {
+        const stay = element.cloneNode(true);
+        for (const named of [stay, ...stay.querySelectorAll("[id]")]) if (!named.closest(REFERRED)) named.removeAttribute("id");
+        if (base) stay.setAttribute("transform", base);
+        else stay.removeAttribute("transform");
+        stay.classList.remove("fig-lifted", "fig-astray", "fig-over-line");
+        stay.classList.add("fig-stay");
+        element.before(stay);
+        return stay;
+      });
+    } else {
+      for (const stay of drag.stays) stay.remove();
+      drag.stays = null;
+    }
+    for (const element of drag.lines) element.classList.toggle("fig-faded", !on);
   }
 
   function dragMove(event) {
@@ -3340,6 +3357,7 @@ export function figureParts(host) {
       if (Math.hypot(event.clientX - drag.from.x, event.clientY - drag.from.y) < 4) return;
       dragStart();
     }
+    if (drag.id) carryCopy(drag.copy);
     event.preventDefault();
     if (!drag.frame) drag.frame = requestAnimationFrame(dragFrame);
   }
@@ -3577,6 +3595,7 @@ export function figureParts(host) {
     was.indicator.remove();
     was.zone.remove();
     was.ghost?.remove();
+    for (const stay of was.stays || []) stay.remove();
     document.body.classList.remove("fig-grabbing", "fig-copying");
     for (const { element } of was.parted) element.style.transform = "";
     // A drag ends in a click on whatever is under the pointer: that click is not one.
@@ -3610,8 +3629,24 @@ export function figureParts(host) {
       home.holder.remove();
     }
   }
-  // Home again: the part slides back to where it was drawn, the lines come back.
-  function sendHome(was) {
+  // A copy let go: what was carried stays where it was let go, a likeness of it (as carryCopy's,
+  // no ids of its own), until the figure is drawn with the copy there -- or, none drawn, a while.
+  function leaveCopy(was) {
+    for (const { element } of was.moving) {
+      const svg = element.ownerSVGElement, holder = element.parentNode;
+      if (!svg || !holder) continue;
+      const copy = element.cloneNode(true), left = holder === svg ? copy : holder.cloneNode(false);
+      if (left !== copy) left.append(copy);
+      for (const named of [left, ...left.querySelectorAll("[id]")]) if (!named.closest(REFERRED)) named.removeAttribute("id");
+      copy.classList.remove("fig-lifted", "fig-astray", "fig-over-line");
+      left.classList.add("fig-stay");
+      svg.append(left);
+      setTimeout(() => left.remove(), 6000);
+    }
+  }
+  // Home again: the part slides back to where it was drawn, the lines come back. (`glide`
+  // false: it is there at once.)
+  function sendHome(was, { glide = true } = {}) {
     clearTimeout(was.wait);
     unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
@@ -3620,7 +3655,7 @@ export function figureParts(host) {
       if (base) element.setAttribute("transform", base);
       else element.removeAttribute("transform");
       element.classList.remove("fig-lifted", "fig-settling", "fig-astray", "fig-over-line");
-      if (moved) element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
+      if (moved && glide) element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
         { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
     }
     for (const element of was.lines) element.classList.remove("fig-faded");
@@ -3635,9 +3670,10 @@ export function figureParts(host) {
     const was = dragFinish();
     if (!was) return;
     const at = was.at;
-    // ⌥ held as it is let go, as Keynote's ⌥-drag: it goes home, and a copy of it goes where it
-    // was let go -- or, let go where it was, beside it.
-    if (copy && at) { sendHome(was); copyAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn }); return; }
+    // ⌥ held as it is let go, as Keynote's ⌥-drag: it is home at once (it never left: see
+    // carryCopy), and a copy of it goes where it was let go -- or, let go where it was, beside
+    // it -- the copy carried staying there until it is drawn.
+    if (copy && at) { leaveCopy(was); sendHome(was, { glide: false }); copyAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn }); return; }
     if (!at || unchanged(at, was.id, was.drawn)) { sendHome(was); return; }
     // It stays where it was let go until the drawing it makes comes back and lands.
     for (const { element } of was.moving) { element.classList.add("fig-settling"); element.classList.remove("fig-over-line"); }
@@ -6478,7 +6514,7 @@ export function figureParts(host) {
     // (A part on its way, till it lands: a slide's frame round the figure waits for it.)
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, turnable,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
