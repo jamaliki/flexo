@@ -393,7 +393,8 @@ export function figureParts(host) {
 
   // `afresh`: the figure as another's edit or an undo left it, its words shown in the field
   // being typed in too (see typing).
-  function setModel(next, { afresh: fresh = false } = {}) {
+  // (`back`: the figure as an undo or a redo left it: what that brought back is chosen.)
+  function setModel(next, { afresh: fresh = false, back = false } = {}) {
     if (!next) return;
     const before = state.model;
     state.model = next;
@@ -404,6 +405,7 @@ export function figureParts(host) {
     const wanted = [...new Set([...state.selected, ...state.missing])];
     state.selected = wanted.filter((id) => typeOf(id));
     state.missing = wanted.filter((id) => !typeOf(id));
+    if (back && before) chooseBack(before, next);
     afresh = fresh;
     try { host.changed(); } finally { afresh = false; }
     mergeTyping();
@@ -413,6 +415,25 @@ export function figureParts(host) {
     if (owed && typeOf(owed.id)) { const { id, text } = owed; owed = null; giveWords(id, text); }
     // (Words kept in sight for a part not drawn yet go with it, should it go: an undo, say.)
     if (typedOver?.box) showTyped();
+  }
+
+  // An undo or a redo chooses what it brought back or changed, as Keynote's does: a shape
+  // deleted, or its words, or a group whole (not the shapes it holds) -- else, nothing of that
+  // kind, a line that came back. Anything else leaves what is chosen as it was.
+  function chooseBack(before, next) {
+    const had = new Set([...(before.nodes || []), ...(before.groups || [])].map((item) => item.id));
+    const was = new Map((before.nodes || []).map((node) => [node.id, JSON.stringify(node)]));
+    const come = [...(next.groups || []).filter((group) => !had.has(group.id) && !group.implied),
+      ...(next.nodes || []).filter((node) => !had.has(node.id) || was.get(node.id) !== JSON.stringify(node))].map((item) => item.id);
+    const held = (id) => come.some((other) => (groupOf(other)?.children || []).includes(id));
+    let found = come.filter((id) => !held(id));
+    if (!found.length) {
+      // (A line by what it is, not its id, which numbers it among the others.)
+      const said = (line) => JSON.stringify({ ...line, id: null });
+      const lines = new Set([...(before.edges || []), ...(before.nets || [])].map(said));
+      found = [...(next.edges || []), ...(next.nets || [])].filter((line) => !lines.has(said(line))).map((line) => line.id);
+    }
+    if (found.length) { state.selected = found; state.missing = []; state.inside = false; }
   }
 
   // Shapes chosen that another renamed (an agent writing the file, its Name in File changed
@@ -1384,11 +1405,12 @@ export function figureParts(host) {
   // a group being edited: a second ⌫ deletes nothing more (never the whole figure), and Esc
   // chooses the figure itself. (The lines through a shape taken out of a chain are joined up
   // round it: figure_edit's `rejoin`.)
-  function remove(ids = state.selected, keep = []) {
+  // (`cut`: taken away by ⌘X, and said so in the history.)
+  function remove(ids = state.selected, keep = [], { cut = false } = {}) {
     const gone = ids.filter((id) => id !== model()?.root);
     if (!gone.length) return;
     const kept = keep.filter((id) => typeOf(id) && !gone.includes(id));
-    act({ do: "delete", ids: gone }, { select: false });
+    act({ do: "delete", ids: gone }, { select: false, label: cut ? said({ do: "delete", ids: gone }).replace(/^Delete\b/, "Cut") : null });
     // (At once: a ⌫ pressed again before the figure comes back acts on nothing.)
     select(kept, { reveal: false });
     if (!kept.length) open();
@@ -1407,6 +1429,17 @@ export function figureParts(host) {
     const node = nodeOf(id), group = groupOf(id), edge = edgeOf(id);
     const isRoot = id === model()?.root;
     const items = [];
+    // Several chosen, one of them right-clicked: what is done to them all, as the panel of
+    // several offers -- nothing that acts on the one alone. (Lines chosen together into, or
+    // out of, the same shape: one line, with a trunk they share.)
+    if (state.selected.length > 1) {
+      const chosen = [...state.selected], shapes = chosen.some((each) => !isLine(each));
+      if (chosen.every(isLine) && joinable(chosen)) items.push({ icon: "right", label: "Join Lines", run: () => joinLines(chosen) });
+      if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
+      if (shapes) items.push({ icon: "duplicate", label: "Duplicate", keys: "⌘D", run: () => duplicate(chosen) });
+      items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove(chosen) });
+      return items;
+    }
     if (!isRoot && (node || group || isLine(id))) items.push({ icon: "pencil", label: "Edit Text", run: () => openInline(id) });
     if (node) {
       const kind = nextKind(node);
@@ -1424,11 +1457,7 @@ export function figureParts(host) {
       items.push({ icon: "plus", label: "Insert Shape", run: () => addPart("block", lineWhere(id)) },
         { icon: "plus", label: "Insert Shape…", keys: "A", run: () => addPalette(anchor, { into: id }) });
     }
-    // Lines chosen together into (or out of) the same shape: one line, with a trunk they
-    // share; and one such line made lines again.
-    if (isLine(id) && state.selected.length > 1 && state.selected.every(isLine) && joinable(state.selected)) {
-      items.push({ icon: "right", label: "Join Lines", run: () => joinLines([...state.selected]) });
-    }
+    // A line joined of several made lines again.
     if (netOf(id)) items.push({ icon: "right", label: "Separate Lines", run: () => separateLine(id) });
     const holder = parentOf(id);
     // As drawn: a column turned to fit the slide is a row on screen.
@@ -1436,7 +1465,6 @@ export function figureParts(host) {
     if ((node || (group && !isRoot)) && row && (holder.children || []).some((child) => child !== id)) {
       items.push({ icon: "down", label: "Move to Own Row Below", run: () => ownLine(id, holder.id, "below") });
     }
-    if (state.selected.length > 1 && !state.selected.every(isLine)) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
     // A group: a shape added after it (A, as for a shape), or inside it.
     if (group && !isRoot) {
       items.push({ icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) },
@@ -1451,9 +1479,21 @@ export function figureParts(host) {
   function duplicate(ids = state.selected) {
     const chosen = ids.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
     if (chosen.length) act({ do: "duplicate", ids: chosen });
+    // (Lines alone: said why nothing happens, as for copying them.)
+    else if (ids.length && ids.every(isLine)) toast(linesGoWith("duplicated"), { icon: "info", seconds: 3 });
+  }
+  // Every part of the figure chosen (⌘A): what its layout holds at the top, as Keynote's Select
+  // All chooses a group whole -- copied, its groups go with it.
+  function chooseAll() {
+    const top = groupOf(model()?.root)?.children || (model()?.nodes || []).map((node) => node.id);
+    select(top.filter((id) => typeOf(id)), { reveal: false });
   }
 
   // -- copied, and pasted (into this figure or another) --
+  // A line goes with the shapes it joins: chosen alone, it is not copied (a paste of a line
+  // between no shapes would be nothing), nor duplicated -- and that is said.
+  const linesGoWith = (done) => `A line is ${done} with the shapes it joins. Select them too.`;
+  const uncopied = () => (state.selected.length && state.selected.every(isLine) ? linesGoWith("copied") : null);
   // The parts and groups chosen, with what they hold and the lines between them.
   function clip() {
     const figure = model();
@@ -1488,6 +1528,8 @@ export function figureParts(host) {
     else send();
   }
 
+  // Whether what is chosen can be grouped: shapes and groups, no lines (nor the layout).
+  const canGroup = () => state.selected.length > 0 && state.selected.every((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
   function groupMenu(anchor) {
     menu(anchor, catalog.groups.map((group) => ({ label: group.title, hint: group.hint, run: () => gather(group) })));
   }
@@ -1582,11 +1624,14 @@ export function figureParts(host) {
     // meanwhile put there.)
     const id = idAt(asPressed(event));
     if (state.connecting) { if (id) connectTo(id); return; }
+    // (The figure's own layout, clicked where nothing is drawn, is nothing: the page clicked,
+    // as Keynote's canvas -- the layout is chosen from the list of shapes.)
+    const part = id && id !== model()?.root ? id : null;
     if (event.shiftKey || event.metaKey || event.ctrlKey) {
-      if (id) select(state.selected.includes(id) ? state.selected.filter((item) => item !== id) : [...state.selected, id]);
+      if (part) select(state.selected.includes(part) ? state.selected.filter((item) => item !== part) : [...state.selected, part]);
       return;
     }
-    select(id ? [id] : []);
+    select(part ? [part] : []);
   }
   function dblclick(event) {
     const id = idAt(asPressed(event));
@@ -2669,14 +2714,95 @@ export function figureParts(host) {
   function pointerdown(event) {
     if (event.button !== 0 || state.connecting || inline) return;
     if (turnable(event)) { turnStart(event, chosenOne()); return; }
-    if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     const id = idAt(event);
+    // Pressed where nothing is drawn, in a figure that is the whole document (the figure
+    // editor's): a drag chooses what it touches. (On a slide it moves the figure: the deck's.)
+    if (host.whole && (!id || id === model()?.root) && !event.metaKey && !event.ctrlKey && !event.altKey) { band(event); return; }
+    if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
     window.addEventListener("pointercancel", dragCancel);
     window.addEventListener("keydown", dragKey, true);
+  }
+
+  // -- a band dragged from where nothing is, choosing the shapes it touches --
+  // As on Keynote's canvas: pressed where nothing is drawn and dragged, a band is drawn from
+  // there to the pointer, and the shapes it touches are chosen as it goes (with ⇧, as well as
+  // those chosen already). Let go, they stay chosen; Esc puts back what was chosen before.
+  let banding = null;
+  function band(event) {
+    if (event.button !== 0 || banding || drag || !model() || state.connecting) return;
+    banding = { start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0,
+      had: [...state.selected], base: event.shiftKey ? [...state.selected] : [], touched: null };
+    window.addEventListener("pointermove", bandMove);
+    window.addEventListener("pointerup", bandUp);
+    window.addEventListener("pointercancel", bandCancel);
+    window.addEventListener("keydown", bandKey, true);
+  }
+  function bandMove(event) {
+    if (!banding) return;
+    banding.pointer = { x: event.clientX, y: event.clientY };
+    if (!banding.moved) {
+      if (Math.hypot(event.clientX - banding.start.x, event.clientY - banding.start.y) < 4) return;
+      banding.moved = true;
+      window.getSelection?.()?.removeAllRanges();
+      banding.node = h("div.fig-band");
+      host.overlay.append(banding.node);
+      document.body.classList.add("fig-banding");
+    }
+    event.preventDefault();
+    if (!banding.frame) banding.frame = requestAnimationFrame(bandFrame);
+  }
+  function bandFrame() {
+    if (!banding?.moved) return;
+    banding.frame = 0;
+    const outer = host.overlay.getBoundingClientRect();
+    const { start, pointer } = banding;
+    const left = Math.min(start.x, pointer.x) - outer.left, top = Math.min(start.y, pointer.y) - outer.top;
+    const width = Math.abs(pointer.x - start.x), height = Math.abs(pointer.y - start.y);
+    Object.assign(banding.node.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    // Every shape whose drawing it reaches -- a shape's, not the group round it, which would
+    // choose all it holds as one.
+    const touched = (model().nodes || []).map((node) => node.id).filter((id) => {
+      const box = host.box(id);
+      return box && box.left < left + width && box.left + box.width > left && box.top < top + height && box.top + box.height > top;
+    });
+    const key = touched.join("\n");
+    if (key === banding.touched) return;
+    banding.touched = key;
+    select([...new Set([...banding.base, ...touched])], { reveal: false });
+  }
+  function bandFinish() {
+    window.removeEventListener("pointermove", bandMove);
+    window.removeEventListener("pointerup", bandUp);
+    window.removeEventListener("pointercancel", bandCancel);
+    window.removeEventListener("keydown", bandKey, true);
+    document.body.classList.remove("fig-banding");
+    const was = banding;
+    banding = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    was?.node?.remove();
+    return was;
+  }
+  function bandUp(event) {
+    if (banding?.moved && event) { banding.pointer = { x: event.clientX, y: event.clientY }; bandFrame(); }
+    const was = bandFinish();
+    // (A band let go is not a click on where it ends: the page, which would choose nothing.)
+    if (was?.moved) swallowClick();
+  }
+  function bandCancel() {
+    const was = bandFinish();
+    if (was?.moved) select(was.had, { reveal: false });
+  }
+  function bandKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // (Let go after Esc, the pointer chooses nothing where it is.)
+    if (banding?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
+    bandCancel();
   }
 
   // The figure as it is seen: where every part and group is drawn (`boxes`), each row and
@@ -4199,6 +4325,14 @@ export function figureParts(host) {
     }
     if (mod) {
       if (event.key.toLowerCase() === "d" && state.selected.length) { event.preventDefault(); duplicate(); return true; }
+      // ⌘A chooses every part of the figure being edited -- in the figure editor, always; on a
+      // slide, once its shapes are being edited (one chosen, or one just deleted) -- as Keynote's
+      // Select All does inside a group it is editing. (The figure alone chosen: the slide's.)
+      if (event.key.toLowerCase() === "a" && !event.altKey && !event.shiftKey && model() && (host.whole || state.selected.length || state.inside)) {
+        event.preventDefault();
+        chooseAll();
+        return true;
+      }
       return false;
     }
     if (event.key === "Backspace" || event.key === "Delete") {
@@ -4251,7 +4385,8 @@ export function figureParts(host) {
     const letter = event.key.toLowerCase();
     if (letter === "a") { event.preventDefault(); addPalette(host.addAnchor?.() || { x: innerWidth / 2 - 190, y: 120 }); return true; }
     if (letter === "c") { event.preventDefault(); toggleConnect(); return true; }
-    if (letter === "g") { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
+    // (Shapes to group chosen: an empty group is added from the palette's Layout.)
+    if (letter === "g" && canGroup()) { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
     if (letter === "enter") {
       const id = chosenOne();
       if (!id) return false;
@@ -5623,7 +5758,7 @@ export function figureParts(host) {
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom, turnable,
-    addPalette, addPart, gather, groupMenu, remove, duplicate, toggleConnect, clip, paste, menuOf, revealProblem,
+    addPalette, addPart, gather, groupMenu, canGroup, band, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }
