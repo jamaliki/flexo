@@ -93,13 +93,8 @@ class ThemeKind:
         return isinstance(document, dict) and isinstance(document.get("theme"), dict)
 
     def new(self, path: Path) -> dict[str, Any]:
-        return {
-            "theme": {
-                "name": path.stem.removesuffix(".theme"),
-                "base": "paper",
-                "description": "Our own look.",
-            }
-        }
+        # (No description of its own yet: its field says what one is for, until one is written.)
+        return {"theme": {"name": path.stem.removesuffix(".theme"), "base": "paper"}}
 
     def load(self, path: Path) -> dict[str, Any]:
         text = path.read_text(encoding="utf-8")
