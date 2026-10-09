@@ -19,7 +19,13 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-wordless.tight { visibility: hidden; }
 .fig-wordless.tight.pointed { visibility: visible; z-index: 2; color: var(--text-small); background: var(--raised); padding: 2px 5px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
 .fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 8px; height: 8px; margin: -4px 0 0 -4px; box-sizing: border-box; background: #ffffff; border: 1px solid var(--accent); border-radius: 1.5px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18); touch-action: none; }
-.fig-size::before { content: ""; position: absolute; inset: -6px; }
+/* Its reach is out from the shape, past its corner: a small shape pressed anywhere inside is
+   the shape, moved, not a corner taking it to be sized. */
+.fig-size::before { content: ""; position: absolute; }
+.fig-size.nw::before { inset: -7px 0 0 -7px; }
+.fig-size.ne::before { inset: -7px -7px 0 0; }
+.fig-size.sw::before { inset: 0 0 -7px -7px; }
+.fig-size.se::before { inset: 0 -7px -7px 0; }
 .fig-size:hover { background: var(--accent); }
 .fig-size.nw, .fig-size.se { cursor: nwse-resize; }
 .fig-size.ne, .fig-size.sw { cursor: nesw-resize; }

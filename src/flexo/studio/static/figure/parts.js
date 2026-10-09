@@ -1717,7 +1717,8 @@ export function figureParts(host) {
   }
   // The + in clear space on the side the flow goes on -- slid along that side, or else
   // on another, if a line or a label is there.
-  function plusPlace(id, box, towards = null) {
+  // (`cornered`: the part has handles at its corners, which the + keeps well clear of.)
+  function plusPlace(id, box, towards = null, cornered = false) {
     // (A branch's on the side it goes: under the part, or beside it.)
     const flow = towards || sideOf(id, box);
     // On the side the part it adds will go, clear of what is drawn there: along that side,
@@ -1747,7 +1748,9 @@ export function figureParts(host) {
       }
     }
     const offLines = (x, y) => !points.some((point) => Math.abs(point.x - x) < PLUS / 2 + 3 && Math.abs(point.y - y) < PLUS / 2 + 3);
-    const clear = (place) => onPage(place) && offLines(outer.left + place.x, outer.top + place.y) && clearAt(outer.left + place.x, outer.top + place.y, own);
+    const corners = cornered ? [[box.left, box.top], [box.left + box.width, box.top], [box.left, box.top + box.height], [box.left + box.width, box.top + box.height]] : [];
+    const offCorners = (place) => corners.every(([x, y]) => Math.hypot(place.x - x, place.y - y) >= PLUS + 4);
+    const clear = (place) => onPage(place) && offCorners(place) && offLines(outer.left + place.x, outer.top + place.y) && clearAt(outer.left + place.x, outer.top + place.y, own);
     for (const side of [flow, ...["right", "bottom", "left", "top"].filter((other) => other !== flow)]) {
       const found = tries(side).find(clear);
       if (found) return found;
@@ -1879,13 +1882,17 @@ export function figureParts(host) {
     pointHints();
     const id = chosenOne();
     const box = id && nodeOf(id) && !state.connecting && !inline ? host.box(id) : null;
+    // A shape that takes a size of its own (its drawing says the size that fits its words), and
+    // a molecule or a picture: handles at its corners.
+    const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? fitOf(id) : null;
+    const sizable = Boolean(box && (SIZED_PARTS.has(nodeOf(id)?.kind) || fits));
     const stop = (event) => event.stopPropagation();
     // ⌥-clicked or right-clicked, a + opens the palette of shapes, to choose what it adds.
     const choose = (event, into = null) => { event.preventDefault(); stop(event); addPalette(event.currentTarget, into ? { into } : { next: id }); };
     if (box) {
       const kind = nextKind(nodeOf(id));
       const { branch } = addWhere(id, true, kind);
-      const { side, x, y } = plusPlace(id, box, branch?.towards);
+      const { side, x, y } = plusPlace(id, box, branch?.towards, sizable);
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: splices(id, kind) ? `Insert ${article(parts[kind].title)} ${inSentence(parts[kind].title)} between ${inQuotes(nameOf(id))} and ${inQuotes(nameOf(splices(id, kind)))} (⌥-click for other shapes)`
@@ -1962,11 +1969,15 @@ export function figureParts(host) {
     // handle is at the same corner, the part's steps inside it.
     // A shape that takes a size of its own (its drawing says the size that fits its words)
     // has one too: dragged, it is drawn that size, snapping to the size that fits its words.
-    const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? fitOf(id) : null;
-    if (box && (SIZED_PARTS.has(nodeOf(id)?.kind) || fits)) {
+    if (sizable) {
       const theirs = [...host.overlay.querySelectorAll(".size-handle")].map((handle) => handle.getBoundingClientRect()).filter((rect) => rect.width);
+      // (A molecule's or a picture's at the corners of its picture, the size it is given: not
+      // of its words over it.)
+      const picture = fits ? null : host.element(id)?.querySelector("image")?.getBoundingClientRect();
+      const whole = host.element(id)?.getBoundingClientRect(), pad = whole?.width ? (box.width - whole.width) / 2 : 0;
+      const at = picture?.width ? { left: picture.left - outer.left - pad, top: picture.top - outer.top - pad, width: picture.width + 2 * pad, height: picture.height + 2 * pad } : box;
       for (const corner of ["nw", "ne", "sw", "se"]) {
-        let left = corner.endsWith("w") ? box.left : box.left + box.width, top = corner.startsWith("n") ? box.top : box.top + box.height;
+        let left = corner.endsWith("w") ? at.left : at.left + at.width, top = corner.startsWith("n") ? at.top : at.top + at.height;
         if (theirs.some((rect) => Math.hypot(rect.left + rect.width / 2 - outer.left - left, rect.top + rect.height / 2 - outer.top - top) < 14)) {
           left += corner.endsWith("w") ? 12 : -12;
           top += corner.startsWith("n") ? 12 : -12;
@@ -1998,9 +2009,10 @@ export function figureParts(host) {
   }
 
   // -- a molecule or picture sized by its corners --
-  // It grows or shrinks about its opposite corner as the pointer goes; let go, it is
-  // given that width and height and the figure is laid out again, its parts gliding to
-  // where they go.
+  // It grows or shrinks about its opposite corner as the pointer goes -- its picture, the size
+  // it is given: its words over it stay as they are, laid out round it again -- and let go, it
+  // is given that width and height and the figure is laid out again, its parts gliding to
+  // where they go. Esc puts it back as it was.
   const SIZED_PARTS = new Set(["structure", "image"]);
   let partSizing = null;
   function partSizeStart(event, id, corner) {
@@ -2008,19 +2020,21 @@ export function figureParts(host) {
     event.preventDefault();
     event.stopPropagation();
     const element = host.element(id);
-    const box = element?.getBoundingClientRect();
+    const picture = element?.querySelector("image") || element;
+    const box = picture?.getBoundingClientRect();
     const unit = element?.getScreenCTM?.()?.a;
     if (!box || !box.width || !unit) return;
     const west = corner.endsWith("w"), north = corner.startsWith("n");
-    Object.assign(element.style, { transformBox: "fill-box", transformOrigin: `${west ? "100%" : "0"} ${north ? "100%" : "0"}`, transform: "" });
+    Object.assign(picture.style, { transformBox: "fill-box", transformOrigin: `${west ? "100%" : "0"} ${north ? "100%" : "0"}`, transform: "" });
     const tip = h("div.fig-turn-tip");
     host.overlay.append(tip);
-    partSizing = { id, element, box, unit, tip, scale: 1, moved: false, start: { x: event.clientX, y: event.clientY },
+    partSizing = { id, element: picture, box, unit, tip, scale: 1, moved: false, start: { x: event.clientX, y: event.clientY },
       anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, handle: { x: west ? box.left : box.right, y: north ? box.top : box.bottom } };
     host.overlay.classList.add("fig-sizing");
     window.addEventListener("pointermove", partSizeMove);
     window.addEventListener("pointerup", partSizeEnd);
     window.addEventListener("pointercancel", partSizeCancel);
+    window.addEventListener("keydown", partSizeKey, true);
   }
   function partSizeMove(event) {
     const sizing = partSizing;
@@ -2044,6 +2058,7 @@ export function figureParts(host) {
     window.removeEventListener("pointermove", partSizeMove);
     window.removeEventListener("pointerup", partSizeEnd);
     window.removeEventListener("pointercancel", partSizeCancel);
+    window.removeEventListener("keydown", partSizeKey, true);
     host.overlay.classList.remove("fig-sizing");
     sizing?.tip.remove();
     if (sizing?.moved) swallowClick();
@@ -2063,6 +2078,14 @@ export function figureParts(host) {
     const sizing = partSizeFinish();
     if (sizing) sizing.element.style.transform = "";
   }
+  function partSizeKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    // (Let go after Esc, the pointer chooses nothing where it is.)
+    if (partSizing?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
+    partSizeCancel();
+  }
 
   // -- a shape sized by its corners --
   // The size that fits a shape's words, as its drawing says (in the figure's units), for a
@@ -2081,25 +2104,36 @@ export function figureParts(host) {
   // Dragged, its outline is drawn at the size it will be, its opposite corner kept: a side
   // within a few pixels of the size that fits its words snaps to it (both: it fits them
   // again, its size its own no longer), and a side not moved keeps what it was; ⇧ keeps
-  // its proportions. Let go, it is that size, and the figure is laid out round it again.
+  // its proportions. It is never smaller than its words need (a diamond's, wider and
+  // flatter about them as it is drawn so); a circle stays round, and a person keeps its
+  // figure's proportions, as they are drawn. Let go, it is that size -- its outline there
+  // until it is drawn so -- and the figure is laid out round it again.
   const SIZE_SNAP = 7; // (pixels)
+  // Kinds drawn in proportions of their own: a circle round, a person as its figure is (a
+  // head and shoulders 0.85 as wide as they are tall, its name under them).
+  const PROPORTIONED = new Set(["circle", "person"]);
+  const FIGURE_WIDTH = 0.85;
   let shapeSizing = null;
   function shapeSizeStart(event, id, corner, fit) {
     if (event.button !== 0 || shapeSizing || partSizing) return;
     event.preventDefault();
     event.stopPropagation();
     const element = host.element(id);
-    const box = (host.element(`${id}.body`) || element)?.getBoundingClientRect();
+    const node = nodeOf(id);
+    // (A person's box is its figure and its name under it, as it is laid out: not its figure alone.)
+    const box = (node?.kind === "person" ? element : host.element(`${id}.body`) || element)?.getBoundingClientRect();
     const unit = element?.getScreenCTM?.()?.a;
     if (!box?.width || !box.height || !unit) return;
     const west = corner.endsWith("w"), north = corner.startsWith("n");
-    const node = nodeOf(id);
     const drawing = document.createElementNS(SVG_NS, "svg");
     drawing.classList.add("fig-end-drag", "fig-size-drag");
     const outline = document.createElementNS(SVG_NS, node?.kind === "decision" ? "polygon" : node?.kind === "circle" ? "ellipse" : "rect");
     drawing.append(outline);
     const tip = h("div.fig-turn-tip", { hidden: true });
-    shapeSizing = { id, element, box, unit, fit, kind: node?.kind, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
+    // (A person's name, under its figure: its band, which stays as it is.)
+    const figure = node?.kind === "person" ? host.element(`${id}.body`)?.getBoundingClientRect() : null;
+    const band = figure?.height ? Math.max(0, box.bottom - figure.bottom) / unit : 0;
+    shapeSizing = { id, element, box, unit, fit, band, kind: node?.kind, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
       had: { width: node?.width ?? null, height: node?.height ?? null },
       anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, west, north, size: null };
     window.addEventListener("pointermove", shapeSizeMove);
@@ -2109,17 +2143,43 @@ export function figureParts(host) {
   }
   // The size the pointer gives it (in the figure's units), snapped, and what is said of it.
   function shapeSizeAt(sizing, clientX, clientY, keep) {
-    const { anchor, box, unit, fit } = sizing;
+    const { anchor, box, unit, fit, kind, band } = sizing;
     let width = Math.max(8, Math.abs(clientX - anchor.x)) / unit, height = Math.max(8, Math.abs(clientY - anchor.y)) / unit;
     const was = { width: box.width / unit, height: box.height / unit };
-    if (keep) {
-      const by = Math.max(width / was.width, height / was.height);
-      width = was.width * by;
-      height = was.height * by;
+    // A person's figure is as tall as it is less its name, and as wide as its figure is, or its
+    // name: the pointer gives it as tall as it reaches either way (the figure's width that far
+    // out), never less than its words need.
+    if (kind === "person") {
+      height = Math.max(height, width / FIGURE_WIDTH + band, fit.height);
+      width = Math.max(fit.width, FIGURE_WIDTH * (height - band));
+    }
+    // (In proportion: as far as the pointer reaches either way.)
+    const ratio = kind === "circle" ? 1 : kind !== "person" && keep ? was.width / was.height : null;
+    if (ratio) {
+      const by = Math.max(width / ratio, height);
+      width = by * ratio;
+      height = by;
+    }
+    // Never smaller than its words need: the size that fits them -- a diamond any size its
+    // words' corners keep inside it, as narrow as just over half its fit (then tall), or as
+    // flat as half its fit's height (then wide).
+    if (kind === "decision") {
+      width = Math.max(width, 0.55 * fit.width);
+      height = Math.max(height, fit.height / 2 / (1 - fit.width / (2 * width)));
+    } else if (ratio) {
+      const by = Math.max(1, fit.width / width, fit.height / height);
+      width *= by;
+      height *= by;
+    } else {
+      width = Math.max(width, fit.width);
+      height = Math.max(height, fit.height);
     }
     const near = SIZE_SNAP / unit;
     const snapped = { width: false, height: false }, kept = { width: false, height: false };
-    if (!keep) {
+    if (PROPORTIONED.has(kind)) {
+      // (In proportion, both sides fit its words at once.)
+      if (Math.abs(height - fit.height) < near) { snapped.width = snapped.height = true; width = fit.width; height = fit.height; }
+    } else if (!keep) {
       for (const side of ["width", "height"]) {
         if (Math.abs((side === "width" ? width : height) - fit[side]) < near) { snapped[side] = true; if (side === "width") width = fit.width; else height = fit.height; }
         else if (Math.abs((side === "width" ? width : height) - was[side]) < near) { kept[side] = true; if (side === "width") width = was.width; else height = was.height; }
@@ -2162,32 +2222,48 @@ export function figureParts(host) {
     window.removeEventListener("pointerup", shapeSizeEnd);
     window.removeEventListener("pointercancel", shapeSizeCancel);
     window.removeEventListener("keydown", shapeSizeKey, true);
+    if (sizing?.moved) swallowClick();
+    return sizing;
+  }
+  function shapeSizeClear(sizing) {
     host.overlay.classList.remove("fig-sizing");
     sizing?.drawing.remove();
     sizing?.tip.remove();
-    if (sizing?.moved) swallowClick();
-    return sizing;
   }
   function shapeSizeEnd() {
     const sizing = shapeSizeFinish();
     const size = sizing?.moved ? sizing.size : null;
-    if (!size) return;
+    if (!size) { shapeSizeClear(sizing); return; }
     // Fitting its words, it is written as fitValues says. Else a side that fits them has
     // no size of its own, and one not moved keeps what it had -- but for a diamond, whose
-    // height is its width's (and its width its height's): it is the size it is drawn at.
+    // height is its width's (and its width its height's), and a circle or a person, in
+    // proportion: each is the size it is drawn at, both ways.
     const own = (side) => `${Math.round(size[side])}pt`;
-    const value = (side) => (sizing.kind === "decision" ? (size.kept[side] && sizing.had[side] !== null ? sizing.had[side] : own(side))
+    const both = sizing.kind === "decision" || PROPORTIONED.has(sizing.kind);
+    const value = (side) => (both ? (size.kept[side] && sizing.had[side] !== null ? sizing.had[side] : own(side))
       : size.snapped[side] ? null : size.kept[side] ? sizing.had[side] : own(side));
     const values = size.fitted ? fitValues(sizing.id, sizing.fit) : { width: value("width"), height: value("height") };
-    if (values.width === sizing.had.width && values.height === sizing.had.height) return;
-    if (size.fitted) { fitWords(sizing.id, sizing.fit, { then: () => { state.landing = Date.now(); } }); return; }
-    act({ do: "update", target: { type: "node", id: sizing.id }, values }, { then: () => { state.landing = Date.now(); } });
+    if (values.width === sizing.had.width && values.height === sizing.had.height) { shapeSizeClear(sizing); return; }
+    // Its outline stays where it was let go, the tip gone, until it is drawn at that size (or
+    // the edit is refused): it never goes back to the size it was meanwhile.
+    sizing.tip.remove();
+    const done = { then: () => { state.landing = Date.now(); }, failed: () => shapeSizeClear(sizing) };
+    if (size.fitted) fitWords(sizing.id, sizing.fit, done);
+    else act({ do: "update", target: { type: "node", id: sizing.id }, values }, done);
+    const started = Date.now();
+    const wait = () => {
+      if (!sizing.element.isConnected || Date.now() - started > 6000) shapeSizeClear(sizing);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
   }
-  function shapeSizeCancel() { shapeSizeFinish(); }
+  function shapeSizeCancel() { shapeSizeClear(shapeSizeFinish()); }
   function shapeSizeKey(event) {
     if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
+    // (Let go after Esc, the pointer chooses nothing where it is.)
+    if (shapeSizing?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
     shapeSizeCancel();
   }
 
@@ -3312,6 +3388,8 @@ export function figureParts(host) {
     if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
+    // (Let go after Esc, the pointer chooses nothing where it is.)
+    if (drag?.started) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
     dragCancel();
   }
 
