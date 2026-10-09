@@ -1867,6 +1867,18 @@ export function figureParts(host) {
         ondblclick: (event) => { stop(event); endTo(ended, end.key, ""); },
       }));
     }
+    // A curved line chosen -- or a straight one -- has a handle on its middle: dragged, the
+    // line bends through it (a straight one turning curved); double-clicked, it bows as it
+    // would of itself again.
+    const bending = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
+    if (bending) {
+      views.push(h("span.fig-bend", {
+        style: { left: `${bending.at.x}px`, top: `${bending.at.y}px` },
+        title: "Drag to bend the line · Double-click to reset",
+        onpointerdown: (event) => bendStart(event, ended, bending), onclick: stop, onmousemove: stop,
+        ondblclick: (event) => { stop(event); if (edgeOf(ended)?.bend !== undefined) bendTo(ended, null); },
+      }));
+    }
     // A molecule chosen is moved by dragging, like any part; it is turned by its handle
     // (or by ⌥-dragging it).
     const molecule = box && nodeOf(id)?.kind === "structure" ? moleculeOf(id)?.getBoundingClientRect() : null;
@@ -2118,6 +2130,126 @@ export function figureParts(host) {
     // (Let go after Esc, the pointer chooses nothing where it is.)
     if (ending?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
     endCancel();
+  }
+
+  // -- a line bent by its middle --
+  // A curved line's middle stands off the line between its ends by its `bend`, a share of
+  // that line's length, to the left of its travel: dragged, its handle bends it through the
+  // pointer, the curve it would make drawn as it goes. Measured, as the figure measures it,
+  // from the middles of the sides it runs between (the shaft's `data-flexo-chord`), else
+  // -- a straight line, not yet bent -- from its own ends.
+  let bendingNow = null;
+  function bendSeen(id) {
+    const shaft = host.element(id)?.querySelector("path[id$='.shaft']");
+    const outer = host.overlay?.getBoundingClientRect();
+    const matrix = shaft?.getScreenCTM?.(), length = shaft?.getTotalLength?.() || 0;
+    if (!shaft || !outer || !matrix || !length) return null;
+    const chord = (shaft.getAttribute("data-flexo-chord") || "").split(" ").map(Number);
+    const from = chord.length === 4 && chord.every(Number.isFinite) ? { x: chord[0], y: chord[1] } : shaft.getPointAtLength(0);
+    const to = chord.length === 4 && chord.every(Number.isFinite) ? { x: chord[2], y: chord[3] } : shaft.getPointAtLength(length);
+    const middle = shaft.getPointAtLength(length / 2);
+    const seen = (point) => { const at = new DOMPoint(point.x, point.y).matrixTransform(matrix); return { x: at.x - outer.left, y: at.y - outer.top }; };
+    return { shaft, matrix, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, at: seen(middle), ends: [seen(shaft.getPointAtLength(0)), seen(shaft.getPointAtLength(length))] };
+  }
+  // The bend that puts a line's middle at a point on the page (its own units: the figure's).
+  function bendAt(bending, clientX, clientY) {
+    const point = new DOMPoint(clientX, clientY).matrixTransform(bending.matrix.inverse());
+    const { from, to } = bending;
+    const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy);
+    if (length < 1e-6) return 0;
+    const rise = ((point.x - (from.x + to.x) / 2) * dy - (point.y - (from.y + to.y) / 2) * dx) / length;
+    const bend = Math.max(-1, Math.min(1, rise / length));
+    // (Within a hair of straight, straight.)
+    return Math.abs(bend) < 0.02 ? 0 : Math.round(bend * 100) / 100;
+  }
+  function bendTo(id, bend) {
+    const edge = edgeOf(id);
+    if (!edge || (edge.shape === "curved" && (edge.bend ?? null) === bend)) return false;
+    const values = bend === null ? { bend: null } : { shape: "curved", bend };
+    act({ do: "update", target: { type: "edge", id }, values }, { select: false, label: bend === null ? "Reset Bend" : edge.shape === "curved" ? "Bend Line" : "Curve Line" });
+    return true;
+  }
+  function bendStart(event, id, bending) {
+    if (event.button !== 0 || bendingNow || ending) return;
+    event.preventDefault();
+    event.stopPropagation();
+    bendingNow = { id, bending, start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, line: host.element(id) };
+    window.addEventListener("pointermove", bendMove);
+    window.addEventListener("pointerup", bendUp);
+    window.addEventListener("pointercancel", bendCancel);
+    window.addEventListener("keydown", bendKey, true);
+  }
+  function bendMove(event) {
+    if (!bendingNow) return;
+    bendingNow.pointer = { x: event.clientX, y: event.clientY };
+    if (!bendingNow.moved) {
+      if (Math.hypot(event.clientX - bendingNow.start.x, event.clientY - bendingNow.start.y) < 3) return;
+      bendingNow.moved = true;
+      const drawing = document.createElementNS(SVG_NS, "svg");
+      drawing.classList.add("fig-end-drag");
+      const way = document.createElementNS(SVG_NS, "path"), spot = document.createElementNS(SVG_NS, "circle");
+      spot.setAttribute("r", "4");
+      drawing.append(way, spot);
+      host.overlay.append(drawing);
+      host.overlay.classList.add("fig-ending");
+      bendingNow.line?.classList.add("fig-faded");
+      document.body.classList.add("fig-grabbing");
+      Object.assign(bendingNow, { drawing, way, spot });
+    }
+    event.preventDefault();
+    if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame);
+  }
+  function bendFrame() {
+    if (!bendingNow?.moved) return;
+    bendingNow.frame = 0;
+    const { drawing, way, spot, bending } = bendingNow;
+    const outer = host.overlay.getBoundingClientRect();
+    const point = { x: bendingNow.pointer.x - outer.left, y: bendingNow.pointer.y - outer.top };
+    drawing.setAttribute("width", String(outer.width));
+    drawing.setAttribute("height", String(outer.height));
+    // Through the pointer, from end to end: the curve its middle would be at.
+    const [from, to] = bending.ends;
+    const control = { x: 2 * point.x - (from.x + to.x) / 2, y: 2 * point.y - (from.y + to.y) / 2 };
+    way.setAttribute("d", `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`);
+    spot.setAttribute("cx", String(point.x));
+    spot.setAttribute("cy", String(point.y));
+  }
+  function bendFinish() {
+    window.removeEventListener("pointermove", bendMove);
+    window.removeEventListener("pointerup", bendUp);
+    window.removeEventListener("pointercancel", bendCancel);
+    window.removeEventListener("keydown", bendKey, true);
+    document.body.classList.remove("fig-grabbing");
+    const was = bendingNow;
+    bendingNow = null;
+    if (was?.frame) cancelAnimationFrame(was.frame);
+    return was;
+  }
+  function bendClear(was) {
+    was.drawing?.remove();
+    was.line?.classList.remove("fig-faded");
+    host.overlay.classList.remove("fig-ending");
+  }
+  function bendUp() {
+    const was = bendFinish();
+    if (!was?.moved || !was.pointer) return;
+    swallowClick();
+    if (!bendTo(was.id, bendAt(was.bending, was.pointer.x, was.pointer.y))) { bendClear(was); return; }
+    // Its curve shown until the line is drawn bent (or the edit is refused).
+    const started = Date.now();
+    const wait = () => {
+      if (!was.line?.isConnected || Date.now() - started > 6000) bendClear(was);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
+  }
+  function bendCancel() { const was = bendFinish(); if (was) bendClear(was); }
+  function bendKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (bendingNow?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });
+    bendCancel();
   }
 
   // -- a structure turned by dragging on it --

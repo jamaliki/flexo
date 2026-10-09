@@ -477,6 +477,7 @@ class Figure:
         lane: str | None = None,
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
+        bend: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
@@ -503,6 +504,7 @@ class Figure:
             lane=lane,
             via=via,
             shape=shape,
+            bend=bend,
             line=line,
             arrow=arrow,
             head=head,
@@ -2452,6 +2454,7 @@ class GroupBuilder:
         lane: str | None = None,
         via: Side | str | None = None,
         shape: EdgeShape = "auto",
+        bend: float | None = None,
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
@@ -2476,7 +2479,8 @@ class GroupBuilder:
         reports ``routing.via.clamped`` if the geometry left it no choice.
 
         ``shape="straight"`` draws one straight segment between the two outlines
-        instead of a routed path, and ``"curved"`` one smooth curve; ``"auto"``
+        instead of a routed path, and ``"curved"`` one smooth curve (``bend=0.2``
+        bows its middle a fifth of its length to the left of its travel); ``"auto"``
         follows the figure's ``lines`` convention. ``line="dashed"`` or
         ``"dotted"`` strokes it that way, and ``arrow="none"`` (an undirected
         link) or ``"both"`` moves its arrowheads. ``width=2`` draws it 2pt wide,
@@ -2510,6 +2514,7 @@ class GroupBuilder:
             lane,
             via=_side(via, "via side"),
             shape=shape,
+            bend=bend,
             line=line,
             arrow=arrow,
             head=head,

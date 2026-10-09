@@ -183,6 +183,8 @@ type EdgeShape = Literal["auto", "orthogonal", "straight", "curved"]
 EDGE_SHAPES = ("auto", "orthogonal", "straight", "curved")
 LINE_WIDTHS = (0.1, 20.0)
 """The narrowest and widest an edge's own ``width`` may be, in points."""
+BENDS = (-1.0, 1.0)
+"""How far a curved edge's ``bend`` may stand its middle off its line, either way."""
 HEAD_SIZES = (0.1, 10.0)
 """The smallest and largest an edge's own ``head_size`` may be, times the theme's."""
 type JointStyle = Literal["dot", "arrow", "auto"]
@@ -531,8 +533,14 @@ class EdgeSpec:
     the side ``via`` names, else away from the middle of the figure (round a
     cycle, outwards), else to the left of its travel -- so two edges between one
     pair, one each way, bow apart. Given a ``depart`` or ``arrive`` side, it
-    leaves and meets those sides square, as a hand-drawn arrow does.
+    leaves and meets those sides square, as a hand-drawn arrow does. ``bend``
+    says how far it bows instead.
     """
+    bend: float | None = None
+    """How far a curved edge's middle stands off the straight line between its ends, as
+    a share of that line's length: positive to the left of its travel (from its source
+    to its target, on the page), negative to the right, ``0`` not at all. Unset, it bows
+    of itself (see ``shape``). Where it bows out of its container, the container grows."""
 
     line: LineStyle = "solid"
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
@@ -603,6 +611,7 @@ class EdgeSpec:
                 f"valid shapes: {', '.join(EDGE_SHAPES)}"
             )
         for name, value, (least, most), unit in (
+            ("bend", self.bend, BENDS, ""),
             ("width", self.width, LINE_WIDTHS, "pt"),
             ("head_size", self.head_size, HEAD_SIZES, ""),
         ):

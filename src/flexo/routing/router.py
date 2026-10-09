@@ -359,9 +359,8 @@ def route_figure(
     for edge in semantic.edges:
         if edge.id in straight:
             pairs[frozenset((edge.source.node_id, edge.target.node_id))].append(edge)
-    # (A curved edge bows away from the figure's middle, and stays on its canvas.)
+    # (A curved edge bows away from the figure's middle.)
     middle = Rect.union(node.bounds for node in fitted.nodes).center if fitted.nodes else None
-    canvas = Rect(0.0, 0.0, fitted.canvas_size.width, fitted.canvas_size.height)
     for together in pairs.values():
         # Straight edges between one pair of components run side by side,
         # a lane apart, rather than on top of each other.
@@ -370,7 +369,7 @@ def route_figure(
             if edge.shape == "curved":
                 routed_edges[edge.id] = curved_edge(
                     edge, fitted, layout_style, text_measurer, offset=offset,
-                    paired=len(together) > 1, middle=middle, canvas=canvas,
+                    paired=len(together) > 1, middle=middle,
                 )
                 continue
             routed_edges[edge.id] = straight_edge(

@@ -616,8 +616,12 @@ the target to the side of the target that faces back. It bows away from the
 middle of the figure (round a cycle, outwards), else to the left of its travel,
 so two curves between one pair, one each way, bow apart; `via="south"` bows it
 that way instead, and `depart=` and `arrive=` sides make it leave and meet those
-sides square, as a hand-drawn arrow does. It stays on the canvas, bowing the
-other way or less where it would leave it.
+sides square, as a hand-drawn arrow does. `bend=` says how far it bows: its
+middle stood off the straight line between its ends by that share of the line's
+length, to the left of its travel (`0.3`) or the right (`-0.3`); in the studio,
+drag the square handle on a curved or straight line's middle (double-click it to
+let the line bow of itself again). Where a curve bows out of its container, the
+container makes room for it, as it does for any line.
 
 `width=` draws a line wider or thinner than the theme's, in points, and its
 arrowheads grow and shrink with it, as a drawing program's do; `head_size=`

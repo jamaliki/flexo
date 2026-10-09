@@ -912,6 +912,9 @@ def resolve_style(
         style = replace(style, typography=style.typography.with_family(font))
     if conventions is not None:
         style = replace(style, conventions=style.conventions.with_updates(conventions))
+    if style.conventions.arrowheads != "theme":
+        # Every arrow drawn in the shape the conventions name, whatever the theme draws.
+        style = replace(style, arrow_shape=style.conventions.arrowheads)
     if sketch is not None:
         style = replace(style, sketch=(style.sketch or Sketch()).with_updates(sketch.changes()))
     if background is not None:

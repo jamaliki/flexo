@@ -615,15 +615,14 @@ def curved_edge(
     offset: float = 0.0,
     paired: bool = False,
     middle: Point | None = None,
-    canvas: Rect | None = None,
 ) -> RoutedEdge:
     """One smooth curve from outline to outline: a cubic Bézier between the sides of the
     two that face each other, bowed to one side (see ``EdgeSpec.shape``), or leaving and
     meeting square the sides ``depart`` and ``arrive`` name. ``offset`` moves it sideways
     as a straight edge's; ``paired``, it shares its two ends with another, and bows to the
     left of its travel (the other way, the other way); ``middle`` is the figure's, which
-    it bows away from, and ``canvas`` what it keeps inside, bowing the other way or less
-    to.
+    it bows away from. Where it bows out of its container, the container is given the room
+    (``flexo.routing.room``), as for any line.
 
     Its centerline is the curve read as ``CURVE_SAMPLES`` pieces, which lint, the caption
     and the shaft's trims read as any line's; ``curve`` is the shaft, as one cubic.
@@ -631,9 +630,7 @@ def curved_edge(
 
     source = fitted.node(edge.source.node_id)
     target = fitted.node(edge.target.node_id)
-    controls = _curve(
-        edge, source, target, offset=offset, paired=paired, middle=middle, canvas=canvas
-    )
+    controls = _curve(edge, source, target, offset=offset, paired=paired, middle=middle)
     first = _leaving(source, controls, style, at_start=True)
     last = _leaving(target, controls, style, at_start=False)
     if last - first < 1e-6:
@@ -644,7 +641,7 @@ def curved_edge(
     shaft = routed.shaft
     drawn = _between(curve, _parameter(centerline, shaft[0]), _parameter(centerline, shaft[-1]))
     # (Its caption is placed by its middle: see ``flexo.routing.labels``.)
-    return replace(routed, straight=True, curve=drawn)
+    return replace(routed, straight=True, curve=drawn, chord=(controls[0], controls[3]))
 
 
 def _curve(
@@ -655,66 +652,53 @@ def _curve(
     offset: float,
     paired: bool,
     middle: Point | None,
-    canvas: Rect | None,
 ) -> Cubic:
-    """The curve a curved edge is drawn on, side to side."""
+    """The curve a curved edge is drawn on, side to side: leaving its source and meeting
+    its target square to the sides named (``depart``, ``arrive``), else along the line
+    between them, its middle stood off that line as far as ``bend`` says -- else bowed of
+    itself (``_bow``), or as the sides alone carry it."""
 
     a, b = source.bounds.center, target.bounds.center
     leave = edge.depart or _facing(source.bounds, b)
     meet = edge.arrive or _facing(target.bounds, a)
     start, end = _side_middle(source.bounds, leave), _side_middle(target.bounds, meet)
-    if edge.depart is not None or edge.arrive is not None:
-        out, into = leave.vector, meet.vector
-
-        def square(reach: float) -> Cubic:
-            return (
-                start,
-                start.translated(out.x * reach, out.y * reach),
-                end.translated(into.x * reach, into.y * reach),
-                end,
-            )
-
-        reach = max(start.distance_to(end) * CURVE_REACH, 12.0)
-        if canvas is not None:
-            # (Run out less far where the canvas ends first.)
-            room = canvas.inflated(-2.0)
-            for share in (1.0, 0.5, 0.25):
-                controls = square(reach * share)
-                if all(room.contains_point(_at(controls, step / 16.0)) for step in range(17)):
-                    return controls
-            return square(reach * 0.25)
-        return square(reach)
-    # Else from the middle of the side facing the other to the middle of the other's facing
-    # it, bowed.
-    a, b = start, end
-    dx, dy = b.x - a.x, b.y - a.y
+    square = edge.depart is not None or edge.arrive is not None
+    dx, dy = end.x - start.x, end.y - start.y
     length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
-    # Offsets in one fixed frame per pair, as a straight edge's.
-    if (a.x, a.y) > (b.x, b.y):
-        offset = -offset
-    a = a.translated(-dy / length * offset, dx / length * offset)
-    b = b.translated(-dy / length * offset, dx / length * offset)
+    if not square:
+        # Offsets in one fixed frame per pair, as a straight edge's.
+        if (start.x, start.y) > (end.x, end.y):
+            offset = -offset
+        start = start.translated(-dy / length * offset, dx / length * offset)
+        end = end.translated(-dy / length * offset, dx / length * offset)
     left = Point(dy / length, -dx / length)  # to the left of its travel, y growing down
+    if square:
+        out, into = leave.vector, meet.vector
+        reach = max(length * CURVE_REACH, 12.0)
+    else:
+        out, into = Point(dx / length, dy / length), Point(-dx / length, -dy / length)
+        reach = length / 3.0
+    # How far the way it leaves and meets carries its middle off the line, of itself.
+    lean = left.x * (out.x + into.x) + left.y * (out.y + into.y)
 
-    def arc(way: float, bend: float) -> Cubic:
-        rise = way * bend * length
+    def shaped(rise: float, run: float = reach) -> Cubic:
+        """The curve whose middle stands ``rise`` to the left of the line between its ends
+        (a cubic's middle is 3/8 of the way to its controls' sum: both are moved across)."""
+
+        across = (8.0 * rise / 3.0 - run * lean) / 2.0
         return (
-            a,
-            Point(a.x + dx / 3.0 + left.x * rise, a.y + dy / 3.0 + left.y * rise),
-            Point(a.x + 2.0 * dx / 3.0 + left.x * rise, a.y + 2.0 * dy / 3.0 + left.y * rise),
-            b,
+            start,
+            Point(start.x + out.x * run + left.x * across, start.y + out.y * run + left.y * across),
+            Point(end.x + into.x * run + left.x * across, end.y + into.y * run + left.y * across),
+            end,
         )
 
-    way = _bow(edge, a, b, left, length, paired=paired, middle=middle)
-    if canvas is None:
-        return arc(way, CURVE_BEND)
-    room = canvas.inflated(-2.0)
-    for bend in (CURVE_BEND, CURVE_BEND / 2.0, CURVE_BEND / 4.0):
-        for side in (way, -way):
-            controls = arc(side, bend)
-            if all(room.contains_point(_at(controls, step / 16.0)) for step in range(17)):
-                return controls
-    return arc(way, CURVE_BEND / 4.0)
+    if edge.bend is not None:
+        return shaped(edge.bend * length)
+    if square:
+        return shaped(3.0 * reach * lean / 8.0)
+    way = _bow(edge, start, end, left, length, paired=paired, middle=middle)
+    return shaped(way * 0.75 * CURVE_BEND * length)
 
 
 def _bow(

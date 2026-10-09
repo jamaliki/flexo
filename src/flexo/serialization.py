@@ -271,6 +271,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["via"] = edge.via.value
     if edge.shape != "auto":
         result["shape"] = edge.shape
+    if edge.bend is not None:
+        result["bend"] = edge.bend
     if edge.line != "solid":
         result["line"] = edge.line
     if edge.tone is not None:
@@ -515,6 +517,7 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         arrive=Side(data["arrive"]) if data.get("arrive") else None,
         via=Side(data["via"]) if data.get("via") else None,
         shape=data.get("shape", "auto"),
+        bend=_points(data.get("bend")),
         line=data.get("line", "solid"),
         tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),

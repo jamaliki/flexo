@@ -503,6 +503,12 @@ def _render_edge(
             else rounded_polyline_path(edge.shaft, style.elbow_radius.points, edge.joints),
             marker__end=f"url(#{head})" if heads else None,
             marker__start=f"url(#{tail})" if edge.spec.arrow == "both" else None,
+            # (What its bend is measured from, for an editor's handle on its middle.)
+            data__flexo__chord=" ".join(
+                number(value) for point in edge.chord for value in (point.x, point.y)
+            )
+            if edge.chord is not None
+            else None,
             stroke__linecap="round",
             stroke__linejoin="round",
             **stroke,

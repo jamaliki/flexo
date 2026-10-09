@@ -149,7 +149,9 @@ def test_curves_widths_and_head_sizes_are_written_and_read_back() -> None:
     assert (written["shape"], written["width"], written["head_size"]) == ("curved", 2.0, 1.5)
 
 
-@pytest.mark.parametrize(("key", "value"), [("width", 0.0), ("width", 40), ("head_size", 0)])
+@pytest.mark.parametrize(
+    ("key", "value"), [("width", 0.0), ("width", 40), ("head_size", 0), ("bend", 1.5)]
+)
 def test_a_width_or_head_size_out_of_range_is_refused(key: str, value: float) -> None:
     with pytest.raises(ValueError, match=key):
         EdgeSpec("e", PortRef("a", "output"), PortRef("b", "input"), **{key: value})
@@ -190,3 +192,46 @@ def test_a_line_with_heads_at_both_ends_may_start_with_another() -> None:
     }
     (written, _) = figure_to_document(figure.spec)["edges"]
     assert written["tail"] == "dot"
+
+
+@pytest.mark.parametrize("bend", [0.3, -0.3, 0.0])
+def test_a_bend_stands_the_curves_middle_off_its_line_by_that_share(bend: float) -> None:
+    figure, a, b = _row()
+    with figure:
+        figure.connect(a, b, shape="curved", bend=bend)
+    compiled = compile_figure(figure.spec)
+    (edge,) = compiled.routed.edges
+    start, end = edge.chord
+    length = start.distance_to(end)
+    assert _bow(edge) == pytest.approx(bend * length, abs=0.05)
+    # Its chord is written for an editor's handle to measure from.
+    shaft = _elements(compiled)[f"{edge.spec.id}.shaft"]
+    chord = [float(value) for value in shaft.get("data-flexo-chord").split()]
+    assert chord == pytest.approx([start.x, start.y, end.x, end.y], abs=1e-3)
+
+
+def test_a_curve_bent_out_of_its_figure_is_given_the_room() -> None:
+    figure, a, b = _row()
+    with figure:
+        figure.connect(a, b, shape="curved", bend=0.6)
+    compiled = compile_figure(figure.spec)
+    (edge,) = compiled.routed.edges
+    top = min(point.y for point in edge.centerline)
+    assert top >= 0.0, "on the canvas"
+    plain, _, _ = _row()
+    assert compiled.fitted.canvas_size.height > compile_figure(plain.spec).fitted.canvas_size.height
+    assert not lint_compilation(compiled).errors
+
+
+def test_the_arrowheads_convention_draws_every_plain_head_in_its_shape() -> None:
+    def heads(**options) -> set[str]:
+        figure = Figure("c", **options)
+        with figure, figure.module("m", layout="row") as m:
+            a, b = m.block("a", label="A"), m.block("b", label="B")
+            figure.connect(a, b)
+            figure.connect(b, a, head="dot")  # a head of its own keeps it
+        drawing = read_drawing(compile_figure(figure.spec).document.text)
+        return {found.shape for item in drawing.walk() for found in getattr(item, "arrowheads", ())}
+
+    assert heads() == {"stealth", "dot"}  # the paper theme's own
+    assert heads(conventions={"arrowheads": "triangle"}) == {"triangle", "dot"}

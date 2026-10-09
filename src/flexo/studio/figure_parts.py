@@ -1027,6 +1027,16 @@ EDGE_FIELDS = [
         hint="Curved bows away from the figure's middle, or leaves the sides chosen square",
     ),
     _field(
+        "bend",
+        "Bend",
+        "number",
+        min=-1,
+        max=1,
+        step=0.05,
+        show={"shape": "curved"},
+        hint="Drag the handle on its middle; a share of its length, to the left of its travel",
+    ),
+    _field(
         "width",
         "Line Width",
         "number",

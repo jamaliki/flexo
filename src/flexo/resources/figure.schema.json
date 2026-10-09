@@ -124,6 +124,7 @@
             "merge": {"enum": ["auto", "arrow", "plain", "dot"]},
             "arrivals": {"enum": ["separate", "joined"]},
             "lines": {"enum": ["orthogonal", "straight"]},
+            "arrowheads": {"enum": ["theme", "triangle", "stealth", "latex", "open"]},
             "pin_spread": {"type": "number", "minimum": 0, "maximum": 1}
           }
         },
@@ -230,6 +231,7 @@
         "arrive": {"$ref": "#/$defs/side"},
         "via": {"$ref": "#/$defs/side"},
         "shape": {"enum": ["auto", "orthogonal", "straight", "curved"]},
+        "bend": {"type": "number", "minimum": -1, "maximum": 1},
         "line": {"enum": ["solid", "dashed", "dotted"]},
         "tone": {"type": ["string", "integer"]},
         "arrow": {"enum": ["end", "none", "both", "reversible"]},
