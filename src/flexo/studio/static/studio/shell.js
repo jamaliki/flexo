@@ -758,12 +758,17 @@ export async function start() {
   const doable = (session) => {
     try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
   };
+  // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
+  const doesKey = (session, keys) => {
+    try { return Boolean(session?.commands().some((command) => !command.disabled && command.keys === keys)); } catch { return false; }
+  };
   let reporting = null;
   const report = () => {
     if (reporting) return;
     reporting = setTimeout(() => {
       reporting = null;
       const session = workspace.active;
+      const field = typingIn(document.activeElement) ? document.activeElement : null;
       window.pywebview?.api?.studio_state?.({
         file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
         can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
@@ -776,6 +781,8 @@ export async function start() {
         tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
         sheet: Boolean(document.querySelector(".scrim:not(.palette-scrim)")),
         side: side.open || "",
+        // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
+        deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
       });
     }, 80);
   };
@@ -784,6 +791,24 @@ export async function start() {
   for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
   document.addEventListener("focusin", report);
   document.addEventListener("focusout", report);
+  // (So does choosing words in a field, or no longer: Edit › Delete is for them.)
+  let wordsChosen = false;
+  document.addEventListener("selectionchange", () => {
+    const now = typingIn(document.activeElement) && chosenIn(document.activeElement);
+    if (now !== wordsChosen) { wordsChosen = now; report(); }
+  });
+  // Edit › Cut, Copy and Paste, chosen with the pointer in the Mac app, for what is chosen in
+  // the document (an object, a figure's shapes, a slide): the web view offers them only for
+  // words chosen, unless the page says first that it has something of its own to cut, copy or
+  // paste (its beforecut, beforecopy and beforepaste, as WebKit asks before its Edit menu
+  // shows); the page's own cut, copy and paste then do it, as for ⌘X, ⌘C and ⌘V. Words typed
+  // or chosen keep the web view's own.
+  for (const [name, keys] of [["beforecut", "⌘X"], ["beforecopy", "⌘C"], ["beforepaste", "⌘V"]]) {
+    document.addEventListener(name, (event) => {
+      if (typingIn(document.activeElement) || !getSelection().isCollapsed || document.querySelector(".scrim, .present")) return;
+      if (doesKey(workspace.active, keys)) event.preventDefault();
+    });
+  }
   window.addEventListener("pywebviewready", report);
   new MutationObserver(report).observe(document.body, { childList: true });
   const docHead = h("div", {}, docbar, trustBar);
@@ -918,7 +943,7 @@ export async function start() {
       fitDocbar();
     }
     // A document that has never read has nothing to edit, export or present.
-    for (const slot of [docLeft, docRight]) slot.inert = unreadable(session);
+    for (const slot of [docLeft, docCentre, docRight]) slot.inert = unreadable(session);
     renderUnread(session);
   };
 
@@ -1200,10 +1225,13 @@ function inField(event) {
 // own, as its keys are. Delete takes the words chosen, and nothing with none chosen.
 function editField(field, name) {
   if (name === "undo" || name === "redo") { document.execCommand(name); return; }
-  const plain = !field.isContentEditable;
-  if (name === "select-all") { if (plain) field.select(); else document.execCommand("selectAll"); return; }
-  const chosen = plain ? field.selectionStart !== field.selectionEnd : !getSelection().isCollapsed;
-  if (chosen) document.execCommand("delete");
+  if (name === "select-all") { if (field.isContentEditable) document.execCommand("selectAll"); else field.select(); return; }
+  if (chosenIn(field)) document.execCommand("delete");
+}
+
+// Words chosen in a field typed in, not the caret alone.
+function chosenIn(field) {
+  return field.isContentEditable ? !getSelection().isCollapsed : field.selectionStart !== field.selectionEnd;
 }
 
 // A key pressed where the keys are, as if typed (Edit › Delete is ⌫ there): `mod` is ⌘ on a
