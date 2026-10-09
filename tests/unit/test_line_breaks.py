@@ -8,7 +8,7 @@ import yaml
 
 from flexo.builder import Figure
 from flexo.compiler import compile_figure
-from flexo.markup import parse_label
+from flexo.markup import parse_label, parse_words
 
 
 def _texts(label: str) -> list[str]:
@@ -44,3 +44,11 @@ def test_words_given_a_new_line_in_the_studio_are_written_as_typed() -> None:
     ):
         written = apply(text, action)["text"]
         assert yaml.safe_load(written)["nodes"][0]["label"] == "A\nB", written
+
+
+def test_running_text_keeps_its_words_as_written() -> None:
+    # A slide's words, between their emphasis: a line that ends before bold words is kept,
+    # and a backslash and n are only that.
+    assert [run.text for run in parse_words("one\n")] == ["one\n"]
+    assert [run.text for run in parse_words("a \\n b")] == ["a \\n b"]
+    assert [run.text for run in parse_words("one\n[two]{accent}")] == ["one\n", "two"]

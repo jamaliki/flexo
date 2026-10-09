@@ -249,19 +249,32 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
     (not in its maths or code, where ``\\nu`` and ``\\n`` are their own) starts a new
     line, as Graphviz reads it."""
 
-    # A tab in words is a space between them; other control characters (a stray \r)
-    # draw nothing -- a font has no glyph for either. A new line after the last words
-    # (as a block in YAML ends) is no line of its own.
-    text = text.translate(_CONTROLS).rstrip("\n")
+    # A new line after the last words (as a block in YAML ends) is no line of its own.
+    text = text.rstrip("\n")
     while text.endswith("\\n") and not text.endswith("\\\\n"):
         text = text[:-2].rstrip("\n")
+    return _runs(text, breaks=True)
+
+
+def parse_words(text: str) -> tuple[TextRun, ...]:
+    """The runs of a piece of running text (a slide's words, between its emphasis), as
+    ``parse_label`` reads a label, but word for word: a new line it ends with is kept
+    (the words after it follow on a line of their own), and ``\\n`` is two characters."""
+
+    return _runs(text, breaks=False)
+
+
+def _runs(text: str, *, breaks: bool) -> tuple[TextRun, ...]:
+    # A tab in words is a space between them; other control characters (a stray \r)
+    # draw nothing -- a font has no glyph for either.
+    text = text.translate(_CONTROLS)
     if not text:
         return ()
     if (
         "$" not in text and "`" not in text and "](" not in text and "]{" not in text
         and "\\(" not in text and "\\[" not in text
     ):
-        return (TextRun(text.replace("\\n", "\n")),)
+        return (TextRun(text.replace("\\n", "\n") if breaks else text),)
     runs: list[TextRun] = []
     plain: list[str] = []
     index = 0
@@ -275,7 +288,7 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
             plain.append("`")
             index += 2
             continue
-        if character == "\\" and text[index + 1 : index + 2] == "n":
+        if breaks and character == "\\" and text[index + 1 : index + 2] == "n":
             plain.append("\n")
             index += 2
             continue
@@ -284,14 +297,16 @@ def parse_label(text: str) -> tuple[TextRun, ...]:
                 runs.append(TextRun("".join(plain)))
                 plain = []
             colour = coloured.group(2)
-            runs.extend(replace(run, color=colour) for run in parse_label(coloured.group(1)))
+            inner = _runs(coloured.group(1), breaks=breaks)
+            runs.extend(replace(run, color=colour) for run in inner)
             index = coloured.end()
             continue
         if character == "[" and (link := _LINK.match(text, index)):
             if plain:
                 runs.append(TextRun("".join(plain)))
                 plain = []
-            runs.extend(replace(run, link=link.group(2)) for run in parse_label(link.group(1)))
+            inner = _runs(link.group(1), breaks=breaks)
+            runs.extend(replace(run, link=link.group(2)) for run in inner)
             index = link.end()
             continue
         if character == "`":
