@@ -264,6 +264,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .docbar.compact .docbar-slot .btn:not(.keep-label) .btn-label { display: none; }
 .docbar.compact .docbar-slot .btn.ghost:not(.icon) { height: 36px; min-width: 34px; }
 .docbar.tight .btn-label, .docbar.tight .status-text, .docbar.tight .bar-label { display: none; }
+/* Too narrow even for the tools' words, a document that could not be saved still says so,
+   cut short (its tooltip has it whole): a coloured dot alone says nothing. */
+.docbar.tight .status.problem .status-text, .docbar.tight .status.offline .status-text { display: inline; max-width: 180px; }
 .docbar.tight .status:not(.problem) { min-width: 0; }
 .docbar-slot, .docbar-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .docbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; flex: none; }
@@ -345,6 +348,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 1239px) {
   .workbench { position: relative; }
   .side { position: absolute; top: var(--doc-head, 0px); right: 0; bottom: 0; z-index: 40; width: 300px; box-shadow: var(--shadow-2); }
+  /* The inspector under it is out of sight: its buttons are not shown pressed (shell.js). */
+  body.side-open .docbar .docbar-slot .btn.ghost.on[aria-pressed] { background: transparent; color: var(--ink-2); }
+  body.side-open .docbar .docbar-slot .btn.ghost.on[aria-pressed] svg { color: inherit; }
 }
 .side-head { display: flex; align-items: center; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .side-tabs { display: flex; gap: 2px; }
@@ -746,7 +752,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog.wide { width: min(860px, calc(100vw - 32px)); }
 .dialog-head { display: flex; align-items: center; padding: 14px 16px 10px; gap: 10px; }
 .dialog-title { font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
-.dialog-body { padding: 6px 16px 16px; overflow: auto; display: grid; gap: 14px; }
+.dialog-body { padding: 6px 16px 16px; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
 /* What an export makes, said at the top of its sheet. */
 .export-hint { margin: 0; color: var(--ink-2); }
