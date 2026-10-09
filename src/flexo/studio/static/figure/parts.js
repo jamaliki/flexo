@@ -354,6 +354,8 @@ export function figureParts(host) {
         if (all("properties.yaw", "properties.pitch", "properties.roll")) return `Rotate ${name(id)}`;
         if (all("properties.yaw", "properties.pitch", "properties.roll", "properties.zoom")) return `Reset View of ${name(id)}`;
         if (all("properties.width", "properties.height")) return `Resize ${name(id)}`;
+        if (all("width", "height")) return values.width === null && values.height === null ? `Fit ${name(id)} to Its Words` : `Resize ${name(id)}`;
+        if (all("bend", "lean")) return values.bend === null && values.lean === null ? "Reset Bend" : "Bend Line";
         // mol-sketch's settings, by the setting's label: "Change Line Width".
         const style = keys.filter((key) => key.startsWith("properties.style"));
         if (style.length && style.length === keys.length) {
@@ -1869,9 +1871,9 @@ export function figureParts(host) {
     if (bending) {
       views.push(h("span.fig-bend", {
         style: { left: `${bending.at.x}px`, top: `${bending.at.y}px` },
-        title: "Drag to bend the line · Double-click to reset",
+        title: "Drag to shape the curve (⌘: without snapping) · Double-click to reset",
         onpointerdown: (event) => bendStart(event, ended, bending), onclick: stop, onmousemove: stop,
-        ondblclick: (event) => { stop(event); if (edgeOf(ended)?.bend !== undefined) bendTo(ended, null); },
+        ondblclick: (event) => { stop(event); bendTo(ended, null); },
       }));
     }
     // A molecule chosen is moved by dragging, like any part; it is turned by its handle
@@ -1894,7 +1896,10 @@ export function figureParts(host) {
     // A molecule or picture chosen has a handle at each corner: dragged, it is drawn
     // larger or smaller, and the figure is laid out round it again. Where the figure's own
     // handle is at the same corner, the part's steps inside it.
-    if (box && SIZED_PARTS.has(nodeOf(id)?.kind)) {
+    // A shape that takes a size of its own (its drawing says the size that fits its words)
+    // has one too: dragged, it is drawn that size, snapping to the size that fits its words.
+    const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? fitOf(id) : null;
+    if (box && (SIZED_PARTS.has(nodeOf(id)?.kind) || fits)) {
       const theirs = [...host.overlay.querySelectorAll(".size-handle")].map((handle) => handle.getBoundingClientRect()).filter((rect) => rect.width);
       for (const corner of ["nw", "ne", "sw", "se"]) {
         let left = corner.endsWith("w") ? box.left : box.left + box.width, top = corner.startsWith("n") ? box.top : box.top + box.height;
@@ -1902,7 +1907,12 @@ export function figureParts(host) {
           left += corner.endsWith("w") ? 12 : -12;
           top += corner.startsWith("n") ? 12 : -12;
         }
-        views.push(h(`span.fig-size.${corner}`, {
+        views.push(h(`span.fig-size.${corner}`, fits ? {
+          style: { left: `${left}px`, top: `${top}px` },
+          title: "Drag to resize (⇧: keep its proportions) · Double-click to fit it to its words",
+          onpointerdown: (event) => shapeSizeStart(event, id, corner, fits), onclick: stop, onmousemove: stop,
+          ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, fitValues(id, fits)); },
+        } : {
           style: { left: `${left}px`, top: `${top}px` },
           title: "Drag to resize · Double-click to reset size",
           onpointerdown: (event) => partSizeStart(event, id, corner),
@@ -1988,6 +1998,129 @@ export function figureParts(host) {
   function partSizeCancel() {
     const sizing = partSizeFinish();
     if (sizing) sizing.element.style.transform = "";
+  }
+
+  // -- a shape sized by its corners --
+  // The size that fits a shape's words, as its drawing says (in the figure's units), for a
+  // shape that takes a size of its own.
+  function fitOf(id) {
+    const [width, height] = (host.element(id)?.getAttribute("data-flexo-fit") || "").split(" ").map(Number);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+  // The size that fits a shape's words, as it is written: a box's is its own (no size of
+  // its own); a diamond's hugs its words closer than it does of itself, so is written.
+  const fitValues = (id, fit) => (nodeOf(id)?.kind === "decision"
+    ? { width: `${Math.ceil(fit.width)}pt`, height: `${Math.ceil(fit.height)}pt` } : { width: null, height: null });
+  // Dragged, its outline is drawn at the size it will be, its opposite corner kept: a side
+  // within a few pixels of the size that fits its words snaps to it (both: it fits them
+  // again, its size its own no longer), and a side not moved keeps what it was; ⇧ keeps
+  // its proportions. Let go, it is that size, and the figure is laid out round it again.
+  const SIZE_SNAP = 7; // (pixels)
+  let shapeSizing = null;
+  function shapeSizeStart(event, id, corner, fit) {
+    if (event.button !== 0 || shapeSizing || partSizing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const element = host.element(id);
+    const box = (host.element(`${id}.body`) || element)?.getBoundingClientRect();
+    const unit = element?.getScreenCTM?.()?.a;
+    if (!box?.width || !box.height || !unit) return;
+    const west = corner.endsWith("w"), north = corner.startsWith("n");
+    const node = nodeOf(id);
+    const drawing = document.createElementNS(SVG_NS, "svg");
+    drawing.classList.add("fig-end-drag", "fig-size-drag");
+    const outline = document.createElementNS(SVG_NS, node?.kind === "decision" ? "polygon" : node?.kind === "circle" ? "ellipse" : "rect");
+    drawing.append(outline);
+    const tip = h("div.fig-turn-tip", { hidden: true });
+    shapeSizing = { id, element, box, unit, fit, kind: node?.kind, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
+      had: { width: node?.width ?? null, height: node?.height ?? null },
+      anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, west, north, size: null };
+    window.addEventListener("pointermove", shapeSizeMove);
+    window.addEventListener("pointerup", shapeSizeEnd);
+    window.addEventListener("pointercancel", shapeSizeCancel);
+    window.addEventListener("keydown", shapeSizeKey, true);
+  }
+  // The size the pointer gives it (in the figure's units), snapped, and what is said of it.
+  function shapeSizeAt(sizing, clientX, clientY, keep) {
+    const { anchor, box, unit, fit } = sizing;
+    let width = Math.max(8, Math.abs(clientX - anchor.x)) / unit, height = Math.max(8, Math.abs(clientY - anchor.y)) / unit;
+    const was = { width: box.width / unit, height: box.height / unit };
+    if (keep) {
+      const by = Math.max(width / was.width, height / was.height);
+      width = was.width * by;
+      height = was.height * by;
+    }
+    const near = SIZE_SNAP / unit;
+    const snapped = { width: false, height: false }, kept = { width: false, height: false };
+    if (!keep) {
+      for (const side of ["width", "height"]) {
+        if (Math.abs((side === "width" ? width : height) - fit[side]) < near) { snapped[side] = true; if (side === "width") width = fit.width; else height = fit.height; }
+        else if (Math.abs((side === "width" ? width : height) - was[side]) < near) { kept[side] = true; if (side === "width") width = was.width; else height = was.height; }
+      }
+    }
+    const fitted = snapped.width && snapped.height;
+    const said = fitted ? "Fits Its Words" : `${Math.round(width)} × ${Math.round(height)} pt`;
+    return { width, height, snapped, kept, fitted, said };
+  }
+  function shapeSizeMove(event) {
+    const sizing = shapeSizing;
+    if (!sizing) return;
+    if (!sizing.moved && Math.hypot(event.clientX - sizing.start.x, event.clientY - sizing.start.y) < 3) return;
+    if (!sizing.moved) {
+      sizing.moved = true;
+      host.overlay.append(sizing.drawing, sizing.tip);
+      host.overlay.classList.add("fig-sizing");
+    }
+    sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey };
+    const size = shapeSizeAt(sizing, event.clientX, event.clientY, event.shiftKey);
+    sizing.size = size;
+    const outer = host.overlay.getBoundingClientRect();
+    const { anchor, unit, west, north, drawing, outline, tip } = sizing;
+    const w = size.width * unit, ht = size.height * unit;
+    const left = (west ? anchor.x - w : anchor.x) - outer.left, top = (north ? anchor.y - ht : anchor.y) - outer.top;
+    drawing.setAttribute("width", String(outer.width));
+    drawing.setAttribute("height", String(outer.height));
+    if (sizing.kind === "decision") outline.setAttribute("points", `${left + w / 2},${top} ${left + w},${top + ht / 2} ${left + w / 2},${top + ht} ${left},${top + ht / 2}`);
+    else if (sizing.kind === "circle") for (const [key, value] of Object.entries({ cx: left + w / 2, cy: top + ht / 2, rx: w / 2, ry: ht / 2 })) outline.setAttribute(key, String(value));
+    else for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: ht, rx: 4 })) outline.setAttribute(key, String(value));
+    outline.classList.toggle("fits", size.fitted);
+    tip.hidden = false;
+    tip.textContent = size.said;
+    Object.assign(tip.style, { left: `${left + w / 2}px`, top: `${top + ht + 8}px` });
+  }
+  function shapeSizeFinish() {
+    const sizing = shapeSizing;
+    shapeSizing = null;
+    window.removeEventListener("pointermove", shapeSizeMove);
+    window.removeEventListener("pointerup", shapeSizeEnd);
+    window.removeEventListener("pointercancel", shapeSizeCancel);
+    window.removeEventListener("keydown", shapeSizeKey, true);
+    host.overlay.classList.remove("fig-sizing");
+    sizing?.drawing.remove();
+    sizing?.tip.remove();
+    if (sizing?.moved) swallowClick();
+    return sizing;
+  }
+  function shapeSizeEnd() {
+    const sizing = shapeSizeFinish();
+    const size = sizing?.moved ? sizing.size : null;
+    if (!size) return;
+    // Fitting its words, it is written as fitValues says. Else a side that fits them has
+    // no size of its own, and one not moved keeps what it had -- but for a diamond, whose
+    // height is its width's (and its width its height's): it is the size it is drawn at.
+    const own = (side) => `${Math.round(size[side])}pt`;
+    const value = (side) => (sizing.kind === "decision" ? (size.kept[side] && sizing.had[side] !== null ? sizing.had[side] : own(side))
+      : size.snapped[side] ? null : size.kept[side] ? sizing.had[side] : own(side));
+    const values = size.fitted ? fitValues(sizing.id, sizing.fit) : { width: value("width"), height: value("height") };
+    if (values.width === sizing.had.width && values.height === sizing.had.height) return;
+    act({ do: "update", target: { type: "node", id: sizing.id }, values }, { then: () => { state.landing = Date.now(); } });
+  }
+  function shapeSizeCancel() { shapeSizeFinish(); }
+  function shapeSizeKey(event) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    shapeSizeCancel();
   }
 
   // -- a line's end dragged to another side of its shape --
@@ -2128,68 +2261,135 @@ export function figureParts(host) {
   }
 
   // -- a line bent by its middle --
-  // A curved line's middle stands off the line between its ends by its `bend`, a share of
-  // that line's length, to the left of its travel: dragged, its handle bends it through the
-  // pointer, the curve it would make drawn as it goes. Measured, as the figure measures it,
-  // from the middles of the sides it runs between (the shaft's `data-flexo-chord`), else
-  // -- a straight line, not yet bent -- from its own ends.
+  // A curved line passes through its middle, and its handle is there: dragged anywhere,
+  // the curve is drawn through it as it goes, as it will be -- its middle off the line
+  // between its ends by its `bend`, and along that line by its `lean` (shares of the
+  // line's length). The handle snaps to where a curve is likely to be wanted: half way
+  // between its ends, straight, where it bows of itself, and level with either end, the
+  // guide it keeps to drawn; ⌘ held, it snaps to nothing. Measured as the figure
+  // measures it, from its whole curve side to side (the shaft's `data-flexo-curve`),
+  // else -- a straight line, not yet bent -- from its own ends.
   let bendingNow = null;
+  const BEND_SNAP = 7; // (pixels)
+  const cubicAt = ([a, b, c, d], t) => {
+    const u = 1 - t;
+    return { x: u * u * u * a.x + 3 * u * u * t * b.x + 3 * u * t * t * c.x + t * t * t * d.x, y: u * u * u * a.y + 3 * u * u * t * b.y + 3 * u * t * t * c.y + t * t * t * d.y };
+  };
   function bendSeen(id) {
     const shaft = host.element(id)?.querySelector("path[id$='.shaft']");
     const outer = host.overlay?.getBoundingClientRect();
     const matrix = shaft?.getScreenCTM?.(), length = shaft?.getTotalLength?.() || 0;
     if (!shaft || !outer || !matrix || !length) return null;
-    const chord = (shaft.getAttribute("data-flexo-chord") || "").split(" ").map(Number);
-    const from = chord.length === 4 && chord.every(Number.isFinite) ? { x: chord[0], y: chord[1] } : shaft.getPointAtLength(0);
-    const to = chord.length === 4 && chord.every(Number.isFinite) ? { x: chord[2], y: chord[3] } : shaft.getPointAtLength(length);
-    const middle = shaft.getPointAtLength(length / 2);
+    const numbers = (name, count) => {
+      const values = (shaft.getAttribute(name) || "").split(" ").map(Number);
+      return values.length === count && values.every(Number.isFinite) ? values : null;
+    };
+    const whole = numbers("data-flexo-curve", 8);
+    let curve;
+    if (whole) curve = [0, 2, 4, 6].map((at) => ({ x: whole[at], y: whole[at + 1] }));
+    else {
+      const a = shaft.getPointAtLength(0), b = shaft.getPointAtLength(length);
+      curve = [0, 1, 2, 3].map((step) => ({ x: a.x + ((b.x - a.x) * step) / 3, y: a.y + ((b.y - a.y) * step) / 3 }));
+    }
+    const rest = numbers("data-flexo-rest", 2);
+    const middle = cubicAt(curve, 0.5);
     const seen = (point) => { const at = new DOMPoint(point.x, point.y).matrixTransform(matrix); return { x: at.x - outer.left, y: at.y - outer.top }; };
-    return { shaft, matrix, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, at: seen(middle), ends: [seen(shaft.getPointAtLength(0)), seen(shaft.getPointAtLength(length))] };
+    return { shaft, matrix, curve, middle, rest: rest ? { x: rest[0], y: rest[1] } : null, at: seen(middle), seen };
   }
-  // The bend that puts a line's middle at a point on the page (its own units: the figure's).
-  function bendAt(bending, clientX, clientY) {
-    const point = new DOMPoint(clientX, clientY).matrixTransform(bending.matrix.inverse());
-    const { from, to } = bending;
-    const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy);
-    if (length < 1e-6) return 0;
-    const rise = ((point.x - (from.x + to.x) / 2) * dy - (point.y - (from.y + to.y) / 2) * dx) / length;
-    const bend = Math.max(-1, Math.min(1, rise / length));
-    // (Within a hair of straight, straight.)
-    return Math.abs(bend) < 0.02 ? 0 : Math.round(bend * 100) / 100;
+  // Where the pointer puts a line's middle (in the figure's units), snapped, the guides it
+  // keeps to, what it is said to be, and its bend and lean there (none: as it bows of
+  // itself).
+  function bendPlace(bending, edge, clientX, clientY, free) {
+    let point = new DOMPoint(clientX, clientY).matrixTransform(bending.matrix.inverse());
+    point = { x: point.x, y: point.y };
+    const [from, , , to] = bending.curve;
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    const along = { x: (to.x - from.x) / length, y: (to.y - from.y) / length };
+    const left = { x: along.y, y: -along.x };
+    const near = BEND_SNAP / (Math.hypot(bending.matrix.a, bending.matrix.b) || 1);
+    const lean = edge?.lean || 0;
+    // Half way between its ends: the line its middle is centred on.
+    const centre = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    const guides = [];
+    let centred = false, straight = false, rest = false;
+    if (!free) {
+      if (bending.rest && Math.hypot(point.x - bending.rest.x, point.y - bending.rest.y) < near) {
+        point = { ...bending.rest };
+        rest = true;
+      } else {
+        const off = (point.x - centre.x) * along.x + (point.y - centre.y) * along.y;
+        if (Math.abs(off) < near) {
+          point = { x: point.x - off * along.x, y: point.y - off * along.y };
+          guides.push({ at: centre, way: left });
+          centred = true;
+        }
+        const rise = (point.x - from.x) * left.x + (point.y - from.y) * left.y;
+        if (Math.abs(rise) < near) {
+          point = { x: point.x - rise * left.x, y: point.y - rise * left.y };
+          guides.push({ at: from, way: along });
+          straight = true;
+        }
+        // Level with either end: across from it, or over or under it.
+        if (!centred && !straight) {
+          for (const end of [from, to]) {
+            if (Math.abs(point.x - end.x) < near) { point.x = end.x; guides.push({ at: end, way: { x: 0, y: 1 } }); break; }
+          }
+          for (const end of [from, to]) {
+            if (Math.abs(point.y - end.y) < near) { point.y = end.y; guides.push({ at: end, way: { x: 1, y: 0 } }); break; }
+          }
+        }
+      }
+    }
+    const clamp = (value, most) => Math.round(Math.max(-most, Math.min(most, value)) * 100) / 100;
+    const bend = straight ? 0 : clamp(((point.x - from.x) * left.x + (point.y - from.y) * left.y) / length, 1);
+    const leaning = clamp(lean + ((point.x - bending.middle.x) * along.x + (point.y - bending.middle.y) * along.y) / length, 0.5);
+    const said = rest ? "As Drawn of Itself" : straight ? "Straight" : centred ? "Centred" : "";
+    return { point, guides, said, values: rest ? null : { bend, lean: leaning } };
   }
-  function bendTo(id, bend) {
+  function bendTo(id, values) {
     const edge = edgeOf(id);
-    if (!edge || (edge.shape === "curved" && (edge.bend ?? null) === bend)) return false;
-    const values = bend === null ? { bend: null } : { shape: "curved", bend };
-    act({ do: "update", target: { type: "edge", id }, values }, { select: false, label: bend === null ? "Reset Bend" : edge.shape === "curved" ? "Bend Line" : "Curve Line" });
+    if (!edge) return false;
+    if (values === null) {
+      if (edge.bend === undefined && edge.lean === undefined) return false;
+      act({ do: "update", target: { type: "edge", id }, values: { bend: null, lean: null } }, { select: false, label: "Reset Bend" });
+      return true;
+    }
+    const lean = values.lean || null;
+    if (edge.shape === "curved" && (edge.bend ?? null) === values.bend && (edge.lean ?? null) === lean) return false;
+    act({ do: "update", target: { type: "edge", id }, values: { shape: "curved", bend: values.bend, lean } },
+      { select: false, label: edge.shape === "curved" ? "Bend Line" : "Curve Line" });
     return true;
   }
   function bendStart(event, id, bending) {
     if (event.button !== 0 || bendingNow || ending) return;
     event.preventDefault();
     event.stopPropagation();
-    bendingNow = { id, bending, start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, line: host.element(id) };
+    bendingNow = { id, bending, edge: edgeOf(id), start: { x: event.clientX, y: event.clientY }, pointer: null, free: false, moved: false, frame: 0, line: host.element(id) };
     window.addEventListener("pointermove", bendMove);
     window.addEventListener("pointerup", bendUp);
     window.addEventListener("pointercancel", bendCancel);
     window.addEventListener("keydown", bendKey, true);
+    window.addEventListener("keyup", bendKey, true);
   }
   function bendMove(event) {
     if (!bendingNow) return;
     bendingNow.pointer = { x: event.clientX, y: event.clientY };
+    bendingNow.free = event.metaKey;
     if (!bendingNow.moved) {
       if (Math.hypot(event.clientX - bendingNow.start.x, event.clientY - bendingNow.start.y) < 3) return;
       bendingNow.moved = true;
       const drawing = document.createElementNS(SVG_NS, "svg");
       drawing.classList.add("fig-end-drag");
-      const way = document.createElementNS(SVG_NS, "path"), spot = document.createElementNS(SVG_NS, "circle");
+      const guides = document.createElementNS(SVG_NS, "g"), way = document.createElementNS(SVG_NS, "path"), spot = document.createElementNS(SVG_NS, "circle");
+      guides.classList.add("fig-guides");
       spot.setAttribute("r", "4");
-      drawing.append(way, spot);
-      host.overlay.append(drawing);
+      drawing.append(guides, way, spot);
+      const tip = h("div.fig-turn-tip");
+      host.overlay.append(drawing, tip);
       host.overlay.classList.add("fig-ending");
       bendingNow.line?.classList.add("fig-faded");
       document.body.classList.add("fig-grabbing");
-      Object.assign(bendingNow, { drawing, way, spot });
+      Object.assign(bendingNow, { drawing, guides, way, spot, tip });
     }
     event.preventDefault();
     if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame);
@@ -2197,23 +2397,39 @@ export function figureParts(host) {
   function bendFrame() {
     if (!bendingNow?.moved) return;
     bendingNow.frame = 0;
-    const { drawing, way, spot, bending } = bendingNow;
+    const { drawing, guides, way, spot, tip, bending, edge } = bendingNow;
     const outer = host.overlay.getBoundingClientRect();
-    const point = { x: bendingNow.pointer.x - outer.left, y: bendingNow.pointer.y - outer.top };
     drawing.setAttribute("width", String(outer.width));
     drawing.setAttribute("height", String(outer.height));
-    // Through the pointer, from end to end: the curve its middle would be at.
-    const [from, to] = bending.ends;
-    const control = { x: 2 * point.x - (from.x + to.x) / 2, y: 2 * point.y - (from.y + to.y) / 2 };
-    way.setAttribute("d", `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`);
-    spot.setAttribute("cx", String(point.x));
-    spot.setAttribute("cy", String(point.y));
+    const placed = bendPlace(bending, edge, bendingNow.pointer.x, bendingNow.pointer.y, bendingNow.free);
+    bendingNow.placed = placed;
+    // The curve it will be: both controls moved 4/3 as far as its middle is.
+    const shift = { x: (4 / 3) * (placed.point.x - bending.middle.x), y: (4 / 3) * (placed.point.y - bending.middle.y) };
+    const [a, b, c, d] = bending.curve;
+    const [p0, p1, p2, p3] = [a, { x: b.x + shift.x, y: b.y + shift.y }, { x: c.x + shift.x, y: c.y + shift.y }, d].map(bending.seen);
+    way.setAttribute("d", `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`);
+    const at = bending.seen(placed.point);
+    spot.setAttribute("cx", String(at.x));
+    spot.setAttribute("cy", String(at.y));
+    // Each guide across the page, through the point it keeps to.
+    const reach = 4000;
+    guides.replaceChildren(...placed.guides.map(({ at: through, way: toward }) => {
+      const one = bending.seen({ x: through.x - toward.x * reach, y: through.y - toward.y * reach });
+      const two = bending.seen({ x: through.x + toward.x * reach, y: through.y + toward.y * reach });
+      const line = document.createElementNS(SVG_NS, "line");
+      for (const [key, value] of Object.entries({ x1: one.x, y1: one.y, x2: two.x, y2: two.y })) line.setAttribute(key, String(value));
+      return line;
+    }));
+    tip.textContent = placed.said;
+    tip.hidden = !placed.said;
+    Object.assign(tip.style, { left: `${at.x}px`, top: `${at.y + 16}px` });
   }
   function bendFinish() {
     window.removeEventListener("pointermove", bendMove);
     window.removeEventListener("pointerup", bendUp);
     window.removeEventListener("pointercancel", bendCancel);
     window.removeEventListener("keydown", bendKey, true);
+    window.removeEventListener("keyup", bendKey, true);
     document.body.classList.remove("fig-grabbing");
     const was = bendingNow;
     bendingNow = null;
@@ -2222,6 +2438,7 @@ export function figureParts(host) {
   }
   function bendClear(was) {
     was.drawing?.remove();
+    was.tip?.remove();
     was.line?.classList.remove("fig-faded");
     host.overlay.classList.remove("fig-ending");
   }
@@ -2229,8 +2446,11 @@ export function figureParts(host) {
     const was = bendFinish();
     if (!was?.moved || !was.pointer) return;
     swallowClick();
-    if (!bendTo(was.id, bendAt(was.bending, was.pointer.x, was.pointer.y))) { bendClear(was); return; }
+    was.tip?.remove();
+    const placed = bendPlace(was.bending, was.edge, was.pointer.x, was.pointer.y, was.free);
+    if (!bendTo(was.id, placed.values)) { bendClear(was); return; }
     // Its curve shown until the line is drawn bent (or the edit is refused).
+    was.guides?.replaceChildren();
     const started = Date.now();
     const wait = () => {
       if (!was.line?.isConnected || Date.now() - started > 6000) bendClear(was);
@@ -2240,7 +2460,12 @@ export function figureParts(host) {
   }
   function bendCancel() { const was = bendFinish(); if (was) bendClear(was); }
   function bendKey(event) {
-    if (event.key !== "Escape") return;
+    // ⌘ pressed or let go: snapping off or on again, where the pointer is.
+    if (event.key === "Meta") {
+      if (bendingNow?.moved) { bendingNow.free = event.type === "keydown"; if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame); }
+      return;
+    }
+    if (event.type !== "keydown" || event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     if (bendingNow?.moved) window.addEventListener("pointerup", () => swallowClick(), { capture: true, once: true });

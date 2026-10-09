@@ -47,6 +47,12 @@ class RoutedEdge:
     chord: tuple[Point, Point] | None = None
     """The two points a curved edge's ``bend`` is measured from: the middles of the sides
     it runs between (an editor's handle on its middle measures from them too)."""
+    whole: tuple[Point, Point, Point, Point] | None = None
+    """A curved edge's whole curve, from ``chord`` to ``chord`` (``curve`` is the part of
+    it between the outlines): its middle is where an editor puts its handle."""
+    rest: Point | None = None
+    """Where a curved edge's middle would be with no ``bend`` or ``lean`` of its own (as
+    it bows of itself): where an editor's handle snaps back to. Unset, it is there."""
     joined_at: Point | None = None
     """Where this edge merges into another of its bundle and its ink stops."""
     join_arrow: bool = True

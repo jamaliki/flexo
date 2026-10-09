@@ -187,6 +187,8 @@ LINE_WIDTHS = (0.1, 20.0)
 """The narrowest and widest an edge's own ``width`` may be, in points."""
 BENDS = (-1.0, 1.0)
 """How far a curved edge's ``bend`` may stand its middle off its line, either way."""
+LEANS = (-0.5, 0.5)
+"""How far a curved edge's ``lean`` may move its middle along its line, either way."""
 HEAD_SIZES = (0.1, 10.0)
 """The smallest and largest an edge's own ``head_size`` may be, times the theme's."""
 type JointStyle = Literal["dot", "arrow", "auto"]
@@ -536,13 +538,17 @@ class EdgeSpec:
     cycle, outwards), else to the left of its travel -- so two edges between one
     pair, one each way, bow apart. Given a ``depart`` or ``arrive`` side, it
     leaves and meets those sides square, as a hand-drawn arrow does. ``bend``
-    says how far it bows instead.
+    says how far it bows instead, and ``lean`` where along it the bow peaks.
     """
     bend: float | None = None
     """How far a curved edge's middle stands off the straight line between its ends, as
     a share of that line's length: positive to the left of its travel (from its source
     to its target, on the page), negative to the right, ``0`` not at all. Unset, it bows
     of itself (see ``shape``). Where it bows out of its container, the container grows."""
+    lean: float | None = None
+    """How far a curved edge's middle is moved along the line between its ends, as a share
+    of that line's length: positive toward its target, negative toward its source. Unset
+    (or ``0``), its bow peaks half way, as ``bend`` alone puts it."""
 
     line: LineStyle = "solid"
     """How the line is stroked: ``"solid"``, ``"dashed"``, or ``"dotted"``. Paint only."""
@@ -614,6 +620,7 @@ class EdgeSpec:
             )
         for name, value, (least, most), unit in (
             ("bend", self.bend, BENDS, ""),
+            ("lean", self.lean, LEANS, ""),
             ("width", self.width, LINE_WIDTHS, "pt"),
             ("head_size", self.head_size, HEAD_SIZES, ""),
         ):

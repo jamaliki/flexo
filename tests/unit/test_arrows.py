@@ -140,17 +140,21 @@ def test_curves_widths_and_head_sizes_are_written_and_read_back() -> None:
     data = {
         "figure": {"id": "kept"},
         "nodes": [{"id": "a"}, {"id": "b"}],
-        "edges": [{"from": "a", "to": "b", "shape": "curved", "width": 2, "head_size": 1.5}],
+        "edges": [
+            {"from": "a", "to": "b", "shape": "curved", "width": 2, "head_size": 1.5, "lean": 0.2}
+        ],
     }
     spec = parse_figure(data)
     (edge,) = spec.edges
-    assert (edge.shape, edge.width, edge.head_size) == ("curved", 2.0, 1.5)
+    assert (edge.shape, edge.width, edge.head_size, edge.lean) == ("curved", 2.0, 1.5, 0.2)
     (written,) = figure_to_document(spec)["edges"]
     assert (written["shape"], written["width"], written["head_size"]) == ("curved", 2.0, 1.5)
+    assert written["lean"] == 0.2
 
 
 @pytest.mark.parametrize(
-    ("key", "value"), [("width", 0.0), ("width", 40), ("head_size", 0), ("bend", 1.5)]
+    ("key", "value"),
+    [("width", 0.0), ("width", 40), ("head_size", 0), ("bend", 1.5), ("lean", 0.6)],
 )
 def test_a_width_or_head_size_out_of_range_is_refused(key: str, value: float) -> None:
     with pytest.raises(ValueError, match=key):
@@ -235,3 +239,61 @@ def test_the_arrowheads_convention_draws_every_plain_head_in_its_shape() -> None
 
     assert heads() == {"stealth", "dot"}  # the paper theme's own
     assert heads(conventions={"arrowheads": "triangle"}) == {"triangle", "dot"}
+
+
+def _middle(curve) -> tuple[float, float]:
+    first, near, far, last = curve
+    return (
+        (first.x + 3 * near.x + 3 * far.x + last.x) / 8.0,
+        (first.y + 3 * near.y + 3 * far.y + last.y) / 8.0,
+    )
+
+
+def test_a_lean_moves_the_curves_middle_along_its_line_by_that_share() -> None:
+    def curved(**options):
+        figure, a, b = _row()
+        with figure:
+            figure.connect(a, b, shape="curved", **options)
+        compiled = compile_figure(figure.spec)
+        (edge,) = compiled.routed.edges
+        return compiled, edge
+
+    _, bent = curved(bend=0.3)
+    compiled, leaning = curved(bend=0.3, lean=0.25)
+    start, end = leaning.chord
+    length = start.distance_to(end)
+    (x0, y0), (x1, y1) = _middle(bent.whole), _middle(leaning.whole)
+    # A row's line runs left to right: a quarter of its length on toward its target, and
+    # no further off it.
+    assert x1 - x0 == pytest.approx(0.25 * length, abs=0.05)
+    assert y1 == pytest.approx(y0, abs=0.05)
+    # Its whole curve is written for an editor's handle, and where its middle rests,
+    # bent and leaned not at all.
+    shaft = _elements(compiled)[f"{leaning.spec.id}.shaft"]
+    whole = [float(value) for value in shaft.get("data-flexo-curve").split()]
+    written = [value for point in leaning.whole for value in (point.x, point.y)]
+    assert whole == pytest.approx(written, abs=1e-3)
+    _, unbent = curved()
+    rest = [float(value) for value in shaft.get("data-flexo-rest").split()]
+    assert rest == pytest.approx(list(_middle(unbent.whole)), abs=1e-3)
+    assert unbent.rest is None, "unbent, it is where it rests"
+    assert not lint_compilation(compiled).errors
+
+
+def test_a_line_bent_and_leaned_in_the_editor_drops_both_when_no_longer_curved() -> None:
+    import yaml
+
+    from flexo.studio.figure_edit import apply
+
+    text = (
+        "figure: {id: t}\nnodes:\n- {id: a}\n- {id: b}\n"
+        "edges:\n- {id: e, from: a, to: b, shape: curved}\n"
+    )
+    target = {"type": "edge", "id": "e"}
+    bent = apply(text, {"do": "update", "target": target, "values": {"bend": 0.3, "lean": -0.2}})
+    (edge,) = yaml.safe_load(bent["text"])["edges"]
+    assert (edge["bend"], edge["lean"]) == (0.3, -0.2)
+    unbent = {"do": "update", "target": target, "values": {"shape": "straight"}}
+    straight = apply(bent["text"], unbent)
+    (edge,) = yaml.safe_load(straight["text"])["edges"]
+    assert "bend" not in edge and "lean" not in edge

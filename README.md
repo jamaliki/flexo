@@ -569,7 +569,10 @@ m.connect(done, start, label="no")
 ```
 
 A process is a `block`, a start or end a `terminal`, a question a `decision`, and
-data read or written an `io` parallelogram. The shapes of a software diagram are
+data read or written an `io` parallelogram. A decision's diamond is sized round its
+words; given a `width=` (or `height=`), it is that, and the other way as small as its
+words let it be. In the studio, drag a shape's corner to size it: it snaps to the size
+that fits its words (for a diamond, one that hugs them), and a double-click fits it. The shapes of a software diagram are
 components too, each sized round its label and painted in the theme's roles, so a
 palette, a tone, or a dark theme recolours them with the rest:
 
@@ -618,10 +621,13 @@ so two curves between one pair, one each way, bow apart; `via="south"` bows it
 that way instead, and `depart=` and `arrive=` sides make it leave and meet those
 sides square, as a hand-drawn arrow does. `bend=` says how far it bows: its
 middle stood off the straight line between its ends by that share of the line's
-length, to the left of its travel (`0.3`) or the right (`-0.3`); in the studio,
-drag the square handle on a curved or straight line's middle (double-click it to
-let the line bow of itself again). Where a curve bows out of its container, the
-container makes room for it, as it does for any line.
+length, to the left of its travel (`0.3`) or the right (`-0.3`); `lean=` moves that
+middle along the line, toward its target (`0.25`) or its source (`-0.25`). In the
+studio, drag the handle on a curved or straight line's middle anywhere: the curve
+passes through it, and it snaps half way between the ends, to straight, to where
+the line bows of itself, and level with either end (hold ⌘ to place it freely;
+double-click it to let the line bow of itself again). Where a curve bows out of its
+container, the container makes room for it, as it does for any line.
 
 `width=` draws a line wider or thinner than the theme's, in points, and its
 arrowheads grow and shrink with it, as a drawing program's do; `head_size=`

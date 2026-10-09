@@ -56,6 +56,11 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-end-drag { position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; overflow: visible; }
 .fig-end-drag line { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; }
 .fig-end-drag circle { fill: var(--accent); stroke: var(--raised); stroke-width: 1.5; }
+/* A shape's outline at the size it is being dragged to: solid once it fits its words. */
+.fig-size-drag rect, .fig-size-drag polygon, .fig-size-drag ellipse { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.fig-size-drag .fits { stroke-dasharray: none; }
+/* The guide a curve's middle keeps to, as the slide's alignment guides are drawn. */
+.fig-end-drag .fig-guides line { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.9; }
 .fig-end-shape { position: absolute; z-index: 3; pointer-events: none; border: var(--frame, 2px) dashed var(--accent); border-radius: 4px; }
 .fig-hover { position: absolute; pointer-events: none; border: var(--frame, 2px) dashed var(--accent-line); border-radius: 4px; }
 .fig-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-radius: 99px; background: var(--ink); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-2); white-space: nowrap; }

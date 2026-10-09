@@ -1082,7 +1082,8 @@ class _Document:
                 continue
             _set(item, key.split("."), value)
             if kind == "edge" and key == "shape" and value != "curved":
-                item.pop("bend", None)  # (only a curve bends)
+                item.pop("bend", None)  # (only a curve bends, or leans)
+                item.pop("lean", None)
             if kind == "edge" and key in {"arrow", "head"}:
                 # A regulation head goes on an arrow with an end; a reversible step has none
                 # (and only an arrow with heads at both ends has a head at its start).

@@ -1038,6 +1038,16 @@ EDGE_FIELDS = [
         hint="Drag the handle on its middle; a share of its length, to the left of its travel",
     ),
     _field(
+        "lean",
+        "Lean",
+        "number",
+        min=-0.5,
+        max=0.5,
+        step=0.05,
+        show={"shape": "curved"},
+        hint="Where along it the curve peaks: toward its end (+) or its start (-)",
+    ),
+    _field(
         "width",
         "Line Width",
         "number",
