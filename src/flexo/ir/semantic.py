@@ -146,6 +146,7 @@ type EdgeHead = Literal[
     "stealth",
     "latex",
     "open",
+    "hollow",
     "dot",
     "diamond",
     "square",
@@ -161,6 +162,7 @@ EDGE_HEADS = (
     "stealth",
     "latex",
     "open",
+    "hollow",
     "dot",
     "diamond",
     "square",
@@ -172,11 +174,11 @@ EDGE_HEADS = (
 )
 """An arrowhead's shape: ``arrow``, the theme's (its ``arrow_shape``); one of those
 shapes by name whatever the theme -- ``triangle``, ``stealth`` (a notched dart),
-``latex`` (convex flanks), ``open`` (two strokes); a filled ``dot``, ``diamond`` or
-``square``; or one that says what the line does, after SBGN: a bar for
-``inhibition`` (a repressor on its promoter), an open circle for ``catalysis``, an
-open triangle for ``stimulation`` (with a bar behind it, ``necessary``), an open
-diamond for ``modulation``."""
+``latex`` (convex flanks), ``open`` (two strokes); an outline triangle, ``hollow``;
+a filled ``dot``, ``diamond`` or ``square``; or one that says what the line does,
+after SBGN: a bar for ``inhibition`` (a repressor on its promoter), an open circle
+for ``catalysis``, an open triangle for ``stimulation`` (with a bar behind it,
+``necessary``), an open diamond for ``modulation``."""
 type LineStyle = Literal["solid", "dashed", "dotted"]
 LINE_STYLES = ("solid", "dashed", "dotted")
 type EdgeShape = Literal["auto", "orthogonal", "straight", "curved"]

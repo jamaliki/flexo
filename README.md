@@ -630,7 +630,8 @@ they are a line's **Routing**, **Line Width** and **Arrowhead Size**.
 
 `head=` draws a line's head in a shape of its own: one of the theme's arrow
 shapes by name, whatever the theme (`"triangle"`, `"stealth"`, `"latex"`,
-`"open"`), or a filled `"dot"`, `"diamond"` or `"square"`; the SBGN heads (above)
+`"open"`), an outline triangle (`"hollow"`), or a filled `"dot"`, `"diamond"` or
+`"square"`; the SBGN heads (above)
 say what a line does. With `arrow="both"`, `tail=` gives its start a head of
 its own (`connect(a, b, arrow="both", head="triangle", tail="dot")`). In the
 studio they are **Arrowhead** and **Start Arrowhead**, each shown as it looks.

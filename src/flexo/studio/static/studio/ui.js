@@ -155,6 +155,7 @@ const ICONS = {
   "head-stealth": "M1.5 8H10",
   "head-latex": "M1.5 8H9",
   "head-open": "M1.5 8h12M9 4.5L13.5 8 9 11.5",
+  "head-hollow": "M1.5 8H8m0-3.5L14 8l-6 3.5z",
   "head-dot": "M1.5 8H10",
   "head-diamond": "M1.5 8H8",
   "head-square": "M1.5 8H10",

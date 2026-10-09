@@ -211,7 +211,7 @@
     },
     "head": {
       "enum": [
-        "arrow", "triangle", "stealth", "latex", "open", "dot", "diamond", "square",
+        "arrow", "triangle", "stealth", "latex", "open", "hollow", "dot", "diamond", "square",
         "inhibition", "catalysis", "stimulation", "necessary", "modulation"
       ]
     },

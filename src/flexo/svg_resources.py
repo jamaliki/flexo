@@ -160,8 +160,8 @@ def _head_marker(
     - ``modulation``: an open diamond;
     - ``harpoon``: half an arrowhead, on the left of the line's travel -- one
       of the two lines of a reversible reaction (⇌);
-    - ``dot``, ``diamond``, ``square``: a filled one, its tip where an arrow's is
-      (these say nothing of their own).
+    - ``hollow``: an outline triangle; ``dot``, ``diamond``, ``square``: a filled
+      one -- each its tip where an arrow's is (these say nothing of their own).
     """
 
     length = style.arrow_length.points
@@ -217,6 +217,10 @@ def _head_marker(
             f"M 0 0 L {n(base)} 0 M {n(base)} 0 L {n(middle)} {n(-wide)} "
             f"L {n(tip)} 0 L {n(middle)} {n(wide)} Z"
         )
+        paint = hollow
+    elif head == "hollow":
+        # The arrow's own triangle, drawn round: the shaft stops at its base.
+        data = f"M 0 {n(-half)} L {n(length)} 0 L 0 {n(half)} Z"
         paint = hollow
     elif head == "dot":
         radius = length / 2.0
