@@ -476,13 +476,15 @@ def _structure() -> dict[str, Any]:
             _field(
                 "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
             ),
+            # (The theme's look, named so: not "Default", which reads as a look of its own
+            # beside the one it is -- Engraved Colour, on a light theme.)
             _field(
                 "properties.look",
                 "Look",
                 "choice",
                 options=["", *LOOKS],
-                labels={"": "Default"},
-                hint="Default uses the figure's theme",
+                labels={"": "Theme\u2019s Look"},
+                hint="The look the figure's theme gives structures",
             ),
             # mol-sketch's own settings: its palettes, colours of one's own, what is
             # drawn, the site, a density map, and every field of its style.
@@ -570,6 +572,9 @@ def _structure() -> dict[str, Any]:
             ),
             _field("properties.style", "Rendering", "molsketch", sections=list(SECTIONS)),
         ],
+        # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
+        # and nothing round it.)
+        common=[LABEL],
         needs_file=True,
         unavailable="" if ready else "Requires flexo[structures,molecules]",
     )
