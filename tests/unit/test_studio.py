@@ -384,7 +384,7 @@ def test_a_file_moved_away_is_said_and_written_again_when_saved(tmp_path: Path) 
         doc = workspace.open("figure.yaml")
         figure.unlink()
         wait_for(lambda: doc.problem is not None)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.info()["problem"] == doc.problem  # a page opened now says so too
         time.sleep(0.6)
         assert not figure.exists()  # not put back behind its person's back
@@ -428,7 +428,7 @@ def test_only_a_file_that_just_appeared_can_be_one_renamed_or_moved(tmp_path: Pa
         doc = workspace.open("figure.yaml")
         figure.unlink()
         wait_for(lambda: doc.problem is not None)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.write(again=True) and doc.problem is None
         # Moved into a folder in its folder: followed there.
         time.sleep(0.6)
@@ -500,7 +500,7 @@ def test_a_document_gone_from_its_folder_holds_its_edits_until_it_is_found_or_sa
         # Moved out of the studio's folder: nowhere it can find it.
         figure.rename(outside / "figure.yaml")
         wait_for(lambda: doc.gone)
-        assert doc.problem == "figure.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "figure.yaml was moved or deleted. Save (⌘S) to put it back."
         assert doc.info()["gone"] and doc.said()["gone"]
         # Edited meanwhile: the edit is held, never written where the file was.
         text = doc.document["text"].replace("Encoder", "Decoder")
@@ -950,7 +950,7 @@ def test_a_studio_started_again_keeps_a_document_whose_file_went_meanwhile(tmp_p
         # The page that held it asks for it as the kind it is open as: nothing is made anew.
         doc = workspace.open("gone.yaml", "theme", held=True)
         assert doc.kind.name == "theme" and not doc.exists
-        assert doc.problem == "gone.yaml was moved or deleted. Saving writes it again."
+        assert doc.problem == "gone.yaml was moved or deleted. Save (⌘S) to put it back."
         time.sleep(0.6)
         assert not (tmp_path / "gone.yaml").exists()
     finally:

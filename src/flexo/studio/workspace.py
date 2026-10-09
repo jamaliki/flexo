@@ -430,7 +430,7 @@ class Doc:
                     f"{self.name} was renamed {self.moved}."
                     if self.moved
                     else f"{self.name} was moved or deleted."
-                    + ("" if self.unread else " Saving writes it again.")
+                    + ("" if self.unread else " Save (⌘S) to put it back.")
                 )
                 return "problem"
             text = _words(self.path)
@@ -876,7 +876,7 @@ class Workspace:
                     doc.problem = (
                         f"{doc.name} is gone: renamed {doc.moved}?"
                         if doc.moved
-                        else f"{doc.name} was moved or deleted. Saving writes it again."
+                        else f"{doc.name} was moved or deleted. Save (⌘S) to put it back."
                     )
                 self.docs[relative] = doc
                 if doc.exists:
