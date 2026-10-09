@@ -1414,7 +1414,8 @@ function toInspector() {
   const view = [...document.querySelectorAll(".views > *")].find((node) => !node.hidden);
   const panel = view?.querySelector(".inspector, .fig-inspector, .theme-panel");
   const first = panel && [...panel.querySelectorAll("button:not(:disabled), input, select, textarea, [contenteditable=true], [tabindex='0']")]
-    .find((node) => node.offsetParent && node.tabIndex >= 0);
+    // (Words typed as they look -- a contenteditable -- say -1 and still take the keys.)
+    .find((node) => node.offsetParent && (node.tabIndex >= 0 || node.isContentEditable));
   if (!first) return;
   const before = document.activeElement;
   first.focus({ focusVisible: true });

@@ -469,7 +469,7 @@ def _structure() -> dict[str, Any]:
         "structure",
         "Structure",
         "Biology",
-        "A PDB or mmCIF structure drawn by mol-sketch",
+        "A molecule\u2019s structure, from a PDB or mmCIF file",
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
