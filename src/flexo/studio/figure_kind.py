@@ -17,7 +17,7 @@ import yaml
 from flexo.studio import Drawing, Message, Page
 
 NEW_FIGURE = """\
-# A flexo figure: nodes, then the edges between them. See docs/guide.md.
+# A figure: its shapes (nodes), then the lines between them (edges).
 figure:
   id: figure
   style: paper
@@ -28,7 +28,7 @@ nodes:
 editor shows what it is, faintly, until its words are typed; nothing is drawn for it."""
 
 SAMPLE_FIGURE = """\
-# A flexo figure: nodes, then the edges between them. See docs/guide.md.
+# A figure: its shapes (nodes), then the lines between them (edges).
 figure:
   id: figure
   style: paper
@@ -626,9 +626,37 @@ def _without(document: dict[str, Any], base: Path, wrong: set[str]) -> Any:
         return None
 
 
+# What the YAML reader says of a file it can't read, and what that is to whoever wrote it.
+_YAML_SAID = (
+    (
+        r"expected ',' or '\]'",
+        "a list in square brackets isn\u2019t closed, or a word in it needs quotes",
+    ),
+    (
+        r"expected ',' or '\}'",
+        "a set of settings in braces isn\u2019t closed, or a word in it needs quotes",
+    ),
+    (r"mapping values are not allowed", "a colon is among words; put words with a colon in quotes"),
+    (r"found character '\\t'|found character '\t'", "a line is indented with a tab, not spaces"),
+    (r"could not find expected ':'", "a line is missing its colon"),
+    (r"unexpected end of stream|while scanning a quoted scalar", "a quote isn\u2019t closed"),
+    (
+        r"did not find expected key|expected <block end>|did not find expected '-' indicator",
+        "a line is indented differently from the lines around it",
+    ),
+    (r"found duplicate anchor|found undefined alias", "a name after & or * is used wrongly"),
+)
+
+
 def _yaml_problem(error: Exception) -> str:
-    problem = getattr(error, "problem", None)
-    return f"the file does not read as YAML: {problem or error}"
+    """Why a figure's file can't be read, in its writer's words, never the reader's."""
+
+    problem = str(getattr(error, "problem", None) or error)
+    context = str(getattr(error, "context", None) or "")
+    for pattern, said in _YAML_SAID:
+        if re.search(pattern, f"{context} {problem}"):
+            return f"The file can\u2019t be read: {said}."
+    return f"The file can\u2019t be read as written: {problem}."
 
 
 def _yaml_line(error: Exception) -> str:

@@ -237,7 +237,7 @@ def test_words_rewritten_while_typed_in_are_both_kept_and_said_to_the_typist(
     try:
         doc = workspace.open("figure.yaml")
         listener = workspace.listen("page-a", PERSON)
-        line = "# A flexo figure: nodes, then the edges between them. See docs/guide.md."
+        line = "# A figure: its shapes (nodes), then the lines between them (edges)."
         typed = SAMPLE_FIGURE.replace(line, line.replace("figure:", "figure my words:"))
         doc.update({"text": typed}, 1, PERSON, "page-a")
         agent = {"id": "agent", "name": "Claude", "kind": "agent"}
