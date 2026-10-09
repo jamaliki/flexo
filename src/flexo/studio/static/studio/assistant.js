@@ -16,8 +16,8 @@ const SUGGESTIONS = {
   none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab’s colours"],
 };
 
-// A model by the name its maker gives it: "claude-opus-5-5" is Opus 5.5, "gpt-5" GPT-5; one
-// served elsewhere (Ollama's "llama3.2:latest") as it is named there.
+// A model by the name its maker gives it: a family and its version ("claude-<family>-<n>-<m>" as
+// "<Family> <n>.<m>", "gpt-<n>" as "GPT-<n>"); one served elsewhere (Ollama's) as it is named there.
 export function modelName(id) {
   const model = String(id || "");
   const claude = /^claude-(?:(opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?|(\d+)(?:-(\d))?-(opus|sonnet|haiku))(?:-\d{8})?(?:-latest)?$/.exec(model);
