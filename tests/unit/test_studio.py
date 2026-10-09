@@ -2949,3 +2949,68 @@ def test_a_document_duplicated_is_a_copy_beside_it_opened(served) -> None:
     assert "figure copy.yaml" in workspace.docs and workspace.docs["figure.yaml"] is doc
     status, _ = call(f"{url}/api/duplicate", workspace.token, asked)
     assert status == 409
+
+
+# -- the assistant's words when it can't answer ----------------------------------------
+
+
+def _stand_in_sdk(name: str) -> NS:
+    """An SDK's errors, as the assistant tells them apart (the SDK itself not needed)."""
+
+    class APIStatusError(Exception):
+        status_code, message = 400, ""
+
+    errors = {
+        "APIStatusError": APIStatusError,
+        "AuthenticationError": type("AuthenticationError", (APIStatusError,), {}),
+        "RateLimitError": type("RateLimitError", (APIStatusError,), {}),
+        "NotFoundError": type("NotFoundError", (APIStatusError,), {}),
+        "APIConnectionError": type("APIConnectionError", (Exception,), {}),
+    }
+    return NS(__name__=name, **errors)
+
+
+def test_a_refused_key_and_a_server_not_running_are_said_as_they_are(monkeypatch) -> None:
+    import sys
+
+    from flexo.studio import assistant
+
+    openai, anthropic = _stand_in_sdk("openai"), _stand_in_sdk("anthropic")
+    monkeypatch.setitem(sys.modules, "openai", openai)
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic)
+    monkeypatch.setenv("FLEXO_STUDIO_OTHER_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("FLEXO_STUDIO_OTHER_NAME", "Ollama")
+    monkeypatch.delenv("FLEXO_STUDIO_OTHER_MODEL", raising=False)
+    monkeypatch.delenv("FLEXO_STUDIO_SETTINGS", raising=False)
+    found = assistant.providers()
+    other, chatgpt, claude = found["other"], found["chatgpt"], found["claude"]
+    # A key there, refused: never "add a key".
+    assert claude.explain(anthropic.AuthenticationError()).startswith(
+        "Claude didn\u2019t accept the API key: it may be mistyped, expired or revoked. "
+        "Set ANTHROPIC_API_KEY"
+    )
+    assert chatgpt.explain(openai.APIConnectionError()) == (
+        "Couldn\u2019t reach ChatGPT: check your internet connection."
+    )
+    assert other.explain(openai.APIConnectionError()) == (
+        "Couldn\u2019t reach Ollama at http://localhost:11434/v1. Check that it\u2019s running, "
+        "and its address (FLEXO_STUDIO_OTHER_URL)."
+    )
+    # In the Mac app, where its Settings put it right.
+    monkeypatch.setenv("FLEXO_STUDIO_SETTINGS", "the app's Settings")
+    assert chatgpt.explain(openai.AuthenticationError()).endswith(
+        "Put in a new one in the app's Settings."
+    )
+    assert other.explain(openai.APIConnectionError()).endswith(
+        "and its address in the app's Settings."
+    )
+
+    # Asked with its server not running, it says so -- not "choose a model" from a list that
+    # couldn't be read.
+    def unreachable() -> list[str]:
+        raise openai.APIConnectionError()
+
+    other.client = NS()
+    monkeypatch.setattr(other, "list_models", unreachable)
+    with pytest.raises(openai.APIConnectionError):
+        other.converse(None, {})
