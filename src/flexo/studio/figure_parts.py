@@ -970,6 +970,7 @@ HEAD_NAMES = {
     "arrow": "Theme\u2019s Arrow",
     "latex": "LaTeX",
     "open": "Open Arrow",
+    "hollow": "Hollow Triangle",
     "inhibition": "Bar (Inhibits)",
     "catalysis": "Open Circle (Catalysis)",
     "stimulation": "Open Triangle (Stimulates)",
