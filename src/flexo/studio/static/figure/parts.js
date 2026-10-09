@@ -104,7 +104,153 @@ export function painted(tone) {
   return tone ? (chroma(tone.fill) > chroma(tone.stroke) ? tone.fill : tone.stroke || tone.fill) : undefined;
 }
 export const words = (label) => (Array.isArray(label) ? label.map((run) => run?.text ?? "").join("") : label ?? "");
-export const plain = (label) => readable(words(label));
+// (A figure draws an asterisk as typed: no emphasis.)
+export const plain = (label) => readable(words(label).replace(/(?<!\\)\*/g, "\\*"));
+
+// A label kept as runs (a figure made in Python, or a deck's, writes its words so: each run
+// its look -- maths, a script, code, a colour) as the markup that reads back as the same runs
+// (flexo.markup's parse_label): "Denoiser $\epsilon_\theta$", not "Denoiser 𝜖𝜃". It is what
+// is typed in, so that a letter changed keeps the rest as it was. (Words are their words.)
+const GREEK = {
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ϵ", varepsilon: "ε", zeta: "ζ", eta: "η", theta: "θ", vartheta: "ϑ",
+  iota: "ι", kappa: "κ", lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ", sigma: "σ", tau: "τ", upsilon: "υ", phi: "ϕ",
+  varphi: "φ", chi: "χ", psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ",
+  Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+};
+// Maths' letters as drawn, by the command that draws them: a lower-case Greek letter is the
+// maths font's italic one (𝜃 for \theta), as flexo.markup sets it; ℓ, ℏ and ℵ lean of themselves.
+const TYPED = new Map([["ℓ", "ell"], ["ℏ", "hbar"], ["ℵ", "aleph"], ...Object.entries(GREEK).map(([name, letter]) => {
+  const code = letter.codePointAt(0), variant = [0x3f5, 0x3d1, 0x3f0, 0x3d5, 0x3f1, 0x3d6].indexOf(code);
+  return [/^[a-z]/.test(name) ? String.fromCodePoint(variant >= 0 ? 0x1d716 + variant : 0x1d6fc + code - 0x3b1) : letter, name];
+})]);
+// The named functions maths sets upright, by the words they show.
+const NAMED = new Map(["log", "exp", "max", "min", "sin", "cos", "tan", "tanh", "arg", "det", "lim", "sup", "inf", "ln", "Pr", "tr",
+  "diag", "softmax", "KL", "argmax", "argmin"].map((name) => [name.replace(/^arg(max|min)$/, "arg $1"), name]));
+// The signs maths spaces itself (a + b, x = y): the spaces round them are its, not typed.
+const SPACED = new Set([..."+−×·±∓∘⊙⊕⊗∗∪∩∧∨÷⋆∖=<>≤≥≠≈≡∼≃≅∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔⟺⟹↦∣≪≫∥"]);
+function mathsOf(runs) {
+  const items = [];
+  for (const run of runs) {
+    const shift = run.baseline_shift || "normal";
+    if (run.accent) items.push({ shift, accent: run });
+    else for (const ch of run.text) items.push({ ch, shift, italic: Boolean(run.italic), weight: run.weight ?? 400, code: Boolean(run.code) });
+  }
+  const upright = (item) => /^[A-Za-z]$/.test(item?.ch || "") && !item.italic && item.weight < 600 && !item.code;
+  // Upright words first (\mathrm{d}, a function's name), each from its first letter: its
+  // letters and digits, and a space between two of its words ("arg max").
+  for (let at = 0; at < items.length;) {
+    if (!upright(items[at])) { at += 1; continue; }
+    const shift = items[at].shift;
+    let to = at;
+    const within = (item, next) => item?.shift === shift && (upright(item) || (/^\d$/.test(item.ch || "") && item.weight < 600 && !item.code)
+      || (item.ch === " " && !item.italic && upright(next) && next.shift === shift));
+    while (to < items.length && within(items[to], items[to + 1])) to += 1;
+    const word = items.slice(at, to).map((item) => item.ch).join("");
+    items[at].word = { word, to, named: NAMED.has(word) };
+    for (let i = at; i < to; i += 1) items[i].named = NAMED.has(word);
+    at = to;
+  }
+  // The nearest of the others, not a space, `step` from `at`.
+  const near = (at, step) => { for (let i = at + step; i >= 0 && i < items.length; i += step) if (items[i].ch !== " ") return items[i]; return null; };
+  const typed = (text) => text.replace(/\\/g, "").replace(/[{}$]/g, (mark) => `\\${mark}`);
+  // Each piece of the source, at its shift; `ends` when it ends with a command's name (a
+  // letter after it is kept apart: "\alpha x", not "\alphax").
+  const pieces = [];
+  const put = (src, shift, ends = false) => pieces.push({ src, shift, ends });
+  for (let at = 0; at < items.length;) {
+    const item = items[at], shift = item.shift, ch = item.ch;
+    if (item.accent) {
+      put(`\\${item.accent.accent === "←" ? "overleftarrow" : "vec"}{${mathsOf([{ ...item.accent, accent: "", baseline_shift: "normal" }])}}`, shift);
+      at += 1;
+    } else if (item.weight >= 600 || item.code) {
+      // Bold and code are words in maths, set as typed, spaces and all: \mathbf{h}, \texttt{relu}.
+      let to = at;
+      while (to < items.length && !items[to].accent && items[to].shift === shift && items[to].weight === item.weight && items[to].code === item.code) to += 1;
+      put(`\\${item.code ? "texttt" : "mathbf"}{${typed(items.slice(at, to).map((each) => each.ch).join(""))}}`, shift);
+      at = to;
+    } else if (item.word) {
+      put(item.word.named ? `\\${NAMED.get(item.word.word)}` : `\\mathrm{${item.word.word}}`, shift, item.word.named);
+      at = item.word.to;
+    } else {
+      at += 1;
+      // A space maths sets of itself -- round a sign, beside a function's name, after a comma
+      // -- is typed as a space, which maths leaves to it (and a bar with room each side is a
+      // "given", spaced as a sign); another was typed as one (\ ). The hair space an italic
+      // letter keeps before a sign is maths' own too.
+      const before = near(at - 1, -1), after = near(at - 1, 1);
+      if (ch === "\u200a") continue;
+      if ((ch === " " && (SPACED.has(before?.ch) || SPACED.has(after?.ch) || before?.named || after?.named || before?.ch === "|" || after?.ch === "|"))
+          || (ch === "\u202f" && items[at - 2]?.ch === ",")) { put(" ", shift); continue; }
+      if (TYPED.has(ch) && (item.italic || !/^[ℓℏℵ]$/.test(ch))) put(`\\${TYPED.get(ch)}`, shift, true);
+      else put({ " ": "\\ ", "\u202f": "\\,", "−": "-", "′": "'", "{": "\\{", "}": "\\}", _: "\\_", "^": "\\^", $: "\\$" }[ch] ?? ch, shift);
+    }
+  }
+  // A script is its pieces at one shift, run together: x_{t-1}, p_\theta.
+  const apart = (ends, src) => (ends && /^[A-Za-z]/.test(src) ? " " : "");
+  let source = "", ends = false;
+  for (let at = 0; at < pieces.length;) {
+    const shift = pieces[at].shift;
+    let to = at, inner = "", innerEnds = false;
+    for (; to < pieces.length && pieces[to].shift === shift; to += 1) {
+      inner += apart(innerEnds, pieces[to].src) + pieces[to].src;
+      innerEnds = pieces[to].ends;
+    }
+    const one = to - at === 1 && ([...inner].length === 1 || /^\\[A-Za-z]+$/.test(inner));
+    const src = shift === "normal" ? inner : `${shift === "sub" ? "_" : "^"}${one ? inner : `{${inner}}`}`;
+    // (A letter after a script stands a space apart, as it is read: "x_t y".)
+    source += (shift === "normal" && at && /^[A-Za-z]/.test(src) ? " " : apart(ends, src)) + src;
+    ends = shift === "normal" || one ? innerEnds : false;
+    at = to;
+  }
+  return source;
+}
+export function markupOf(label) {
+  if (!Array.isArray(label)) return label ?? "";
+  const runs = label.filter((run) => run?.text || run?.math);
+  // Words in a colour, or linking somewhere, are bracketed together; maths and code apart.
+  const groups = [];
+  for (const run of runs) {
+    const last = groups[groups.length - 1];
+    if (last && last.color === (run.color || "") && last.link === (run.link || "")) last.runs.push(run);
+    else groups.push({ color: run.color || "", link: run.link || "", runs: [run] });
+  }
+  return groups.map(({ color, link, runs: group }) => {
+    const pieces = [];
+    for (let at = 0; at < group.length;) {
+      const run = group[at];
+      if (run.math) {
+        const display = /^\\displaystyle /.test(run.math);
+        pieces.push({ maths: display ? `$${run.math.slice(14)}$` : run.math, display });
+        at += 1;
+      } else if (run.maths) {
+        let to = at;
+        while (to < group.length && group[to].maths && !group[to].math) to += 1;
+        pieces.push({ maths: mathsOf(group.slice(at, to)) });
+        at = to;
+      } else {
+        pieces.push({ text: run.code ? `\`${run.text}\`` : run.text.replace(/[$`]/g, (mark) => `\\${mark}`) });
+        at += 1;
+      }
+    }
+    let out = "";
+    pieces.forEach((piece, at) => {
+      if (piece.text !== undefined) {
+        // (A formula set on its own line has the line's breaks of itself.)
+        out += pieces[at - 1]?.display ? piece.text.replace(/^\n/, "") : piece.text;
+        return;
+      }
+      if (!piece.maths) return;
+      if (piece.display) out = out.replace(/\n$/, "");
+      // Maths followed by a digit is closed all the same ("$x{}$2", not a price's "$5").
+      const next = pieces[at + 1]?.text;
+      const kept = /^\d/.test(next || "") && !/[\\^_{]/.test(piece.maths) ? "{}" : "";
+      out += `$${piece.maths}${kept}$`;
+    });
+    if (!color && !link) return out;
+    // (Bracketed a line at a time: a colour's words are of one line.)
+    return out.split("\n").map((line) => (line ? (color ? `[${line}]{${color}}` : `[${line}](${link})`) : "")).join("\n");
+  }).join("");
+}
 export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
 
 // A value as a person reads it, in title case: "ink colour" and "engraved-colour" are
@@ -328,23 +474,23 @@ export function figureParts(host) {
         const target = action.target || action.targets?.[0] || {};
         const id = target.id, values = action.values || {}, keys = Object.keys(values);
         const all = (...wanted) => keys.length && keys.every((key) => wanted.includes(key));
-        if (all("label")) {
+        if (all("label") || all("back_label")) {
           // Typed on in a field, one entry stands for it all: said by the name it had.
-          const had = (nodeOf(id) || groupOf(id))?.label, was = plain(had), now = plain(values.label);
+          const had = (nodeOf(id) || groupOf(id) || edgeOf(id) || netOf(id))?.[keys[0]], given = values[keys[0]];
+          const was = plain(markupOf(had)), now = plain(given);
           // The same words in another look (a colour, code) are the label's format changed.
           // (Not the same words sent again, the typing done: a part just added named for them.)
-          if (was && was === now && JSON.stringify(had) !== JSON.stringify(values.label)) return `Format ${inQuotes(now)}`;
-          // Words typed (on a shape that had none, or typed on in, however quickly done):
-          // said as every run of typing is, by what it typed since its run began (`merge`),
-          // not as the shape's kind -- typingName.
+          if (was && was === now && markupOf(had) !== markupOf(given)) return `Format ${inQuotes(now)}`;
+          // Words typed (on a shape that had none, or typed on in, however quickly done; a
+          // group's title, a line's) are said as every run of typing is, by what it typed since
+          // its run began (`merge`), not as the shape's kind -- typingName. By the words as
+          // typed, maths and all (a space typed in maths is one): a "\n" typed is a new line.
+          const typed = (label) => typedBreaks(markupOf(label));
           if (merge && !runFrom.has(merge)) {
-            runFrom.set(merge, was);
+            runFrom.set(merge, typed(had));
             if (runFrom.size > 100) runFrom.delete(runFrom.keys().next().value);
           }
-          // A group's title typed: the group renamed, said by the name it had.
-          if (target.type === "group" && groupOf(id)) return `Rename ${inQuotes((merge ? runFrom.get(merge) : was) || now || nameOf(id))}`;
-          if (now) return typingName(merge ? runFrom.get(merge) : was, now, 24);
-          return `Edit ${name(id)}`;
+          return typingName(merge ? runFrom.get(merge) : typed(had), typed(given), 24);
         }
         if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.|tone$)/.test(key))) return "Change Colour";
         if (all("line")) return `Make Line ${titled(values.line || "solid")}`;
@@ -1593,7 +1739,9 @@ export function figureParts(host) {
     if (!id) return;
     // The part typed on is the part chosen: its panel shows beside it.
     if (chosenOne() !== id) select([id], { reveal: false });
-    openInline(id, { at: { x: event.clientX, y: event.clientY } });
+    // (A line's back label, under it, is typed in where it is: not the words over it.)
+    const back = isLine(id) && targetOf(asPressed(event))?.closest?.('[id$=".back-label"]');
+    openInline(id, { at: { x: event.clientX, y: event.clientY }, key: back ? "back_label" : "label" });
   }
   function marks() {
     return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
@@ -3482,47 +3630,56 @@ export function figureParts(host) {
   // Where the box the words are typed in is kept: the host's \`typing\` element, which stays
   // as the drawing is put in again (so the keys go on through a redraw), else the overlay.
   const typingPlace = () => host.typing || host.overlay;
-  // Return or Esc ends the typing and keeps what was typed, as a Mac text field does;
-  // so does clicking elsewhere. ⌘Z takes it back.
+  // Return starts a new line; Esc or ⌘Return ends the typing and keeps what was typed, as
+  // a click elsewhere does, and Tab goes on to the next shape. ⌘Z takes it back.
   // `guess`: where a part just added will be drawn (guessPlace), typed on there until it is.
   // `after`: the part a part just added went after (chosen again should it be given no words).
-  function openInline(id, { at = null, guess = null, fresh = null, after = null } = {}) {
+  // `key`: the words typed -- a line's back label ("back_label", drawn under it), else its label.
+  function openInline(id, { at = null, guess = null, fresh = null, after = null, key = "label" } = {}) {
     closeInline(false);
     const kind = typeOf(id);
     const item = kind === "node" ? nodeOf(id) : kind === "edge" ? edgeOf(id) : kind === "net" ? netOf(id) : groupOf(id);
     if (!item || !(host.box(id) || guess)) return;
-    const original = words(item.label);
-    // A label's words are names and maths, not prose: no spelling, no corrections.
+    const drawnAs = key === "back_label" ? `${id}.back-label` : `${id}.label`;
+    // (Words kept as runs are typed as the markup that writes them: their maths kept.)
+    const original = markupOf(item[key]);
+    // A label's words are names and maths, not prose: no spelling, no corrections, no links.
     // Its format bar is the slide's words': the theme's colours too.
-    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, spelling: false, lines: true });
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     // A shape with no words is typed on where they will go, what it is shown faintly there.
-    // So is a line with none: at its middle, where its words will be drawn.
-    const bare = (kind === "node" && !original.trim() && Boolean(hintOf(item)) && !host.element(`${id}.label`) && Boolean(host.box(id)))
-      || (lineKind(kind) && !host.element(`${id}.label`) && Boolean(lineMiddle(id)));
+    // So is a line with none: at its middle, where its words will be drawn; and a group with
+    // no title, at its top, where its title will be.
+    const bare = (kind === "node" && !original.trim() && Boolean(hintOf(item)) && !host.element(drawnAs) && Boolean(host.box(id)))
+      || (lineKind(kind) && !host.element(drawnAs) && Boolean(lineMiddle(id)))
+      || (kind === "group" && id !== model()?.root && !original.trim() && !host.element(drawnAs) && Boolean(host.box(id)));
     if (kind === "node" && !original.trim()) field.area.placeholder = (fresh && givenWords(item)) || hintOf(item);
     if (lineKind(kind) && !original.trim()) field.area.placeholder = "Label";
+    if (kind === "group" && !original.trim()) field.area.placeholder = "Title";
     // Its faint hint gives way to the field's own, said in the same place.
     for (const hint of host.overlay.querySelectorAll(`.fig-wordless[data-id="${CSS.escape(id)}"]`)) hint.remove();
-    const label = host.element(`${id}.label`) || (guess && !host.box(id) ? guess : null) || (bare ? "bare" : null);
-    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Esc or ⌘Return: done · $maths$ · *emphasis*" }, field,
-      label ? null : h("div.inline-foot", {}, h("span", {}, "Esc or ⌘Return: done"), h("span", {}, "$maths$ · *emphasis*")));
+    const label = host.element(drawnAs) || (guess && !host.box(id) ? guess : null) || (bare ? "bare" : null);
+    // (Said as the slide's words' editor says its keys.)
+    const box = h(`div.fig-inline${label ? ".in-place" : ""}`, { title: "Tab: next shape · ⌥⌘E: equation · Esc: done" }, field,
+      label ? null : h("div.inline-foot", {}, h("span", {}, "Tab: next shape · ⌥⌘E: equation"), h("span", {}, "Esc: done")));
     // A shape's words wrap where the drawing wraps them; a line's or a group's break only
     // where they are broken, as the drawing breaks them.
     if (label && kind === "node") field.area.style.whiteSpace = "pre-wrap";
     else if (label) field.area.setAttribute("wrap", "off");
     typingPlace().append(box);
-    // The handles on the part step aside while it is typed on.
-    for (const handle of host.overlay.querySelectorAll(".fig-next, .fig-rotate")) handle.remove();
+    // The handles on the part step aside while it is typed on: its corners', a line's ends'.
+    for (const handle of host.overlay.querySelectorAll(".fig-next, .fig-rotate, .fig-size, .fig-end, .fig-bend")) handle.remove();
     // So does a line's mark along it: its words' box is where it is now.
     for (const twin of host.element(id)?.querySelectorAll(".hit-line.chosen") || []) twin.classList.remove("chosen");
-    inline = { id, kind, field: field.area, original, box, inPlace: Boolean(label), sent: original, merge: `label:${id}:${Date.now()}`, live: null,
+    inline = { id, kind, key, drawnAs, field: field.area, original, box, inPlace: Boolean(label), sent: original, merge: `${key}:${id}:${Date.now()}`, live: null,
       guess: label === guess ? guess : null, look: guess?.look || null, fresh, after, waiting: null,
       // The words as the figure has them, that what is typed is typed over; and every
       // version of them sent from here (one coming back late is not someone else's).
       base: original, mine: new Set([original]) };
     placeInline();
+    // (Marked again at once: the part's own frame gives way to its words' box.)
+    host.settled?.();
     field.area.focus();
     // Double-clicked on a word, the word is chosen, as on a Mac; else all of it. (A group's
     // title is a name, typed over whole as a shape's words in it are: all of it, always.)
@@ -3536,27 +3693,62 @@ export function figureParts(host) {
       setTimeout(() => {
         const area = field.area;
         if (inline?.field !== area || area.selectionStart !== 0 || area.selectionEnd !== area.value.length || area.value !== original) return;
-        const later = wordAt(host.element(`${id}.label`) || label, at, area.value);
+        const later = wordAt(host.element(drawnAs) || label, at, area.value);
         if (later) area.setSelectionRange(later.start, later.end);
       }, 300);
     }
     field.area.addEventListener("input", () => { placeInline(); drawSoon(); });
+    typedAsMeant(field.area);
     // Its format bar shows once words are chosen in it, as the slide's words' does: not over a
-    // caret waiting for the first key.
-    const chosenWords = () => box.classList.toggle("words-chosen", field.area.selectionStart !== field.area.selectionEnd);
+    // caret waiting for the first key -- placed then, where it covers least.
+    const chosenWords = () => {
+      const was = box.classList.contains("words-chosen");
+      box.classList.toggle("words-chosen", field.area.selectionStart !== field.area.selectionEnd);
+      if (!was && box.classList.contains("words-chosen") && inline?.box === box) placeInline();
+    };
     for (const type of ["select", "selectionchange", "keyup", "mouseup", "input", "focus"]) field.area.addEventListener(type, chosenWords);
     chosenWords();
     field.area.addEventListener("keydown", (event) => {
+      const mod = event.metaKey || event.ctrlKey, letter = event.key.toLowerCase();
       // Return starts a new line, as in any text; Esc or ⌘Return is done (as a click elsewhere
-      // is) -- ⌘Return here, not the slide's Present.
-      if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
-      if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); event.stopPropagation(); closeInline(true); }
+      // is) -- ⌘Return here, not the slide's Present. (⌫ then deletes the part, as it would.)
+      if (((event.key === "Enter" && mod) || event.key === "Escape") && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeInline(true);
+        lastTyped = 0;
+      }
+      // Tab is done too, and chooses the next shape (⇧Tab the one before), as Tab does from a
+      // shape chosen: not the next control on the page.
+      if (event.key === "Tab" && !mod && !event.altKey && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        const ids = (model()?.nodes || []).map((node) => node.id), from = ids.indexOf(id);
+        const next = !ids.length ? null : from < 0 ? ids[event.shiftKey ? ids.length - 1 : 0] : ids[(from + (event.shiftKey ? -1 : 1) + ids.length) % ids.length];
+        closeInline(true);
+        lastTyped = 0;
+        if (next && next !== id) select([next]);
+      }
       // Someone else's words come in as it is typed in, the field's own undo knows nothing
       // of them: ⌘Z is the document's, which takes back this person's typing and keeps theirs.
       // (⇧⌘Z, or ⌘Y, is the document's redo then, too.)
       const typing = inline;
-      const mod = event.metaKey || event.ctrlKey, letter = event.key.toLowerCase();
       const back = mod && !event.shiftKey && letter === "z", again = mod && ((event.shiftKey && letter === "z") || (!event.shiftKey && letter === "y"));
+      // With nothing of its own to take back (nothing typed yet, or all of it taken back), ⌘Z is
+      // the document's too: the typing ends and the edit before it is undone (⇧⌘Z, redone).
+      if ((back || again) && typing && !typing.merged && host.undo) {
+        let own = false;
+        const mine = (input) => { if (/^history(Undo|Redo)$/.test(input.inputType)) own = true; };
+        typing.field.addEventListener("input", mine);
+        setTimeout(() => {
+          typing.field.removeEventListener("input", mine);
+          if (own || inline !== typing || typing.field.value !== typing.sent) return;
+          // (A Text just added and left empty goes with its adding: nothing more is undone.)
+          const added = typing.fresh && nodeOf(typing.id)?.kind === "text" && !typing.field.value.trim();
+          closeInline(false);
+          if (!added) idle().then(() => (back ? host.undo() : host.redo?.()));
+        }, 0);
+      }
       if ((back || again) && typing?.merged && host.undo) {
         event.preventDefault();
         event.stopPropagation();
@@ -3583,6 +3775,50 @@ export function figureParts(host) {
     field.area.addEventListener("blur", (event) => {
       if (inline?.box !== box || box.contains(event.relatedTarget) || !document.hasFocus()) return;
       closeInline(true);
+    });
+    // A click in the shape being typed on, beside its words, is in its words, as in Keynote's
+    // text: the caret goes to their start or their end, the typing goes on.
+    if (kind === "node") {
+      const within = (event) => {
+        if (inline?.box !== box || box.contains(event.target) || event.button > 0) return;
+        const part = host.box(id), outer = host.overlay.getBoundingClientRect();
+        if (!part || event.clientX < outer.left + part.left || event.clientX > outer.left + part.left + part.width
+            || event.clientY < outer.top + part.top || event.clientY > outer.top + part.top + part.height) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.type !== "pointerdown") return;
+        const area = field.area, rect = area.getBoundingClientRect();
+        const end = event.clientY > rect.bottom || (event.clientY >= rect.top && event.clientX > rect.left + rect.width / 2) ? area.value.length : 0;
+        area.focus();
+        area.setSelectionRange(end, end);
+      };
+      const kinds = ["pointerdown", "mousedown", "click", "dblclick"];
+      for (const type of kinds) addEventListener(type, within, true);
+      inline.unlisten = () => { for (const type of kinds) removeEventListener(type, within, true); };
+    }
+  }
+  // Words pasted into a label are its words: a tab is a space, a new line at their end none.
+  // And "\n" typed in its words (not in maths or code, where \nu and \n are their own) is
+  // the new line it means, at once.
+  function typedAsMeant(area) {
+    area.addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text/plain");
+      if (typeof text !== "string") return;
+      const clean = text.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/\s+$/, "");
+      if (clean === text) return;
+      event.preventDefault();
+      document.execCommand("insertText", false, clean);
+    });
+    area.addEventListener("beforeinput", (event) => {
+      if (event.inputType !== "insertText" || event.data !== "n") return;
+      const at = area.selectionStart, before = area.value.slice(0, at);
+      if (at !== area.selectionEnd || !/(^|[^\\])\\$/.test(before)) return;
+      // (Inside maths or code when a $ or a backtick before it is left open.)
+      const open = (mark) => (before.replace(/\\[$`]/g, "").split(mark).length - 1) % 2 === 1;
+      if (open("$") || open("`")) return;
+      event.preventDefault();
+      area.setSelectionRange(at - 1, at);
+      document.execCommand("insertText", false, "\n");
     });
   }
   // What is typed is drawn as it is typed, once the keys rest a moment -- and, should they
@@ -3822,9 +4058,10 @@ export function figureParts(host) {
     const y = (client) => client - frame.top + holder.scrollTop - holder.clientTop;
     if (!inline.guess) stand(null);
     const part = { left: outer.left + where.left, top: outer.top + where.top, bottom: outer.top + where.top + where.height };
-    const label = inline.inPlace && !inline.guess && host.element(`${inline.id}.label`);
-    // In place on a shape with no words drawn: typed at its middle, as its words will be.
-    const bare = !label && !inline.guess && inline.inPlace && (inline.kind === "node" || lineKind(inline.kind));
+    const label = inline.inPlace && !inline.guess && host.element(inline.drawnAs);
+    // In place on a shape with no words drawn: typed at its middle, as its words will be (a
+    // group's title at its top).
+    const bare = !label && !inline.guess && inline.inPlace && (inline.kind === "node" || inline.kind === "group" || lineKind(inline.kind));
     if (!label && !inline.guess && !bare) {
       // Under the part, kept on the stage -- in sight, clear of what is beside it (a slide's
       // inspector), and over the part should there be no room under it.
@@ -3840,18 +4077,21 @@ export function figureParts(host) {
     const style = label ? getComputedStyle(label) : null;
     const look = label ? { size: parseFloat(style.fontSize) * (label.getScreenCTM()?.a || 1), family: style.fontFamily, weight: style.fontWeight,
       fill: style.fill && style.fill !== "none" ? style.fill : "" } : inline.guess?.look || (inline.look ??= figureLook());
+    // (A group's title, not drawn yet, in the face its titles are: bold.)
+    if (!label && inline.kind === "group") look.weight = 700;
     const size = look.size;
     // As wide as its longest line, growing as it is typed. A shape's words wrap where the
-    // drawing wraps them: at the measure the figure wraps them at (its ems), the lines
-    // evened out as the drawing evens them -- or, for a shape given its width, as wide as
-    // they are drawn when the drawing wrapped them (more lines than were typed).
+    // drawing wraps them: at the width the figure says it wraps them at (a diamond's
+    // narrower than a box's, a shape's given width less its padding), the lines evened out
+    // as the drawing evens them; else at the measure the figure wraps words at (its ems).
+    // Words the figure never wraps -- a line's, a group's -- break only where broken.
     let room = Infinity;
     const measure = label ? Number(label.closest("[data-flexo-measure]")?.dataset.flexoMeasure) || 16 : look.measure;
     const drawn = label ? label.getBoundingClientRect() : null;
     if (inline.kind === "node") {
-      const lines = drawn ? Math.max(1, Math.round(drawn.height / (size * 1.25))) : 1;
-      const sized = nodeOf(inline.id)?.width != null;
-      room = sized && drawn && lines > inline.sent.split("\n").length ? drawn.width + size * 0.6 : measure * size;
+      const part = host.element(inline.id), wraps = part?.getAttribute?.("data-flexo-room");
+      const scale = (label || part)?.getScreenCTM?.()?.a;
+      room = wraps && scale ? Number(wraps) * scale : part?.hasAttribute?.("data-flexo-fit") || !part ? measure * size : Infinity;
     }
     // Typed on a part with no words drawn yet, between others (one just added): the words
     // wrap to the room there is beside it -- in a diamond's or a circle's middle -- not across
@@ -3864,7 +4104,17 @@ export function figureParts(host) {
     const font = `${look.weight} ${size}px ${look.family}`;
     // With nothing typed yet, as wide as what it says it is.
     const lines = inline.field.value ? inline.field.value.split("\n") : [inline.field.placeholder || " "];
-    const text = Math.min(Math.max(...lines.map((line) => evened(plain(line) || " ", room, font))), room);
+    // The words in the box are as typed -- maths as its markup ($\epsilon_\theta$), wider than
+    // drawn -- and wrap onto as many lines as the drawing sets them on: their box is as much
+    // wider than the drawn words as their markup is.
+    const typedWidth = (line) => {
+      const shown = plain(line) || " ";
+      if (line === shown || !measuring) return Math.min(evened(shown, room, font), room);
+      measuring.font = font;
+      const wider = Math.max(1, measuring.measureText(line).width / Math.max(1, measuring.measureText(shown).width));
+      return Math.min(evened(line, room * wider, font), room * wider);
+    };
+    const text = Math.max(...lines.map(typedWidth));
     // (How many lines they take, wrapped so.)
     const rows = lines.reduce((sum, line) => sum + Math.max(1, wrapped(plain(line) || " ", room, font).length), 0);
     let width = text + size + 12;
@@ -3874,14 +4124,21 @@ export function figureParts(host) {
     const inner = ["decision", "circle"].includes(nodeOf(inline.id)?.kind) ? 0.62 : 1;
     if (drawn && inline.kind === "node" && inline.field.value === inline.sent) width = Math.min(width, Math.max(where.width * inner - 8, text + 12));
     // The words wrap in the box where the drawing will wrap them: as wide as the widest line
-    // (and a caret).
-    const pad = Math.max(2, (width - text - 8) / 2);
+    // (and a caret), and no wider -- a word more would fit on a line the drawing ends.
+    const pad = Math.max(2, (width - text - 2) / 2);
     // On a part with none drawn yet, where its words will be drawn (a heading at its top
-    // left, a plasmid's over its length): the same place as its faint hint.
+    // left, a plasmid's over its length, a group's title at its top left): the same place as
+    // its faint hint.
     const place = !drawn && !inline.guess && inline.kind === "node"
       ? wordsAt(nodeOf(inline.id), { left: part.left, top: part.top, width: where.width, height: where.height }, size)
-      : !drawn && lineKind(inline.kind) ? (({ x, y } = lineMiddle(inline.id) || { x: part.left + where.width / 2, y: part.top + where.height / 2 }) => ({ x, y, anchor: "middle" }))() : null;
-    let middle = drawn?.width ? drawn.left + drawn.width / 2
+      : !drawn && inline.kind === "group" ? { x: part.left + size * 1.4, y: part.top + size * 2, anchor: "start" }
+        : !drawn && lineKind(inline.kind) ? (({ x, y } = lineMiddle(inline.id) || { x: part.left + where.width / 2, y: part.top + where.height / 2 }) => ({ x, y, anchor: "middle" }))() : null;
+    // Its lines lie as the drawing's do: from the left for words set from their left (a
+    // group's title, a heading), else about their middle.
+    const anchor = label ? (label.matches("text") ? label : label.querySelector("text"))?.getAttribute("text-anchor")
+      || getComputedStyle(label.matches("text") ? label : label.querySelector("text") || label).textAnchor : place?.anchor;
+    const align = anchor === "start" ? "left" : anchor === "end" ? "right" : "center";
+    let middle = drawn?.width ? (align === "left" ? drawn.left - pad + width / 2 : align === "right" ? drawn.right + pad - width / 2 : drawn.left + drawn.width / 2)
       : place ? (place.anchor === "start" ? place.x - pad + width / 2 : place.x) : part.left + where.width / 2;
     let top = drawn?.height ? alignedTop(drawn, inline.label, look, size)
       : (place ? place.y : part.top + where.height / 2) - size * 0.7 - 4;
@@ -3922,7 +4179,7 @@ export function figureParts(host) {
       }
     }
     Object.assign(inline.field.style, { fontSize: `${size}px`, fontFamily: look.family, fontWeight: look.weight,
-      color: look.fill, textAlign: "center", paddingLeft: `${pad}px`, paddingRight: `${pad}px`, textRendering: "geometricPrecision" });
+      color: look.fill, textAlign: align, paddingLeft: `${pad}px`, paddingRight: `${pad}px`, textRendering: "geometricPrecision" });
     // Wider than its shape until the drawing catches up, the words lie on the page's paper,
     // not across the parts beside it.
     // (A line's words, typed over the line, lie on the paper too: the line does not run through them.)
@@ -3989,6 +4246,11 @@ export function figureParts(host) {
     for (const node of model()?.nodes || []) {
       const other = node.id !== id && host.box(node.id);
       if (other) add({ left: outer.left + other.left, top: outer.top + other.top, width: other.width, height: other.height });
+    }
+    // (And the groups' titles, which are words too.)
+    for (const group of model()?.groups || []) {
+      const title = group.id !== id && host.element(`${group.id}.label`);
+      if (title) add(title.getBoundingClientRect());
     }
     const root = host.element(model()?.root);
     for (const line of root?.querySelectorAll(LINES) || []) {
@@ -4078,7 +4340,7 @@ export function figureParts(host) {
   // Words typed on a part sent, with the words they were typed over: should someone else
   // have changed those meanwhile, the figure keeps both changes, merged.
   function sendWords(typing, text, { name, ...options }) {
-    const action = { do: "update", target: { type: typing.kind, id: typing.id }, values: { label: text }, was: typing.base };
+    const action = { do: "update", target: { type: typing.kind, id: typing.id }, values: { [typing.key || "label"]: text }, was: typing.base };
     if (name !== undefined) action.name = name;
     typing.base = text;
     typing.mine.add(text);
@@ -4092,8 +4354,8 @@ export function figureParts(host) {
     if (!typing || typing.guess) return;
     const item = typing.kind === "node" ? nodeOf(typing.id) : typing.kind === "edge" ? edgeOf(typing.id) : typing.kind === "net" ? netOf(typing.id)
       : typing.kind === "group" ? groupOf(typing.id) : null;
-    if (!item || typeof (item.label ?? "") !== "string") return;
-    const theirs = item.label ?? "";
+    if (!item) return;
+    const theirs = markupOf(item[typing.key]);
     if (theirs === typing.base || typing.mine.has(theirs)) return;
     const field = typing.field, before = field.value;
     const merged = mergeText(typing.base, before, theirs);
@@ -4126,6 +4388,7 @@ export function figureParts(host) {
     const closing = inline;
     const { id, kind, field, original, box, sent, merge, inPlace, guess, fresh, after } = inline;
     clearTimeout(inline.live);
+    inline.unlisten?.();
     inline.label?.style.removeProperty("visibility");
     const bare = inPlace && !inline.label && !guess;
     inline = null;
@@ -4140,8 +4403,19 @@ export function figureParts(host) {
       select(after && typeOf(after) ? [after] : []);
       return;
     }
-    // "\n" typed in its words (as Graphviz has it) is the new line it means, kept as one.
-    if (keep) field.value = typedBreaks(field.value);
+    // Nor are a Text's words all taken away: it goes, as an emptied text box does in Keynote --
+    // one step with the typing that emptied it, said as its going.
+    if (keep && kind === "node" && nodeOf(id)?.kind === "text" && original.trim() && !field.value.trim()) {
+      box.remove();
+      stand(null);
+      act({ do: "delete", ids: [id], rejoin: true }, { merge: sent === original ? null : merge, hold: true, select: false,
+        label: `Delete ${inQuotes(plain(typedBreaks(original)).trim() || nameOf(id))}` });
+      select([]);
+      return;
+    }
+    // "\n" typed in its words (as Graphviz has it) is the new line it means, kept as one --
+    // but not one at their end, which is no line (nor a block in the file for one line).
+    if (keep) field.value = typedBreaks(field.value).replace(/\n+$/, "");
     // A part just added, done with no words typed (Return, Esc, a click elsewhere): its kind's
     // own words, as its field showed them -- an MLP's "MLP" -- not none.
     const given = keep && fresh && kind === "node" && !original.trim() && !field.value.trim() ? givenWords(nodeOf(id)) : "";
@@ -4924,7 +5198,10 @@ export function figureParts(host) {
       const value = valueAt(item, key) ?? list.find((f) => f.key === key)?.default;
       return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
     };
-    const shown = list.filter((field) => !field.show || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
+    // (Words the figure draws are never out of reach: a field of them that has some shows,
+    // whatever else is chosen -- a line's back label, drawn under it.)
+    const worded = (field) => field.type === "markup" && Boolean(plain(valueAt(item, field.key)).trim());
+    const shown = list.filter((field) => !field.show || worded(field) || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
     // Fields few reach for are folded away under the rest -- open, if one of them is set.
     const more = shown.filter((field) => field.more);
     const set = more.some((field) => valueAt(item, field.key) !== undefined && valueAt(item, field.key) !== null && valueAt(item, field.key) !== "");
@@ -4948,18 +5225,22 @@ export function figureParts(host) {
         // and nothing is left chosen in the field, nor its format bar over the panel.
         // A shape's words, while it has none, say faintly what it is, as on the drawing.
         const placeholder = field.key === "label" && item?.id && nodeOf(item.id) ? hintOf(item) : "";
-        const control = ui.markup({ value: typing(key) ?? words(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, spelling: false, lines: true, onInput: type });
+        // (Words kept as runs are shown as the markup that writes them, as on the drawing.)
+        const control = ui.markup({ value: typing(key) ?? markupOf(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true, onInput: type });
+        // Esc is done too, as it is on the drawing and in every field: the words are kept.
         control.area.addEventListener("keydown", (event) => {
-          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.isComposing) return;
+          if (event.isComposing || !((event.key === "Enter" && (event.metaKey || event.ctrlKey)) || event.key === "Escape")) return;
           event.preventDefault();
           event.stopPropagation();
           const end = control.area.value.length;
           control.area.setSelectionRange(end, end);
           control.area.blur();
+          lastTyped = 0;
         });
-        // Left, a "\n" typed in it is the new line it means.
+        typedAsMeant(control.area);
+        // Left, a "\n" typed in it is the new line it means; one at its end is none.
         control.area.addEventListener("blur", () => {
-          const broken = typedBreaks(control.area.value);
+          const broken = typedBreaks(control.area.value).replace(/\n+$/, "");
           if (broken === control.area.value) return;
           control.area.value = broken;
           control.area.dispatchEvent(new Event("input", { bubbles: true }));

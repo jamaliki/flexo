@@ -404,15 +404,21 @@ export const ui = {
   // their asterisks -- leaves those tools out.
   // `lines`: Return starts a new line, as in any text, even in a field of one line (a shape's
   // words); ⌘Return is done.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, key, spelling = true, lines = false } = {}) {
+  // `links: false` for words that link nowhere -- a figure's labels -- leaves ⌘K and the link
+  // tool out: ⌘K there does nothing (not the command palette either).
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, links = true, key, spelling = true, lines = false } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
-      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*", onInput); }
-      if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
+      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**"); }
+      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*"); }
+      if (mod && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (links) wrap(area, "[", "](https://)");
+      }
       // ⌥⌘E, as Keynote's Insert › Equation: ⌘M is the Mac's Window › Minimize.
-      if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$", onInput); }
+      if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$"); }
       // A field of one line (a slide's title) takes Return as done; ⇧Return starts a line of
       // its own. One whose words take new lines (`lines`) is done with ⌘Return.
       if (event.key === "Enter" && !event.isComposing && (lines ? mod : rows === 1 && !event.shiftKey)) { event.preventDefault(); area.blur(); }
@@ -420,7 +426,7 @@ export const ui = {
     // The tools show while the field is typed in (studio.css) and are worked by the pointer,
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
     const tool = (label, title, before, after, style) =>
-      h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
+      h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after); } }, label);
     // As the slide's words' format bar (richtext.js) has them, in its order and its look.
     const palette = colours === true ? { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)", ink: "var(--ink)" } : colours || {};
     // Each colour offered once, as there: one that looks as another does (Swiss's second
@@ -437,7 +443,7 @@ export const ui = {
       emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
       tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
       tool(h("span.tool-maths", {}, "∑"), "Equation (⌥⌘E)", "$", "$"),
-      tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
+      links ? tool(icon("link"), "Link (⌘K)", "[", "](https://)") : null,
       swatch("accent", "Accent"), swatch("accent2", "Accent 2"), swatch("muted", "Muted"), swatch("ink", "Default colour"));
     const node = h("div.markup", {}, tools, area);
     node.area = area;
@@ -763,13 +769,23 @@ function fit(area) {
   area.style.height = `${area.scrollHeight + 2}px`;
 }
 
-function wrap(area, before, after, onInput) {
+// Marks put round the words chosen (or round nothing, the caret between them), as typing
+// would put them: the field's own ⌘Z takes them back. The words stay chosen -- or, for a link
+// round words, its address is, to be typed over.
+function wrap(area, before, after) {
   const { selectionStart: start, selectionEnd: end, value } = area;
   const inner = value.slice(start, end);
-  area.setRangeText(before + inner + after, start, end, "select");
-  area.setSelectionRange(start + before.length, start + before.length + inner.length);
-  area.dispatchEvent(new Event("input"));
   area.focus();
+  area.setSelectionRange(start, end);
+  // (Should the browser not type it, it is put in all the same, outside the field's undo.)
+  if (!document.execCommand?.("insertText", false, before + inner + after) || area.value === value) {
+    area.setRangeText(before + inner + after, start, end, "select");
+    area.dispatchEvent(new Event("input"));
+  }
+  if (inner && before === "[" && after.startsWith("](")) {
+    const at = start + before.length + inner.length + 2;
+    area.setSelectionRange(at, at + after.length - 3);
+  } else area.setSelectionRange(start + before.length, start + before.length + inner.length);
 }
 
 // Tab indents a code editor's lines and ⇧Tab outdents them, as in a Mac code editor;

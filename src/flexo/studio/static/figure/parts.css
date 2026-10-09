@@ -70,7 +70,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-inline .markup { border: 0; box-shadow: none; }
 /* Typed in place: over the part's words, as they look; the tools float above. */
 /* Its ring as wide as the chosen frame, and inside it (placeInline keeps the box within). */
-.fig-inline.in-place { background: transparent; padding: 0; border-radius: 3px; box-shadow: 0 0 0 var(--frame, 2px) var(--accent); animation: none; }
+.fig-inline.in-place { background: transparent; padding: 0; border-radius: 4px; box-shadow: 0 0 0 var(--frame, 2px) var(--accent), 0 0 0 calc(var(--frame, 2px) + 3.5px) var(--accent-soft); animation: none; }
 .fig-inline.in-place .markup { background: transparent; }
 .fig-inline.in-place .textarea { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; line-height: 1.2; resize: none; overflow: hidden; caret-color: var(--accent); white-space: pre; }
 .fig-inline.in-place .textarea:focus { box-shadow: none; outline: none; }

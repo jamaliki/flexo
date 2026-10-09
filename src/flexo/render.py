@@ -57,6 +57,9 @@ def render_node(
         data__flexo__fit=f"{number(fit.width)} {number(fit.height)}"
         if fit is not None and spec.kind not in FIT_NEVER and spec.kind not in DRAWN_KINDS
         else None,
+        # (How wide a line of its words runs before it wraps: an editor's box for typing them
+        # wraps them there too, as they will be drawn.)
+        data__flexo__room=number(node.measured.room) if node.measured.room is not None else None,
     )
     if spec.kind in DRAWN_KINDS:
         from flexo.render_drawn import render_drawn

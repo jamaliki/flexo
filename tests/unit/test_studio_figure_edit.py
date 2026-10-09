@@ -477,6 +477,42 @@ def test_a_word_yaml_could_read_as_a_flag_or_number_stays_a_word() -> None:
         assert apply_to_data(data, action)["data"]["nodes"][0]["label"] == word
 
 
+def test_words_typed_keep_only_the_quotes_a_person_chose() -> None:
+    text = (
+        "figure: {id: f}\n"
+        "nodes:\n"
+        '  - {id: a, label: "no"}\n'
+        '  - {id: b, label: "Chosen"}\n'
+        "  - {id: c, label: Plain}\n"
+    )
+    for id_, words, written in (
+        ("a", "no again", "label: no again}"),  # quoted only as YAML needed for "no"
+        ("b", "Chosen words", 'label: "Chosen words"}'),  # quoted as the person chose
+        ("c", "yes", "label: 'yes'}"),  # a word YAML would read as true
+    ):
+        action = {"do": "update", "target": {"type": "node", "id": id_}, "values": {"label": words}}
+        lines = apply(text, action)["text"].splitlines()
+        line = next(line for line in lines if f"id: {id_}," in line)
+        assert line.endswith(written), line
+
+
+def test_a_part_added_among_parts_written_a_line_each_is_written_so_too() -> None:
+    text = (
+        "figure: {id: f}\n"
+        "nodes:\n"
+        "  - {id: a, label: A}\n"
+        "  - {id: b, label: B}\n"
+        "edges:\n"
+        "  - {from: a, to: b}\n"
+    )
+    made = apply(text, {"do": "add", "kind": "block", "after": "b", "source": "b"})
+    new = made["select"][0]
+    named = apply(made["text"], {"do": "update", "target": {"type": "node", "id": new},
+                                 "values": {"label": "Alpha"}})["text"]
+    assert f"  - {{id: {new}, label: Alpha}}" in named.splitlines()
+    assert f"  - {{from: b, to: {new}}}" in named.splitlines()
+
+
 def test_a_merge_that_keeps_a_line_to_a_shape_deleted_is_mended() -> None:
     from flexo.studio.merge import merge3
 

@@ -82,7 +82,8 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
   (1.5 = half as large again)}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
-Labels are markup: $maths$, *emphasis*, **strong**. `flexo schema` prints the full schema.
+Labels are markup: $maths$, `code`, [words]{accent} in a colour, \\n a new line (asterisks are
+drawn as typed: no emphasis). `flexo schema` prints the full schema.
 """
 
 
