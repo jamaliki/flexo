@@ -1082,7 +1082,10 @@ class _Document:
                 continue
             _set(item, key.split("."), value)
             if kind == "edge" and key in {"arrow", "head"}:
-                # A regulation head goes on an arrow with an end; a reversible step has none.
+                # A regulation head goes on an arrow with an end; a reversible step has none
+                # (and only an arrow with heads at both ends has a head at its start).
+                if key == "arrow" and value != "both":
+                    item.pop("tail", None)
                 if key == "arrow" and value in {"reversible", "none"}:
                     item.pop("head", None)
                 elif (

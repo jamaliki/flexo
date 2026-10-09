@@ -141,13 +141,42 @@ type NetKind = Literal["fan-out", "merge"]
 type ArrowEnds = Literal["end", "none", "both", "reversible"]
 ARROW_ENDS = ("end", "none", "both", "reversible")
 type EdgeHead = Literal[
-    "arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"
+    "arrow",
+    "triangle",
+    "stealth",
+    "latex",
+    "open",
+    "dot",
+    "diamond",
+    "square",
+    "inhibition",
+    "catalysis",
+    "stimulation",
+    "necessary",
+    "modulation",
 ]
-EDGE_HEADS = ("arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation")
-"""What an arrowhead says, after SBGN: an ordinary arrow; a bar for inhibition
-(a repressor on its promoter); an open circle for catalysis; an open triangle for
-stimulation, with a bar behind it for necessary stimulation; an open diamond for
-modulation."""
+EDGE_HEADS = (
+    "arrow",
+    "triangle",
+    "stealth",
+    "latex",
+    "open",
+    "dot",
+    "diamond",
+    "square",
+    "inhibition",
+    "catalysis",
+    "stimulation",
+    "necessary",
+    "modulation",
+)
+"""An arrowhead's shape: ``arrow``, the theme's (its ``arrow_shape``); one of those
+shapes by name whatever the theme -- ``triangle``, ``stealth`` (a notched dart),
+``latex`` (convex flanks), ``open`` (two strokes); a filled ``dot``, ``diamond`` or
+``square``; or one that says what the line does, after SBGN: a bar for
+``inhibition`` (a repressor on its promoter), an open circle for ``catalysis``, an
+open triangle for ``stimulation`` (with a bar behind it, ``necessary``), an open
+diamond for ``modulation``."""
 type LineStyle = Literal["solid", "dashed", "dotted"]
 LINE_STYLES = ("solid", "dashed", "dotted")
 type EdgeShape = Literal["auto", "orthogonal", "straight", "curved"]
@@ -518,6 +547,9 @@ class EdgeSpec:
     directions as two half-headed lines side by side (⇌)."""
     head: EdgeHead = "arrow"
     """The head's shape and meaning; see ``EDGE_HEADS``."""
+    tail: EdgeHead | None = None
+    """The head at its start, for an edge with heads at both ends (``arrow`` ``"both"``):
+    one of ``EDGE_HEADS``; unset, the same as ``head``. Unused otherwise."""
     width: float | None = None
     """How wide the line is drawn, in points; unset, the theme's ``connector_width``.
     Its arrowheads grow and shrink with it, as a drawing program's do. Paint only."""
@@ -541,6 +573,8 @@ class EdgeSpec:
             )
         if self.head not in EDGE_HEADS:
             raise ValueError(f'edge "{self.id}": ' + _unknown("head", self.head, EDGE_HEADS))
+        if self.tail is not None and self.tail not in EDGE_HEADS:
+            raise ValueError(f'edge "{self.id}": ' + _unknown("tail", self.tail, EDGE_HEADS))
         if self.head != "arrow" and self.arrow in {"none", "reversible"}:
             raise ValueError(
                 f'edge "{self.id}" has head "{self.head}" but arrow "{self.arrow}"; '

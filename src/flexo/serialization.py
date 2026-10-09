@@ -279,6 +279,8 @@ def _edge_data(edge: EdgeSpec) -> dict[str, object]:
         result["arrow"] = edge.arrow
     if edge.head != "arrow":
         result["head"] = edge.head
+    if edge.tail is not None:
+        result["tail"] = edge.tail
     if edge.width is not None:
         result["width"] = edge.width
     if edge.head_size is not None:
@@ -517,6 +519,7 @@ def _edge(data: dict[str, Any], edge_id: str, source: PortRef, target: PortRef) 
         tone=_tone(data.get("tone")),
         arrow=data.get("arrow", "end"),
         head=data.get("head", "arrow"),
+        tail=data.get("tail"),
         width=_points(data.get("width")),
         head_size=_points(data.get("head_size")),
         back_label=_label(data.get("back_label", "")),

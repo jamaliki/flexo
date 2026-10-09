@@ -39,6 +39,8 @@ from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
+from flexo.ir.semantic import EDGE_HEADS
+
 TONES = (
     "encoder",
     "decoder",
@@ -964,6 +966,19 @@ GROUP_FIELDS = [
     SHADOW,
 ]
 
+HEAD_NAMES = {
+    "arrow": "Theme\u2019s Arrow",
+    "latex": "LaTeX",
+    "open": "Open Arrow",
+    "inhibition": "Bar (Inhibits)",
+    "catalysis": "Open Circle (Catalysis)",
+    "stimulation": "Open Triangle (Stimulates)",
+    "necessary": "Bar and Open Triangle (Necessary)",
+    "modulation": "Open Diamond (Modulates)",
+}
+"""What each arrowhead is called in the inspector: by its look, and an SBGN head by what it
+says too."""
+
 EDGE_FIELDS = [
     LABEL,
     _field(
@@ -985,11 +1000,22 @@ EDGE_FIELDS = [
         "head",
         "Arrowhead",
         "choice",
-        options=["arrow", "inhibition", "catalysis", "stimulation", "necessary", "modulation"],
-        labels={"inhibition": "Blunt End (Inhibits)", "necessary": "Necessary Stimulation"},
+        options=list(EDGE_HEADS),
+        labels=HEAD_NAMES,
+        icons={head: f"head-{head}" for head in EDGE_HEADS},
         default="arrow",
-        hint="What the arrowhead means, as in SBGN",
+        hint="The open ones and the bar say what the line does, as in SBGN",
         show={"arrow": ["end", "both"]},
+    ),
+    _field(
+        "tail",
+        "Start Arrowhead",
+        "choice",
+        options=["", *EDGE_HEADS],
+        labels={"": "Same as End", **HEAD_NAMES},
+        icons={head: f"head-{head}" for head in EDGE_HEADS},
+        default="",
+        show={"arrow": "both"},
     ),
     _field("line", "Line Style", "choice", options=["solid", "dashed", "dotted"], default="solid"),
     _field(

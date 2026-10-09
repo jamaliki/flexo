@@ -9,7 +9,7 @@ import pytest
 from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.drawing import read_drawing
-from flexo.ir.semantic import EdgeSpec, PortRef
+from flexo.ir.semantic import EDGE_HEADS, EdgeSpec, PortRef
 from flexo.lint import lint_compilation
 from flexo.serialization import figure_to_document, parse_figure
 from flexo.themes import figure_style
@@ -153,3 +153,40 @@ def test_curves_widths_and_head_sizes_are_written_and_read_back() -> None:
 def test_a_width_or_head_size_out_of_range_is_refused(key: str, value: float) -> None:
     with pytest.raises(ValueError, match=key):
         EdgeSpec("e", PortRef("a", "output"), PortRef("b", "input"), **{key: value})
+
+
+@pytest.mark.parametrize("head", [head for head in EDGE_HEADS if head != "arrow"])
+def test_each_head_is_drawn_and_read_back_as_itself(head: str) -> None:
+    figure, a, b = _row()
+    with figure:
+        edge = figure.connect(a, b, head=head)
+    compiled = compile_figure(figure.spec)
+    shaft = _elements(compiled)[f"{edge.id}.shaft"]
+    assert shaft.get("marker-end") == f"url(#arrow.flow.{head})"
+    drawing = read_drawing(compiled.document.text)
+    heads = [found for item in drawing.walk() for found in getattr(item, "arrowheads", ())]
+    assert [(found.shape, found.end) for found in heads] == [(head, "end")]
+    assert not lint_compilation(compiled).errors
+
+
+def test_a_line_with_heads_at_both_ends_may_start_with_another() -> None:
+    figure, a, b = _row()
+    with figure:
+        edge = figure.connect(a, b, arrow="both", head="triangle", tail="dot")
+        same = figure.connect(b, a, arrow="both", head="diamond")
+    compiled = compile_figure(figure.spec)
+    by_id = _elements(compiled)
+    assert by_id[f"{edge.id}.shaft"].get("marker-start") == "url(#arrow.flow.dot.start)"
+    assert by_id[f"{edge.id}.shaft"].get("marker-end") == "url(#arrow.flow.triangle)"
+    assert by_id[f"{same.id}.shaft"].get("marker-start") == "url(#arrow.flow.diamond.start)"
+    drawing = read_drawing(compiled.document.text)
+    heads = {
+        (found.shape, found.end)
+        for item in drawing.walk()
+        for found in getattr(item, "arrowheads", ())
+    }
+    assert heads == {
+        ("triangle", "end"), ("dot", "start"), ("diamond", "end"), ("diamond", "start")
+    }
+    (written, _) = figure_to_document(figure.spec)["edges"]
+    assert written["tail"] == "dot"

@@ -74,10 +74,11 @@ Grids: kind cells, properties {grid: "K . K\n. Y R" (one row per line, one symbo
   . empty, numbers shaded on ramp), key: [{symbol, color: tone or #hex, mark, label}], cell,
   gap, corner, lines: ink|muted|#hex, row_labels / column_labels: numbers|letters|"a, b",
   row_side, column_side, ramp: "#lo, #hi", range: "lo, hi", values: true}.
-edges: each {from: node or node.port, to: node or node.port, label, role, head: inhibition|
-  catalysis|stimulation|necessary|modulation, arrow: reversible, back_label, cofactors: [ATP, ADP],
-  shape: orthogonal|straight|curved, line: dashed|dotted, tone, width (pt), head_size (1.5 = half
-  as large again)}
+edges: each {from: node or node.port, to: node or node.port, label, role, head: triangle|stealth|
+  latex|open|dot|diamond|square, or SBGN's inhibition|catalysis|stimulation|necessary|modulation,
+  arrow: none|both|reversible, tail (the start's head, with arrow: both), back_label, cofactors:
+  [ATP, ADP], shape: orthogonal|straight|curved, line: dashed|dotted, tone, width (pt), head_size
+  (1.5 = half as large again)}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
 Labels are markup: $maths$, *emphasis*, **strong**. `flexo schema` prints the full schema.

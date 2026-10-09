@@ -149,10 +149,31 @@ const ICONS = {
   pencil: "M10.5 2.5l3 3L6 13H3v-3z",
   theme: "M8 2a6 6 0 100 12 1.5 1.5 0 001.2-2.4 1.5 1.5 0 011.2-2.4H12a2 2 0 002-2C14 4.4 11.3 2 8 2zM5 8h.01M6.5 5h.01M9.5 5h.01",
   deck: "M2 3h12v8H2zM5.5 14h5M8 11v3",
+  // A line's arrowheads, each on the end of a short line (filled ones in FILLS).
+  "head-arrow": "M1.5 8H9",
+  "head-triangle": "M1.5 8H9",
+  "head-stealth": "M1.5 8H10",
+  "head-latex": "M1.5 8H9",
+  "head-open": "M1.5 8h12M9 4.5L13.5 8 9 11.5",
+  "head-dot": "M1.5 8H10",
+  "head-diamond": "M1.5 8H8",
+  "head-square": "M1.5 8H10",
+  "head-inhibition": "M1.5 8h11.5M13 4.5v7",
+  "head-catalysis": "M1.5 8H9m0 0a2.25 2.25 0 104.5 0 2.25 2.25 0 10-4.5 0",
+  "head-stimulation": "M1.5 8H8m0-3.5L14 8l-6 3.5z",
+  "head-necessary": "M1.5 8H8m-2-3.5v7m2-7L14 8l-6 3.5z",
+  "head-modulation": "M1.5 8H7m0 0l3.25-3 3.25 3-3.25 3z",
 };
 // Parts of an icon filled rather than drawn: Appearance's circle, half dark as on a Mac.
 const FILLS = {
   appearance: "M8 2.25a5.75 5.75 0 000 11.5z",
+  "head-arrow": "M8 4.5L14 8l-6 3.5 1.8-3.5z",
+  "head-triangle": "M8 4.5L14 8l-6 3.5z",
+  "head-stealth": "M8 4.5L14 8l-6 3.5 1.8-3.5z",
+  "head-latex": "M8 4.5Q11.5 6.5 14 8 11.5 9.5 8 11.5q.9-3.5 0-7z",
+  "head-dot": "M9.5 8a2.25 2.25 0 104.5 0 2.25 2.25 0 10-4.5 0",
+  "head-diamond": "M7.5 8L10.75 5 14 8l-3.25 3z",
+  "head-square": "M10 5.75h4v4.5h-4z",
 };
 
 export function icon(name, extra = {}) {

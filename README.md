@@ -624,6 +624,13 @@ arrowheads grow and shrink with it, as a drawing program's do; `head_size=`
 scales the heads on top of that (`1.5`, half as large again). In the studio
 they are a line's **Routing**, **Line Width** and **Arrowhead Size**.
 
+`head=` draws a line's head in a shape of its own: one of the theme's arrow
+shapes by name, whatever the theme (`"triangle"`, `"stealth"`, `"latex"`,
+`"open"`), or a filled `"dot"`, `"diamond"` or `"square"`; the SBGN heads (above)
+say what a line does. With `arrow="both"`, `tail=` gives its start a head of
+its own (`connect(a, b, arrow="both", head="triangle", tail="dot")`). In the
+studio they are **Arrowhead** and **Start Arrowhead**, each shown as it looks.
+
 `connect(a, a)` draws a loop: a recurrent cell's state fed back to itself, a
 state that can stay where it is. It goes on the component's emptiest side.
 

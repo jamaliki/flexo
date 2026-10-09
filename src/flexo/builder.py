@@ -480,6 +480,7 @@ class Figure:
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        tail: EdgeHead | None = None,
         width: float | None = None,
         head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
@@ -505,6 +506,7 @@ class Figure:
             line=line,
             arrow=arrow,
             head=head,
+            tail=tail,
             width=width,
             head_size=head_size,
             back_label=back_label,
@@ -2453,6 +2455,7 @@ class GroupBuilder:
         line: LineStyle = "solid",
         arrow: ArrowEnds = "end",
         head: EdgeHead = "arrow",
+        tail: EdgeHead | None = None,
         width: float | None = None,
         head_size: float | None = None,
         back_label: str | tuple[TextRun, ...] = "",
@@ -2480,8 +2483,12 @@ class GroupBuilder:
         its heads grown to match, and ``head_size=1.5`` makes them half as large
         again.
 
-        For pathways, gene circuits, and reactions, ``head=`` says what the
-        connector does to its target, after SBGN: ``"inhibition"`` (a bar, ⊣),
+        ``head=`` draws its head in a shape of its own: one of the theme's --
+        ``"triangle"``, ``"stealth"``, ``"latex"``, ``"open"`` -- or a filled
+        ``"dot"``, ``"diamond"`` or ``"square"``; ``tail=`` the head at its start,
+        with ``arrow="both"``, when that one differs. For pathways, gene circuits,
+        and reactions, ``head=`` says what the connector does to its target, after
+        SBGN: ``"inhibition"`` (a bar, ⊣),
         ``"catalysis"`` (an open circle), ``"stimulation"`` (an open triangle),
         ``"necessary"`` (a bar and an open triangle), or ``"modulation"`` (an
         open diamond). ``arrow="reversible"`` draws a reversible step as two
@@ -2506,6 +2513,7 @@ class GroupBuilder:
             line=line,
             arrow=arrow,
             head=head,
+            tail=tail,
             width=width,
             head_size=head_size,
             back_label=_label(back_label),

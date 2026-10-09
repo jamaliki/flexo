@@ -409,10 +409,13 @@ def _heads(routed: RoutedFigure, palette: Palette, style: LayoutStyle) -> set[st
             }
         if spec.arrow == "reversible":
             wanted.add(head_marker_id(family, "harpoon", scale=scale))
-        elif spec.head != "arrow" and spec.arrow != "none":
-            wanted.add(head_marker_id(family, spec.head, scale=scale))
-            if spec.arrow == "both":
-                wanted.add(head_marker_id(family, spec.head, start=True, scale=scale))
+        elif spec.arrow != "none":
+            if spec.head != "arrow":
+                wanted.add(head_marker_id(family, spec.head, scale=scale))
+            # (Its start's head, if it has one: its own, else the same.)
+            tail = spec.tail or spec.head
+            if spec.arrow == "both" and tail != "arrow":
+                wanted.add(head_marker_id(family, tail, start=True, scale=scale))
     for net in routed.nets:
         family = _line_paint(net.spec, palette)[1]
         if family not in {"flow", "residual"}:
@@ -490,7 +493,7 @@ def _render_edge(
     else:
         heads = edge.spec.arrow != "none" and (edge.joined_at is None or edge.join_arrow)
         head = head_marker_id(family, edge.spec.head, scale=scale)
-        tail = head_marker_id(family, edge.spec.head, start=True, scale=scale)
+        tail = head_marker_id(family, edge.spec.tail or edge.spec.head, start=True, scale=scale)
         element(
             group,
             "path",

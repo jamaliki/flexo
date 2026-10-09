@@ -4678,7 +4678,7 @@ export function figureParts(host) {
         // Left as it is by default, the choice reads in grey, as an empty field's placeholder does.
         // (Keyed, a problem with it leads to it: a plate's Wells.)
         return ui.field(field.label, ui.select({ value: value ?? field.default ?? "", unset: value === undefined || value === null, key,
-          options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)) })),
+          options: field.options.map((option) => ({ value: option, label: field.labels?.[option] ?? (option === "" ? "None" : titled(option)), icon: field.icons?.[option] })),
           onChange: (next) => {
             const typed = field.options.find((option) => String(option) === next);
             set(typed === field.default || typed === "" ? null : typed);
@@ -4993,7 +4993,7 @@ export function figureParts(host) {
     const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
     switch (field.type) {
       case "choice": {
-        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option) }))],
+        const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option), icon: field.icons?.[option] }))],
           onChange: (next) => set(next || null) });
         fills.push((drawn) => { const inherited = drawn[field.key]; select.relabel("", inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`); });
         return titled(ui.field(field.label, select, options));

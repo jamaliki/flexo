@@ -338,6 +338,12 @@ def test_updates_set_and_clear_keys_and_a_new_kind_keeps_what_it_can() -> None:
     text, _ = edit(text, do="update", target=edge, values={"head": "inhibition"})
     text, _ = edit(text, do="update", target=edge, values={"arrow": "reversible"})
     assert data(text)["edges"][1] == {"from": "encoder", "to": "y", "arrow": "reversible"}
+    # A head at its start only while it has heads at both ends.
+    text, _ = edit(text, do="update", target=edge, values={"arrow": "both", "tail": "dot"})
+    assert data(text)["edges"][1]["tail"] == "dot"
+    text, _ = edit(text, do="update", target=edge, values={"arrow": "end"})
+    assert "tail" not in data(text)["edges"][1]
+    text, _ = edit(text, do="update", target=edge, values={"arrow": "reversible"})
     text, _ = edit(text, do="update", target={"type": "figure"}, values={"figure.style": "tikz"})
     assert data(text)["figure"]["style"] == "tikz"
 

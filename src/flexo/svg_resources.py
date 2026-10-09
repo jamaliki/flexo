@@ -71,6 +71,13 @@ def add_definitions(
             if role not in {"flow", "residual"}:
                 _arrow_marker(definitions, role, marker_paint(family), drawn, palette, start=start)
             continue
+        if head in ARROW_SHAPES:
+            # One of the theme's shapes, by name, whatever the theme draws.
+            _arrow_marker(
+                definitions, role, marker_paint(family), drawn, palette, start=start,
+                shape=head, identifier=identifier,
+            )
+            continue
         paint = marker_paint(family)
         _head_marker(definitions, identifier, head, paint, drawn, palette, start=start)
     return stylesheet
@@ -152,7 +159,9 @@ def _head_marker(
     - ``stimulation``: an open triangle; ``necessary``: a bar, then one;
     - ``modulation``: an open diamond;
     - ``harpoon``: half an arrowhead, on the left of the line's travel -- one
-      of the two lines of a reversible reaction (⇌).
+      of the two lines of a reversible reaction (⇌);
+    - ``dot``, ``diamond``, ``square``: a filled one, its tip where an arrow's is
+      (these say nothing of their own).
     """
 
     length = style.arrow_length.points
@@ -209,6 +218,26 @@ def _head_marker(
             f"L {n(tip)} 0 L {n(middle)} {n(wide)} Z"
         )
         paint = hollow
+    elif head == "dot":
+        radius = length / 2.0
+        data = (
+            f"M 0 0 A {n(radius)} {n(radius)} 0 1 1 {n(length)} 0 "
+            f"A {n(radius)} {n(radius)} 0 1 1 0 0 Z"
+        )
+        paint = {"fill_role": paint_role}
+    elif head == "diamond":
+        # As long again as it is wide, back over the end of the shaft: as weighty as a dot.
+        back, wide = -0.4 * length, 0.5 * length
+        middle = (back + length) / 2.0
+        data = (
+            f"M {n(back)} 0 L {n(middle)} {n(-wide)} L {n(length)} 0 "
+            f"L {n(middle)} {n(wide)} Z"
+        )
+        paint = {"fill_role": paint_role}
+    elif head == "square":
+        side = length / 2.0
+        data = f"M 0 {n(-side)} L {n(length)} {n(-side)} L {n(length)} {n(side)} L 0 {n(side)} Z"
+        paint = {"fill_role": paint_role}
     elif head == "harpoon":
         if style.arrow_shape == "open":
             data = f"M 0 0 L {n(length)} 0 L 0 {n(-half)}"
@@ -224,9 +253,13 @@ def _head_marker(
         id=f"{identifier}.shape",
         d=data,
         stroke__linecap="round",
-        stroke__linejoin="round" if head != "harpoon" else "miter",
+        stroke__linejoin="miter" if head in {"harpoon", "diamond", "square"} else "round",
         **paint_attributes(palette=palette, **paint),  # type: ignore[arg-type]
     )
+
+
+ARROW_SHAPES = ("triangle", "stealth", "latex", "open")
+"""The shapes an arrow's head is drawn in: a theme's ``arrow_shape``, or one line's own."""
 
 
 def _arrow_marker(
@@ -237,8 +270,11 @@ def _arrow_marker(
     palette: Palette,
     *,
     start: bool = False,
+    shape: str | None = None,
+    identifier: str | None = None,
 ) -> None:
-    """One arrowhead, in the style's shape, tip ``arrow_length`` beyond the path end.
+    """One arrowhead, in the style's shape (or ``shape``), tip ``arrow_length`` beyond the
+    path end, as ``identifier`` (else ``arrow.<role>``).
 
     ``start=True`` makes the marker for the other end of a line
     (``arrow.<role>.start``), turned round with ``auto-start-reverse``.
@@ -252,10 +288,11 @@ def _arrow_marker(
     length = style.arrow_length.points
     half = style.arrow_width.points / 2.0
     width = style.connector_width.points
+    name = identifier or (f"arrow.{role}.start" if start else f"arrow.{role}")
     marker = element(
         definitions,
         "marker",
-        id=f"arrow.{role}.start" if start else f"arrow.{role}",
+        id=name,
         viewBox=f"{number(-width)} {number(-half - width)} "
         f"{number(length + 2 * width)} {number(2 * half + 2 * width)}",
         refX=0.0,
@@ -266,14 +303,12 @@ def _arrow_marker(
         orient="auto-start-reverse" if start else "auto",
         overflow="visible",
     )
-    if start:
-        role = f"{role}.start"
-    shape = style.arrow_shape
+    shape = shape or style.arrow_shape
     if shape == "open":
         element(
             marker,
             "path",
-            id=f"arrow.{role}.shape",
+            id=f"{name}.shape",
             d=f"M 0 {number(-half)} L {number(length)} 0 L 0 {number(half)}",
             stroke__linecap="round",
             stroke__linejoin="round",
@@ -295,7 +330,7 @@ def _arrow_marker(
     element(
         marker,
         "path",
-        id=f"arrow.{role}.shape",
+        id=f"{name}.shape",
         d=data,
         stroke__linejoin="miter",
         **paint_attributes(palette=palette, fill_role=paint_role),
