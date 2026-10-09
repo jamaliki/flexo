@@ -2900,3 +2900,52 @@ def test_a_part_dragged_in_a_flow_takes_its_place_among_its_own_layer() -> None:
     boxes = {"root": [0, 0, 240, 30], "a": [0, 0, 40, 30], "b": [100, 0, 140, 30],
              "c": [200, 0, 240, 30]}
     assert dropped(flow, boxes, [["c", 52, 15], ["a", 188, 15]]) == ["root 1", "root 1"]
+
+
+# -- the File menu's Rename and Duplicate --------------------------------------------
+
+
+def test_a_document_renamed_follows_its_file_with_its_edits(served) -> None:
+    url, workspace = served
+    doc = workspace.open("figure.yaml")
+    listener = workspace.listen("page-b", PERSON)
+    typed = SAMPLE_FIGURE.replace("Encoder", "Coder")
+    doc.update({"text": typed}, doc.version, PERSON, "page-a")
+    asked = {"file": "figure.yaml", "to": "Pipeline.yaml", "who": PERSON}
+    status, answer = call(f"{url}/api/rename", workspace.token, asked)
+    assert (status, answer) == (200, {"file": "Pipeline.yaml"})
+    folder = workspace.root
+    assert not (folder / "figure.yaml").exists()
+    # What was typed and not yet written is in the renamed file, not left under the old name.
+    assert "Coder" in (folder / "Pipeline.yaml").read_text(encoding="utf-8")
+    assert workspace.docs["Pipeline.yaml"] is doc and "figure.yaml" not in workspace.docs
+    events = []
+    while not listener.events.empty():
+        events.append(listener.events.get())
+    assert {"type": "renamed", "file": "figure.yaml", "to": "Pipeline.yaml"} in events
+    assert any(entry["text"] == "renamed “figure” to “Pipeline”" for entry in workspace.activity)
+    # Never over another file, and only as a document's name.
+    (folder / "other.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    asked = {"file": "Pipeline.yaml", "to": "other.yaml"}
+    status, answer = call(f"{url}/api/rename", workspace.token, asked)
+    assert status == 409 and "already used" in answer["error"]
+    asked = {"file": "Pipeline.yaml", "to": "notes.txt"}
+    status, _ = call(f"{url}/api/rename", workspace.token, asked)
+    assert status == 400
+    assert (folder / "Pipeline.yaml").exists()
+
+
+def test_a_document_duplicated_is_a_copy_beside_it_opened(served) -> None:
+    url, workspace = served
+    doc = workspace.open("figure.yaml")
+    typed = SAMPLE_FIGURE.replace("Encoder", "Coder")
+    doc.update({"text": typed}, doc.version, PERSON, "page-a")
+    asked = {"file": "figure.yaml", "to": "figure copy.yaml"}
+    status, answer = call(f"{url}/api/duplicate", workspace.token, asked)
+    assert (status, answer) == (200, {"file": "figure copy.yaml"})
+    folder = workspace.root
+    assert "Coder" in (folder / "figure copy.yaml").read_text(encoding="utf-8")
+    assert "Coder" in (folder / "figure.yaml").read_text(encoding="utf-8")
+    assert "figure copy.yaml" in workspace.docs and workspace.docs["figure.yaml"] is doc
+    status, _ = call(f"{url}/api/duplicate", workspace.token, asked)
+    assert status == 409
