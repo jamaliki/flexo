@@ -317,6 +317,12 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/new":
             doc = workspace.new(name, data.get("kind", ""), data.get("data"), who)
             self._json({"file": doc.name})
+        elif route == "/api/rename":
+            # The File menu's Rename: the file renamed, the open document following it.
+            self._json({"file": workspace.rename(name, str(data.get("to") or ""), who)})
+        elif route == "/api/duplicate":
+            # The File menu's Duplicate: a copy beside it, opened.
+            self._json({"file": workspace.duplicate(name, str(data.get("to") or ""), who).name})
         elif route == "/api/export":
             self._export(workspace.open(name), data)
         elif route == "/api/act":
