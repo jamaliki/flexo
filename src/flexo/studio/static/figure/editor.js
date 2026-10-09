@@ -297,7 +297,8 @@ export function mount(studio, main) {
       const item = h(`div.tree-row${chosen.includes(id) ? ".on" : ""}${isRoot ? ".root" : ""}`, {
         draggable: isRoot ? "false" : "true", dataset: { id }, style: { paddingLeft: `${6 + depth * 14}px` },
         onclick: (event) => choose(event, id),
-        ondblclick: () => (node ? figure.openInline(id) : null),
+        // (Double-clicked, its words are typed in, on the drawing: a shape's, a group's title.)
+        ondblclick: () => (node || (group && !isRoot) ? figure.openInline(id) : null),
       },
       group && children.length ? h(`button.tree-caret${open ? ".open" : ""}`, { type: "button", onclick: (event) => {
         event.stopPropagation();
@@ -319,7 +320,7 @@ export function mount(studio, main) {
       figure.groupOf(found.root) ? row(found.root, 0) : null,
       h("div.tree-head", {}, "Lines", h("span.count", {}, lines.length)),
       lines.length ? lines.map((line) => h(`div.tree-row.line${chosen.includes(line.id) ? ".on" : ""}`, {
-        dataset: { id: line.id }, onclick: () => figure.select([line.id]),
+        dataset: { id: line.id }, onclick: () => figure.select([line.id]), ondblclick: () => figure.openInline(line.id),
       }, h("span.tree-caret"), glyph(line.net ? "net" : "edge"),
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
