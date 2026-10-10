@@ -85,8 +85,12 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
         elif isinstance(item, Text):
             _text(parent, item)
         elif isinstance(item, Image):
+            holder = parent
+            if item.clip is not None:
+                # A picture cropped shows only what of it is kept: a rectangle, or an oval.
+                holder = _clipped(parent, item)
             image = ET.SubElement(
-                parent,
+                holder,
                 svg_tag("image"),
                 {
                     "x": number(item.x),
@@ -104,6 +108,27 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
                 ex = 2 * item.x + item.width if item.flip_x else 0.0
                 ey = 2 * item.y + item.height if item.flip_y else 0.0
                 image.set("transform", f"matrix({sx} 0 0 {sy} {number(ex)} {number(ey)})")
+
+
+def _clipped(parent: ET.Element, item: Image) -> ET.Element:
+    """A group showing only what of ``item`` its clip keeps, for the picture to go in."""
+
+    left, top, right, bottom = item.clip or (0.0, 0.0, 0.0, 0.0)
+    # Named for the picture, or else by how many clips come before it: one of its own.
+    count = sum(1 for _ in parent.iter(svg_tag("clipPath")))
+    name = f"{item.id}.clip" if item.id else f"clip{count + 1}"
+    clip = ET.SubElement(parent, svg_tag("clipPath"), {"id": name})
+    if item.oval:
+        ET.SubElement(clip, svg_tag("ellipse"), {
+            "cx": number((left + right) / 2.0), "cy": number((top + bottom) / 2.0),
+            "rx": number((right - left) / 2.0), "ry": number((bottom - top) / 2.0),
+        })
+    else:
+        ET.SubElement(clip, svg_tag("rect"), {
+            "x": number(left), "y": number(top),
+            "width": number(right - left), "height": number(bottom - top),
+        })
+    return ET.SubElement(parent, svg_tag("g"), {"clip-path": f"url(#{name})"})
 
 
 def _paint(element: ET.Element, paint: Paint) -> None:
