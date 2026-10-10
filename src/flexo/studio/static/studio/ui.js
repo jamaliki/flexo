@@ -105,6 +105,8 @@ const ICONS = {
   figure: "M2 2.5h5.5V7H2zM8.5 9H14v4.5H8.5zM4.75 7v4.25H8.5",
   plot: "M2.5 2.5v11h11M4.5 11l3-4 2.5 2 3.5-5",
   image: "M2.5 3.5h11v9h-11zM2.5 11l3.5-3.5 3 3 2-2 2.5 2.5M10.5 6.5h.01",
+  // Crop's two corners, as a Mac draws it: the frame kept, its corners crossing.
+  crop: "M4.5 1.5v10h10M1.5 4.5h10v10",
   gallery: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
   layout: "M2.5 2.5h11v11h-11zM2.5 5.5h11M8 5.5v8",
   slide: "M2 3.5h12v9H2z",

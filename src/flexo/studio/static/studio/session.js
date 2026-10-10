@@ -782,7 +782,9 @@ export class Session {
   // Export, as Keynote's File › Export To does. The kind's entry for a format (in
   // `exports`) asks first, in a sheet, when there is anything to choose -- `choose`, the
   // formats to offer for it ([{ format, label }]); `options`, settings its export takes
-  // ([{ name, label, value, onChange }], `onChange` to keep a setting for next time) --
+  // ([{ name, label, value, onChange }], `onChange` to keep a setting for next time): a
+  // switch, or with `choices` ([{ value, label }]) segments to choose one of, shown only
+  // while one of its `formats` is chosen, if it names them (a PNG's size) --
   // its `hint` (what the file will be) said there too. With nothing to choose (a deck's
   // PowerPoint, its PDF with no builds) it goes straight on, as Keynote does. Then the Mac app's one save panel puts the file, or a folder of several,
   // where its person says, or the browser downloads it (several files as a zip): nothing
@@ -796,18 +798,30 @@ export class Session {
     const options = {};
     if (entry?.choose?.length || entry?.options?.length) {
       let chosen = entry.format;
-      for (const option of entry.options || []) options[option.name] = Boolean(option.value);
+      for (const option of entry.options || []) options[option.name] = option.choices ? option.value : Boolean(option.value);
+      // Each option for some formats only, shown while one of them is chosen.
+      const shown = [];
+      const showFor = (format) => { for (const [node, formats] of shown) node.hidden = !formats.includes(format); };
+      const control = (option) => {
+        const set = (value) => { options[option.name] = value; option.onChange?.(value); };
+        const node = option.choices
+          ? ui.field(option.label, ui.segmented({ value: options[option.name], options: option.choices, onChange: set }), { hint: option.hint })
+          : ui.toggle({ value: options[option.name], label: option.label, onChange: set });
+        if (option.formats) shown.push([node, option.formats]);
+        return node;
+      };
       const go = await new Promise((done) => {
         let going = false;
         dialog({
           title: `Export ${named}`,
           body: [
-            entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; } })) : null,
-            ...(entry.options || []).map((option) => ui.toggle({ value: options[option.name], label: option.label, onChange: (value) => { options[option.name] = value; option.onChange?.(value); } })),
+            entry.choose?.length ? ui.field("Format", ui.segmented({ value: chosen, options: entry.choose.map((item) => ({ value: item.format, label: item.label })), onChange: (value) => { chosen = value; showFor(value); } })) : null,
+            ...(entry.options || []).map(control),
           ],
           actions: [{ label: "Cancel" }, { label: app ? "Next…" : "Export", kind: "primary", run: () => { going = true; } }],
           onClose: () => done(going),
         });
+        showFor(chosen);
         [...document.querySelectorAll(".dialog-foot .btn.primary")].pop()?.focus();
       });
       if (!go) return [];
