@@ -114,6 +114,8 @@ def _clipped(parent: ET.Element, item: Image) -> ET.Element:
     """A group showing only what of ``item`` its clip keeps, for the picture to go in."""
 
     left, top, right, bottom = item.clip or (0.0, 0.0, 0.0, 0.0)
+    # (A clip that keeps none of it keeps nothing: never a box turned inside out.)
+    right, bottom = max(right, left), max(bottom, top)
     # Named for the picture, or else by how many clips come before it: one of its own.
     count = sum(1 for _ in parent.iter(svg_tag("clipPath")))
     name = f"{item.id}.clip" if item.id else f"clip{count + 1}"
