@@ -181,6 +181,11 @@ class Image:
     flip_x: bool = False
     flip_y: bool = False
     """Whether the picture is drawn mirrored (a plot's image is often stored upside down)."""
+    clip: tuple[float, float, float, float] | None = None
+    """The part of it that shows, on the page (``left, top, right, bottom``): a picture
+    cropped, or cut by a clip it is drawn in; ``None`` where it shows whole."""
+    oval: bool = False
+    """Whether only the oval within ``clip`` shows (a picture cropped round)."""
 
     def placed(self, width: float, height: float) -> tuple[float, float, float, float]:
         """Where a picture of ``width`` by ``height`` is drawn: ``x, y, w, h``."""
@@ -287,8 +292,11 @@ def ink_bounds(drawing: Drawing) -> tuple[float, float, float, float]:
             xs += [x for x, _ in corners]
             ys += [y for _, y in corners]
         elif isinstance(item, Image):
-            xs += [item.x, item.x + item.width]
-            ys += [item.y, item.y + item.height]
+            left, top, right, bottom = item.x, item.y, item.x + item.width, item.y + item.height
+            if item.clip is not None:
+                left, top, right, bottom = _intersect((left, top, right, bottom), item.clip)
+            xs += [left, right]
+            ys += [top, bottom]
     if not xs:
         return 0.0, 0.0, drawing.width, drawing.height
     return min(xs), min(ys), max(xs), max(ys)
@@ -652,6 +660,12 @@ def _read_one(
             _read_one(target, used, context, alpha, environment, moved)
             group.items.extend(used.items)
     elif tag in {"rect", "circle", "ellipse", "path", "line", "polyline", "polygon"}:
+        # A rectangle or oval filled with one picture is that picture, cropped to it.
+        picture = _patterned(child, tag, context, environment, placed)
+        if picture is not None:
+            group.items.append(picture)
+            if _paint(context, alpha).stroke is None:
+                return
         shape = _shape(child, tag, context, alpha, environment.markers)
         if shape is not None:
             shape = _clipped(_transformed(shape, placed), _region_of(context.get("-flexo-clip")))
@@ -662,17 +676,16 @@ def _read_one(
         if text is not None:
             group.items.append(_transformed(text, placed))
     elif tag == "image":
-        group.items.append(
-            _transformed(Image(
-                child.get("id"),
-                _float(child, "x"),
-                _float(child, "y"),
-                _float(child, "width"),
-                _float(child, "height"),
-                child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or "",
-                child.get("preserveAspectRatio", "xMidYMid meet"),
-            ), placed)
-        )
+        picture = _transformed(Image(
+            child.get("id"),
+            _float(child, "x"),
+            _float(child, "y"),
+            _float(child, "width"),
+            _float(child, "height"),
+            child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or "",
+            child.get("preserveAspectRatio", "xMidYMid meet"),
+        ), placed)
+        group.items.append(_cut(picture, _region_of(context.get("-flexo-clip"))))
     elif tag == "svg":
         if _drawable(child):
             _viewport(child, group, context, alpha, environment, placed)
@@ -731,6 +744,68 @@ def _viewport(
     _read_children(element, nested, inner, opacity, environment, _compose(matrix, fit))
     if nested.items:
         group.items.append(nested)
+
+
+def _patterned(
+    element: ET.Element,
+    tag: str,
+    context: dict[str, str],
+    environment: _Environment,
+    matrix: Matrix,
+) -> Image | None:
+    """The picture a rectangle or an oval is filled with -- a pattern of one picture, drawn
+    once, which is how a picture cropped is drawn -- shown only within the shape: None
+    for any other fill."""
+
+    if tag not in {"rect", "circle", "ellipse"}:
+        return None
+    found = re.fullmatch(r"\s*url\(\s*['\"]?#([^)'\"]+)['\"]?\s*\)\s*", context.get("fill", ""))
+    pattern = environment.ids.get(found.group(1)) if found else None
+    if pattern is None or local_name(pattern.tag) != "pattern":
+        return None
+    if (pattern.get("patternUnits") != "userSpaceOnUse"
+            or pattern.get("patternContentUnits", "userSpaceOnUse") != "userSpaceOnUse"
+            or pattern.get("patternTransform") or pattern.get("viewBox")):
+        return None
+    inside = [item for item in pattern if local_name(item.tag) not in {"title", "desc"}]
+    if len(inside) != 1 or local_name(inside[0].tag) != "image" or inside[0].get("transform"):
+        return None
+    source = inside[0]
+    tile = [_float(pattern, name) for name in ("x", "y", "width", "height")]
+    x, y = tile[0] + _float(source, "x"), tile[1] + _float(source, "y")
+    width, height = _float(source, "width"), _float(source, "height")
+    # One picture, wholly in one tile: drawn once, not repeated.
+    beyond = max(x + width - tile[0] - tile[2], y + height - tile[1] - tile[3])
+    if min(width, height) <= 0.0 or beyond > 1e-6:
+        return None
+    href = source.get("href") or source.get("{http://www.w3.org/1999/xlink}href") or ""
+    fit = source.get("preserveAspectRatio", "xMidYMid meet")
+    picture = _transformed(Image(element.get("id"), x, y, width, height, href, fit), matrix)
+    if tag == "rect":
+        left, top = _float(element, "x"), _float(element, "y")
+        right, bottom = left + _float(element, "width"), top + _float(element, "height")
+    else:
+        cx, cy = _float(element, "cx"), _float(element, "cy")
+        rx = _float(element, "r") if tag == "circle" else _float(element, "rx")
+        ry = _float(element, "r") if tag == "circle" else _float(element, "ry")
+        left, top, right, bottom = cx - rx, cy - ry, cx + rx, cy + ry
+    corners = [_map(matrix, point) for point in ((left, top), (right, bottom))]
+    shape = (min(p[0] for p in corners), min(p[1] for p in corners),
+             max(p[0] for p in corners), max(p[1] for p in corners))
+    region = _intersect(shape, _region_of(context.get("-flexo-clip")))
+    return replace(picture, clip=region, oval=tag != "rect" and region == shape)
+
+
+def _cut(picture: Image, region: Region | None) -> Image:
+    """``picture`` cut to ``region`` -- unless the region holds it whole."""
+
+    if region is None:
+        return picture
+    box = (picture.x, picture.y, picture.x + picture.width, picture.y + picture.height)
+    cut = _intersect(box, region)
+    if all(abs(edge - whole) < 1e-6 for edge, whole in zip(cut, box, strict=True)):
+        return picture
+    return replace(picture, clip=cut)
 
 
 # -- clipping ------------------------------------------------------------------------

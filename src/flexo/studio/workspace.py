@@ -430,7 +430,7 @@ class Doc:
                     f"{self.name} was renamed {self.moved}."
                     if self.moved
                     else f"{self.name} was moved or deleted."
-                    + ("" if self.unread else " Saving writes it again.")
+                    + ("" if self.unread else " Save (⌘S) to put it back.")
                 )
                 return "problem"
             text = _words(self.path)
@@ -830,7 +830,9 @@ class Workspace:
                     if getattr(open_doc, "faulty", False)
                     else {}
                 )
-                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title, **said})
+                # (When it was last changed, for a list of them, as the Finder dates a file.)
+                found.append({"file": name, "kind": kind, "title": self.kinds[kind].title,
+                              "modified": round(_stamp(file)), **said})
             if len(found) >= 300:
                 break
         return found
@@ -876,7 +878,7 @@ class Workspace:
                     doc.problem = (
                         f"{doc.name} is gone: renamed {doc.moved}?"
                         if doc.moved
-                        else f"{doc.name} was moved or deleted. Saving writes it again."
+                        else f"{doc.name} was moved or deleted. Save (⌘S) to put it back."
                     )
                 self.docs[relative] = doc
                 if doc.exists:
@@ -988,6 +990,65 @@ class Workspace:
         )
         self.broadcast({"type": "documents", "documents": self.documents()})
         return doc
+
+    def rename(self, name: str, to: str, who: dict[str, Any] | None = None) -> str:
+        """A document's file given a new name in the folder, as the File menu's Rename gives one:
+        never over another file. Open, the document follows it as it follows a file renamed
+        in the Finder (``_follow_rename``) -- its edits written first, so nothing waits under
+        the old name. The name it has now."""
+
+        source, target = self.path(name), self._new_name(to)
+        moved = self.relative(target)
+        if not source.is_file():
+            raise FileNotFoundError(f"{name} is no longer in this folder.")
+        # (Only its capitals changed, on a disk that does not tell them apart: the same file.)
+        if target.exists() and _file(target) != _file(source):
+            raise FileExistsError(_taken(target))
+        doc = self.docs.get(name)
+        if doc is not None and (doc.unread or doc.held or not doc.exists):
+            raise ValueError(f"{name} can be renamed once it can be read.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if doc is None:
+            os.rename(source, target)
+        else:
+            with doc.lock:
+                self._write(doc)
+                os.rename(source, target)
+                doc.moved = moved
+                if not self._follow_rename(doc):
+                    self.reread(doc)
+        self.record(who or {"id": "studio", "name": "Studio", "kind": "system"}, moved,
+                    f"renamed \u201c{_shown(name)}\u201d to \u201c{_shown(moved)}\u201d")
+        self.broadcast({"type": "documents", "documents": self.documents()})
+        return moved
+
+    def duplicate(self, name: str, to: str, who: dict[str, Any] | None = None) -> Doc:
+        """A copy of a document, as the File menu's Duplicate makes one: its file as it is now (its
+        edits written first), under the name ``to`` in the folder, opened."""
+
+        source, target = self.path(name), self._new_name(to)
+        if target.exists():
+            raise FileExistsError(_taken(target))
+        doc = self.docs.get(name)
+        if doc is not None and doc.exists:
+            self._write(doc)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        copy = self.open(self.relative(target))
+        self.record(who or {"id": "studio", "name": "Studio", "kind": "system"}, copy.name,
+                    f"made a copy of \u201c{_shown(name)}\u201d")
+        self.broadcast({"type": "documents", "documents": self.documents()})
+        return copy
+
+    def _new_name(self, to: str) -> Path:
+        """Where a document named ``to`` (in the folder) goes: a file a kind reads."""
+
+        if not to.strip() or to.strip().endswith("/"):
+            raise ValueError("Enter a name.")
+        target = self.path(to.strip())
+        if target.suffix.lower() not in DOCUMENT_SUFFIXES:
+            raise ValueError("A document\u2019s file name ends in .yaml, .yml or .json.")
+        return target
 
     def flush(self) -> None:
         for doc in list(self.docs.values()):
@@ -1598,13 +1659,30 @@ def _shaped(kind: Kind, document: Any) -> None:
 
 
 def _unread(error: BaseException, name: str) -> str:
-    """Why a file does not read, in words that do not name it again."""
+    """Why a file does not read, in words that do not name it again -- in its writer's
+    words where the YAML reader's are known ("line 4: a quote is not closed")."""
 
+    from flexo.studio.figure_kind import yaml_said
+
+    plain = yaml_said(error) if isinstance(error, yaml.YAMLError) else None
+    mark = getattr(error, "problem_mark", None)
+    if plain:
+        return f"line {mark.line + 1}: {plain}" if mark is not None else plain
     said = explain(error)
     for lead in (f"{name}: ", f"{name}, "):
         if said.startswith(lead):
             return said[len(lead):]
     return f"it {said[len(name) + 1:]}" if said.startswith(f"{name} ") else said
+
+
+def _taken(target: Path) -> str:
+    return f"\u201c{target.name}\u201d is already used in this folder. Choose a different name."
+
+
+def _shown(name: str) -> str:
+    """A document's name as the studio shows it: its file's, without the extension."""
+
+    return re.sub(r"(\.theme)?\.(ya?ml|json)$", "", Path(name).name, flags=re.IGNORECASE)
 
 
 def _reason(error: Exception) -> str:

@@ -39,7 +39,7 @@ def edges(text: str) -> list[tuple[str, str]]:
 def test_a_part_added_after_another_is_fed_from_it_and_the_comments_stay() -> None:
     text, chosen = edit(SAMPLE_FIGURE, do="add", kind="mlp", after="encoder", source="encoder")
     assert chosen == ["mlp"]
-    assert text.startswith("# A flexo figure")
+    assert text.startswith("# A figure: ")
     ids = [node["id"] for node in data(text)["nodes"]]
     # A file of nodes alone stacks them as listed: the new one comes right after.
     assert ids == ["x", "encoder", "mlp", "y"]
@@ -477,6 +477,42 @@ def test_a_word_yaml_could_read_as_a_flag_or_number_stays_a_word() -> None:
         assert apply_to_data(data, action)["data"]["nodes"][0]["label"] == word
 
 
+def test_words_typed_keep_only_the_quotes_a_person_chose() -> None:
+    text = (
+        "figure: {id: f}\n"
+        "nodes:\n"
+        '  - {id: a, label: "no"}\n'
+        '  - {id: b, label: "Chosen"}\n'
+        "  - {id: c, label: Plain}\n"
+    )
+    for id_, words, written in (
+        ("a", "no again", "label: no again}"),  # quoted only as YAML needed for "no"
+        ("b", "Chosen words", 'label: "Chosen words"}'),  # quoted as the person chose
+        ("c", "yes", "label: 'yes'}"),  # a word YAML would read as true
+    ):
+        action = {"do": "update", "target": {"type": "node", "id": id_}, "values": {"label": words}}
+        lines = apply(text, action)["text"].splitlines()
+        line = next(line for line in lines if f"id: {id_}," in line)
+        assert line.endswith(written), line
+
+
+def test_a_part_added_among_parts_written_a_line_each_is_written_so_too() -> None:
+    text = (
+        "figure: {id: f}\n"
+        "nodes:\n"
+        "  - {id: a, label: A}\n"
+        "  - {id: b, label: B}\n"
+        "edges:\n"
+        "  - {from: a, to: b}\n"
+    )
+    made = apply(text, {"do": "add", "kind": "block", "after": "b", "source": "b"})
+    new = made["select"][0]
+    named = apply(made["text"], {"do": "update", "target": {"type": "node", "id": new},
+                                 "values": {"label": "Alpha"}})["text"]
+    assert f"  - {{id: {new}, label: Alpha}}" in named.splitlines()
+    assert f"  - {{from: b, to: {new}}}" in named.splitlines()
+
+
 def test_a_merge_that_keeps_a_line_to_a_shape_deleted_is_mended() -> None:
     from flexo.studio.merge import merge3
 
@@ -687,6 +723,13 @@ def test_a_figure_file_with_a_shape_that_cannot_be_drawn_exports_with_a_plain_bo
     after = yaml.safe_load(SAMPLE_FIGURE)
     after["nodes"].append({"id": "extra", "label": "Extra step"})
     assert figure_changes(before, after) == ["added “Extra step”"]
+    # A shape whose id alone changed (made from the words typed in it) is the same shape:
+    # nothing to say, not one deleted and another added -- nor its lines taken away.
+    renamed = yaml.safe_load(
+        SAMPLE_FIGURE.replace("id: encoder", "id: coder").replace("to: encoder", "to: coder")
+        .replace("from: encoder", "from: coder")
+    )
+    assert figure_changes(before, renamed) == []
 
 
 def test_a_structure_that_cannot_be_downloaded_is_an_answer_not_a_failed_request(
@@ -1236,3 +1279,20 @@ def test_activity_says_lines_joined_and_parted_as_one() -> None:
     assert said == ["joined the lines into “Attended”"]
     said = [note["text"] for note in kind.describe({"text": joined}, {"text": ATTENTION})]
     assert said == ["separated the line into “Attended”"]
+
+
+def test_a_copy_of_a_copy_is_numbered_on_from_it() -> None:
+    text, chosen = edit(SAMPLE_FIGURE, do="duplicate", ids=["encoder"])
+    assert chosen == ["encoder-2"]
+    text, chosen = edit(text, do="duplicate", ids=["encoder-2"])
+    assert chosen == ["encoder-3"]
+    text, chosen = edit(text, do="duplicate", ids=["encoder-2"])
+    assert chosen == ["encoder-4"]
+    compile_figure(parse(text, Path.cwd()))
+    # So is one pasted where its id is taken; pasted where it is not, it keeps it.
+    copied = {"top": ["encoder-2"], "nodes": [{"id": "encoder-2", "label": "Encoder"}]}
+    text, chosen = edit(text, do="paste", after="x", **copied)
+    assert chosen == ["encoder-5"]
+    compile_figure(parse(text, Path.cwd()))
+    _, chosen = edit(SAMPLE_FIGURE, do="paste", after="x", **copied)
+    assert chosen == ["encoder-2"]

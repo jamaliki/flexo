@@ -596,6 +596,8 @@ def test_the_studio_s_preview_reads_maths_as_the_pdf_and_powerpoint_do(tmp_path)
         r"[\mathrm{Na^+}]_{in}",
         r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
         r"\int_0^\infty e^{-x}\,dx",
+        # An accent over one letter, braced or not, as the letter with its mark.
+        r"\sqrt{1-\bar\alpha_t} + \hat{x}_0 + \vec v + \tilde\beta",
     ]
     code = (
         f"import {{ mathWords }} from {json.dumps((tmp_path / 'maths.mjs').as_uri())};\n"

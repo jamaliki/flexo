@@ -572,7 +572,10 @@ A process is a `block`, a start or end a `terminal`, a question a `decision`, an
 data read or written an `io` parallelogram. A decision's diamond is sized round its
 words; given a `width=` (or `height=`), it is that, and the other way as small as its
 words let it be. In the studio, drag a shape's corner to size it: it snaps to the size
-that fits its words (for a diamond, one that hugs them), and a double-click fits it. The shapes of a software diagram are
+that fits its words (for a diamond, one that hugs them), and a double-click fits it. Text
+has a handle at each side instead, as a Keynote text box has: drag one to set where its
+words wrap (`width=`); it snaps back to the width they take of themselves, and stops at the
+longest word. The shapes of a software diagram are
 components too, each sized round its label and painted in the theme's roles, so a
 palette, a tone, or a dark theme recolours them with the rest:
 
@@ -965,7 +968,7 @@ slide 4") show where it works, the activity list says who changed what, and
 own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
 changes in words, to go back or forward to any of them.
 
-- **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
+- **Figures**, made without writing YAML: **Add** offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
   is chosen comes after it, a line between them; when the chosen part's single line
@@ -973,12 +976,14 @@ changes in words, to go back or forward to any of them.
   flow chart. A **+** beside the part chosen adds the next step there at once (a
   block after a start or a decision, another structure after a structure), and the
   words of a part just added are typed on it as soon as it is drawn, in place, in
-  the part's own face and size. A chosen structure turns as it is dragged (or by
+  the part's own face and size; with a part chosen, typing types over its words, as on a
+  Keynote shape, and ⌥⌘G groups the parts chosen (⇧⌥⌘G ungroups). A chosen structure
+  turns by its rotate handle (or by
   the buttons in its panel), and a structure or picture is sized by its corners;
   a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
-  (C) draws a line from one part to the next; double-click a part or a line to
-  type its words on the drawing; ⇧-click several and **Group** (G) gathers them
+  draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
+  type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
   into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and

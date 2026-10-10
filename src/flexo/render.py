@@ -36,6 +36,10 @@ from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
 
 
+def _box(bounds: Rect) -> tuple[float, float, float, float]:
+    return (bounds.x, bounds.y, bounds.width, bounds.height)
+
+
 def render_node(
     parent: ET.Element,
     node: FittedNode,
@@ -57,6 +61,16 @@ def render_node(
         data__flexo__fit=f"{number(fit.width)} {number(fit.height)}"
         if fit is not None and spec.kind not in FIT_NEVER and spec.kind not in DRAWN_KINDS
         else None,
+        # (How wide a line of its words runs before it wraps: an editor's box for typing them
+        # wraps them there too, as they will be drawn.)
+        data__flexo__room=number(node.measured.room) if node.measured.room is not None else None,
+        # (Text draws its words alone: where its box is, which an editor's handles set the
+        # width of, is said.)
+        data__flexo__box=" ".join(number(value) for value in _box(node.bounds))
+        if spec.kind == "text"
+        else None,
+        # (And the room it keeps round them: its words wrap that much inside its width.)
+        data__flexo__inset=number(style.padding_y.points) if spec.kind == "text" else None,
     )
     if spec.kind in DRAWN_KINDS:
         from flexo.render_drawn import render_drawn

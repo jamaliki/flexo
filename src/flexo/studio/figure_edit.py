@@ -54,7 +54,13 @@ from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
-from ruamel.yaml.scalarstring import LiteralScalarString, SingleQuotedScalarString
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.compat import ordereddict
+from ruamel.yaml.scalarstring import (
+    DoubleQuotedScalarString,
+    LiteralScalarString,
+    SingleQuotedScalarString,
+)
 
 from flexo.ir.semantic import ID_PATTERN
 from flexo.studio.merge import merge_text
@@ -625,6 +631,20 @@ class _Document:
             candidate, number = f"{slug}-{number}", number + 1
         return candidate
 
+    def fresh_copy(self, identifier: str, also: set[str] | frozenset[str] = frozenset()) -> str:
+        """An unused id for a copy of ``identifier`` (duplicated, or pasted where it is taken):
+        a copy of a copy numbered on from it, as the copies of one part are -- ``fix-3``
+        after ``fix-2``, never ``fix-2-2``; none of ``also`` either."""
+
+        taken = self.taken() | set(also)
+        numbered = re.fullmatch(r"(.+)-(\d+)", identifier)
+        if not numbered or identifier not in taken:
+            return self.fresh(identifier, also)
+        stem, number = _slug(numbered[1]), int(numbered[2]) + 1
+        while f"{stem}-{number}" in taken:
+            number += 1
+        return f"{stem}-{number}"
+
     def detach(self, identifier: str) -> None:
         # (Lined up under a part where it was, it is placed afresh where it goes.)
         node = self.node(identifier)
@@ -1041,12 +1061,13 @@ class _Document:
         now = self.edge_id(item) if kind == "edge" else None
         chosen = [now or identifier] if identifier else []
         typed_over = action.get("was")
-        if isinstance(typed_over, str) and isinstance(values.get("label"), str):
-            # Words typed over what a label said when the typing began, while someone else
-            # changed it: both kept, merged as two people's words in one field are.
-            now = item.get("label")
-            if isinstance(now, str) and now != typed_over:
-                values["label"] = merge_text(typed_over, values["label"], now)
+        for words in ("label", "back_label"):
+            if isinstance(typed_over, str) and isinstance(values.get(words), str):
+                # Words typed over what a label said when the typing began, while someone
+                # else changed it: both kept, merged as two people's words in one field are.
+                now = item.get(words)
+                if isinstance(now, str) and now != typed_over:
+                    values[words] = merge_text(typed_over, values[words], now)
         if (
             kind == "node"
             and "name" in action
@@ -1636,7 +1657,7 @@ class _Document:
             raise EditError("There\u2019s nothing to paste.")
         renamed: dict[str, str] = {}
         for item in [*nodes, *groups]:
-            renamed[str(item["id"])] = self.fresh(str(item["id"]), set(renamed.values()))
+            renamed[str(item["id"])] = self.fresh_copy(str(item["id"]), set(renamed.values()))
         for node in nodes:
             node["id"] = renamed[str(node["id"])]
             # The page's model lists port names where a file writes ports.
@@ -1717,7 +1738,7 @@ class _Document:
                 continue
             self.data.setdefault("nets", []).append(
                 {
-                    "id": self.fresh(str(net.get("id") or "line")),
+                    "id": self.fresh_copy(str(net.get("id") or "line")),
                     "kind": "merge" if merge else "fan-out",
                     "sources": ends if merge else [hub],
                     "targets": [hub] if merge else ends,
@@ -1730,7 +1751,7 @@ class _Document:
         node, group = self.node(identifier), self.group(identifier)
         if node is None and group is None:
             return None
-        new = self.fresh(identifier)
+        new = self.fresh_copy(identifier)
         renamed[identifier] = new
         if node is not None:
             twin = copy.deepcopy(dict(node))
@@ -2024,8 +2045,27 @@ def _set(item: dict[str, Any], path: list[str], value: object) -> None:
         for parent, key in zip(reversed(trail[:-1]), reversed(path[:-1]), strict=True):
             if not parent[key] and key != "layout":
                 del parent[key]
+    elif isinstance(value, str) and isinstance(trail[-1], CommentedMap) and last in trail[-1]:
+        # (Set as it is: ruamel would give new words the quotes of the old ones.)
+        here = trail[-1]
+        ordereddict.__setitem__(here, last, _requoted(here[last], value))
+        here._ok.add(last)
     else:
         trail[-1][last] = value
+
+
+def _requoted(old: object, words: str) -> str:
+    """Words typed over words the file quoted: in the quotes the person chose for them --
+    not in quotes YAML needed for what was there before (a "no", a '12'), which the new
+    words may not need (``_blocks`` quotes them again if they do)."""
+
+    import yaml
+
+    quoted = (SingleQuotedScalarString, DoubleQuotedScalarString)
+    plain = yaml.safe_dump(str(old), width=10**6).lstrip()[:1] not in ("'", '"')
+    if isinstance(old, quoted) and "\n" not in words and plain:
+        return type(old)(words)
+    return words
 
 
 def _misread(text: str) -> bool:
@@ -2038,12 +2078,18 @@ def _misread(text: str) -> bool:
     )
 
 
-def _blocks(value: Any) -> Any:
+WORDS = frozenset({"label", "back_label", "caption", "title", "description", "text"})
+"""Keys whose strings are words: written as typed, a new line in them no more (a block's
+closing new line would be a line of their own)."""
+
+
+def _blocks(value: Any, *, words: bool = False) -> Any:
     """``value`` with every new multi-line string written as a block (``|``), and every
     new string that would read back as something else (``Yes``, ``off``, ``12``) quoted.
 
     A grid of cells or a Newick tree typed into the page reads line by line in
-    the file only as a block; a quoted string with ``\\n`` in it reads as noise.
+    the file only as a block; a quoted string with ``\\n`` in it reads as noise. A block
+    ends in a new line -- but words (``WORDS``) end where they were typed to end.
     The file is written as YAML 1.2 writes it but read as YAML 1.1 reads it, where a
     plain ``Yes`` or ``no`` is true or false: a label typed as "Yes" stays the word.
     Only plain strings change: what the file already held keeps the quoting it
@@ -2051,13 +2097,21 @@ def _blocks(value: Any) -> Any:
     """
 
     if type(value) is str and "\n" in value:
-        return LiteralScalarString(value if value.endswith("\n") else value + "\n")
+        return LiteralScalarString(value if words or value.endswith("\n") else value + "\n")
     if type(value) is str and _misread(value):
         return SingleQuotedScalarString(value)
     if isinstance(value, dict):
         for key in list(value):
-            value[key] = _blocks(value[key])
+            value[key] = _blocks(value[key], words=key in WORDS)
     elif isinstance(value, list):
+        # A part added among parts the file writes a line each ({id: a, label: A}) is
+        # written so too, not as a block among them.
+        flow = isinstance(value, CommentedSeq) and any(
+            isinstance(item, CommentedMap) and item.fa.flow_style() for item in value
+        )
         for index, item in enumerate(value):
+            if flow and type(item) is dict:
+                item = CommentedMap(item)
+                item.fa.set_flow_style()
             value[index] = _blocks(item)
     return value

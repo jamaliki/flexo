@@ -116,6 +116,45 @@ def test_a_long_name_wraps_and_an_authored_size_is_kept() -> None:
     assert (sized.bounds.width, sized.bounds.height) == pytest.approx((90.0, 50.0))
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_size_too_small_for_its_words_grows_to_hold_them(kind: str) -> None:
+    """A given size is a design, not a clip: the words wrap to its width and the shape is at
+    least as tall as they need there, in the room its outline leaves them."""
+
+    compiled = _alone(kind, "Every old result kept for later", width="50pt", height="20pt")
+    node = compiled.fitted.node("m.a")
+    style = figure_style(compiled.measured.semantic)
+    label = node.measured.label
+    area = label_area(kind, node.bounds, label, style)
+    assert len(label.lines) > 1, "wrapped to the width it is given"
+    assert area.width >= label.width - 1e-6 and area.height >= label.height - 1e-6
+    assert node.bounds.contains_rect(area)
+
+
+def test_a_circles_words_wrap_and_a_small_circle_grows_round_them() -> None:
+    def circle(**options: object):
+        with Figure("c") as figure, figure.row("r") as row:
+            row.circle("a", label="Hub of every old result", **options)
+        return compile_figure(figure.spec).fitted.node("r.a")
+
+    for node in (circle(), circle(width="30pt", height="30pt")):
+        label = node.measured.label
+        assert len(label.lines) == 2, "not one line drawn across it from edge to edge"
+        # Its words' box inscribed in it.
+        assert math.hypot(label.width, label.height) <= node.bounds.width + 1e-6
+        assert node.bounds.width == pytest.approx(node.bounds.height)
+    assert circle(width="120pt").bounds.width == pytest.approx(120.0), "a size that holds them"
+
+
+def test_a_shape_says_how_wide_its_words_run_before_they_wrap() -> None:
+    compiled = _alone("cloud", width="80pt")
+    root = ET.fromstring(compiled.document.text)
+    group = next(item for item in root.iter() if item.get("id") == "m.a")
+    style = figure_style(compiled.measured.semantic)
+    room = 80.0 * CLOUD_ROOM[0] - style.padding_x.points
+    assert float(group.get("data-flexo-room")) == pytest.approx(room, abs=0.01)
+
+
 def test_a_database_is_a_cylinder_its_label_under_the_lid() -> None:
     compiled = _alone("database")
     node = compiled.fitted.node("m.a")

@@ -17,7 +17,7 @@ import yaml
 from flexo.studio import Drawing, Message, Page
 
 NEW_FIGURE = """\
-# A flexo figure: nodes, then the edges between them. See docs/guide.md.
+# A figure: its shapes (nodes), then the lines between them (edges).
 figure:
   id: figure
   style: paper
@@ -28,7 +28,7 @@ nodes:
 editor shows what it is, faintly, until its words are typed; nothing is drawn for it."""
 
 SAMPLE_FIGURE = """\
-# A flexo figure: nodes, then the edges between them. See docs/guide.md.
+# A figure: its shapes (nodes), then the lines between them (edges).
 figure:
   id: figure
   style: paper
@@ -82,7 +82,8 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
   (1.5 = half as large again)}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
-Labels are markup: $maths$, *emphasis*, **strong**. `flexo schema` prints the full schema.
+Labels are markup: $maths$, `code`, [words]{accent} in a colour, \\n a new line (asterisks are
+drawn as typed: no emphasis). `flexo schema` prints the full schema.
 """
 
 
@@ -114,7 +115,10 @@ class FigureKind:
         return {"text": yaml.safe_dump(data, sort_keys=False, allow_unicode=True)}
 
     def load(self, path: Path) -> dict[str, Any]:
-        return {"text": path.read_text(encoding="utf-8")}
+        # A file that does not read is not opened as words to draw (said "Saved", with
+        # nothing drawn): it is a document whose file can't be read, as a deck's or a
+        # theme's is, its line chosen to put right.
+        return self.parse(path.read_text(encoding="utf-8"))
 
     def save(self, path: Path, document: dict[str, Any]) -> None:
         path.write_text(document["text"], encoding="utf-8")
@@ -626,9 +630,47 @@ def _without(document: dict[str, Any], base: Path, wrong: set[str]) -> Any:
         return None
 
 
+# What the YAML reader says of a file it can't read, and what that is to whoever wrote it.
+_YAML_SAID = (
+    (
+        r"expected ',' or '\]'",
+        "a list in square brackets isn\u2019t closed, or a word in it needs quotes",
+    ),
+    (
+        r"expected ',' or '\}'",
+        "a set of settings in braces isn\u2019t closed, or a word in it needs quotes",
+    ),
+    (r"mapping values are not allowed", "a colon is among words; put words with a colon in quotes"),
+    (r"found character '\\t'|found character '\t'", "a line is indented with a tab, not spaces"),
+    (r"could not find expected ':'", "a line is missing its colon"),
+    (r"unexpected end of stream|while scanning a quoted scalar", "a quote isn\u2019t closed"),
+    (
+        r"did not find expected key|expected <block end>|did not find expected '-' indicator",
+        "a line is indented differently from the lines around it",
+    ),
+    (r"found duplicate anchor|found undefined alias", "a name after & or * is used wrongly"),
+)
+
+
+def yaml_said(error: Exception) -> str | None:
+    """What the YAML reader found wrong in a file, in its writer's words ("a quote is not
+    closed"); None if it is none of those it is known to say."""
+
+    problem = str(getattr(error, "problem", None) or error)
+    context = str(getattr(error, "context", None) or "")
+    return next(
+        (said for pattern, said in _YAML_SAID if re.search(pattern, f"{context} {problem}")), None
+    )
+
+
 def _yaml_problem(error: Exception) -> str:
-    problem = getattr(error, "problem", None)
-    return f"the file does not read as YAML: {problem or error}"
+    """Why a figure's file can't be read, in its writer's words, never the reader's."""
+
+    said = yaml_said(error)
+    if said:
+        return f"The file can\u2019t be read: {said}."
+    problem = str(getattr(error, "problem", None) or error)
+    return f"The file can\u2019t be read as written: {problem}."
 
 
 def _yaml_line(error: Exception) -> str:
@@ -699,6 +741,7 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
 
     if old is None or new is None:
         return None
+    old = _same_shapes(old, new)
 
     def name(node: dict[str, Any]) -> str:
         words = re.sub(r"\s+", " ", str(node.get("label") or "")).strip()
@@ -833,6 +876,50 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
     if old["rest"] != new["rest"]:
         notes.append({"text": "changed the figure's settings", "where": None})
     return notes[:4] if notes else None
+
+
+def _same_shapes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """``old`` with each shape whose id alone has changed -- a new shape's made from the words
+    typed in it, say -- under its new id: the same shape, not one deleted and another added
+    (an id is the file's business, not news)."""
+
+    gone = [key for key in old["nodes"] if key not in new["nodes"]]
+    added = [key for key in new["nodes"] if key not in old["nodes"]]
+
+    def without_id(node: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in node.items() if key != "id"}
+
+    ids: dict[str, str] = {}
+    for key in gone:
+        twin = next(
+            (
+                item
+                for item in added
+                if item not in ids.values()
+                and without_id(new["nodes"][item]) == without_id(old["nodes"][key])
+            ),
+            None,
+        )
+        if twin is not None:
+            ids[key] = twin
+    if not ids:
+        return old
+
+    def swap(value: Any) -> Any:
+        if isinstance(value, str):
+            head, dot, tail = value.partition(".")
+            return ids[head] + dot + tail if head in ids else value
+        if isinstance(value, (list, tuple, set)):
+            return type(value)(swap(item) for item in value)
+        if isinstance(value, dict):
+            return {swap(key): swap(item) for key, item in value.items()}
+        return value
+
+    nodes = {
+        ids.get(key, key): {**node, "id": ids.get(key, key)} for key, node in old["nodes"].items()
+    }
+    parts = {part: swap(old[part]) for part in ("edges", "groups", "nets")}
+    return {**old, "nodes": nodes, **parts}
 
 
 def _order(figure: dict[str, Any]) -> list[str]:
