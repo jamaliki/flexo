@@ -968,7 +968,7 @@ slide 4") show where it works, the activity list says who changed what, and
 own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
 changes in words, to go back or forward to any of them.
 
-- **Figures**, made without writing YAML: **Add** (A) offers every kind of part --
+- **Figures**, made without writing YAML: **Add** offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
   is chosen comes after it, a line between them; when the chosen part's single line
@@ -976,12 +976,14 @@ changes in words, to go back or forward to any of them.
   flow chart. A **+** beside the part chosen adds the next step there at once (a
   block after a start or a decision, another structure after a structure), and the
   words of a part just added are typed on it as soon as it is drawn, in place, in
-  the part's own face and size. A chosen structure turns as it is dragged (or by
+  the part's own face and size; with a part chosen, typing types over its words, as on a
+  Keynote shape, and ⌥⌘G groups the parts chosen (⇧⌥⌘G ungroups). A chosen structure
+  turns by its rotate handle (or by
   the buttons in its panel), and a structure or picture is sized by its corners;
   a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
-  (C) draws a line from one part to the next; double-click a part or a line to
-  type its words on the drawing; ⇧-click several and **Group** (G) gathers them
+  draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
+  type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
   into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and

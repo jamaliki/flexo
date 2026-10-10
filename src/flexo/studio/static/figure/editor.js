@@ -74,9 +74,9 @@ export function mount(studio, main) {
   });
 
   // -- the bar --
-  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add Shape (A)" });
-  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
-  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (G)" });
+  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add a Shape" });
+  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a Line from One Shape to Another" });
+  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌥⌘G)" });
   const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
   studio.tools.append(listButton);
@@ -263,7 +263,7 @@ export function mount(studio, main) {
   function pageMenu(point) {
     figure.select([]);
     if (!figure.model) return;
-    menu(point, [{ icon: "plus", label: "Add Shape…", keys: "A", run: () => figure.addPalette(point) },
+    menu(point, [{ icon: "plus", label: "Add Shape…", run: () => figure.addPalette(point) },
       { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && figure.paste(clipboard.parts) },
       { icon: "target", label: "Select All", keys: "⌘A", run: () => figure.chooseAll() }]);
   }
@@ -760,6 +760,8 @@ export function mount(studio, main) {
     const shapes = figure.selected.filter((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root)).length;
     return shapes > 1 ? `${shapes} Shapes` : shapes ? "Shape" : null;
   };
+  // A group chosen alone (not the figure's whole layout): Ungroup takes it apart.
+  const ungroupable = () => figure.selected.length === 1 && Boolean(figure.groupOf(figure.selected[0])) && figure.selected[0] !== figure.model?.root;
   // What ⌫ deletes, named for it ("Delete Shape", "Delete 2 Lines") -- the Mac app's Edit ›
   // Delete is enabled by it.
   const deleteName = () => {
@@ -776,6 +778,9 @@ export function mount(studio, main) {
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // Arrange › Group and Ungroup, as Keynote's (the Mac menus run them by these names).
+    ...(!typingNow() && figure.canGroup() ? [{ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => figure.groupMenu(gatherButton) }] : []),
+    ...(!typingNow() && ungroupable() ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌥⌘G", run: () => figure.act({ do: "ungroup", id: figure.selected[0] }) }] : []),
     // View › Zoom, as a deck's slide is zoomed: by steps, a point to a point, or fitted.
     { icon: "plus", label: "Zoom In", keys: "⌘+", run: () => zoomBy(1.25) },
     { icon: "minus", label: "Zoom Out", keys: "⌘−", run: () => zoomBy(1 / 1.25) },

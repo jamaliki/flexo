@@ -1441,7 +1441,7 @@ const SHORTCUTS = [
     ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["⌥ ⌘ E", "Inline Equation"], ["Esc or ⌘ ↩", "Done"]]],
   // (A figure's labels are drawn as typed, but for maths: none of these is theirs.)
   ["Styling a Slide’s Words (Not a Figure’s Labels)", [["⌘ B", "Bold"], ["⌘ I", "Italic"], ["⌘ K", "Link"], ["⌘ E", "Code"], ["⌃ ⇥", "Go to the Format Bar (Esc: Back)"]]],
-  ["Figures", [["A", "Add Shape"], ["C", "Connect"], ["G", "Group the Selected Shapes"], ["⇥", "Next Shape (⇧⇥: Previous), Also While Typing a Label"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"],
+  ["Figures", [["Type", "Type Over a Chosen Shape’s Words"], ["⌥ ⌘ G", "Group the Selected Shapes"], ["⇧ ⌥ ⌘ G", "Ungroup"], ["⇥", "Next Shape (⇧⇥: Previous), Also While Typing a Label"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"],
     ["Drag", "Select the Shapes It Touches (from an Empty Spot, in a Figure File)"], ["⌘ A", "Select All Shapes"], ["← → ↑ ↓", "Select the Shape That Way"],
     ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘↩: Done)"],
     ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go"], ["⌘ Drag", "Drag a Handle Without Snapping (a Curve’s Middle, a Shape’s Corners, a Text’s Sides)"],

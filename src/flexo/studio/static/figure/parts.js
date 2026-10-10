@@ -1634,7 +1634,7 @@ export function figureParts(host) {
     if (state.selected.length > 1) {
       const chosen = [...state.selected], shapes = chosen.some((each) => !isLine(each));
       if (chosen.every(isLine) && joinable(chosen)) items.push({ icon: "right", label: "Join Lines", run: () => joinLines(chosen) });
-      if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "G", run: () => groupMenu(anchor) });
+      if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => groupMenu(anchor) });
       if (shapes) items.push({ icon: "duplicate", label: "Duplicate", keys: "⌘D", run: () => duplicate(chosen) });
       items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove(chosen) });
       return items;
@@ -1658,14 +1658,14 @@ export function figureParts(host) {
       // (A shape that is the whole figure -- a structure on its own -- is grown into a figure
       // from the palette, not given a block or a line of a diagram's at once.)
       if (!lone(id)) items.push({ icon: "plus", label: `${verb} ${titled(parts[kind].title)} ${titled(word)}${parts[kind].needs_file ? "…" : ""}`, run: () => addPart(kind, { after: id, source: id }) });
-      items.push({ icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) });
-      if (!lone(id)) items.push({ icon: "right", label: "Draw Line from Here", keys: "C", run: () => toggleConnect(true) });
+      items.push({ icon: "plus", label: "Add Shape After…", run: () => addPalette(anchor) });
+      if (!lone(id)) items.push({ icon: "right", label: "Draw Line from Here", run: () => toggleConnect(true) });
     }
     // A line: a shape put into it, between the two it joins -- a block, or one chosen from the
     // palette -- ready for its words.
     if (edge) {
       items.push({ icon: "plus", label: `Insert ${kindTitle("block")}`, run: () => addPart("block", lineWhere(id)) },
-        { icon: "plus", label: "Insert Shape…", keys: "A", run: () => addPalette(anchor, { into: id }) });
+        { icon: "plus", label: "Insert Shape…", run: () => addPalette(anchor, { into: id }) });
     }
     // A line joined of several made lines again.
     if (netOf(id)) items.push({ icon: "right", label: "Separate Lines", run: () => separateLine(id) });
@@ -1677,7 +1677,7 @@ export function figureParts(host) {
     }
     // A group: a shape added after it (A, as for a shape), or inside it.
     if (group && !isRoot) {
-      items.push({ icon: "plus", label: "Add Shape After…", keys: "A", run: () => addPalette(anchor) },
+      items.push({ icon: "plus", label: "Add Shape After…", run: () => addPalette(anchor) },
         { icon: "plus", label: "Add Shape Inside…", run: () => addPalette(anchor, { inside: id }) });
     }
     if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
@@ -5130,6 +5130,14 @@ export function figureParts(host) {
     }
     if (mod) {
       if (event.key.toLowerCase() === "d" && state.selected.length) { event.preventDefault(); duplicate(); return true; }
+      // ⌥⌘G groups the shapes chosen, ⇧⌥⌘G ungroups a group, as Keynote's Arrange menu does.
+      // (By the key's place: ⌥ makes another letter of it.)
+      if (event.code === "KeyG" && event.altKey) {
+        const id = chosenOne();
+        if (event.shiftKey && id && typeOf(id) === "group" && id !== model()?.root) { event.preventDefault(); act({ do: "ungroup", id }); return true; }
+        if (!event.shiftKey && canGroup()) { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
+        return false;
+      }
       // ⌘A chooses every part of the figure being edited -- in the figure editor, always; on a
       // slide, once its shapes are being edited (one chosen, or one just deleted) -- as Keynote's
       // Select All does inside a group it is editing. (The figure alone chosen: the slide's.)
@@ -5189,16 +5197,22 @@ export function figureParts(host) {
       if (best) select([best.id]);
       return true;
     }
-    const letter = event.key.toLowerCase();
-    if (letter === "a") { event.preventDefault(); addPalette(host.addAnchor?.() || { x: innerWidth / 2 - 190, y: 120 }); return true; }
-    if (letter === "c") { event.preventDefault(); toggleConnect(); return true; }
-    // (Shapes to group chosen: an empty group is added from the palette's Layout.)
-    if (letter === "g" && canGroup()) { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
-    if (letter === "enter") {
+    if (event.key === "Enter") {
       const id = chosenOne();
       if (!id) return false;
       event.preventDefault();
       openInline(id);
+      return true;
+    }
+    // A letter (or a space) typed with a part chosen types over its words, as on a Keynote
+    // shape: its editor opens with all of them chosen, and the key replaces them.
+    if ([...event.key].length === 1 && !event.altKey && !event.isComposing && !state.connecting) {
+      const id = chosenOne();
+      if (!id || id === model()?.root) return false;
+      event.preventDefault();
+      openInline(id);
+      if (inline?.id !== id) return true;
+      document.execCommand("insertText", false, event.key);
       return true;
     }
     return false;
