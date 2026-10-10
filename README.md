@@ -572,7 +572,10 @@ A process is a `block`, a start or end a `terminal`, a question a `decision`, an
 data read or written an `io` parallelogram. A decision's diamond is sized round its
 words; given a `width=` (or `height=`), it is that, and the other way as small as its
 words let it be. In the studio, drag a shape's corner to size it: it snaps to the size
-that fits its words (for a diamond, one that hugs them), and a double-click fits it. The shapes of a software diagram are
+that fits its words (for a diamond, one that hugs them), and a double-click fits it. Text
+has a handle at each side instead, as a Keynote text box has: drag one to set where its
+words wrap (`width=`); it snaps back to the width they take of themselves, and stops at the
+longest word. The shapes of a software diagram are
 components too, each sized round its label and painted in the theme's roles, so a
 palette, a tone, or a dark theme recolours them with the rest:
 

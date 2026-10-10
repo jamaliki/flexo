@@ -1867,7 +1867,25 @@ export function figureParts(host) {
     openInline(id, { at: { x: event.clientX, y: event.clientY }, key: back ? "back_label" : "label" });
   }
   function marks() {
-    return state.selected.map((id) => ({ id, box: host.box(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
+    return state.selected.map((id) => ({ id, box: partBox(id), group: typeOf(id) === "group", name: nameOf(id) })).filter((mark) => mark.box);
+  }
+  // Where a part is, in the overlay's pixels, as it is framed: text by its box (its words are
+  // drawn alone, as narrow as they wrap, the box as wide as it is set), else as it is drawn.
+  function partBox(id) {
+    const text = nodeOf(id)?.kind === "text" ? textBox(id) : null;
+    return text ? { left: text.left - 3, top: text.top - 3, width: text.width + 6, height: text.height + 6 } : host.box(id);
+  }
+  // Where a text part's box is (`screen`: in the window's pixels), as its drawing says.
+  function textBox(id, screen = false) {
+    const element = host.element(id);
+    const [x, y, width, height] = (element?.getAttribute("data-flexo-box") || "").split(" ").map(Number);
+    const ctm = element?.getScreenCTM?.();
+    if (!ctm || !(width > 0) || !(height > 0)) return null;
+    const a = new DOMPoint(x, y).matrixTransform(ctm), b = new DOMPoint(x + width, y + height).matrixTransform(ctm);
+    const left = Math.min(a.x, b.x), top = Math.min(a.y, b.y), right = Math.max(a.x, b.x), bottom = Math.max(a.y, b.y);
+    if (screen) return { left, top, right, bottom, width: right - left, height: bottom - top };
+    const outer = host.overlay.getBoundingClientRect();
+    return { left: left - outer.left, top: top - outer.top, width: right - left, height: bottom - top };
   }
 
   // The marks as the host shows them over the drawing: a frame round each part chosen,
@@ -1962,7 +1980,8 @@ export function figureParts(host) {
       }
     }
     const offLines = (x, y) => !points.some((point) => Math.abs(point.x - x) < PLUS / 2 + 3 && Math.abs(point.y - y) < PLUS / 2 + 3);
-    const corners = cornered ? [[box.left, box.top], [box.left + box.width, box.top], [box.left, box.top + box.height], [box.left + box.width, box.top + box.height]] : [];
+    const corners = !cornered ? [] : nodeOf(id)?.kind === "text" ? [[box.left, box.top + box.height / 2], [box.left + box.width, box.top + box.height / 2]]
+      : [[box.left, box.top], [box.left + box.width, box.top], [box.left, box.top + box.height], [box.left + box.width, box.top + box.height]];
     const offCorners = (place) => corners.every(([x, y]) => Math.hypot(place.x - x, place.y - y) >= PLUS + 4);
     const clear = (place) => onPage(place) && offCorners(place) && offLines(outer.left + place.x, outer.top + place.y) && clearAt(outer.left + place.x, outer.top + place.y, own);
     for (const side of [flow, ...["right", "bottom", "left", "top"].filter((other) => other !== flow)]) {
@@ -2100,7 +2119,7 @@ export function figureParts(host) {
     }
     pointHints();
     const id = chosenOne();
-    const box = id && nodeOf(id) && !state.connecting && !inline ? host.box(id) : null;
+    const box = id && nodeOf(id) && !state.connecting && !inline ? partBox(id) : null;
     // A shape that takes a size of its own (its drawing says the size that fits its words), and
     // a molecule or a picture: handles at its corners.
     const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? fitOf(id) : null;
@@ -2204,7 +2223,18 @@ export function figureParts(host) {
       const picture = fits ? null : host.element(id)?.querySelector("image")?.getBoundingClientRect();
       const whole = host.element(id)?.getBoundingClientRect(), pad = whole?.width ? (box.width - whole.width) / 2 : 0;
       const at = picture?.width ? { left: picture.left - outer.left - pad, top: picture.top - outer.top - pad, width: picture.width + 2 * pad, height: picture.height + 2 * pad } : box;
-      for (const corner of ["nw", "ne", "sw", "se"]) {
+      // Text has a handle at each side instead, as a Keynote text box has: dragged, it sets how
+      // wide its words run before they wrap, snapping to the width they take of themselves.
+      const text = fits && nodeOf(id)?.kind === "text" ? textBox(id) : null;
+      if (text) for (const side of ["w", "e"]) {
+        views.push(h(`span.fig-size.${side}`, {
+          style: { left: `${side === "w" ? text.left : text.left + text.width}px`, top: `${text.top + text.height / 2}px` },
+          title: "Drag to set where its words wrap (⌘: without snapping) · Double-click to fit it to its words",
+          onpointerdown: (event) => shapeSizeStart(event, id, side, fits), onclick: stop, onmousemove: stop,
+          ondblclick: (event) => { event.stopPropagation(); fitWords(id, fits); },
+        }));
+      }
+      for (const corner of text ? [] : ["nw", "ne", "sw", "se"]) {
         let left = corner.endsWith("w") ? at.left : at.left + at.width, top = corner.startsWith("n") ? at.top : at.top + at.height;
         if (theirs.some((rect) => Math.hypot(rect.left + rect.width / 2 - outer.left - left, rect.top + rect.height / 2 - outer.top - top) < 14)) {
           left += corner.endsWith("w") ? 12 : -12;
@@ -2343,6 +2373,8 @@ export function figureParts(host) {
   // head and shoulders 0.85 as wide as they are tall, its name under them).
   const PROPORTIONED = new Set(["circle", "person"]);
   const FIGURE_WIDTH = 0.85;
+  // The narrowest a text is set (in the figure's points): a word or two.
+  const TEXT_LEAST = 24;
   let shapeSizing = null;
   function shapeSizeStart(event, id, corner, fit) {
     if (event.button !== 0 || shapeSizing || partSizing) return;
@@ -2350,11 +2382,13 @@ export function figureParts(host) {
     event.stopPropagation();
     const element = host.element(id);
     const node = nodeOf(id);
+    // (A text's sides, its width alone: its box, as its drawing says.)
+    const sideways = corner === "w" || corner === "e";
     // (A person's box is its figure and its name under it, as it is laid out: not its figure alone.)
-    const box = (node?.kind === "person" ? element : host.element(`${id}.body`) || element)?.getBoundingClientRect();
+    const box = sideways ? textBox(id, true) : (node?.kind === "person" ? element : host.element(`${id}.body`) || element)?.getBoundingClientRect();
     const unit = element?.getScreenCTM?.()?.a;
     if (!box?.width || !box.height || !unit) return;
-    const west = corner.endsWith("w"), north = corner.startsWith("n");
+    const west = corner.endsWith("w"), north = !sideways && corner.startsWith("n");
     const drawing = document.createElementNS(SVG_NS, "svg");
     drawing.classList.add("fig-end-drag", "fig-size-drag");
     const outline = document.createElementNS(SVG_NS, node?.kind === "decision" ? "polygon" : node?.kind === "circle" ? "ellipse" : "rect");
@@ -2363,7 +2397,9 @@ export function figureParts(host) {
     // (A person's name, under its figure: its band, which stays as it is.)
     const figure = node?.kind === "person" ? host.element(`${id}.body`)?.getBoundingClientRect() : null;
     const band = figure?.height ? Math.max(0, box.bottom - figure.bottom) / unit : 0;
-    shapeSizing = { id, element, box, unit, fit, band, kind: node?.kind, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
+    // (A text's words are shown wrapping where they will as it is dragged, its own hidden.)
+    const words = sideways ? textPreview(id, node, unit) : null;
+    shapeSizing = { id, element, box, unit, fit, band, kind: node?.kind, sideways, words, drawing, outline, tip, moved: false, start: { x: event.clientX, y: event.clientY },
       had: { width: node?.width ?? null, height: node?.height ?? null },
       anchor: { x: west ? box.right : box.left, y: north ? box.bottom : box.top }, west, north, size: null };
     window.addEventListener("pointermove", shapeSizeMove);
@@ -2376,6 +2412,18 @@ export function figureParts(host) {
   // is said of it.
   function shapeSizeAt(sizing, clientX, clientY, keep, free = false) {
     const { anchor, box, unit, fit, kind, band } = sizing;
+    // Text: its width alone, where its words wrap -- never narrower than its longest word,
+    // which would run past it -- snapping to the width its words take of themselves, or back
+    // to its own.
+    if (sizing.sideways) {
+      const near = free ? 0 : SIZE_SNAP / unit, was = box.width / unit;
+      // (In whole points, as it is written: its words wrapped at that width, not a fraction more.)
+      let width = Math.max(Math.ceil(sizing.words?.least ?? TEXT_LEAST), Math.round(Math.abs(clientX - anchor.x) / unit));
+      const snapped = { width: Math.abs(width - fit.width) < near, height: false }, kept = { width: false, height: true };
+      if (snapped.width) width = fit.width;
+      else if (Math.abs(width - was) < near) { kept.width = true; width = was; }
+      return { width, height: box.height / unit, snapped, kept, fitted: snapped.width, said: snapped.width ? "Fits Its Words" : `${Math.round(width)} pt Wide` };
+    }
     let width = Math.max(8, Math.abs(clientX - anchor.x)) / unit, height = Math.max(8, Math.abs(clientY - anchor.y)) / unit;
     const was = { width: box.width / unit, height: box.height / unit };
     // A person's figure is as tall as it is less its name, and as wide as its figure is, or its
@@ -2428,6 +2476,7 @@ export function figureParts(host) {
     if (!sizing.moved) {
       sizing.moved = true;
       host.overlay.append(sizing.drawing, sizing.tip);
+      if (sizing.words) { host.overlay.append(sizing.words.node); sizing.words.label?.style.setProperty("visibility", "hidden"); }
       host.overlay.classList.add("fig-sizing");
     }
     sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey, free: event.metaKey };
@@ -2446,7 +2495,21 @@ export function figureParts(host) {
     drawing.setAttribute("height", String(outer.height));
     if (sizing.kind === "decision") outline.setAttribute("points", `${left + w / 2},${top} ${left + w},${top + ht / 2} ${left + w / 2},${top + ht} ${left},${top + ht / 2}`);
     else if (sizing.kind === "circle") for (const [key, value] of Object.entries({ cx: left + w / 2, cy: top + ht / 2, rx: w / 2, ry: ht / 2 })) outline.setAttribute(key, String(value));
-    else for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: ht, rx: 4 })) outline.setAttribute(key, String(value));
+    else if (sizing.words) {
+      // Text: its words wrapped at the width, and its outline as tall as they come out.
+      const { node, inset, lines, font, scale } = sizing.words;
+      const room = Math.max(1, w - 2 * inset);
+      // (Broken where the figure will break them: each line evened, as it evens a label's.)
+      node.textContent = lines.map((line) => wrapped(line, room * scale, font).join("\n")).join("\n");
+      Object.assign(node.style, { left: `${left + inset}px`, top: `${top + inset}px`, width: `${room}px` });
+      const tall = node.offsetHeight + 2 * inset;
+      for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: tall, rx: 4 })) outline.setAttribute(key, String(value));
+      tip.hidden = false;
+      tip.textContent = size.said;
+      Object.assign(tip.style, { left: `${left + w / 2}px`, top: `${top + tall + 8}px` });
+      outline.classList.toggle("fits", size.fitted);
+      return;
+    } else for (const [key, value] of Object.entries({ x: left, y: top, width: w, height: ht, rx: 4 })) outline.setAttribute(key, String(value));
     outline.classList.toggle("fits", size.fitted);
     tip.hidden = false;
     tip.textContent = size.said;
@@ -2467,6 +2530,29 @@ export function figureParts(host) {
     host.overlay.classList.remove("fig-sizing");
     sizing?.drawing.remove();
     sizing?.tip.remove();
+    sizing?.words?.node.remove();
+    sizing?.words?.label?.style.removeProperty("visibility");
+  }
+  // A text's words as they would wrap at another width, while its side is dragged: in their
+  // face, size, weight and colour, centred, its lines as typed each wrapped as the figure
+  // wraps them, inside the room the text keeps round them (`inset`, in the window's pixels).
+  function textPreview(id, node, unit) {
+    const label = host.element(`${id}.label`);
+    if (!label?.getScreenCTM?.()) return null;
+    const look = lookOf(label);
+    const inset = (Number(host.element(id)?.getAttribute("data-flexo-inset")) || 0) * unit / 2;
+    const words = h("div.fig-text-preview", { style: { fontFamily: look.family, fontSize: `${look.size}px`, fontWeight: look.weight, color: look.fill || "" } });
+    // (Measured large and scaled, as the figure measures them: set small, a browser's words
+    // come out a little narrower, and a line just too long for it would fit here.)
+    const lines = plain(node?.label).split("\n"), font = `${look.weight} 100px ${look.family}`, scale = 100 / look.size;
+    // (The narrowest it is set: its longest word, and the room round it, in the figure's points.)
+    let longest = 0;
+    if (measuring) {
+      measuring.font = font;
+      for (const word of lines.join(" ").split(/\s+/).filter(Boolean)) longest = Math.max(longest, measuring.measureText(word).width / scale);
+    }
+    const least = Math.max(TEXT_LEAST, (longest + 2 * inset) / unit);
+    return { node: words, label, inset, lines, font, scale, least };
   }
   function shapeSizeEnd() {
     const sizing = shapeSizeFinish();
@@ -2480,8 +2566,8 @@ export function figureParts(host) {
     const both = sizing.kind === "decision" || PROPORTIONED.has(sizing.kind);
     const value = (side) => (both ? (size.kept[side] && sizing.had[side] !== null ? sizing.had[side] : own(side))
       : size.snapped[side] ? null : size.kept[side] ? sizing.had[side] : own(side));
-    const values = size.fitted ? fitValues(sizing.id, sizing.fit) : { width: value("width"), height: value("height") };
-    if (values.width === sizing.had.width && values.height === sizing.had.height) { shapeSizeClear(sizing); return; }
+    const values = size.fitted ? fitValues(sizing.id, sizing.fit) : sizing.sideways ? { width: value("width") } : { width: value("width"), height: value("height") };
+    if (values.width === sizing.had.width && (sizing.sideways || values.height === sizing.had.height)) { shapeSizeClear(sizing); return; }
     // Its outline stays where it was let go, the tip gone, until it is drawn at that size (or
     // the edit is refused): it never goes back to the size it was meanwhile.
     sizing.tip.remove();
@@ -4444,15 +4530,16 @@ export function figureParts(host) {
   function wrapped(line, room, font) {
     if (!measuring) return [line];
     measuring.font = font;
-    const space = measuring.measureText(" ").width;
     const all = line.split(/ +/).filter(Boolean);
     const sizes = all.map((word) => measuring.measureText(word).width);
+    // (Each line measured whole, as the figure measures it: its words' widths and its spaces
+    // added up come out a little short of it, kerned across the spaces.)
     const fill = (limit) => {
       const lines = [[]];
-      let run = 0;
       sizes.forEach((size, index) => {
-        const next = run ? run + space + size : size;
-        if (run && next > limit + 0.5) { lines.push([index]); run = size; } else { lines[lines.length - 1].push(index); run = next; }
+        const line = lines[lines.length - 1];
+        const next = line.length ? measuring.measureText([...line, index].map((at) => all[at]).join(" ")).width : size;
+        if (line.length && next > limit + 0.5) lines.push([index]); else line.push(index);
       });
       return lines;
     };

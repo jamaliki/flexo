@@ -394,6 +394,10 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
         if node.kind == "circle":
             # (A line of its words across the square inscribed in it, less its padding.)
             return max(1.0, width / 2.0**0.5 - style.padding_x.points)
+        if node.kind == "text":
+            # (Less the room it keeps round its words of itself: given the width it has of
+            # itself, its words wrap as they do without one.)
+            return max(1.0, width - style.padding_y.points)
         return max(1.0, width - 2.0 * style.padding_x.points)
     if node.kind == "circle" and node.height is not None and not isinstance(node.height, CellSpan):
         height = style.resolve_extent(node.height).points

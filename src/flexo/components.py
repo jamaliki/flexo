@@ -1042,10 +1042,9 @@ def _least_diamond(corners: list[tuple[float, float]], aspect: float) -> Size:
     return Size(width, height)
 
 
-FIT_NEVER = frozenset(
-    {"label", "text", "spacer", "icon", "op", "vector", "volume", "image", "structure"}
-)
-"""Kinds sized by their content alone, or by handles of their own: no size to fit."""
+FIT_NEVER = frozenset({"label", "spacer", "icon", "op", "vector", "volume", "image", "structure"})
+"""Kinds sized by their content alone, or by handles of their own: no size to fit. (Text has
+one, its width only: where its words wrap.)"""
 
 GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
 """Kinds whose size is their content's own, never grown around a label."""

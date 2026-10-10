@@ -27,6 +27,9 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-size.sw::before { inset: 0 0 -7px -7px; }
 .fig-size.se::before { inset: 0 -7px -7px 0; }
 .fig-size:hover { background: var(--accent); }
+.fig-size.w::before { inset: -7px 0 -7px -7px; }
+.fig-size.e::before { inset: -7px -7px -7px 0; }
+.fig-size.w, .fig-size.e { cursor: ew-resize; }
 .fig-size.nw, .fig-size.se { cursor: nwse-resize; }
 .fig-size.ne, .fig-size.sw { cursor: nesw-resize; }
 .fig-sizing .fig-mark, .fig-sizing .fig-next, .fig-sizing .fig-size { visibility: hidden; }
@@ -66,6 +69,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* A shape's outline at the size it is being dragged to: solid once it fits its words. */
 .fig-size-drag rect, .fig-size-drag polygon, .fig-size-drag ellipse { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .fig-size-drag .fits { stroke-dasharray: none; }
+.fig-text-preview { position: absolute; z-index: 2; pointer-events: none; line-height: 1.22; text-align: center; white-space: pre; }
 /* The guide a curve's middle keeps to, as the slide's alignment guides are drawn. */
 .fig-end-drag .fig-guides line { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.9; }
 .fig-end-shape { position: absolute; z-index: 3; pointer-events: none; border: var(--frame, 2px) dashed var(--accent); border-radius: 4px; }
