@@ -270,6 +270,19 @@ export function mount(studio, main) {
     dropSaid("Drop pictures (PNG, JPEG, SVG, PDF) or structure files (PDB, mmCIF) to add them to the figure");
   });
   center.addEventListener("dragleave", (event) => { if (!center.contains(event.relatedTarget)) dropSaid(""); });
+  // The width a picture dropped comes in at: its own, unless that is more than half the
+  // page (a photograph's own size is several pages) -- then half the page, to be sized from
+  // there by its corners. Null for its own, and for a file whose size is not read here (a PDF).
+  async function fittingWidth(file) {
+    if (!/\.(png|jpe?g|svg)$/i.test(file.name)) return null;
+    const address = URL.createObjectURL(file);
+    try {
+      const picture = new Image();
+      await new Promise((loaded, failed) => { picture.onload = loaded; picture.onerror = failed; picture.src = address; });
+      const most = (page.querySelector("svg")?.viewBox?.baseVal?.width || 0) / 2;
+      return most && picture.naturalWidth * 0.75 > most ? `${Math.round(most)}pt` : null;
+    } catch { return null; } finally { URL.revokeObjectURL(address); }
+  }
   center.addEventListener("drop", async (event) => {
     dropSaid("");
     const files = [...(event.dataTransfer?.files || [])];
@@ -278,17 +291,18 @@ export function mount(studio, main) {
     event.preventDefault();
     const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name));
     if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator) and structure files (PDB, mmCIF) can be added to a figure.", { icon: "info", seconds: 6 }); return; }
-    // Where: the shape or group under the pointer, as a shape added there goes.
+    // Where: beside the shape under the pointer, in the group under it, or else at the
+    // figure's end -- never into the line of whatever happens to be chosen, as a shape added
+    // from the palette goes: a picture let go on the desk joins nothing.
     const under = figure.idAt(event);
-    let where = under && figure.nodeOf(under) && figure.nodeOf(under).kind !== "frame" ? { after: under }
-      : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : undefined;
+    const where = under && figure.nodeOf(under) && figure.nodeOf(under).kind !== "frame" ? { after: under }
+      : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : {};
     try {
       for (const file of taken) {
         const kind = STRUCTURE_FILE.test(file.name) ? "structure" : "image";
         if (catalog.parts[kind]?.unavailable) { toast(`${file.name}: ${catalog.parts[kind].unavailable}`, { icon: "info", seconds: 6 }); continue; }
-        await figure.addPart(kind, where, { file: await studio.upload(file) });
-        // (The next after where the first went, not on top of it: after what is then chosen.)
-        where = undefined;
+        const width = kind === "image" ? await fittingWidth(file) : null;
+        await figure.addPart(kind, where, { file: await studio.upload(file), width });
         await figure.idle?.();
       }
     } catch (error) {

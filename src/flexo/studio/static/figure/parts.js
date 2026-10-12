@@ -1189,8 +1189,9 @@ export function figureParts(host) {
   // was let go: `parent` and `index`, or `side` and `of` (a line of its own beside a part),
   // with the figure's `folds` as it was seen then; `at`, the point on the drawing it was let go
   // at (the overlay's pixels), where it stands until drawn; `label`, its name for Undo.
-  // `file`: the file of a part that is one (a picture dropped on the figure), not asked for.
-  async function addPart(kind, where = placement(), { file: given = null } = {}) {
+  // `file`: the file of a part that is one (a picture dropped on the figure), not asked for;
+  // `width`: the width it is given, where its own is more than the page has room for.
+  async function addPart(kind, where = placement(), { file: given = null, width = null } = {}) {
     // (Refused at once with the studio away, before anything stands in for it: see act.)
     if (host.away?.("add shapes")) return;
     const part = parts[kind];
@@ -1220,7 +1221,7 @@ export function figureParts(host) {
       const field = part.fields.find((item) => item.type === "file");
       const file = given || await host.chooseFile({ title: `Choose ${article(part.title)} ${titled(part.title)}`, types: field.types, action: "Insert" });
       if (!file) return;
-      action.node = { properties: { source: file } };
+      action.node = { properties: { source: file }, ...(width ? { width } : {}) };
       if (kind === "structure") action.node.label = fileLabel(file);
     }
     // Where it will be drawn, as nearly as can be told before it is: its words are typed

@@ -722,6 +722,10 @@ class _Document:
             item["kind"] = kind
         if overrides.get("label"):
             item["label"] = overrides["label"]
+        # (And the size it is given: a picture dropped in, at a width the page has room for.)
+        for side in ("width", "height"):
+            if overrides.get(side):
+                item[side] = overrides[side]
         # A structure named only for its file (1A7G) is named for what the file says it holds.
         if kind == "structure":
             item["label"] = self.structure_label(item.get("label"), properties.get("source"))

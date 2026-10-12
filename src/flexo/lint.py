@@ -733,6 +733,9 @@ def _structural_svg_diagnostics(
         diagnostics.append(
             Diagnostic("svg.text.flattened", "Editable master contains no live text.")
         )
+    from flexo.artwork import picture_link
+
+    linked = picture_link.get() is not None
     layer_attribute = f"{{{INKSCAPE_NS}}}groupmode"
     label_attribute = f"{{{INKSCAPE_NS}}}label"
     for item in elements:
@@ -746,7 +749,9 @@ def _structural_svg_diagnostics(
             )
         for attribute in ("href", f"{{{SVG_NS}}}href"):
             reference = item.get(attribute)
-            if reference and not reference.startswith(("data:", "#")):
+            # (Drawn for a page that is sent its photographs by address -- the studio's --
+            # they are the page's to fetch, and are in the file when it is exported.)
+            if reference and not linked and not reference.startswith(("data:", "#")):
                 diagnostics.append(
                     Diagnostic(
                         "svg.resource.external",

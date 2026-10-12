@@ -1352,3 +1352,39 @@ def test_a_figures_page_is_chosen_by_name_or_typed(tmp_path: Path) -> None:
     ]
     assert "<svg" in drawing.pages[0].svg
 
+
+def test_a_photograph_sent_to_the_page_by_address_is_no_error(tmp_path: Path) -> None:
+    """The studio sends its page a photograph by address, not in the drawing: every one in a
+    figure was said to be an "external resource", an error, though the export holds it."""
+
+    from PIL import Image
+
+    from flexo.artwork import picture_link
+
+    Image.new("RGB", (40, 30), "#2b4c9b").save(tmp_path / "photo.png")
+    text = "figure: {id: f}\nnodes:\n- {id: p, kind: image, properties: {source: photo.png}}\n"
+    token = picture_link.set(lambda artwork: "/api/picture?path=photo.png")
+    try:
+        drawing = FigureKind().draw({"text": text}, tmp_path)
+    finally:
+        picture_link.reset(token)
+    assert "/api/picture?path=photo.png" in drawing.pages[0].svg
+    assert not [message for message in drawing.messages if message.code == "svg.resource.external"]
+
+
+def test_a_picture_added_with_a_width_keeps_it_and_joins_nothing(tmp_path: Path) -> None:
+    """A picture dropped on the figure: at the figure's end, on no line, at the width the
+    page had room for (its own is often several pages)."""
+
+    from PIL import Image
+
+    Image.new("RGB", (1600, 900), "#2b4c9b").save(tmp_path / "photo.png")
+    node = {"properties": {"source": "photo.png"}, "width": "255pt"}
+    result = apply(SAMPLE_FIGURE, {"do": "add", "kind": "image", "node": node}, base=tmp_path)
+    (made,) = result["select"]
+    added = next(item for item in data(result["text"])["nodes"] if item["id"] == made)
+    assert added["width"] == "255pt" and added["properties"] == {"source": "photo.png"}
+    assert edges(result["text"]) == edges(SAMPLE_FIGURE)
+    compiled = compile_figure(parse(result["text"], tmp_path))
+    assert not [item for item in compiled.measured.diagnostics if item.code == "layout.width.grown"]
+
