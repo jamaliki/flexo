@@ -809,6 +809,16 @@ export async function start() {
       if (doesKey(workspace.active, keys)) event.preventDefault();
     });
   }
+  // A file let go where nothing takes it is never opened in place of the studio, as a browser
+  // (and the Mac app's web view) opens one dropped on a page. (An editor that takes files --
+  // a slide, a figure -- has taken them first.)
+  for (const name of ["dragover", "drop"]) {
+    window.addEventListener(name, (event) => {
+      if (event.defaultPrevented || ![...(event.dataTransfer?.types || [])].includes("Files")) return;
+      event.preventDefault();
+      if (name === "dragover") event.dataTransfer.dropEffect = "none";
+    });
+  }
   window.addEventListener("pywebviewready", report);
   new MutationObserver(report).observe(document.body, { childList: true });
   const docHead = h("div", {}, docbar, trustBar);

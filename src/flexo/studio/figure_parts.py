@@ -39,6 +39,7 @@ from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
+from flexo.frames import LAYERS
 from flexo.ir.semantic import EDGE_HEADS
 from flexo.pages import PAGE_SIZES, PANEL_LABELS, panel_letter
 
@@ -773,6 +774,35 @@ def _basics() -> list[dict[str, Any]]:
         ),
         _part("junction", "Junction", "Basics", "A point where lines meet", common=[]),
         _cells(),
+        # A frame goes round shapes chosen (Group, then Frame): it is never added alone, so
+        # it is in no category of the palette.
+        _part(
+            "frame",
+            "Frame",
+            "",
+            "A box round shapes anywhere in the figure",
+            {"properties": {"around": ""}},
+            [
+                _field(
+                    "properties.layer",
+                    "Layer",
+                    "choice",
+                    options=list(LAYERS),
+                    labels={"behind": "Behind", "front": "In Front", "over": "Over (See-Through)"},
+                    default="behind",
+                    hint="Behind its shapes, an outline in front of them, or a tint over them",
+                ),
+                _field(
+                    "properties.around",
+                    "Goes Round",
+                    "text",
+                    hint="The names of the shapes and groups it goes round",
+                    more=True,
+                ),
+            ],
+            common=[LABEL, TONE],
+            wraps=True,
+        ),
     ]
 
 
@@ -937,8 +967,15 @@ GROUPS = [
         "layout": "row",
         "role": "panel",
     },
+    {
+        "kind": "frame",
+        "title": "Frame",
+        "hint": "A box round the shapes chosen, wherever they are: behind, in front or over them",
+        "frame": True,
+    },
 ]
-"""What parts can be gathered into; each takes the parts chosen, or a first block."""
+"""What parts can be gathered into; each takes the parts chosen, or a first block. (A frame
+goes round them where they are, and gathers nothing.)"""
 
 GROUP_FIELDS = [
     # (A group's words are its title, as its colours call them.)

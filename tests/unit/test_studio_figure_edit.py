@@ -85,7 +85,8 @@ def test_every_part_in_the_palette_can_be_added_and_drawn(tmp_path: Path) -> Non
         '<rect width="40" height="30" fill="#4a7"/></svg>'
     )
     for kind, part in catalogue()["parts"].items():
-        if part.get("unavailable") or kind == "structure":
+        # (A frame is no part of the palette: it goes round shapes chosen, never added alone.)
+        if part.get("unavailable") or part.get("wraps") or kind == "structure":
             continue
         node = {"properties": {"source": "picture.svg"}} if part.get("needs_file") else None
         result = apply(
@@ -928,7 +929,8 @@ def test_every_part_in_the_palette_can_be_put_into_a_line(tmp_path: Path) -> Non
         '<rect width="40" height="30" fill="#4a7"/></svg>'
     )
     for kind, part in catalogue()["parts"].items():
-        if part.get("unavailable") or kind == "structure":
+        # (A frame is no part of the palette: it goes round shapes chosen, never added alone.)
+        if part.get("unavailable") or part.get("wraps") or kind == "structure":
             continue
         node = {"properties": {"source": "picture.svg"}} if part.get("needs_file") else None
         action = {"do": "add", "kind": kind, "into": "edge.2.b-to-c", "node": node}
@@ -1331,7 +1333,7 @@ def test_a_figures_page_is_chosen_by_name_or_typed(tmp_path: Path) -> None:
     assert (sizes["nature-page"]["width"], sizes["nature-page"]["height"]) == ("183mm", "247mm")
     assert fields["figure.height"]["type"] == "length"
     assert fields["figure.panel_labels"]["labels"]["(A)"] == "(A), (B), (C)"
-    assert [group["kind"] for group in catalogue()["groups"]][-1] == "panel"
+    assert [group["kind"] for group in catalogue()["groups"]][-2:] == ["panel", "frame"]
 
     a4 = {"figure.width": sizes["a4"]["width"], "figure.height": sizes["a4"]["height"]}
     text, _ = edit(SAMPLE_FIGURE, do="update", target=figure, values=a4)

@@ -249,6 +249,52 @@ export function mount(studio, main) {
   // Pressed on the desk round the page and dragged, a band chooses the shapes it touches, as
   // from the page's own empty space.
   stage.addEventListener("pointerdown", (event) => { if (event.target === stage && figure.model) figure.band(event); });
+
+  // Files dropped on the figure are added to it: pictures and drawings (PNG, JPEG, SVG, PDF,
+  // Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
+  // shape they are let go on, in the group they are let go in, or else after what is chosen.
+  const PICTURE_FILE = /\.(png|jpe?g|svg|pdf|ai)$/i, STRUCTURE_FILE = /\.(pdb|cif|mmcif|ent)$/i;
+  const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+  let dropNote = null;
+  const dropSaid = (said) => {
+    if (dropNote?.textContent === (said || "")) return;
+    dropNote?.remove();
+    dropNote = said ? h("div.drop-note", {}, said) : null;
+    if (dropNote) center.append(dropNote);
+  };
+  center.addEventListener("dragover", (event) => {
+    if (!carriesFiles(event) || !figure.model) return;
+    // (Never opened in place of the studio, as a browser opens a file dropped where none is taken.)
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    dropSaid("Drop pictures (PNG, JPEG, SVG, PDF) or structure files (PDB, mmCIF) to add them to the figure");
+  });
+  center.addEventListener("dragleave", (event) => { if (!center.contains(event.relatedTarget)) dropSaid(""); });
+  center.addEventListener("drop", async (event) => {
+    dropSaid("");
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length || !figure.model) return;
+    // Taken now, before anything is waited for: later, the browser would have opened the file.
+    event.preventDefault();
+    const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name));
+    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator) and structure files (PDB, mmCIF) can be added to a figure.", { icon: "info", seconds: 6 }); return; }
+    // Where: the shape or group under the pointer, as a shape added there goes.
+    const under = figure.idAt(event);
+    let where = under && figure.nodeOf(under) && figure.nodeOf(under).kind !== "frame" ? { after: under }
+      : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : undefined;
+    try {
+      for (const file of taken) {
+        const kind = STRUCTURE_FILE.test(file.name) ? "structure" : "image";
+        if (catalog.parts[kind]?.unavailable) { toast(`${file.name}: ${catalog.parts[kind].unavailable}`, { icon: "info", seconds: 6 }); continue; }
+        await figure.addPart(kind, where, { file: await studio.upload(file) });
+        // (The next after where the first went, not on top of it: after what is then chosen.)
+        where = undefined;
+        await figure.idle?.();
+      }
+    } catch (error) {
+      toast(`Couldn’t add ${taken.length > 1 ? "the files" : taken[0].name}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
+    }
+  });
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
   // Right-click, as on a slide: what is under the pointer is chosen, and its menu offers what
   // can be done with it (a line: a shape inserted into it) -- Cut, Copy and Paste among it, as
@@ -786,7 +832,7 @@ export function mount(studio, main) {
     { icon: "minus", label: "Zoom Out", keys: "⌘−", run: () => zoomBy(1 / 1.25) },
     { icon: "eye", label: "Actual Size", keys: "⌘0", run: () => setZoom(1) },
     { icon: "figure", label: "Zoom to Fit", also: ["Fit Slide"], keys: "⇧⌘0", run: () => setZoom(null) },
-    ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
+    ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable && !part.wraps).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
     { icon: "right", label: "Connect Shapes", run: () => figure.toggleConnect(true) },
     { icon: "export", label: "Export as Editable SVG…", run: () => studio.exportFiles(["editable"]) },
     { icon: "export", label: "Export as PDF…", run: () => studio.exportFiles(["pdf"]) },

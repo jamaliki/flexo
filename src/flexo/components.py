@@ -519,6 +519,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # it -- a thing an arrow starts or ends at that is not a box.
         ComponentDefinition("text", Size(0.0, 0.0), _TEXT_PORTS),
         ComponentDefinition("spacer", Size(0.0, 0.0), ()),
+        # (A box round other shapes, placed once they are: see ``flexo.frames``.)
+        ComponentDefinition("frame", Size(0.0, 0.0), ()),
         # A badge's mark on its own, as large as the author asks (a legend key).
         ComponentDefinition("icon", Size(0.0, 0.0), ()),
         # Genetic designs (flexo.genetics): a construct's parts on a backbone, its

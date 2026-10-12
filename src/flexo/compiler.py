@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
+from flexo.frames import PlacedFrame, place, room, split
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
@@ -27,6 +28,8 @@ class Compilation:
     fitted: FittedFigure
     routed: RoutedFigure
     document: SVGDocument
+    frames: tuple[PlacedFrame, ...] = ()
+    """The figure's frames (``flexo.frames``), round what they name: no part of the layout."""
 
 
 def compile_figure(
@@ -38,7 +41,9 @@ def compile_figure(
     give_up_if_newer()
     layout_style = style or figure_style(figure)
     paint_palette = palette or figure_palette(figure)
-    figure = lettered(_resolved_shapes(figure, layout_style))
+    # (A frame goes round shapes where the layout puts them: laid out without it.)
+    figure, frames = split(lettered(_resolved_shapes(figure, layout_style)))
+    figure = _with_margin_for(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
     if style is None and _too_large(measured):
         # Tighten the spacing before growing the page: a figure a little too
@@ -75,8 +80,7 @@ def compile_figure(
         )
         # (The next draft starts from this one's room, as its lines are this one's.)
         remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
-        document = emit_svg(routed, style=layout_style, palette=paint_palette)
-        return Compilation(measured, fitted, routed, document)
+        return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
     give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
     give_up_if_newer()
@@ -91,8 +95,51 @@ def compile_figure(
     # (For a draft of it to start from.)
     remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
     give_up_if_newer()
-    document = emit_svg(routed, style=layout_style, palette=paint_palette)
-    return Compilation(measured, fitted, routed, document)
+    return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
+
+
+def _with_margin_for(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> FigureSpec:
+    """``figure`` with its page's margin wider by what its frames stand out from their
+    shapes: a frame round shapes at the page's edge is on the page."""
+
+    sides, top = room(frames, style)
+    if not frames:
+        return figure
+    groups = []
+    for group in figure.groups:
+        if group.id == figure.root:
+            padding = group.layout.authored_padding(style.group_padding)
+            group = replace(
+                group,
+                layout=replace(
+                    group.layout,
+                    padding_top=Length(padding.top + top),
+                    padding_right=Length(padding.right + sides),
+                    padding_bottom=Length(padding.bottom + sides),
+                    padding_left=Length(padding.left + sides),
+                ),
+            )
+        groups.append(group)
+    return replace(figure, groups=tuple(groups))
+
+
+def _framed(
+    frames: tuple,
+    measured: MeasuredFigure,
+    fitted: FittedFigure,
+    routed: RoutedFigure,
+    style: LayoutStyle,
+    palette: Palette,
+) -> Compilation:
+    """The figure drawn, its frames round what they name."""
+
+    placed, said = place(frames, fitted, style)
+    if said:
+        measured = replace(measured, diagnostics=measured.diagnostics + said)
+        fitted = replace(fitted, measured=measured)
+        routed = replace(routed, fitted=fitted)
+    document = emit_svg(routed, style=style, palette=palette, frames=placed)
+    return Compilation(measured, fitted, routed, document, placed)
 
 
 def _layout_key(figure: FigureSpec, style: LayoutStyle) -> tuple:

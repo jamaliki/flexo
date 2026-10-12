@@ -69,6 +69,7 @@ export const GLYPHS = {
   grid: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
   module: "M1.5 3.5h13v10h-13zM1.5 6h13M3.5 8.5h4v3h-4zM8.5 8.5h4v3h-4z",
   panel: "M2 3.2a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M4.4 2v2.4M2 7.5h5v6H2zM9 7.5h5v6H9z",
+  frame: "M1.5 2.5h13v11h-13zM4 7h3v3.5H4zM9 5.5h3V9H9z",
   edge: "M2 8h10M9 5l3 3-3 3",
   net: "M2 8h5M7 8l5-4M7 8l5 4M7 8h5",
 };
@@ -522,6 +523,7 @@ export function figureParts(host) {
       case "delete": return many(action.ids, "Delete");
       case "duplicate": return many(action.ids, "Duplicate");
       // (A module made of the shapes chosen is said so: "Make Module".)
+      case "frame": return "Add Frame";
       case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
       // (One group pasted is said as it is: a module, a group.)
@@ -957,6 +959,8 @@ export function figureParts(host) {
     // not inside it (its panel's Add Shape Inside… adds there). The figure chosen: at its end.
     if (id && groupOf(id) && (id === model().root || groupOf(id).implied)) return { parent: id, text: "Adds to the end of the figure" };
     if (id && groupOf(id)) return { after: id, text: `Adds after ${inQuotes(nameOf(id))}` };
+    // (A frame chosen is no place in the figure: nothing goes after it, or is joined to it.)
+    if (id && nodeOf(id)?.kind === "frame") return { text: "Adds to the end of the figure" };
     if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: addWhere(id, state.chain).text, from: id };
     // A line chosen: into it, between the two it joins.
     if (id && edgeOf(id)) return lineWhere(id);
@@ -1185,7 +1189,8 @@ export function figureParts(host) {
   // was let go: `parent` and `index`, or `side` and `of` (a line of its own beside a part),
   // with the figure's `folds` as it was seen then; `at`, the point on the drawing it was let go
   // at (the overlay's pixels), where it stands until drawn; `label`, its name for Undo.
-  async function addPart(kind, where = placement()) {
+  // `file`: the file of a part that is one (a picture dropped on the figure), not asked for.
+  async function addPart(kind, where = placement(), { file: given = null } = {}) {
     // (Refused at once with the studio away, before anything stands in for it: see act.)
     if (host.away?.("add shapes")) return;
     const part = parts[kind];
@@ -1213,7 +1218,7 @@ export function figureParts(host) {
     if (onward) Object.assign(action, { into: onward.id, parent: leaves ? null : holder?.id || null });
     if (part.needs_file) {
       const field = part.fields.find((item) => item.type === "file");
-      const file = await host.chooseFile({ title: `Choose ${article(part.title)} ${titled(part.title)}`, types: field.types, action: "Insert" });
+      const file = given || await host.chooseFile({ title: `Choose ${article(part.title)} ${titled(part.title)}`, types: field.types, action: "Insert" });
       if (!file) return;
       action.node = { properties: { source: file } };
       if (kind === "structure") action.node.label = fileLabel(file);
@@ -1627,6 +1632,13 @@ export function figureParts(host) {
 
   function gather(group, where = null) {
     const chosen = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== model().root));
+    // A frame goes round what is chosen where it is, in whatever groups: nothing is moved.
+    if (group.frame) {
+      const round = chosen.filter((id) => nodeOf(id)?.kind !== "frame");
+      if (!round.length) { toast("Select the shapes or groups for the frame to go round.", { icon: "info" }); return; }
+      act({ do: "frame", ids: round });
+      return;
+    }
     const at = where || placement();
     // A group stands, dashed, round what it gathers -- or, made empty, where it will be --
     // until it is drawn.
@@ -2187,7 +2199,8 @@ export function figureParts(host) {
     const stop = (event) => event.stopPropagation();
     // ⌥-clicked or right-clicked, a + opens the palette of shapes, to choose what it adds.
     const choose = (event, into = null) => { event.preventDefault(); stop(event); addPalette(event.currentTarget, into ? { into } : { next: id }); };
-    if (box) {
+    // (A frame takes no line, and nothing comes after it: no + beside one.)
+    if (box && nodeOf(id)?.kind !== "frame") {
       const kind = nextKind(nodeOf(id));
       const { branch } = addWhere(id, true, kind);
       const { side, x, y } = plusPlace(id, box, branch?.towards, sizable);
@@ -3331,6 +3344,8 @@ export function figureParts(host) {
     // (⌥ held, as it is let go, a copy goes there: see dragEnd.)
     if (event.shiftKey || event.metaKey || event.ctrlKey) return;
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
+    // (A frame stays round its shapes: it has no place of its own to be dragged from.)
+    if (nodeOf(id)?.kind === "frame") return;
     drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
@@ -5141,6 +5156,9 @@ export function figureParts(host) {
       field.readOnly = true;
       field.blur();
     } else {
+      // (Left first: a field taken away with the keys in it tells no one they are free, and
+      // the Mac's Edit › Delete and Duplicate stayed greyed for the shape still chosen.)
+      if (document.activeElement === field) field.blur();
       box.remove();
       stand(null);
     }
@@ -5373,6 +5391,16 @@ export function figureParts(host) {
     // (Lines joined into one, it is among their ends.)
     const joined = (model().nets || []).filter((net) => [...(net.sources || []), ...(net.targets || [])].some((ref) => nodeOfRef(ref) === node.id));
     const shown = part.fields.filter((field) => field.key !== "properties.tone");
+    // A frame is a box round other shapes: of no other type, on no line, in no row.
+    if (kind === "frame") {
+      return [
+        h("div.section.insp-top", {}, crumbs(node.id),
+          h("div.insp-row", {}, titleBlock(glyph(kind), part.title, null, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
+        colourSection([{ type: "node", id: node.id, item: node }]),
+        h("div.section", {}, fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
+        h("div.section", {}, advanced(idField(node.id, "node"))),
+      ];
+    }
     return [
       h("div.section.insp-top", {}, crumbs(node.id),
         h("div.insp-row", {}, titleBlock(glyph(kind), part.title, null, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
