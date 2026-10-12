@@ -853,6 +853,9 @@ class FigureSpec:
     """Draw by hand, laid over the theme's own hand; see ``flexo.sketch``."""
     background: bool | str | None = None
     """Paint the page (``True``, or a colour) or not (``False``); ``None`` is the theme's."""
+    panel_labels: str = "a"
+    """How the figure's panels (groups with ``role: panel``) are lettered, as the first one
+    is: ``a`` (a, b, c), ``A``, ``(a)``; see ``flexo.pages``."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")

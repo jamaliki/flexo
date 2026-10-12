@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple
 
+from flexo.components import TRANSPARENT_ROLES
 from flexo.geometry import Point, Segment, segments
 from flexo.hierarchy import lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
@@ -320,7 +321,7 @@ class _Hierarchy:
         palette: Palette,
     ) -> None:
         spec = group.measured.spec
-        if spec.role in {"canvas", "layout"}:
+        if spec.role in TRANSPARENT_ROLES:
             return
         radius = (
             style.container_radius.points

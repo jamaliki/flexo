@@ -208,6 +208,10 @@ class Figure:
     ``width`` takes a length or one of the publication presets the style defines
     (``"single-column"``, ``"double-column"``, ``"presentation"``); ``height`` is
     normally left out, so the canvas ends at the content plus its margin.
+    ``page`` names a size instead (``"nature-2"``, ``"a4"``; see ``flexo.PAGE_SIZES``):
+    its width, and its height where the page has one.
+    ``panel_labels`` is how the figure's panels (``figure.panel``) are lettered, as
+    the first one is: ``"a"`` by default, or ``"A"``, ``"(a)"``.
 
     ``theme`` picks the whole look -- type, line work, and colour rules -- from
     ``flexo.THEMES`` (``"paper"``, ``"tikz"``, ``"dark"``, ``"swiss"``, ...), or
@@ -243,12 +247,21 @@ class Figure:
         background: bool | str | None = None,
         layout: LayoutKind | LayoutSpec | None = None,
         style: str | None = None,
+        page: str | None = None,
+        panel_labels: str = "a",
     ) -> None:
         if theme is not None and style is not None and theme != style:
             raise ValueError("theme= and style= name the same thing; pass only one")
+        if page is not None:
+            from flexo.pages import page_size
+
+            size = page_size(page)
+            width = size.width
+            height = size.height if height is None else height
         self.id = id
         self.width = width
         self.height = Length.parse(height) if height is not None else None
+        self.panel_labels = panel_labels
         from flexo.theme_files import is_file_reference, register_palette, register_theme
 
         self.style = theme or style or "paper"
@@ -319,6 +332,18 @@ class Figure:
             id, label=label, layout=layout, justify=justify, role=role, **options
         )
 
+    def panel(
+        self,
+        id: str,
+        label: str | tuple[TextRun, ...] = "",
+        *,
+        layout: LayoutKind | LayoutSpec = "row",
+        **options: Any,
+    ) -> GroupBuilder:
+        """Open a panel directly on the root: ``figure.root.panel`` in one call."""
+
+        return self.root.panel(id, label, layout=layout, **options)
+
     @property
     def spec(self) -> FigureSpec:
         """This figure lowered into the validated semantic IR.
@@ -354,6 +379,7 @@ class Figure:
                 conventions=self.conventions,
                 sketch=self.sketch,
                 background=self.background,
+                panel_labels=self.panel_labels,
                 nodes=tuple(self._nodes),
                 edges=tuple(
                     replace(
@@ -809,6 +835,24 @@ class GroupBuilder:
         return self.group(
             id, label=label, layout=layout, role="plate", title_side="bottom-right", **options
         )
+
+    def panel(
+        self,
+        id: str,
+        label: str | tuple[TextRun, ...] = "",
+        *,
+        layout: LayoutKind | LayoutSpec = "row",
+        **options: Any,
+    ) -> GroupBuilder:
+        """A panel of a figure of several, as a journal prints them: no frame, and its
+        letter where a title goes.
+
+        The letters run in the order the panels are read (a, b, c; ``panel_labels`` on
+        the figure letters them another way), so none is written; ``label`` is a title
+        set after the letter, for a panel that has one.
+        """
+
+        return self.group(id, label=label, layout=layout, role="panel", **options)
 
     def row(self, id: str, **options: object) -> GroupBuilder:
         """Open a group whose children run left to right; see ``group``.

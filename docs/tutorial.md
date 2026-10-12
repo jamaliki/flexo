@@ -50,8 +50,9 @@ flexo.build(figure, "build", formats=("editable", "pdf", "png"))
 ```
 
 `width` is `"single-column"`, `"double-column"` (the default), `"presentation"`,
-or any length (`"120mm"`, `"5in"`). In a notebook, end a cell with `figure` to
-see it.
+or any length (`"120mm"`, `"5in"`); `page="nature-2"` or `page="a4"` names a
+journal's column or a sheet of paper instead. In a notebook, end a cell with
+`figure` to see it.
 
 ## 2. Let the wiring lay it out
 
@@ -512,7 +513,8 @@ a flawed figure is still there to look at.
 | Straight lines for a graph | `Figure(conventions={"lines": "straight"})` |
 | Which boxes match | `tone="name"` on each component |
 | One box's paint | `paint={"fill": "#..", "stroke": "#..", "label": "#.."}` |
-| The size of the figure | `Figure(width="single-column")`, `width="120mm"` |
+| The size of the figure | `Figure(width="single-column")`, `width="120mm"`, `page="nature-2"`, `page="a4"` |
+| Panels lettered a, b, c | `figure.panel("id")` for each, on `Figure(layout="row")`; `panel_labels="A"` |
 | Space between things | `gap=`, `row_gap=`, `column_gap=`, `padding=` on a group |
 | Where things go | `row`, `column`, `grid(columns=...)` with `at=(row, column)`, `layout="flow"` |
 | Which way a route goes | `via="west"` on `connect`, `net`, or `merge` |

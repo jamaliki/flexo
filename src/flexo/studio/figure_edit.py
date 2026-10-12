@@ -1393,13 +1393,16 @@ class _Document:
         children = parent["children"]
         ordered = sorted(ids, key=children.index)
         label = action.get("label") or ("Module" if role == "module" else "")
-        identifier = self.fresh(label or layout)
+        # (A panel has its letter, not a title: named for what it is.)
+        identifier = self.fresh(label or ("panel" if role == "panel" else layout))
         group: dict[str, Any] = {"id": identifier, "children": ordered, "layout": {"kind": layout}}
         if layout == "grid":
             group["layout"]["columns"] = max(1, math.ceil(math.sqrt(len(ordered))))
         if role == "module":
             group["layout"]["justify"] = "center"
             group["role"] = "module"
+        if role == "panel":
+            group["role"] = "panel"
         if label:
             group["label"] = label
         index = children.index(ordered[0])

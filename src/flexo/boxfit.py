@@ -102,7 +102,10 @@ def fit_in_box(
     base = style.typography.size.points
     least = (words or base) / base
     most = (largest / base) if largest else least * 2.0
-    spec = replace(spec, width=f"{max(width / least, 40.0):.3f}pt", background=False)
+    # (Its own page is not the box's: neither its width nor a height it was given.)
+    spec = replace(
+        spec, width=f"{max(width / least, 40.0):.3f}pt", height=None, background=False
+    )
     tight = replace(
         style,
         gap=Length(style.gap.points * TIGHTER),

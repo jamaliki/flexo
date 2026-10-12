@@ -48,8 +48,10 @@ ink: a run through the middle of "Attended value" is a defect, not a shortcut,
 which is what makes a caption an obstacle at all.
 """
 
-TRANSPARENT_ROLES = frozenset({"layout", "canvas"})
+TRANSPARENT_ROLES = frozenset({"layout", "canvas", "panel"})
 """Group roles that draw no boundary and therefore never block a route.
+
+(A panel's only ink is its letter.)
 
 The container counterpart of ``TRANSPARENT_KINDS``, and read the same way by
 every pass that asks what is in the way.

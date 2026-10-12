@@ -68,6 +68,7 @@ export const GLYPHS = {
   column: "M4.5 1.5h7v3.5h-7zM4.5 6.25h7v3.5h-7zM4.5 11h7v3.5h-7z",
   grid: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
   module: "M1.5 3.5h13v10h-13zM1.5 6h13M3.5 8.5h4v3h-4zM8.5 8.5h4v3h-4z",
+  panel: "M2 3.2a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M4.4 2v2.4M2 7.5h5v6H2zM9 7.5h5v6H9z",
   edge: "M2 8h10M9 5l3 3-3 3",
   net: "M2 8h5M7 8l5-4M7 8l5 4M7 8h5",
 };
@@ -85,6 +86,36 @@ export function glyph(name) {
   path.setAttribute("d", GLYPHS[name] || GLYPHS.block);
   node.append(path);
   return node;
+}
+
+// A length as a figure's file has it ("89mm", "8.5in", "120" for points), in points; null
+// for what is none (a width's name, "single-column").
+const POINTS = { pt: 1, mm: 72 / 25.4, cm: 72 / 2.54, in: 72, px: 0.75 };
+export function lengthPoints(text) {
+  const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(String(text ?? "").trim());
+  return found ? Number(found[1]) * POINTS[(found[2] || "pt").toLowerCase()] : null;
+}
+// Which of the page `sizes` ({ name, width, height }) a figure's `width` and `height` are: a
+// size's name, or "" for a page of the person's own. A width by name ("double-column") is
+// that size and no other; lengths are the same whatever unit they are written in.
+export function pageNamed(sizes, width, height) {
+  const tall = height === undefined || height === null || height === "" ? null : lengthPoints(height);
+  const same = (a, b) => a !== null && b !== null && Math.abs(a - b) < 0.05;
+  const wide = lengthPoints(width);
+  const found = sizes.find((size) => {
+    const depth = size.height ? lengthPoints(size.height) : null;
+    if ((depth === null) !== (tall === null) || (depth !== null && !same(depth, tall))) return false;
+    return wide === null ? size.width === width : same(lengthPoints(size.width), wide);
+  });
+  return found?.name ?? "";
+}
+// A page size as its pop-up names it: with its measure, as written ("A4 · 210 × 297 mm").
+export function pageTitle(size) {
+  const parts = (text) => /^([\d.]+)\s*([a-z]+)$/i.exec(String(text));
+  const wide = parts(size.width), tall = size.height ? parts(size.height) : null;
+  if (!wide) return size.title;
+  const measure = tall ? (tall[2] === wide[2] ? `${wide[1]} × ${tall[1]} ${wide[2]}` : `${wide[1]} ${wide[2]} × ${tall[1]} ${tall[2]}`) : `${wide[1]} ${wide[2]}`;
+  return `${size.title} · ${measure}`;
 }
 
 // A structure's name from its file: a PDB ID in capitals, any other file by its name.
@@ -254,7 +285,30 @@ export function markupOf(label) {
     return out.split("\n").map((line) => (line ? (color ? `[${line}]{${color}}` : `[${line}](${link})`) : "")).join("\n");
   }).join("");
 }
-export const groupGlyph = (group) => (group.role === "module" ? "module" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
+export const groupGlyph = (group) => (group.role === "module" ? "module" : group.role === "panel" ? "panel" : ["grid", "row", "column"].includes(group.layout?.kind) ? group.layout.kind : "column");
+// A figure's panels (its groups with role "panel"), each with its letter: in the order they
+// are read -- the root's children first to last, and into each -- lettered as `pattern`
+// letters the first ("a", "A", "(a)"). As flexo draws them (flexo.pages).
+export function panelLetters(groups, root, pattern = "a") {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  const found = [], seen = new Set();
+  const walk = (id) => {
+    const group = byId.get(id);
+    if (!group || seen.has(id)) return;
+    seen.add(id);
+    if (group.role === "panel") found.push(id);
+    for (const child of group.children || []) walk(child);
+  };
+  walk(root);
+  for (const group of groups) walk(group.id);
+  const [, before, first, after] = /^([^A-Za-z0-9]*)([aA])([^A-Za-z0-9]*)$/.exec(String(pattern ?? "a")) || [null, "", "a", ""];
+  const letter = (index) => {
+    let letters = "";
+    for (let number = index + 1; number; number = Math.floor((number - 1) / 26)) letters = String.fromCharCode(first.charCodeAt(0) + ((number - 1) % 26)) + letters;
+    return `${before}${letters}${after}`;
+  };
+  return new Map(found.map((id, index) => [id, letter(index)]));
+}
 
 // A value as a person reads it, in title case: "ink colour" and "engraved-colour" are
 // "Ink Colour" and "Engraved Colour". Short words stay small inside a title.
@@ -415,6 +469,11 @@ export function figureParts(host) {
     // A shape with no words is called what it shows faintly on the drawing ("Block").
     if (node) return oneLine(node.label) || hintOf(node) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
+    // A panel by its letter, as it is drawn: "Panel a", and with a title "a Overview".
+    if (group?.role === "panel") {
+      const letter = panelLetters(model().groups, model().root, model().figure?.panel_labels).get(id) || "";
+      return oneLine(group.label) ? `${letter} ${oneLine(group.label)}`.trim() : `Panel ${letter}`.trim();
+    }
     if (group) return oneLine(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) {
@@ -463,7 +522,7 @@ export function figureParts(host) {
       case "delete": return many(action.ids, "Delete");
       case "duplicate": return many(action.ids, "Duplicate");
       // (A module made of the shapes chosen is said so: "Make Module".)
-      case "gather": return action.role === "module" ? "Make Module" : action.ids?.length ? many(action.ids, "Group") : "Add Group";
+      case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
       // (One group pasted is said as it is: a module, a group.)
       case "paste": {
@@ -510,6 +569,7 @@ export function figureParts(host) {
           return typingName(merge ? runFrom.get(merge) : typed(had), typed(given), 24);
         }
         if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.|tone$)/.test(key))) return "Change Colour";
+        if (target.type === "figure" && keys.length === 2 && all("figure.width", "figure.height")) return "Change Page Size";
         if (all("line")) return `Make Line ${titled(values.line || "solid")}`;
         if (all("depart")) return "Change Where the Line Leaves";
         if (all("arrive")) return "Change Where the Line Arrives";
@@ -5479,7 +5539,7 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, isRoot ? null : crumbs(group.id),
         h("div.insp-row", {},
-          titleBlock(glyph(["row", "column"].includes(writtenKind(group)) ? writtenKind(group) : groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : "Group",
+          titleBlock(glyph(group.role !== "panel" && ["row", "column"].includes(writtenKind(group)) ? writtenKind(group) : groupGlyph(group)), isRoot ? "Layout" : group.role === "module" ? "Module" : group.role === "panel" ? nameOf(group.id) : "Group",
             // As its Layout pop-up says it: written so (the note under it says how it is drawn).
             `${counted(count, "shape")} · ${titled(writtenKind(group) || "column")}`),
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
@@ -6040,6 +6100,26 @@ export function figureParts(host) {
           return ui.field(field.label, ui.combo({ value: shown(typing(key) ?? value ?? field.default ?? ""), options: field.options.map((option) => shown(String(option))), key,
             placeholder: shown(field.default ?? ""), onChange: (text) => set(String(text).trim() ? meant(text) : null) }), options);
         }
+      case "page": {
+        // The page by name: one of the two the theme sizes, a journal's column, a sheet of
+        // paper -- its width, and its height if it has one -- or the person's own, typed in
+        // Width and Height under it (Custom… goes to them).
+        const width = valueAt(item, "figure.width") ?? field.default, height = valueAt(item, "figure.height");
+        const families = [...new Set(field.sizes.map((size) => size.family))];
+        const choices = families.flatMap((family, index) => [...(index ? [{ line: true }] : []),
+          ...field.sizes.filter((size) => size.family === family).map((size) => ({ value: size.name, label: pageTitle(size) }))]);
+        const custom = () => setTimeout(() => {
+          const typedIn = [...document.querySelectorAll("input")].find((input) => input.dataset.key === `${scope}:figure.width`);
+          typedIn?.focus();
+          typedIn?.select();
+        }, 0);
+        return ui.field(field.label, ui.select({ value: pageNamed(field.sizes, width, height) || "Custom", key, options: choices,
+          actions: [{ label: "Custom…", run: custom }],
+          onChange: (name) => {
+            const size = field.sizes.find((each) => each.name === name);
+            if (size) write({ "figure.width": size.width === field.default ? null : size.width, "figure.height": size.height ?? null }, key);
+          } }), options);
+      }
       case "palette": {
         const current = value ?? field.default;
         // The default palette is the theme's: its colours as the figure is drawn with it.

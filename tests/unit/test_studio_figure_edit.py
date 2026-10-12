@@ -1296,3 +1296,57 @@ def test_a_copy_of_a_copy_is_numbered_on_from_it() -> None:
     compile_figure(parse(text, Path.cwd()))
     _, chosen = edit(SAMPLE_FIGURE, do="paste", after="x", **copied)
     assert chosen == ["encoder-2"]
+
+
+def test_shapes_are_gathered_into_a_panel_that_has_its_letter_not_a_title(tmp_path: Path) -> None:
+    """Group into a Panel: the shapes chosen in a group with no frame and no words of its own,
+    lettered as it is drawn; a second is the next letter."""
+
+    panel_of = {"do": "gather", "layout": "row", "role": "panel"}
+    text, chosen = edit(SAMPLE_FIGURE, ids=["x", "encoder"], **panel_of)
+    assert chosen == ["panel"]
+    panel = next(group for group in data(text)["groups"] if group["id"] == "panel")
+    assert panel == {"id": "panel", "children": ["x", "encoder"], "layout": {"kind": "row"},
+                     "role": "panel"}
+    text, chosen = edit(text, ids=["y"], **panel_of)
+    assert chosen == ["panel-2"]
+    drawn = FigureKind().draw({"text": text}, tmp_path).pages[0].svg
+    assert ">a</tspan>" in drawn and ">b</tspan>" in drawn
+    assert 'id="panel.container"' not in drawn
+    # Its Frame chosen otherwise, it is a group like any other again.
+    group = {"type": "group", "id": "panel"}
+    text, _ = edit(text, do="update", target=group, values={"role": None})
+    assert "role" not in next(group for group in data(text)["groups"] if group["id"] == "panel")
+
+
+def test_a_figures_page_is_chosen_by_name_or_typed(tmp_path: Path) -> None:
+    """Page Size sets the page's width and height together (a column of a journal's has no
+    height: the page is as tall as the figure); a page too small is drawn, and said in the
+    editor's words."""
+
+    figure = {"type": "figure"}
+    fields = {field["key"]: field for field in catalogue()["figure_fields"]}
+    sizes = {size["name"]: size for size in fields["figure.page"]["sizes"]}
+    assert list(sizes)[:3] == ["single-column", "double-column", "nature-1"]
+    assert (sizes["nature-page"]["width"], sizes["nature-page"]["height"]) == ("183mm", "247mm")
+    assert fields["figure.height"]["type"] == "length"
+    assert fields["figure.panel_labels"]["labels"]["(A)"] == "(A), (B), (C)"
+    assert [group["kind"] for group in catalogue()["groups"]][-1] == "panel"
+
+    a4 = {"figure.width": sizes["a4"]["width"], "figure.height": sizes["a4"]["height"]}
+    text, _ = edit(SAMPLE_FIGURE, do="update", target=figure, values=a4)
+    assert (data(text)["figure"]["width"], data(text)["figure"]["height"]) == ("210mm", "297mm")
+    assert text.startswith("# A figure")  # (what was written round it is kept)
+    column = {"figure.width": sizes["nature-1"]["width"], "figure.height": None}
+    text, _ = edit(text, do="update", target=figure, values=column)
+    assert data(text)["figure"]["width"] == "89mm" and "height" not in data(text)["figure"]
+
+    text, _ = edit(text, do="update", target=figure, values={"figure.height": "5mm"})
+    drawing = FigureKind().draw({"text": text}, tmp_path)
+    said = [message.text for message in drawing.messages if message.code == "layout.height.grown"]
+    assert said == [
+        "The figure is taller than its page. Choose a taller Page Size, or empty Height for a "
+        "page as tall as the figure."
+    ]
+    assert "<svg" in drawing.pages[0].svg
+

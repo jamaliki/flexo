@@ -129,6 +129,11 @@
           }
         },
         "background": {"oneOf": [{"type": "boolean"}, {"type": "string", "minLength": 1}]},
+        "panel_labels": {
+          "type": "string",
+          "pattern": "^[^A-Za-z0-9]*[aA][^A-Za-z0-9]*$",
+          "default": "a"
+        },
         "sketch": {
           "oneOf": [
             {"type": "boolean"},
