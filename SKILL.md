@@ -46,6 +46,14 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 
 - `Figure(id, width=, theme=, palette=, font=, conventions=, sketch=, background=, layout=)`;
   `width` is `"single-column"`, `"double-column"` (default), `"presentation"`, or a length.
+  `page="nature-2"` (or `"nature-1"`, `"nature-page"`, `"cell-2"`, `"pnas-2"`, `"a4"`,
+  `"letter"`, ...) names the page instead, and `height=` fixes its depth.
+- A box round shapes in different groups, which moves none of them: a frame, in a file
+  `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over}}`.
+- A figure of several panels: `figure.panel(id)` for each (a group with no frame, lettered
+  a, b, c in order; `figure.panel(id, "Title")` sets a title after the letter), on a figure
+  with `layout="row"` or `layout=flexo.LayoutSpec("grid", columns=2)`.
+  `Figure(panel_labels="A")` letters them A, B, C.
 - Components go on the figure (`figure.block(...)`, the same as `figure.root.block(...)`)
   or a group; each returns a handle. `input=h`
   (one) / `inputs=[a, b]` (several) draw the arrows in; `figure.connect(a, b)`

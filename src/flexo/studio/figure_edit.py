@@ -72,6 +72,7 @@ STRUCTURAL = frozenset(
         "rename",
         "delete",
         "gather",
+        "frame",
         "ungroup",
         "move",
         "step",
@@ -101,6 +102,20 @@ ROUTE = frozenset({"waypoints", "lane", "via"})
 when one of its ends changes."""
 
 
+def _framed(node: Mapping[str, Any]) -> list[str]:
+    """The ids a frame (a node of kind ``frame``) goes round, as its file names them; none
+    for any other shape."""
+
+    if node.get("kind") != "frame":
+        return []
+    written = str((node.get("properties") or {}).get("around") or "")
+    return [item.strip() for item in written.split(",") if item.strip()]
+
+
+def _frame_round(node: dict[str, Any], ids: list[str]) -> None:
+    node.setdefault("properties", {})["around"] = ", ".join(ids)
+
+
 def apply(
     text: str, action: Mapping[str, Any], *, suffix: str = ".yaml", base: Path | None = None
 ) -> dict[str, Any]:
@@ -115,6 +130,7 @@ def apply(
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
     document.tidy_alignment()
+    document.tidy_frames()
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
@@ -706,6 +722,10 @@ class _Document:
             item["kind"] = kind
         if overrides.get("label"):
             item["label"] = overrides["label"]
+        # (And the size it is given: a picture dropped in, at a width the page has room for.)
+        for side in ("width", "height"):
+            if overrides.get(side):
+                item[side] = overrides[side]
         # A structure named only for its file (1A7G) is named for what the file says it holds.
         if kind == "structure":
             item["label"] = self.structure_label(item.get("label"), properties.get("source"))
@@ -1227,6 +1247,9 @@ class _Document:
         for part in self.nodes:
             if isinstance(part, dict) and part.get("align_with") == old:
                 part["align_with"] = new
+            # (A frame goes on round it, by its new name.)
+            if isinstance(part, dict) and old in _framed(part):
+                _frame_round(part, [new if item == old else item for item in _framed(part)])
         for edge in self.edges:
             edge["from"], edge["to"] = moved(str(edge["from"])), moved(str(edge["to"]))
             for waypoint in edge.get("waypoints") or []:
@@ -1393,13 +1416,16 @@ class _Document:
         children = parent["children"]
         ordered = sorted(ids, key=children.index)
         label = action.get("label") or ("Module" if role == "module" else "")
-        identifier = self.fresh(label or layout)
+        # (A panel has its letter, not a title: named for what it is.)
+        identifier = self.fresh(label or ("panel" if role == "panel" else layout))
         group: dict[str, Any] = {"id": identifier, "children": ordered, "layout": {"kind": layout}}
         if layout == "grid":
             group["layout"]["columns"] = max(1, math.ceil(math.sqrt(len(ordered))))
         if role == "module":
             group["layout"]["justify"] = "center"
             group["role"] = "module"
+        if role == "panel":
+            group["role"] = "panel"
         if label:
             group["label"] = label
         index = children.index(ordered[0])
@@ -1408,6 +1434,54 @@ class _Document:
         children.insert(index, identifier)
         self.data.setdefault("groups", []).append(group)
         return [identifier]
+
+    def _frame(self, action: Mapping[str, Any]) -> list[str]:
+        """A frame round the shapes and groups chosen (``ids``), wherever in the figure they
+        are: behind them, or in front of them or over them as ``layer`` says. It is a shape
+        of its own, which no group arranges (``flexo.frames``)."""
+
+        chosen = [str(item) for item in action.get("ids") or []]
+        round_ = [item for item in chosen if self.framable(item)]
+        if not round_:
+            raise EditError("Select the shapes or groups for the frame to go round.")
+        identifier = self.fresh("frame")
+        properties: dict[str, Any] = {"around": ", ".join(round_)}
+        if action.get("layer") in {"front", "over"}:
+            properties["layer"] = str(action["layer"])
+        node: dict[str, Any] = {"id": identifier, "kind": "frame"}
+        if action.get("label"):
+            node["label"] = str(action["label"])
+        node["properties"] = properties
+        self.nodes.append(node)
+        root = self.group(self.root)
+        if root is not None:
+            root.setdefault("children", []).append(identifier)
+        return [identifier]
+
+    def framable(self, identifier: str) -> bool:
+        """Whether a frame can go round ``identifier``: a shape that is no frame itself, or
+        a group other than the figure's own layout."""
+
+        node = self.node(identifier)
+        if node is not None:
+            return node.get("kind") != "frame"
+        return self.group(identifier) is not None and identifier != self.root
+
+    def tidy_frames(self) -> None:
+        """No frame left round what the figure no longer has: one round nothing goes."""
+
+        for node in list(self.nodes):
+            if not isinstance(node, dict) or node.get("kind") != "frame":
+                continue
+            named = _framed(node)
+            kept = [item for item in named if self.framable(item)]
+            if kept == named:
+                continue
+            if kept:
+                _frame_round(node, kept)
+            else:
+                self.nodes.remove(node)
+                self.detach(str(node.get("id")))
 
     def _arrange(self, action: Mapping[str, Any]) -> list[str]:
         """A row (or column) written as it is seen folded onto lines to fit (``lines``, each
@@ -1456,6 +1530,11 @@ class _Document:
         inside = list(group.get("children") or [])
         children[index : index + 1] = inside
         self.groups.remove(group)
+        # A frame round the group goes round what it held.
+        for node in self.nodes:
+            if isinstance(node, dict) and identifier in _framed(node):
+                held = [item for item in _framed(node) if item != identifier]
+                _frame_round(node, [*held, *(item for item in inside if item not in held)])
         return inside
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:

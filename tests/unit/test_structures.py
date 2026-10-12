@@ -327,6 +327,8 @@ def test_a_molecule_kept_from_an_engine_let_go_is_read_again() -> None:
 
 
 def test_a_structure_that_cant_be_downloaded_is_a_panel_saying_so(monkeypatch) -> None:
+    # (Without mol-sketch the panel says that first: nothing is downloaded to draw.)
+    pytest.importorskip("molsketch")
     from flexo import structures
     from flexo.drawn import _picture
 

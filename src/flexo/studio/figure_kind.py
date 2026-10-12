@@ -56,7 +56,10 @@ GUIDE = """\
 A flexo figure file: YAML naming what the figure is, not where things go -- flexo lays it out
 and routes every line.
 
-figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), palette, width}
+figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), palette, width
+  (single-column, double-column, or a length: 89mm for a column of Nature's, 183mm for two),
+  height (a length, for a page of a fixed size: 210mm x 297mm is A4; left out, the page is as
+  tall as the figure), panel_labels (a, A, (a): how panels are lettered)}
 nodes: each {id, label, kind (block by default; text, op, circle, feature-strip, mlp,
   attention, channels, inset, ...), properties: {tone: encoder|head|attention|..., badge, ...}}
 Genetics: kind construct, properties {parts: [{type: promoter|rbs|cds|terminator|operator|origin|
@@ -82,6 +85,13 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
   (1.5 = half as large again)}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
   (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
+A frame round shapes anywhere in the figure (in different groups too), which moves none of
+  them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
+  layer: behind|front|over (a tint they show through), tone}}.
+A figure of several panels, as a journal prints one: each panel a group with role: panel (no
+  frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
+  a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,
+  columns: 2}, children: [first, second, ...]}).
 Labels are markup: $maths$, `code`, [words]{accent} in a colour, \\n a new line (asterisks are
 drawn as typed: no emphasis). `flexo schema` prints the full schema.
 """
@@ -485,6 +495,10 @@ def _is_file(value: object) -> bool:
 _PLAIN = {
     "layout.width.grown": (
         "The figure is wider than its page. Choose a wider Width, or fewer shapes in a row."
+    ),
+    "layout.height.grown": (
+        "The figure is taller than its page. Choose a taller Page Size, or empty Height for "
+        "a page as tall as the figure."
     ),
 }
 """Diagnostics said in the editor's words, not the file's (what to do there, not what to write)."""

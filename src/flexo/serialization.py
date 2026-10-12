@@ -132,6 +132,7 @@ def parse_figure(document: object) -> FigureSpec:
         conventions=parse_conventions(figure_data.get("conventions")),
         sketch=parse_sketch(figure_data.get("sketch")),
         background=figure_data.get("background"),
+        panel_labels=str(figure_data.get("panel_labels", "a")),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(edges),
         nets=tuple(_net(item, reference) for item in document.get("nets", [])),
@@ -219,6 +220,8 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
         result["sketch"] = figure.sketch.changes() or True
     if figure.background is not None:
         result["background"] = figure.background
+    if figure.panel_labels != "a":
+        result["panel_labels"] = figure.panel_labels
     return result
 
 

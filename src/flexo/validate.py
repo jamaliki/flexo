@@ -210,10 +210,12 @@ def resolve_alignment(figure: FigureSpec) -> FigureSpec:
                 for child in group.children
             )
         )
-        layout = replace(
-            group.layout, align="ports" if wired else ("start" if stacks else "center")
+        # Panels side by side, or one over another, start together: their letters on a line.
+        panels = len(group.children) > 1 and all(
+            child in groups and groups[child].role == "panel" for child in group.children
         )
-        resolved.append(replace(group, layout=layout))
+        align = "start" if panels else "ports" if wired else ("start" if stacks else "center")
+        resolved.append(replace(group, layout=replace(group.layout, align=align)))
     return replace(figure, groups=tuple(resolved))
 
 

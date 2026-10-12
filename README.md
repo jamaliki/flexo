@@ -678,6 +678,56 @@ own:
 - A figure wider than its page first gets tighter gaps and group padding (down
   to half), and only then a wider page, with a `layout.width.grown` warning.
   A figure compiled with an explicit `style=` keeps its spacing exactly.
+  A figure taller than a page with a `height` is treated the same way
+  (`layout.height.grown`).
+
+### Pages and panels
+
+A figure's page is its `width` and, for a page of a fixed size, its `height`;
+without a height the page is as tall as the figure. `page=` names a size
+instead: a journal's column (`"nature-1"` is 89 mm, `"nature-2"` 183 mm,
+`"cell-1"`, `"cell-1.5"`, `"cell-2"`, `"pnas-1"`, `"pnas-1.5"`, `"pnas-2"`), a
+journal's whole page (`"nature-page"`, 183 × 247 mm), or a sheet of paper
+(`"a3"`, `"a4"`, `"a5"`, `"letter"`); `flexo.PAGE_SIZES` lists them. In a file
+the size is written as its lengths (`width: 183mm`, `height: 247mm`).
+
+A figure of several panels, as a journal prints one, is made of `panel`s: a
+panel is a group with no frame, lettered where a title goes. The letters run in
+the order the panels are read, so none is written, and a panel moved takes the
+letter of where it is now.
+
+```python
+with flexo.Figure("study", page="nature-2", layout="row") as figure:
+    with figure.panel("model") as model:  # a
+        x = model.text("x", "Input $x$")
+        model.block("encoder", label="Encoder", input=x)
+    with figure.panel("readout", "Read-out") as readout:  # b, with a title after it
+        readout.block("head", label="Head")
+```
+
+`Figure(panel_labels="A")` letters them A, B, C, and `"(a)"` or `"(A)"` in
+brackets. Panels in rows and columns are a grid:
+`layout=flexo.LayoutSpec("grid", columns=2)`. In a file a panel is a group with
+`role: panel`, and the root group lays the panels out
+(`layout: {kind: grid, columns: 2}`).
+
+### Frames: a box round shapes anywhere
+
+A group holds what stands together, and arranges it. A **frame** arranges nothing: it
+names the shapes and groups it goes round, wherever in the figure they are, and is drawn
+round them where the layout put them -- behind them, as an outline in front of them, or
+over them as a tint they show through.
+
+```yaml
+nodes:
+- {id: shared, kind: frame, label: Shared weights, properties: {around: "encoder, decoder"}}
+- {id: frozen, kind: frame, properties: {around: "left", layer: over, tone: 4}}
+```
+
+`around` lists ids of shapes or groups; `layer` is `behind` (the default), `front` or
+`over`; a frame takes a `label`, a `tone` and `paint` as a shape does. It takes no room:
+the page's margin is wider by what a frame stands out, and nothing else moves. Behind
+shapes that stand in filled groups, it is drawn over those groups' own fills, so it shows.
 
 ### Laying a figure out for a box (slides, posters)
 
@@ -984,7 +1034,15 @@ changes in words, to go back or forward to any of them.
   for what can be done with it. **Connect**
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
-  into a row, column, grid, or titled module. A part (or a whole group) dragged on the drawing goes to another
+  into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
+  journal prints a figure of several; **Panel Letters**, with nothing chosen,
+  letters them A, B, C or in brackets) -- or puts a **frame** round them where they
+  are, in whatever groups: behind them, in front of them or over them as a tint (its
+  **Layer**). Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
+  the figure are added to it, beside the shape they are let go on. With nothing chosen the figure's **Page
+  Size** is chosen by name -- a column or a page of Nature's, Cell's or PNAS's, A4,
+  US Letter -- or typed as a **Width** and **Height** of your own (Custom…); a
+  page with no height is as tall as the figure. A part (or a whole group) dragged on the drawing goes to another
   place in its row or column, or into another group: it follows the pointer, a line
   shows where it would go, and once it is let go the figure is laid out again and
   every part slides to where it now is (Esc, or letting go off the figure, takes it

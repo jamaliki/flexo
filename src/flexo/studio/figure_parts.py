@@ -39,7 +39,9 @@ from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
+from flexo.frames import LAYERS
 from flexo.ir.semantic import EDGE_HEADS
+from flexo.pages import PAGE_SIZES, PANEL_LABELS, panel_letter
 
 TONES = (
     "encoder",
@@ -772,6 +774,35 @@ def _basics() -> list[dict[str, Any]]:
         ),
         _part("junction", "Junction", "Basics", "A point where lines meet", common=[]),
         _cells(),
+        # A frame goes round shapes chosen (Group, then Frame): it is never added alone, so
+        # it is in no category of the palette.
+        _part(
+            "frame",
+            "Frame",
+            "",
+            "A box round shapes anywhere in the figure",
+            {"properties": {"around": ""}},
+            [
+                _field(
+                    "properties.layer",
+                    "Layer",
+                    "choice",
+                    options=list(LAYERS),
+                    labels={"behind": "Behind", "front": "In Front", "over": "Over (See-Through)"},
+                    default="behind",
+                    hint="Behind its shapes, an outline in front of them, or a tint over them",
+                ),
+                _field(
+                    "properties.around",
+                    "Goes Round",
+                    "text",
+                    hint="The names of the shapes and groups it goes round",
+                    more=True,
+                ),
+            ],
+            common=[LABEL, TONE],
+            wraps=True,
+        ),
     ]
 
 
@@ -929,8 +960,22 @@ GROUPS = [
         "layout": "row",
         "role": "module",
     },
+    {
+        "kind": "panel",
+        "title": "Panel",
+        "hint": "A lettered part of the figure: a, b, c",
+        "layout": "row",
+        "role": "panel",
+    },
+    {
+        "kind": "frame",
+        "title": "Frame",
+        "hint": "A box round the shapes chosen, wherever they are: behind, in front or over them",
+        "frame": True,
+    },
 ]
-"""What parts can be gathered into; each takes the parts chosen, or a first block."""
+"""What parts can be gathered into; each takes the parts chosen, or a first block. (A frame
+goes round them where they are, and gathers nothing.)"""
 
 GROUP_FIELDS = [
     # (A group's words are its title, as its colours call them.)
@@ -962,10 +1007,11 @@ GROUP_FIELDS = [
         "role",
         "Frame",
         "choice",
-        options=["layout", "container", "module"],
-        labels={"layout": "None", "container": "Frame", "module": "Module"},
+        options=["layout", "container", "module", "panel"],
+        labels={"layout": "None", "container": "Frame", "module": "Module", "panel": "Panel"},
         default="container",
-        hint="Whether a frame is drawn round the shapes; a module's is named for them",
+        hint="Whether a frame is drawn round the shapes; a module's is named for them, and "
+        "a panel has its letter instead",
     ),
     SHADOW,
 ]
@@ -1113,6 +1159,27 @@ NET_FIELDS = [
 """A line that branches: its words, how it is drawn, and where its branches meet."""
 
 
+def page_sizes() -> list[dict[str, Any]]:
+    """The pages a figure's Page Size offers: the two its theme sizes, then the named sizes
+    (``flexo.pages``), each with what it sets -- its width, and its height if it has one."""
+
+    theme = [
+        {"name": name, "title": title, "width": name, "height": None, "family": "Theme"}
+        for name, title in (("single-column", "Single Column"), ("double-column", "Double Column"))
+    ]
+    named = [
+        {
+            "name": size.name,
+            "title": size.title,
+            "width": size.width,
+            "height": size.height,
+            "family": size.family,
+        }
+        for size in PAGE_SIZES
+    ]
+    return theme + named
+
+
 def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         # The figure's name is its file's; what the file calls it is kept under More.
@@ -1130,6 +1197,9 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             colours=catalog.get("palettes", {}),
             default="default",
         ),
+        # The page: by name (a journal's column, a sheet of paper), or its width and height
+        # as typed. (A page with no height is as tall as what is on it.)
+        _field("figure.page", "Page Size", "page", sizes=page_sizes(), default="double-column"),
         _field(
             "figure.width",
             "Width",
@@ -1138,8 +1208,25 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             labels={"single-column": "Single Column", "double-column": "Double Column"},
             default="double-column",
         ),
+        _field("figure.height", "Height", "length", hint="Empty: as tall as the figure"),
         _field("figure.font", "Font", "combo", options=catalog.get("fonts", [])),
+        _field(
+            "figure.panel_labels",
+            "Panel Letters",
+            "choice",
+            options=list(PANEL_LABELS),
+            labels={pattern: _lettering(pattern) for pattern in PANEL_LABELS},
+            default="a",
+            hint="How the figure's panels are lettered, in the order they are read",
+            more=True,
+        ),
     ]
+
+
+def _lettering(pattern: str) -> str:
+    """A way of lettering as it is shown: its first three ("a, b, c")."""
+
+    return ", ".join(panel_letter(index, pattern) for index in range(3))
 
 
 CATEGORIES = ("Basics", "Software", "Machine Learning", "Biology")

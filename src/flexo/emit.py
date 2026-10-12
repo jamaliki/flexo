@@ -5,11 +5,14 @@ from __future__ import annotations
 import itertools
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import NamedTuple
 
+from flexo.components import TRANSPARENT_ROLES
+from flexo.frames import PlacedFrame, around
+from flexo.frames import draw as draw_frame
 from flexo.geometry import Point, Segment, segments
-from flexo.hierarchy import lowest_common_group, parent_map
+from flexo.hierarchy import ancestors, lowest_common_group, parent_map
 from flexo.ir.fitted import FittedGroup
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
@@ -85,6 +88,7 @@ def emit_svg(
     *,
     style: LayoutStyle | None = None,
     palette: Palette | None = None,
+    frames: tuple[PlacedFrame, ...] = (),
 ) -> SVGDocument:
     semantic_figure = routed.fitted.measured.semantic
     layout_style = style or figure_style(semantic_figure)
@@ -113,7 +117,13 @@ def emit_svg(
     add_metadata(root, routed, paint_palette)
     from flexo.themes import with_tone_roles
 
-    paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(semantic, layout_style))
+    # (A frame's colour is one of the figure's, as a shape's is.)
+    toned = (
+        replace(semantic, nodes=semantic.nodes + tuple(frame.spec for frame in frames))
+        if frames
+        else semantic
+    )
+    paint_palette = with_tone_roles(paint_palette).with_tones(_tone_map(toned, layout_style))
     heads = _heads(routed, paint_palette, layout_style)
     fonts = add_definitions(root, layout_style, paint_palette, heads)
     background = layer(root, "layer.background", "Background")
@@ -134,8 +144,14 @@ def emit_svg(
             else {"fill": page if isinstance(page, str) else "none"}
         ),
     )
-    hierarchy = _Hierarchy(routed)
+    hierarchy = _Hierarchy(routed, frames)
     hierarchy.render(root, layout_style, paint_palette)
+    # Frames in front of their shapes, and over them: after everything.
+    ahead = [frame for frame in frames if frame.layer != "behind"]
+    if ahead:
+        holder = layer(root, "layer.frames", "Frames")
+        for frame in ahead:
+            draw_frame(holder, frame, layout_style, paint_palette)
     if layout_style.sketch is not None:
         sketch_svg(root, layout_style.sketch, canvas=paint_palette.get("canvas"))
     embed_fonts(fonts, root, layout_style)
@@ -201,13 +217,42 @@ def _tone_map(figure, style: LayoutStyle) -> dict[str, int]:
 
 
 class _Hierarchy:
-    def __init__(self, routed: RoutedFigure) -> None:
+    def __init__(self, routed: RoutedFigure, frames: tuple[PlacedFrame, ...] = ()) -> None:
         self.routed = routed
         semantic = routed.fitted.measured.semantic
         self.group_specs = {group.id: group for group in semantic.groups}
         self.fitted_groups = {group.measured.spec.id: group for group in routed.fitted.groups}
         self.nodes = {node.measured.spec.id: node for node in routed.fitted.nodes}
         self.parent = parent_map(semantic.groups)
+        # A frame behind its shapes is drawn in the innermost group that holds them all, over
+        # that group's own fill -- and again, the part of it inside, in every filled group
+        # between there and a shape: behind the shapes, in front of what they stand on.
+        self.backdrops: defaultdict[str, list[PlacedFrame]] = defaultdict(list)
+        self.pieces: defaultdict[str, list[PlacedFrame]] = defaultdict(list)
+        for frame in frames:
+            if frame.layer != "behind":
+                continue
+            chains = [ancestors(self.parent, item) for item in around(frame.spec)]
+            chains = [chain for chain in chains if chain]
+            if not chains:
+                continue
+            common = next(
+                group for group in chains[0] if all(group in chain for chain in chains)
+            )
+            # (A group that only arranges has no layer of its own: the one round it.)
+            while self.group_specs[common].role == "layout" and common in self.parent:
+                common = self.parent[common]
+            self.backdrops[common].append(frame)
+            between: list[str] = []
+            for chain in chains:
+                for group in chain:
+                    if group == common or group not in self.parent:
+                        break
+                    if group not in between:
+                        between.append(group)
+            for group in between:
+                if self.group_specs[group].role not in TRANSPARENT_ROLES:
+                    self.pieces[group].append(frame)
         self.edges: defaultdict[str, list[RoutedEdge]] = defaultdict(list)
         for edge in routed.edges:
             owner = lowest_common_group(
@@ -243,6 +288,10 @@ class _Hierarchy:
             # words typed on a part there too.
             group_layer.set("data-flexo-measure", f"{style.label_measure:g}")
         self._render_container(group_layer, fitted, style, palette)
+        for frame in self.backdrops.get(group_id, ()):
+            draw_frame(group_layer, frame, style, palette)
+        for frame in self.pieces.get(group_id, ()):
+            draw_frame(group_layer, frame, style, palette, within=fitted.bounds, name=group_id)
         component_group = element(
             group_layer,
             "g",
@@ -320,7 +369,7 @@ class _Hierarchy:
         palette: Palette,
     ) -> None:
         spec = group.measured.spec
-        if spec.role in {"canvas", "layout"}:
+        if spec.role in TRANSPARENT_ROLES:
             return
         radius = (
             style.container_radius.points

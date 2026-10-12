@@ -7,11 +7,13 @@ from dataclasses import dataclass, replace
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
+from flexo.frames import PlacedFrame, place, room, split
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
 from flexo.ir.semantic import FigureSpec, GroupSpec
 from flexo.layout import fit_figure, measure_figure
+from flexo.pages import lettered
 from flexo.routing import route_figure
 from flexo.routing.room import crossing_room, crossings, room_needed, with_room
 from flexo.style import LayoutStyle, Palette
@@ -26,6 +28,8 @@ class Compilation:
     fitted: FittedFigure
     routed: RoutedFigure
     document: SVGDocument
+    frames: tuple[PlacedFrame, ...] = ()
+    """The figure's frames (``flexo.frames``), round what they name: no part of the layout."""
 
 
 def compile_figure(
@@ -37,11 +41,16 @@ def compile_figure(
     give_up_if_newer()
     layout_style = style or figure_style(figure)
     paint_palette = palette or figure_palette(figure)
-    figure = _resolved_shapes(figure, layout_style)
+    # (A frame goes round shapes where the layout puts them: laid out without it.)
+    figure, frames = split(lettered(_resolved_shapes(figure, layout_style)))
+    figure = _with_margin_for(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
-    if style is None and _too_wide(measured):
+    if style is None and _too_large(measured):
         # Tighten the spacing before growing the page: a figure a little too
         # wide for its column reads better closer together than overflowing.
+        # (Too tall for a page with a height, the same; if nothing fits both ways, the
+        # first spacing that fits across is kept, as for a page with no height.)
+        across = None
         for scale in COMPACT_SCALES:
             tighter = replace(
                 layout_style,
@@ -49,9 +58,13 @@ def compile_figure(
                 group_padding=Length(layout_style.group_padding.points * scale),
             )
             attempt = measure_figure(figure, style=tighter)
-            if not _too_wide(attempt):
-                layout_style, measured = tighter, attempt
+            if not _too_large(attempt):
+                across = (tighter, attempt)
                 break
+            if across is None and _too_wide(measured) and not _too_wide(attempt):
+                across = (tighter, attempt)
+        if across is not None:
+            layout_style, measured = across
     if DRAFT.get():
         # A draft (flexo.draft): laid out with the room, and the slides, the figure's last
         # drawing had; routed from that drawing; no more room asked for, nor a lane tried.
@@ -67,8 +80,7 @@ def compile_figure(
         )
         # (The next draft starts from this one's room, as its lines are this one's.)
         remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
-        document = emit_svg(routed, style=layout_style, palette=paint_palette)
-        return Compilation(measured, fitted, routed, document)
+        return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
     give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
     give_up_if_newer()
@@ -83,16 +95,59 @@ def compile_figure(
     # (For a draft of it to start from.)
     remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
     give_up_if_newer()
-    document = emit_svg(routed, style=layout_style, palette=paint_palette)
-    return Compilation(measured, fitted, routed, document)
+    return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
+
+
+def _with_margin_for(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> FigureSpec:
+    """``figure`` with its page's margin wider by what its frames stand out from their
+    shapes: a frame round shapes at the page's edge is on the page."""
+
+    sides, top = room(frames, style)
+    if not frames:
+        return figure
+    groups = []
+    for group in figure.groups:
+        if group.id == figure.root:
+            padding = group.layout.authored_padding(style.group_padding)
+            group = replace(
+                group,
+                layout=replace(
+                    group.layout,
+                    padding_top=Length(padding.top + top),
+                    padding_right=Length(padding.right + sides),
+                    padding_bottom=Length(padding.bottom + sides),
+                    padding_left=Length(padding.left + sides),
+                ),
+            )
+        groups.append(group)
+    return replace(figure, groups=tuple(groups))
+
+
+def _framed(
+    frames: tuple,
+    measured: MeasuredFigure,
+    fitted: FittedFigure,
+    routed: RoutedFigure,
+    style: LayoutStyle,
+    palette: Palette,
+) -> Compilation:
+    """The figure drawn, its frames round what they name."""
+
+    placed, said = place(frames, fitted, style)
+    if said:
+        measured = replace(measured, diagnostics=measured.diagnostics + said)
+        fitted = replace(fitted, measured=measured)
+        routed = replace(routed, fitted=fitted)
+    document = emit_svg(routed, style=style, palette=palette, frames=placed)
+    return Compilation(measured, fitted, routed, document, placed)
 
 
 def _layout_key(figure: FigureSpec, style: LayoutStyle) -> tuple:
-    """Which drawing of a figure a draft's layout follows: the figure, at its width and
+    """Which drawing of a figure a draft's layout follows: the figure, on its page and at its
     spacing, its groups running the way they do (turned to fit a slide, another)."""
 
     kinds = tuple((group.id, group.layout.kind) for group in figure.groups)
-    return (figure.id, figure.width, style, kinds)
+    return (figure.id, figure.width, figure.height, style, kinds)
 
 
 def _room_of(figure: FigureSpec) -> dict[str, tuple]:
@@ -268,8 +323,15 @@ def _too_wide(measured: MeasuredFigure) -> bool:
     return any(item.code == "layout.width.grown" for item in measured.diagnostics)
 
 
+def _too_large(measured: MeasuredFigure) -> bool:
+    """Wider than its page, or taller than a page with a height."""
+
+    grown = {"layout.width.grown", "layout.height.grown"}
+    return any(item.code in grown for item in measured.diagnostics)
+
+
 COMPACT_SCALES = (0.8, 0.65, 0.5)
-"""Spacing scales tried, in order, when a figure is wider than its page."""
+"""Spacing scales tried, in order, when a figure is wider (or taller) than its page."""
 
 CROSSING_ROOM_TRIALS = 2
 """Most layouts tried, per figure, to route a crossing round instead of through."""

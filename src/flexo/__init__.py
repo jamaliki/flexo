@@ -30,6 +30,7 @@ from flexo.ir.semantic import (
 )
 from flexo.lint import LintReport, lint_compilation, lint_svg
 from flexo.orient import turned
+from flexo.pages import PAGE_SIZES, PageSize, page_size
 from flexo.serialization import dump_figure, load_figure, save_figure
 from flexo.sketch import Sketch
 from flexo.sources import from_structure, from_uniprot
@@ -57,6 +58,7 @@ __all__ = [
     "DEFAULT_PALETTE",
     "FORMATS",
     "GRAYSCALE_PALETTE",
+    "PAGE_SIZES",
     "PALETTES",
     "RAMP_ROLES",
     "STYLES",
@@ -84,6 +86,7 @@ __all__ = [
     "NodeHandle",
     "NodeSpec",
     "OutputFiles",
+    "PageSize",
     "Palette",
     "Point",
     "PortRef",
@@ -114,6 +117,7 @@ __all__ = [
     "lint_svg",
     "load_figure",
     "mm",
+    "page_size",
     "palettes",
     "pt",
     "px",

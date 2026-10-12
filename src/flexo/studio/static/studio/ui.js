@@ -461,10 +461,11 @@ export const ui = {
   // name in its tooltip after `title`; `actions`: commands under the choices, after a line
   // ({ label, icon, run }), as a column's pop-up in Numbers has. `key` keeps the keys on it
   // as the form is drawn again by the change (keepFocus). `acting(on)`: what the pop-up acts
-  // on shown (a table's column) while its menu is open.
+  // on shown (a table's column) while its menu is open. An option `{ line: true }` is a line
+  // between the choices before it and after it.
   select({ value, options, onChange, placeholder, unset = false, icons = false, title = "", actions = [], key, acting } = {}) {
     const items = [...(placeholder !== undefined ? [{ value: "", label: placeholder }] : []),
-      ...options.map((option) => (typeof option === "object" ? { ...option, value: String(option.value ?? "") } : { value: String(option), label: String(option) }))];
+      ...options.map((option) => (option?.line ? "-" : typeof option === "object" ? { ...option, value: String(option.value ?? "") } : { value: String(option), label: String(option) }))];
     const label = h("span");
     const node = h(`button.select${icons ? ".icon-select" : ""}`, { type: "button", "aria-haspopup": "menu" }, label, icon("chevron-down"));
     if (key) node.dataset.key = key;

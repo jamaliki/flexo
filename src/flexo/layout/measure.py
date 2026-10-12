@@ -103,8 +103,10 @@ def measure_figure(
         # label weight.
         plate = group.role == "plate"
         typography = layout_style.typography
+        # (A panel's letter is its figure's choice, a or A: never a theme's capitals.)
+        as_written = plate or group.role == "panel"
         label = title_measurer.measure(
-            group.label if plate else title_runs(group.label, typography),
+            group.label if as_written else title_runs(group.label, typography),
             weight=typography.label_weight if plate else typography.title_weight,
         )
         gaps = routing_gaps_for_group(
@@ -190,6 +192,20 @@ def measure_figure(
             ),
         )
         canvas_width = needed
+    tall = declared_size(root.spec.layout, root.intrinsic_size).height
+    if semantic.height is not None and tall > canvas_height + 1e-6:
+        # Taller than its page, as wider is: drawn all the same, and said.
+        diagnostics += (
+            Diagnostic(
+                "layout.height.grown",
+                f"The figure needs {tall:.1f} pt but its height is {canvas_height:.1f} pt; "
+                "the canvas grew to fit.",
+                Severity.WARNING,
+                entity_id=semantic.id,
+                hint="Give the figure a taller page, a smaller theme, or more columns.",
+            ),
+        )
+        canvas_height = tall
     return MeasuredFigure(
         semantic,
         measured_nodes,
