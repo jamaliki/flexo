@@ -16,10 +16,27 @@ const SUGGESTIONS = {
   none: ["Make a 5-slide talk about this folder", "Draw a figure of a transformer", "Make a theme in our lab’s colours"],
 };
 
-// Each answerer's mark, in its own colour (white on it).
+// A model by the name its maker gives it: a family and its version ("claude-<family>-<n>-<m>" as
+// "<Family> <n>.<m>", "gpt-<n>" as "GPT-<n>"); one served elsewhere (Ollama's) as it is named there.
+export function modelName(id) {
+  const model = String(id || "");
+  const claude = /^claude-(?:(opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?|(\d+)(?:-(\d))?-(opus|sonnet|haiku))(?:-\d{8})?(?:-latest)?$/.exec(model);
+  if (claude) {
+    const [, family, major, minor, oldMajor, oldMinor, oldFamily] = claude;
+    const name = family || oldFamily, version = family ? major + (minor ? `.${minor}` : "") : oldMajor + (oldMinor ? `.${oldMinor}` : "");
+    return `${name[0].toUpperCase()}${name.slice(1)} ${version}`;
+  }
+  const gpt = /^gpt-([\w.]+?)(?:-(.+))?$/.exec(model);
+  if (gpt) return `GPT-${gpt[1]}${gpt[2] ? ` ${gpt[2].replace(/-/g, " ")}` : ""}`;
+  return model;
+}
+
+// Each answerer's mark, in its own colour (white on it): another model's a grey dark enough
+// for white in either appearance (the ink's grey is pale in Dark).
 export const MARK_COLOURS = { claude: "#d97757", chatgpt: "#10a37f" };
+export const OTHER_MARK = "#6b6b70";
 export function assistantMark(provider, small = false) {
-  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || "var(--ink-2)" } }, icon("sparkle"));
+  return h(`span.assistant-mark${small ? ".small" : ""}`, { style: { background: MARK_COLOURS[provider] || OTHER_MARK } }, icon("sparkle"));
 }
 
 function remembered() { try { return JSON.parse(localStorage.getItem("flexo-studio-assistant") || "null"); } catch { return null; } }
@@ -42,9 +59,13 @@ export class AssistantPanel {
     this.input.addEventListener("input", () => this.grow());
     this.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); this.send(); }
+      // Esc gives the keys back to the document, where they were before the panel took them.
+      else if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); this.giveBack(); }
     });
     workspace.on("assistant", (event) => this.handle(event));
-    workspace.on("active", () => this.renderContext());
+    // What it offers to ask, and what it is asked about, are the document in front's,
+    // whichever that is now (or none).
+    workspace.on("active", () => { if (!this.state.transcript.length) this.render(); this.renderContext(); });
     workspace.on("focus", () => this.renderContext());
     this.render();
     this.restore();
@@ -91,7 +112,7 @@ export class AssistantPanel {
     const items = [{ title: "Ask" }, ...(state.providers || []).map((item) => ({
       label: item.name,
       checked: item.id === current,
-      hint: item.why ? "Not set up" : (item.id === current ? "" : item.model || ""),
+      hint: item.why ? "Not set up" : (item.id === current ? "" : modelName(item.model)),
       run: () => { if (item.id !== current) this.choose(item.id); },
     }))];
     if (state.available) {
@@ -108,13 +129,27 @@ export class AssistantPanel {
       items.push("-", { title: "Model" });
       if (answer.error && !shown.length) items.push({ label: answer.error, disabled: true });
       for (const model of shown.slice(0, 40)) {
-        items.push({ label: model, checked: model === chosen, run: () => { if (model !== chosen) this.choose(current, model); } });
+        items.push({ label: modelName(model), hint: modelName(model) === model ? "" : model, checked: model === chosen, run: () => { if (model !== chosen) this.choose(current, model); } });
       }
     }
     menu(this.whoButton, items, { className: "who-menu" });
   }
 
-  focus() { setTimeout(() => this.input.focus(), 20); this.renderContext(); }
+  focus() {
+    const at = document.activeElement;
+    if (at && at !== document.body && !this.node.contains(at)) this.before = at;
+    setTimeout(() => this.input.focus(), 20);
+    this.renderContext();
+  }
+
+  // The keys back where they were before the panel took them (the slide, a field), else
+  // nowhere in it.
+  giveBack() {
+    const before = this.before;
+    this.before = null;
+    if (before?.isConnected && !this.node.contains(before)) before.focus({ preventScroll: true });
+    else if (this.node.contains(document.activeElement)) document.activeElement.blur();
+  }
 
   grow() {
     this.input.style.height = "auto";
@@ -132,7 +167,7 @@ export class AssistantPanel {
     const where = session?.where?.label;
     clear(this.contextChip, session && this.includeContext
       ? h("span.context-pill", {}, icon("target"), `${docName(session.file)}${where ? ` · ${where}` : ""}`,
-        h("button", { type: "button", title: "Remove context", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
+        h("button", { type: "button", title: "Remove Context", onclick: () => { this.includeContext = false; this.renderContext(); } }, icon("close")))
       : session ? h("button.context-add", { type: "button", onclick: () => { this.includeContext = true; this.renderContext(); } }, icon("plus"), "Add Context") : null);
   }
 
@@ -196,7 +231,7 @@ export class AssistantPanel {
   renderWho() {
     const state = this.state;
     clear(this.whoButton, assistantMark(state.provider, true), h("span.who-name", {}, this.name),
-      state.model ? h("span.who-model", {}, state.model) : null, icon("chevron-down"));
+      state.model ? h("span.who-model", { title: state.model }, modelName(state.model)) : null, icon("chevron-down"));
     // Choosing waits for an answer to finish.
     this.whoButton.disabled = Boolean(state.running);
     document.documentElement.style.setProperty("--assistant", MARK_COLOURS[state.provider] || "var(--ink-2)");

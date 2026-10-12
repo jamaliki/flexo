@@ -99,6 +99,37 @@ def _png(width: int, height: int, colour_type: int, rows: bytes) -> bytes:
             + chunk(b"IEND", b""))
 
 
+def test_a_cropped_picture_shows_only_what_is_kept_in_the_pdf_and_the_portable_svg() -> None:
+    import base64
+
+    from flexo.export import rasterise
+    from flexo.pdf import _png_decode, pdf_bytes
+    from flexo.portable import portable_svg
+
+    # Black at its left half, white at its right; the right half kept, and an oval of it.
+    row = b"\x00" + bytes(0 if x < 2 else 255 for x in range(4))
+    href = "data:image/png;base64," + base64.b64encode(_png(4, 1, 0, row)).decode()
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="200pt" height="100pt" '
+           'viewBox="0 0 200 100">'
+           '<pattern id="p" patternUnits="userSpaceOnUse" x="-100" y="0" width="200" height="100">'
+           f'<image width="200" height="100" preserveAspectRatio="none" href="{href}"/></pattern>'
+           '<pattern id="q" patternUnits="userSpaceOnUse" x="0" y="0" width="200" height="100">'
+           f'<image width="200" height="100" preserveAspectRatio="none" href="{href}"/></pattern>'
+           '<rect id="kept" x="0" y="0" width="100" height="100" fill="url(#p)"/>'
+           '<ellipse id="round" cx="150" cy="50" rx="50" ry="50" fill="url(#q)"/></svg>')
+    streams = re.findall(rb"stream\n(.*?)\nendstream", pdf_bytes([svg]), re.S)
+    drawn = b"".join(zlib.decompress(found) for found in streams if found[:2] == b"x\x9c")
+    assert b"q 0 0 100 100 re W n " in drawn and b" c h W n " in drawn
+    portable = portable_svg(svg)
+    kept = r'<clipPath id="kept.clip">\s*<rect x="0" y="0" width="100" height="100" />'
+    round_ = r'<clipPath id="round.clip">\s*<ellipse cx="150" cy="50" rx="50" ry="50" />'
+    assert re.search(kept, portable) and re.search(round_, portable)
+    # Drawn from the portable SVG, the kept half is white throughout: none of the black.
+    width, _, channels, pixels = _png_decode(rasterise(portable, dpi=72))
+    middle = pixels[50 * width * channels : 51 * width * channels : channels]
+    assert min(middle[2:98]) > 200 and min(middle[110:190]) > 200
+
+
 def test_pdf_parts_a_pictures_colour_from_its_alpha_pixel_for_pixel() -> None:
     import re
     import zlib

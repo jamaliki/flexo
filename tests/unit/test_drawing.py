@@ -140,3 +140,29 @@ def test_a_regulation_head_is_read_by_its_name_whatever_the_page_puts_before_its
     heads = [head.shape for line in lines for head in line.arrowheads]
     # A bar (it represses) is not an open arrowhead (it activates) to a writer reading it.
     assert heads == ["inhibition"]
+
+
+def test_a_shape_filled_with_one_picture_is_that_picture_cropped_to_the_shape() -> None:
+    from flexo.drawing import Drawing, ink_bounds
+
+    picture = 'href="data:image/png;base64,AAAA"'
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+        '<pattern id="p" patternUnits="userSpaceOnUse" x="-50" y="0" width="200" height="100">'
+        f'<image width="200" height="100" {picture}/></pattern>'
+        '<g transform="translate(10,0)">'
+        '<rect id="kept" x="0" y="10" width="100" height="80" fill="url(#p)"/>'
+        '<ellipse id="round" cx="50" cy="50" rx="40" ry="40" fill="url(#p)"/></g>'
+        '<clipPath id="c"><rect x="0" y="0" width="60" height="100"/></clipPath>'
+        f'<image id="cut" width="100" height="100" clip-path="url(#c)" {picture}/>'
+        f'<image id="whole" width="50" height="50" clip-path="url(#c)" {picture}/>'
+        "</svg>"
+    )
+    kept, round_, cut, whole = read_drawing(svg).walk()
+    # The whole picture, where the pattern puts it, showing only within the shape.
+    assert (kept.id, kept.x, kept.y, kept.width, kept.height) == ("kept", -40.0, 0.0, 200.0, 100.0)
+    assert kept.clip == (10.0, 10.0, 110.0, 90.0) and not kept.oval
+    assert round_.oval and round_.clip == (20.0, 10.0, 100.0, 90.0)
+    # A picture cut by a clip it is drawn in shows only what the clip keeps -- if it cuts it.
+    assert cut.clip == (0.0, 0.0, 60.0, 100.0) and whole.clip is None
+    assert ink_bounds(Drawing(200.0, 100.0, Group(None, [kept]))) == (10.0, 10.0, 110.0, 90.0)

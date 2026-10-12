@@ -105,6 +105,8 @@ const ICONS = {
   figure: "M2 2.5h5.5V7H2zM8.5 9H14v4.5H8.5zM4.75 7v4.25H8.5",
   plot: "M2.5 2.5v11h11M4.5 11l3-4 2.5 2 3.5-5",
   image: "M2.5 3.5h11v9h-11zM2.5 11l3.5-3.5 3 3 2-2 2.5 2.5M10.5 6.5h.01",
+  // Crop's two corners, as a Mac draws it: the frame kept, its corners crossing.
+  crop: "M4.5 1.5v10h10M1.5 4.5h10v10",
   gallery: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
   layout: "M2.5 2.5h11v11h-11zM2.5 5.5h11M8 5.5v8",
   slide: "M2 3.5h12v9H2z",
@@ -402,23 +404,31 @@ export const ui = {
   // true for the studio's own as stand-ins, or false for none.
   // `emphasis: false` for words that set no bold or italic -- a figure's labels, which keep
   // their asterisks -- leaves those tools out.
-  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, key, spelling = true } = {}) {
+  // `lines`: Return starts a new line, as in any text, even in a field of one line (a shape's
+  // words); ⌘Return is done.
+  // `links: false` for words that link nowhere -- a figure's labels -- leaves ⌘K and the link
+  // tool out: ⌘K there does nothing (not the command palette either).
+  markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, links = true, key, spelling = true, lines = false } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**", onInput); }
-      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*", onInput); }
-      if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); wrap(area, "[", "](https://)", onInput); }
+      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**"); }
+      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*"); }
+      if (mod && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (links) wrap(area, "[", "](https://)");
+      }
       // ⌥⌘E, as Keynote's Insert › Equation: ⌘M is the Mac's Window › Minimize.
-      if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$", onInput); }
-      // A field of one line (a shape's label) takes Return as done, as the label's editor on
-      // the slide does; ⇧Return starts a line of its own.
-      if (rows === 1 && event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); area.blur(); }
+      if (mod && event.altKey && event.code === "KeyE") { event.preventDefault(); wrap(area, "$", "$"); }
+      // A field of one line (a slide's title) takes Return as done; ⇧Return starts a line of
+      // its own. One whose words take new lines (`lines`) is done with ⌘Return.
+      if (event.key === "Enter" && !event.isComposing && (lines ? mod : rows === 1 && !event.shiftKey)) { event.preventDefault(); area.blur(); }
     });
     // The tools show while the field is typed in (studio.css) and are worked by the pointer,
     // the keys beside each name doing the same: Tab goes from field to field, not through them.
     const tool = (label, title, before, after, style) =>
-      h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after, onInput); } }, label);
+      h("button", { type: "button", title, style, tabIndex: -1, onmousedown: (event) => { event.preventDefault(); wrap(area, before, after); } }, label);
     // As the slide's words' format bar (richtext.js) has them, in its order and its look.
     const palette = colours === true ? { accent: "var(--accent)", accent2: "var(--accent-2)", muted: "var(--ink-3)", ink: "var(--ink)" } : colours || {};
     // Each colour offered once, as there: one that looks as another does (Swiss's second
@@ -435,7 +445,7 @@ export const ui = {
       emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
       tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
       tool(h("span.tool-maths", {}, "∑"), "Equation (⌥⌘E)", "$", "$"),
-      tool(icon("link"), "Link (⌘K)", "[", "](https://)"),
+      links ? tool(icon("link"), "Link (⌘K)", "[", "](https://)") : null,
       swatch("accent", "Accent"), swatch("accent2", "Accent 2"), swatch("muted", "Muted"), swatch("ink", "Default colour"));
     const node = h("div.markup", {}, tools, area);
     node.area = area;
@@ -761,13 +771,23 @@ function fit(area) {
   area.style.height = `${area.scrollHeight + 2}px`;
 }
 
-function wrap(area, before, after, onInput) {
+// Marks put round the words chosen (or round nothing, the caret between them), as typing
+// would put them: the field's own ⌘Z takes them back. The words stay chosen -- or, for a link
+// round words, its address is, to be typed over.
+function wrap(area, before, after) {
   const { selectionStart: start, selectionEnd: end, value } = area;
   const inner = value.slice(start, end);
-  area.setRangeText(before + inner + after, start, end, "select");
-  area.setSelectionRange(start + before.length, start + before.length + inner.length);
-  area.dispatchEvent(new Event("input"));
   area.focus();
+  area.setSelectionRange(start, end);
+  // (Should the browser not type it, it is put in all the same, outside the field's undo.)
+  if (!document.execCommand?.("insertText", false, before + inner + after) || area.value === value) {
+    area.setRangeText(before + inner + after, start, end, "select");
+    area.dispatchEvent(new Event("input"));
+  }
+  if (inner && before === "[" && after.startsWith("](")) {
+    const at = start + before.length + inner.length + 2;
+    area.setSelectionRange(at, at + after.length - 3);
+  } else area.setSelectionRange(start + before.length, start + before.length + inner.length);
 }
 
 // Tab indents a code editor's lines and ⇧Tab outdents them, as in a Mac code editor;
@@ -1144,8 +1164,17 @@ export function dialog({ title, body, actions = [], wide = false, onClose } = {}
   document.body.append(scrim);
   // The dialog has the keys at once, on its default button when it has one (Return chooses
   // it, Space too), else on what it says (Esc, Tab, and the arrows scroll it); a caller that
-  // wants a field focused focuses it.
-  (panel.querySelector(".dialog-foot .btn.primary:not(:disabled)") || panel.querySelector(".dialog-body")).focus({ preventScroll: true });
+  // wants a field focused focuses it. The default button, blue already, is not ringed too
+  // (as a Mac sheet's is not) until Tab comes to it.
+  const primary = panel.querySelector(".dialog-foot .btn.primary:not(:disabled)");
+  if (primary) {
+    primary.dataset.defaultFocus = "";
+    const plain = () => { delete primary.dataset.defaultFocus; panel.removeEventListener("keydown", tabbed, true); };
+    const tabbed = (event) => { if (event.key === "Tab") plain(); };
+    panel.addEventListener("keydown", tabbed, true);
+    primary.addEventListener("blur", plain, { once: true });
+  }
+  (primary || panel.querySelector(".dialog-body")).focus({ preventScroll: true });
   return { close };
 }
 
@@ -1196,9 +1225,16 @@ export function toast(message, { kind = "", seconds = 3.5, icon: iconName } = {}
   const node = h(`div.toast${kind ? `.${kind}` : ""}`, {}, iconName ? icon(iconName) : null, message);
   const box = toasts();
   placeToasts(box);
+  // The same words said again while they are still shown (Saved, saved again): the one there
+  // stays for longer, rather than a second under it.
+  const said = `${kind}\n${node.textContent}`;
+  const shown = [...box.children].find((other) => other.said === said && other.style.opacity !== "0");
+  if (shown?.renew) { shown.renew(seconds); return shown; }
+  node.said = said;
   box.append(node);
   const fade = () => { node.style.transition = "opacity .3s"; node.style.opacity = "0"; setTimeout(() => node.remove(), 300); };
   let left = seconds * 1000;
+  node.renew = (again) => { left = Math.max(left, again * 1000); };
   const tick = () => {
     if (!node.isConnected) return;
     if (!sheetOpen()) left -= 250;
@@ -1248,6 +1284,9 @@ const grouped = (tex) => {
   return /[\s+−\-=/·×]/.test(words) || several ? `(${words})` : words;
 };
 
+// The marks Unicode sets over the letter before them, for TeX's accents.
+const ACCENTS = { hat: "\u0302", widehat: "\u0302", bar: "\u0304", overline: "\u0304", tilde: "\u0303", widetilde: "\u0303", vec: "\u20d7", dot: "\u0307", ddot: "\u0308" };
+
 // A formula as a line of words: Greek and signs as themselves, fractions as a/b,
 // scripts raised or lowered where Unicode can, commands without their backslashes.
 export function mathWords(tex) {
@@ -1262,6 +1301,8 @@ export function mathWords(tex) {
     .replace(/\\begin\{pmatrix\}/g, "(").replace(/\\end\{pmatrix\}/g, ")")
     .replace(/\\begin\{bmatrix\}/g, "[").replace(/\\end\{bmatrix\}/g, "]")
     .replace(/\\begin\{[a-z*]+\}|\\end\{[a-z*]+\}/g, "").replace(/&/g, ",\u0007").replace(/\\\\/g, ";\u0007")
+    // An accent or a face given one letter unbraced (\bar\alpha, \hat x), as TeX takes it: braced.
+    .replace(/\\(hat|widehat|bar|overline|tilde|widetilde|vec|dot|ddot|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol|bm|mathcal|mathbb|mathfrak)(?![A-Za-z])\s*(\\[A-Za-z]+|[A-Za-z0-9])/g, "\\$1{$2}")
     // Greek and signs first, so a script of one (p_{\theta}, x^{\prime}) is set as one; not
     // a command taking an argument (\sqrt{…}, set below).
     .replace(/\\([A-Za-z]+)(?![A-Za-z{])/g, (whole, name) => TEX_WORDS[name] ?? whole)
@@ -1271,6 +1312,8 @@ export function mathWords(tex) {
     text = text
       .replace(/\\[dtc]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a, b) => `${grouped(a)}/${grouped(b)}`)
       .replace(/\\sqrt\{([^{}]*)\}/g, (_, a) => `√${grouped(a)}`)
+      // An accent over one letter is drawn over it (x̂, ᾱ); over more, the letters alone.
+      .replace(/\\(hat|widehat|bar|overline|tilde|widetilde|vec|dot|ddot)\{([^{}]*)\}/g, (_, accent, x) => ([...x].length === 1 ? x + ACCENTS[accent] : x))
       .replace(/\\(mathcal|mathbb)\{([A-Z])\}/g, (_, font, ch) => ALPHABET[font][1][ch] || String.fromCodePoint(ALPHABET[font][0] + ch.charCodeAt(0) - 65))
       .replace(/\\(mathrm|mathbf|mathit|mathsf|mathtt|text|textrm|textbf|operatorname\*?|boldsymbol|bm|hat|bar|tilde|vec|dot|overline|underline|mathcal|mathbb|mathfrak|ce)\{([^{}]*)\}/g, "$2")
       .replace(/_\{([^{}]*)\}/g, (_, a) => script(a, SUB, "_"))
@@ -1289,7 +1332,7 @@ export function mathWords(tex) {
     .replace(/\u0008(?=[\p{L}\p{N}])/gu, " ").replace(/\u0008/g, "")
     // Relations spaced, and an operation between two terms -- a sign before one (−x) not.
     .replace(/\s*([=<>≤≥≠≈≡∼≃∝→←⇒⟹⟺↦∈∉⊂⊆])\s*/g, " $1 ")
-    .replace(/([\p{L}\p{N})\]′!⁺⁻₊₋])\s*([+−×·±∓÷])\s*/gu, "$1 $2 ")
+    .replace(/([\p{L}\p{N}\p{M})\]′!⁺⁻₊₋])\s*([+−×·±∓÷])\s*/gu, "$1 $2 ")
     .replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")").trim();
 }
 

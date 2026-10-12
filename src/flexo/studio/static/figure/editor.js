@@ -8,7 +8,7 @@
 // be written there.
 
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel } from "/static/studio/studio.js";
-import { figureParts, glyph, groupGlyph, lookFrom, plain, titled, widenLines } from "/static/kinds/figure/parts.js";
+import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -36,8 +36,8 @@ export function mount(studio, main) {
     ui.button("", () => zoomBy(1 / 1.25), { kind: "ghost", icon: "minus", small: true, title: "Zoom Out (⌘−)" }),
     zoomValue,
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
-    ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true }),
-    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true }));
+    ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true, title: "Zoom to Fit (⇧⌘0)" }),
+    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }));
   // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
   // it would look pressed while the drawing is zoomed on from the keyboard.
   for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -74,9 +74,9 @@ export function mount(studio, main) {
   });
 
   // -- the bar --
-  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add Shape (A)" });
-  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a line from one shape to another (C)" });
-  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the selected shapes (G)" });
+  const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add a Shape" });
+  const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a Line from One Shape to Another" });
+  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌥⌘G)" });
   const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
   studio.tools.append(listButton);
@@ -111,6 +111,9 @@ export function mount(studio, main) {
   const figure = figureParts({
     catalog,
     overlay: page,
+    // The figure is the whole document: ⌘A chooses all of it, and a drag from where nothing is
+    // chooses what it touches.
+    whole: true,
     // The box words are typed in stays on the stage as the drawing is put in again.
     typing: stage,
     element: elementOf,
@@ -175,7 +178,8 @@ export function mount(studio, main) {
     const chosen = figure.selected;
     deleteButton.disabled = !chosen.length || chosen.includes(figure.model?.root);
     connectButton.classList.toggle("on", Boolean(figure.connecting));
-    gatherButton.disabled = !figure.model;
+    // (Shapes to group chosen: an empty group is added from the palette's Layout.)
+    gatherButton.disabled = !figure.model || !figure.canGroup();
     addButton.disabled = !figure.model;
   }
   function showHint() {
@@ -241,17 +245,39 @@ export function mount(studio, main) {
   }
   page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
   page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
-  stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting) figure.select([]); });
+  stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting && !figure.justDragged) figure.select([]); });
+  // Pressed on the desk round the page and dragged, a band chooses the shapes it touches, as
+  // from the page's own empty space.
+  stage.addEventListener("pointerdown", (event) => { if (event.target === stage && figure.model) figure.band(event); });
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
   // Right-click, as on a slide: what is under the pointer is chosen, and its menu offers what
-  // can be done with it (a line: a shape inserted into it); on nothing, Add Shape.
+  // can be done with it (a line: a shape inserted into it) -- Cut, Copy and Paste among it, as
+  // the slide's object menu has them; on nothing (the page, or the desk round it), Add Shape.
+  function partMenu(point, id) {
+    const own = figure.menuOf(id, point), last = (label) => own.filter((item) => item?.label === label);
+    const first = own.filter((item) => !["Duplicate", "Delete"].includes(item?.label));
+    // (A line's offers no Cut or Copy: a line goes with the shapes it joins.)
+    const clips = clipItems().filter((item) => item.label === "Paste" || !item.disabled);
+    menu(point, [...first, ...(first.length ? ["-"] : []), ...clips, ...last("Duplicate"), "-", ...last("Delete")]);
+  }
+  function pageMenu(point) {
+    figure.select([]);
+    if (!figure.model) return;
+    menu(point, [{ icon: "plus", label: "Add Shape…", run: () => figure.addPalette(point) },
+      { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && figure.paste(clipboard.parts) },
+      { icon: "target", label: "Select All", keys: "⌘A", run: () => figure.chooseAll() }]);
+  }
   page.addEventListener("contextmenu", (event) => {
     if (event.target.closest(".fig-inline")) return;
     event.preventDefault();
     const point = { x: event.clientX, y: event.clientY }, id = figure.model ? figure.idAt(event) : null;
-    if (id && id !== figure.model.root) { menu(point, figure.menuOf(id, point)); return; }
-    figure.select([]);
-    if (figure.model) menu(point, [{ icon: "plus", label: "Add Shape…", keys: "A", run: () => figure.addPalette(point) }]);
+    if (id && id !== figure.model.root) partMenu(point, id);
+    else pageMenu(point);
+  });
+  stage.addEventListener("contextmenu", (event) => {
+    if (event.target !== stage) return;
+    event.preventDefault();
+    pageMenu({ x: event.clientX, y: event.clientY });
   });
   // What the pointer is over is framed, dashed -- not what is chosen, framed already -- and
   // stays framed as the drawing is zoomed under it.
@@ -297,7 +323,10 @@ export function mount(studio, main) {
       const item = h(`div.tree-row${chosen.includes(id) ? ".on" : ""}${isRoot ? ".root" : ""}`, {
         draggable: isRoot ? "false" : "true", dataset: { id }, style: { paddingLeft: `${6 + depth * 14}px` },
         onclick: (event) => choose(event, id),
-        ondblclick: () => (node ? figure.openInline(id) : null),
+        // (Double-clicked, its words are typed in, on the drawing: a shape's, a group's title.)
+        ondblclick: () => (node || (group && !isRoot) ? figure.openInline(id) : null),
+        // Right-clicked, the row's shape has its menu, as on the drawing (the layout, the page's).
+        oncontextmenu: (event) => { event.preventDefault(); const point = { x: event.clientX, y: event.clientY }; if (isRoot) pageMenu(point); else partMenu(point, id); },
       },
       group && children.length ? h(`button.tree-caret${open ? ".open" : ""}`, { type: "button", onclick: (event) => {
         event.stopPropagation();
@@ -319,11 +348,12 @@ export function mount(studio, main) {
       figure.groupOf(found.root) ? row(found.root, 0) : null,
       h("div.tree-head", {}, "Lines", h("span.count", {}, lines.length)),
       lines.length ? lines.map((line) => h(`div.tree-row.line${chosen.includes(line.id) ? ".on" : ""}`, {
-        dataset: { id: line.id }, onclick: () => figure.select([line.id]),
+        dataset: { id: line.id }, onclick: (event) => choose(event, line.id), ondblclick: () => figure.openInline(line.id),
+        oncontextmenu: (event) => { event.preventDefault(); partMenu({ x: event.clientX, y: event.clientY }, line.id); },
       }, h("span.tree-caret"), glyph(line.net ? "net" : "edge"),
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
-      line.label && !figure.nameOf(line.id).includes(inQuotes(plain(line.label))) ? h("span.tree-id", {}, plain(line.label)) : null))
+      line.label && !figure.nameOf(line.id).includes(inQuotes(oneLine(line.label))) ? h("span.tree-id", {}, oneLine(line.label)) : null))
       : h("div.empty.small", {}, "No lines"));
   }
 
@@ -531,6 +561,84 @@ export function mount(studio, main) {
     });
   }
 
+  // -- copied, cut and pasted --
+  // The shapes chosen, with what they hold and the lines between them, as a slide's figure's
+  // are copied (in the deck's own format): pasted after what is chosen -- in this figure,
+  // another, or onto a slide.
+  const CLIP = "application/x-flexo-deck";
+  let clipboard = null;
+  const typingNow = () => Boolean(typing(document.activeElement) || document.querySelector(".scrim"));
+  // Words chosen to copy in the panel or a message -- not on the drawing.
+  const wordsChosen = () => { const chosenWords = window.getSelection(); return Boolean(chosenWords?.toString()) && !page.contains(chosenWords.anchorNode); };
+  const clipOf = () => {
+    const parts = figure.model ? figure.clip() : null;
+    return parts ? { what: "parts", parts, label: parts.top.length > 1 ? `${parts.top.length} shapes` : "shape" } : null;
+  };
+  const plainOf = (clip) => clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n");
+  const clipName = (clip) => clip.label.replace(/(^|\s)\p{L}/gu, (first) => first.toUpperCase());
+  const copied = (clip) => toast(`${clip.label.charAt(0).toUpperCase()}${clip.label.slice(1)} copied`, { icon: "copy", seconds: 1.5 });
+  // (Lines chosen alone: why nothing was copied is said, not left to look done.)
+  const uncopied = (cut = false) => { const why = figure.uncopied(cut); if (why) toast(why, { icon: "info", seconds: 3 }); };
+  const ownsClip = () => studio.active && !typingNow() && !wordsChosen() && Boolean(figure.model);
+  function clipChosen(cut) {
+    const clip = clipOf();
+    if (!clip) { uncopied(cut); return; }
+    clipboard = clip;
+    navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
+    if (cut) figure.remove(undefined, [], { cut: true }); else copied(clip);
+  }
+  // Greyed out, as a Mac menu's are, when there is nothing to cut, copy or paste.
+  const clipItems = () => [
+    { icon: "cut", label: "Cut", keys: "⌘X", disabled: !clipOf(), run: () => clipChosen(true) },
+    { icon: "copy", label: "Copy", keys: "⌘C", disabled: !clipOf(), run: () => clipChosen(false) },
+    { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && figure.paste(clipboard.parts) },
+  ];
+  function copyNow(event) {
+    const clip = ownsClip() ? clipOf() : null;
+    if (!clip) return null;
+    event.preventDefault();
+    clipboard = clip;
+    event.clipboardData?.setData(CLIP, JSON.stringify(clip));
+    event.clipboardData?.setData("text/plain", plainOf(clip));
+    return clip;
+  }
+  document.addEventListener("copy", (event) => {
+    keyed = null;
+    const clip = copyNow(event);
+    if (clip) copied(clip); else if (ownsClip()) uncopied();
+  });
+  document.addEventListener("cut", (event) => {
+    keyed = null;
+    const clip = copyNow(event);
+    if (clip) figure.remove(undefined, [], { cut: true }); else if (ownsClip()) uncopied(true);
+  });
+  document.addEventListener("paste", (event) => {
+    keyed = null;
+    if (!ownsClip() || event.defaultPrevented) return;
+    let clip = null;
+    try { clip = JSON.parse(event.clipboardData?.getData(CLIP) || "null"); } catch { clip = null; }
+    // A clipboard that keeps only words: what was copied here, if they are its words.
+    if (!clip && clipboard && event.clipboardData?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
+    if (clip?.what !== "parts" || !clip.parts?.top?.length) return;
+    event.preventDefault();
+    figure.paste(clip.parts);
+  });
+  // A web view that gives no copy, cut or paste to a page with nothing to type in (a Mac
+  // app's, whose Edit menu waits for a selection) still passes the keys: if no such event
+  // follows them, the page does it itself, with what it copied (as a deck's does).
+  let keyed = null;
+  document.addEventListener("keydown", (event) => {
+    const letter = event.key.toLowerCase();
+    if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || !["c", "x", "v"].includes(letter) || !ownsClip()) return;
+    keyed = letter;
+    setTimeout(() => {
+      if (keyed !== letter) return;
+      keyed = null;
+      if (letter === "v") { if (clipboard) figure.paste(clipboard.parts); return; }
+      clipChosen(letter === "x");
+    }, 80);
+  }, true);
+
   // -- keys --
   const typing = (target) => target.closest?.("input, textarea, select, [contenteditable]");
   document.addEventListener("keydown", (event) => {
@@ -543,10 +651,17 @@ export function mount(studio, main) {
       return;
     }
     if (typing(event.target)) return;
-    // ⌘+ and ⌘− zoom the drawing, not the page round it.
-    if ((event.metaKey || event.ctrlKey) && !event.altKey && ["=", "+", "-", "_"].includes(event.key)) {
+    const mod = event.metaKey || event.ctrlKey;
+    // ⌘+ and ⌘− zoom the drawing, not the page round it; ⌘0 shows it at its actual size, and
+    // ⇧⌘0 fits it to the window, as a deck's slide.
+    if (mod && !event.altKey && ["=", "+", "-", "_"].includes(event.key)) {
       event.preventDefault();
       zoomBy(["-", "_"].includes(event.key) ? 1 / 1.25 : 1.25);
+      return;
+    }
+    if (mod && !event.altKey && event.code === "Digit0") {
+      event.preventDefault();
+      setZoom(event.shiftKey ? null : 1);
       return;
     }
     figure.key(event);
@@ -574,12 +689,14 @@ export function mount(studio, main) {
     if (state.tab === "source") numbers();
   };
 
-  // Drawn after another's edit or an undo, the words of the field being typed in follow too.
-  let afresh = false;
+  // Drawn after another's edit or an undo, the words of the field being typed in follow too
+  // -- and, after an undo or a redo, what it brought back is chosen (`travelled`).
+  let afresh = false, travelled = false;
   studio.on("drawn", (result) => {
     messages = result.messages || [];
-    if (result.info?.model) figure.setModel(result.info.model, { afresh });
+    if (result.info?.model) figure.setModel(result.info.model, { afresh, back: travelled });
     afresh = false;
+    travelled = false;
     showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
@@ -611,6 +728,7 @@ export function mount(studio, main) {
   // Someone else's change, or undo: the source follows, keeping the caret on its words.
   studio.on("change", ({ quiet, source }) => {
     if (source === "history" || source === "remote") afresh = true;
+    if (source === "history") travelled = true;
     if (quiet || area.value === studio.doc.text) return;
     const { selectionStart: start, selectionEnd: end, scrollTop } = area;
     const before = area.value;
@@ -636,8 +754,38 @@ export function mount(studio, main) {
       area.scrollTop = Math.max(0, (where.line - 1) * LINE - area.clientHeight / 3);
     }
   };
+  // What is chosen, named for it: "Duplicate Shape", "Duplicate 3 Shapes" -- also the Mac
+  // menu's plain Edit › Duplicate (`also`).
+  const chosenName = () => {
+    const shapes = figure.selected.filter((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root)).length;
+    return shapes > 1 ? `${shapes} Shapes` : shapes ? "Shape" : null;
+  };
+  // A group chosen alone (not the figure's whole layout): Ungroup takes it apart.
+  const ungroupable = () => figure.selected.length === 1 && Boolean(figure.groupOf(figure.selected[0])) && figure.selected[0] !== figure.model?.root;
+  // What ⌫ deletes, named for it ("Delete Shape", "Delete 2 Lines") -- the Mac app's Edit ›
+  // Delete is enabled by it.
+  const deleteName = () => {
+    const chosen = figure.selected;
+    if (!chosen.length || chosen.includes(figure.model?.root)) return null;
+    return chosenName() || (chosen.length > 1 ? `${chosen.length} Lines` : "Line");
+  };
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
+    // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
+    ...(!typingNow() && clipOf() ? [{ icon: "cut", label: `Cut ${clipName(clipOf())}`, keys: "⌘X", run: () => clipChosen(true) },
+      { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),
+    ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => figure.paste(clipboard.parts) }] : []),
+    ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
+    ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
+    ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // Arrange › Group and Ungroup, as Keynote's (the Mac menus run them by these names).
+    ...(!typingNow() && figure.canGroup() ? [{ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => figure.groupMenu(gatherButton) }] : []),
+    ...(!typingNow() && ungroupable() ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌥⌘G", run: () => figure.act({ do: "ungroup", id: figure.selected[0] }) }] : []),
+    // View › Zoom, as a deck's slide is zoomed: by steps, a point to a point, or fitted.
+    { icon: "plus", label: "Zoom In", keys: "⌘+", run: () => zoomBy(1.25) },
+    { icon: "minus", label: "Zoom Out", keys: "⌘−", run: () => zoomBy(1 / 1.25) },
+    { icon: "eye", label: "Actual Size", keys: "⌘0", run: () => setZoom(1) },
+    { icon: "figure", label: "Zoom to Fit", also: ["Fit Slide"], keys: "⇧⌘0", run: () => setZoom(null) },
     ...Object.entries(catalog.parts).filter(([, part]) => !part.unavailable).map(([kind, part]) => ({ icon: "plus", label: `Add ${titled(part.title)}${part.needs_file ? "…" : ""}`, hint: part.hint, run: () => figure.addPart(kind) })),
     { icon: "right", label: "Connect Shapes", run: () => figure.toggleConnect(true) },
     { icon: "export", label: "Export as Editable SVG…", run: () => studio.exportFiles(["editable"]) },

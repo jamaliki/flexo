@@ -4,7 +4,7 @@
    the figure editor (.fig), so the deck looks the same before a figure is chosen and after. */
 
 svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
-.hit-line { fill: none; stroke: transparent; stroke-width: 9; stroke-dasharray: none; pointer-events: stroke; cursor: pointer; }
+.hit-line { fill: none; stroke: transparent; stroke-width: 9; stroke-dasharray: none; pointer-events: stroke; }
 .fig-marks { position: absolute; inset: 0; pointer-events: none; }
 /* A chosen part's frame is where the part is, at once: it never glides there. */
 /* Frames as wide as every frame on a slide (--frame): chosen, solid; pointed at, dashed. */
@@ -19,8 +19,17 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-wordless.tight { visibility: hidden; }
 .fig-wordless.tight.pointed { visibility: visible; z-index: 2; color: var(--text-small); background: var(--raised); padding: 2px 5px; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
 .fig-size { position: absolute; z-index: 3; pointer-events: auto; width: 8px; height: 8px; margin: -4px 0 0 -4px; box-sizing: border-box; background: #ffffff; border: 1px solid var(--accent); border-radius: 1.5px; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18); touch-action: none; }
-.fig-size::before { content: ""; position: absolute; inset: -6px; }
+/* Its reach is out from the shape, past its corner: a small shape pressed anywhere inside is
+   the shape, moved, not a corner taking it to be sized. */
+.fig-size::before { content: ""; position: absolute; }
+.fig-size.nw::before { inset: -7px 0 0 -7px; }
+.fig-size.ne::before { inset: -7px -7px 0 0; }
+.fig-size.sw::before { inset: 0 0 -7px -7px; }
+.fig-size.se::before { inset: 0 -7px -7px 0; }
 .fig-size:hover { background: var(--accent); }
+.fig-size.w::before { inset: -7px 0 -7px -7px; }
+.fig-size.e::before { inset: -7px -7px -7px 0; }
+.fig-size.w, .fig-size.e { cursor: ew-resize; }
 .fig-size.nw, .fig-size.se { cursor: nwse-resize; }
 .fig-size.ne, .fig-size.sw { cursor: nesw-resize; }
 .fig-sizing .fig-mark, .fig-sizing .fig-next, .fig-sizing .fig-size { visibility: hidden; }
@@ -43,7 +52,8 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .hit-line.chosen { stroke: var(--accent); stroke-opacity: 0.3; }
 /* Its ends, each a handle: dragged round its shape, or onto another, the end goes there --
    its way drawn to the side it would meet, that shape framed. */
-.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: #ffffff; border: 1.5px solid var(--accent); cursor: grab; touch-action: none; }
+/* (A ring: the arrowhead it sits on shows through it.) */
+.fig-end { position: absolute; z-index: 3; pointer-events: auto; width: 10px; height: 10px; margin: -5px 0 0 -5px; box-sizing: border-box; border-radius: 50%; background: transparent; border: 1.5px solid var(--accent); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85); cursor: grab; touch-action: none; }
 .fig-end::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
 .fig-end:hover { background: var(--accent); }
 .fig-ending .fig-end, .fig-ending .fig-next { visibility: hidden; }
@@ -59,6 +69,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 /* A shape's outline at the size it is being dragged to: solid once it fits its words. */
 .fig-size-drag rect, .fig-size-drag polygon, .fig-size-drag ellipse { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .fig-size-drag .fits { stroke-dasharray: none; }
+.fig-text-preview { position: absolute; z-index: 2; pointer-events: none; line-height: 1.22; text-align: center; white-space: pre; }
 /* The guide a curve's middle keeps to, as the slide's alignment guides are drawn. */
 .fig-end-drag .fig-guides line { stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.9; }
 .fig-end-shape { position: absolute; z-index: 3; pointer-events: none; border: var(--frame, 2px) dashed var(--accent); border-radius: 4px; }
@@ -70,7 +81,7 @@ svg.glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCo
 .fig-inline .markup { border: 0; box-shadow: none; }
 /* Typed in place: over the part's words, as they look; the tools float above. */
 /* Its ring as wide as the chosen frame, and inside it (placeInline keeps the box within). */
-.fig-inline.in-place { background: transparent; padding: 0; border-radius: 3px; box-shadow: 0 0 0 var(--frame, 2px) var(--accent); animation: none; }
+.fig-inline.in-place { background: transparent; padding: 0; border-radius: 4px; box-shadow: 0 0 0 var(--frame, 2px) var(--accent), 0 0 0 calc(var(--frame, 2px) + 3.5px) var(--accent-soft); animation: none; }
 .fig-inline.in-place .markup { background: transparent; }
 .fig-inline.in-place .textarea { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; line-height: 1.2; resize: none; overflow: hidden; caret-color: var(--accent); white-space: pre; }
 .fig-inline.in-place .textarea:focus { box-shadow: none; outline: none; }
@@ -195,6 +206,9 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-lifted { filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22)); }
 .fig-settling { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.16)); }
 .fig-astray { opacity: 0.5; }
+/* What stays where it was while a copy of it is carried (⌥-drag), and the copy let go until
+   it is drawn: likenesses, never pressed. */
+.fig-stay, .fig-stay * { pointer-events: none; }
 .fig-faded { opacity: 0.18; transition: opacity 0.15s ease-out; }
 [data-flexo-entity] { transition: transform 0.16s cubic-bezier(.2, .8, .2, 1); }
 .fig-dragging .fig-lifted, .fig-dragging .fig-lifted * { transition: none; }
@@ -278,3 +292,15 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .net-end-name:hover, .net-end-name:focus-visible { background: var(--accent-soft); }
 .net-end-port { flex: none; height: 20px; padding: 0 6px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink-2); font: var(--text-small); cursor: pointer; }
 .net-end-port:hover { border-color: var(--accent); color: var(--ink); }
+/* A band dragged from where nothing is drawn: the shapes it touches are chosen. */
+.fig-band { position: absolute; z-index: 6; pointer-events: none; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 1px; }
+body.fig-banding, body.fig-banding * { user-select: none; }
+/* A curve's arrowheads as it is bent, where they will be drawn. */
+.fig-end-drag .fig-heads polygon { fill: var(--accent); stroke: none; }
+/* A slide's figure carried to another place: its chosen shape's frame and handles go with
+   the rest of what is chosen, not left where it was. */
+.block-dragging .fig-marks { visibility: hidden; }
+/* What is carried is seen whole, past the page's edge too, until it is let go. */
+.fig-dragging svg { overflow: visible; }
+body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !important; }
+.fig-end-drag .fig-head { fill: var(--accent); stroke: none; }

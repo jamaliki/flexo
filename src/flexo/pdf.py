@@ -37,6 +37,7 @@ from pathlib import Path
 
 from flexo.colour import to_rgb
 from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
+from flexo.drawing import _ellipse as _oval
 from flexo.fonts import FontFace, hb_font, load_face
 from flexo.outline import _outline, shape, underline
 from flexo.portable import SYNTHETIC_SLANT, run_outline
@@ -628,10 +629,21 @@ class _Content:
         down = f"0 {_n(h)}" if item.flip_y else f"0 {_n(-h)}"
         left = x + w if item.flip_x else x
         top = y if item.flip_y else y + h
-        # A picture filling its box by slicing is clipped to the box.
-        clip = ""
+        # A picture filling its box by slicing is clipped to the box; one cropped, to what
+        # of it shows -- an oval, cropped round.
+        region = item.clip
         if w > item.width + 0.01 or h > item.height + 0.01:
-            clip = f"{_n(item.x)} {_n(item.y)} {_n(item.width)} {_n(item.height)} re W n "
+            box = (item.x, item.y, item.x + item.width, item.y + item.height)
+            region = box if region is None else (max(box[0], region[0]), max(box[1], region[1]),
+                                                  min(box[2], region[2]), min(box[3], region[3]))
+        clip = ""
+        if region is not None:
+            cx, cy = (region[0] + region[2]) / 2.0, (region[1] + region[3]) / 2.0
+            rx, ry = max(region[2] - region[0], 0.0) / 2.0, max(region[3] - region[1], 0.0) / 2.0
+            if item.oval:
+                clip = f"{_path(_oval(cx, cy, rx, ry))} W n "
+            else:
+                clip = f"{_n(region[0])} {_n(region[1])} {_n(2.0 * rx)} {_n(2.0 * ry)} re W n "
         self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 

@@ -469,20 +469,20 @@ def _structure() -> dict[str, Any]:
         "structure",
         "Structure",
         "Biology",
-        "A PDB or mmCIF structure drawn by mol-sketch",
+        "A molecule\u2019s structure, from a PDB or mmCIF file",
         {"label": "Structure", "properties": {"source": ""}},
         [
             _field("properties.source", "File", "file", types=["structure"]),
-            _field(
-                "properties", "View", "view", hint="Or drag its rotate handle, or ⌥-drag it"
-            ),
+            _field("properties", "View", "view", hint="Or drag its rotate handle"),
+            # (The theme's look, named so: not "Default", which reads as a look of its own
+            # beside the one it is -- Engraved Colour, on a light theme.)
             _field(
                 "properties.look",
                 "Look",
                 "choice",
                 options=["", *LOOKS],
-                labels={"": "Default"},
-                hint="Default uses the figure's theme",
+                labels={"": "Theme\u2019s Look"},
+                hint="The look the figure's theme gives structures",
             ),
             # mol-sketch's own settings: its palettes, colours of one's own, what is
             # drawn, the site, a density map, and every field of its style.
@@ -570,6 +570,9 @@ def _structure() -> dict[str, Any]:
             ),
             _field("properties.style", "Rendering", "molsketch", sections=list(SECTIONS)),
         ],
+        # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
+        # and nothing round it.)
+        common=[LABEL],
         needs_file=True,
         unavailable="" if ready else "Requires flexo[structures,molecules]",
     )
@@ -930,7 +933,8 @@ GROUPS = [
 """What parts can be gathered into; each takes the parts chosen, or a first block."""
 
 GROUP_FIELDS = [
-    LABEL,
+    # (A group's words are its title, as its colours call them.)
+    _field("label", "Title", "markup"),
     _field(
         "layout.kind",
         "Layout",
@@ -995,7 +999,8 @@ EDGE_FIELDS = [
         "Back Label",
         "markup",
         show={"arrow": "reversible"},
-        hint="The rate shown under a reversible step",
+        # (Shown too wherever it has words: they are drawn under any line.)
+        hint="Words under the line: a reversible step's rate back",
     ),
     _field(
         "head",

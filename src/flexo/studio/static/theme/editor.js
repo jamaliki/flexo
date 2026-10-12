@@ -179,7 +179,6 @@ export function mount(studio, container) {
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
         ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
-      section("Documents", uses),
       section("Colour",
         h("div.setting-group-label", { title: "Colours for shapes, in order" }, "Palette"),
         paletteView(),
@@ -222,6 +221,8 @@ export function mount(studio, container) {
         // Named once, by its row, as every switch in the panel is.
         row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), key: "sketch", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
         sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
+      // Which of the folder's documents use it: after its own settings, however many there are.
+      section("Documents", uses),
       h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>
           typeof value === "string" && /pt$|mm$/.test(value) ? length(titled(key), ["style", key], { unit: value.endsWith("mm") ? "mm" : "pt" })
@@ -268,7 +269,8 @@ export function mount(studio, container) {
   // Straight to the file, as an export with nothing to choose is ("…" in the Mac app, whose
   // save panel asks where).
   studio.exports = [{ format: "yaml", label: exportLabel("Full Theme"), hint: "The theme with every setting written out, those it takes from its base theme too" }];
-  studio.actions.append(ui.button(exportLabel("Export Full Theme"), () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
+  // (Export, as every document's toolbar names it; what it writes, its tooltip.)
+  studio.actions.append(ui.button(exportLabel("Export"), () => studio.exportFiles(["yaml"]), { kind: "ghost", icon: "export", title: "Export the theme with every setting written out, including those it takes from its base theme" }));
   studio.workspace.on("documents", renderShowOn);
   renderShowOn();
 

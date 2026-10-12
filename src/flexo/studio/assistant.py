@@ -57,6 +57,13 @@ def system_prompt(name: str) -> str:
 SYSTEM = system_prompt("Claude")
 
 
+def _settings_place() -> str | None:
+    """Where the assistant is set up, as the app that holds the studio says it (its Settings),
+    if one does."""
+
+    return os.environ.get("FLEXO_STUDIO_SETTINGS") or None
+
+
 # -- who answers --
 
 
@@ -288,16 +295,23 @@ class Claude(Provider):
                 "(pip install 'flexo[assistant]'), then a restart."
             )
         if isinstance(error, anthropic.AuthenticationError):
-            return os.environ.get("FLEXO_STUDIO_KEY_HINT") or (
-                "Claude could not sign in: set ANTHROPIC_API_KEY, or run `ant auth login`, "
-                "then restart the studio."
+            # A key there is (else Claude would not have been asked): it was refused.
+            place = _settings_place()
+            return (
+                "Claude didn\u2019t accept the API key: it may be mistyped, expired or revoked. "
+                + (
+                    f"Put in a new one in {place}."
+                    if place
+                    else "Set ANTHROPIC_API_KEY to a new one, or run `ant auth login`, then "
+                    "restart the studio."
+                )
             )
         if isinstance(error, anthropic.RateLimitError):
             return "Claude is rate-limited just now; try again in a moment."
         if isinstance(error, anthropic.APIStatusError):
             return f"Claude's API answered {error.status_code}: {error.message}"
         if isinstance(error, anthropic.APIConnectionError):
-            return "Could not reach Claude's API: check the network."
+            return "Couldn\u2019t reach Claude: check your internet connection."
         return str(error)
 
 
@@ -392,6 +406,10 @@ class OpenAIStyle(Provider):
         client = self._client()
         model = self.model
         if not model:
+            # None set, and none listed: why its list can't be read (its server not running)
+            # is the answer, not a model to choose from a list that isn't there.
+            if not self.models():
+                raise RuntimeError(f"{self.name} lists no models: add one to it first.")
             raise RuntimeError(f"Choose a model for {self.name} at the top of the panel.")
         tools = [
             {
@@ -524,8 +542,13 @@ class OpenAIStyle(Provider):
                 "(pip install 'flexo[assistant]'), then a restart."
             )
         if isinstance(error, openai.AuthenticationError):
-            return os.environ.get(self._hint) or (
-                f"{self.name} could not sign in: check {self._key}, then restart the studio."
+            # A key there is (or one is asked for): it was refused.
+            place = _settings_place()
+            refused = f"{self.name} didn\u2019t accept the API key"
+            return f"{refused}: it may be mistyped, expired or revoked. " + (
+                f"Put in a new one in {place}."
+                if place
+                else f"Set {self._key} to a new one, then restart the studio."
             )
         if isinstance(error, openai.RateLimitError):
             return f"{self.name} is rate-limited just now (or out of credit); try again later."
@@ -536,7 +559,16 @@ class OpenAIStyle(Provider):
         if isinstance(error, openai.APIStatusError):
             return f"{self.name}'s API answered {error.status_code}: {error.message}"
         if isinstance(error, openai.APIConnectionError):
-            return f"Could not reach {self.name}'s API: check the network, or its address."
+            if self.id != "other":
+                return f"Couldn\u2019t reach {self.name}: check your internet connection."
+            # One served on this Mac (Ollama, LM Studio) is most often simply not running.
+            _, url = self._settings()
+            place = _settings_place()
+            where = f"in {place}" if place else "(FLEXO_STUDIO_OTHER_URL)"
+            return (
+                f"Couldn\u2019t reach {self.name} at {url}. "
+                f"Check that it\u2019s running, and its address {where}."
+            )
         return str(error)
 
 

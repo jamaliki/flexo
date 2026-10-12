@@ -62,7 +62,6 @@
 .fig-stage.connecting .fig-page, .fig-stage.connecting .fig-page [data-flexo-entity] { cursor: crosshair; }
 .fig-page { background: #fff; box-shadow: var(--shadow-page); border-radius: 2px; position: relative; line-height: 0; user-select: none; -webkit-user-select: none; }
 .fig-page svg { display: block; }
-.fig-page [data-flexo-entity] { cursor: pointer; }
 
 /* At the top: notices come up from the foot of the window, and would cover it there. (Named
    as the figure editor's own, as its flash is: this sheet stays loaded while a deck is

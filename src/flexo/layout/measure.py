@@ -206,9 +206,12 @@ def _measure_node(
     measurer: TextMeasurer,
     style: LayoutStyle,
 ) -> MeasuredNode:
-    label = measurer.measure(node.label, max_width=_label_width(node, style))
+    room = _label_width(node, style)
+    label = measurer.measure(node.label, max_width=room)
     if node.kind == "decision" and node.width is not None and not isinstance(node.width, CellSpan):
-        label = _decision_words(node, measurer, style)
+        room, label = _decision_words(node, measurer, style)
+    if node.kind == "circle" and room is not None and _given_side(node, style) is not None:
+        room, label = _circle_words(node, measurer, style, room)
     if node.kind == "structure" and node.label:
         # Set over its panel, wrapped to its width, in the title's weight (flexo.structures).
         from flexo.structures import structure_title
@@ -234,29 +237,68 @@ def _measure_node(
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
     # cell grid because the caption is a sibling node rather than padding.
-    return MeasuredNode(node, label, size, Point(size.width / 2.0, size.height / 2.0), fit=fit)
+    return MeasuredNode(
+        node, label, size, Point(size.width / 2.0, size.height / 2.0), fit=fit, room=room
+    )
 
 
-def _decision_words(node: NodeSpec, measurer: TextMeasurer, style: LayoutStyle) -> TextMetrics:
+def _decision_words(
+    node: NodeSpec, measurer: TextMeasurer, style: LayoutStyle
+) -> tuple[float, TextMetrics]:
     """A decision given a width: its words in as few lines as fit its diamond -- as tall as
-    it is given, else as short as it can be -- of a few ways of wrapping them, widest first."""
+    it is given, else as short as it can be -- of a few ways of wrapping them, widest first;
+    and the width they were wrapped at."""
 
     width = style.resolve_extent(node.width).points  # type: ignore[arg-type]
     height = style.resolve_extent(node.height).points if node.height is not None else None
     widest = width - 2.0 * DIAMOND_PADDING * style.padding_x.points
-    best: tuple[float, TextMetrics] | None = None
+    best: tuple[float, float, TextMetrics] | None = None
     for room in (widest, 0.75 * width, decision_room(width, style), width / 3.0):
-        words = measurer.measure(node.label, max_width=max(1.0, room))
+        room = max(1.0, room)
+        words = measurer.measure(node.label, max_width=room)
         size = decision_size(node, words, style)
         if size.width > width + 0.5:
             continue  # (a line too long for it: it would widen)
         if height is not None and size.height <= height + 0.5:
-            return words
+            return room, words
         if best is None or size.height < best[0]:
-            best = (size.height, words)
+            best = (size.height, room, words)
     if best is not None:
-        return best[1]
-    return measurer.measure(node.label, max_width=decision_room(width, style))
+        return best[1], best[2]
+    room = decision_room(width, style)
+    return room, measurer.measure(node.label, max_width=room)
+
+
+def _given_side(node: NodeSpec, style: LayoutStyle) -> float | None:
+    """The side of a circle given a size (its width or height, the larger), if it is."""
+
+    given = [
+        style.resolve_extent(extent).points
+        for extent in (node.width, node.height)
+        if extent is not None and not isinstance(extent, CellSpan)
+    ]
+    return max(given) if given else None
+
+
+def _circle_words(
+    node: NodeSpec, measurer: TextMeasurer, style: LayoutStyle, room: float
+) -> tuple[float, TextMetrics]:
+    """A circle given a size: its words wrapped to the square inscribed in it -- or, too many
+    for it, wrapped as the least circle round them is, which it grows to (rather than a
+    column of words one or two long, the circle grown far past them)."""
+
+    side = _given_side(node, style)
+    assert side is not None
+    best: tuple[float, float, TextMetrics] | None = None
+    for each in (room, CIRCLE_MEASURE * style.typography.size.points):
+        words = measurer.measure(node.label, max_width=each)
+        needed = (words.width**2 + words.height**2) ** 0.5 + style.padding_y.points
+        if needed <= side + 0.5:
+            return each, words
+        if best is None or needed < best[0]:
+            best = (needed, each, words)
+    assert best is not None
+    return best[1], best[2]
 
 
 def _measure_drawn(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> MeasuredNode:
@@ -322,6 +364,7 @@ WRAPPED_KINDS = frozenset(
         "feature-strip",
         "sequence",
         "decision",
+        "circle",
         *SHAPE_KINDS,
     }
 )
@@ -330,6 +373,11 @@ WRAPPED_KINDS = frozenset(
 DECISION_MEASURE = 8.0
 """The longest a decision's line of words runs, in ems: a longer question takes two lines,
 so its diamond stays near square rather than a long flat lozenge."""
+
+CIRCLE_MEASURE = 6.0
+"""The longest a circle's line of words runs, in ems: a longer name takes two lines or
+more, its box nearer square, so that the circle round it stays small -- not one line drawn
+across it from edge to edge."""
 
 
 def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
@@ -343,11 +391,23 @@ def _label_width(node: NodeSpec, style: LayoutStyle) -> float | None:
             return label_room(node.kind, width, style)
         if node.kind == "decision":
             return decision_room(width, style)
+        if node.kind == "circle":
+            # (A line of its words across the square inscribed in it, less its padding.)
+            return max(1.0, width / 2.0**0.5 - style.padding_x.points)
+        if node.kind == "text":
+            # (Less the room it keeps round its words of itself: given the width it has of
+            # itself, its words wrap as they do without one.)
+            return max(1.0, width - style.padding_y.points)
         return max(1.0, width - 2.0 * style.padding_x.points)
+    if node.kind == "circle" and node.height is not None and not isinstance(node.height, CellSpan):
+        height = style.resolve_extent(node.height).points
+        return max(1.0, height / 2.0**0.5 - style.padding_x.points)
     if node.kind == "cloud":
         return CLOUD_MEASURE * style.typography.size.points
     if node.kind == "decision":
         return DECISION_MEASURE * style.typography.size.points
+    if node.kind == "circle":
+        return CIRCLE_MEASURE * style.typography.size.points
     return style.label_measure * style.typography.size.points
 
 
