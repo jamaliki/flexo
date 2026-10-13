@@ -72,7 +72,8 @@ def _maths_diagnostics(compilation: Compilation) -> list[Diagnostic]:
     from flexo.texmath import problems_in
 
     semantic = compilation.measured.semantic
-    labelled = [*semantic.nodes, *semantic.groups, *semantic.edges]
+    lines = compilation.routed.fitted.measured.semantic
+    labelled = [*semantic.nodes, *semantic.groups, *lines.edges]
     found: list[Diagnostic] = []
     for item in labelled:
         for run in getattr(item, "label", None) or ():
@@ -678,21 +679,24 @@ def _routing_owner_bounds(
     source_id: str,
     target_id: str,
 ) -> Rect:
-    semantic = compilation.measured.semantic
+    # (As it was routed: a frame a line ends at is held by a group there -- flexo.frames.)
+    semantic = compilation.routed.fitted.measured.semantic
     owner = bounded_owner(semantic, parent_map(semantic.groups), (source_id, target_id))
     return compilation.fitted.group(owner).bounds
 
 
 def _svg_diagnostics(compilation: Compilation) -> tuple[Diagnostic, ...]:
     semantic = compilation.measured.semantic
+    # (Its lines as they were routed: those that end at a frame among them.)
+    lines = compilation.routed.fitted.measured.semantic
     expected_ids = tuple(
         [group.id for group in semantic.groups]
         + [node.id for node in semantic.nodes]
-        + [edge.id for edge in semantic.edges]
-        + [net.id for net in semantic.nets]
+        + [edge.id for edge in lines.edges]
+        + [net.id for net in lines.nets]
     )
     worded = any(
-        item.label for item in (*semantic.groups, *semantic.nodes, *semantic.edges, *semantic.nets)
+        item.label for item in (*semantic.groups, *semantic.nodes, *lines.edges, *lines.nets)
     )
     return _structural_svg_diagnostics(compilation.document.text, expected_ids, worded=worded)
 

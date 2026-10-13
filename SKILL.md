@@ -51,7 +51,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 - A box round shapes in different groups, which moves none of them: a frame, in a file
   `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over,
   title_side: left|right|bottom-left|bottom-right}}` (the corner its label stands at:
-  the top left by default).
+  the top left by default). A line may end at it, from a shape outside it:
+  `{from: block, to: stage, arrive: south}` meets the middle of that side of its outline.
 - A data plot in a figure: `panel.plot(id, "plots.py", "function", width=, height=)`; in a
   file `{kind: plot, properties: {source: plots.py, function: f}}`. The function returns
   a matplotlib figure; flexo sets the font, sizes and colours and lays it out at that size.

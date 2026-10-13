@@ -1688,7 +1688,22 @@ def test_the_figures_guide_for_agents_says_how_each_thing_is_written_and_says_it
     corners = "title_side: left|right|bottom-left|bottom-right"
     assert GUIDE.replace("\n ", "").count(corners) == 2
     frame = GUIDE[GUIDE.index("kind: frame") :]
-    assert "title_side" in frame[: frame.index("A plot:")]
+    frame = frame[: frame.index("A plot:")].replace("\n ", "")
+    assert "title_side" in frame
+    # And a line to a frame is said as one is written: the one it writes out is drawn.
+    assert "An edge may start or end at a frame" in frame and "arrive: south" in frame
+    written = yaml.safe_load(re.search(r"\{from: block, to: stage, arrive: south\}", frame)[0])
+    document = {
+        "figure": {"id": "guide"},
+        "nodes": [
+            {"id": "block"}, {"id": "held"},
+            {"id": "stage", "kind": "frame", "properties": {"around": "held"}},
+        ],
+        "edges": [written],
+    }
+    drawn = compile_figure(parse_figure(document))
+    (line,) = drawn.routed.edges
+    assert line.centerline[-1].y == pytest.approx(drawn.frames[0].bounds.bottom)
     # The mechanisms it writes out are ones flexo draws: a real one, and one of placeholders.
     steps = (
         [
@@ -3069,6 +3084,51 @@ def test_a_lines_end_dragged_meets_the_side_of_the_shape_it_is_let_go_by() -> No
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_lines_end_dragged_to_a_frame_meets_its_outline_or_its_title_not_what_it_holds() -> None:
+    # A frame (0..200 across, 0..160 down) round a box, its title at its top left. What is
+    # inside a frame is the shapes', or nobody's: an end let go there, on nothing, goes
+    # nowhere -- near the frame's outline, on either side of it, it meets that side at its
+    # middle; on its title, the frame, wherever the figure puts it; on the box, the box.
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    shapes = [
+        {"id": "stage", "left": 0, "top": 0, "right": 200, "bottom": 160, "hollow": True,
+         "title": {"left": 8, "top": 8, "right": 60, "bottom": 20}},
+        {"id": "box", "left": 60, "top": 60, "right": 140, "bottom": 100},
+    ]
+    points = [
+        [100, 150], [100, 168], [4, 80], [196, 30], [30, 14], [100, 40], [170, 130],
+        [100, 80], [100, 104], [100, 190],
+    ]
+    code = (
+        f"import {{ endAt, endOff }} from {json.dumps(script.as_uri())};\n"
+        f"const shapes = {json.dumps(shapes)};\n"
+        f"console.log(JSON.stringify([{json.dumps(points)}.map(([x, y]) => {{\n"
+        "  const at = endAt(shapes, { x, y });\n"
+        "  return at && [at.id, at.side, at.at.x, at.at.y];\n"
+        "}), [[100, 150], [100, 168], [30, 14], [100, 40]].map(([x, y]) =>"
+        " endOff(shapes[0], { x, y }))]));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    met, off = json.loads(result.stdout)
+    assert met == [
+        ["stage", "south", 100, 160],
+        ["stage", "south", 100, 160],
+        ["stage", "west", 0, 80],
+        ["stage", "east", 200, 80],
+        ["stage", "", 100, 80],
+        None,
+        None,
+        ["box", "", 100, 80],
+        ["box", "south", 100, 100],
+        None,
+    ]
+    # (How far from where a line may end at it: from its outline, inside it or out.)
+    assert off == [10, 8, 0, 40]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_a_lines_drawn_ends_are_told_apart_by_the_shapes_they_meet() -> None:
     # A joined line's pieces: two stems into one shape's two ports, side by side, and a
     # rail whose end stops short of a shape -- each end given its own nearest point.
@@ -3476,7 +3536,7 @@ globalThis.setTimeout = (run, ms, ...rest) => {
   return timer;
 };
 
-function dragPage(model, boxes, answer = () => ({})) {
+function dragPage(model, boxes, answer = () => ({}), parts = {}) {
   const elements = new Map(), gliding = new Map();
   const carried = (node) => {
     const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(node.getAttribute("transform") || "");
@@ -3501,7 +3561,7 @@ function dragPage(model, boxes, answer = () => ({})) {
   };
   const page = new Node("div");
   const figure = figureParts({
-    catalog: { parts: {}, groups: [] }, overlay: page, idOf: (id) => id, changed() {},
+    catalog: { parts, groups: [] }, overlay: page, idOf: (id) => id, changed() {},
     element, box: (id) => element(id)?.getBoundingClientRect() || null,
     // (`breaks`: what goes wrong as an edit is asked for, to see what becomes of the shape.)
     edited: () => { if (figure.breaks) throw new Error(figure.breaks); },
@@ -3547,6 +3607,96 @@ function dragPage(model, boxes, answer = () => ({})) {
 
 def _drag_page(code: str) -> dict:
     return _figure_page(DRAG_PAGE + code)
+
+
+# Two boxes in a column with a frame round them, "Stage", a box to its left and one to its
+# right -- each element hearing what it listens for, so a + can be pressed and clicked.
+FRAMED_PAGE = (
+    "Node.prototype.addEventListener = function (type, run) { (this.heard ??= {})[type] = run; };\n"
+    "const TITLE = { left: 196, top: 14, right: 240, bottom: 26, width: 44, height: 12 };\n"
+    "Node.prototype.querySelector = function (selector) {\n"
+    "  return this.id === 'stage' && selector.includes('.label')"
+    " ? { getBoundingClientRect: () => TITLE } : null;\n"
+    "};\n"
+    "globalThis.getComputedStyle = () => ({});\n"
+    "const boxes = { a: [20, 100, 80, 130], b: [200, 40, 260, 70], c: [200, 100, 260, 130],\n"
+    "  d: [400, 60, 460, 90], stage: [190, 10, 270, 140], root: [0, 0, 600, 300] };\n"
+    "const figure = dragPage({ nodes: [...SHAPES,\n"
+    "    { id: 'stage', kind: 'frame', label: 'Stage', properties: { around: 'b, c' } }],\n"
+    "  groups: [{ id: 'root', layout: { kind: 'row' }, children: ['a', 'col', 'd', 'stage'] },\n"
+    "    { id: 'col', role: 'layout', layout: { kind: 'column' }, children: ['b', 'c'] }] },\n"
+    "  boxes, () => ({}), PARTS);\n"
+    "const plus = () => figure.markViews()"
+    ".filter((node) => (node.attributes.class || '').includes('fig-next'));\n"
+    "const at = (x, y) => ({ button: 0, clientX: x, clientY: y,"
+    " preventDefault() {}, stopPropagation() {} });\n"
+    "// The + beside `from` pressed, dragged to a point and let go there: the edits sent.\n"
+    "const drawn = async (from, to) => {\n"
+    "  figure.select([from]);\n"
+    "  const [button] = plus(), before = sent.length;\n"
+    "  button.heard.pointerdown(at(0, 0));\n"
+    "  fire('pointermove', at(...to)); frame();\n"
+    "  fire('pointerup', at(...to));\n"
+    "  await figure.idle();\n"
+    "  return sent.slice(before).map(([action]) => action);\n"
+    "};\n"
+).replace("SHAPES", _shapes("a", "b", "c", "d"))
+
+
+def _framed_page(code: str) -> dict:
+    from flexo.studio.figure_parts import catalogue
+
+    parts = {kind: catalogue()["parts"][kind] for kind in ("block", "frame")}
+    return _drag_page(f"const PARTS = {json.dumps(parts)};\n" + FRAMED_PAGE + code)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_line_is_drawn_from_a_plus_to_a_frame_and_from_a_frames_own_plus() -> None:
+    """A frame had no + (it took no line), and a line let go anywhere over one was sent to
+    it and refused."""
+
+    out = _framed_page("""
+const out = {};
+figure.select(["stage"]);
+out.plus = plus().map((node) => node.attributes.title);
+// Its + dragged to a shape outside it: a line from the frame; to one it goes round: none.
+out.toShape = await drawn("stage", [430, 75]);
+out.toHeld = await drawn("stage", [230, 55]);
+// A shape's + let go at the frame's outline, just inside it or just outside; on its title;
+// inside it on nothing; on a shape inside it; far from everything.
+out.outline = [await drawn("a", [192, 85]), await drawn("a", [185, 85])];
+out.outline.push(await drawn("d", [230, 138]));
+out.title = await drawn("a", [220, 20]);
+out.inside = await drawn("a", [230, 85]);
+out.held = await drawn("a", [230, 115]);
+out.far = await drawn("a", [300, 200]);
+// From a shape the frame goes round, the frame is no place to let go.
+out.fromHeld = await drawn("b", [230, 12]);
+// Clicked, the frame's + asks for the shape its line goes to: clicked on next. (Once the
+// click that ends a drag has had its turn to be swallowed.)
+await new Promise((done) => setTimeout(done, 5));
+figure.select(["stage"]);
+plus()[0].heard.click(at(0, 0));
+out.asking = figure.connecting;
+const before = sent.length;
+figure.click({ target: { id: "d", matches: () => true, closest: () => null } });
+await figure.idle();
+out.clicked = sent.slice(before).map(([action]) => action);
+out.asked = figure.connecting;
+console.log(JSON.stringify(out));
+""")
+    assert len(out["plus"]) == 1 and "Draw a line from “Stage”" in out["plus"][0]
+    assert out["toShape"] == [{"do": "connect", "source": "stage", "target": "d"}]
+    assert out["toHeld"] == []
+    to_frame = {"do": "connect", "target": "stage"}
+    assert out["outline"] == [
+        [{**to_frame, "source": "a"}], [{**to_frame, "source": "a"}], [{**to_frame, "source": "d"}]
+    ]
+    assert out["title"] == [{**to_frame, "source": "a"}]
+    assert out["inside"] == [] and out["far"] == [] and out["fromHeld"] == []
+    assert out["held"] == [{"do": "connect", "source": "a", "target": "c"}]
+    assert out["asking"] == {"source": "stage"} and out["asked"] is None
+    assert out["clicked"] == [{"do": "connect", "source": "stage", "target": "d"}]
 
 
 # A flow of seven written with no groups (a column), seen on a slide as a row: six on one

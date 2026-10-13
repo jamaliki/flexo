@@ -7,7 +7,17 @@ from dataclasses import dataclass, replace
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
-from flexo.frames import PlacedFrame, margin, place, split, title_room
+from flexo.frames import (
+    PlacedFrame,
+    ended,
+    margin,
+    place,
+    settled,
+    split,
+    stood_in,
+    title_room,
+    undrawn,
+)
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
@@ -42,8 +52,12 @@ def compile_figure(
     give_up_if_newer()
     layout_style = style or figure_style(figure)
     paint_palette = palette or figure_palette(figure)
-    # (A frame goes round shapes where the layout puts them: laid out without it.)
-    figure, frames = split(lettered(_resolved_shapes(figure, layout_style)))
+    # (A frame goes round shapes where the layout puts them: laid out without it, and
+    # without the lines that end at it -- routed once it is where it will be drawn.)
+    whole = lettered(_resolved_shapes(figure, layout_style))
+    figure, frames = split(whole)
+    lines = ended(whole) if frames else ((), ())
+    held = (frames, lines) if any(lines) else None
     # Each shape's words in the weight and slant it asks for (``flexo.wording``).
     figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
     figure = _with_margin_for(frames, figure, layout_style)
@@ -78,28 +92,68 @@ def compile_figure(
             figure = _with_recalled_room(figure, last[0])
             measured = measure_figure(figure, style=layout_style)
         fitted = fit_figure(measured, style=layout_style, slide=slide)
-        routed = route_figure(fitted, style=layout_style)
+        routed = _route(fitted, layout_style, held)
         current, measured, fitted, routed = _with_room_rounds(
-            figure, measured, fitted, routed, layout_style, slide=slide, rounds=DRAFT_ROOM_ROUNDS
+            figure, measured, fitted, routed, layout_style, slide=slide,
+            rounds=DRAFT_ROOM_ROUNDS, held=held,
         )
         # (The next draft starts from this one's room, as its lines are this one's.)
         remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
-        return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
+        return _framed(frames, measured, fitted, routed, layout_style, paint_palette, held)
     give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
     give_up_if_newer()
-    routed = route_figure(fitted, style=layout_style)
-    fitted, routed, slide = _judged_slides(measured, fitted, routed, layout_style)
+    routed = _route(fitted, layout_style, held)
+    fitted, routed, slide = _judged_slides(measured, fitted, routed, layout_style, held)
     current, measured, fitted, routed = _with_room_rounds(
-        figure, measured, fitted, routed, layout_style, slide=slide
+        figure, measured, fitted, routed, layout_style, slide=slide, held=held
     )
     current, measured, fitted, routed = _uncrossed(
-        current, measured, fitted, routed, layout_style, slide=slide
+        current, measured, fitted, routed, layout_style, slide=slide, held=held
     )
     # (For a draft of it to start from.)
     remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
     give_up_if_newer()
-    return _framed(frames, measured, fitted, routed, layout_style, paint_palette)
+    return _framed(frames, measured, fitted, routed, layout_style, paint_palette, held)
+
+
+FRAME_ROUNDS = 1
+"""Most times a figure is routed again because a frame its lines end at is drawn elsewhere
+than they took it to be: a line through its title's band that was not looked for."""
+
+
+def _route(fitted: FittedFigure, style: LayoutStyle, held: tuple | None = None) -> RoutedFigure:
+    """``fitted`` routed. Where lines end at frames (``held``: the frames, and those
+    lines), with each such frame standing in the figure where it will be drawn
+    (``flexo.frames.stood_in``) -- routed again should its routes put the frame elsewhere,
+    so that the lines meet its outline as it is drawn."""
+
+    if held is None:
+        return route_figure(fitted, style=style)
+    frames, lines = held
+    stood = stood_in(fitted, frames, lines, style)
+    routed = route_figure(stood, style=style)
+    for _ in range(FRAME_ROUNDS):
+        again = stood_in(fitted, frames, lines, style, among=routed)
+        if settled(stood, again):
+            break
+        stood, routed = again, route_figure(again, style=style)
+    return routed
+
+
+def _kept(
+    routed: RoutedFigure, fitted: FittedFigure, style: LayoutStyle, held: tuple | None
+) -> RoutedFigure:
+    """``routed`` as the routes of ``fitted``, a layout that puts everything where the one
+    it was routed in did: its frames standing in it where they stood."""
+
+    if held is None:
+        return replace(routed, fitted=fitted)
+    frames, lines = held
+    again = stood_in(fitted, frames, lines, style, among=routed)
+    if settled(routed.fitted, again):
+        return replace(routed, fitted=again)
+    return _route(fitted, style, held)
 
 
 def _with_margin_for(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> FigureSpec:
@@ -165,10 +219,13 @@ def _framed(
     routed: RoutedFigure,
     style: LayoutStyle,
     palette: Palette,
+    held: tuple | None = None,
 ) -> Compilation:
     """The figure drawn, its frames round what they name."""
 
     placed, said = place(frames, routed, style)
+    if held is not None:
+        said = (*said, *undrawn(frames, held[1], routed))
     # Its plots drawn (once: kept for the figure's own drawing), and what to say of those
     # that were not.
     if any(node.measured.spec.kind == "plot" for node in fitted.nodes):
@@ -178,7 +235,13 @@ def _framed(
     if said:
         measured = replace(measured, diagnostics=measured.diagnostics + said)
         fitted = replace(fitted, measured=measured)
-        routed = replace(routed, fitted=fitted)
+        if routed.fitted.nodes == fitted.nodes:
+            routed = replace(routed, fitted=fitted)
+        else:
+            # (Routed with frames standing in it for their lines: said of that figure too.)
+            among = routed.fitted.measured
+            among = replace(among, diagnostics=among.diagnostics + said)
+            routed = replace(routed, fitted=replace(routed.fitted, measured=among))
     document = emit_svg(routed, style=style, palette=palette, frames=placed)
     return Compilation(measured, fitted, routed, document, placed)
 
@@ -216,7 +279,7 @@ def _with_recalled_room(figure: FigureSpec, room: dict[str, tuple]) -> FigureSpe
     return replace(figure, groups=tuple(groups))
 
 
-def _judged_slides(measured, fitted, routed, style):
+def _judged_slides(measured, fitted, routed, style, held=None):
     """The layout with its groups slid to straighten arrows, if the routes agree.
 
     Fitting slides a group on a prediction of where the router will put each
@@ -229,7 +292,7 @@ def _judged_slides(measured, fitted, routed, style):
     plain = fit_figure(measured, style=style, slide=False)
     if plain.nodes == fitted.nodes:
         return fitted, routed, True
-    plain_routed = route_figure(plain, style=style)
+    plain_routed = _route(plain, style, held)
     bends, plain_bends = _bends(routed), _bends(plain_routed)
     # (Bending no less, the slid layout is still the better if its lines meet their boxes
     # nearer the middles of their sides: a branch's last step level with the one feeding it.)
@@ -285,7 +348,9 @@ def _corners(points) -> int:
     return count
 
 
-def _with_room_rounds(figure, measured, fitted, routed, style, *, slide=True, rounds=None):
+def _with_room_rounds(
+    figure, measured, fitted, routed, style, *, slide=True, rounds=None, held=None
+):
     """Lay out again, up to ``ROOM_ROUNDS`` times (or ``rounds``), with the room routing
     asked for."""
 
@@ -305,9 +370,9 @@ def _with_room_rounds(figure, measured, fitted, routed, style, *, slide=True, ro
         # Room the layout had to spare moves nothing, and routing it again would draw
         # every line as it is: they are kept.
         if _placed_alike(next_fitted, fitted):
-            routed = replace(routed, fitted=next_fitted)
+            routed = _kept(routed, next_fitted, style, held)
         else:
-            routed = route_figure(next_fitted, style=style)
+            routed = _route(next_fitted, style, held)
         current, measured, fitted = attempt, next_measured, next_fitted
     return current, measured, fitted, routed
 
@@ -332,7 +397,7 @@ def _unroomed(group: GroupSpec) -> GroupSpec:
     return replace(group, layout=replace(group.layout, room=(0.0, 0.0, 0.0, 0.0), gap_room=()))
 
 
-def _uncrossed(figure, measured, fitted, routed, style, *, slide=True):
+def _uncrossed(figure, measured, fitted, routed, style, *, slide=True, held=None):
     """Try a lane of room along a container's edge where it would take a crossing out.
 
     A route that crosses another often has a clean way round -- over the top
@@ -360,9 +425,10 @@ def _uncrossed(figure, measured, fitted, routed, style, *, slide=True):
                 attempt,
                 trial_measured,
                 trial_fitted,
-                route_figure(trial_fitted, style=style),
+                _route(trial_fitted, style, held),
                 style,
                 slide=slide,
+                held=held,
             )
             count = len(crossings(trial[3]))
             if count < best:

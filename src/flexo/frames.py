@@ -18,20 +18,36 @@ widens it (``title_room``), so it lies on nothing -- a line that comes down ther
 short of. The title stands at the frame's top left, or at the corner its ``title_side``
 names, as a group's does: ``right``, ``bottom-left`` or ``bottom-right`` -- its band under
 the shape at the frame's bottom then, and all of this the same, seen in a mirror.
+
+A line may start or end at a frame (``{from: block, to: stage, arrive: south}``), from a
+shape the frame does not hold. The layout sees no such line (``split``, ``ended``): it
+moves nothing. Where there are any, routing is given each frame they end at as a part of
+the figure, where it will be drawn (``stood_in``) -- one that every other line goes
+through as before, and that its own lines keep out of -- so they meet its outline as
+lines meet a box: at the middle of the side that faces their other end, or the side
+``depart`` or ``arrive`` names.
 """
 
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from itertools import pairwise
 
 from flexo.diagnostics import Diagnostic, Severity
-from flexo.geometry import Point, Rect
-from flexo.ir.fitted import FittedFigure
-from flexo.ir.measured import TextMetrics
+from flexo.geometry import Point, Rect, Size
+from flexo.ir.fitted import FittedFigure, FittedNode, ResolvedPort
+from flexo.ir.measured import MeasuredNode, TextMetrics
 from flexo.ir.routed import RoutedFigure
-from flexo.ir.semantic import TITLE_SIDES, FigureSpec, GroupSpec, NodeSpec
+from flexo.ir.semantic import (
+    TITLE_SIDES,
+    EdgeSpec,
+    FigureSpec,
+    GroupSpec,
+    NetSpec,
+    NodeSpec,
+)
 from flexo.style import LayoutStyle, Palette
 
 FRAME_KIND = "frame"
@@ -119,14 +135,89 @@ def split(figure: FigureSpec) -> tuple[FigureSpec, tuple[NodeSpec, ...]]:
                 replace(group, children=tuple(c for c in group.children if c not in ids))
                 for group in figure.groups
             ),
-            edges=tuple(
-                edge
-                for edge in figure.edges
-                if edge.source.node_id not in ids and edge.target.node_id not in ids
-            ),
+            edges=tuple(edge for edge in figure.edges if not _ends(edge) & ids),
+            nets=tuple(net for net in figure.nets if not _ends(net) & ids),
         ),
         frames,
     )
+
+
+def _ends(line: EdgeSpec | NetSpec) -> set[str]:
+    """The shapes (and frames) a line starts and ends at."""
+
+    if isinstance(line, EdgeSpec):
+        return {line.source.node_id, line.target.node_id}
+    return {reference.node_id for reference in (*line.sources, *line.targets)}
+
+
+def ended(figure: FigureSpec) -> tuple[tuple[EdgeSpec, ...], tuple[NetSpec, ...]]:
+    """The lines of ``figure`` that start or end at one of its frames: its edges, and its
+    lines that branch. (What ``split`` keeps from the layout.)"""
+
+    ids = {node.id for node in figure.nodes if node.kind == FRAME_KIND}
+    if not ids:
+        return (), ()
+    return (
+        tuple(edge for edge in figure.edges if _ends(edge) & ids),
+        tuple(net for net in figure.nets if _ends(net) & ids),
+    )
+
+
+def refused(figure: FigureSpec) -> tuple[Diagnostic, ...]:
+    """What to say of a line that ends at a frame and cannot: one between a frame and a
+    shape it goes round (or a frame all of whose shapes it goes round) -- there is no way
+    to it from outside."""
+
+    frames = {node.id: node for node in figure.nodes if node.kind == FRAME_KIND}
+    edges, nets = ended(figure)
+    if not edges and not nets:
+        return ()
+    groups = {group.id: group for group in figure.groups}
+
+    def within(ids: tuple[str, ...]) -> set[str]:
+        found: set[str] = set()
+        left = list(ids)
+        while left:
+            one = left.pop()
+            if one not in found:
+                found.add(one)
+                left += groups[one].children if one in groups else ()
+        return found
+
+    held = {name: within(around(frame)) - set(groups) for name, frame in frames.items()}
+    said: list[Diagnostic] = []
+    for line in (*edges, *nets):
+        ends = sorted(_ends(line))
+        for frame in (end for end in ends if end in frames):
+            inside = [
+                other
+                for other in ends
+                if other != frame
+                and (
+                    other in held[frame]
+                    or (other in frames and held[other] and held[other] <= held[frame])
+                )
+            ]
+            alone = isinstance(line, EdgeSpec) and line.source.node_id == line.target.node_id
+            if not inside and not alone:
+                continue
+            what = (
+                "starts and ends at it"
+                if alone
+                else f"joins it to “{inside[0]}”, which it goes round"
+            )
+            said.append(
+                Diagnostic(
+                    "frame.line.inside",
+                    f"A line can\u2019t end at the frame “{frame}” from inside it: this one "
+                    f"{what}.",
+                    entity_id=line.id,
+                    hint="Join the frame to a shape it does not go round, or the line to a "
+                    "shape inside it.",
+                )
+            )
+            break
+    return tuple(said)
 
 
 def place(
@@ -138,13 +229,13 @@ def place(
     if not frames:
         return (), ()
     fitted = routed.fitted
-    boxes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
-    boxes |= {
-        group.measured.spec.id: group.bounds
-        for group in fitted.groups
-        if group.measured.spec.id != fitted.measured.semantic.root
+    boxes = _boxes(fitted)
+    # (Where its lines were taken to it, a frame with lines of its own: ``stood_in``.)
+    stood = {
+        node.measured.spec.id: node.bounds
+        for node in fitted.nodes
+        if node.measured.spec.kind == FRAME_KIND
     }
-    inset = _inset(style)
     drawn = _strokes(routed)
     placed: list[PlacedFrame] = []
     said: list[Diagnostic] = []
@@ -179,25 +270,234 @@ def place(
             )
         if not found:
             continue
-        label = _title(spec, style)
-        held = _round(found)
-        band = label.height + style.compact_gap.points if label is not None else 0.0
-        if _below(side):
-            # (Under its shapes, the same: the lines that go down through the band there.)
-            lines = _crossing(
-                drawn, held.bottom + style.compact_gap.points, held.bottom + band
-            )
-            ends, top = _feet(found), held.y - inset
-        else:
-            # (The lines that come down where its title is: through the band, clear of its
-            # gap.)
-            lines = _crossing(drawn, held.y - band, held.y - style.compact_gap.points)
-            ends, top = _heads(found), held.y - inset - band
-        reach, title_x = _reach(held, ends, label, style, lines, right=_right(side))
-        middle = held.x + held.width / 2.0
-        bounds = Rect(middle - reach, top, 2.0 * reach, held.height + 2.0 * inset + band)
-        placed.append(PlacedFrame(spec, bounds, label, layer_of(spec), inset, title_x, side))
+        # (A line that ends at the frame stops at its outline: it is not through its band.)
+        runs = _strokes(routed, but=spec.id) if spec.id in stood else drawn
+
+        def through(top: float, bottom: float, runs: list = runs) -> list[tuple[float, float]]:
+            return _crossing(runs, top, bottom)
+
+        placed.append(_round_them(spec, found, style, through, stood.get(spec.id)))
     return tuple(placed), tuple(said)
+
+
+def _boxes(fitted: FittedFigure) -> dict[str, Rect]:
+    """Where each shape and group a frame may go round is: not the figure's own group, nor
+    a frame standing in the figure for its lines."""
+
+    boxes = {
+        node.measured.spec.id: node.bounds
+        for node in fitted.nodes
+        if node.measured.spec.kind != FRAME_KIND
+    }
+    boxes |= {
+        group.measured.spec.id: group.bounds
+        for group in fitted.groups
+        if group.measured.spec.id != fitted.measured.semantic.root
+    }
+    return boxes
+
+
+def _round_them(
+    spec: NodeSpec,
+    found: list[Rect],
+    style: LayoutStyle,
+    through: Callable[[float, float], list[tuple[float, float]]],
+    stood: Rect | None = None,
+) -> PlacedFrame:
+    """One frame round the boxes ``found``. ``through(top, bottom)``: the lines that pass
+    between those heights, where its title's band is. ``stood``: where its own lines were
+    taken to it -- as wide as that it is drawn, so they meet its outline."""
+
+    inset = _inset(style)
+    side = title_side_of(spec)
+    label = _title(spec, style)
+    held = _round(found)
+    band = label.height + style.compact_gap.points if label is not None else 0.0
+    if _below(side):
+        # (Under its shapes, the same: the lines that go down through the band there.)
+        lines = through(held.bottom + style.compact_gap.points, held.bottom + band)
+        ends, top = _feet(found), held.y - inset
+    else:
+        # (The lines that come down where its title is: through the band, clear of its
+        # gap.)
+        lines = through(held.y - band, held.y - style.compact_gap.points)
+        ends, top = _heads(found), held.y - inset - band
+    reach, title_x = _reach(held, ends, label, style, lines, right=_right(side))
+    middle = held.x + held.width / 2.0
+    if stood is not None and abs(stood.width / 2.0 - reach) > 1e-9:
+        # Its lines end where it was taken to be: the title keeps its place in the frame
+        # as it is drawn (but over shapes that start further in, where it is with them).
+        wider = stood.width / 2.0 - reach
+        if _right(side) and ends.right >= held.right - 0.5:
+            title_x += wider
+        elif not _right(side) and ends.x <= held.x + 0.5:
+            title_x -= wider
+        reach = stood.width / 2.0
+    bounds = Rect(middle - reach, top, 2.0 * reach, held.height + 2.0 * inset + band)
+    return PlacedFrame(spec, bounds, label, layer_of(spec), inset, title_x, side)
+
+
+SETTLED = 0.05
+"""How near, in points, a frame is drawn to where its lines were taken to it for them to be
+left as they are: nearer than any eye, further than arithmetic."""
+
+
+def stood_in(
+    fitted: FittedFigure,
+    frames: tuple[NodeSpec, ...],
+    lines: tuple[tuple[EdgeSpec, ...], tuple[NetSpec, ...]],
+    style: LayoutStyle,
+    *,
+    among: RoutedFigure | None = None,
+) -> FittedFigure:
+    """``fitted`` as routing sees it where ``lines`` end at frames: each frame they end at
+    a part of the figure, where it will be drawn, and those lines among the figure's.
+
+    A frame is drawn once everything is routed, as wide as the lines through its title's
+    band leave its title room for -- which its own lines must know before they are routed.
+    So it stands where it is expected to be drawn (``_expected``), or, given the figure
+    routed with it so (``among``), where those routes put it: the same place, unless a
+    line went through its band unlooked for. It is held, for whose a line to it is, by
+    the innermost group that holds all it goes round; no group's layout knows of it.
+
+    A line to a frame that goes round nothing in the figure is left out: there is no frame
+    for it to end at (``undrawn``)."""
+
+    from flexo.components import normalize_node
+    from flexo.hierarchy import lowest_common_group, parent_map
+    from flexo.routing.aside import writing_room
+    from flexo.text import TextMeasurer
+
+    edges, nets = lines
+    semantic = fitted.measured.semantic
+    groups = {group.id: group for group in semantic.groups}
+    parents = parent_map(semantic.groups)
+    boxes = _boxes(fitted)
+    named = {end for line in (*edges, *nets) for end in _ends(line)}
+    nodes: list[FittedNode] = []
+    owners: dict[str, list[str]] = {}
+    for frame in frames:
+        held = [item for item in around(frame) if item in boxes and item in parents]
+        if frame.id not in named or not held:
+            continue
+        spec = normalize_node(frame)
+        found = [boxes[item] for item in held]
+        if among is None:
+            ahead = _expected(
+                held, semantic, groups, boxes, _round(found), below=_below(title_side_of(spec))
+            )
+
+            def through(top: float, bottom: float, ahead: list = ahead) -> list:
+                return ahead
+        else:
+            runs = _strokes(among, but=frame.id)
+
+            def through(top: float, bottom: float, runs: list = runs) -> list:
+                return _crossing(runs, top, bottom)
+
+        bounds = _round_them(spec, found, style, through).bounds
+        if among is not None:
+            # (As it stood, if that is where it is drawn: its lines are as they are.)
+            before = next(
+                (node.bounds for node in among.fitted.nodes if node.measured.spec.id == frame.id),
+                None,
+            )
+            if before is not None and _alike(before, bounds):
+                bounds = before
+        measured = MeasuredNode(
+            spec,
+            TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ()),
+            Size(bounds.width, bounds.height),
+            Point(bounds.width / 2.0, bounds.height / 2.0),
+        )
+        ports = tuple(
+            ResolvedPort(port.name, port.side, bounds.point_on(port.side, port.offset))
+            for port in spec.ports
+        )
+        nodes.append(FittedNode(measured, bounds, ports))
+        owners.setdefault(lowest_common_group(parents, held), []).append(frame.id)
+    there = {node.measured.spec.id for node in nodes} | {
+        node.measured.spec.id for node in fitted.nodes
+    }
+    edges = tuple(edge for edge in edges if _ends(edge) <= there)
+    nets = tuple(net for net in nets if _ends(net) <= there)
+    if not nodes or not (edges or nets):
+        return fitted
+    measurer = TextMeasurer(style.typography)
+    measured = replace(
+        fitted.measured,
+        semantic=replace(
+            semantic,
+            nodes=semantic.nodes + tuple(node.measured.spec for node in nodes),
+            groups=tuple(
+                replace(group, children=group.children + tuple(owners[group.id]))
+                if group.id in owners
+                else group
+                for group in semantic.groups
+            ),
+            edges=semantic.edges + edges,
+            nets=semantic.nets + nets,
+        ),
+        nodes=fitted.measured.nodes + tuple(node.measured for node in nodes),
+        edge_labels=fitted.measured.edge_labels
+        + tuple(
+            writing_room(edge, measurer.measure(edge.label), measurer.measure, style)
+            for edge in edges
+        ),
+        net_labels=fitted.measured.net_labels
+        + tuple(measurer.measure(net.label) for net in nets),
+    )
+    return replace(fitted, measured=measured, nodes=fitted.nodes + tuple(nodes))
+
+
+def _alike(one: Rect, other: Rect) -> bool:
+    return all(
+        abs(a - b) <= SETTLED
+        for a, b in zip(
+            (one.x, one.y, one.width, one.height),
+            (other.x, other.y, other.width, other.height),
+            strict=True,
+        )
+    )
+
+
+def settled(stood: FittedFigure, again: FittedFigure) -> bool:
+    """Whether the frames standing in ``again`` (``stood_in``, among the lines routed with
+    them in ``stood``) are where they stood: the lines to them meet them as they are."""
+
+    def frames(fitted: FittedFigure) -> dict[str, Rect]:
+        return {
+            node.measured.spec.id: node.bounds
+            for node in fitted.nodes
+            if node.measured.spec.kind == FRAME_KIND
+        }
+
+    one, other = frames(stood), frames(again)
+    return one.keys() == other.keys() and all(_alike(one[name], other[name]) for name in one)
+
+
+def undrawn(
+    frames: tuple[NodeSpec, ...],
+    lines: tuple[tuple[EdgeSpec, ...], tuple[NetSpec, ...]],
+    routed: RoutedFigure,
+) -> tuple[Diagnostic, ...]:
+    """What to say of each of ``lines`` that is not drawn: its frame goes round nothing in
+    the figure, so there is none for it to end at."""
+
+    drawn = {edge.spec.id for edge in routed.edges} | {net.spec.id for net in routed.nets}
+    names = {frame.id for frame in frames}
+    return tuple(
+        Diagnostic(
+            "frame.line.undrawn",
+            f"The line to the frame “{sorted(_ends(line) & names)[0]}” is not drawn: the frame "
+            "goes round nothing in the figure.",
+            Severity.WARNING,
+            entity_id=line.id,
+            hint="Name the shapes or groups the frame goes round in its properties.around.",
+        )
+        for line in (*lines[0], *lines[1])
+        if line.id not in drawn
+    )
 
 
 def _title(spec: NodeSpec, style: LayoutStyle) -> TextMetrics | None:
@@ -283,11 +583,16 @@ def _reach(
     return reach, middle - reach + inset
 
 
-def _strokes(routed: RoutedFigure) -> list[tuple[Point, ...]]:
-    """Every line of the figure as it was routed, a run of points each."""
+def _strokes(routed: RoutedFigure, but: str | None = None) -> list[tuple[Point, ...]]:
+    """Every line of the figure as it was routed, a run of points each -- ``but`` those
+    that end at the frame of that name."""
 
-    runs = [edge.centerline for edge in routed.edges]
+    runs = [
+        edge.centerline for edge in routed.edges if but is None or but not in _ends(edge.spec)
+    ]
     for net in routed.nets:
+        if but is not None and but in _ends(net.spec):
+            continue
         runs += [net.rail, *net.trunks, *net.joins]
         runs += [stem.centerline for stem in (*net.source_stems, *net.target_stems)]
     return [run for run in runs if len(run) > 1]

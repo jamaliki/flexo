@@ -450,7 +450,11 @@ def plan_pins(
         order = (overrides or {}).get((node_id, side))
         if order is not None and set(order) != set(groups):
             order = None
-        placed = _place_on_side(node, side, groups, style, blockers, order, captioned, lines)
+        ahead = blockers
+        if node.measured.spec.kind == "frame":
+            # (A frame's own pins keep off the lines that go through that side of it.)
+            ahead = blockers + _through(node, side, ends, style)
+        placed = _place_on_side(node, side, groups, style, ahead, order, captioned, lines)
         orders.append(list(placed))
         if chosen is not None:
             chosen[(node_id, side)] = list(placed)
@@ -473,6 +477,34 @@ def plan_pins(
         clearance = style.arrival_clearance.points if arriving else style.route_clearance.points
         pins[key] = Pin(key, slot.node, slot.side, point, arriving, clearance)
     return pins
+
+
+def _through(
+    frame: FittedNode, side: Side, ends: list[End], style: LayoutStyle
+) -> tuple[Rect, ...]:
+    """Where lines go through one side of a frame: each line that leaves a shape the frame
+    goes round by that side, for a shape outside the frame -- a lane wide, just in front
+    of the side, where the frame's own pins are not to be (``_open_stretch``)."""
+
+    bounds, lane, depth = frame.bounds, style.port_spacing.points, style.arrival_clearance.points
+    found: list[Rect] = []
+    for end in ends:
+        box = end.node.bounds
+        if (
+            end.group is None
+            or end.group[2] is not side
+            or end.node is frame
+            or not bounds.inflated(0.5).contains_rect(box)
+            or bounds.contains_point(end.counterpart.center)
+        ):
+            continue
+        if side in {Side.NORTH, Side.SOUTH}:
+            top = bounds.top - depth if side is Side.NORTH else bounds.bottom
+            found.append(Rect(box.center.x - lane, top, 2.0 * lane, depth))
+        else:
+            left = bounds.left - depth if side is Side.WEST else bounds.right
+            found.append(Rect(left, box.center.y - lane, depth, 2.0 * lane))
+    return tuple(found)
 
 
 def _common_net_sides(
