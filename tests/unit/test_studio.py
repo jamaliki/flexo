@@ -1673,6 +1673,33 @@ def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> Non
     assert tones["colours"][0]["fill"].startswith("#")
 
 
+def test_the_figures_guide_for_agents_says_how_each_thing_is_written_and_says_it_truly() -> None:
+    from flexo.compiler import compile_figure
+    from flexo.serialization import parse_figure
+    from flexo.studio.figure_kind import GUIDE
+
+    said = (
+        "kind: image", "kind: structure", "kind: mechanism", "kind: plot", "kind: frame",
+        "title_side", "hide: [ids]", "role: panel", "line: dashed|dotted", "[*Ar]",
+    )
+    for words in said:
+        assert words in GUIDE, words
+    # The mechanisms it writes out are ones flexo draws: a real one, and one of placeholders.
+    steps = (
+        [
+            {"smiles": "[OH-:5].[CH3:1][C:2](=[O:3])[Cl:4]", "arrows": ["5 -> 2", "2=3 -> 3"]},
+            {"arrows": ["3 -> 2", "2-4 -> 4"]},
+        ],
+        [{"smiles": "[X:1].[Y:2][Z:3]", "arrows": ["1 -> 2", "2-3 -> 3"]}],
+    )
+    written = GUIDE.replace("\n  ", "")
+    assert all(each[0]["smiles"] in written for each in steps)
+    for each in steps:
+        node = {"id": "r", "kind": "mechanism", "properties": {"steps": each}}
+        document = {"figure": {"id": "guide"}, "nodes": [node]}
+        assert "<svg" in compile_figure(parse_figure(document)).document.text
+
+
 def test_the_figure_kind_and_theme_kind_are_always_there() -> None:
     found = kinds()
     assert isinstance(found["figure"], FigureKind) and isinstance(found["theme"], ThemeKind)
