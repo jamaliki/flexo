@@ -884,6 +884,45 @@ def test_the_line_a_part_is_moved_out_of_goes_when_it_is_left_holding_nothing() 
     assert _groups(titled)[second] == []
 
 
+def test_a_snake_written_as_it_is_seen_keeps_every_part_where_it_was_and_its_lines() -> None:
+    def drawn(text: str) -> dict[str, tuple[float, float, float]]:
+        nodes = compile_figure(parse(text, Path.cwd())).fitted.nodes
+        return {
+            node.measured.spec.id: (
+                node.bounds.x, node.bounds.x + node.bounds.width, node.bounds.y
+            )
+            for node in nodes
+        }
+
+    # Seven folded four and three, the second line run back: seen as "g f e" under "a b c d",
+    # their right ends level -- and written so, each line in the order it is seen.
+    chain = _flow()
+    seen = [["a", "b", "c", "d"], ["g", "f", "e"]]
+    arranged = apply(
+        chain, {"do": "arrange", "id": "root", "kind": "row", "lines": seen, "align": "end"}
+    )
+    first, second = arranged["select"]
+    assert _groups(arranged["text"]) == {"root": [first, second], first: seen[0], second: seen[1]}
+    # Drawn as it was seen: the second line's parts left to right as written, its end under
+    # the first's -- not turned round. Its lines are the chain's own, none added or turned:
+    # "d" to "e" steps down at the end, and "e", "f", "g" still run back.
+    at = drawn(arranged["text"])
+    assert at["g"][0] < at["f"][0] < at["e"][0] and abs(at["e"][1] - at["d"][1]) < 1.0
+    assert all(at[name][2] > at["d"][2] for name in "efg")
+    assert edges(arranged["text"]) == edges(chain)
+    # A part put in before "f" on that line is written after it: the line runs back.
+    added = apply(arranged["text"], {"do": "add", "kind": "block", "into": "edge.5.e-to-f"})
+    assert _groups(added["text"])[second] == ["g", "f", added["select"][0], "e"]
+    # The last of the chain's second line let go under "f": a line of its own under the
+    # last, then lined up -- drawn under "f", on a third line.
+    moved = apply(arranged["text"], {"do": "move", "id": "e", "parent": "root", "index": 2})
+    under = apply(moved["text"], {"do": "align", "id": "e", "with": "f"})
+    assert _groups(under["text"]) == {"root": [first, second, "e"], first: seen[0],
+                                      second: ["g", "f"]}
+    at = drawn(under["text"])
+    assert abs(sum(at["e"][:2]) - sum(at["f"][:2])) < 2.0 and at["e"][2] > at["f"][2]
+
+
 LOOSE = (
     "figure:\n  id: f\nnodes:\n"
     + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcdexy")

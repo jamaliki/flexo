@@ -3789,7 +3789,9 @@ export function figureParts(host) {
       // (Kept within the line it goes with, as the figure keeps it: never wider for it.)
       const line = drag.boxes.get(at.of);
       const left = line && line.right - line.left >= width ? Math.max(line.left, Math.min(at.x - width / 2, line.right - width)) : at.x - width / 2;
-      const slot = { left, top: own.top, right: left + width, bottom: own.bottom };
+      // (On its own line, where that is -- or, yet to be put on one, just under the line it goes with.)
+      const top = at.move && line ? line.bottom + 18 : own.top;
+      const slot = { left, top, right: left + width, bottom: top + height };
       // (A row with no title -- a line of a row seen folded, too -- is "the row".)
       const row = (drag.drawn || model()).groups.find((group) => group.id === at.with);
       const label = at.centred
@@ -3976,6 +3978,10 @@ export function figureParts(host) {
     const copy = Boolean(event?.altKey ?? drag?.copy);
     const was = dragFinish();
     if (!was) return;
+    // (Nor left there should its move not be asked for: whatever fails, it is home at once.)
+    try { letGo(was, copy); } catch (error) { sendHome(was); throw error; }
+  }
+  function letGo(was, copy) {
     const at = was.at;
     // ⌥ held as it is let go, as Keynote's ⌥-drag: it is home at once (it never left: see
     // carryCopy), and a copy of it goes where it was let go -- or, let go where it was, beside
@@ -4007,11 +4013,18 @@ export function figureParts(host) {
     // Lined up under a part of the line it goes with (or the line itself): only it moves --
     // a figure folded onto lines written as seen first too, one step: the line it goes with
     // is then a row of its own, and the last line, should it be alone on it, its own.
+    // (Let go under a part of the line over it, it is put on a line of its own there first --
+    // `move` -- one step too.)
     if (at.kind === "align") {
       const label = at.centred ? `Centre ${inQuotes(nameOf(id))}` : `Place ${inQuotes(nameOf(id))} ${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
-      if (!folds.length) { act({ do: "align", id, with: at.with }, { failed, label }); return; }
-      const merge = `as-drawn:${id}:${Date.now()}`;
-      arrangeSeen(folds, { merge, label, failed }, (written) => act({ do: "align", id, with: written(at.with) }, { merge, label, failed }));
+      const merge = folds.length || at.move ? `as-drawn:${id}:${Date.now()}` : null;
+      const lined = (written = (each) => each) => {
+        const align = () => act({ do: "align", id, with: written(at.with) }, { merge, label, failed });
+        if (at.move) act({ do: "move", id, parent: written(at.parent), index: at.index, ...carried }, { merge, label, failed, then: align });
+        else align();
+      };
+      if (folds.length) arrangeSeen(folds, { merge, label, failed }, lined);
+      else lined();
       return;
     }
     if (!folds.length) {
@@ -4036,19 +4049,18 @@ export function figureParts(host) {
       const copy = result.select?.[0];
       if (!copy) return;
       const options = { merge, label };
-      // (Lined up: the part alone on a line that holds only it, the copy is first put on a
-      // line of its own after it. On a line of its own: a figure drawn turned to fit is
-      // written as drawn first, as for the part itself -- ownLine.)
+      // (Lined up: the part alone on a line that holds only it, or let go under a part of
+      // the line over it, the copy is first put on a line of its own -- after the part's,
+      // or there. On a line of its own: a figure drawn turned to fit is written as drawn
+      // first, as for the part itself -- ownLine.)
       const align = () => act({ do: "align", id: copy, with: written(at.with) }, options);
+      const own = holder && at.parent === holder.id ? holder.children.indexOf(id) : -1;
+      const index = own >= 0 && at.index >= own ? at.index + 1 : at.index;
       if (at.kind === "splice") act({ do: "move", id: copy, into: at.line, parent: at.parent }, options);
-      else if (at.kind === "align" && at.line) act({ do: "move", id: copy, parent: written(at.parent), index: at.index + 1 }, { ...options, then: align });
+      else if (at.kind === "align" && (at.line || at.move)) act({ do: "move", id: copy, parent: written(at.parent), index: at.line ? at.index + 1 : index }, { ...options, then: align });
       else if (at.kind === "align") align();
       else if (at.kind === "line") ownLine(copy, written(at.of), at.side, { ...options, drawn, written: Boolean(folds.length) });
-      else {
-        const own = holder && at.parent === holder.id ? holder.children.indexOf(id) : -1;
-        const index = own >= 0 && at.index >= own ? at.index + 1 : at.index;
-        act({ do: "move", id: copy, parent: written(at.parent), index }, options);
-      }
+      else act({ do: "move", id: copy, parent: written(at.parent), index }, options);
     } });
     if (folds.length) arrangeSeen(folds, { merge, label }, duplicateThen);
     else duplicateThen();

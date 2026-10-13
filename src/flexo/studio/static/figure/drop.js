@@ -24,7 +24,10 @@
 // of, centred } (the server's "align"), judged by where the part's middle now is
 // (`centre`, the pointer if not given). Nothing moves but it: the row keeps its places.
 // (`line`: the group that holds only it, should its line be one -- the last line of a row
-// folded to fit, as it is seen or as it was written.)
+// folded to fit, as it is seen or as it was written.) A part let go just under a row of a
+// column, under one of its parts, goes the same way, by a line of its own it has yet to be
+// put on: { kind: "align", with, move: true, parent, index } -- the server's "move" there,
+// then its "align".
 //
 // A part or group with no box (not drawn: a group left holding nothing) has no place to go
 // beside, and is none of the parts another goes between.
@@ -115,6 +118,21 @@ export function dropPlace(model, boxes, point, id, centre = point) {
   const back = Boolean(across && kind === "row" && ((level(siblings[at + 1]) && middle(siblings[at + 1]) < middle(near))
     || (level(siblings[at - 1]) && middle(siblings[at - 1]) > middle(near))));
   const after = across ? (point.x > (box.left + box.right) / 2) !== back : point.y > (box.top + box.bottom) / 2;
+  // Just under a row of a column -- nearer it than makes a pair of the two (underPart) -- and
+  // under one of that row's parts: a line of its own there, lined up under that part (`move`:
+  // put there first). A shape only: a group is lined up with nothing.
+  const row = kind === "column" && after && id && !groups.has(id) && point.y > box.bottom ? groups.get(near) : null;
+  const over = row?.layout?.kind === "row" ? (row.children || []).find((child) => {
+    const part = child !== id && boxes.get(child);
+    return part && point.x >= part.left && point.x <= part.right;
+  }) : null;
+  if (over) {
+    // (There already, and lined up with it -- or drawn under its middle: it stays.)
+    const placed = parent.get(id) === group.id && group.children.indexOf(id) === at + 1;
+    const lined = (model.nodes || []).find((node) => node.id === id)?.align_with === over;
+    return { kind: "align", with: over, of: near, centred: false, side: "below", x: middle(over), move: true,
+      here: placed && (lined || Boolean(own) && Math.abs((own.left + own.right) / 2 - middle(over)) < 1.5), parent: group.id, index: at + 1 };
+  }
   return { parent: group.id, index: at + (after ? 1 : 0), kind, near, after, across, siblings, back };
 }
 
