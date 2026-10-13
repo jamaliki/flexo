@@ -1084,9 +1084,13 @@ def lone_pair_spots(
 ) -> list[tuple[Point, Point]]:
     """Where an atom's lone pairs are, as the two dots of each -- for an editor to show
     under the pointer: those the arrows drawn have not taken (``given``), where a drawing
-    showing every pair puts them. A hydrogen has none, and none sits on its letter."""
+    showing every pair puts them. A hydrogen has none, and none sits on its letter; a
+    placeholder, its valence unknown, always has one more to give."""
 
-    return pair_spots(molecule, drawn, pen, atom, molecule.atoms[atom].lone // 2 - given)
+    left = molecule.atoms[atom].lone // 2 - given
+    if molecule.atoms[atom].placeholder:
+        left = max(left, 1)
+    return pair_spots(molecule, drawn, pen, atom, left)
 
 
 # -- vectors ----------------------------------------------------------------------------

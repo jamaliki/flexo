@@ -72,13 +72,84 @@ def test_an_aromatic_ring_is_drawn_as_alternating_bonds() -> None:
         ("C((C)", "A branch is opened and never closed"),
         ("CC(C)(C)(C)C", "makes 5 bonds"),
         ("c1cccc1", "cannot be drawn as alternating single and double bonds"),
-        ("[Xx]", '"Xx" is not an element'),
+        ("[CL]", '"CL" is not an element'),
         ("", "The SMILES is empty"),
     ],
 )
 def test_smiles_that_cannot_be_read_is_said_in_words(smiles: str, said: str) -> None:
     with pytest.raises(SmilesError, match=re.escape(said)):
         read_smiles(smiles)
+
+
+def _placeholders(smiles: str) -> list[tuple[str, int, int | None]]:
+    return [(atom.placeholder, atom.charge, atom.map) for atom in read_smiles(smiles).atoms]
+
+
+def test_a_bracket_atom_that_is_no_element_is_a_placeholder_drawn_as_it_is_written() -> None:
+    assert _placeholders("[X:1].[Y:2][Z:3]") == [("X", 0, 1), ("Y", 0, 2), ("Z", 0, 3)]
+    assert _placeholders("[Nu-:1].[E:2]=[Z:3]") == [("Nu", -1, 1), ("E", 0, 2), ("Z", 0, 3)]
+    symbols = ["X", "Nu", "E", "LG", "R", "R1", "R'", "R1''", "EWG", "M", "L", "Ph", "NHC"]
+    for symbol in symbols:
+        assert _placeholders(f"[{symbol}]") == [(symbol, 0, None)], symbol
+    assert _placeholders("[Nu+]") == [("Nu", 1, None)]
+    assert _placeholders("[LG-2:7]") == [("LG", -2, 7)]
+    # Its valence is unknown: any bonds, no hydrogens of its own, no electrons known to be its.
+    crowded = read_smiles("[M](=O)(=O)(=O)(Cl)(Cl)(Cl)C")
+    assert crowded.bonded(0) == 10 and crowded.charge_of(0) == 0
+    assert [(atom.hydrogens, atom.lone) for atom in read_smiles("[X][Y-]").atoms] == [(0, 0)] * 2
+    # The atoms beside it are read as ever.
+    assert _atoms("C[X]")[0] == ("C", 3, 0, 0)
+    assert [read_smiles("[R1:4]C[X]").name(index) for index in range(3)] == [
+        "R1:4",
+        "an unnumbered C",
+        "an unnumbered X",
+    ]
+    assert [read_smiles("[R'][Nu]").name(index) for index in range(2)] == ["R':1", "Nu2"]
+
+
+def test_a_symbol_that_is_an_element_means_the_element_unless_a_star_comes_before_it() -> None:
+    argon, boron = read_smiles("[Ar]").atoms[0], read_smiles("[B:4]").atoms[0]
+    assert (argon.element, argon.placeholder, argon.lone) == ("Ar", "", 8)
+    assert (boron.element, boron.placeholder, boron.map) == ("B", "", 4)
+    assert _placeholders("[*Ar]") == [("Ar", 0, None)]
+    assert _placeholders("[*B:4]") == [("B", 0, 4)]
+    assert _placeholders("[*CL-]") == [("CL", -1, None)]
+    forced = read_smiles("[*C](C)(C)(C)(C)C")  # no carbon: five bonds are not counted against it
+    assert forced.atoms[0].element == "*" and forced.name(0) == "C1"
+
+
+@pytest.mark.parametrize(
+    ("smiles", "said", "hint"),
+    [
+        ("*", "A * (any atom) cannot be drawn without a name", "[X], [Nu], [R1]; or [*Ar]"),
+        ("C[*]", "A * (any atom) cannot be drawn without a name", "[X], [Nu], [R1]; or [*Ar]"),
+        ("[*-:1]", "A * (any atom) cannot be drawn without a name", "Name it, in brackets"),
+        ("[XH2]", "gives the placeholder X hydrogens", "[X][H]"),
+        ("[NuH+:2]", "a placeholder carries none of its own", "[Nu][H]"),
+        ("[R1H]", "gives the placeholder R1 hydrogens", "[R1][H]"),
+        ("[*OH]", "gives the placeholder O hydrogens", "[*O][H]"),
+        ("[13X]", "gives the placeholder X an isotope", ""),
+        ("[X@@]", "gives the placeholder X a handedness", ""),
+        # A mistyped element is not taken for a placeholder.
+        ("[CL]", '"CL" is not an element flexo knows', "Did you mean [Cl]?"),
+        ("C[BR-:3]", '"BR" is not an element flexo knows', "Did you mean [Br-:3]?"),
+        ("[NA+]", '"NA" is not an element flexo knows', "write [*NA+]"),
+        ("[RH]", '"RH" is not an element flexo knows', "Did you mean [Rh]?"),
+        ("[cl]", '"[cl]" is not a bracket atom SMILES writes', "Did you mean [Cl]?"),
+        ("[x]", '"[x]" is not a bracket atom SMILES writes', ""),
+        ("[Xyz1a?]", '"[Xyz1a?]" is not a bracket atom SMILES writes', ""),
+        ("[R1a]", '"[R1a]" is not a bracket atom SMILES writes', ""),
+        ("[*c]", '"[*c]" is not a bracket atom SMILES writes', ""),
+        ("[Cl2]", '"[Cl2]" is not a bracket atom SMILES writes', "write [*Cl2]"),
+        ("CX", '"X" is not an atom SMILES writes', "goes in them: [X]"),
+    ],
+)
+def test_a_placeholder_written_wrongly_and_an_element_mistyped_are_said_in_words(
+    smiles: str, said: str, hint: str
+) -> None:
+    with pytest.raises(SmilesError, match=re.escape(said)) as caught:
+        read_smiles(smiles)
+    assert hint in caught.value.hint and bool(hint) == bool(caught.value.hint)
 
 
 def _angles(molecule) -> set[int]:
@@ -175,6 +246,71 @@ def test_arrows_move_electrons_and_the_structure_follows() -> None:
     assert end.charge_of(end.index_of(4)) == -1  # chloride
     radicals = _pushed("[Br:1][Br:2]", ["1-2 ~> 1", "1-2 ~> 2"])
     assert not radicals.bonds and [atom.lone % 2 for atom in radicals.atoms] == [1, 1]
+
+
+def _charges(molecule) -> dict[str, int]:
+    return {molecule.name(index): molecule.charge_of(index) for index in range(len(molecule.atoms))}
+
+
+def test_a_placeholder_gives_the_pair_an_arrow_takes_and_its_charge_is_kept() -> None:
+    # Backside attack: X gives a pair into a bond, Z takes the pair of the bond that breaks.
+    sigma = _pushed("[X:1].[Y:2][Z:3]", ["1 -> 2", "2-3 -> 3"])
+    assert _bonds(sigma) == {"X1-Y2"}
+    assert _charges(sigma) == {"X1": 1, "Y2": 0, "Z3": -1}
+    assert _charges(_pushed("[X-:1].[Y:2][Z:3]", ["1 -> 2", "2-3 -> 3"])) == {
+        "X1": 0,
+        "Y2": 0,
+        "Z3": -1,
+    }
+    pi = _pushed("[Nu-:1].[E:2]=[Z:3]", ["1 -> 2", "2=3 -> 3"])
+    assert _bonds(pi) == {"Nu1-E2", "E2-Z3"}
+    assert _charges(pi) == {"Nu1": 0, "E2": 0, "Z3": -1}
+    # The pair Z took is its own now, to give back: the step undone leaves all as it was.
+    back = _pushed("[Nu-:1].[E:2]=[Z:3]", ["1 -> 2", "2=3 -> 3"], ["3 -> 2-3", "2-1 -> 1"])
+    assert _bonds(back) == {"E2=Z3"} and _charges(back) == {"Nu1": -1, "E2": 0, "Z3": 0}
+    assert [atom.lone for atom in back.atoms] == [2, 0, 0]
+    # A bond moved through a placeholder leaves it as it was, however many bonds it has.
+    moved = _pushed("[X:1]=[Y:2][Z+:3]", ["1=2 -> 2-3"])
+    assert _bonds(moved) == {"X1-Y2", "Y2=Z3"} and _charges(moved) == {"X1": 1, "Y2": 0, "Z3": 0}
+    many = _pushed("[L-:1].[M:2]([L])([L])([L])([L])[L]", ["1 -> 2"])
+    assert many.bonded(many.index_of(2)) == 6 and many.charge_of(many.index_of(2)) == -1
+    # Fishhooks, a half each: a bond broken into two radicals, and a radical adding to an alkene.
+    halves = _pushed("[R:1][R:2]", ["1-2 ~> 1", "1-2 ~> 2"])
+    assert not halves.bonds and _charges(halves) == {"R1": 0, "R2": 0}
+    assert [atom.lone for atom in halves.atoms] == [1, 1]
+    added = _pushed("[R:1].[CH2:3]=[CH2:4]", ["1 ~> 1-3", "3=4 ~> 3-1", "3=4 ~> 4"])
+    assert _bonds(added) == {"R1-C3", "C3-C4"} and set(_charges(added).values()) == {0}
+    assert [atom.lone for atom in added.atoms] == [0, 0, 1]
+    # What is asked of a placeholder is not written on the molecule it was asked of.
+    before = read_smiles("[X:1].[Y:2][Z:3]")
+    push(before, [read_arrow("1 -> 2", before), read_arrow("2-3 -> 3", before)])
+    assert [atom.lone for atom in before.atoms] == [0, 0, 0]
+
+
+def test_the_real_atoms_beside_a_placeholder_are_checked_as_ever() -> None:
+    mixed = "[Nu-:1].[CH3:2][Br:3]"
+    made = _pushed(mixed, ["1 -> 2", "2-3 -> 3"])
+    assert _bonds(made) == {"Nu1-C2"} and _charges(made) == {"Nu1": 0, "C2": 0, "Br3": -1}
+    with pytest.raises(MechanismError, match="C2 would have 10 electrons round it"):
+        _pushed(mixed, ["1 -> 2"])
+    with pytest.raises(MechanismError, match="C2, which has no lone pair to give"):
+        _pushed(mixed, ["2 -> 1"])
+    with pytest.raises(MechanismError, match="H3 would make 2 bonds"):
+        _pushed("[X:1].[Y:2][H:3]", ["1 -> 3"])
+    with pytest.raises(MechanismError, match="is left with 1 electron"):
+        _pushed("[R:1][R:2]", ["1-2 ~> 1"])
+    # A step drawn by hand: a placeholder's charge and symbol are what the arrows leave.
+    made = _pushed("[X:1].[Y:2][Z:3]", ["1 -> 2", "2-3 -> 3"])
+    agreed = compare(made, read_smiles("[X+:1][Y:2].[Z-:3]"), step="step 2", before="step 1")
+    assert agreed == []
+    said = compare(made, read_smiles("[X:1][Y:2].[Nu-:3]"), step="step 2", before="step 1")
+    assert said == [
+        "step 1's arrows leave X1 positively charged, but step 2 draws it neutral.",
+        "step 2 draws atom 3 as Nu; step 1 has it as Z.",
+    ]
+    # Its electrons cannot be written, so a radical the arrows leave on it is not asked for.
+    halves = _pushed("[R:1][R:2]", ["1-2 ~> 1", "1-2 ~> 2"])
+    assert compare(halves, read_smiles("[R:1].[R:2]"), step="step 2", before="step 1") == []
 
 
 @pytest.mark.parametrize(
@@ -344,6 +480,102 @@ def test_a_mechanism_draws_its_arrows_in_the_colour_asked_and_the_lone_pairs_the
     assert len([shape for shape in drawing.shapes if shape.id.startswith("m.step1.pair")]) >= 2
     with pytest.raises(FlexoError, match="arrow_colour"):
         _mechanism([{"smiles": ACYL}], arrow_colour="magenta")
+
+
+def _numbers(d: str) -> list[float]:
+    return [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", d)]
+
+
+def test_a_placeholder_is_lettered_as_an_atom_is_where_its_bond_and_its_charge_meet_it() -> None:
+    from flexo.compiler import compile_figure
+    from flexo.mechanism import mechanism_composed
+
+    steps = [{"smiles": "[X:1].[Y:2][Z:3]", "arrows": ["1 -> 2", "2-3 -> 3"]}]
+    figure, drawing = _mechanism(steps)
+    lettered = {words.id: "".join(run.text for run in words.runs) for words in drawing.words}
+    assert [lettered[f"m.step1.atom{index}"] for index in range(3)] == ["X", "Y", "Z"]
+    assert [lettered[f"m.step2.atom{index}"] for index in range(3)] == ["X", "Y", "Z"]
+    ids = {shape.id for shape in drawing.shapes}
+    # The pair X gives is drawn at its arrow's tail, as any atom's is; the charges the
+    # arrows leave are circled beside X and Z.
+    assert {"m.step1.arrow0", "m.step1.arrow0.electrons", "m.step1.arrow1"} <= ids
+    assert "m.step1.arrow1.electrons" not in ids
+    assert {"m.step2.charge0", "m.step2.charge2"} <= ids and "m.step2.charge1" not in ids
+    marks = (".pair", ".radical", ".charge")
+    assert not any(mark in name for name in ids if name.startswith("m.step1.") for mark in marks)
+    composed = mechanism_composed(figure.spec.nodes[0], STYLES["paper"])
+    drawn, _, _ = composed.drawn[1]
+    u = composed.pen.u
+    # The bond X-Y runs between the two letters and stops short of each, as at any label.
+    (bond,) = [shape for shape in drawn.shapes if shape.id == "m.step2.bond0"]
+    x1, y1, x2, y2 = _numbers(bond.d)
+    for end, atom in (((x1, y1), 0), ((x2, y2), 1)):
+        assert 0.3 * u < math.dist(end, drawn.atoms[atom].point) < 0.7 * u
+    assert math.dist((x1, y1), (x2, y2)) < composed.pen.bond - 0.6 * u
+    for atom, charge, positive in ((0, "m.step2.charge0", True), (2, "m.step2.charge2", False)):
+        (shape,) = [item for item in drawn.shapes if item.id == charge]
+        left, y, radius = _numbers(shape.d)[:3]
+        assert 0.3 * u < math.dist((left + radius, y), drawn.atoms[atom].point) < 1.2 * u
+        assert (shape.d.count(" M ") == 2) is positive  # a plus has two strokes, a minus one
+    # In the file they are words, in the face and size of the other atoms' letters.
+    svg = compile_figure(figure.spec).document.text
+    found = dict(re.findall(r'<text id="(m\.step2\.atom\d)"[^>]*>(?:<tspan[^>]*>)?([^<]+)<', svg))
+    assert found == {"m.step2.atom0": "X", "m.step2.atom1": "Y", "m.step2.atom2": "Z"}
+    assert 'id="m.step2.charge0"' in svg and 'id="m.step2.bond0"' in svg
+    mixed, _ = _mechanism([{"smiles": "[Nu-:1].[CH3:2][Br:3]", "arrows": "1 -> 2; 2-3 -> 3"}])
+    faces = set(
+        re.findall(
+            r'<text id="m\.step1\.atom\d"[^>]*(font-family="[^"]+" font-size="[^"]+")',
+            compile_figure(mixed.spec).document.text,
+        )
+    )
+    assert len(faces) == 1
+
+
+def test_a_placeholders_digits_are_raised_and_its_primes_kept() -> None:
+    drawn = _drawn("[R1][C](=O)[R2'].[EWG-][*Ar]")
+    runs = {
+        words.id: [(run.text, run.baseline_shift) for run in words.runs] for words in drawn.words
+    }
+    assert runs["m.atom0"] == [("R", "normal"), ("1", "super")]
+    assert runs["m.atom3"] == [("R", "normal"), ("2", "super"), ("'", "normal")]
+    assert runs["m.atom4"] == [("EWG", "normal")] and runs["m.atom5"] == [("Ar", "normal")]
+    assert "m.charge4" in {shape.id for shape in drawn.shapes}
+    # Its letters are centred on its place, and keep its bond off all of them.
+    (label,) = [words for words in drawn.words if words.id == "m.atom4"]
+    x = drawn.atoms[4].point[0]
+    assert label.x + label.metrics.width / 2 == pytest.approx(x)
+    assert drawn.atoms[4].radius[0] > label.metrics.width / 2
+    # A charge beside a raised number keeps off the number, which stands above the capitals.
+    numbered = _drawn("[R1-]")
+    ((_, cx, cy, radius),) = numbered.marks
+    _, (left, top, right, bottom) = numbered.atoms[0].ink
+    assert top < numbered.atoms[0].ink[0][1]
+    assert math.hypot(max(left - cx, 0, cx - right), max(top - cy, 0, cy - bottom)) > radius
+    # A hydrogen bonded to it that no arrow moves is written in its label, as H2O's are.
+    _, drawing = _mechanism("[Nu:1][H:2]")
+    (label,) = drawing.words
+    assert "".join(run.text for run in label.runs) in {"NuH", "HNu"}
+
+
+def test_the_lone_pairs_of_a_placeholder_are_those_arrows_leave_on_it() -> None:
+    steps = [{"smiles": "[X:1].[Y:2][Z:3]", "arrows": ["1 -> 2", "2-3 -> 3"]}]
+    _, drawing = _mechanism(steps, lone_pairs="all")
+    pairs = sorted(shape.id for shape in drawing.shapes if ".pair" in shape.id)
+    # As written it shows none; X's is at its arrow's tail; Z keeps the pair it took.
+    assert pairs == ["m.step2.pair2.0"]
+    _, drawing = _mechanism([{"smiles": "[R:1][R:2]", "arrows": ["1-2 ~> 1", "1-2 ~> 2"]}])
+    assert {shape.id for shape in drawing.shapes if ".radical" in shape.id} == {
+        "m.step2.radical0",
+        "m.step2.radical1",
+    }
+    # A fishhook from a placeholder draws the one electron it takes, not a pair.
+    _, drawing = _mechanism(
+        [{"smiles": "[R:1].[CH2:3]=[CH2:4]", "arrows": ["1 ~> 1-3", "3=4 ~> 3-1", "3=4 ~> 4"]}]
+    )
+    (dots,) = [shape for shape in drawing.shapes if shape.id == "m.step1.arrow0.electrons"]
+    assert dots.d.count("M") == 1
+    assert not any(shape.id == "m.step1.radical0" for shape in drawing.shapes)
 
 
 def test_a_cycloaddition_is_drawn_ready_to_close_its_ring() -> None:
@@ -519,6 +751,31 @@ def test_a_figure_file_writes_a_mechanisms_arrows_and_places_as_python_does() ->
     assert picture(figure.nodes[0], STYLES["paper"]) == picture(same.spec.nodes[0], STYLES["paper"])
     back = figure_to_document(figure)["nodes"][0]["properties"]["steps"][0]
     assert back["arrows"] == "1 -> 2; 2-3 -> 3"
+
+
+def test_a_figure_file_writes_placeholders_as_python_does() -> None:
+    from flexo.serialization import figure_to_document, parse_figure
+
+    steps = [
+        {"smiles": "[X:1].[Y:2][Z:3]", "arrows": ["1 -> 2", "2-3 -> 3"]},
+        {"smiles": "[X+:1][Y:2].[Z-:3]", "label": "X\u2013Y"},
+    ]
+    written = {
+        "figure": {"id": "file"},
+        "nodes": [{"id": "m", "kind": "mechanism", "properties": {"steps": steps}}],
+    }
+    figure = parse_figure(written)
+    with flexo.Figure("file") as same:
+        same.root.mechanism("m", steps)
+    drawing = picture(figure.nodes[0], STYLES["paper"])
+    assert drawing == picture(same.spec.nodes[0], STYLES["paper"])
+    assert {"X", "Y", "Z"} <= {"".join(run.text for run in words.runs) for words in drawing.words}
+    back = figure_to_document(figure)["nodes"][0]["properties"]["steps"]
+    assert [step.get("smiles") for step in back] == [step["smiles"] for step in steps]
+    # A step written out is held to the charges the arrows leave, on a placeholder too.
+    steps[1]["smiles"] = "[X:1][Y:2].[Z-:3]"
+    with pytest.raises(FlexoError, match="leave X1 positively charged, but step 2 draws it"):
+        picture(parse_figure(written).nodes[0], STYLES["paper"])
 
 
 @pytest.mark.parametrize(

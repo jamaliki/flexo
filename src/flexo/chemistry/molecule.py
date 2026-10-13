@@ -7,6 +7,13 @@ closures, branches, stereo (``@``, ``@@``, ``/``, ``\\``) and separate molecules
 (``.``) -- and gives the Kekulé structure a mechanism needs: arrows move the
 electrons of one double bond, not of a ring's delocalised six.
 
+A bracket atom whose symbol is no element is a placeholder, an atom that stands for
+any: ``[X]``, ``[Nu-]``, ``[R1]``, ``[R']``, ``[EWG]`` -- a capital letter, then
+letters, digits or primes. A symbol that is an element means the element; a ``*``
+before it (``[*Ar]``, ``[*B]``) makes it a placeholder all the same. A placeholder's
+valence is not known: it takes any bonds, carries no hydrogens of its own, and its
+charge is the one written.
+
 Each atom keeps the electrons it does not share (``lone``): an oxygen of water
 four, a carbanion two, a radical one. They are what lone pairs and radicals are
 drawn from, and what an arrow from an atom takes.
@@ -100,6 +107,11 @@ _NORMAL_VALENCES = {
 _ORGANIC = ("Cl", "Br", "B", "C", "N", "O", "P", "S", "F", "I")
 _AROMATIC = ("se", "as", "b", "c", "n", "o", "p", "s")
 _ELEMENT = re.compile(r"[A-Z][a-z]?")
+_CHARGE = r"(\+\d*|\++|-\d*|-+)?(?::(\d+))?"
+_BRACKET = re.compile(r"(\d+)?([A-Z][a-z]?|se|as|[bcnops])(@@|@)?(H\d*)?" + _CHARGE)
+_PLACEHOLDER = re.compile(r"([A-Z][A-Za-z]*)(\d*['\u2032]*)(H\d*)?" + _CHARGE)
+"""A placeholder's bracket: its letters, its digits and primes, then what any bracket atom
+may carry (a hydrogen count is read, to be refused in words)."""
 _BONDS = {"-": 1, "=": 2, "#": 3, "$": 4, ":": 1, "/": 1, "\\": 1}
 
 
@@ -132,6 +144,16 @@ class Atom:
     """The electrons it does not share: two for each lone pair, one for a radical."""
     x: float = 0.0
     y: float = 0.0
+    placeholder: str = ""
+    """The symbol of an atom that stands for any (``[X]``, ``[Nu]``, ``[*Ar]``), drawn as it
+    is written; its ``element`` is ``*``, its valence unknown, its ``charge`` the one it
+    is written with and what arrows have made of it since."""
+
+    @property
+    def symbol(self) -> str:
+        """What it is written as: its element, or a placeholder's symbol."""
+
+        return self.placeholder or self.element
 
 
 @dataclass(slots=True)
@@ -171,9 +193,11 @@ class Molecule:
 
     def charge_of(self, atom: int) -> int:
         """Its formal charge, from its electrons: those of its group, less those it keeps,
-        less one for each bond."""
+        less one for each bond. A placeholder has no group: its charge is the one it holds."""
 
         item = self.atoms[atom]
+        if item.placeholder:
+            return item.charge
         return VALENCE_ELECTRONS.get(item.element, 4) - item.lone - self.bonded(atom)
 
     def fragments(self) -> list[list[int]]:
@@ -211,6 +235,7 @@ class Molecule:
                 a.lone,
                 a.x,
                 a.y,
+                a.placeholder,
             )
             for a in self.atoms
         ]
@@ -229,14 +254,16 @@ class Molecule:
         return number - 1 if 1 <= number <= len(self.atoms) else None
 
     def name(self, atom: int) -> str:
-        """How words name an atom: its element and number, ``C2``, ``O5``."""
+        """How words name an atom: its element (or a placeholder's symbol) and number,
+        ``C2``, ``O5``, ``Nu1`` -- ``R1:4``, ``R':4``, where the symbol does not end in a
+        letter."""
 
         item = self.atoms[atom]
-        if item.map is not None:
-            return f"{item.element}{item.map}"
-        if any(other.map is not None for other in self.atoms):
-            return f"an unnumbered {item.element}"
-        return f"{item.element}{atom + 1}"
+        symbol = item.symbol
+        if item.map is None and any(other.map is not None for other in self.atoms):
+            return f"an unnumbered {symbol}"
+        apart = "" if symbol[-1].isalpha() else ":"
+        return f"{symbol}{apart}{item.map if item.map is not None else atom + 1}"
 
 
 def read_smiles(smiles: str) -> Molecule:
@@ -245,6 +272,8 @@ def read_smiles(smiles: str) -> Molecule:
     molecule = _Reader(smiles).read()
     _kekulize(molecule, smiles)
     for index, atom in enumerate(molecule.atoms):
+        if atom.placeholder:
+            continue  # its valence unknown: no hydrogens, and no electrons known to be its own
         bonded = sum(bond.order for bond in molecule.bonds_of(index))
         if not atom.bracket:
             valences = _NORMAL_VALENCES.get(atom.element, (bonded,))
@@ -289,9 +318,9 @@ class _Reader:
         self.at = 0
         self.molecule = Molecule()
 
-    def fail(self, message: str) -> SmilesError:
+    def fail(self, message: str, hint: str = "") -> SmilesError:
         shown = self.text[: self.at] + " ‸ " + self.text[self.at :]
-        return SmilesError(f"{message} (at {self.at + 1}: {shown}).")
+        return SmilesError(f"{message} (at {self.at + 1}: {shown}).", hint)
 
     def read(self) -> Molecule:
         if not self.text:
@@ -390,7 +419,14 @@ class _Reader:
                 self.at += len(symbol)
                 return self.add(Atom(symbol.upper(), aromatic=True))
         if text[self.at] == "*":
-            raise self.fail("A * (any atom) cannot be drawn")
+            raise self.fail("A * (any atom) cannot be drawn without a name", _NAME_IT)
+        if text[self.at].isupper():
+            symbol = _ELEMENT.match(text, self.at).group()  # type: ignore[union-attr]
+            raise self.fail(
+                f'"{text[self.at]}" is not an atom SMILES writes',
+                f"Outside brackets only B, C, N, O, P, S, F, Cl, Br and I are written; any "
+                f"other atom, and a placeholder, goes in them: [{symbol}].",
+            )
         raise self.fail(f'"{text[self.at]}" is not an atom SMILES writes')
 
     def bracket(self) -> int:
@@ -399,23 +435,18 @@ class _Reader:
         if end < 0:
             raise self.fail("A [ is never closed")
         inside = text[self.at + 1 : end]
-        match = re.fullmatch(
-            r"(\d+)?([A-Z][a-z]?|se|as|[bcnops])(@@|@)?(H\d*)?(\+\d*|\++|-\d*|-+)?(?::(\d+))?",
-            inside,
-        )
-        if match is None:
-            raise self.fail(f'"[{inside}]" is not a bracket atom SMILES writes')
+        match = _BRACKET.fullmatch(inside)
+        if match is None or match.group(2).capitalize() not in VALENCE_ELECTRONS:
+            atom = self.placeholder(inside, match)
+            self.at = end + 1
+            return self.add(atom)
         isotope, symbol, chirality, hydrogens, charge, mapped = match.groups()
         aromatic = symbol[0].islower()
         element = symbol.capitalize()
         count = 0
         if hydrogens:
             count = int(hydrogens[1:]) if len(hydrogens) > 1 else 1
-        signed = 0
-        if charge:
-            sign = 1 if charge[0] == "+" else -1
-            rest = charge[1:]
-            signed = sign * (int(rest) if rest.isdigit() else len(charge))
+        signed = _signed(charge)
         atom = Atom(
             element,
             signed,
@@ -431,9 +462,82 @@ class _Reader:
         self.at = end + 1
         return self.add(atom)
 
+    def placeholder(self, inside: str, plain: re.Match[str] | None) -> Atom:
+        """The placeholder a bracket writes whose symbol is no element (``plain`` is the
+        bracket as SMILES reads an atom's, if it reads so) -- or, after a ``*``, whatever
+        its symbol is. A mistyped element is not taken for one: it is refused, in words."""
+
+        wrong = f'"[{inside}]" is not a bracket atom SMILES writes'
+        forced = inside.startswith("*")
+        body = inside[1:] if forced else inside
+        if forced:
+            if re.fullmatch(_CHARGE, body):
+                raise self.fail("A * (any atom) cannot be drawn without a name", _NAME_IT)
+            plain = _BRACKET.fullmatch(body)
+        letters = re.match(r"[A-Za-z]*", body).group()  # type: ignore[union-attr]
+        meant = letters.capitalize()
+        rest = body[len(letters) :] if re.fullmatch(_CHARGE, body[len(letters) :]) else ""
+        if not forced and meant in VALENCE_ELECTRONS and len(letters) == 2 and letters.isupper():
+            # An element's second letter is small: [CL] is chlorine mistyped.
+            instead = (
+                f"for a placeholder {letters[0]} with a hydrogen, write [{letters[0]}][H]"
+                if plain is not None
+                else f"for a placeholder drawn {letters}, write [*{body}]"
+            )
+            raise self.fail(
+                f'"{letters}" is not an element flexo knows',
+                f"Did you mean [{meant}{rest}]? An element's second letter is small; {instead}.",
+            )
+        if not forced and meant in VALENCE_ELECTRONS and letters.islower():
+            raise self.fail(wrong, f"Did you mean [{meant}{rest}]?")
+        if plain is not None and plain.group(2)[0].isupper():
+            # Written as SMILES writes an atom: what stands round its symbol is an element's.
+            isotope, name, chirality, hydrogens, charge, mapped = plain.groups()
+            marks = ""
+            for found, what in ((isotope, "an isotope"), (chirality, "a handedness (@)")):
+                if found:
+                    raise self.fail(
+                        f'"[{inside}]" gives the placeholder {name} {what}, which only an '
+                        "element has"
+                    )
+        else:
+            found = _PLACEHOLDER.fullmatch(body)
+            if found is None:
+                raise self.fail(wrong)
+            name, marks, hydrogens, charge, mapped = found.groups()
+            if not forced and name in VALENCE_ELECTRONS:
+                # A symbol that is an element means the element, which takes no such marks.
+                raise self.fail(wrong, f"For a placeholder drawn {name}{marks}, write [*{body}].")
+        if hydrogens:
+            raise self.fail(
+                f'"[{inside}]" gives the placeholder {name}{marks} hydrogens, and a '
+                "placeholder carries none of its own",
+                f"Write a hydrogen as an atom bonded to it: [{'*' * forced}{name}{marks}][H].",
+            )
+        return Atom(
+            "*",
+            _signed(charge),
+            map=int(mapped) if mapped else None,
+            bracket=True,
+            placeholder=name + marks,
+        )
+
     def add(self, atom: Atom) -> int:
         self.molecule.atoms.append(atom)
         return len(self.molecule.atoms) - 1
+
+
+_NAME_IT = "Name it, in brackets: [X], [Nu], [R1]; or [*Ar], for a name that is an element's."
+
+
+def _signed(charge: str | None) -> int:
+    """The charge a bracket writes: ``+``, ``-``, ``++``, ``+2``, ``-2``."""
+
+    if not charge:
+        return 0
+    sign = 1 if charge[0] == "+" else -1
+    rest = charge[1:]
+    return sign * (int(rest) if rest.isdigit() else len(charge))
 
 
 class _Spans(_Reader):

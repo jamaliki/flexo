@@ -5,7 +5,9 @@ are many, a reaction arrow between each and the next -- its reagents over it, it
 conditions under it -- and each structure's name under it. A step is
 
 - ``smiles``: its structure, the molecules apart with ``.`` (``[OH-:5].C[C:2](=O)Cl``);
-  atom maps (``:5``) name the atoms its arrows and the steps after it talk of;
+  atom maps (``:5``) name the atoms its arrows and the steps after it talk of; a bracket
+  atom that is no element is a placeholder, drawn as written (``[X:1].[Y:2][Z:3]``,
+  ``[Nu-:1]``, ``[R1]``; ``[*Ar]`` for a symbol that is also an element's);
 - ``arrows``: its curly arrows (``"5 -> 2; 2=3 -> 3"``, see ``flexo.chemistry.electrons``);
 - ``label``, ``reagents``, ``conditions``, and ``arrow``: ``forward`` (the default),
   ``equilibrium``, ``resonance``, or ``none``.
@@ -13,8 +15,10 @@ conditions under it -- and each structure's name under it. A step is
 A step with no ``smiles`` is what the arrows before it make: drawn from them, its
 atoms where they were. One written out is checked against them, and anything they do
 not make -- a charge, a bond, a hydrogen -- is said, as is an arrow that cannot be
-(carbon given ten electrons, a lone pair that is not there). After a last step with
-arrows comes what they make. Lone pairs are drawn where arrows leave them
+(carbon given ten electrons, a lone pair that is not there). A placeholder's valence is
+unknown, so nothing is refused on its account -- it has a pair wherever an arrow starts
+from it -- but its charge is kept as any atom's is. After a last step with arrows comes
+what they make. Lone pairs are drawn where arrows leave them
 (``lone_pairs: all`` for every one, ``none`` for none), charges circled (``charges:
 plain`` for superscripts).
 """
@@ -28,7 +32,15 @@ from dataclasses import dataclass, field
 
 from flexo.chemistry.curly import INK, draw_arrows, tail_ways
 from flexo.chemistry.draw import Drawn, Pen, draw_molecule
-from flexo.chemistry.electrons import Arrow, MechanismError, compare, push, read_arrow, target_bond
+from flexo.chemistry.electrons import (
+    Arrow,
+    MechanismError,
+    compare,
+    lent,
+    push,
+    read_arrow,
+    target_bond,
+)
 from flexo.chemistry.layout import align, assemble, follow, foresee, gather
 from flexo.chemistry.molecule import Molecule, SmilesError, read_smiles
 from flexo.chemistry.stereo import wedges
@@ -355,6 +367,8 @@ def mechanism_states(node: NodeSpec) -> tuple[list[Panel], Diagnostic | None]:
             except MechanismError as error:
                 if problem is None:
                     problem = _said(node, "arrows", f"{where}: {error}", error.hint)
+        # A placeholder holds the electrons its arrows take, to be drawn at their tails.
+        molecule = lent(molecule, arrows)
         made = None
         if arrows and problem is None:
             try:

@@ -127,3 +127,42 @@ def test_the_lone_pairs_offered_are_an_atoms_own_clear_of_its_hydrogens() -> Non
     (hydrogen,) = [atom for atom in hydride["atoms"] if atom["element"] == "H"]
     assert hydrogen["name"] == "H2" and hydrogen["pairs"] == []
     assert {tuple(bond["atoms"]) for bond in hydride["bonds"]} >= {(0, 1)}
+
+
+def test_a_placeholder_is_pointed_at_as_any_atom_and_offers_its_pair() -> None:
+    steps = [{"smiles": "[X].[Y][Z]"}]
+    drawn = sheet(steps, step=0)
+    # Its valence unknown, each has a pair to give: one is offered under the pointer.
+    assert [(atom["name"], atom["element"], len(atom["pairs"])) for atom in drawn["atoms"]] == [
+        ("X1", "X", 1),
+        ("Y2", "Y", 1),
+        ("Z3", "Z", 1),
+    ]
+    made = add_arrow(steps, step=0, tail={"atom": 0}, head={"atom": 1})
+    assert made["arrow"] == "1 -> 2"
+    made = add_arrow(made["steps"], step=0, tail={"bond": [1, 2]}, head={"atom": 2})
+    assert made["steps"] == [{"smiles": "[X].[Y][Z]", "arrows": ["1 -> 2", "2-3 -> 3"]}]
+    drawn = sheet(made["steps"], step=0)
+    assert drawn["problem"] is None and drawn["states"] == 2
+    assert [arrow["said"] for arrow in drawn["arrows"]] == [
+        "lone pair on X1 → Y2",
+        "Y2-Z3 bond → Z3",
+    ]
+    # The pair its arrow takes is drawn at the arrow's tail, and another is still offered.
+    assert "m.step1.arrow0.electrons" in drawn["svg"]
+    assert len(next(atom for atom in drawn["atoms"] if atom["name"] == "X1")["pairs"]) == 1
+    after = sheet(made["steps"], step=1)
+    assert 'id="m.step2.charge0"' in after["svg"] and 'id="m.step2.charge2"' in after["svg"]
+    # One with no number, beside atoms that have them, is given one where it is written.
+    mixed = add_arrow(
+        [{"smiles": "[Nu-].[CH3:2][Br:3]"}], step=0, tail={"atom": 0}, head={"atom": 1}
+    )
+    assert mixed["steps"][0]["smiles"] == "[Nu-:4].[CH3:2][Br:3]" and mixed["arrow"] == "4 -> 2"
+    # Half drawn, the carbon it attacks is said as ever; the placeholder is not.
+    half = sheet(mixed["steps"], step=0)
+    assert "C2 would have 10 electrons" in half["problem"]["message"]
+    fishhook = add_arrow(
+        [{"smiles": "[R:1].[CH2:3]=[CH2:4]"}], step=0, tail={"atom": 0}, head={"atom": 1}, half=True
+    )
+    drawn = sheet(fishhook["steps"], step=0)
+    assert drawn["arrows"][0]["said"] == "radical on R1 ⇀ C3"
