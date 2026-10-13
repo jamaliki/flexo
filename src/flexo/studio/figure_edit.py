@@ -1450,9 +1450,16 @@ class _Document:
         of several parts, in one step. What it has that is in no panel becomes one, laid out
         as it was; the panels it lacks are added, each with a first shape to build on; and
         the figure lays them out -- in a row (as many columns as panels), a column (one), or
-        a grid. Panels it has already are kept, however many. Answers the panels."""
+        a grid. Panels it has already are kept, however many. Answers the panels.
 
-        count = max(1, min(int(action.get("count") or 2), 26))
+        ``rows`` (``[1, 2]``: one panel over two) or ``stacks`` (``[1, 2]``: one beside two,
+        one over the other) lays them out in lines of different lengths instead: each line
+        of more than one panel a row (or column) of its own in the figure's column (row)."""
+
+        rows = [max(1, int(each)) for each in action.get("rows") or []]
+        stacks = [max(1, int(each)) for each in action.get("stacks") or []]
+        lines = rows or stacks
+        count = max(1, min(sum(lines) or int(action.get("count") or 2), 26))
         columns = max(1, min(int(action.get("columns") or count), count))
         root = self.written_root()
         children: list[str] = root.setdefault("children", [])
@@ -1460,6 +1467,14 @@ class _Document:
         def panel(identifier: str) -> bool:
             return (self.group(identifier) or {}).get("role") == "panel"
 
+        # Panels in lines of their own from the last time are the figure's own again first.
+        for item in list(children):
+            line = self.group(item)
+            held = (line or {}).get("children") or []
+            if line and line.get("role") == "layout" and held and all(panel(each) for each in held):
+                at = children.index(item)
+                children[at : at + 1] = held
+                self.data["groups"].remove(line)
         frames = {str(node.get("id")) for node in self.nodes if node.get("kind") == "frame"}
         loose = [item for item in children if not panel(item) and item not in frames]
         if loose:
@@ -1478,8 +1493,25 @@ class _Document:
             first = self._add({"kind": "block", "parent": self.root})
             self._gather({"ids": first, "layout": "row", "role": "panel"})
         panels = [item for item in children if panel(item)]
-        across = min(columns, len(panels))
         kept = {key: value for key, value in (root.get("layout") or {}).items() if key == "gap"}
+        if lines:
+            along, across_ = ("row", "column") if rows else ("column", "row")
+            arranged: list[str] = []
+            left = list(panels)
+            for length in lines:
+                part, left = left[:length], left[length:]
+                if len(part) < 2:
+                    arranged += part
+                    continue
+                identifier = self.fresh("panels")
+                line = {"id": identifier, "role": "layout", "children": part}
+                self.data["groups"].append({**line, "layout": {"kind": along}})
+                arranged.append(identifier)
+            others = [item for item in children if item not in panels]
+            root["children"] = [*arranged, *left, *others]
+            root["layout"] = {"kind": across_, **kept}
+            return panels
+        across = min(columns, len(panels))
         if across >= len(panels):
             root["layout"] = {"kind": "row", **kept}
         elif across == 1:

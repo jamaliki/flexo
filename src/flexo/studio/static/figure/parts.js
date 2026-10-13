@@ -1826,7 +1826,9 @@ export function figureParts(host) {
   // the figure has in no panel becomes its first, and the rest are added to build on.
   const PANEL_LAYOUTS = [[2, 2, "2 Across"], [3, 3, "3 Across"], [2, 1, "2 Stacked"], [4, 2, "2 × 2"], [6, 3, "3 × 2"], [6, 2, "2 × 3"]];
   const panelsNow = () => (model()?.groups || []).filter((group) => group.role === "panel").length;
-  function layOutPanels(count, columns) { act({ do: "panels", count, columns }); }
+  function layOutPanels(count, columns, lines = null) { act({ do: "panels", count, columns, ...(lines || {}) }); }
+  // Lines of different lengths: one panel over two, two over one, one beside two.
+  const PANEL_LINES = [["1 Over 2", { rows: [1, 2] }], ["2 Over 1", { rows: [2, 1] }], ["1 Beside 2", { stacks: [1, 2] }], ["2 Beside 1", { stacks: [2, 1] }]];
   // One more panel, after the last: never the shapes chosen made one (that is Group › Panel).
   function addPanel() { act({ do: "panels", count: panelsNow() + 1, columns: model()?.groups?.find((group) => group.id === model().root)?.layout?.columns || panelsNow() + 1 }); }
   function panelMenu(anchor) {
@@ -1834,6 +1836,8 @@ export function figureParts(host) {
       { label: "Add Panel", hint: panelsNow() ? "One more, lettered after the last" : "The figure made one of panels: a, b", run: () => addPanel() },
       "-",
       ...PANEL_LAYOUTS.map(([count, columns, label]) => ({ label, hint: `${count} panels${columns > 1 && columns < count ? `, ${columns} to a row` : ""}`, run: () => layOutPanels(count, columns) })),
+      "-",
+      ...PANEL_LINES.map(([label, lines]) => ({ label, hint: "3 panels, one of them as long as the other two", run: () => layOutPanels(3, 3, lines) })),
     ]);
   }
   // A part one place back or on in its row or column, as ⌥ and an arrow move it: the Mac's
@@ -5361,7 +5365,9 @@ export function figureParts(host) {
     if (!host.crumbs && !trail.length) return null;
     return h("div.crumbs", {}, host.crumbs ? host.crumbs() : null, trail.map((group, index) => [
       index || host.crumbs ? icon("chevron") : null,
-      h("button.crumb", { type: "button", onclick: () => select(group === model().root ? [] : [group]) }, group === model().root ? "Figure" : nameOf(group)),
+      // (On a slide the figure has no panel of its own to go up to: its layout is shown
+      // there -- its row or grid, its panels and their letters.)
+      h("button.crumb", { type: "button", title: group === model().root && host.nothing ? "The figure’s layout and panels" : "", onclick: () => select(group === model().root ? (host.nothing ? [group] : []) : [group]) }, group === model().root ? "Figure" : nameOf(group)),
     ]));
   }
 
@@ -5614,6 +5620,11 @@ export function figureParts(host) {
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
       isRoot ? null : showSection([group.id]),
+      // The figure's panels, from its own layout: one more, so many laid out, their letters.
+      isRoot ? h("div.section", {}, h("div.section-title", {}, "Panels"),
+        h("div.row", {}, ui.button(panelsNow() ? "Add or Lay Out…" : "Make Panels…", (event) => panelMenu(event.currentTarget), { small: true, icon: "grid", title: "Add a panel, or lay the figure out as panels (a, b, c)" })),
+        panelsNow() ? fields(catalog.figure_fields.filter((field) => field.key === "figure.panel_labels"), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure") : null,
+        anyShownApart() ? h("div.row", {}, ui.button("Show All", () => showAll(), { small: true, icon: "eye", title: shownSummary() })) : null) : null,
       h("div.section", {},
         turned(group) ? h("div.hint-line.turned", {}, icon("info"), `Drawn as a ${drawnKind(group)} to fit the slide; written as a ${writtenKind(group)}.`) : null,
         // The whole figure's layout is drawn with no frame of its own: no Frame to choose.

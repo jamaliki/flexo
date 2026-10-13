@@ -97,22 +97,43 @@ def states(figure: FigureSpec, frames: Iterable[NodeSpec] = ()) -> dict[str, str
     for edge in figure.edges:
         of(edge.id, (edge.source.node_id, edge.target.node_id))
     for net in figure.nets:
-        sources = [port.node_id for port in net.sources]
-        targets = [port.node_id for port in net.targets]
-        # (Gone with what it comes from, or with all it goes to.)
-        gone = any(shown.get(end) == HIDDEN for end in sources) or all(
-            shown.get(end) == HIDDEN for end in targets
-        )
-        if gone:
+        # A line that branches is gone with what it comes from, or with all it goes to, and
+        # faint likewise; a branch of it to one shape is that shape's (``branches``).
+        sources = [shown.get(port.node_id) for port in net.sources]
+        targets = [shown.get(port.node_id) for port in net.targets]
+        if net.id in hidden or HIDDEN in sources or all(how == HIDDEN for how in targets):
             shown[net.id] = HIDDEN
-        else:
-            of(net.id, [end for end in (*sources, *targets) if shown.get(end) != HIDDEN])
+        elif net.id in lit:
+            continue
+        elif net.id in dimmed or DIMMED in sources or all(how is not None for how in targets):
+            shown[net.id] = DIMMED
     for group in figure.groups:
         if group.id != figure.root:
             of(group.id, [one for one in within([group.id]) if one in set(shapes)], every=True)
     for frame, round_ in held.items():
         of(frame, [one for one in within(round_) if one in set(shapes)], every=True)
     return shown
+
+
+def branches(shown: dict[str, str], nets: Iterable[object]) -> dict[str, str]:
+    """``shown`` with the branches of each line that branches (``nets``, as routed) shown as
+    the shape each goes to or comes from is: a branch to a hidden shape is hidden, and to a
+    faint one faint, where the line as a whole is not. (Its trunk stays, for the others.)"""
+
+    if not shown:
+        return shown
+    found = dict(shown)
+    for net in nets:
+        whole = shown.get(net.spec.id)  # type: ignore[attr-defined]
+        if whole == HIDDEN:
+            continue
+        ends = (("source", net.source_stems), ("target", net.target_stems))  # type: ignore[attr-defined]
+        for side, stems in ends:
+            for index, stem in enumerate(stems, 1):
+                how = shown.get(stem.port.node_id)
+                if how == HIDDEN or (how == DIMMED and whole is None):
+                    found[f"{net.spec.id}.{side}.{index}"] = how  # type: ignore[attr-defined]
+    return found
 
 
 def mark(

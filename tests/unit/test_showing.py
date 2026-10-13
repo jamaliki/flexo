@@ -140,3 +140,27 @@ def test_the_studio_hides_dims_highlights_and_shows_again() -> None:
     text = apply(text, {"do": "show", "ids": ["labourer"], "as": "shown"})["text"]
     assert shown(text) == {"dim": ["client"]}
     assert shown(apply(text, {"do": "show", "all": True})["text"]) == {}
+
+
+def test_a_branch_to_a_hidden_shape_is_hidden_and_the_rest_of_its_line_stays() -> None:
+    """A line that branches to three shapes, one of them hidden, kept its branch to where
+    that one had been."""
+
+    document = {
+        "figure": {"id": "fan", "style": "paper", "hide": ["c"], "dim": ["b"]},
+        "groups": [
+            {"id": "root", "role": "canvas", "layout": {"kind": "row"}, "children": ["s", "outs"]},
+            {"id": "outs", "role": "layout", "layout": {"kind": "column"},
+             "children": ["a", "b", "c"]},
+        ],
+        "nodes": [{"id": name, "label": name.upper()} for name in ("s", "a", "b", "c")],
+        "nets": [{"id": "fan", "kind": "fan-out", "sources": ["s"], "targets": ["a", "b", "c"]}],
+    }
+    compiled = compile_figure(parse_figure(document))
+    (net,) = compiled.routed.nets
+    marked = _marked(compiled.document.text)
+    order = [stem.port.node_id for stem in net.target_stems]
+    assert marked[f"{net.spec.id}.target.{order.index('c') + 1}"] == "hidden"
+    assert marked[f"{net.spec.id}.target.{order.index('b') + 1}"] == "dimmed"
+    assert f"{net.spec.id}.target.{order.index('a') + 1}" not in marked
+    assert net.spec.id not in marked and f"{net.spec.id}.rail" not in marked
