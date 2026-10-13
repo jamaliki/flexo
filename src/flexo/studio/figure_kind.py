@@ -57,7 +57,8 @@ A flexo figure file: YAML naming what the figure is, not where things go -- flex
 and routes every line.
 
 figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), palette, width
-  (single-column, double-column, or a length: 89mm for a column of Nature's, 183mm for two),
+  (single-column, double-column, or a length: 89mm for a column of Nature's, 183mm for two;
+  90mm, 144mm and 184mm are Science's one, one and a half, and two),
   height (a length, for a page of a fixed size: 210mm x 297mm is A4; left out, the page is as
   tall as the figure), panel_labels (a, A, (a): how panels are lettered)}
 nodes: each {id, label, kind (block by default; text, op, circle, feature-strip, mlp,
@@ -83,8 +84,18 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
   arrow: none|both|reversible, tail (the start's head, with arrow: both), back_label, cofactors:
   [ATP, ADP], shape: orthogonal|straight|curved, line: dashed|dotted, tone, width (pt), head_size
   (1.5 = half as large again)}
-groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label}; the root group
-  (figure.root, "root" by default) holds the rest. A file without groups stacks its nodes.
+groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label, title_side:
+  left|right|bottom-left|bottom-right (where its label stands)}; the root group (figure.root,
+  "root" by default) holds the rest. A file without groups stacks its nodes.
+A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. A molecule's
+  structure: {id, kind: structure, properties: {source: a .pdb or .cif file in the folder}}.
+A reaction mechanism: {id, kind: mechanism, properties: {steps: [{smiles: "[OH-:5].[CH3:1]
+  [C:2](=[O:3])[Cl:4]", arrows: ["5 -> 2", "2=3 -> 3"], label, reagents, conditions},
+  {arrows: ["3 -> 2", "2-4 -> 4"]}]}} -- the atoms its arrows name are mapped ([O-:5] is 5); an
+  arrow from a lone pair is "5 -> 2", from a bond "2=3 -> 3"; a step with no smiles is drawn
+  from the arrows before it. An atom may be a placeholder, drawn as written, for a reaction in
+  general: "[X:1].[Y:2][Z:3]", [Nu-], [E], [LG], [R1] ([*Ar], [*B] where the letters are an
+  element's).
 A frame round shapes anywhere in the figure (in different groups too), which moves none of
   them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
   layer: behind|front|over (a tint they show through), tone}}.
