@@ -497,6 +497,14 @@ line bends between the two middles. Several lines on one side still spread evenl
 about its middle, and a group lined up by its ports (`align="ports"`) or its edges
 keeps its lines where that puts them.
 
+Two branches side by side end level. A box at the end of its row or column, joined by one
+line to a box beside that row or column -- the last step of the branch under another --
+stands level with that box, further from the rest of its own line, as far as the room of
+what holds the line allows: the steps of one branch may be taller than the other's, or one
+may have a line between its steps and the other none. And a group lined up by one of its
+parts stays where that put it while a line of that part's runs between the middles of two
+sides it has to itself: it is not slid off the line of a flow to straighten a line beside it.
+
 To put a box on a line of its own under one part of a row -- or under the row itself,
 whatever it is joined to -- name it with `align_with`:
 

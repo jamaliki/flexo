@@ -201,7 +201,7 @@ no `groups` stacks nodes. `flexo.dump_figure(figure.spec)` writes any figure as 
 `flexo studio` (in a folder, or on a file: `flexo studio fig.yaml`) opens a local
 editor in the browser for every figure, theme, and (with flexo-talk) deck in the
 folder. Parts are added from a palette (A), connected (C), typed on in place
-(double-click), gathered into rows, columns, grids and modules (G), and set in an
+(double-click), gathered into rows, columns, grids and modules (⌘G), and set in an
 inspector; every edit is written to the YAML file, comments and order kept.
 People and agents edit the same files live.
 

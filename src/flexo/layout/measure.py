@@ -77,7 +77,7 @@ def measure_figure(
     node_anchors = {node.spec.id: node.anchor for node in measured_nodes}
     groups_by_id = {group.id: group for group in semantic.groups}
     child_orders = optimized_child_orders(semantic)
-    outward = _outward_connections(semantic)
+    outward = outward_connections(semantic)
     measured_groups: dict[str, MeasuredGroup] = {}
 
     def child_geometry(child_ids: tuple[str, ...]) -> tuple[tuple[Size, ...], tuple[Point, ...]]:
@@ -459,7 +459,7 @@ def _group_anchor(
     """
 
     speakers = [
-        child for child in _anchor_children(group, node_kinds, outward or {}) if child in child_ids
+        child for child in anchor_children(group, node_kinds, outward or {}) if child in child_ids
     ]
     centre = Point(size.width / 2.0, size.height / 2.0)
     if not speakers:
@@ -511,7 +511,7 @@ def _group_anchor(
     return centre
 
 
-def _anchor_children(
+def anchor_children(
     group: GroupSpec,
     node_kinds: dict[str, str],
     outward: dict[str, int],
@@ -545,7 +545,7 @@ def _anchor_children(
     return (leaders[0],)
 
 
-def _outward_connections(figure: FigureSpec) -> dict[str, dict[str, int]]:
+def outward_connections(figure: FigureSpec) -> dict[str, dict[str, int]]:
     """For every group, how many connections each child carries out of the group."""
 
     groups = {group.id: group for group in figure.groups}

@@ -3034,6 +3034,214 @@ def test_a_label_kept_as_runs_is_typed_as_the_markup_that_writes_them() -> None:
     assert _markup_of(["Plain *words*", None]) == ["Plain *words*", ""]
 
 
+# -- shapes aligned in a row, grouped and ungrouped: the figure's parts on a page --------
+
+# The figure's parts with a stand-in for the page that hosts them: a figure (``model``), where
+# each of its shapes is drawn (``boxes``: left, top, right, bottom), every edit kept
+# (``sent``, with the name the history gives it) instead of made, and a menu's items kept
+# (``opened``) instead of shown.
+FIGURE_PAGE = """
+Node.prototype.getContext = () => null;
+globalThis.opened = [];
+const SHELL = "data:text/javascript," + encodeURIComponent(
+  "export * from " + JSON.stringify(STATIC + "studio/ui.js") + ";"
+  + "export const menu = (anchor, items) => {"
+  + " globalThis.opened.push(items.map((item) => item.label)); };");
+register("data:text/javascript," + encodeURIComponent(`
+export async function resolve(specifier, context, next) {
+  if (specifier === "/static/studio/studio.js") return { url: SHELL, shortCircuit: true };
+  return next(specifier, context);
+}`.replace("SHELL", JSON.stringify(SHELL))));
+const { figureParts } = await import(STATIC + "figure/parts.js");
+const sent = [];
+function figurePage(model, boxes) {
+  const drawn = (id) => {
+    const [left, top, right, bottom] = boxes[id] || [];
+    if (!boxes[id]) return null;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  };
+  const figure = figureParts({
+    catalog: { parts: {}, groups: [{ kind: "row", title: "Row", layout: "row" }] },
+    overlay: new Node("div"), idOf: (id) => id, changed() {}, groupAnchor: () => ({ x: 0, y: 0 }),
+    element: (id) => (drawn(id) ? { getBoundingClientRect: () => drawn(id) } : null), box: drawn,
+    run: async (action, { label }) => {
+      sent.push([action, label]);
+      return { select: action.ids || [] };
+    },
+  });
+  figure.setModel({ figure: { id: "f" }, root: "root", edges: [], nets: [], ...model });
+  return figure;
+}
+// A key pressed with nothing typed in: whether the figure took it, and stopped the
+// browser's own.
+function press(figure, keys) {
+  let stopped = false;
+  const preventDefault = () => { stopped = true; };
+  const event = { key: "g", code: "KeyG", metaKey: true, target: document.body, ...keys };
+  return [figure.key({ ...event, preventDefault }), stopped];
+}
+"""
+
+
+def _figure_page(code: str) -> dict:
+    static = Path(__file__).parents[2] / "src/flexo/studio/static"
+    program = FAKE_PAGE + STATIC_ADDRESSES % json.dumps(static.as_uri() + "/") + FIGURE_PAGE + code
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", program], capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+def _shapes(*names: str) -> str:
+    return json.dumps([{"id": name, "kind": "block", "label": name.title()} for name in names])
+
+
+# A flow chart whose boxes have ended up in two columns side by side, in the figure's row.
+FLOW_PAGE = (
+    "const figure = figurePage({ nodes: "
+    + _shapes("mech", "smiles", "geo", "pose", "crystal", "b", "a")
+    + """,
+  edges: [{ id: "line", from: "geo", to: "pose" }],
+  groups: [
+    { id: "root", layout: { kind: "row" }, children: ["mech", "smiles", "col1", "col2", "a"] },
+    { id: "col1", role: "layout", layout: { kind: "column" }, children: ["geo", "pose"] },
+    { id: "col2", role: "layout", layout: { kind: "column" }, children: ["crystal", "b"] }] },
+  { mech: [0, 0, 40, 20], smiles: [60, 0, 100, 20], geo: [120, 0, 160, 20],
+    pose: [120, 40, 160, 60], crystal: [180, 0, 220, 20], b: [180, 40, 220, 60],
+    a: [240, 0, 280, 20] });
+"""
+)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_shapes_chosen_are_ordered_as_they_are_seen_along_a_row_or_down_a_column() -> None:
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    boxes = {"geo": [120, 0, 160, 20], "pose": [118, 40, 162, 60], "crystal": [180, 2, 220, 26],
+             "a": [240, 0, 280, 20]}
+    code = (
+        f"import {{ seenOrder }} from {json.dumps(script.as_uri())};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)})"
+        ".map(([id, [left, top, right, bottom]]) => [id, { left, top, right, bottom }]));\n"
+        "const chosen = ['a', 'unseen', 'pose', 'crystal', 'geo'];\n"
+        "const seen = ['row', 'column'].map((kind) => seenOrder(chosen, boxes, kind));\n"
+        "console.log(JSON.stringify(seen));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    across, down = json.loads(result.stdout)
+    # Left to right, a shape under another after it; one not drawn after those that are.
+    assert across == ["geo", "pose", "crystal", "a", "unseen"]
+    # Top to bottom, those side by side (one a little lower, or taller) left to right.
+    assert down == ["geo", "crystal", "a", "pose", "unseen"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_align_in_a_row_sends_the_shapes_chosen_anywhere_in_the_order_they_are_seen() -> None:
+    out = _figure_page(FLOW_PAGE + """
+const out = {};
+// The top box of each column and one of the figure's own row, chosen in any order.
+figure.select(["a", "geo", "crystal"]);
+out.offered = figure.canAlign();
+out.menu = figure.menuOf("geo", { x: 0, y: 0 }).map((item) => [item.label, item.keys || ""]);
+figure.alignChosen("row");
+figure.select(["b", "pose"]);
+figure.alignChosen("row");
+// A group goes as a shape does.
+figure.select(["col1", "mech"]);
+figure.alignChosen("column");
+// In one row (one column) already: nothing is sent.
+figure.select(["a", "mech"]);
+out.inRow = figure.alignChosen("row");
+figure.select(["pose", "geo"]);
+out.inColumn = figure.alignChosen("column");
+// Not lines, nor one shape alone.
+figure.select(["geo", "line"]);
+out.withLine = [figure.canAlign(), figure.alignChosen("row")];
+figure.select(["geo"]);
+out.alone = figure.canAlign();
+await figure.idle();
+console.log(JSON.stringify({ ...out, sent }));
+""")
+    assert out["sent"] == [
+        [{"do": "line_up", "ids": ["geo", "crystal", "a"], "kind": "row"},
+         "Align 3 Shapes in a Row"],
+        [{"do": "line_up", "ids": ["pose", "b"], "kind": "row"}, "Align 2 Shapes in a Row"],
+        [{"do": "line_up", "ids": ["mech", "col1"], "kind": "column"},
+         "Align 2 Shapes in a Column"],
+    ]
+    assert out["offered"] is True and out["alone"] is False
+    assert (out["inRow"], out["inColumn"], out["withLine"]) == (False, False, [False, False])
+    # Several chosen, right-clicked: grouped (⌘G), or aligned.
+    assert out["menu"] == [["Group…", "⌘G"], ["Align in a Row", ""],
+                           ["Align in a Column", ""], ["Duplicate", "⌘D"], ["Delete", "⌫"]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_shapes_aligned_in_a_figure_turned_or_folded_to_fit_go_the_way_they_are_seen() -> None:
+    # A column drawn as a row, to fit a slide: its shapes are in a row as they are seen, and
+    # put in a column the figure is first written the way it is drawn -- one step.
+    turned = _figure_page(
+        "const figure = figurePage({ nodes: " + _shapes("p", "q", "r") + """,
+  groups: [{ id: "root", layout: { kind: "column" }, children: ["p", "q", "r"] }] },
+  { p: [0, 0, 40, 20], q: [60, 0, 100, 20], r: [120, 0, 160, 20] });
+figure.select(["q", "p"]);
+const inRow = figure.alignChosen("row");
+figure.alignChosen("column");
+await figure.idle();
+console.log(JSON.stringify({ inRow, sent }));
+""")
+    assert turned["inRow"] is False
+    assert turned["sent"] == [
+        [{"do": "update", "targets": [{"type": "group", "id": "root"}],
+          "values": {"layout.kind": "row"}}, "Align 2 Shapes in a Column"],
+        [{"do": "line_up", "ids": ["p", "q"], "kind": "column"}, "Align 2 Shapes in a Column"],
+    ]
+    # A row folded onto two lines: one shape of each line put in a row, the lines are first
+    # written as they are seen, so that the rest keep theirs.
+    folded = _figure_page(
+        "const figure = figurePage({ nodes: " + _shapes("p", "q", "r", "s") + """,
+  groups: [{ id: "root", layout: { kind: "row" }, children: ["p", "q", "r", "s"] }] },
+  { p: [0, 0, 40, 20], q: [60, 0, 100, 20], r: [0, 40, 40, 60], s: [60, 40, 100, 60] });
+figure.select(["p", "q"]);
+const inRow = figure.alignChosen("row");
+figure.select(["s", "q"]);
+figure.alignChosen("row");
+await figure.idle();
+console.log(JSON.stringify({ inRow, sent }));
+""")
+    assert folded["inRow"] is False
+    assert folded["sent"] == [
+        [{"do": "arrange", "id": "root", "kind": "row", "lines": [["p", "q"], ["r", "s"]],
+          "align": "start"}, "Align 2 Shapes in a Row"],
+        [{"do": "line_up", "ids": ["q", "s"], "kind": "row"}, "Align 2 Shapes in a Row"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_command_g_groups_the_shapes_chosen_and_shift_command_g_ungroups() -> None:
+    out = _figure_page(FLOW_PAGE + """
+const out = {};
+// Shapes chosen: ⌘G opens Group…, as ⌥⌘G (Keynote's, which types another letter) does.
+figure.select(["geo", "crystal"]);
+out.group = [press(figure, {}), press(figure, { altKey: true, key: "©" })];
+out.cannotUngroup = press(figure, { shiftKey: true, key: "G" });
+// A group chosen: ⇧⌘G takes it apart, as ⇧⌥⌘G does.
+figure.select(["col1"]);
+out.ungroup = [press(figure, { shiftKey: true, key: "G" }),
+  press(figure, { shiftKey: true, altKey: true, key: "˝" })];
+// A line cannot be grouped: the key is left to the browser.
+figure.select(["line"]);
+out.line = press(figure, {});
+await figure.idle();
+console.log(JSON.stringify({ ...out, sent, opened: globalThis.opened }));
+""")
+    assert out["group"] == [[True, True], [True, True]] and out["opened"] == [["Row"], ["Row"]]
+    assert out["ungroup"] == [[True, True], [True, True]]
+    assert [action for action, _ in out["sent"]] == [{"do": "ungroup", "id": "col1"}] * 2
+    assert out["cannotUngroup"] == [False, False] and out["line"] == [False, False]
+
+
 # -- the File menu's Rename and Duplicate --------------------------------------------
 
 
