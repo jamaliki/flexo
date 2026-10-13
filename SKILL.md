@@ -52,6 +52,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over}}`.
 - One figure shown several ways with nothing moved (a talk's build-up):
   `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
+- A shape's words set apart: `properties={"bold": True}`, `"italic"`, `"size": "6pt"`,
+  `"align": "left"`; a picture cropped: `properties={"crop_left": 10, ...}` (hundredths).
 - An outline dashed or dotted (what is optional, or not yet there): `line="dashed"` or
   `"dotted"` on a shape, a group or a frame, as on an arrow (`line:` in a file).
 - A figure of several panels: `figure.panel(id)` for each (a group with no frame, lettered

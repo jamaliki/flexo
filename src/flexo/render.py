@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.artwork import node_artwork, picture_href
+from flexo.artwork import crop_of, node_artwork, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     FIT_NEVER,
@@ -36,6 +36,7 @@ from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
 from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
+from flexo.wording import anchor_of, typography_of
 
 
 def _box(bounds: Rect) -> tuple[float, float, float, float]:
@@ -872,11 +873,36 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         else node.bounds
     )
     artwork = node_artwork(spec)
+    kept = crop_of(spec)
+    if kept is not None and artwork.width and artwork.height:
+        # Cropped: the part of it kept fills the bounds, through a window on the whole of
+        # it (a nested drawing, which shows what its viewBox names and no more).
+        whole_w, whole_h = artwork.width, artwork.height
+        window = element(
+            parent,
+            "svg",
+            id=f"{spec.id}.artwork",
+            x=bounds.x,
+            y=bounds.y,
+            width=bounds.width,
+            height=bounds.height,
+            viewBox=" ".join(
+                number(value)
+                for value in (
+                    kept[0] * whole_w, kept[1] * whole_h, kept[2] * whole_w, kept[3] * whole_h
+                )
+            ),
+            preserveAspectRatio=_ARTWORK_FIT,
+        )
+        bounds = Rect(0.0, 0.0, whole_w, whole_h)
+        parent, part = window, f"{spec.id}.artwork.whole"
+    else:
+        part = f"{spec.id}.artwork"
     if artwork.format in {"png", "jpeg"}:
         element(
             parent,
             "image",
-            id=f"{spec.id}.artwork",
+            id=part,
             x=bounds.x,
             y=bounds.y,
             width=bounds.width,
@@ -887,7 +913,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         return
     nested = ET.fromstring(artwork.markup)
     for name, value in (
-        ("id", f"{spec.id}.artwork"),
+        ("id", part),
         ("x", number(bounds.x)),
         ("y", number(bounds.y)),
         ("width", number(bounds.width)),
@@ -1009,20 +1035,26 @@ def _render_label(
     palette: Palette,
 ) -> None:
     spec = node.measured.spec
+    area = (
+        label_area(spec.kind, node.bounds, node.measured.label, style)
+        if spec.kind in SHAPE_KINDS
+        else node.bounds
+    )
+    # Its lines in the middle of the shape, or at the side it asks for (flexo.wording),
+    # in from its edge as its words are kept from it.
+    anchor = anchor_of(spec)
+    inset = (style.padding_y if spec.kind in {"text", "label"} else style.padding_x).points
+    x = {"start": area.x + inset, "end": area.right - inset}.get(anchor, area.center.x)
     render_runs(
         parent,
         f"{spec.id}.label",
         node.measured.label,
-        x=(
-            label_area(spec.kind, node.bounds, node.measured.label, style).center.x
-            if spec.kind in SHAPE_KINDS
-            else node.bounds.center.x
-        ),
+        x=x,
         y=_label_baseline(node, style),
-        typography=style.typography,
+        typography=typography_of(spec, style.typography),
         palette=palette,
         fill_role="muted-ink" if spec.role == CAPTION_ROLE else "ink",
         # Author paint carries no role, so retheme leaves it alone (render_common).
         fill=paint_override(spec, "label"),
-        anchor="middle",
+        anchor=anchor,
     )

@@ -129,3 +129,125 @@ def test_the_studio_offers_it_on_every_kind_with_an_outline_and_sets_it() -> Non
     document = yaml.safe_load(text)
     lines = {item["id"]: item.get("line") for item in document["nodes"] + document["groups"]}
     assert lines["plain"] == lines["later"] == lines["round"] == "dotted"
+
+
+# -- a shape's words: bold, italic, their size, where their lines stand --
+
+WORDED = """
+figure: {id: worded, style: paper}
+groups:
+- {id: root, role: canvas, layout: {kind: row}, children: [head, note, gene, wide, plain]}
+nodes:
+- {id: head, label: Encoder, properties: {bold: true}}
+- {id: note, kind: text, label: "Trained once,\nthen frozen", properties: {align: left, size: 6pt}}
+- {id: gene, kind: text, label: lacZ, properties: {italic: true}}
+- {id: wide, label: "Right\nside", width: 30mm, properties: {align: right, size: 10}}
+- {id: plain, label: Plain}
+"""
+
+
+def test_a_shapes_words_take_a_weight_a_slant_a_size_and_a_side_of_their_own() -> None:
+    """A figure's words were all set alike; a heading in bold, a gene's name in italic, a
+    note set small against its left edge had no way to be said."""
+
+    compiled = compile_figure(parse_figure(yaml.safe_load(WORDED)))
+    svg = compiled.document.text
+    assert 'font-weight="700"' in _tag(svg, "head.label") or re.search(
+        r'<text id="head.label"[^>]*>\s*<tspan[^>]*font-weight="700"', svg
+    )
+    assert re.search(r'<text id="gene.label"[^>]*>.*?font-style="italic"', svg, re.DOTALL)
+    plain = _tag(svg, "plain.label")
+    assert "font-weight" not in plain and "italic" not in plain
+    # A size of its own is what it is measured at, so its shape is the size for it.
+    assert 'font-size="6"' in _tag(svg, "note.label")
+    assert 'font-size="10"' in _tag(svg, "wide.label") and 'font-size="8"' in plain
+    sizes = {
+        node.measured.spec.id: node.measured.label.line_height for node in compiled.fitted.nodes
+    }
+    assert sizes["note"] < sizes["plain"] < sizes["wide"]
+    # Its lines at the side it asks for, in from the shape's edge; else in its middle.
+    boxes = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    left, right, middle = (_tag(svg, f"{name}.label") for name in ("note", "wide", "plain"))
+    assert 'text-anchor="start"' in left and 'text-anchor="end"' in right
+    assert 'text-anchor="middle"' in middle
+    at = lambda tag: float(re.search(r'\bx="([\d.]+)"', tag)[1])  # noqa: E731
+    assert boxes["note"].x < at(left) < boxes["note"].center.x
+    assert boxes["wide"].center.x < at(right) < boxes["wide"].right
+    assert at(middle) == pytest.approx(boxes["plain"].center.x, abs=0.01)
+
+
+def test_the_studio_says_which_kinds_take_text_styling() -> None:
+    parts = catalogue()["parts"]
+    assert parts["block"]["styled"] and parts["text"]["styled"] and parts["database"]["styled"]
+    assert not parts["structure"]["styled"] and not parts["frame"]["styled"]
+    text = apply(WORDED, {"do": "update", "targets": [{"type": "node", "id": "plain"},
+                                                      {"type": "node", "id": "head"}],
+                          "values": {"properties.italic": True, "properties.bold": None}})["text"]
+    nodes = {node["id"]: node for node in yaml.safe_load(text)["nodes"]}
+    assert nodes["plain"]["properties"] == {"italic": True}
+    assert nodes["head"].get("properties") == {"italic": True}
+
+
+def test_a_picture_in_a_figure_is_cropped(tmp_path) -> None:
+    """A picture in a figure was all of it or none: a panel of a larger image, or a plot
+    without its margin, had to be cut in another program first."""
+
+    import struct
+    import zlib
+
+    from flexo.artwork import crop_of
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        check = struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        return struct.pack(">I", len(data)) + tag + data + check
+
+    rows = b"".join(b"\x00" + b"\xd0\x30\x30" * 100 + b"\x30\x50\xd0" * 100 for _ in range(100))
+    header = struct.pack(">IIBBBBB", 200, 100, 8, 2, 0, 0, 0)
+    picture = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+    (tmp_path / "halves.png").write_bytes(picture + chunk(b"IEND", b""))
+    source = str(tmp_path / "halves.png")
+    with flexo.Figure("cropped") as figure:
+        figure.node("whole", "image", width="40mm", properties={"source": source})
+        figure.node("half", "image", width="40mm", properties={"source": source, "crop_left": 50})
+        figure.node(
+            "middle", "image", properties={"source": source, "crop_top": 25, "crop_bottom": 25}
+        )
+    spec = figure.spec
+    assert crop_of(spec.node("whole")) is None
+    assert crop_of(spec.node("half")) == (0.5, 0.0, 0.5, 1.0)
+    compiled = compile_figure(spec)
+    boxes = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    # As large as the part of it kept: half of a picture twice as wide as tall is square,
+    # and one with no size of its own is the size of what is left of it.
+    assert boxes["whole"].width == pytest.approx(2 * boxes["whole"].height)
+    assert boxes["half"].width == pytest.approx(boxes["half"].height)
+    assert boxes["middle"].width == pytest.approx(4 * boxes["middle"].height)
+    svg = compiled.document.text
+    window = _tag(svg, "half.artwork")
+    # Drawn through a window on the whole of it: what its viewBox names, and no more.
+    assert window.startswith("<svg") and re.search(r'viewBox="[\d.]+ 0 [\d.]+ [\d.]+"', window)
+    assert _tag(svg, "whole.artwork").startswith("<image")
+    assert _tag(svg, "half.artwork.whole").startswith("<image")
+    fields = {field["key"] for field in catalogue()["parts"]["image"]["fields"]}
+    assert {f"properties.crop_{side}" for side in ("left", "top", "right", "bottom")} <= fields
+
+
+def test_single_words_of_a_label_are_bold_or_italic() -> None:
+    """A label's asterisks are drawn as typed, so a word in it had no way to be bold: it is
+    said as a coloured word is, ``[word]{bold}``."""
+
+    from flexo.markup import parse_label
+
+    runs = parse_label("An [important]{bold} word, [lacZ]{italic}, [both]{bold-italic}, *kept*")
+    said = {run.text: (run.weight, run.italic) for run in runs}
+    assert said["important"] == (700, False) and said["lacZ"] == (400, True)
+    assert said["both"] == (700, True) and said["An "] == (400, False)
+    assert any("*kept*" in run.text for run in runs)
+    # A colour is still a colour, and may hold a bold word.
+    (red,) = (run for run in parse_label("[warm]{accent}") if run.text == "warm")
+    assert red.color == "accent" and red.weight == 400
+    with flexo.Figure("worded") as figure:
+        figure.block("a", label="An [important]{bold} word")
+    svg = compile_figure(figure.spec).document.text
+    assert re.search(r'<tspan[^>]*font-weight="700"[^>]*>important</tspan>', svg)
+    assert "{bold}" not in svg

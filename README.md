@@ -735,6 +735,20 @@ long title widens it, so the title lies on nothing -- where an arrow comes down 
 frame, it ends short of the arrow. Behind shapes that stand in filled groups, a frame is
 drawn over those groups' own fills, so it shows.
 
+### A shape's words, and a picture's crop
+
+A shape says how the whole of its label is set, in its properties: `bold: true`,
+`italic: true`, `size: 6pt` and `align: left` (or `right`). The size is what the
+label is measured at, so the shape is the size for it. In the studio a shape (or
+several chosen) has a **Text** section -- Bold, Italic, the side its lines stand at,
+and Size -- and ⌘B and ⌘I work on shapes chosen. Single words are bold or italic as
+coloured words are written: `[word]{bold}`, `[lacZ]{italic}` (a label's asterisks are
+drawn as typed); ⌘B and ⌘I do it to the words chosen while a label is typed.
+
+A picture in a figure is cropped by how much is cut off each side, in hundredths:
+`crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part
+kept.
+
 ### Hiding, dimming and highlighting parts
 
 A talk shows one figure many times: all of it, then one part with the rest faint, then
@@ -1071,7 +1085,8 @@ changes in words, to go back or forward to any of them.
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
   journal prints a figure of several; **Panel Letters**, with nothing chosen,
   letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
-  whole figure out as panels -- 2 across, 2 × 2, 3 × 2 -- in one step) -- or puts a **frame** round them where they
+  whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
+  in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
   **Layer**). A shape, a group and a frame each have an **Outline**: solid, dashed or
   dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on

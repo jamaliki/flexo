@@ -76,6 +76,7 @@ STRUCTURAL = frozenset(
         "delete",
         "gather",
         "panels",
+        "shift",
         "frame",
         "ungroup",
         "move",
@@ -1450,9 +1451,16 @@ class _Document:
         of several parts, in one step. What it has that is in no panel becomes one, laid out
         as it was; the panels it lacks are added, each with a first shape to build on; and
         the figure lays them out -- in a row (as many columns as panels), a column (one), or
-        a grid. Panels it has already are kept, however many. Answers the panels."""
+        a grid. Panels it has already are kept, however many. Answers the panels.
 
-        count = max(1, min(int(action.get("count") or 2), 26))
+        ``rows`` (``[1, 2]``: one panel over two) or ``stacks`` (``[1, 2]``: one beside two,
+        one over the other) lays them out in lines of different lengths instead: each line
+        of more than one panel a row (or column) of its own in the figure's column (row)."""
+
+        rows = [max(1, int(each)) for each in action.get("rows") or []]
+        stacks = [max(1, int(each)) for each in action.get("stacks") or []]
+        lines = rows or stacks
+        count = max(1, min(sum(lines) or int(action.get("count") or 2), 26))
         columns = max(1, min(int(action.get("columns") or count), count))
         root = self.written_root()
         children: list[str] = root.setdefault("children", [])
@@ -1460,6 +1468,14 @@ class _Document:
         def panel(identifier: str) -> bool:
             return (self.group(identifier) or {}).get("role") == "panel"
 
+        # Panels in lines of their own from the last time are the figure's own again first.
+        for item in list(children):
+            line = self.group(item)
+            held = (line or {}).get("children") or []
+            if line and line.get("role") == "layout" and held and all(panel(each) for each in held):
+                at = children.index(item)
+                children[at : at + 1] = held
+                self.data["groups"].remove(line)
         frames = {str(node.get("id")) for node in self.nodes if node.get("kind") == "frame"}
         loose = [item for item in children if not panel(item) and item not in frames]
         if loose:
@@ -1478,8 +1494,25 @@ class _Document:
             first = self._add({"kind": "block", "parent": self.root})
             self._gather({"ids": first, "layout": "row", "role": "panel"})
         panels = [item for item in children if panel(item)]
-        across = min(columns, len(panels))
         kept = {key: value for key, value in (root.get("layout") or {}).items() if key == "gap"}
+        if lines:
+            along, across_ = ("row", "column") if rows else ("column", "row")
+            arranged: list[str] = []
+            left = list(panels)
+            for length in lines:
+                part, left = left[:length], left[length:]
+                if len(part) < 2:
+                    arranged += part
+                    continue
+                identifier = self.fresh("panels")
+                line = {"id": identifier, "role": "layout", "children": part}
+                self.data["groups"].append({**line, "layout": {"kind": along}})
+                arranged.append(identifier)
+            others = [item for item in children if item not in panels]
+            root["children"] = [*arranged, *left, *others]
+            root["layout"] = {"kind": across_, **kept}
+            return panels
+        across = min(columns, len(panels))
         if across >= len(panels):
             root["layout"] = {"kind": "row", **kept}
         elif across == 1:
@@ -1629,10 +1662,32 @@ class _Document:
                 _frame_round(node, [*held, *(item for item in inside if item not in held)])
         return inside
 
+    def _shift(self, action: Mapping[str, Any]) -> list[str]:
+        """Several parts of one row, column or group (``ids``) moved a place back or on
+        together (``by``: -1 or 1), in the order they stand: what was before the first of
+        them is after the last (or the other way), and nothing else moves."""
+
+        ids = [str(item) for item in action.get("ids") or []]
+        on = int(action.get("by") or 1) > 0
+        if not ids:
+            return []
+        holders = {id(self.parent_of(item)) for item in ids}
+        if len(holders) != 1:
+            raise EditError("Select shapes that are in the same row, column or group.")
+        children: list[str] = self.parent_of(ids[0])["children"]
+        places = sorted(children.index(item) for item in ids)
+        # (Each from the end they move toward, so one never jumps another of them.)
+        for place in reversed(places) if on else places:
+            other = place + (1 if on else -1)
+            if 0 <= other < len(children) and children[other] not in ids:
+                children[place], children[other] = children[other], children[place]
+        return ids
+
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
         if action.get("into"):
-            return self.put_into(identifier, str(action["into"]), action.get("parent"))
+            moved = self.put_into(identifier, str(action["into"]), action.get("parent"))
+            return [*moved, *self.carried(identifier, action.get("with"))]
         if action.get("line"):
             return self.own_line(
                 identifier, str(action.get("of") or self.root), str(action["line"])
@@ -1644,12 +1699,54 @@ class _Document:
         target = self.group(parent_id) if parent_id != self.root else self.written_root()
         if target is None:
             raise EditError(f"There\u2019s no group named “{parent_id}”.")
+        stood = self.reading_order()
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
-        return [identifier]
+        return [identifier, *self.carried(identifier, action.get("with"), stood)]
+
+    def carried(
+        self, identifier: str, others: object, stood: list[str] | None = None
+    ) -> list[str]:
+        """The other parts chosen with one that was moved (``others``: several chosen, one
+        of them dragged) put where it now is, after it, in the order they stood (``stood``,
+        as it was before the move). Never what holds it, nor what it holds. Answers them."""
+
+        holder = self.parent_of(identifier)
+        order = {part: place for place, part in enumerate(stood or self.reading_order())}
+        also = [
+            other
+            for other in dict.fromkeys(str(item) for item in others or [])  # type: ignore[attr-defined]
+            if other not in (identifier, self.root, holder.get("id"))
+            and (self.node(other) is not None or self.group(other) is not None)
+            and other not in self.descendants(identifier)
+            and identifier not in self.descendants(other)
+        ]
+        also.sort(key=lambda other: order.get(other, len(order)))
+        children: list[str] = holder["children"]
+        for place, other in enumerate(also, 1):
+            self.parent_of(other)
+            self.detach(other)
+            children.insert(children.index(identifier) + place, other)
+        return also
+
+    def reading_order(self) -> list[str]:
+        """Every part and group in the order it is read: the root's children, each followed
+        by what it holds."""
+
+        found: list[str] = []
+        left = [self.root]
+        while left:
+            one = left.pop(0)
+            group = self.group(one)
+            held = list((group or {}).get("children") or []) if one != self.root or group else []
+            if one == self.root and group is None:
+                held = list(self.written_root().get("children") or [])
+            found += [item for item in held if item not in found]
+            left = [*held, *left]
+        return found
 
     def put_into(self, identifier: str, into: str, parent: object = None) -> list[str]:
         """A shape let go on a line (``into``) between two others: put into it, between them

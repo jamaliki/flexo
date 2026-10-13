@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import itertools
 from collections.abc import Callable
 from dataclasses import replace
@@ -25,11 +26,12 @@ from flexo.layout.gaps import routing_gaps_for_group
 from flexo.layout.order import optimized_child_orders
 from flexo.routing.aside import writing_room
 from flexo.shapes import CLOUD_MEASURE, SHAPE_KINDS, label_room
-from flexo.style import LayoutStyle
+from flexo.style import LayoutStyle, TypographyStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
 from flexo.units import CellSpan
 from flexo.validate import merge_matched_stacks, normalize_and_validate, resolve_alignment
+from flexo.wording import typography_of
 
 __all__ = ["arrangement_size", "measure_figure"]
 
@@ -217,11 +219,20 @@ def measure_figure(
     )
 
 
+@functools.lru_cache(maxsize=32)
+def _measurer(typography: TypographyStyle) -> TextMeasurer:
+    return TextMeasurer(typography)
+
+
 def _measure_node(
     node: NodeSpec,
     measurer: TextMeasurer,
     style: LayoutStyle,
 ) -> MeasuredNode:
+    # (At a size of its own, where the shape has one: flexo.wording.)
+    own = typography_of(node, style.typography)
+    if own is not style.typography:
+        measurer = _measurer(own)
     room = _label_width(node, style)
     label = measurer.measure(node.label, max_width=room)
     if node.kind == "decision" and node.width is not None and not isinstance(node.width, CellSpan):

@@ -841,6 +841,10 @@ export function mount(studio, main) {
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // Format › Bold and Italic: of all the words of the shapes chosen (⌘B, ⌘I).
+    ...(!typingNow() && figure.canStyle() ? [
+      { icon: "bold", label: "Bold", keys: "⌘B", run: () => figure.toggleWords("bold") },
+      { icon: "italic", label: "Italic", keys: "⌘I", run: () => figure.toggleWords("italic") }] : []),
     // What is chosen hidden, dimmed or highlighted where it stands, and all of it back.
     ...(!typingNow() && shapesChosen() ? [
       { icon: "eye", label: "Hide", hint: "Not drawn: its place is kept", run: () => figure.showAs("hidden") },

@@ -412,10 +412,13 @@ export const ui = {
   // tool out: ⌘K there does nothing (not the command palette either).
   markup({ value = "", rows = 1, placeholder = "", onInput, colours = true, emphasis = true, links = true, key, spelling = true, lines = false } = {}) {
     const area = ui.textarea({ value, rows, placeholder, onInput, key, spelling });
+    // How bold and italic words are marked: by asterisks, or -- `emphasis: "tags"`, for a
+    // figure's labels, whose asterisks are drawn as typed -- as coloured words are.
+    const marks = emphasis === "tags" ? { bold: ["[", "]{bold}"], italic: ["[", "]{italic}"] } : { bold: ["**", "**"], italic: ["*", "*"] };
     area.addEventListener("keydown", (event) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, "**", "**"); }
-      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, "*", "*"); }
+      if (emphasis && mod && event.key.toLowerCase() === "b") { event.preventDefault(); wrap(area, ...marks.bold); }
+      if (emphasis && mod && event.key.toLowerCase() === "i") { event.preventDefault(); wrap(area, ...marks.italic); }
       if (mod && event.key.toLowerCase() === "k") {
         event.preventDefault();
         event.stopPropagation();
@@ -443,8 +446,8 @@ export const ui = {
       return tool(h("span.rt-swatch", { style: { background: palette[name] } }), title, "[", `]{${name}}`);
     };
     const tools = h("div.markup-tools", {},
-      emphasis ? tool(h("b", {}, "B"), "Bold (⌘B)", "**", "**") : null,
-      emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", "*", "*") : null,
+      emphasis ? tool(h("b", {}, "B"), "Bold (⌘B)", ...marks.bold) : null,
+      emphasis ? tool(h("i", {}, "I"), "Italic (⌘I)", ...marks.italic) : null,
       tool(h("span.tool-code", {}, "</>"), "Code", "`", "`"),
       tool(h("span.tool-maths", {}, "∑"), "Equation (⌥⌘E)", "$", "$"),
       links ? tool(icon("link"), "Link (⌘K)", "[", "](https://)") : null,

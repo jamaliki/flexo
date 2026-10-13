@@ -315,3 +315,47 @@ def test_science_has_its_columns_and_panels_have_sizes_and_letters_in_view() -> 
     )
     wide = {g.measured.spec.id: g.bounds.width for g in compile_figure(sized).fitted.groups}
     assert wide["one"] == pytest.approx(Length.parse("60mm").points)
+
+
+def test_panels_are_laid_out_one_over_two_and_one_beside_two() -> None:
+    """A grid's panels are so many to every row: one wide panel over two had no way to be
+    asked for but groups nested by hand."""
+
+    from flexo.pages import panels as lettered_order
+    from flexo.studio.figure_edit import apply
+
+    plain = "figure: {id: fig, style: paper}\nnodes:\n- {id: a, label: Encoder}\n"
+    over = apply(plain, {"do": "panels", "rows": [1, 2]})
+    document = yaml.safe_load(over["text"])
+    groups = {group["id"]: group for group in document["groups"]}
+    first, second, third = over["select"]
+    line = next(group for group in groups.values() if group.get("role") == "layout")
+    assert groups["root"]["layout"] == {"kind": "column"}
+    assert groups["root"]["children"] == [first, line["id"]]
+    assert line["children"] == [second, third] and line["layout"] == {"kind": "row"}
+    # Lettered as they are read, and drawn so: the first over the other two, side by side.
+    figure = parse_figure(document)
+    assert lettered_order(figure) == (first, second, third)
+    boxes = {g.measured.spec.id: g.bounds for g in compile_figure(figure).fitted.groups}
+    assert boxes[first].bottom <= boxes[second].y
+    assert boxes[second].y == pytest.approx(boxes[third].y)
+    assert boxes[second].right <= boxes[third].x
+    # Laid out again another way, the lines of the last way are gone: no group left over.
+    beside = apply(over["text"], {"do": "panels", "stacks": [1, 2]})
+    again = yaml.safe_load(beside["text"])
+    lines = [group for group in again["groups"] if group.get("role") == "layout"]
+    assert len(lines) == 1 and lines[0]["layout"] == {"kind": "column"}
+    assert next(g for g in again["groups"] if g["id"] == "root")["layout"] == {"kind": "row"}
+    grid = yaml.safe_load(apply(beside["text"], {"do": "panels", "count": 3, "columns": 3})["text"])
+    assert not [group for group in grid["groups"] if group.get("role") == "layout"]
+    assert next(g for g in grid["groups"] if g["id"] == "root")["children"] == over["select"]
+
+
+def test_a_groups_title_position_is_offered() -> None:
+    """Where a module's title or a panel's letter stands was in the file format alone."""
+
+    from flexo.studio.figure_parts import catalogue
+
+    (side,) = (f for f in catalogue()["group_fields"] if f["key"] == "title_side")
+    assert side["options"] == ["left", "right", "bottom-left", "bottom-right"]
+    assert side["show"] == {"role": ["container", "module", "panel"]}

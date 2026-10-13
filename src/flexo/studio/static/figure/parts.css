@@ -304,3 +304,9 @@ body.fig-banding, body.fig-banding * { user-select: none; }
 .fig-dragging svg { overflow: visible; }
 body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !important; }
 .fig-end-drag .fig-head { fill: var(--accent); stroke: none; }
+
+/* A shape's words: bold and italic by a button each, pressed when they are, and their
+   lines' side beside them. */
+.text-style { display: flex; align-items: center; gap: 6px; }
+.text-style > .btn { flex: none; }
+.text-style > .segmented { flex: 1; }

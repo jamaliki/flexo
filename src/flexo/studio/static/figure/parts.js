@@ -525,6 +525,7 @@ export function figureParts(host) {
       case "duplicate": return many(action.ids, "Duplicate");
       // (A module made of the shapes chosen is said so: "Make Module".)
       case "frame": return "Add Frame";
+      case "shift": return many(action.ids, "Move");
       case "panels": return action.count > panelsNow() && action.count === panelsNow() + 1 && panelsNow() ? "Add Panel" : `Lay Out as ${action.count} Panels`;
       case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
@@ -538,6 +539,7 @@ export function figureParts(host) {
       case "rename": return `Change ID of ${name(action.id)}`;
       // A part put on a line of its own beside another makes a row (a column) of the two: said so.
       case "move": {
+        if (action.with?.length) return many([action.id, ...action.with], "Move");
         // Out of its own row (column), onto a line of its own beside it: said as its menu says it.
         if (action.line && action.of && action.of === parentOf(action.id)?.id) {
           const own = { below: "Row Below", above: "Row Above", left: "Column on the Left", right: "Column on the Right" }[action.line];
@@ -1826,7 +1828,9 @@ export function figureParts(host) {
   // the figure has in no panel becomes its first, and the rest are added to build on.
   const PANEL_LAYOUTS = [[2, 2, "2 Across"], [3, 3, "3 Across"], [2, 1, "2 Stacked"], [4, 2, "2 × 2"], [6, 3, "3 × 2"], [6, 2, "2 × 3"]];
   const panelsNow = () => (model()?.groups || []).filter((group) => group.role === "panel").length;
-  function layOutPanels(count, columns) { act({ do: "panels", count, columns }); }
+  function layOutPanels(count, columns, lines = null) { act({ do: "panels", count, columns, ...(lines || {}) }); }
+  // Lines of different lengths: one panel over two, two over one, one beside two.
+  const PANEL_LINES = [["1 Over 2", { rows: [1, 2] }], ["2 Over 1", { rows: [2, 1] }], ["1 Beside 2", { stacks: [1, 2] }], ["2 Beside 1", { stacks: [2, 1] }]];
   // One more panel, after the last: never the shapes chosen made one (that is Group › Panel).
   function addPanel() { act({ do: "panels", count: panelsNow() + 1, columns: model()?.groups?.find((group) => group.id === model().root)?.layout?.columns || panelsNow() + 1 }); }
   function panelMenu(anchor) {
@@ -1834,11 +1838,26 @@ export function figureParts(host) {
       { label: "Add Panel", hint: panelsNow() ? "One more, lettered after the last" : "The figure made one of panels: a, b", run: () => addPanel() },
       "-",
       ...PANEL_LAYOUTS.map(([count, columns, label]) => ({ label, hint: `${count} panels${columns > 1 && columns < count ? `, ${columns} to a row` : ""}`, run: () => layOutPanels(count, columns) })),
+      "-",
+      ...PANEL_LINES.map(([label, lines]) => ({ label, hint: "3 panels, one of them as long as the other two", run: () => layOutPanels(3, 3, lines) })),
     ]);
   }
   // A part one place back or on in its row or column, as ⌥ and an arrow move it: the Mac's
   // Arrange › Move Up and Move Down.
+  // Several chosen, all in one row, column or group: moved a place together.
+  function shiftable() {
+    const parts = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
+    if (parts.length < 2 || parts.length !== state.selected.length) return false;
+    const holders = new Set(parts.map((id) => parentOf(id)?.id ?? null));
+    return holders.size === 1;
+  }
+  function shiftChosen(on) {
+    if (!shiftable()) return false;
+    act({ do: "shift", ids: [...state.selected], by: on ? 1 : -1 });
+    return true;
+  }
   function moveChosen(on) {
+    if (state.selected.length > 1) return shiftChosen(on);
     const id = chosenOne();
     if (!id || running || queue.length) return false;
     const across = parentOf(id) && drawnKind(parentOf(id)) === "row";
@@ -1847,7 +1866,7 @@ export function figureParts(host) {
     nudge(id, key);
     return true;
   }
-  const canMove = (on) => { const id = chosenOne(); if (!id) return false; const across = parentOf(id) && drawnKind(parentOf(id)) === "row"; return Boolean(nudgePlace(id, across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp")); };
+  const canMove = (on) => { if (state.selected.length > 1) return shiftable(); const id = chosenOne(); if (!id) return false; const across = parentOf(id) && drawnKind(parentOf(id)) === "row"; return Boolean(nudgePlace(id, across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp")); };
 
   // -- lines --
   function toggleConnect(force) {
@@ -3378,7 +3397,10 @@ export function figureParts(host) {
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     // (A frame stays round its shapes: it has no place of its own to be dragged from.)
     if (nodeOf(id)?.kind === "frame") return;
-    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey };
+    // One of several chosen, dragged: the others go where it is let go, after it.
+    const also = state.selected.length > 1 && state.selected.includes(id)
+      ? state.selected.filter((other) => other !== id && other !== model()?.root && (nodeOf(other) || groupOf(other)) && nodeOf(other)?.kind !== "frame") : [];
+    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey, also };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
     window.addEventListener("pointercancel", dragCancel);
@@ -3877,17 +3899,19 @@ export function figureParts(host) {
     if (at.kind === "splice") {
       const merge = `as-drawn:${was.id}:${Date.now()}`, failed = () => sendHome(was);
       const label = `Insert ${inQuotes(nameOf(was.id))} Between ${inQuotes(nameOf(at.from))} and ${inQuotes(nameOf(at.to))}`;
-      const into = () => act({ do: "move", id: was.id, into: at.line, parent: at.parent }, { merge, label, failed });
+      const into = () => act({ do: "move", id: was.id, into: at.line, parent: at.parent, ...(was.also?.length ? { with: was.also } : {}) }, { merge, label, failed });
       if (was.folds?.length) arrangeSeen(was.folds, { merge, label, failed }, into);
       else into();
       return;
     }
-    moveAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn, failed: () => sendHome(was) });
+    moveAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn, failed: () => sendHome(was), also: was.also || [] });
   }
   // A part moved to `at` (a place in the figure as it is seen: asSeen), by a drag or a key:
   // a figure folded onto lines to fit is written as seen first, one step with the move,
   // which then goes into the lines as written.
-  function moveAsSeen(id, at, { folds = [], drawn = null, failed = null } = {}) {
+  function moveAsSeen(id, at, { folds = [], drawn = null, failed = null, also = [] } = {}) {
+    // (The others chosen with it, where it goes into a row, column or group: after it.)
+    const carried = also.length ? { with: also } : {};
     // Lined up under a part of the line it goes with (or the line itself): only it moves.
     if (at.kind === "align") {
       const label = at.centred ? `Centre ${inQuotes(nameOf(id))}` : `Place ${inQuotes(nameOf(id))} ${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
@@ -3896,13 +3920,13 @@ export function figureParts(host) {
     }
     if (!folds.length) {
       if (at.kind === "line") ownLine(id, at.of, at.side, { failed, drawn });
-      else act({ do: "move", id, parent: at.parent, index: at.index }, { failed });
+      else act({ do: "move", id, parent: at.parent, index: at.index, ...carried }, { failed });
       return;
     }
-    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id });
+    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, ...carried });
     arrangeSeen(folds, { merge, label, failed }, (written) => {
       if (at.kind === "line") ownLine(id, written(at.of), at.side, { failed, merge, label });
-      else act({ do: "move", id, parent: written(at.parent), index: at.index }, { merge, label, failed });
+      else act({ do: "move", id, parent: written(at.parent), index: at.index, ...carried }, { merge, label, failed });
     });
   }
   // A copy of a part put at `at` (as moveAsSeen puts the part itself), one step: the part
@@ -4401,7 +4425,7 @@ export function figureParts(host) {
     const original = markupOf(item[key]);
     // A label's words are names and maths, not prose: no spelling, no corrections, no links.
     // Its format bar is the slide's words': the theme's colours too.
-    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true });
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: "tags", links: false, spelling: false, lines: true });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     // A shape with no words is typed on where they will go, what it is shown faintly there.
@@ -5240,6 +5264,11 @@ export function figureParts(host) {
     }
     if (mod) {
       if (event.key.toLowerCase() === "d" && state.selected.length) { event.preventDefault(); duplicate(); return true; }
+      // ⌘B and ⌘I with shapes chosen (their words not being typed): all their words bold or
+      // italic, or none when all are already.
+      if (!event.altKey && !event.shiftKey && (event.key.toLowerCase() === "b" || event.key.toLowerCase() === "i") && canStyle()) {
+        event.preventDefault(); toggleWords(event.key.toLowerCase() === "b" ? "bold" : "italic"); return true;
+      }
       // ⌥⌘G groups the shapes chosen, ⇧⌥⌘G ungroups a group, as Keynote's Arrange menu does.
       // (By the key's place: ⌥ makes another letter of it.)
       if (event.code === "KeyG" && event.altKey) {
@@ -5276,6 +5305,13 @@ export function figureParts(host) {
     // ⌥ (or ⇧) and an arrow move the part a place that way, as it is seen (nudge): a shape
     // laid out by the figure moves among the others, not by a few points.
     if ((event.altKey || event.shiftKey) && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      // Several of one row, column or group move a place together, as they stand.
+      if (state.selected.length > 1) {
+        if (!shiftable()) return false;
+        event.preventDefault();
+        if (!running && !queue.length) shiftChosen(event.key === "ArrowDown" || event.key === "ArrowRight");
+        return true;
+      }
       const id = chosenOne();
       if (!id) return false;
       event.preventDefault();
@@ -5356,7 +5392,9 @@ export function figureParts(host) {
     if (!host.crumbs && !trail.length) return null;
     return h("div.crumbs", {}, host.crumbs ? host.crumbs() : null, trail.map((group, index) => [
       index || host.crumbs ? icon("chevron") : null,
-      h("button.crumb", { type: "button", onclick: () => select(group === model().root ? [] : [group]) }, group === model().root ? "Figure" : nameOf(group)),
+      // (On a slide the figure has no panel of its own to go up to: its layout is shown
+      // there -- its row or grid, its panels and their letters.)
+      h("button.crumb", { type: "button", title: group === model().root && host.nothing ? "The figure’s layout and panels" : "", onclick: () => select(group === model().root ? (host.nothing ? [group] : []) : [group]) }, group === model().root ? "Figure" : nameOf(group)),
     ]));
   }
 
@@ -5441,6 +5479,7 @@ export function figureParts(host) {
       shapeProblem(node, part),
       // (A structure is drawn in its own colours, by mol-sketch: no tone or colours of a shape's.)
       kind === "structure" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
+      textSection([node.id]),
       showSection([node.id]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
@@ -5608,6 +5647,11 @@ export function figureParts(host) {
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
       isRoot ? null : showSection([group.id]),
+      // The figure's panels, from its own layout: one more, so many laid out, their letters.
+      isRoot ? h("div.section", {}, h("div.section-title", {}, "Panels"),
+        h("div.row", {}, ui.button(panelsNow() ? "Add or Lay Out…" : "Make Panels…", (event) => panelMenu(event.currentTarget), { small: true, icon: "grid", title: "Add a panel, or lay the figure out as panels (a, b, c)" })),
+        panelsNow() ? fields(catalog.figure_fields.filter((field) => field.key === "figure.panel_labels"), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure") : null,
+        anyShownApart() ? h("div.row", {}, ui.button("Show All", () => showAll(), { small: true, icon: "eye", title: shownSummary() })) : null) : null,
       h("div.section", {},
         turned(group) ? h("div.hint-line.turned", {}, icon("info"), `Drawn as a ${drawnKind(group)} to fit the slide; written as a ${writtenKind(group)}.`) : null,
         // The whole figure's layout is drawn with no frame of its own: no Frame to choose.
@@ -5915,6 +5959,46 @@ export function figureParts(host) {
     ];
   }
 
+  // -- a shape's words --
+  // Bold, italic, a size of their own, and where their lines stand in the shape: of the
+  // whole label (flexo.wording), for one shape or for all those chosen.
+  const styledKind = (id) => Boolean(nodeOf(id) && catalog.parts[nodeOf(id).kind || "block"]?.styled);
+  const wordsOf = (id, key) => nodeOf(id)?.properties?.[key];
+  function setWords(ids, values, label) {
+    const targets = ids.filter(styledKind).map((id) => ({ type: "node", id }));
+    if (targets.length) act({ do: "update", targets, values }, { select: false, label });
+  }
+  // (All bold already: none is. As ⌘B on a text box chosen in Keynote.)
+  function toggleWords(key, ids = state.selected) {
+    const parts = ids.filter(styledKind);
+    if (!parts.length) return false;
+    const on = parts.every((id) => wordsOf(id, key));
+    setWords(parts, { [`properties.${key}`]: on ? null : true }, on ? `Remove ${titled(key)}` : titled(key));
+    return true;
+  }
+  const canStyle = (ids = state.selected) => ids.some(styledKind);
+  function textSection(ids) {
+    const parts = ids.filter(styledKind);
+    if (!parts.length) return null;
+    const pressed = (key, name, keys) => {
+      const on = parts.every((id) => wordsOf(id, key));
+      const button = ui.button("", () => toggleWords(key, parts), { kind: "ghost", small: true, icon: key, title: `${name} (${keys})` });
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+      return button;
+    };
+    const aligns = parts.map((id) => wordsOf(id, "align") || "center");
+    const sizes = parts.map((id) => wordsOf(id, "size") ?? null);
+    const size = sizes.every((each) => each === sizes[0]) ? sizes[0] : null;
+    return h("div.section", {}, h("div.section-title", {}, "Text"),
+      h("div.row.text-style", {}, pressed("bold", "Bold", "⌘B"), pressed("italic", "Italic", "⌘I"),
+        ui.segmented({ value: aligns.every((each) => each === aligns[0]) ? aligns[0] : "", key: `align:${parts.join(",")}`,
+          options: [{ value: "left", label: icon("align-left"), title: "Align Left" }, { value: "center", label: icon("align-centre"), title: "Centre" }, { value: "right", label: icon("align-right"), title: "Align Right" }],
+          onChange: (value) => setWords(parts, { "properties.align": value === "center" ? null : value }, value === "center" ? "Centre Text" : `Align Text ${titled(value)}`) })),
+      ui.field("Size", ui.number({ value: size == null ? null : parseFloat(size), placeholder: "Theme’s", step: 0.5, min: 3, max: 72, unit: "pt", key: `words-size:${parts.join(",")}`,
+        onChange: (value) => setWords(parts, { "properties.size": value == null ? null : `${value}pt` }, "Change Text Size") })));
+  }
+
   // -- shown, dimmed, hidden --
   // A part is drawn plainly, faint, or not at all, where it stands: nothing else moves. (A
   // talk shows one figure many times: all of it, then one part with the rest faint.) Its
@@ -5974,6 +6058,7 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} ${pluralNoun(ids)} Selected`, ids.map(nameOf).join(", "))),
       colourable.length ? colourSection(colourable) : null,
+      textSection(ids),
       gatherable ? showSection(ids) : null,
       h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
@@ -6106,7 +6191,7 @@ export function figureParts(host) {
         // A shape's words, while it has none, say faintly what it is, as on the drawing.
         const placeholder = field.key === "label" && item?.id && nodeOf(item.id) ? hintOf(item) : "";
         // (Words kept as runs are shown as the markup that writes them, as on the drawing.)
-        const control = ui.markup({ value: typing(key) ?? markupOf(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true, onInput: type });
+        const control = ui.markup({ value: typing(key) ?? markupOf(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: "tags", links: false, spelling: false, lines: true, onInput: type });
         // Esc is done too, as it is on the drawing and in every field: the words are kept.
         control.area.addEventListener("keydown", (event) => {
           if (event.isComposing || !((event.key === "Enter" && (event.metaKey || event.ctrlKey)) || event.key === "Escape")) return;
@@ -6806,6 +6891,7 @@ export function figureParts(host) {
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
+    toggleWords, canStyle,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }

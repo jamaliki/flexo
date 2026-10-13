@@ -20,6 +20,7 @@ from flexo.style import LayoutStyle, Palette
 from flexo.svg import SVGDocument
 from flexo.themes import figure_palette, figure_style
 from flexo.units import Length
+from flexo.wording import worded
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,8 @@ def compile_figure(
     paint_palette = palette or figure_palette(figure)
     # (A frame goes round shapes where the layout puts them: laid out without it.)
     figure, frames = split(lettered(_resolved_shapes(figure, layout_style)))
+    # Each shape's words in the weight and slant it asks for (``flexo.wording``).
+    figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
     figure = _with_margin_for(frames, figure, layout_style)
     figure = _with_room_for_titles(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
