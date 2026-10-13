@@ -3473,6 +3473,8 @@ function dragPage(model, boxes, answer = () => ({})) {
     element, box: (id) => element(id)?.getBoundingClientRect() || null,
     // (`breaks`: what goes wrong as an edit is asked for, to see what becomes of the shape.)
     edited: () => { if (figure.breaks) throw new Error(figure.breaks); },
+    // (How many times it was told a shape carried had been let go.)
+    dragged: () => { figure.told = (figure.told || 0) + 1; },
     run: async (action, { label }) => {
       sent.push([action, label]);
       return { select: [], ...answer(action) };
@@ -3787,6 +3789,25 @@ console.log(JSON.stringify(await figure.drag("b", right("pose"))));
     # Whatever fails once it is let go, it is not left where it was let go to wait for a
     # drawing that will not come.
     assert out == {"sent": [], "shown": True, "over": True, "carried": False, "failed": "no edit"}
+
+
+def test_a_box_let_go_tells_its_host_which_keeps_drawings_back_while_one_is_carried() -> None:
+    """A drawing put in while a box is carried takes the figure from under it and ends the
+    drag with nothing done. A host keeps one back while ``dragging`` says a box is carried,
+    and is told when it is let go, once; a box pressed and not carried was never one."""
+
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+const before = figure.told || 0;
+const went = await figure.drag("b", right("pose"));
+const once = figure.told;
+const pressed = await figure.drag("mech", [169, 60], { redrawn: false });
+console.log(JSON.stringify({ before, once, after: figure.told, moved: went.sent.length > 0,
+  stayed: pressed.sent.length === 0, over: went.over && pressed.over }));
+""")
+    assert out == {
+        "before": 0, "once": 1, "after": 1, "moved": True, "stayed": True, "over": True,
+    }
 
 
 # -- the File menu's Rename and Duplicate --------------------------------------------

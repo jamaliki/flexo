@@ -98,6 +98,11 @@ export function mount(studio, main) {
     { icon: "export", label: exportLabel("All Formats"), run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
+  // A drawing kept back while a part is carried, and how long after it is let go the one
+  // kept back is put in (the drawing its move makes has come by then, and is the one seen).
+  const KEPT_BACK = 1200;
+  let kept = null, putKept = () => {};
+
   // -- the drawing's parts, edited --
   const elementOf = (id) => {
     const svg = page.querySelector("svg");
@@ -123,6 +128,8 @@ export function mount(studio, main) {
     box: boxOf,
     changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
     settled: () => placeMarks(),
+    // A part let go: a drawing kept back while it was carried is put in (see `drawn`).
+    dragged: () => setTimeout(putKept, KEPT_BACK),
     // What keeps a shape from being drawn as written, as the drawing says: its panel says it.
     problems: () => messages.filter((message) => message.severity === "error" && figure.typeOf(message.where) === "node")
       .map((message) => ({ id: message.where, text: message.text, what: String(message.code || "").split(".").pop() })),
@@ -756,7 +763,22 @@ export function mount(studio, main) {
   // Drawn after another's edit or an undo, the words of the field being typed in follow too
   // -- and, after an undo or a redo, what it brought back is chosen (`travelled`).
   let afresh = false, travelled = false;
+  // A drawing that comes while a part is carried -- an earlier change's, drawn late; another's
+  // change -- would take the figure from under it and end the drag there, nothing done. It
+  // is kept back until the part is let go: the drawing its move makes comes after it and is
+  // the one put in; let go where it was, the one kept back is, a moment later.
   studio.on("drawn", (result) => {
+    if (figure.dragging) { kept = result; return; }
+    kept = null;
+    drawn(result);
+  });
+  putKept = () => {
+    if (!kept || figure.dragging) return;
+    const result = kept;
+    kept = null;
+    drawn(result);
+  };
+  function drawn(result) {
     messages = result.messages || [];
     if (result.info?.model) figure.setModel(result.info.model, { afresh, back: travelled });
     afresh = false;
@@ -787,7 +809,7 @@ export function mount(studio, main) {
       const nodes = figure.model?.nodes || [];
       if (nodes.length === 1 && !plain(nodes[0].label).trim() && !(figure.model.edges || []).length) figure.typeSoon(nodes[0].id);
     }
-  });
+  }
 
   // Someone else's change, or undo: the source follows, keeping the caret on its words.
   studio.on("change", ({ quiet, source }) => {

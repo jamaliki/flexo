@@ -3907,6 +3907,8 @@ export function figureParts(host) {
     for (const { element } of was.parted) element.style.transform = "";
     // A drag ends in a click on whatever is under the pointer: that click is not one.
     swallowClick();
+    // (Its host may have kept a drawing back while the part was carried: see `dragged`.)
+    host.dragged?.();
     return was;
   }
   // What is carried is drawn over the rest of the figure -- over the groups drawn after it, as
