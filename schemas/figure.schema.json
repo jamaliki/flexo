@@ -184,6 +184,15 @@
         "align_with": {"$ref": "#/$defs/identifier"},
         "properties": {
           "type": "object",
+          "properties": {
+            "data": {
+              "description": "A plot's data, where its Python does not show it (a file a library opens for itself): files, folders or patterns (runs/*.h5), each from the figure's folder. The plot is drawn again when one changes.",
+              "anyOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "string"}}
+              ]
+            }
+          },
           "additionalProperties": {
             "anyOf": [
               {"type": ["string", "number", "integer", "boolean"]},

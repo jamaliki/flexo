@@ -10,6 +10,8 @@ live drawing, exports, and a shared set of controls (``static/studio.js``).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +24,43 @@ from flexo.confine import folder_root as folder_root
 code_allowed: ContextVar[bool] = ContextVar("flexo_studio_code_allowed", default=True)
 """Whether a document's own code (a deck's plots.py) may run as it is drawn or exported:
 not in a folder its person has not said they trust. The workspace sets it."""
+
+_TURN: ContextVar[Any] = ContextVar("flexo_studio_turn", default=None)
+"""The lock a drawing holds while it is its folder's turn to draw (``taking_turns``)."""
+
+
+@contextmanager
+def taking_turns(lock: Any) -> Iterator[None]:
+    """A folder's documents are drawn one at a time, each in its turn (``lock``, held
+    within) -- which a drawing gives up while it waits for another process (``waiting``)."""
+
+    with lock:
+        token = _TURN.set(lock)
+        try:
+            yield
+        finally:
+            _TURN.reset(token)
+
+
+@contextmanager
+def waiting() -> Iterator[None]:
+    """Around a wait for work done in another process -- a plot run apart, which may never
+    return: the folder's turn to draw is another document's meanwhile, and is taken again
+    after. (Nothing is drawn in this process while it waits; held, its turn would keep
+    every other document of the folder waiting out the plot's time with it.)"""
+
+    lock = _TURN.get()
+    if lock is None:
+        yield
+        return
+    # (A wait within this one has no turn to give up.)
+    token = _TURN.set(None)
+    lock.release()
+    try:
+        yield
+    finally:
+        lock.acquire()
+        _TURN.reset(token)
 
 
 @dataclass(slots=True)
@@ -65,6 +104,9 @@ class Drawing:
     files: list[Path] = field(default_factory=list)
     info: dict[str, Any] = field(default_factory=dict)
     """Whatever else the kind's page needs from a drawing (the colours a theme resolved to)."""
+    again: bool = False
+    """Whether the page is to ask for it again as it is: something in it was not ready (a
+    plot whose Python was still starting)."""
 
     @property
     def unfinished(self) -> bool:
