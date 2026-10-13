@@ -206,7 +206,7 @@ def apply_to_data(
     return {
         "data": yaml.safe_load(result["text"]),
         "select": result["select"],
-        "model": model(result["text"]),
+        "model": model(result["text"], base=base),
     }
 
 
@@ -302,11 +302,16 @@ def mend(data: Any, before: set[str] | None = None) -> bool:
     return changed
 
 
-def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
+def model(
+    text: str, *, suffix: str = ".yaml", base: Path | None = None
+) -> dict[str, Any] | None:
     """The figure as its file writes it, for the page's inspector and outline: the
     figure's settings, nodes (with the ports each has), groups (the root among them,
     marked ``implied`` when the file leaves it out), edges under the ids the drawing
-    gives them, and nets. ``None`` when the file does not read."""
+    gives them, and nets. ``None`` when the file does not read.
+
+    With ``base``, the folder its files are named from: the functions each plot's Python
+    file offers too (``functions``), for the page to choose among."""
 
     try:
         document = _Document(text, suffix)
@@ -379,6 +384,14 @@ def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
                     if not usual
                 }
             )
+        },
+        # The functions each plot's file offers, read (never run) from the file as it is now:
+        # none for a file that does not read, whose function is typed.
+        "functions": {
+            node["id"]: offered
+            for node in nodes
+            if node.get("kind") == "plot"
+            and (offered := _offered(base, (node.get("properties") or {}).get("source")))
         },
     }
 
@@ -744,13 +757,11 @@ class _Document:
             item["label"] = self.structure_label(item.get("label"), properties.get("source"))
             if not item["label"]:
                 item.pop("label")
-        # A plot made of a file is that file's first function, till another is named.
-        if kind == "plot" and properties.get("source") and not properties.get("function"):
-            file = Path(str(properties["source"]))
-            file = file if file.is_absolute() else (self.base or Path.cwd()) / file
-            if offered := plot_functions(file):
-                properties["function"] = offered[0]
         if kind == "plot":
+            # A plot made of a file is that file's first function, till another is named.
+            offered = _offered(self.base or Path.cwd(), properties.get("source"))
+            if offered and not properties.get("function"):
+                properties["function"] = offered[0]
             properties = {key: value for key, value in properties.items() if value != ""}
         if properties:
             item["properties"] = properties
@@ -1175,6 +1186,19 @@ class _Document:
                     layout["columns"] = max(1, math.ceil(math.sqrt(count)))
                 elif value != "grid":
                     layout.pop("columns", None)
+        if (
+            kind == "node"
+            and item.get("kind") == "plot"
+            and "properties.source" in values
+            and "properties.function" not in values
+        ):
+            # A plot given another file keeps its function if that file has one of the name;
+            # else it takes the file's first, as a new plot does. (A file that does not
+            # read offers none: the name stays, to be typed.)
+            properties = item.get("properties") or {}
+            offered = _offered(self.base or Path.cwd(), properties.get("source"))
+            if offered and properties.get("function") not in offered:
+                _set(item, ["properties", "function"], offered[0])
         if kind == "edge":
             # (A line given another shape at an end is named by its new ends.)
             chosen = [self.edge_id(item) or identifier]
@@ -2429,14 +2453,40 @@ def plot_functions(path: Path) -> list[str]:
     import ast
 
     try:
+        stat = path.stat()
+        known = _FUNCTIONS.get(str(path))
+        if known is not None and known[0] == (stat.st_mtime_ns, stat.st_size):
+            return list(known[1])
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
         return []
-    return [
+    offered = [
         node.name
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
     ]
+    # (Kept till the file changes: the page's model, read at every drawing, asks each time.)
+    if len(_FUNCTIONS) > 64:
+        _FUNCTIONS.clear()
+    _FUNCTIONS[str(path)] = ((stat.st_mtime_ns, stat.st_size), offered)
+    return list(offered)
+
+
+_FUNCTIONS: dict[str, tuple[tuple[int, int], list[str]]] = {}
+"""The functions a Python file offered when last read, and what the file was then."""
+
+
+def _offered(base: Path | None, source: object) -> list[str]:
+    """The functions of the Python file a plot names (``source``, from the folder ``base``):
+    none with no folder to find it from, or for a file outside the folder a studio serves."""
+
+    from flexo.confine import outside
+
+    if base is None or not source or not isinstance(source, str):
+        return []
+    path = Path(source).expanduser()
+    path = path if path.is_absolute() else base / path
+    return [] if outside(path) else plot_functions(path)
 
 
 def _set(item: dict[str, Any], path: list[str], value: object) -> None:

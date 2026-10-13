@@ -96,6 +96,33 @@ export function lengthPoints(text) {
   const found = /^(\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)?$/i.exec(String(text ?? "").trim());
   return found ? Number(found[1]) * POINTS[(found[2] || "pt").toLowerCase()] : null;
 }
+// So many points written as a length in the unit another is written in ("60mm": in
+// millimetres), to the step a person would type in it -- in points, where that one is none
+// or has no unit.
+const LENGTH_STEPS = { pt: 1, px: 1, mm: 1, cm: 0.1, in: 0.05 };
+export function lengthLike(points, like) {
+  const unit = (/^(?:\d+(?:\.\d*)?|\.\d+)\s*(pt|mm|cm|in|px)$/i.exec(String(like ?? "").trim())?.[1] || "pt").toLowerCase();
+  const step = LENGTH_STEPS[unit];
+  return `${Number((Math.max(1, Math.round(points / POINTS[unit] / step)) * step).toFixed(2))}${unit}`;
+}
+// The choices of a plot's Function pop-up: the functions its file offers (`offered`) --
+// before them, the one it names (`named`) if the file has none of the name, said so; or
+// "Choose…", if it names none. Null where the file offers none: the name is typed.
+export function plotFunctions(offered, named) {
+  if (!offered?.length) return null;
+  if (!named) return [{ value: "", label: "Choose…" }, { line: true }, ...offered];
+  return offered.includes(named) ? [...offered] : [{ value: named, label: `${named} — Not in the File` }, { line: true }, ...offered];
+}
+// A plot sized by its corners, as it is written. `size`: its width and height as dragged, in
+// points; `kept`: the sides not moved; `had`: what each was written as (null: not written).
+// Each side is written in the unit it was written in, or the other's, or points. A side not
+// moved keeps what it had -- but one that had none is written as it is drawn once the other
+// moves: a plot with one side given is three to two, and it would follow.
+export function plotSize(size, kept, had) {
+  if (kept.width && kept.height) return { width: had.width, height: had.height };
+  const written = (side, other) => (kept[side] && had[side] !== null ? had[side] : lengthLike(size[side], had[side] ?? had[other]));
+  return { width: written("width", "height"), height: written("height", "width") };
+}
 // Which of the page `sizes` ({ name, width, height }) a figure's `width` and `height` are: a
 // size's name, or "" for a page of the person's own. A width by name ("double-column") is
 // that size and no other; lengths are the same whatever unit they are written in.
@@ -587,7 +614,9 @@ export function figureParts(host) {
         if (all("properties.yaw", "properties.pitch", "properties.roll", "properties.zoom")) return `Reset View of ${name(id)}`;
         if (all("properties.width", "properties.height")) return `Resize ${name(id)}`;
         // (A line's width is how thick it is drawn: its field's name, "Change Line Width".)
-        if (all("width", "height") && target.type === "node") return values.width === null && values.height === null ? `Fit ${name(id)} to Its Words` : `Resize ${name(id)}`;
+        // (A plot has no words to fit: with no size of its own, it is the size a plot is.)
+        if (all("width", "height") && target.type === "node") return values.width !== null || values.height !== null ? `Resize ${name(id)}`
+          : nodeOf(id)?.kind === "plot" ? `Reset Size of ${name(id)}` : `Fit ${name(id)} to Its Words`;
         if (all("bend", "lean")) return values.bend === null && values.lean === null ? "Reset Bend" : "Bend Line";
         // mol-sketch's settings, by the setting's label: "Change Line Width".
         const style = keys.filter((key) => key.startsWith("properties.style"));
@@ -2274,8 +2303,11 @@ export function figureParts(host) {
     const id = chosenOne();
     const box = id && nodeOf(id) && !state.connecting && !inline ? partBox(id) : null;
     // A shape that takes a size of its own (its drawing says the size that fits its words), and
-    // a molecule or a picture: handles at its corners.
-    const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? fitOf(id) : null;
+    // a molecule or a picture: handles at its corners. A plot too, which is laid out again at
+    // whatever size it is given: the least one is drawn stands where the size that fits a
+    // shape's words does.
+    const plot = nodeOf(id)?.kind === "plot";
+    const fits = box && !SIZED_PARTS.has(nodeOf(id)?.kind) && !inline ? (plot ? PLOT_LEAST : fitOf(id)) : null;
     const sizable = Boolean(box && (SIZED_PARTS.has(nodeOf(id)?.kind) || fits));
     const stop = (event) => event.stopPropagation();
     // ⌥-clicked or right-clicked, a + opens the palette of shapes, to choose what it adds.
@@ -2396,9 +2428,10 @@ export function figureParts(host) {
         }
         views.push(h(`span.fig-size.${corner}`, fits ? {
           style: { left: `${left}px`, top: `${top}px` },
-          title: "Drag to resize (⇧: keep its proportions; ⌘: without snapping) · Double-click to fit it to its words",
+          title: `Drag to resize (⇧: keep its proportions; ⌘: without snapping) · Double-click to ${plot ? "reset size" : "fit it to its words"}`,
           onpointerdown: (event) => shapeSizeStart(event, id, corner, fits), onclick: stop, onmousemove: stop,
-          ondblclick: (event) => { event.stopPropagation(); fitWords(id, fits); },
+          // (A plot with no size of its own is the size a plot is: 60 mm wide, three to two.)
+          ondblclick: (event) => { event.stopPropagation(); if (plot) act({ do: "update", target: { type: "node", id }, values: { width: null, height: null } }, { select: false }); else fitWords(id, fits); },
         } : {
           style: { left: `${left}px`, top: `${top}px` },
           title: "Drag to resize (⌘: without snapping) · Double-click to reset size",
@@ -2529,6 +2562,8 @@ export function figureParts(host) {
   const FIGURE_WIDTH = 0.85;
   // The narrowest a text is set (in the figure's points): a word or two.
   const TEXT_LEAST = 24;
+  // The least a plot is drawn, each way (flexo.plots.plot_size).
+  const PLOT_LEAST = { width: 24, height: 24 };
   let shapeSizing = null;
   function shapeSizeStart(event, id, corner, fit) {
     if (event.button !== 0 || shapeSizing || partSizing) return;
@@ -2610,18 +2645,26 @@ export function figureParts(host) {
     }
     const near = free ? 0 : SIZE_SNAP / unit;
     const snapped = { width: false, height: false }, kept = { width: false, height: false };
+    // (A plot has no words to fit: a side snaps only back to what it was.)
+    const plot = kind === "plot";
     if (PROPORTIONED.has(kind)) {
       // (In proportion, both sides fit its words at once.)
       if (Math.abs(height - fit.height) < near) { snapped.width = snapped.height = true; width = fit.width; height = fit.height; }
     } else if (!keep) {
       for (const side of ["width", "height"]) {
-        if (Math.abs((side === "width" ? width : height) - fit[side]) < near) { snapped[side] = true; if (side === "width") width = fit.width; else height = fit.height; }
+        if (!plot && Math.abs((side === "width" ? width : height) - fit[side]) < near) { snapped[side] = true; if (side === "width") width = fit.width; else height = fit.height; }
         else if (Math.abs((side === "width" ? width : height) - was[side]) < near) { kept[side] = true; if (side === "width") width = was.width; else height = was.height; }
       }
     }
     const fitted = snapped.width && snapped.height;
-    const said = fitted ? "Fits Its Words" : `${Math.round(width)} × ${Math.round(height)} pt`;
+    const said = fitted ? "Fits Its Words" : plot ? plotSaid({ width, height }, sizing.had) : `${Math.round(width)} × ${Math.round(height)} pt`;
     return { width, height, snapped, kept, fitted, said };
+  }
+  // A plot's size as it is dragged, said in the unit it will be written in: "63 × 40 mm".
+  function plotSaid(size, had) {
+    const [wide, across] = lengthParts(lengthLike(size.width, had.width ?? had.height));
+    const [tall, down] = lengthParts(lengthLike(size.height, had.height ?? had.width));
+    return across === down ? `${wide} × ${tall} ${across}` : `${wide} ${across} × ${tall} ${down}`;
   }
   function shapeSizeMove(event) {
     const sizing = shapeSizing;
@@ -2720,7 +2763,8 @@ export function figureParts(host) {
     const both = sizing.kind === "decision" || PROPORTIONED.has(sizing.kind);
     const value = (side) => (both ? (size.kept[side] && sizing.had[side] !== null ? sizing.had[side] : own(side))
       : size.snapped[side] ? null : size.kept[side] ? sizing.had[side] : own(side));
-    const values = size.fitted ? fitValues(sizing.id, sizing.fit) : sizing.sideways ? { width: value("width") } : { width: value("width"), height: value("height") };
+    const values = sizing.kind === "plot" ? plotSize(size, size.kept, sizing.had)
+      : size.fitted ? fitValues(sizing.id, sizing.fit) : sizing.sideways ? { width: value("width") } : { width: value("width"), height: value("height") };
     if (values.width === sizing.had.width && (sizing.sideways || values.height === sizing.had.height)) { shapeSizeClear(sizing); return; }
     // Its outline stays where it was let go, the tip gone, until it is drawn at that size (or
     // the edit is refused): it never goes back to the size it was meanwhile.
@@ -6265,6 +6309,15 @@ export function figureParts(host) {
           control.classList.add("invalid");
         });
         return ui.field(field.label, h("div.field-stack", {}, control, note), options);
+      }
+      case "function": {
+        // A plot's function: one of those its Python file offers (the figure's `functions`,
+        // read from the file as it is now), in a pop-up -- one it names that the file has
+        // none of shown as written, till another is chosen. Typed, where the file offers
+        // none: it does not read, or is not there yet.
+        const offered = plotFunctions(model()?.functions?.[item?.id], value);
+        if (!offered) return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, onInput: type }), options);
+        return ui.field(field.label, ui.select({ value: value ?? "", key, options: offered, onChange: (next) => set(next || null) }), options);
       }
       case "length": {
         // Sent once it reads as a length, as typed. ↑ and ↓ from "Auto" go from the size the
