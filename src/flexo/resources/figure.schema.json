@@ -177,6 +177,7 @@
         "width": {"$ref": "#/$defs/extent"},
         "height": {"$ref": "#/$defs/extent"},
         "shadow": {"type": "boolean", "default": false},
+        "line": {"enum": ["solid", "dashed", "dotted"], "default": "solid"},
         "align_with": {"$ref": "#/$defs/identifier"},
         "properties": {
           "type": "object",
@@ -382,6 +383,7 @@
         "title_side": {"enum": ["left", "right", "bottom-left", "bottom-right"], "default": "left"},
         "anchor": {"$ref": "#/$defs/identifier"},
         "shadow": {"type": "boolean", "default": false},
+        "line": {"enum": ["solid", "dashed", "dotted"], "default": "solid"},
         "paint": {"$ref": "#/$defs/paint"}
       }
     }

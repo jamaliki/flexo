@@ -475,10 +475,18 @@ class NodeSpec:
     under the row itself, named so as asked rather than left to the layout). Unset, its
     group places it -- centred, or under the one part it is joined to (``flexo.layout.slide``).
     Only it moves: as far as its group's room allows, the parts it lines up with stay."""
+    line: LineStyle = "solid"
+    """How its outline is stroked: ``"solid"``, ``"dashed"`` or ``"dotted"``, as a line's is.
+    Paint only; a kind with no outline of its own (text, a picture) has nothing to dash."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Node ID")
         _validate_id(self.kind, "Node kind")
+        if self.line not in LINE_STYLES:
+            raise ValueError(
+                f'unknown line "{self.line}" for node "{self.id}"; '
+                f"valid lines: {', '.join(LINE_STYLES)}"
+            )
         if self.align_with is not None:
             _validate_id(self.align_with, "Aligned-with ID")
         names = [port.name for port in self.ports]
@@ -782,9 +790,17 @@ class GroupSpec:
     serialization. The convention is the node's: an overridden part emits no
     paint role, so ``flexo retheme`` leaves it exactly as authored.
     """
+    line: LineStyle = "solid"
+    """How the container's outline is stroked, where the theme draws it one: ``"dashed"``
+    or ``"dotted"``; ``"solid"`` leaves it as the theme has it. Paint only."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Group ID")
+        if self.line not in LINE_STYLES:
+            raise ValueError(
+                f'unknown line "{self.line}" for group "{self.id}"; '
+                f"valid lines: {', '.join(LINE_STYLES)}"
+            )
         if len(self.children) != len(set(self.children)):
             seen: set[str] = set()
             twice = sorted({child for child in self.children if child in seen or seen.add(child)})

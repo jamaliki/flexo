@@ -572,7 +572,8 @@ export function figureParts(host) {
         }
         if (keys.length && keys.every((key) => /^(properties\.tone$|properties\.paint-|paint\.|tone$)/.test(key))) return "Change Colour";
         if (target.type === "figure" && keys.length === 2 && all("figure.width", "figure.height")) return "Change Page Size";
-        if (all("line")) return `Make Line ${titled(values.line || "solid")}`;
+        // (A line's own style, or the outline of a shape, a group or a frame.)
+        if (all("line")) return `Make ${edgeOf(id) || netOf(id) ? "Line" : "Outline"} ${titled(values.line || "solid")}`;
         if (all("depart")) return "Change Where the Line Leaves";
         if (all("arrive")) return "Change Where the Line Arrives";
         if (all("properties.zoom")) return `Zoom ${name(id)}`;

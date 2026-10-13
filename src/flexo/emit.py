@@ -18,7 +18,13 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedEdge, RoutedFigure, RoutedNet, RoutedStem
 from flexo.ir.semantic import EdgeSpec, NetSpec
 from flexo.render import render_node
-from flexo.render_common import paint_attributes, paint_override, render_runs, soft_shadow
+from flexo.render_common import (
+    dashes,
+    paint_attributes,
+    paint_override,
+    render_runs,
+    soft_shadow,
+)
 from flexo.routing.aside import Aside, arrowhead_outline, harpoon_offset
 from flexo.routing.ink import (
     head_length,
@@ -386,6 +392,13 @@ class _Hierarchy:
         if spec.role == "plate":
             # A plate is a bare frame in every theme: it counts, it does not group.
             kind, radius = "outline", min(radius, style.corner_radius.points)
+        if spec.line != "solid":
+            # A line style of its own wants an outline to be drawn on, whatever the theme's
+            # way with a container.
+            if kind not in {"filled", "outline", "dashed"}:
+                kind = "outline"
+            if stroke_width <= 0.0:
+                stroke_width = style.stroke_width.points
         if spec.shadow and kind in {"filled", "outline", "dashed"}:
             soft_shadow(parent, spec.id, bounds, radius, style, palette)
         fill = paint_override(spec, "fill")
@@ -405,7 +418,10 @@ class _Hierarchy:
                 fill=fill,
                 stroke=stroke,
             )
-            if kind == "dashed":
+            if spec.line != "solid":
+                # Its own line style, over the theme's.
+                attributes |= dashes(spec.line, stroke_width)
+            elif kind == "dashed":
                 dash = max(1.5, 3.0 * stroke_width)
                 attributes["stroke__dasharray"] = f"{number(dash * 2.0)} {number(dash * 1.5)}"
             element(

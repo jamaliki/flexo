@@ -18,6 +18,7 @@ def test_a_vector_is_a_part_of_the_palette_made_with_its_chips_and_steppers() ->
     fields = {field["key"]: field for field in part["fields"]}
     assert set(fields) == {
         "label",
+        "line",
         "properties.tone",
         "properties.cells",
         "properties.columns",

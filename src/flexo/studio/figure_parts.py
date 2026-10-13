@@ -39,6 +39,7 @@ from collections.abc import Mapping
 from importlib.util import find_spec
 from typing import Any
 
+from flexo.components import OUTLINED_NEVER
 from flexo.frames import LAYERS
 from flexo.ir.semantic import EDGE_HEADS
 from flexo.pages import PAGE_SIZES, PANEL_LABELS, panel_letter
@@ -136,6 +137,14 @@ TONE = _field(
 )
 BADGE = _field("properties.badge", "Badge", "choice", options=["", *BADGES])
 SHADOW = _field("shadow", "Shadow", "bool", default=False)
+OUTLINE = _field(
+    "line",
+    "Outline",
+    "choice",
+    options=["solid", "dashed", "dotted"],
+    default="solid",
+    hint="How its outline is drawn: dashed or dotted for what is optional, or not yet there",
+)
 SIZE = [
     _field("width", "Width", "length", hint="Leave empty to fit the label"),
     _field("height", "Height", "length"),
@@ -147,7 +156,7 @@ MOTIF = _field(
     default=True,
     hint="The drawing behind the label",
 )
-COMMON = [LABEL, TONE, BADGE, SHADOW]
+COMMON = [LABEL, TONE, BADGE, SHADOW, OUTLINE]
 
 
 def _part(
@@ -161,13 +170,19 @@ def _part(
     common: list[dict[str, Any]] | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
+    shared = list(COMMON if common is None else common)
+    # (Every kind with an outline has its line style, whatever else it shares.)
+    if kind in OUTLINED_NEVER:
+        shared = [item for item in shared if item is not OUTLINE]
+    elif OUTLINE not in shared:
+        shared.append(OUTLINE)
     return {
         "kind": kind,
         "title": title,
         "category": category,
         "hint": hint,
         "node": {"kind": kind, **(node or {})},
-        "fields": [*(COMMON if common is None else common), *(fields or [])],
+        "fields": [*shared, *(fields or [])],
         **extra,
     }
 
@@ -1014,6 +1029,7 @@ GROUP_FIELDS = [
         "a panel has its letter instead",
     ),
     SHADOW,
+    {**OUTLINE, "show": {"role": ["container", "module"]}},
 ]
 
 HEAD_NAMES = {

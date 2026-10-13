@@ -250,6 +250,8 @@ def _node_data(node: NodeSpec) -> dict[str, object]:
         result["shadow"] = True
     if node.align_with is not None:
         result["align_with"] = node.align_with
+    if node.line != "solid":
+        result["line"] = node.line
     if node.properties:
         result["properties"] = {name: thaw_property(value) for name, value in node.properties}
     return result
@@ -352,6 +354,8 @@ def _group_data(group: GroupSpec) -> dict[str, object]:
         result["anchor"] = group.anchor
     if group.shadow:
         result["shadow"] = True
+    if group.line != "solid":
+        result["line"] = group.line
     if group.paint:
         result["paint"] = dict(group.paint)
     return result
@@ -496,6 +500,7 @@ def _node(data: dict[str, Any]) -> NodeSpec:
         ),
         shadow=data.get("shadow", False),
         align_with=data.get("align_with"),
+        line=data.get("line", "solid"),
     )
 
 
@@ -623,6 +628,7 @@ def _group(data: dict[str, Any]) -> GroupSpec:
         anchor=data.get("anchor"),
         shadow=data.get("shadow", False),
         paint=tuple(sorted(data.get("paint", {}).items())),
+        line=data.get("line", "solid"),
     )
 
 

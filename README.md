@@ -607,6 +607,8 @@ from far down the chart comes in by a corner the flow does not use.
 
 ```python
 m.connect(x, z, line="dashed")                  # or "dotted"
+m.block("cache", label="Cache", line="dashed")  # a shape's outline takes one too,
+m.group("later", label="Later", line="dotted")  # and a group's, and a frame's
 m.connect(top, bottom, arrow="none", label="shared weights")  # undirected
 m.connect(a, b, arrow="both")
 m.connect(a, b, shape="curved")                 # one smooth curve
@@ -725,9 +727,12 @@ nodes:
 ```
 
 `around` lists ids of shapes or groups; `layer` is `behind` (the default), `front` or
-`over`; a frame takes a `label`, a `tone` and `paint` as a shape does. It takes no room:
-the page's margin is wider by what a frame stands out, and nothing else moves. Behind
-shapes that stand in filled groups, it is drawn over those groups' own fills, so it shows.
+`over`; a frame takes a `label`, a `tone`, `paint` and a `line` (`dashed`, `dotted`) as
+a shape does. It is centred on what it holds and takes no room, but for its title: a
+band is kept clear over the shape at the frame's top, and room beside the frame where a
+long title widens it, so the title lies on nothing -- where an arrow comes down into the
+frame, it ends short of the arrow. Behind shapes that stand in filled groups, a frame is
+drawn over those groups' own fills, so it shows.
 
 ### Laying a figure out for a box (slides, posters)
 
@@ -1038,7 +1043,8 @@ changes in words, to go back or forward to any of them.
   journal prints a figure of several; **Panel Letters**, with nothing chosen,
   letters them A, B, C or in brackets) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
-  **Layer**). Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
+  **Layer**). A shape, a group and a frame each have an **Outline**: solid, dashed or
+  dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
   the figure are added to it, beside the shape they are let go on. With nothing chosen the figure's **Page
   Size** is chosen by name -- a column or a page of Nature's, Cell's or PNAS's, A4,
   US Letter -- or typed as a **Width** and **Height** of your own (Custom…); a
