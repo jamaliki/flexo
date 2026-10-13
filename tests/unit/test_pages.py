@@ -259,3 +259,59 @@ def test_the_editor_letters_panels_as_they_are_drawn() -> None:
     assert dict(letters) == drawn == {"one": "(a)", "two": "(b)", "three": "(c)"}
     many = [{"id": f"p{index}", "role": "panel", "children": []} for index in range(28)]
     assert dict(_studio(f"[...parts.panelLetters({json.dumps(many)}, 'root')]"))["p27"] == "ab"
+
+
+# -- a figure of several panels, in one step --
+
+
+def test_a_figure_is_laid_out_as_panels_in_one_step() -> None:
+    """A figure of four panels took a group made for each, each from shapes chosen in one
+    row, and the figure's own layout set by hand to a grid."""
+
+    from flexo.studio.figure_edit import apply
+
+    plain = (
+        "figure: {id: fig, style: paper}\n"
+        "nodes:\n- {id: a, label: Encoder}\n- {id: b, label: Decoder}\n"
+        "edges:\n- {from: a, to: b}\n"
+    )
+    made = apply(plain, {"do": "panels", "count": 4, "columns": 2})
+    document = yaml.safe_load(made["text"])
+    groups = {group["id"]: group for group in document["groups"]}
+    assert groups["root"]["layout"] == {"kind": "grid", "columns": 2}
+    assert groups["root"]["children"] == made["select"] and len(made["select"]) == 4
+    # What the figure had is its first panel, laid out as it was; the rest have a shape each.
+    first, *others = (groups[name] for name in made["select"])
+    assert first["children"] == ["a", "b"] and first["layout"]["kind"] == "column"
+    assert all(group["role"] == "panel" and len(group["children"]) == 1 for group in others)
+    titles = _titles(compile_figure(parse_figure(document)).document.text)
+    assert [titles[name] for name in made["select"]] == ["a", "b", "c", "d"]
+    # Asked for again another way, the panels are kept and laid out anew: in a row, a column.
+    row = yaml.safe_load(apply(made["text"], {"do": "panels", "count": 4, "columns": 4})["text"])
+    assert row["groups"][0]["layout"] == {"kind": "row"} and len(row["groups"]) == 5
+    column = yaml.safe_load(apply(made["text"], {"do": "panels", "count": 4, "columns": 1})["text"])
+    assert column["groups"][0]["layout"] == {"kind": "column"}
+    # One more is one more, after the last.
+    five = apply(made["text"], {"do": "panels", "count": 5, "columns": 2})
+    assert len(five["select"]) == 5 and five["select"][:4] == made["select"]
+
+
+def test_science_has_its_columns_and_panels_have_sizes_and_letters_in_view() -> None:
+    from flexo.studio.figure_parts import catalogue
+
+    assert (page_size("science-1").width, page_size("science-2").width) == ("90mm", "184mm")
+    offered = catalogue()
+    letters = next(f for f in offered["figure_fields"] if f["key"] == "figure.panel_labels")
+    assert not letters.get("more")
+    sizes = {f["key"] for f in offered["group_fields"]} & {"layout.width", "layout.height"}
+    assert sizes == {"layout.width", "layout.height"}
+    sized = _figure()
+    sized = parse_figure(
+        {**yaml.safe_load(PANELS), "groups": [
+            {**group, "layout": {**group["layout"], "width": "60mm"}}
+            if group["id"] == "one" else group
+            for group in yaml.safe_load(PANELS)["groups"]
+        ]}
+    )
+    wide = {g.measured.spec.id: g.bounds.width for g in compile_figure(sized).fitted.groups}
+    assert wide["one"] == pytest.approx(Length.parse("60mm").points)

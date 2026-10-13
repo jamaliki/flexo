@@ -133,6 +133,9 @@ def parse_figure(document: object) -> FigureSpec:
         sketch=parse_sketch(figure_data.get("sketch")),
         background=figure_data.get("background"),
         panel_labels=str(figure_data.get("panel_labels", "a")),
+        hidden=tuple(figure_data.get("hide", ())),
+        dimmed=tuple(figure_data.get("dim", ())),
+        highlighted=tuple(figure_data.get("highlight", ())),
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(edges),
         nets=tuple(_net(item, reference) for item in document.get("nets", [])),
@@ -222,6 +225,10 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
         result["background"] = figure.background
     if figure.panel_labels != "a":
         result["panel_labels"] = figure.panel_labels
+    shown = (("hide", figure.hidden), ("dim", figure.dimmed), ("highlight", figure.highlighted))
+    for key, named in shown:
+        if named:
+            result[key] = list(named)
     return result
 
 

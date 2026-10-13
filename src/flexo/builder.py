@@ -250,6 +250,9 @@ class Figure:
         style: str | None = None,
         page: str | None = None,
         panel_labels: str = "a",
+        hide: tuple[str, ...] | list[str] = (),
+        dim: tuple[str, ...] | list[str] = (),
+        highlight: tuple[str, ...] | list[str] = (),
     ) -> None:
         if theme is not None and style is not None and theme != style:
             raise ValueError("theme= and style= name the same thing; pass only one")
@@ -263,6 +266,7 @@ class Figure:
         self.width = width
         self.height = Length.parse(height) if height is not None else None
         self.panel_labels = panel_labels
+        self.hide, self.dim, self.highlight = tuple(hide), tuple(dim), tuple(highlight)
         from flexo.theme_files import is_file_reference, register_palette, register_theme
 
         self.style = theme or style or "paper"
@@ -382,6 +386,9 @@ class Figure:
                 sketch=self.sketch,
                 background=self.background,
                 panel_labels=self.panel_labels,
+                hidden=self.hide,
+                dimmed=self.dim,
+                highlighted=self.highlight,
                 nodes=tuple(self._nodes),
                 edges=tuple(
                     replace(

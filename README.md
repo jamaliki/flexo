@@ -688,7 +688,8 @@ own:
 A figure's page is its `width` and, for a page of a fixed size, its `height`;
 without a height the page is as tall as the figure. `page=` names a size
 instead: a journal's column (`"nature-1"` is 89 mm, `"nature-2"` 183 mm,
-`"cell-1"`, `"cell-1.5"`, `"cell-2"`, `"pnas-1"`, `"pnas-1.5"`, `"pnas-2"`), a
+`"science-1"`, `"science-1.5"`, `"science-2"`, `"cell-1"`, `"cell-1.5"`, `"cell-2"`,
+`"pnas-1"`, `"pnas-1.5"`, `"pnas-2"`), a
 journal's whole page (`"nature-page"`, 183 × 247 mm), or a sheet of paper
 (`"a3"`, `"a4"`, `"a5"`, `"letter"`); `flexo.PAGE_SIZES` lists them. In a file
 the size is written as its lengths (`width: 183mm`, `height: 247mm`).
@@ -733,6 +734,28 @@ band is kept clear over the shape at the frame's top, and room beside the frame 
 long title widens it, so the title lies on nothing -- where an arrow comes down into the
 frame, it ends short of the arrow. Behind shapes that stand in filled groups, a frame is
 drawn over those groups' own fills, so it shows.
+
+### Hiding, dimming and highlighting parts
+
+A talk shows one figure many times: all of it, then one part with the rest faint, then
+that part alone. Each is the same figure, laid out the same way -- nothing moves --
+drawn with some of it left out:
+
+```yaml
+figure:
+  id: pipeline
+  hide: [store]            # not drawn, and its place kept
+  dim: [queue, worker]     # drawn faint
+  highlight: [api]         # these at full strength, and the rest faint
+```
+
+Each lists shapes, groups (all they hold), lines or frames by id; in Python,
+`Figure("pipeline", hide=[...], dim=[...], highlight=[...])`. A line is shown as the
+less shown of its two ends is. What is faint is drawn in colours nearer the page's
+(not see-through), so it is the same in a PDF and a PowerPoint as on the page; what
+is hidden is in no export. In the studio a shape's **Show** is Shown, Highlight,
+Dimmed or Hidden (a hidden part is a ghost while its figure is edited), and
+**Show All** brings everything back.
 
 ### Laying a figure out for a box (slides, posters)
 
@@ -1047,7 +1070,8 @@ changes in words, to go back or forward to any of them.
   type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
   journal prints a figure of several; **Panel Letters**, with nothing chosen,
-  letters them A, B, C or in brackets) -- or puts a **frame** round them where they
+  letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
+  whole figure out as panels -- 2 across, 2 × 2, 3 × 2 -- in one step) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
   **Layer**). A shape, a group and a frame each have an **Outline**: solid, dashed or
   dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on

@@ -521,9 +521,11 @@ export function figureParts(host) {
       }
       case "connect": return `Connect ${name(action.source)} to ${name(action.target)}`;
       case "delete": return many(action.ids, "Delete");
+      case "show": return action.all ? "Show All" : many(action.ids, { hidden: "Hide", dimmed: "Dim", highlighted: "Highlight" }[action.as] || "Show");
       case "duplicate": return many(action.ids, "Duplicate");
       // (A module made of the shapes chosen is said so: "Make Module".)
       case "frame": return "Add Frame";
+      case "panels": return action.count > panelsNow() && action.count === panelsNow() + 1 && panelsNow() ? "Add Panel" : `Lay Out as ${action.count} Panels`;
       case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
       // (One group pasted is said as it is: a module, a group.)
@@ -1818,6 +1820,34 @@ export function figureParts(host) {
   function groupMenu(anchor) {
     menu(anchor, catalog.groups.map((group) => ({ label: group.title, hint: group.hint, run: () => gather(group) })));
   }
+
+  // -- panels --
+  // A journal's figure of several parts in one step: so many panels, so many across. What
+  // the figure has in no panel becomes its first, and the rest are added to build on.
+  const PANEL_LAYOUTS = [[2, 2, "2 Across"], [3, 3, "3 Across"], [2, 1, "2 Stacked"], [4, 2, "2 × 2"], [6, 3, "3 × 2"], [6, 2, "2 × 3"]];
+  const panelsNow = () => (model()?.groups || []).filter((group) => group.role === "panel").length;
+  function layOutPanels(count, columns) { act({ do: "panels", count, columns }); }
+  // One more panel, after the last: never the shapes chosen made one (that is Group › Panel).
+  function addPanel() { act({ do: "panels", count: panelsNow() + 1, columns: model()?.groups?.find((group) => group.id === model().root)?.layout?.columns || panelsNow() + 1 }); }
+  function panelMenu(anchor) {
+    menu(anchor, [
+      { label: "Add Panel", hint: panelsNow() ? "One more, lettered after the last" : "The figure made one of panels: a, b", run: () => addPanel() },
+      "-",
+      ...PANEL_LAYOUTS.map(([count, columns, label]) => ({ label, hint: `${count} panels${columns > 1 && columns < count ? `, ${columns} to a row` : ""}`, run: () => layOutPanels(count, columns) })),
+    ]);
+  }
+  // A part one place back or on in its row or column, as ⌥ and an arrow move it: the Mac's
+  // Arrange › Move Up and Move Down.
+  function moveChosen(on) {
+    const id = chosenOne();
+    if (!id || running || queue.length) return false;
+    const across = parentOf(id) && drawnKind(parentOf(id)) === "row";
+    const key = across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp";
+    if (!nudgePlace(id, key)) return false;
+    nudge(id, key);
+    return true;
+  }
+  const canMove = (on) => { const id = chosenOne(); if (!id) return false; const across = parentOf(id) && drawnKind(parentOf(id)) === "row"; return Boolean(nudgePlace(id, across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp")); };
 
   // -- lines --
   function toggleConnect(force) {
@@ -5399,6 +5429,7 @@ export function figureParts(host) {
         h("div.section.insp-top", {}, crumbs(node.id),
           h("div.insp-row", {}, titleBlock(glyph(kind), part.title, null, part.hint), h("div.insp-actions", {}, headActions(node.id)))),
         colourSection([{ type: "node", id: node.id, item: node }]),
+        showSection([node.id]),
         h("div.section", {}, fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
         h("div.section", {}, advanced(idField(node.id, "node"))),
       ];
@@ -5410,6 +5441,7 @@ export function figureParts(host) {
       shapeProblem(node, part),
       // (A structure is drawn in its own colours, by mol-sketch: no tone or colours of a shape's.)
       kind === "structure" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
+      showSection([node.id]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
       h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length + joined.length)),
@@ -5575,6 +5607,7 @@ export function figureParts(host) {
           isRoot ? null : h("div.insp-actions", {}, headActions(group.id))),
         isRoot ? null : ui.button("Ungroup", () => act({ do: "ungroup", id: group.id }), { small: true, title: "Remove the group and keep its shapes" })),
       isRoot || group.implied ? null : colourSection([{ type: "group", id: group.id, item: group }]),
+      isRoot ? null : showSection([group.id]),
       h("div.section", {},
         turned(group) ? h("div.hint-line.turned", {}, icon("info"), `Drawn as a ${drawnKind(group)} to fit the slide; written as a ${writtenKind(group)}.`) : null,
         // The whole figure's layout is drawn with no frame of its own: no Frame to choose.
@@ -5874,7 +5907,51 @@ export function figureParts(host) {
       // Named as its file is, where it has one of its own.
       h("div.section.insp-top", {}, titleBlock(icon("figure"), host.name?.() || "Figure", counts)),
       h("div.section", {}, fields(catalog.figure_fields, { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
+      // What is hidden or dimmed, brought back from here too: with it chosen it can't be
+      // seen to choose.
+      anyShownApart() ? h("div.section", {}, h("div.section-title", {}, "Show"),
+        h("div.hint-line", {}, shownSummary()),
+        h("div.row", {}, ui.button("Show All", () => showAll(), { small: true, icon: "eye" }))) : null,
     ];
+  }
+
+  // -- shown, dimmed, hidden --
+  // A part is drawn plainly, faint, or not at all, where it stands: nothing else moves. (A
+  // talk shows one figure many times: all of it, then one part with the rest faint.) Its
+  // lines go with it. Kept in the figure's own settings: hide, dim, highlight.
+  const SHOWN_AS = { hidden: "hide", dimmed: "dim", highlighted: "highlight" };
+  const shownLists = () => model()?.figure || {};
+  // How a part is shown, as it is written: null when plainly. (One in a group written so is
+  // shown as its group is.)
+  function shownAs(id) {
+    const lists = shownLists();
+    for (const [how, key] of Object.entries(SHOWN_AS)) if ((lists[key] || []).includes(id)) return how;
+    return null;
+  }
+  const anyShownApart = () => Object.values(SHOWN_AS).some((key) => shownLists()[key]?.length);
+  function shownSummary() {
+    const lists = shownLists(), said = [];
+    for (const [key, word] of [["hide", "hidden"], ["dim", "dimmed"], ["highlight", "highlighted"]]) {
+      if (lists[key]?.length) said.push(`${lists[key].length} ${word}`);
+    }
+    return `${said.join(", ")}: drawn where ${said.length === 1 && /^1 /.test(said[0]) ? "it stands" : "they stand"}, and nothing else moved.`;
+  }
+  function showAs(how, ids = state.selected) {
+    const parts = ids.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
+    if (!parts.length) return;
+    act({ do: "show", ids: parts, as: how }, { select: false });
+  }
+  function showAll() { if (anyShownApart()) act({ do: "show", all: true }, { select: false }); }
+  function showSection(ids) {
+    const each = ids.map(shownAs);
+    const value = each.every((how) => how === each[0]) ? each[0] || "shown" : "";
+    return h("div.section", {}, h("div.section-title", {}, "Show"),
+      ui.segmented({ value, key: `show:${ids.join(",")}`, onChange: (how) => showAs(how, ids), options: [
+        { value: "shown", label: "Shown", title: "Drawn plainly" },
+        { value: "highlighted", label: "Highlight", title: "Drawn plainly, and the rest of the figure faint" },
+        { value: "dimmed", label: "Dimmed", title: "Drawn faint, where it stands" },
+        { value: "hidden", label: "Hidden", title: "Not drawn: its place is kept, and nothing else moves" }] }),
+      anyShownApart() ? h("div.row", {}, ui.button("Show All", () => showAll(), { small: true, icon: "eye", title: "Everything in the figure drawn plainly again" })) : null);
   }
 
 
@@ -5897,6 +5974,7 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} ${pluralNoun(ids)} Selected`, ids.map(nameOf).join(", "))),
       colourable.length ? colourSection(colourable) : null,
+      gatherable ? showSection(ids) : null,
       h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
           glyph(group.kind), h("span", {}, group.title)))),
@@ -6727,6 +6805,7 @@ export function figureParts(host) {
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
+    showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }

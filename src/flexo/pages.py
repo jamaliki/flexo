@@ -44,6 +44,12 @@ PAGE_SIZES = (
     PageSize("nature-1", "Nature, One Column", "89mm", family="Nature"),
     PageSize("nature-2", "Nature, Two Columns", "183mm", family="Nature"),
     PageSize("nature-page", "Nature, Full Page", "183mm", "247mm", family="Nature"),
+    # Science: as its instructions for revised research articles give them (1 column 9 cm,
+    # 2 columns 18.4 cm, a figure narrower than two columns 14.4 cm at most); its older
+    # guides give a three-column page's 5.5, 12 and 18.3 cm.
+    PageSize("science-1", "Science, One Column", "90mm", family="Science"),
+    PageSize("science-1.5", "Science, 1.5 Columns", "144mm", family="Science"),
+    PageSize("science-2", "Science, Two Columns", "184mm", family="Science"),
     PageSize("cell-1", "Cell, One Column", "85mm", family="Cell"),
     PageSize("cell-1.5", "Cell, 1.5 Columns", "114mm", family="Cell"),
     PageSize("cell-2", "Cell, Full Width", "174mm", family="Cell"),

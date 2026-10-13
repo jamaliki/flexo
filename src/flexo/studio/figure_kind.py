@@ -89,6 +89,8 @@ A frame round shapes anywhere in the figure (in different groups too), which mov
   them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
   layer: behind|front|over (a tint they show through), tone}}.
 A node, a group and a frame each take line: dashed|dotted for their outline, as an edge does.
+figure: {hide: [ids], dim: [ids], highlight: [ids]} leaves parts out, draws them faint, or draws
+  all but them faint -- where they stand, nothing moved (one figure shown several ways in a talk).
 A figure of several panels, as a journal prints one: each panel a group with role: panel (no
   frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
   a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,

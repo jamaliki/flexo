@@ -109,6 +109,8 @@ const ICONS = {
   crop: "M4.5 1.5v10h10M1.5 4.5h10v10",
   gallery: "M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z",
   layout: "M2.5 2.5h11v11h-11zM2.5 5.5h11M8 5.5v8",
+  // Four panels: a figure of several parts.
+  grid: "M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5h-4.5zM9 9h4.5v4.5H9z",
   slide: "M2 3.5h12v9H2z",
   section: "M2 3.5h12v9H2zM5 8h6",
   folder: "M2 4.5h4l1.5 1.5H14v7H2z",
