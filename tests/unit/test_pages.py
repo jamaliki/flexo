@@ -349,3 +349,13 @@ def test_panels_are_laid_out_one_over_two_and_one_beside_two() -> None:
     grid = yaml.safe_load(apply(beside["text"], {"do": "panels", "count": 3, "columns": 3})["text"])
     assert not [group for group in grid["groups"] if group.get("role") == "layout"]
     assert next(g for g in grid["groups"] if g["id"] == "root")["children"] == over["select"]
+
+
+def test_a_groups_title_position_is_offered() -> None:
+    """Where a module's title or a panel's letter stands was in the file format alone."""
+
+    from flexo.studio.figure_parts import catalogue
+
+    (side,) = (f for f in catalogue()["group_fields"] if f["key"] == "title_side")
+    assert side["options"] == ["left", "right", "bottom-left", "bottom-right"]
+    assert side["show"] == {"role": ["container", "module", "panel"]}

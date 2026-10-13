@@ -1052,6 +1052,17 @@ GROUP_FIELDS = [
         hint="Whether a frame is drawn round the shapes; a module's is named for them, and "
         "a panel has its letter instead",
     ),
+    _field(
+        "title_side",
+        "Title Position",
+        "choice",
+        options=["left", "right", "bottom-left", "bottom-right"],
+        labels={"left": "Top Left", "right": "Top Right", "bottom-left": "Bottom Left",
+                "bottom-right": "Bottom Right"},
+        default="left",
+        hint="The corner its title (a panel's letter) stands at",
+        show={"role": ["container", "module", "panel"]},
+    ),
     SHADOW,
     {**OUTLINE, "show": {"role": ["container", "module"]}},
     # A size of its own, for a panel that is not as large as what it holds would make it.
