@@ -770,19 +770,46 @@ The function is called with matplotlib set to the figure's look -- its font and
 size, its inks, the palette's tones as the colour cycle (`flexo.plots.plot_style`)
 -- and what it returns is laid out again at the shape's own size, so its words
 are the size of the figure's words whatever the panel's size. It is drawn as
-vectors, its words kept as words, and drawn again only when its size, the
-figure's look or a file it is drawn from changes: its Python file, the data its
-function read (a CSV, however it is opened: `open`, numpy, pandas) and the
-modules it imports from beside it. Name data from the file's own folder
+vectors, its words kept as words. Name data from the file's own folder
 (`Path(__file__).parent / "loss.csv"`), so it is found wherever the figure is
 drawn.
 
+A plot is drawn again only when its size, the figure's look or something it is
+drawn from changes:
+
+- its Python file, and the modules it imports from beside it;
+- the files its function read, however they are opened (`open`, numpy, pandas),
+  in a thread it starts too;
+- the folders it listed (`glob`, `os.listdir`, `os.scandir`, `Path.iterdir`):
+  one more file where it looks is a change;
+- the files its Python names in so many words -- `"loss.h5"`,
+  `HERE / "runs" / "a.parquet"`, a pattern `"runs/*.h5"` -- which is how a file
+  read by a library that opens files for itself (HDF5, Parquet) is seen at all.
+
+What none of these shows -- a name put together as the function runs -- the plot
+names as its `data`: files, folders (all that is in them) or patterns, from the
+figure's folder.
+
+```yaml
+- id: loss
+  kind: plot
+  properties: {source: plots.py, function: loss, data: [loss.h5, "runs/*.parquet"]}
+```
+
+```python
+panel.plot("loss", "plots.py", "loss", data=["loss.h5", "runs/*.parquet"])
+```
+
+Only files in the folder count -- the studio's, or outside a studio the Python
+file's -- and never Python's own, a font, or anything in a hidden folder.
+
 In the studio, **Shape › Plot** asks for the file and takes its first function.
 **Function** is a pop-up of the functions the file offers, and a plot given
-another file keeps its function's name if that file has it. A corner dragged
-sets its width and height, in the unit they are written in (⇧ keeps its
-proportions; double-click for the size a plot has of itself). The figure redraws
-when the Python file, or data it read, is saved.
+another file keeps its function's name if that file has it. **Data** (under
+More) is its `data`, the names with commas between them. A corner dragged sets
+its width and height, in the unit they are written in (⇧ keeps its proportions;
+double-click for the size a plot has of itself). The figure redraws when the
+Python file, or data it read, is saved, and when a file is put where it looks.
 
 A figure that names Python runs it when it is drawn: in a studio, only in a folder
 you have trusted. Not run -- or with matplotlib missing, or the function failing
@@ -790,7 +817,11 @@ you have trusted. Not run -- or with matplotlib missing, or the function failing
 figure is drawn. In Flexo Studio (and any studio with flexo-talk installed) the
 function runs in a process of its own, as a deck's Python does: one that takes
 longer than 30 seconds is stopped, one that crashes takes only that process with
-it, and the plot says which.
+it, and the plot says which. The 30 seconds are the function's own, counted once
+Python and matplotlib have started. A plot that was stopped is not run again
+until its Python file changes, at whatever size or in whichever figure; and
+while it runs it holds up nothing else: the folder's other plots, and its other
+documents, are drawn meanwhile.
 
 ### Hiding, dimming and highlighting parts
 

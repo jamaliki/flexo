@@ -37,7 +37,7 @@ import yaml
 
 from flexo.draft import GivenUp, given_up_when
 from flexo.roundtrip import writing
-from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures
+from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures, taking_turns
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
@@ -105,6 +105,8 @@ class Doc:
         self.path = path
         self.kind = kind
         self.lock = threading.RLock()
+        self.drawing = threading.Lock()
+        """One drawing of it at a time, whichever document has the folder's turn."""
         self.exists = path.is_file()
         self.problem: str | None = None
         self.held = False
@@ -587,6 +589,8 @@ class Workspace:
         """Copies taken out of the folder while the studio runs, kept to be put back if a
         document uses one again (its picture's adding redone)."""
         self.drawing = threading.Lock()
+        """The folder's turn to draw: one drawing at a time -- but for one waiting on a plot
+        run apart, which gives its turn to another document meanwhile (``taking_turns``)."""
         self.latest: dict[str, int] = {}
         self.acts: dict[str, int] = {}
         """How many edits the pages have asked of each document's kind (``acting``)."""
@@ -1351,7 +1355,7 @@ class Workspace:
             if hints.get("yields")
             else contextlib.nullcontext()
         )
-        with self.drawing:
+        with doc.drawing, taking_turns(self.drawing):
             if version < self.latest[client]:
                 return {"version": version, "stale": True}
             started = time.perf_counter()
@@ -1413,7 +1417,7 @@ class Workspace:
                 {**asdict(message), "text": self.named(message.text, doc)}
                 for message in drawing.messages
             ],
-            "unfinished": drawing.unfinished,
+            "unfinished": drawing.unfinished or drawing.again,
         }
 
     def named(self, text: str, doc: Doc) -> str:
@@ -1430,7 +1434,7 @@ class Workspace:
         doc = self.open(name)
         with doc.lock:
             document = copy.deepcopy(doc.document)
-        with self.drawing:
+        with doc.drawing, taking_turns(self.drawing):
             for _ in range(200):
                 with fonts_linked(), self.running():
                     drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))

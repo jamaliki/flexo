@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
@@ -1726,6 +1726,7 @@ class GroupBuilder:
         *,
         width: Extent | str | float | None = None,
         height: Extent | str | float | None = None,
+        data: str | Path | Iterable[str | Path] | None = None,
         **options: object,
     ) -> NodeHandle:
         """A plot: the matplotlib figure that ``function`` in the Python file ``source``
@@ -1737,14 +1738,24 @@ class GroupBuilder:
         said), so its words are the size of the figure's own, not scaled with it. With
         the file not run (a folder not trusted, in a studio), matplotlib not installed,
         or the function failing, it is an empty box and a warning that says why.
+
+        ``data`` names what it plots, where its Python does not show it (a file a library
+        opens for itself): files, folders or patterns (``"runs/*.h5"``). The plot is drawn
+        again when one changes, as it is for the files it is seen to read.
         """
 
+        names = [data] if isinstance(data, str | Path) else list(data or ())
         return self.node(
             id,
             "plot",
             width=width,
             height=height,
-            **_with_properties(options, source=str(source), function=function),  # type: ignore[arg-type]
+            **_with_properties(
+                options,
+                source=str(source),
+                function=function,
+                **({"data": [str(name) for name in names]} if names else {}),  # type: ignore[arg-type]
+            ),
         )
 
     def image(
