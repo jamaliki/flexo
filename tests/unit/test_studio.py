@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import json
 import re
 import shutil
@@ -2772,6 +2773,158 @@ def test_a_part_under_a_row_is_dragged_to_centre_under_one_of_its_parts_or_the_r
     ]
 
 
+def _places(model: dict, boxes: dict, drags: list, shown: str) -> list:
+    """Where each of ``drags`` (the part, the pointer's x and y, and where the part's middle
+    then is) would go, by drop.js alone: ``shown``, an expression of ``place`` and ``kept``
+    (whether the part stays where it is)."""
+
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
+    code = (
+        f"import {{ dropPlace, stays }} from {json.dumps(script.as_uri())};\n"
+        f"const model = {json.dumps(model)};\n"
+        f"const boxes = new Map(Object.entries({json.dumps(boxes)}).map(([id, box]) => "
+        "[id, box && { left: box[0], top: box[1], right: box[2], bottom: box[3] }]));\n"
+        f"console.log(JSON.stringify({json.dumps(drags)}.map(([id, x, y, middle]) => {{\n"
+        "  const place = dropPlace(model, boxes, { x, y }, id, { x: middle ?? x, y });\n"
+        "  const kept = stays(model, place, id);\n"
+        f"  return {shown};\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_alone_on_the_last_line_of_a_folded_row_goes_under_a_part_of_the_line_over() -> None:
+    # A row seen folded onto two lines, its last part alone on the second: each line a group
+    # that only arranges its parts, as the page sees them and as the server writes them.
+    model = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "column"}, "children": ["root~line1", "root~line2"]},
+        {"id": "root~line1", "role": "layout", "layout": {"kind": "row"},
+         "children": ["a", "b", "c", "d"]},
+        {"id": "root~line2", "role": "layout", "layout": {"kind": "row"}, "children": ["e"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 370, 130], "root~line1": [10, 10, 360, 40],
+        "root~line2": [145, 100, 225, 130],
+        "a": [10, 10, 60, 40], "b": [110, 10, 160, 40], "c": [210, 10, 260, 40],
+        "d": [310, 10, 360, 40], "e": [145, 100, 225, 130],
+    }
+    shown = ("place && (place.kind === 'align' ? [place.with, place.centred, kept, place.line, "
+             "place.parent, place.index] : place.kind)")
+    drags = [["e", 140, 115, 136], ["e", 240, 46, 236], ["e", 190, 115, 186], ["e", 190, 400, 186]]
+    assert _places(model, boxes, drags, shown) == [
+        # Along its own line -- and just under the line over it -- under the part its middle
+        # is nearest: its own line named, to take that line's place in the column.
+        ["b", False, False, "root~line2", "root", 1],
+        ["c", False, False, "root~line2", "root", 1],
+        # Under the line as a whole, where it is drawn already: it stays.
+        ["root~line1", True, True, "root~line2", "root", 1],
+        None,
+    ]
+    # Not alone on its line, nor in a group with a title (or a frame) of its own: placed as ever.
+    for change in ({"children": ["e", "f"]}, {"label": "Result"}, {"role": "module"}):
+        other = {**model, "groups": [*model["groups"][:2], {**model["groups"][2], **change}]}
+        more = {**boxes, "e": [145, 100, 180, 130], "f": [190, 100, 225, 130]}
+        assert _places(other, more, [["e", 140, 115, 136]], "place && place.kind") != ["align"]
+    # A part under a row seen folded: under a part of that row's last line, never a line.
+    under = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "column"}, "children": ["flow", "e"]},
+        {"id": "flow", "layout": {"kind": "column"}, "children": ["flow~line1", "flow~line2"]},
+        {"id": "flow~line1", "role": "layout", "layout": {"kind": "row"}, "children": ["a", "b"]},
+        {"id": "flow~line2", "role": "layout", "layout": {"kind": "row"}, "children": ["d", "c"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 100, 120], "flow": [0, 0, 100, 60], "e": [30, 100, 70, 120],
+        "flow~line1": [0, 0, 100, 20], "flow~line2": [0, 40, 100, 60],
+        "a": [0, 0, 40, 20], "b": [60, 0, 100, 20], "d": [0, 40, 40, 60], "c": [60, 40, 100, 60],
+    }
+    drags = [["e", 80, 110, 80], ["e", 20, 110, 20], ["e", 50, 110, 50]]
+    assert _places(under, boxes, drags, "[place.with, place.of, kept]") == [
+        ["c", "flow", False], ["d", "flow", False], ["flow", "flow", True]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_let_go_where_it_already_is_stays_however_the_place_is_said() -> None:
+    model = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "row"}, "children": ["a", "col"]},
+        {"id": "col", "layout": {"kind": "column"}, "children": ["b", "c"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 300, 150], "a": [10, 60, 60, 90], "col": [100, 0, 200, 150],
+        "b": [110, 10, 190, 40], "c": [110, 110, 190, 140],
+    }
+    shown = "place.kind === 'line' ? [`${place.side} of ${place.of}`, kept] : [place.index, kept]"
+    # Under the part over it in its column -- in the gap between them, or past its own foot,
+    # where it is said as a line of its own under that part -- is where it is: it stays.
+    # Another part let go there goes under it.
+    drags = [["c", 150, 100], ["c", 150, 170], ["a", 150, 170], ["b", 150, 170]]
+    assert _places(model, boxes, drags, shown) == [
+        [1, True], ["below of b", True], ["below of c", False], ["below of c", False]]
+    # Lined up under a part already, and drawn as near it as its line has room for (short of
+    # it): let go under that part again, it stays.
+    lined = {"root": "root", "nodes": [{"id": "e", "align_with": "d"}], "groups": [
+        {"id": "root", "layout": {"kind": "column"}, "children": ["row", "e"]},
+        {"id": "row", "layout": {"kind": "row"}, "children": ["a", "b", "c", "d"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 370, 130], "row": [10, 10, 360, 40], "a": [10, 10, 60, 40],
+        "b": [110, 10, 160, 40], "c": [210, 10, 260, 40], "d": [310, 10, 360, 40],
+        "e": [260, 100, 360, 130],
+    }
+    drags = [["e", 335, 115, 335], ["e", 235, 115, 235]]
+    assert _places(lined, boxes, drags, "[place.with, kept]") == [["d", True], ["c", False]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_let_go_just_under_a_part_of_a_row_takes_a_line_of_its_own_under_that_part() -> None:
+    model = {"root": "root", "nodes": [{"id": "g", "align_with": "d"}], "groups": [
+        {"id": "root", "layout": {"kind": "column"}, "children": ["one", "two", "g"]},
+        {"id": "one", "layout": {"kind": "row"}, "children": ["a", "b", "c"]},
+        {"id": "two", "layout": {"kind": "row"}, "children": ["d", "e", "pair"]},
+        {"id": "pair", "layout": {"kind": "column"}, "children": ["f"]},
+    ]}
+    boxes = {
+        "root": [0, 0, 260, 190], "one": [0, 0, 260, 30], "two": [0, 60, 260, 90],
+        "a": [0, 0, 60, 30], "b": [100, 0, 160, 30], "c": [200, 0, 260, 30],
+        "d": [0, 60, 60, 90], "e": [100, 60, 160, 90], "pair": [200, 60, 260, 90],
+        "f": [200, 60, 260, 90], "g": [20, 150, 60, 180],
+    }
+    shown = ("place.kind === 'align' ? [place.with, place.of, place.move, place.parent, "
+             "place.index, kept] : [place.parent, place.index, kept]")
+    drags = [["e", 30, 108], ["a", 130, 108], ["e", 80, 108], [None, 30, 108], ["pair", 30, 108],
+             ["g", 30, 100, 400]]
+    assert _places(model, boxes, drags, shown) == [
+        # Just under the row, under one of its parts -- one of its own, or another row's: a line
+        # of its own there (its place in the column), lined up under that part.
+        ["d", "two", True, "root", 2, False], ["e", "two", True, "root", 2, False],
+        # Under the gap between two parts, a line of its own as its column places it; and so
+        # a shape from the palette, and a group, which are lined up with nothing.
+        ["root", 2, False], ["root", 2, False], ["root", 2, False],
+        # There already, lined up with it (picked up by its far end, say): it stays.
+        ["d", "two", True, "root", 2, True],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_part_not_drawn_has_no_place_beside_it_and_stops_no_other_from_going_to_its() -> None:
+    # A group left holding nothing, and a shape the drawing lacks: neither has a box.
+    model = {"root": "root", "groups": [
+        {"id": "root", "layout": {"kind": "row"}, "children": ["a", "gone", "b", "c", "late"]},
+        {"id": "gone", "role": "layout", "layout": {"kind": "row"}, "children": []},
+    ]}
+    boxes = {"root": [0, 0, 160, 20], "a": [0, 0, 40, 20], "b": [60, 0, 100, 20],
+             "c": [120, 0, 160, 20], "gone": None, "late": None}
+    shown = ("place.kind === 'line' ? `${place.side} of ${place.of}` "
+             ": [place.parent, place.index, place.siblings]")
+    drags = [["c", 48, 10], ["c", 112, 10], ["c", 20, 60]]
+    assert _places(model, boxes, drags, shown) == [
+        # Beside a part of the row: its place among all the row holds; shown between those drawn.
+        ["root", 1, ["a", "b"]], ["root", 3, ["a", "b"]], "below of a"]
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_a_shape_let_go_on_a_lines_body_goes_into_the_line() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/figure/drop.js"
@@ -3240,6 +3393,421 @@ console.log(JSON.stringify({ ...out, sent, opened: globalThis.opened }));
     assert out["ungroup"] == [[True, True], [True, True]]
     assert [action for action, _ in out["sent"]] == [{"do": "ungroup", "id": "col1"}] * 2
     assert out["cannotUngroup"] == [False, False] and out["line"] == [False, False]
+
+
+# -- a shape dragged on the drawing: the edits the page sends --------------------------
+
+# The stand-in page with a drawing to drag on: each shape an element that says where it is
+# drawn (``boxes``) and how far it has been carried, the window's listeners kept to be
+# fired, a frame run when asked. ``answer(action)`` is what the studio answers an edit with
+# (the lines an "arrange" made, the copy a "duplicate" made), beside ``sent``.
+DRAG_PAGE = r"""
+class Names {
+  constructor() { this.names = new Set(); }
+  add(...names) { for (const name of names) this.names.add(name); }
+  remove(...names) { for (const name of names) this.names.delete(name); }
+  toggle(name, on = !this.names.has(name)) { if (on) this.add(name); else this.remove(name); }
+  contains(name) { return this.names.has(name); }
+}
+Object.defineProperty(Node.prototype, "classList", {
+  get() { return (this.named ??= new Names()); },
+});
+const PAGE = { left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 };
+Object.assign(Node.prototype, {
+  removeAttribute(key) { delete this.attributes[key]; },
+  contains(other) { return other === this; },
+  matches: () => false, closest: () => null, querySelectorAll: () => [],
+  animate() {}, before() {}, cloneNode() { return new Node(this.tag); },
+  getBoundingClientRect: () => PAGE,
+});
+const created = document.createElement;
+document.createElement = (tag) => Object.assign(created(tag), { style: { setProperty() {} } });
+document.querySelectorAll = () => [];
+const listeners = new Map();
+globalThis.window = {
+  addEventListener(type, run) { listeners.set(type, [...(listeners.get(type) || []), run]); },
+  removeEventListener(type, run) {
+    listeners.set(type, (listeners.get(type) || []).filter((each) => each !== run));
+  },
+  getSelection: () => null,
+};
+const fire = (type, event) => { for (const run of listeners.get(type) || []) run(event); };
+let frames = [];
+globalThis.requestAnimationFrame = (run) => frames.push(run);
+globalThis.cancelAnimationFrame = () => {};
+const frame = () => { const due = frames; frames = []; for (const run of due) run(); };
+// (A part let go waits a while for the drawing it makes: not what this waits for.)
+const later = setTimeout;
+globalThis.setTimeout = (run, ms, ...rest) => {
+  const timer = later(run, ms, ...rest);
+  if (ms >= 1000) timer.unref();
+  return timer;
+};
+
+function dragPage(model, boxes, answer = () => ({})) {
+  const elements = new Map(), gliding = new Map();
+  const carried = (node) => {
+    const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(node.getAttribute("transform") || "");
+    return moved ? [Number(moved[1]), Number(moved[2])] : [0, 0];
+  };
+  const element = (id) => {
+    if (!boxes[id]) return null;
+    if (!elements.has(id)) {
+      const node = Object.assign(new Node("g"), { id, matches: () => true });
+      // (Where it is drawn, as far as it has been carried -- and, landing there from where
+      // it was, as far short of it as it still is.)
+      node.getBoundingClientRect = () => {
+        const [left, top, right, bottom] = boxes[id], [cx, cy] = carried(node);
+        const [dx, dy] = [cx + (gliding.get(id)?.[0] || 0), cy + (gliding.get(id)?.[1] || 0)];
+        return { left: left + dx, top: top + dy, right: right + dx, bottom: bottom + dy,
+          width: right - left, height: bottom - top };
+      };
+      node.getAnimations = () => (gliding.has(id) ? [{ finish: () => gliding.delete(id) }] : []);
+      elements.set(id, node);
+    }
+    return elements.get(id);
+  };
+  const page = new Node("div");
+  const figure = figureParts({
+    catalog: { parts: {}, groups: [] }, overlay: page, idOf: (id) => id, changed() {},
+    element, box: (id) => element(id)?.getBoundingClientRect() || null,
+    // (`breaks`: what goes wrong as an edit is asked for, to see what becomes of the shape.)
+    edited: () => { if (figure.breaks) throw new Error(figure.breaks); },
+    // (How many times it was told a shape carried had been let go.)
+    dragged: () => { figure.told = (figure.told || 0) + 1; },
+    run: async (action, { label }) => {
+      sent.push([action, label]);
+      return { select: [], ...answer(action) };
+    },
+  });
+  figure.setModel({ figure: { id: "f" }, root: "root", edges: [], nets: [], ...model });
+  // A shape pressed at its middle, carried to `to` and let go there -- or at `up` (`keys`:
+  // ⌥ held, say). The drawing is as it was, whatever was dragged before (`redrawn`: its
+  // elements new) -- unless the drawing an earlier drag's edits make has not yet come.
+  // Answers the edits sent, whether a place was shown for it as it was let go (a slot, a
+  // line between two parts), whether it is still carried (its drawing yet to come), whether
+  // the drag is over, and what failed on the way, if anything (as in a browser, where a
+  // frame or a listener that fails stops nothing else).
+  figure.drag = async (id, to, { keys = {}, up = to, redrawn = true } = {}) => {
+    if (redrawn) elements.clear();
+    const box = element(id).getBoundingClientRect(), from = sent.length;
+    const at = (x, y) => ({ button: 0, target: element(id), clientX: x, clientY: y,
+      preventDefault() {}, ...keys });
+    const [x, y] = [(box.left + box.right) / 2, (box.top + box.bottom) / 2];
+    let failed = null;
+    const tried = (run) => { try { run(); } catch (error) { failed = error.message; } };
+    figure.pointerdown(at(x, y));
+    for (const part of [0.5, 1]) {
+      fire("pointermove", at(x + (to[0] - x) * part, y + (to[1] - y) * part));
+      tried(frame);
+    }
+    const marks = page.children.filter((node) => !node.removed);
+    const shown = marks.some((node) => node.classList.contains("on"));
+    tried(() => fire("pointerup", at(...up)));
+    await figure.idle();
+    return { sent: sent.slice(from), shown, over: !figure.dragging,
+      carried: Boolean(element(id).getAttribute("transform")), ...(failed ? { failed } : {}) };
+  };
+  return Object.assign(figure, { page, gliding });
+}
+"""
+
+
+def _drag_page(code: str) -> dict:
+    return _figure_page(DRAG_PAGE + code)
+
+
+# A flow of seven written with no groups (a column), seen on a slide as a row: six on one
+# line and the seventh, "new2", alone on a second, under "geo".
+SEVEN = ["mech", "smiles", "geo", "new1", "new2", "crystal", "a"]
+SEVEN_PAGE = (
+    "const names = " + json.dumps(SEVEN) + ";\n"
+    "const boxes = { new2: [240, 90, 330, 120] };\n"
+    "names.filter((name) => name !== 'new2').forEach((name, at) => "
+    "{ boxes[name] = [20 + at * 110, 20, 110 + at * 110, 50]; });\n"
+    "const figure = dragPage({ nodes: " + _shapes(*SEVEN) + ",\n"
+    "  edges: names.slice(1).map((name, at) => ({ id: `line${at}`, from: names[at], to: name })),\n"
+    "  groups: [{ id: 'root', implied: true, layout: { kind: 'column' }, children: names }] },\n"
+    "  boxes, (action) => (action.do === 'arrange' ? { select: ['row', 'row-2'] }\n"
+    "    : action.do === 'duplicate' ? { select: ['new2-2'] } : {}));\n"
+)
+SEVEN_SEEN = {"do": "arrange", "id": "root", "kind": "row", "align": "center",
+              "lines": [[name for name in SEVEN if name != "new2"], ["new2"]]}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_alone_on_a_folded_line_let_go_under_a_box_goes_under_that_box_in_one_step() -> None:
+    out = _drag_page(SEVEN_PAGE + """
+const out = {};
+// Just under "crystal"; under the middle of the row; and where it is, under "geo".
+out.under = await figure.drag("new2", [505, 60]);
+out.centred = await figure.drag("new2", [340, 105]);
+out.stays = await figure.drag("new2", [290, 110]);
+console.log(JSON.stringify(out));
+""")
+    # The figure written as it is seen, then the box lined up: one step, named for the box it
+    # goes under -- not put under the row as a whole, in the row's middle.
+    under = "Place “New2” Under “Crystal”"
+    assert out["under"]["sent"] == [
+        [SEVEN_SEEN, under], [{"do": "align", "id": "new2", "with": "crystal"}, under]]
+    # (The line it goes with, by the name it was written under.)
+    assert out["centred"]["sent"] == [
+        [SEVEN_SEEN, "Centre “New2”"],
+        [{"do": "align", "id": "new2", "with": "row"}, "Centre “New2”"]]
+    assert out["under"]["shown"] and out["under"]["carried"] and out["under"]["over"]
+    # Let go where it is, no place is shown and nothing sent -- nor the figure written as
+    # seen -- and it is home.
+    assert out["stays"] == {"sent": [], "shown": False, "carried": False, "over": True}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_under_a_row_seen_folded_is_lined_up_once_the_row_is_written_as_seen() -> None:
+    out = _drag_page(
+        "const figure = dragPage({ nodes: " + _shapes("a", "b", "c", "d", "f", "g", "e") + """,
+  groups: [{ id: "root", layout: { kind: "column" }, children: ["flow", "e"] },
+    { id: "flow", layout: { kind: "row" }, children: ["a", "b", "c", "d", "f", "g"] }] },
+  { a: [0, 0, 40, 20], b: [60, 0, 100, 20], c: [120, 0, 160, 20], d: [120, 40, 160, 60],
+    f: [60, 40, 100, 60], g: [0, 40, 40, 60], e: [60, 100, 100, 120] },
+  (action) => (action.do === "arrange" ? { select: ["row", "row-2"] } : {}));
+console.log(JSON.stringify(await figure.drag("e", [140, 110])));
+""")
+    said = "Place “E” Under “D”"
+    assert out["sent"] == [
+        [{"do": "arrange", "id": "flow", "kind": "row", "align": "start",
+          "lines": [["a", "b", "c"], ["g", "f", "d"]]}, said],
+        [{"do": "align", "id": "e", "with": "d"}, said]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_let_go_where_it_is_or_where_no_place_can_be_told_is_home_at_once() -> None:
+    out = _drag_page(
+        "const boxes = { mech: [105, 28, 149, 56], smiles: [169, 28, 213, 56],"
+        " geo: [233, 28, 277, 56], pose: [233, 84, 277, 112], b: [233, 126, 277, 154] };\n"
+        "const figure = dragPage({ nodes: " + _shapes("mech", "smiles", "geo", "pose", "b", "late")
+        + """,
+  groups: [{ id: "root", layout: { kind: "column" }, children: ["row", "pose", "b"] },
+    { id: "row", role: "layout", layout: { kind: "row" },
+      children: ["mech", "gone", "smiles", "geo", "late"] },
+    { id: "gone", role: "layout", layout: { kind: "row" }, children: [] }] }, boxes);
+const out = {};
+// Under the box over it in its column, past its own foot: where it is.
+out.under = await figure.drag("b", [255, 185]);
+// Beside a box of a row that holds a group left empty and a shape not drawn yet: its place.
+out.beside = await figure.drag("b", [157, 42]);
+console.log(JSON.stringify(out));
+""")
+    assert out["under"] == {"sent": [], "shown": False, "carried": False, "over": True}
+    assert [action for action, _ in out["beside"]["sent"]] == [
+        {"do": "move", "id": "b", "parent": "row", "index": 1}]
+    assert out["beside"]["shown"] and out["beside"]["over"]
+    # Should where it goes not be worked out as it is let go, the drag ends all the same:
+    # the box is home, nothing sent, and the pointer carries it no further.
+    failed = _drag_page(
+        "const figure = dragPage({ nodes: " + _shapes("a", "b") + """,
+  groups: [{ id: "root", layout: { kind: "row" }, children: ["a", "b"] }] },
+  { a: [0, 0, 40, 20], b: [60, 0, 100, 20] });
+// (Let go a little further on than the pointer was last seen: its place is told afresh.)
+figure.page.getBoundingClientRect = () => { throw new Error("no place"); };
+console.log(JSON.stringify(await figure.drag("b", [20, 60], { up: [130, 10] })));
+""")
+    assert failed == {
+        "sent": [], "shown": False, "carried": False, "over": True, "failed": "no place"}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_copy_let_go_goes_where_the_box_itself_would_on_a_figure_turned_or_folded() -> None:
+    # A column drawn as a row, to fit a slide: a copy let go under the row is put there once
+    # the figure is written the way it is drawn, as the box itself is -- one step.
+    turned = _drag_page(
+        "const figure = dragPage({ nodes: " + _shapes("p", "q", "r") + """,
+  groups: [{ id: "root", layout: { kind: "column" }, children: ["p", "q", "r"] }] },
+  { p: [0, 0, 40, 20], q: [60, 0, 100, 20], r: [120, 0, 160, 20] },
+  (action) => (action.do === "duplicate" ? { select: ["r-2"] } : {}));
+console.log(JSON.stringify(await figure.drag("r", [50, 70], { keys: { altKey: true } })));
+""")
+    said = "Duplicate “R”"
+    assert turned["sent"] == [
+        [{"do": "duplicate", "ids": ["r"]}, said],
+        [{"do": "update", "targets": [{"type": "group", "id": "root"}],
+          "values": {"layout.kind": "row"}}, said],
+        [{"do": "move", "id": "r-2", "line": "below", "of": "root"}, said]]
+    assert not turned["carried"]  # (the box itself never left)
+    # A copy of the box alone on a folded line, let go under a box of the line over it: on a
+    # line of its own after the box's, then lined up there.
+    folded = _drag_page(SEVEN_PAGE + """
+console.log(JSON.stringify(await figure.drag("new2", [505, 60], { keys: { altKey: true } })));
+""")
+    said = "Duplicate “New2”"
+    assert folded["sent"] == [
+        [SEVEN_SEEN, said], [{"do": "duplicate", "ids": ["new2"]}, said],
+        [{"do": "move", "id": "new2-2", "parent": "root", "index": 2}, said],
+        [{"do": "align", "id": "new2-2", "with": "crystal"}, said]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_dragged_while_the_figure_lands_is_read_where_the_figure_is_drawn() -> None:
+    # Seven folded onto two lines, the second run back -- just drawn so: "crystal" and "a"
+    # still gliding down from the one line they were on, "new2" alone under it for a moment.
+    out = _drag_page(
+        "const names = " + json.dumps(SEVEN) + ";\n"
+        "const boxes = { a: [130, 90, 220, 120], crystal: [240, 90, 330, 120],"
+        " new2: [350, 90, 440, 120] };\n"
+        "names.slice(0, 4).forEach((name, at) => "
+        "{ boxes[name] = [20 + at * 110, 20, 110 + at * 110, 50]; });\n"
+        "const figure = dragPage({ nodes: " + _shapes(*SEVEN) + """,
+  groups: [{ id: "root", implied: true, layout: { kind: "column" }, children: names }] },
+  boxes, (action) => (action.do === "arrange" ? { select: ["row", "row-2"] } : {}));
+const out = {};
+figure.gliding.set("crystal", [220, -70]).set("a", [440, -70]);
+// Let go just right of "new1", at the end of the first line.
+out.landing = await figure.drag("new2", [452, 35]);
+// Let go there, its drawing still on its way, it is not picked up again from where it was
+// let go: the press is no drag.
+out.again = await figure.drag("new2", [200, 105], { redrawn: false });
+console.log(JSON.stringify(out));
+""")
+    # Written as it is drawn, four and three -- not as it looked on the way, six and one.
+    assert [action for action, _ in out["landing"]["sent"]] == [
+        {"do": "arrange", "id": "root", "kind": "row", "align": "end",
+         "lines": [["mech", "smiles", "geo", "new1"], ["a", "crystal", "new2"]]},
+        {"do": "move", "id": "new2", "parent": "row", "index": 4}]
+    assert out["again"] == {"sent": [], "shown": False, "carried": True, "over": True}
+
+
+# A chain of seven on a slide, written with no groups and drawn folded four and three as a
+# snake: the second line under the first, their right ends level, and running back. Each
+# box's width in units of its height; a box 28 pixels tall.
+SNAKE_WIDTHS = {"mech": 3.43, "smiles": 2.35, "geo": 1.89, "pose": 3.09, "b": 1.57,
+                "crystal": 1.67, "a": 1.59}
+
+
+def _snake(first: list[str], second: list[str], height: float = 28.0) -> dict[str, list[float]]:
+    """Where each box of a chain folded onto two lines is drawn, in pixels: ``first`` left
+    to right, ``second`` (as the chain runs) back from under the first line's end."""
+
+    gap, boxes, x = 0.72, {}, 4.325
+    for name in first:
+        boxes[name] = [x, -0.5, x + SNAKE_WIDTHS[name], 0.5]
+        x += SNAKE_WIDTHS[name] + gap
+    x -= gap
+    for name in second:
+        boxes[name] = [x - SNAKE_WIDTHS[name], 1.44, x, 2.44]
+        x -= SNAKE_WIDTHS[name] + gap
+    return {
+        name: [round(left * height, 1), round(top * height + 60, 1),
+               round(right * height, 1), round(bottom * height + 60, 1)]
+        for name, (left, top, right, bottom) in boxes.items()
+    }
+
+
+def _snake_page(first: list[str], second: list[str], groups: list | None = None) -> str:
+    """The page with that chain on it: as the file has it (no groups), or as ``groups``."""
+
+    order = [*first, *second]
+    lines = [{"id": f"line{at}", "from": one, "to": two}
+             for at, (one, two) in enumerate(itertools.pairwise(order))]
+    groups = groups or [
+        {"id": "root", "implied": True, "layout": {"kind": "column"}, "children": order}]
+    return (
+        "const boxes = " + json.dumps(_snake(first, second)) + ";\n"
+        "const figure = dragPage({ nodes: " + _shapes(*order) + ",\n"
+        "  edges: " + json.dumps(lines) + ",\n  groups: " + json.dumps(groups) + " }, boxes,\n"
+        "  (action) => (action.do === 'arrange' ? { select: ['row', 'row-2'] }\n"
+        "    : action.do === 'duplicate' ? { select: ['b-2'] } : {}));\n"
+        # (Just past a side of a box, level with its middle: 18 pixels right of it, or under it.)
+        "const right = (id) => [boxes[id][2] + 18, (boxes[id][1] + boxes[id][3]) / 2];\n"
+        "const under = (id) => [(boxes[id][0] + boxes[id][2]) / 2, boxes[id][3] + 18];\n"
+    )
+
+
+def _seen(first: list[str], second: list[str]) -> dict:
+    """That fold written as it is seen: its second line in the order it is seen, left to right."""
+
+    return {"do": "arrange", "id": "root", "kind": "row", "align": "end",
+            "lines": [first, second[::-1]]}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_let_go_just_right_of_the_last_box_of_a_folded_line_goes_after_that_box() -> None:
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+console.log(JSON.stringify(await figure.drag("b", right("pose"))));
+""")
+    # Up from under "pose" to just past its right side: after it, at the end of its line --
+    # its place among that line's own four, whichever way the line it came from runs.
+    assert [action for action, _ in out["sent"]] == [
+        _seen(first, second), {"do": "move", "id": "b", "parent": "row", "index": 4}]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_let_go_just_under_a_box_of_the_last_line_takes_a_line_of_its_own_under_it() -> None:
+    said = "Place “B” Under “Crystal”"
+    placed = [[{"do": "move", "id": "b", "parent": "root", "index": 2}, said],
+              [{"do": "align", "id": "b", "with": "crystal"}, said]]
+    # From the end of the last line, the figure not yet written as it is seen: written so,
+    # then the box put on a line of its own under the last and lined up under "crystal" --
+    # one step, and a slot shown for it there.
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+console.log(JSON.stringify(await figure.drag("b", under("crystal"))));
+""")
+    assert out == {"sent": [[_seen(first, second), said], *placed], "shown": True, "over": True,
+                   "carried": True}
+    # From the first line (spliced in before "pose"), the same: never the end of that line.
+    first, second = ["mech", "smiles", "geo", "b"], ["pose", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+console.log(JSON.stringify(await figure.drag("b", under("crystal"))));
+""")
+    assert out["sent"] == [[_seen(first, second), said], *placed]
+    # And once the figure is written as its lines, with nothing to write first -- a copy
+    # too, put on that line then lined up.
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    written = [
+        {"id": "root", "layout": {"kind": "column", "align": "end"}, "children": ["row", "row-2"]},
+        {"id": "row", "role": "layout", "layout": {"kind": "row"}, "children": first},
+        {"id": "row-2", "role": "layout", "layout": {"kind": "row"}, "children": second[::-1]},
+    ]
+    out = _drag_page(_snake_page(first, second, written) + """
+const out = { moved: await figure.drag("b", under("crystal")) };
+out.copied = await figure.drag("b", under("crystal"), { keys: { altKey: true } });
+console.log(JSON.stringify(out));
+""")
+    assert out["moved"]["sent"] == placed
+    assert [action for action, _ in out["copied"]["sent"]] == [
+        {"do": "duplicate", "ids": ["b"]},
+        {"do": "move", "id": "b-2", "parent": "root", "index": 2},
+        {"do": "align", "id": "b-2", "with": "crystal"}]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_box_whose_move_cannot_be_asked_for_is_home_at_once() -> None:
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+figure.breaks = "no edit";
+console.log(JSON.stringify(await figure.drag("b", right("pose"))));
+""")
+    # Whatever fails once it is let go, it is not left where it was let go to wait for a
+    # drawing that will not come.
+    assert out == {"sent": [], "shown": True, "over": True, "carried": False, "failed": "no edit"}
+
+
+def test_a_box_let_go_tells_its_host_which_keeps_drawings_back_while_one_is_carried() -> None:
+    """A drawing put in while a box is carried takes the figure from under it and ends the
+    drag with nothing done. A host keeps one back while ``dragging`` says a box is carried,
+    and is told when it is let go, once; a box pressed and not carried was never one."""
+
+    first, second = ["mech", "smiles", "geo", "pose"], ["b", "crystal", "a"]
+    out = _drag_page(_snake_page(first, second) + """
+const before = figure.told || 0;
+const went = await figure.drag("b", right("pose"));
+const once = figure.told;
+const pressed = await figure.drag("mech", [169, 60], { redrawn: false });
+console.log(JSON.stringify({ before, once, after: figure.told, moved: went.sent.length > 0,
+  stayed: pressed.sent.length === 0, over: went.over && pressed.over }));
+""")
+    assert out == {
+        "before": 0, "once": 1, "after": 1, "moved": True, "stayed": True, "over": True,
+    }
 
 
 # -- the File menu's Rename and Duplicate --------------------------------------------

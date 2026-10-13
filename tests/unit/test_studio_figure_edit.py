@@ -3,6 +3,7 @@ renamed, gathered, moved, and removed, the file keeping its comments and reading
 
 from __future__ import annotations
 
+import itertools
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -812,6 +813,154 @@ def test_a_shape_is_lined_up_under_a_part_and_placed_afresh_when_moved() -> None
     assert "align_with" not in apply(under["text"], {"do": "align", "id": "e"})["text"]
     with pytest.raises(EditError, match="line it up with"):
         apply(text, {"do": "align", "id": "e", "with": "nowhere"})
+
+
+def _flow(names: str = "abcdefg") -> str:
+    """A chain of blocks with no groups written: stacked as listed, each joined to the next."""
+
+    nodes = "".join(f"- id: {name}\n  label: {name.upper()}\n" for name in names)
+    return f"figure:\n  id: flow\nnodes:\n{nodes}edges:\n" + "".join(
+        f"- from: {one}\n  to: {two}\n" for one, two in itertools.pairwise(names)
+    )
+
+
+def _groups(text: str) -> dict[str, list[str]]:
+    return {group["id"]: list(group["children"]) for group in data(text).get("groups") or []}
+
+
+def test_a_part_alone_on_a_line_written_for_it_is_lined_up_across_the_lines() -> None:
+    # Seen folded with its last part alone on the second line, and written so.
+    seen = [["a", "b", "c", "d", "f", "g"], ["e"]]
+    arranged = apply(
+        _flow(), {"do": "arrange", "id": "root", "kind": "row", "lines": seen, "align": "center"}
+    )
+    row, line = arranged["select"]
+    assert _groups(arranged["text"])[line] == ["e"]
+    # Lined up under a part of the line over it, it takes its line's place in the column:
+    # under that part, not centred along a row of its own.
+    under = apply(arranged["text"], {"do": "align", "id": "e", "with": "f"})
+    assert _groups(under["text"]) == {"root": [row, "e"], row: seen[0]}
+    assert {node["id"]: node.get("align_with") for node in data(under["text"])["nodes"]}["e"] == "f"
+    nodes = compile_figure(parse(under["text"], Path.cwd())).fitted.nodes
+    middle = {node.measured.spec.id: node.bounds.x + node.bounds.width / 2 for node in nodes}
+    top = {node.measured.spec.id: node.bounds.y for node in nodes}
+    assert abs(middle["e"] - middle["f"]) < 1.0 and top["e"] > top["f"]
+    # Under the line itself, too.
+    centred = apply(arranged["text"], {"do": "align", "id": "e", "with": row})
+    assert _groups(centred["text"])["root"] == [row, "e"]
+    # A group with a title of its own that holds only it stays its group.
+    titled = arranged["text"].replace(f"- id: {line}\n", f"- id: {line}\n  label: Result\n")
+    assert titled != arranged["text"]
+    kept = apply(titled, {"do": "align", "id": "e", "with": "f"})
+    assert _groups(kept["text"])[line] == ["e"]
+
+
+def test_the_line_a_part_is_moved_out_of_goes_when_it_is_left_holding_nothing() -> None:
+    seen = [["a", "b", "c", "d", "f", "g"], ["e"]]
+    arranged = apply(
+        _flow(), {"do": "arrange", "id": "root", "kind": "row", "lines": seen, "align": "center"}
+    )
+    row, line = arranged["select"]
+    # Into the first line: its own, written only to hold it, is not left empty in the file
+    # (drawn as a gap under the row, and listed by the page as a part with no place).
+    into = apply(arranged["text"], {"do": "move", "id": "e", "parent": row, "index": 4})
+    assert _groups(into["text"]) == {"root": [row], row: ["a", "b", "c", "d", "e", "f", "g"]}
+    # Under one part of the first line, the same.
+    under = apply(arranged["text"], {"do": "move", "id": "e", "line": "below", "of": "f"})
+    groups = _groups(under["text"])
+    assert line not in groups and groups["root"] == [row]
+    # A line left holding one part gives that part its place.
+    two = apply(
+        _flow("abcde"),
+        {"do": "arrange", "id": "root", "kind": "row", "lines": [["a", "b", "c"], ["d", "e"]]},
+    )
+    first, second = two["select"]
+    left = apply(two["text"], {"do": "move", "id": "e", "parent": first, "index": 3})
+    assert _groups(left["text"]) == {"root": [first, "d"], first: ["a", "b", "c", "e"]}
+    # A group with a title of its own stays, whatever it is left holding.
+    titled = two["text"].replace(f"- id: {second}\n", f"- id: {second}\n  label: Results\n")
+    for part in "de":
+        titled = apply(titled, {"do": "move", "id": part, "parent": first, "index": 3})["text"]
+    assert _groups(titled)[second] == []
+
+
+def test_a_snake_written_as_it_is_seen_keeps_every_part_where_it_was_and_its_lines() -> None:
+    def drawn(text: str) -> dict[str, tuple[float, float, float]]:
+        nodes = compile_figure(parse(text, Path.cwd())).fitted.nodes
+        return {
+            node.measured.spec.id: (
+                node.bounds.x, node.bounds.x + node.bounds.width, node.bounds.y
+            )
+            for node in nodes
+        }
+
+    # Seven folded four and three, the second line run back: seen as "g f e" under "a b c d",
+    # their right ends level -- and written so, each line in the order it is seen.
+    chain = _flow()
+    seen = [["a", "b", "c", "d"], ["g", "f", "e"]]
+    arranged = apply(
+        chain, {"do": "arrange", "id": "root", "kind": "row", "lines": seen, "align": "end"}
+    )
+    first, second = arranged["select"]
+    assert _groups(arranged["text"]) == {"root": [first, second], first: seen[0], second: seen[1]}
+    # Drawn as it was seen: the second line's parts left to right as written, its end under
+    # the first's -- not turned round. Its lines are the chain's own, none added or turned:
+    # "d" to "e" steps down at the end, and "e", "f", "g" still run back.
+    at = drawn(arranged["text"])
+    assert at["g"][0] < at["f"][0] < at["e"][0] and abs(at["e"][1] - at["d"][1]) < 1.0
+    assert all(at[name][2] > at["d"][2] for name in "efg")
+    assert edges(arranged["text"]) == edges(chain)
+    # A part put in before "f" on that line is written after it: the line runs back.
+    added = apply(arranged["text"], {"do": "add", "kind": "block", "into": "edge.5.e-to-f"})
+    assert _groups(added["text"])[second] == ["g", "f", added["select"][0], "e"]
+    # The last of the chain's second line let go under "f": a line of its own under the
+    # last, then lined up -- drawn under "f", on a third line.
+    moved = apply(arranged["text"], {"do": "move", "id": "e", "parent": "root", "index": 2})
+    under = apply(moved["text"], {"do": "align", "id": "e", "with": "f"})
+    assert _groups(under["text"]) == {"root": [first, second, "e"], first: seen[0],
+                                      second: ["g", "f"]}
+    at = drawn(under["text"])
+    assert abs(sum(at["e"][:2]) - sum(at["f"][:2])) < 2.0 and at["e"][2] > at["f"][2]
+
+
+LOOSE = (
+    "figure:\n  id: f\nnodes:\n"
+    + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcdexy")
+    + "groups:\n- {id: root, layout: {kind: row}, children: [a, b, c, d, e]}\n"
+    "edges:\n- {from: a, to: b}\n- {from: b, to: c}\n"
+)
+"""A file written by hand: two shapes in none of its groups, drawn at the end of its row."""
+
+
+def test_a_part_the_root_leaves_out_is_held_where_it_is_drawn_once_a_part_is_placed() -> None:
+    def root(text: str) -> list[str]:
+        return _groups(text)["root"]
+
+    # One of them put on a row of its own under the rest: the other stays in the row, at its
+    # end, where it was drawn -- not thrown out of it, under the first.
+    below = apply(LOOSE, {"do": "move", "id": "x", "line": "below", "of": "root"})
+    (row,) = (name for name in _groups(below["text"]) if name != "root")
+    assert _groups(below["text"]) == {"root": [row, "x"], row: ["a", "b", "c", "d", "e", "y"]}
+    compile_figure(parse(below["text"], Path.cwd()))
+    # Beside the other, which no group held either; and a place among the parts as the page
+    # counts them (its model lists them in the root).
+    beside = apply(LOOSE, {"do": "move", "id": "y", "line": "left", "of": "x"})
+    assert root(beside["text"]) == ["a", "b", "c", "d", "e", "y", "x"]
+    assert root(apply(LOOSE, {"do": "move", "id": "a", "parent": "root", "index": 6})["text"]) == [
+        "b", "c", "d", "e", "x", "y", "a",
+    ]
+    # A place back, a copy, a group of the two, and the row written as it is seen folded.
+    assert root(apply(LOOSE, {"do": "step", "id": "y", "delta": -1})["text"])[-2:] == ["y", "x"]
+    assert root(apply(LOOSE, {"do": "shift", "ids": ["y"], "by": -1})["text"])[-2:] == ["y", "x"]
+    assert root(apply(LOOSE, {"do": "duplicate", "ids": ["y"]})["text"])[-3:] == ["x", "y", "y-2"]
+    gathered = apply(LOOSE, {"do": "gather", "ids": ["x", "y"], "layout": "column"})
+    assert _groups(gathered["text"])[gathered["select"][0]] == ["x", "y"]
+    lines = [["a", "b", "c", "d"], ["e", "x", "y"]]
+    folded = apply(LOOSE, {"do": "arrange", "id": "root", "kind": "row", "lines": lines})
+    assert [_groups(folded["text"])[line] for line in folded["select"]] == lines
+    # An edit that places nothing leaves the file's groups as they were written.
+    joined = apply(LOOSE, {"do": "connect", "source": "e", "target": "x"})
+    assert root(joined["text"]) == ["a", "b", "c", "d", "e"]
 
 
 CHAIN = (

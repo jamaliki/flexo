@@ -90,7 +90,9 @@ A frame round shapes anywhere in the figure (in different groups too), which mov
   layer: behind|front|over (a tint they show through), tone}}.
 A plot: {id, kind: plot, properties: {source: plots.py, function: name}, width, height} -- the
   matplotlib figure that function returns, in the figure's font and colours, at that size (don't
-  set fonts, sizes or colours in the function: they are the figure's).
+  set fonts, sizes or colours in the function: they are the figure's). It is drawn again when
+  a file it reads changes; properties.data: [loss.h5, "runs/*.parquet"] names data it reads
+  through a library that opens files itself (HDF5, Parquet), which is not seen otherwise.
 A node, a group and a frame each take line: dashed|dotted for their outline, as an edge does.
 A node's properties set its whole label: bold: true, italic: true, size: 6pt, align: left|right;
   an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side).
@@ -247,6 +249,7 @@ class FigureKind:
         from flexo.compiler import compile_figure
         from flexo.diagnostics import FlexoError
         from flexo.lint import lint_compilation
+        from flexo.plots import WAITING
         from flexo.studio.figure_edit import model
         from flexo.studio.plain import explain
 
@@ -292,7 +295,10 @@ class FigureKind:
         files = [base / value for value in (spec.style, spec.palette) if _is_file(value)]
         files += _plot_files(spec, base)
         said = [*report.diagnostics, *structure_problems(spec)]
-        return Drawing([page], [*said_first, *(_message(item) for item in said)], files, info)
+        # (A plot not run yet, its Python still starting, is asked for again by the page.)
+        again = any(item.code == WAITING for item in said)
+        messages = [*said_first, *(_message(item) for item in said)]
+        return Drawing([page], messages, files, info, again=again)
 
     def export(
         self,
@@ -343,9 +349,9 @@ class FigureKind:
 
 
 def _plot_files(spec, base: Path) -> list[Path]:
-    """The files the figure's plots are drawn from -- each one's Python file (there or not
-    yet), and the data its function read (``flexo.plots.files``): saved, the figure is
-    drawn again."""
+    """What the figure's plots are drawn from -- each one's Python file (there or not
+    yet), and what its function read (``flexo.plots.files``: its data, and the folders it
+    listed): one saved, or a file put in such a folder, the figure is drawn again."""
 
     from flexo.confine import outside
     from flexo.plots import PLOT_KIND, files
@@ -354,7 +360,8 @@ def _plot_files(spec, base: Path) -> list[Path]:
     for node in spec.nodes:
         source = str(node.property("source", "") or "").strip()
         if node.kind == PLOT_KIND and source and not outside(base / source):
-            found += files(base / source, str(node.property("function", "") or "").strip())
+            function = str(node.property("function", "") or "").strip()
+            found += files(base / source, function, node.property("data"))
     return found
 
 
@@ -417,6 +424,7 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
     """A figure from its file's words, theme and palette files -- and the pictures and
     structures its parts draw -- found from ``base``."""
 
+    from flexo.plots import PLOT_KIND, beside
     from flexo.serialization import parse_figure
 
     document = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
@@ -434,6 +442,9 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
             value = properties.get(key) if isinstance(properties, dict) else None
             if isinstance(value, str) and value and (base / value).is_file():
                 properties[key] = str((base / value).resolve())
+        # (The data a plot names is its figure's too: found from the figure's folder.)
+        if isinstance(properties, dict) and node.get("kind") == PLOT_KIND and "data" in properties:
+            properties["data"] = beside(base, properties["data"])
     return parse_figure(document)
 
 

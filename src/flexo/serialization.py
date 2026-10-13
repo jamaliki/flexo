@@ -67,7 +67,7 @@ def parse_figure(document: object) -> FigureSpec:
     the same as ``style``.
     """
 
-    document = _written_steps(document)
+    document = _written_data(_written_steps(document))
     validate_document(document)
     assert isinstance(document, dict)
     figure_data = document["figure"]
@@ -165,6 +165,27 @@ def _written_steps(document: object) -> object:
                 **node,
                 "properties": {**properties, "steps": step_records(properties["steps"])},
             }
+        nodes.append(node)
+    return {**document, "nodes": nodes}
+
+
+def _written_data(document: object) -> object:
+    """The document with each plot's ``data`` as the figure holds it, a list of names: a
+    file may write one name, or several with commas between them (``flexo.plots.named``)."""
+
+    if not isinstance(document, dict) or not isinstance(document.get("nodes"), list):
+        return document
+    from flexo.plots import PLOT_KIND, named
+
+    nodes = []
+    for node in document["nodes"]:
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if (
+            node_kind(node) == PLOT_KIND
+            and isinstance(properties, dict)
+            and isinstance(properties.get("data"), str)
+        ):
+            node = {**node, "properties": {**properties, "data": list(named(properties["data"]))}}
         nodes.append(node)
     return {**document, "nodes": nodes}
 

@@ -829,6 +829,15 @@ def _basics() -> list[dict[str, Any]]:
                     "function",
                     hint="In the file: it returns a matplotlib figure",
                 ),
+                # What it plots, where its Python does not show it: the files it is seen to
+                # read are watched without being named.
+                _field(
+                    "properties.data",
+                    "Data",
+                    "text",
+                    hint="Files it reads that aren\u2019t seen: loss.h5, runs/*.parquet",
+                    more=True,
+                ),
                 *SIZE,
             ],
             common=[],

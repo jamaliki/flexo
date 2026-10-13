@@ -53,6 +53,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 - A data plot in a figure: `panel.plot(id, "plots.py", "function", width=, height=)`; in a
   file `{kind: plot, properties: {source: plots.py, function: f}}`. The function returns
   a matplotlib figure; flexo sets the font, sizes and colours and lays it out at that size.
+  It is drawn again when a file it reads changes; `data=["loss.h5", "runs/*.parquet"]`
+  (`properties.data`) names data read by a library that opens files itself (HDF5, Parquet).
 - One figure shown several ways with nothing moved (a talk's build-up):
   `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
 - A shape's words set apart: `properties={"bold": True}`, `"italic"`, `"size": "6pt"`,
