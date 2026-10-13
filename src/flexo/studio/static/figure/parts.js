@@ -3899,7 +3899,7 @@ export function figureParts(host) {
     if (at.kind === "splice") {
       const merge = `as-drawn:${was.id}:${Date.now()}`, failed = () => sendHome(was);
       const label = `Insert ${inQuotes(nameOf(was.id))} Between ${inQuotes(nameOf(at.from))} and ${inQuotes(nameOf(at.to))}`;
-      const into = () => act({ do: "move", id: was.id, into: at.line, parent: at.parent }, { merge, label, failed });
+      const into = () => act({ do: "move", id: was.id, into: at.line, parent: at.parent, ...(was.also?.length ? { with: was.also } : {}) }, { merge, label, failed });
       if (was.folds?.length) arrangeSeen(was.folds, { merge, label, failed }, into);
       else into();
       return;

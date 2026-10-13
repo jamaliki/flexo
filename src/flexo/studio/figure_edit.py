@@ -1686,7 +1686,8 @@ class _Document:
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
         if action.get("into"):
-            return self.put_into(identifier, str(action["into"]), action.get("parent"))
+            moved = self.put_into(identifier, str(action["into"]), action.get("parent"))
+            return [*moved, *self.carried(identifier, action.get("with"))]
         if action.get("line"):
             return self.own_line(
                 identifier, str(action.get("of") or self.root), str(action["line"])
@@ -1698,28 +1699,38 @@ class _Document:
         target = self.group(parent_id) if parent_id != self.root else self.written_root()
         if target is None:
             raise EditError(f"There\u2019s no group named “{parent_id}”.")
-        # Others carried with it (``with``: several chosen, one of them dragged) go where it
-        # goes, after it, in the order they stood.
-        also = [
-            other
-            for other in dict.fromkeys(str(item) for item in action.get("with") or [])
-            if other not in (identifier, parent_id, self.root)
-            and (self.node(other) is not None or self.group(other) is not None)
-            and other not in self.descendants(identifier)
-            and parent_id not in self.descendants(other)
-        ]
-        stood = {other: place for place, other in enumerate(self.reading_order())}
-        also.sort(key=lambda other: stood.get(other, len(stood)))
+        stood = self.reading_order()
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
-        for other in also:
+        return [identifier, *self.carried(identifier, action.get("with"), stood)]
+
+    def carried(
+        self, identifier: str, others: object, stood: list[str] | None = None
+    ) -> list[str]:
+        """The other parts chosen with one that was moved (``others``: several chosen, one
+        of them dragged) put where it now is, after it, in the order they stood (``stood``,
+        as it was before the move). Never what holds it, nor what it holds. Answers them."""
+
+        holder = self.parent_of(identifier)
+        order = {part: place for place, part in enumerate(stood or self.reading_order())}
+        also = [
+            other
+            for other in dict.fromkeys(str(item) for item in others or [])  # type: ignore[attr-defined]
+            if other not in (identifier, self.root, holder.get("id"))
+            and (self.node(other) is not None or self.group(other) is not None)
+            and other not in self.descendants(identifier)
+            and identifier not in self.descendants(other)
+        ]
+        also.sort(key=lambda other: order.get(other, len(order)))
+        children: list[str] = holder["children"]
+        for place, other in enumerate(also, 1):
             self.parent_of(other)
             self.detach(other)
-            children.insert(children.index(identifier) + 1 + also.index(other), other)
-        return [identifier, *also]
+            children.insert(children.index(identifier) + place, other)
+        return also
 
     def reading_order(self) -> list[str]:
         """Every part and group in the order it is read: the root's children, each followed
