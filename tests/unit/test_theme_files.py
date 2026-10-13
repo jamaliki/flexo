@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from flexo.builder import Figure
 from flexo.compiler import compile_figure
 from flexo.diagnostics import FlexoError
 from flexo.lint import lint_compilation
-from flexo.themes import THEMES, theme
+from flexo.themes import THEMES, figure_style, theme
 
 LAB = """
 theme:
@@ -190,3 +191,47 @@ def _hue(colour: str) -> float:
 
     red, green, blue = (int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5))
     return colorsys.rgb_to_hsv(red, green, blue)[0] * 360
+
+
+def _families(svg: str) -> set[str]:
+    """The families a figure's words are set in: the first each text asks for."""
+
+    return {
+        asked.split(",")[0].strip(" '\"")
+        for asked in re.findall(r"font-family=\"([^\"]+)\"", svg)
+    }
+
+
+def test_a_theme_sets_the_words_of_figures_and_of_titles_in_families_of_their_own() -> None:
+    """One font for everything was all a theme had: a deck's figures in a monospace face
+    and its slides in a sans had to be said deck by deck."""
+
+    name = flexo.register_theme(
+        {
+            "theme": {
+                "name": "figures-apart",
+                "base": "paper",
+                "font": "IBM Plex Sans",
+                "type": {"figure_family": "IBM Plex Mono", "title_family": "Latin Modern Roman"},
+            }
+        }
+    )
+    typography = flexo.resolve_style(name).typography
+    # The theme's own font is still its words': a deck sets its slides in it.
+    assert typography.family == "IBM Plex Sans"
+    assert typography.figure_family == "IBM Plex Mono"
+    assert typography.title_family == "Latin Modern Roman"
+    with flexo.Figure("mono", theme=name) as figure:
+        figure.block("a", label="Encoder")
+    assert figure_style(figure.spec).typography.family == "IBM Plex Mono"
+    drawn = compile_figure(figure.spec).document.text
+    assert _families(drawn) == {"IBM Plex Mono"}
+    # A figure with a font of its own keeps it.
+    with flexo.Figure("own", theme=name, font="Figtree") as figure:
+        figure.block("a", label="Encoder")
+    assert _families(compile_figure(figure.spec).document.text) == {"Figtree"}
+    # And both are settings of the theme as a file, to edit.
+    written = theme_files.theme_document(name)["theme"]
+    assert written["font"] == "IBM Plex Sans"
+    assert written["type"]["figure_family"] == "IBM Plex Mono"
+    assert theme_files.theme_document("paper")["theme"]["type"]["figure_family"] is None

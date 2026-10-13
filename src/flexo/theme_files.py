@@ -26,6 +26,18 @@ named by ``FLEXO_THEME_PATH`` is registered on first use, so a lab sets the
 variable once. ``flexo theme paper`` prints any theme -- built in or
 registered -- as a complete file to start from.
 
+One ``font`` sets everything. ``type`` sets kinds of words apart from it:
+``figure_family`` the words of figures (a deck's figures in a monospace face,
+its slides in the theme's font), ``title_family`` a deck's slide titles and
+headings, ``mono_family`` code and ``math_family`` mathematics:
+
+```yaml
+theme:
+  name: talk
+  font: IBM Plex Sans
+  type: {figure_family: IBM Plex Mono, title_family: Latin Modern Roman}
+```
+
 A theme set in faces Flexo does not ship brings them: ``fonts:`` names font
 files, or folders of them, beside the theme file, and they are registered with
 it (as ``flexo.register_font`` would), so the file works wherever it is copied

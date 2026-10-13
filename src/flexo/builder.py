@@ -47,7 +47,7 @@ from flexo.style import (
     VectorPreset,
     normalize_colour,
 )
-from flexo.themes import resolve_style
+from flexo.themes import figure_family, resolve_style
 from flexo.units import Extent, Length, parse_extent, pt
 from flexo.validate import normalize_and_validate
 
@@ -2069,7 +2069,9 @@ class GroupBuilder:
                 "the glyphs are centred under the block's q/k/v ports, which is a "
                 "fraction of a width the block would otherwise take from its label"
             )
-        style = resolve_style(self.figure.style, self.figure.font)
+        style = resolve_style(
+            self.figure.style, figure_family(self.figure.style, self.figure.font)
+        )
         block_width = style.resolve_extent(parse_extent(width)).points  # type: ignore[arg-type]
         offsets = _attention_offsets(tuple(options.get("ports") or ()), tuple(presets))
         presets = {name: presets[name] for name in sorted(presets, key=offsets.__getitem__)}
@@ -2323,7 +2325,9 @@ class GroupBuilder:
                 tone: TONE_NAMES.get(tone, tone.replace("-", " ").capitalize()) for tone in entries
             }
         )
-        style = resolve_style(self.figure.style, self.figure.font)
+        style = resolve_style(
+            self.figure.style, figure_family(self.figure.style, self.figure.font)
+        )
         side = pt(style.typography.size.points)
         key = self.group(
             id,

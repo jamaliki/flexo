@@ -840,7 +840,13 @@ flexo-talk's PowerPoint -- set in the accent colour.
 Code between backticks in a label (`` `fit()` ``) is set in `type: {mono_family: ...}`,
 or the first installed of JetBrains Mono, Menlo, Consolas, DejaVu Sans Mono, ....
 `type: {math_family: Latin Modern Math}` sets maths symbols and italic Greek
-in a maths font, as TeX does (the `tikz` theme does this). The
+in a maths font, as TeX does (the `tikz` theme does this).
+`type: {figure_family: IBM Plex Mono}` sets the words of figures in a family of
+their own -- a deck's figures in a monospace face, its slides in the theme's
+`font` -- and `type: {title_family: ...}` a deck's slide titles and headings; a
+figure with a `font` of its own keeps it. In the studio a theme's settings are in
+tabs -- **Colour**, **Type** (a font for the text, and for titles, figures, code
+and maths apart from it), **Shapes** and **Layout**. The
 [tutorial](docs/tutorial.md#12-your-own-theme-and-palette) lists every key.
 
 ### Drawing by hand

@@ -66,6 +66,14 @@ class TypographyStyle:
     """A mathematics family (``Latin Modern Math``) for the symbols ``family``
     lacks, tried before ``fallbacks``; italic Greek is set in its mathematical
     italic letters, as TeX sets them."""
+    figure_family: str | None = None
+    """The family a figure's words are set in, where a theme sets them apart from the words
+    round it (a deck's figures in a monospace face, its slides in a sans): ``family`` when
+    unset. A figure with a ``font`` of its own keeps it (``flexo.themes.figure_style``)."""
+    title_family: str | None = None
+    """The family headings are set in where a document has them -- a deck's slide titles
+    and section headings (flexo-talk): ``family`` when unset. A figure's own titles are
+    its words, in its family."""
 
     def with_family(self, family: str, *fallbacks: str) -> TypographyStyle:
         """This typography set in ``family``, keeping every size and weight."""
