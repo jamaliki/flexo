@@ -749,6 +749,49 @@ A picture in a figure is cropped by how much is cut off each side, in hundredths
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part
 kept.
 
+### Plots in a figure
+
+A paper's figure has plots among its diagrams. A `plot` names a Python file and a
+function in it that returns a matplotlib figure (`pip install "flexo[plots]"`):
+
+```yaml
+- id: loss
+  kind: plot
+  properties: {source: plots.py, function: loss}
+  width: 60mm
+  height: 40mm
+```
+
+```python
+panel.plot("loss", "plots.py", "loss", width="60mm", height="40mm")
+```
+
+The function is called with matplotlib set to the figure's look -- its font and
+size, its inks, the palette's tones as the colour cycle (`flexo.plots.plot_style`)
+-- and what it returns is laid out again at the shape's own size, so its words
+are the size of the figure's words whatever the panel's size. It is drawn as
+vectors, its words kept as words, and drawn again only when its size, the
+figure's look or a file it is drawn from changes: its Python file, the data its
+function read (a CSV, however it is opened: `open`, numpy, pandas) and the
+modules it imports from beside it. Name data from the file's own folder
+(`Path(__file__).parent / "loss.csv"`), so it is found wherever the figure is
+drawn.
+
+In the studio, **Shape › Plot** asks for the file and takes its first function.
+**Function** is a pop-up of the functions the file offers, and a plot given
+another file keeps its function's name if that file has it. A corner dragged
+sets its width and height, in the unit they are written in (⇧ keeps its
+proportions; double-click for the size a plot has of itself). The figure redraws
+when the Python file, or data it read, is saved.
+
+A figure that names Python runs it when it is drawn: in a studio, only in a folder
+you have trusted. Not run -- or with matplotlib missing, or the function failing
+-- the plot is an empty box and a warning that says why, and the rest of the
+figure is drawn. In Flexo Studio (and any studio with flexo-talk installed) the
+function runs in a process of its own, as a deck's Python does: one that takes
+longer than 30 seconds is stopped, one that crashes takes only that process with
+it, and the plot says which.
+
 ### Hiding, dimming and highlighting parts
 
 A talk shows one figure many times: all of it, then one part with the rest faint, then
@@ -1075,20 +1118,24 @@ changes in words, to go back or forward to any of them.
   block after a start or a decision, another structure after a structure), and the
   words of a part just added are typed on it as soon as it is drawn, in place, in
   the part's own face and size; with a part chosen, typing types over its words, as on a
-  Keynote shape, and ⌥⌘G groups the parts chosen (⇧⌥⌘G ungroups). A chosen structure
+  Keynote shape, and ⌘G groups the parts chosen (⇧⌘G ungroups). A chosen structure
   turns by its rotate handle (or by
   the buttons in its panel), and a structure or picture is sized by its corners;
   a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
-  type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
+  type its words on the drawing; ⇧-click several and **Group** (⌘G) gathers them
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
   journal prints a figure of several; **Panel Letters**, with nothing chosen,
   letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
-  **Layer**). A shape, a group and a frame each have an **Outline**: solid, dashed or
+  **Layer**). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
+  column of their own with **Align in a Row** or **Align in a Column** (in their panel,
+  their right-click menu and the palette), in the order they are seen, where the first of
+  them stood: boxes of a flow chart that have ended up in two columns side by side are put
+  back on one line. A shape, a group and a frame each have an **Outline**: solid, dashed or
   dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
   the figure are added to it, beside the shape they are let go on. With nothing chosen the figure's **Page
   Size** is chosen by name -- a column or a page of Nature's, Cell's or PNAS's, A4,

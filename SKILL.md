@@ -50,6 +50,9 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   `"letter"`, ...) names the page instead, and `height=` fixes its depth.
 - A box round shapes in different groups, which moves none of them: a frame, in a file
   `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over}}`.
+- A data plot in a figure: `panel.plot(id, "plots.py", "function", width=, height=)`; in a
+  file `{kind: plot, properties: {source: plots.py, function: f}}`. The function returns
+  a matplotlib figure; flexo sets the font, sizes and colours and lays it out at that size.
 - One figure shown several ways with nothing moved (a talk's build-up):
   `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
 - A shape's words set apart: `properties={"bold": True}`, `"italic"`, `"size": "6pt"`,
@@ -198,7 +201,7 @@ no `groups` stacks nodes. `flexo.dump_figure(figure.spec)` writes any figure as 
 `flexo studio` (in a folder, or on a file: `flexo studio fig.yaml`) opens a local
 editor in the browser for every figure, theme, and (with flexo-talk) deck in the
 folder. Parts are added from a palette (A), connected (C), typed on in place
-(double-click), gathered into rows, columns, grids and modules (G), and set in an
+(double-click), gathered into rows, columns, grids and modules (⌘G), and set in an
 inspector; every edit is written to the YAML file, comments and order kept.
 People and agents edit the same files live.
 
@@ -210,8 +213,8 @@ tool), `write_document`, `look` (the pages as pictures, with lint), and
 same as above: read, edit the YAML, `look`, fix, `look` again. Write figures as
 YAML there (`flexo.dump_figure(spec)` shows how any Python figure reads as YAML).
 
-A folder's Python (a deck's plots) runs only once its person trusts the folder;
-the studio reads and writes only inside the folder.
+A folder's Python (a deck's plots, a figure's) runs only once its person trusts the
+folder; the studio reads and writes only inside the folder.
 
 ## Reference
 

@@ -183,6 +183,8 @@ def _render_kind(
         _vector(parent, node, style, palette)
     elif kind == "image":
         _image(parent, node, style)
+    elif kind == "plot":
+        _plot(parent, node, style, palette)
     elif kind in {"matrix", "attention", "graph", "inset"}:
         render_scientific(parent, node, style, palette)
     else:
@@ -922,6 +924,55 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
     ):
         nested.set(name, value)
     parent.append(nested)
+
+
+def _plot(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:
+    """A plot at the node's bounds: the drawing its function made, laid out for exactly
+    that size (``flexo.plots``) -- or, where there is none, an empty box that says why."""
+
+    from flexo.plots import drawn
+
+    spec, bounds = node.measured.spec, node.bounds
+    made = drawn(spec, bounds.width, bounds.height, style, palette)
+    if made.markup:
+        nested = ET.fromstring(made.markup)
+        for name, value in (
+            ("id", f"{spec.id}.artwork"),
+            ("x", number(bounds.x)),
+            ("y", number(bounds.y)),
+            ("width", number(bounds.width)),
+            ("height", number(bounds.height)),
+            ("preserveAspectRatio", _ARTWORK_FIT),
+        ):
+            nested.set(name, value)
+        parent.append(nested)
+        return
+    element(
+        parent,
+        "rect",
+        id=f"{spec.id}.body",
+        x=bounds.x,
+        y=bounds.y,
+        width=bounds.width,
+        height=bounds.height,
+        rx=style.corner_radius.points,
+        stroke__dasharray="3 2.5",
+        **paint_attributes(
+            palette=palette, stroke_role="muted-ink", stroke_width=style.stroke_width.points
+        ),
+    )
+    words = str(spec.property("function", "") or "") or "Plot"
+    element(
+        parent,
+        "text",
+        id=f"{spec.id}.placeholder",
+        x=bounds.center.x,
+        y=bounds.center.y + style.typography.size.points * 0.35,
+        text__anchor="middle",
+        font__family=style.typography.family,
+        font__size=style.typography.size.points,
+        fill=palette.get("muted-ink"),
+    ).text = f"{words}: not drawn"
 
 
 def _channels(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Palette) -> None:

@@ -88,6 +88,9 @@ groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label};
 A frame round shapes anywhere in the figure (in different groups too), which moves none of
   them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
   layer: behind|front|over (a tint they show through), tone}}.
+A plot: {id, kind: plot, properties: {source: plots.py, function: name}, width, height} -- the
+  matplotlib figure that function returns, in the figure's font and colours, at that size (don't
+  set fonts, sizes or colours in the function: they are the figure's).
 A node, a group and a frame each take line: dashed|dotted for their outline, as an edge does.
 A node's properties set its whole label: bold: true, italic: true, size: 6pt, align: left|right;
   an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side).
@@ -216,7 +219,7 @@ class FigureKind:
         return {
             "document": {**document, "text": result["text"]},
             "select": result["select"],
-            "model": model(result["text"], suffix=suffix),
+            "model": model(result["text"], suffix=suffix, base=base),
         }
 
     def check(self, document: dict[str, Any], base: Path) -> list[str]:
@@ -249,7 +252,8 @@ class FigureKind:
 
         # The figure as written, for the page's inspector, whether or not it draws.
         try:
-            info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
+            suffix = document.get("suffix", ".yaml")
+            info = {"model": model(document["text"], suffix=suffix, base=base)}
         except Exception:  # not a shape the inspector can list: the drawing says why
             info = {}
         said_first: list[Message] = []
@@ -286,6 +290,7 @@ class FigureKind:
             spec.id, compilation.document.text, label=spec.id, extra={"outline": outline(spec)}
         )
         files = [base / value for value in (spec.style, spec.palette) if _is_file(value)]
+        files += _plot_files(spec, base)
         said = [*report.diagnostics, *structure_problems(spec)]
         return Drawing([page], [*said_first, *(_message(item) for item in said)], files, info)
 
@@ -335,6 +340,22 @@ class FigureKind:
             result.outputs.editable_svg.unlink()
             written.remove(result.outputs.editable_svg)
         return written
+
+
+def _plot_files(spec, base: Path) -> list[Path]:
+    """The files the figure's plots are drawn from -- each one's Python file (there or not
+    yet), and the data its function read (``flexo.plots.files``): saved, the figure is
+    drawn again."""
+
+    from flexo.confine import outside
+    from flexo.plots import PLOT_KIND, files
+
+    found: list[Path] = []
+    for node in spec.nodes:
+        source = str(node.property("source", "") or "").strip()
+        if node.kind == PLOT_KIND and source and not outside(base / source):
+            found += files(base / source, str(node.property("function", "") or "").strip())
+    return found
 
 
 def _tones(spec) -> dict[str, Any]:

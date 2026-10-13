@@ -23,6 +23,8 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``gather``: ``ids`` held by one group, into a new ``layout`` (row, column,
   grid) group, a titled module if ``role`` is ``module``;
 - ``ungroup``: ``id``'s children take its place;
+- ``line_up``: ``ids``, whatever groups hold them, into one row or column (``kind``)
+  of their own, in the order given, where the first of them stood;
 - ``move``: ``id`` into ``parent`` at ``index``; or, with ``line`` (``below``,
   ``above``, ``right``, ``left``), on a line of its own beside the group ``of``
   (the root if not given), centred on it; ``step``: ``id`` by ``delta`` places
@@ -77,6 +79,7 @@ STRUCTURAL = frozenset(
         "gather",
         "panels",
         "shift",
+        "line_up",
         "frame",
         "ungroup",
         "move",
@@ -134,6 +137,9 @@ def apply(
         raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
+    if document.unchanged:
+        # Nothing to do: the file's words as they were, to the letter.
+        return {"text": text, "select": list(select)}
     document.tidy_alignment()
     document.tidy_frames()
     document.tidy_shown()
@@ -200,7 +206,7 @@ def apply_to_data(
     return {
         "data": yaml.safe_load(result["text"]),
         "select": result["select"],
-        "model": model(result["text"]),
+        "model": model(result["text"], base=base),
     }
 
 
@@ -296,11 +302,16 @@ def mend(data: Any, before: set[str] | None = None) -> bool:
     return changed
 
 
-def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
+def model(
+    text: str, *, suffix: str = ".yaml", base: Path | None = None
+) -> dict[str, Any] | None:
     """The figure as its file writes it, for the page's inspector and outline: the
     figure's settings, nodes (with the ports each has), groups (the root among them,
     marked ``implied`` when the file leaves it out), edges under the ids the drawing
-    gives them, and nets. ``None`` when the file does not read."""
+    gives them, and nets. ``None`` when the file does not read.
+
+    With ``base``, the folder its files are named from: the functions each plot's Python
+    file offers too (``functions``), for the page to choose among."""
 
     try:
         document = _Document(text, suffix)
@@ -373,6 +384,14 @@ def model(text: str, *, suffix: str = ".yaml") -> dict[str, Any] | None:
                     if not usual
                 }
             )
+        },
+        # The functions each plot's file offers, read (never run) from the file as it is now:
+        # none for a file that does not read, whose function is typed.
+        "functions": {
+            node["id"]: offered
+            for node in nodes
+            if node.get("kind") == "plot"
+            and (offered := _offered(base, (node.get("properties") or {}).get("source")))
         },
     }
 
@@ -486,6 +505,7 @@ class _Document:
         self.data.setdefault("figure", {"id": "figure"})
         self.data.setdefault("nodes", [])
         self.spliced = False
+        self.unchanged = False
 
     def dump(self) -> str:
         if self.json:
@@ -737,6 +757,12 @@ class _Document:
             item["label"] = self.structure_label(item.get("label"), properties.get("source"))
             if not item["label"]:
                 item.pop("label")
+        if kind == "plot":
+            # A plot made of a file is that file's first function, till another is named.
+            offered = _offered(self.base or Path.cwd(), properties.get("source"))
+            if offered and not properties.get("function"):
+                properties["function"] = offered[0]
+            properties = {key: value for key, value in properties.items() if value != ""}
         if properties:
             item["properties"] = properties
         # Put into a line (``into``, chosen or let go on): between the parts it joins.
@@ -1160,6 +1186,19 @@ class _Document:
                     layout["columns"] = max(1, math.ceil(math.sqrt(count)))
                 elif value != "grid":
                     layout.pop("columns", None)
+        if (
+            kind == "node"
+            and item.get("kind") == "plot"
+            and "properties.source" in values
+            and "properties.function" not in values
+        ):
+            # A plot given another file keeps its function if that file has one of the name;
+            # else it takes the file's first, as a new plot does. (A file that does not
+            # read offers none: the name stays, to be typed.)
+            properties = item.get("properties") or {}
+            offered = _offered(self.base or Path.cwd(), properties.get("source"))
+            if offered and properties.get("function") not in offered:
+                _set(item, ["properties", "function"], offered[0])
         if kind == "edge":
             # (A line given another shape at an end is named by its new ends.)
             chosen = [self.edge_id(item) or identifier]
@@ -1682,6 +1721,119 @@ class _Document:
             if 0 <= other < len(children) and children[other] not in ids:
                 children[place], children[other] = children[other], children[place]
         return ids
+
+    def _line_up(self, action: Mapping[str, Any]) -> list[str]:
+        """Shapes and groups chosen anywhere in the figure (``ids``, in the order they are
+        seen) put in one row or column (``kind``) of their own: a group that only arranges
+        them, lined up by their lines, where the first of them stood. One chosen with the
+        group that holds it goes with that group. What they leave is tidied (``tidy_left``);
+        the lines between them are as they were. All in one row (column) already, nothing
+        changes. Answers the parts lined up."""
+
+        kind = str(action.get("kind", "row"))
+        if kind not in {"row", "column"}:
+            raise EditError(f"“{kind}” isn\u2019t a way to line shapes up.")
+        # (Never a frame, which no group arranges, nor the figure's own layout.)
+        named = [
+            item
+            for item in dict.fromkeys(str(each) for each in action.get("ids") or [])
+            if self.framable(item)
+        ]
+        ids = [
+            item for item in named if not any(item in self.descendants(other) for other in named)
+        ]
+        if len(ids) < 2:
+            raise EditError(f"Select two or more shapes to align in a {kind}.")
+        first = ids[0]
+        outer = self.parent_of(first)
+        if (
+            all(self.parent_of(item) is outer for item in ids)
+            and (outer.get("layout") or {}).get("kind", "row") == kind
+        ):
+            self.unchanged = True
+            return ids
+        stood = {str(group.get("id")): list(group.get("children") or []) for group in self.groups}
+        left = [group for item in ids if (group := self.holder(item)) is not None]
+        identifier = self.fresh(kind)
+        children = outer.setdefault("children", [])
+        if first in children:
+            children[children.index(first)] = identifier
+        else:
+            children.append(identifier)  # held by no group: drawn at the end of the root
+        # Where they go is lined up by its parts' lines too, should it run the other way and
+        # have been arranged centred (as ``own_line``'s pair): the first of them keeps its
+        # place, level with the parts beside it.
+        layout = outer.get("layout")
+        if (
+            outer.get("role") == "layout"
+            and isinstance(layout, dict)
+            and layout.get("align") == "center"
+            and layout.get("kind", "row") == ("column" if kind == "row" else "row")
+        ):
+            layout["align"] = "ports"
+        for item in ids:
+            self.detach(item)
+        self.data.setdefault("groups", []).append(
+            # Arrangement only: drawn with no frame of its own, its parts lined up by their
+            # lines.
+            {
+                "id": identifier,
+                "children": ids,
+                "layout": {"kind": kind, "align": "ports"},
+                "role": "layout",
+            }
+        )
+        self.tidy_left(left, stood)
+        return ids
+
+    def tidy_left(self, groups: list[dict[str, Any]], stood: Mapping[str, list[str]]) -> None:
+        """Groups that parts were taken out of: one left holding nothing goes, and the group
+        that held it is looked at in its turn; one that only arranged its parts (no frame,
+        no title), left holding a single part, gives that part its place. Never the
+        figure's own layout. A frame round a group that goes is round what it held
+        (``stood``: every group's parts as they were) or, of a group that gave its place,
+        the part that took it -- as a shape lined up with that group is lined up with it."""
+
+        gone: dict[str, list[str]] = {}
+        left = list(groups)
+        while left:
+            group = left.pop(0)
+            name = str(group.get("id"))
+            if name == self.root or name in gone:
+                continue
+            held = group.get("children") or []
+            holder = self.holder(name)
+            if not held:
+                self.groups.remove(group)
+                self.detach(name)
+                gone[name] = list(stood.get(name) or [])
+                if holder is not None:
+                    left.append(holder)
+            elif (
+                len(held) == 1
+                and holder is not None
+                and group.get("role") == "layout"
+                and not group.get("label")
+            ):
+                (only,) = held
+                holder["children"][holder["children"].index(name)] = only
+                for place in (holder.get("layout") or {}).get("placements") or []:
+                    if place.get("child") == name:
+                        place["child"] = only
+                self.groups.remove(group)
+                gone[name] = [only]
+                for node in self.nodes:
+                    if isinstance(node, dict) and node.get("align_with") == name:
+                        node["align_with"] = only
+
+        def now(item: str) -> list[str]:
+            return [each for inner in gone[item] for each in now(inner)] if item in gone else [item]
+
+        for node in self.nodes:
+            named = _framed(node) if isinstance(node, dict) else []
+            if any(item in gone for item in named):
+                round_ = [each for item in named for each in now(item)]
+                _frame_round(node, list(dict.fromkeys(round_)))
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])
@@ -2292,6 +2444,49 @@ def _insert_after_id(item: dict[str, Any], key: str, value: object) -> None:
     rest = {name: item.pop(name) for name in list(item) if name != "id"}
     item[key] = value
     item.update(rest)
+
+
+def plot_functions(path: Path) -> list[str]:
+    """The functions a plot's Python file offers -- those at its top, not named as its own
+    (``_helper``) -- read without running it; none if it does not read."""
+
+    import ast
+
+    try:
+        stat = path.stat()
+        known = _FUNCTIONS.get(str(path))
+        if known is not None and known[0] == (stat.st_mtime_ns, stat.st_size):
+            return list(known[1])
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return []
+    offered = [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
+    ]
+    # (Kept till the file changes: the page's model, read at every drawing, asks each time.)
+    if len(_FUNCTIONS) > 64:
+        _FUNCTIONS.clear()
+    _FUNCTIONS[str(path)] = ((stat.st_mtime_ns, stat.st_size), offered)
+    return list(offered)
+
+
+_FUNCTIONS: dict[str, tuple[tuple[int, int], list[str]]] = {}
+"""The functions a Python file offered when last read, and what the file was then."""
+
+
+def _offered(base: Path | None, source: object) -> list[str]:
+    """The functions of the Python file a plot names (``source``, from the folder ``base``):
+    none with no folder to find it from, or for a file outside the folder a studio serves."""
+
+    from flexo.confine import outside
+
+    if base is None or not source or not isinstance(source, str):
+        return []
+    path = Path(source).expanduser()
+    path = path if path.is_absolute() else base / path
+    return [] if outside(path) else plot_functions(path)
 
 
 def _set(item: dict[str, Any], path: list[str], value: object) -> None:

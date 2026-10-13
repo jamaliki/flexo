@@ -812,7 +812,10 @@ def _tree_depth(root: ET.Element, *, grouped: bool = False) -> int:
         "data-flexo-entity"
     ) == "group"
     own = 0 if layer and grouped else 1
-    children = list(root)
+    # A drawing placed whole in the figure -- a picture's artwork, a plot -- is one object
+    # of it, however deep its own maker nested it: it is not the figure's to flatten.
+    placed = str(root.get("id", "")).endswith(".artwork") and root.tag.endswith("}svg")
+    children = [] if placed else list(root)
     if not children:
         return own
     deepest = 0

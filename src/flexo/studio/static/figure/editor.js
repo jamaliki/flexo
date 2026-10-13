@@ -76,7 +76,7 @@ export function mount(studio, main) {
   // -- the bar --
   const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add a Shape" });
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a Line from One Shape to Another" });
-  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌥⌘G)" });
+  const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌘G)" });
   // A figure of several parts, as a journal prints one: a panel more, or so many laid out.
   const panelButton = ui.button("Panel", (event) => figure.panelMenu(event.currentTarget), { kind: "ghost", icon: "grid", title: "Add a Panel, or Lay the Figure Out as Panels (a, b, c)" });
   const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
@@ -536,7 +536,7 @@ export function mount(studio, main) {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
       const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
-      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : ".pdb,.cif,.mmcif,.ent";
+      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
       const actions = [{ label: "Upload…", aside: true, run: () => { upload.click(); return false; } }];
@@ -579,7 +579,9 @@ export function mount(studio, main) {
             h("span.menu-text", {}, h("span", {}, file.split("/").pop()), file.includes("/") ? h("span.menu-hint", {}, file.slice(0, file.lastIndexOf("/") + 1)) : null));
           return row;
         })
-          : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID." : "No files of this type next to the figure. Click Upload to add one."));
+          : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID."
+            : types.includes("python") ? "No Python files next to the figure. A plot is a function in one that returns a matplotlib figure: click Upload to add the file."
+              : "No files of this type next to the figure. Click Upload to add one."));
         // The keys at the first file, to choose with the arrows.
         list.querySelector("[role=option]")?.focus({ preventScroll: true });
       });
@@ -860,8 +862,12 @@ export function mount(studio, main) {
     ...[[2, 2, "2 Across"], [3, 3, "3 Across"], [2, 1, "2 Stacked"], [4, 2, "2 × 2"], [6, 3, "3 × 2"], [6, 2, "2 × 3"]].map(([count, columns, label]) => (
       { icon: "grid", label: `Panels: ${label}`, hint: `Lay the figure out as ${count} panels`, run: () => figure.layOutPanels(count, columns) })),
     // Arrange › Group and Ungroup, as Keynote's (the Mac menus run them by these names).
-    ...(!typingNow() && figure.canGroup() ? [{ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => figure.groupMenu(gatherButton) }] : []),
-    ...(!typingNow() && ungroupable() ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌥⌘G", run: () => figure.act({ do: "ungroup", id: figure.selected[0] }) }] : []),
+    ...(!typingNow() && figure.canGroup() ? [{ icon: "layout", label: "Group…", keys: "⌘G", run: () => figure.groupMenu(gatherButton) }] : []),
+    ...(!typingNow() && ungroupable() ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌘G", run: () => figure.act({ do: "ungroup", id: figure.selected[0] }) }] : []),
+    // Arrange › Align in a Row and in a Column: the shapes chosen, wherever each is, in one.
+    ...(!typingNow() && figure.canAlign() ? [
+      { icon: "layout", label: "Align in a Row", hint: "The shapes chosen, in one row", run: () => figure.alignChosen("row") },
+      { icon: "layout", label: "Align in a Column", hint: "The shapes chosen, in one column", run: () => figure.alignChosen("column") }] : []),
     // View › Zoom, as a deck's slide is zoomed: by steps, a point to a point, or fitted.
     { icon: "plus", label: "Zoom In", keys: "⌘+", run: () => zoomBy(1.25) },
     { icon: "minus", label: "Zoom Out", keys: "⌘−", run: () => zoomBy(1 / 1.25) },
