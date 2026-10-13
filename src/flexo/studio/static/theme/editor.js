@@ -252,8 +252,10 @@ export function mount(studio, container) {
   // -- the samples --
   const renderStage = () => {
     const figures = specimen.name === "figures";
-    const cards = pages.map((page) => h(`figure.sample${page.stale ? ".stale" : ""}${figures ? "" : ".slide"}`, {},
-      page.svg ? picture(page.svg, page.hash, { natural: figures }) : h("div.sample-wait", {}, h("div.spinner")),
+    // (A slide among the figures -- the one that shows the type -- is a slide there too.)
+    const slide = (page) => !figures || page.slide;
+    const cards = pages.map((page) => h(`figure.sample${page.stale ? ".stale" : ""}${slide(page) ? ".slide" : ""}`, {},
+      page.svg ? picture(page.svg, page.hash, { natural: !slide(page) }) : h("div.sample-wait", {}, h("div.spinner")),
       h("figcaption", {}, page.label)));
     // Nothing to show and why said (a deck that does not read): that, not a spinner for ever.
     const said = !cards.length && messages.find((message) => message.severity === "error");

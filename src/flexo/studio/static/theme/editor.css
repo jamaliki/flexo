@@ -63,6 +63,8 @@
 .sample { margin: 0; display: grid; gap: 8px; justify-items: center; }
 .sample .picture { max-width: min(100%, 900px); background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; display: block; }
 .sample.slide .picture { width: 100%; aspect-ratio: 16 / 9; }
+/* A slide shown with the figures: as wide as reads well, not a figure's own size. */
+.samples:not(.slides) > .sample.slide { width: min(100%, 720px); }
 .sample figcaption { font-size: 12px; color: var(--ink-3); }
 .sample.stale .picture { opacity: 0.55; transition: opacity 0.2s; }
 .sample-wait { width: 320px; height: 180px; display: grid; place-items: center; background: var(--panel); border-radius: 4px; }
