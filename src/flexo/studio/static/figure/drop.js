@@ -349,6 +349,21 @@ export function endAt(shapes, point, reach = END_REACH) {
   return down > 0 ? { id, side: "south", at: { x: middle.x, y: bottom } } : { id, side: "north", at: { x: middle.x, y: top } };
 }
 
+// The parts chosen (`ids`) in the order they are seen along a row (left to right) or a
+// column (top to bottom), to be put in one: by the middle of each one's box (`boxes`, as
+// dropPlace's) -- two that stand one over the other in a row (side by side in a column) in
+// the other way's order. One not drawn comes after those that are, in the order given.
+export function seenOrder(ids, boxes, kind) {
+  const [start, end, other] = kind === "column" ? ["top", "bottom", "left"] : ["left", "right", "top"];
+  const middle = (box) => (box[start] + box[end]) / 2;
+  const level = (a, b) => (middle(a) >= b[start] && middle(a) <= b[end]) || (middle(b) >= a[start] && middle(b) <= a[end]);
+  return [...ids].sort((one, another) => {
+    const a = boxes.get(one), b = boxes.get(another);
+    if (!a || !b) return a ? -1 : b ? 1 : 0;
+    return level(a, b) ? a[other] - b[other] : middle(a) - middle(b);
+  });
+}
+
 // Which of a line's drawn ends is at which of its shapes: `points`, the ends of its pieces
 // ({ x, y, ... }); `ends`, its shapes' ends ({ key, left, top, right, bottom }). Each end
 // is given the point nearest its shape's drawing that a nearer end has not taken -- two

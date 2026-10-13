@@ -1105,20 +1105,24 @@ changes in words, to go back or forward to any of them.
   block after a start or a decision, another structure after a structure), and the
   words of a part just added are typed on it as soon as it is drawn, in place, in
   the part's own face and size; with a part chosen, typing types over its words, as on a
-  Keynote shape, and ⌥⌘G groups the parts chosen (⇧⌥⌘G ungroups). A chosen structure
+  Keynote shape, and ⌘G groups the parts chosen (⇧⌘G ungroups). A chosen structure
   turns by its rotate handle (or by
   the buttons in its panel), and a structure or picture is sized by its corners;
   a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
-  type its words on the drawing; ⇧-click several and **Group** (⌥⌘G) gathers them
+  type its words on the drawing; ⇧-click several and **Group** (⌘G) gathers them
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
   journal prints a figure of several; **Panel Letters**, with nothing chosen,
   letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
-  **Layer**). A shape, a group and a frame each have an **Outline**: solid, dashed or
+  **Layer**). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
+  column of their own with **Align in a Row** or **Align in a Column** (in their panel,
+  their right-click menu and the palette), in the order they are seen, where the first of
+  them stood: boxes of a flow chart that have ended up in two columns side by side are put
+  back on one line. A shape, a group and a frame each have an **Outline**: solid, dashed or
   dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
   the figure are added to it, beside the shape they are let go on. With nothing chosen the figure's **Page
   Size** is chosen by name -- a column or a page of Nature's, Cell's or PNAS's, A4,

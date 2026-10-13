@@ -22,7 +22,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
 import { mergeText, follows } from "/static/studio/merge.js";
-import { dropPlace, stays, lineAt, groupAt, endAt, endsOf } from "/static/kinds/figure/drop.js";
+import { dropPlace, stays, lineAt, groupAt, endAt, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -526,6 +526,8 @@ export function figureParts(host) {
       // (A module made of the shapes chosen is said so: "Make Module".)
       case "frame": return "Add Frame";
       case "shift": return many(action.ids, "Move");
+      // Shapes chosen anywhere, put in one row: "Align 3 Shapes in a Row".
+      case "line_up": return `${many(action.ids, "Align")} in a ${action.kind === "column" ? "Column" : "Row"}`;
       case "panels": return action.count > panelsNow() && action.count === panelsNow() + 1 && panelsNow() ? "Add Panel" : `Lay Out as ${action.count} Panels`;
       case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
@@ -729,7 +731,7 @@ export function figureParts(host) {
   // left before the latest keys must not put older words back in the field.
   const typed = new Map();
   let afresh = false;
-  const LANDS = new Set(["move", "align", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect"]);
+  const LANDS = new Set(["move", "align", "step", "add", "delete", "duplicate", "gather", "ungroup", "connect", "line_up"]);
   // A molecule changed is drawn again by mol-sketch, which takes a moment: a small
   // spinner shows on it meanwhile, until its new drawing is in.
   const redrawing = new Map();
@@ -746,7 +748,7 @@ export function figureParts(host) {
   // What a change of the figure's parts is, said where it is refused (the studio away):
   // "Can't add shapes while…". Words and settings typed are not refused: they are held.
   const REFUSED = { add: "add shapes", connect: "connect shapes", delete: "delete shapes", paste: "paste shapes", duplicate: "duplicate shapes",
-    gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes" };
+    gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes", line_up: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
   function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
     // With the studio away, a host that keeps its drawing as it was (a deck's slide) refuses
@@ -1712,7 +1714,8 @@ export function figureParts(host) {
     if (state.selected.length > 1) {
       const chosen = [...state.selected], shapes = chosen.some((each) => !isLine(each));
       if (chosen.every(isLine) && joinable(chosen)) items.push({ icon: "right", label: "Join Lines", run: () => joinLines(chosen) });
-      if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => groupMenu(anchor) });
+      if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "⌘G", run: () => groupMenu(anchor) });
+      if (canAlign()) items.push({ icon: "layout", label: "Align in a Row", run: () => alignChosen("row") }, { icon: "layout", label: "Align in a Column", run: () => alignChosen("column") });
       if (shapes) items.push({ icon: "duplicate", label: "Duplicate", keys: "⌘D", run: () => duplicate(chosen) });
       items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove(chosen) });
       return items;
@@ -1821,6 +1824,33 @@ export function figureParts(host) {
   const canGroup = () => state.selected.length > 0 && state.selected.every((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
   function groupMenu(anchor) {
     menu(anchor, catalog.groups.map((group) => ({ label: group.title, hint: group.hint, run: () => gather(group) })));
+  }
+  // -- aligned in a row --
+  // Shapes chosen anywhere in the figure put in one row (or column) of their own, in the
+  // order they are seen, where the first of them stands: boxes that have ended up in two
+  // columns side by side, the top one of each chosen, are one row. (Not lines, which follow
+  // their shapes; nor a frame, which stays round its own.)
+  const canAlign = () => state.selected.length > 1 && state.selected.every((id) => (nodeOf(id) ? nodeOf(id).kind !== "frame" : Boolean(groupOf(id)) && id !== model()?.root));
+  function alignChosen(kind) {
+    if (!canAlign()) return false;
+    const { boxes, drawn, folds } = asSeen();
+    const ids = seenOrder(state.selected, boxes, kind);
+    // In one row already, as the figure is seen: nothing to do, and said.
+    const holders = new Set(ids.map((id) => drawn.groups.find((group) => (group.children || []).includes(id))));
+    const [holder] = holders;
+    if (holders.size === 1 && holder && (holder.layout?.kind || writtenKind(holder)) === kind) {
+      toast(`These are in one ${kind} already.`, { icon: "info", seconds: 3 });
+      return false;
+    }
+    const action = { do: "line_up", ids, kind }, label = said(action);
+    // A figure seen folded onto lines, or turned, to fit is written as seen first, one step
+    // with this: only the shapes chosen move, and they go the way that was asked for.
+    const awry = folds.length ? [] : model().groups.filter(turned);
+    if (!folds.length && !awry.length) { act(action); return true; }
+    const merge = `as-drawn:${ids[0]}:${Date.now()}`, then = () => act(action, { merge, label });
+    if (folds.length) arrangeSeen(folds, { merge, label }, then);
+    else writeTurned(awry, shownKind, { merge, label }, then);
+    return true;
   }
 
   // -- panels --
@@ -5269,9 +5299,9 @@ export function figureParts(host) {
       if (!event.altKey && !event.shiftKey && (event.key.toLowerCase() === "b" || event.key.toLowerCase() === "i") && canStyle()) {
         event.preventDefault(); toggleWords(event.key.toLowerCase() === "b" ? "bold" : "italic"); return true;
       }
-      // ⌥⌘G groups the shapes chosen, ⇧⌥⌘G ungroups a group, as Keynote's Arrange menu does.
-      // (By the key's place: ⌥ makes another letter of it.)
-      if (event.code === "KeyG" && event.altKey) {
+      // ⌘G groups the shapes chosen and ⇧⌘G ungroups a group -- with ⌥ too, as Keynote's
+      // Arrange menu has them. (With ⌥, by the key's place: it makes another letter of it.)
+      if (event.altKey ? event.code === "KeyG" : event.key.toLowerCase() === "g") {
         const id = chosenOne();
         if (event.shiftKey && id && typeOf(id) === "group" && id !== model()?.root) { event.preventDefault(); act({ do: "ungroup", id }); return true; }
         if (!event.shiftKey && canGroup()) { event.preventDefault(); groupMenu(host.groupAnchor?.() || { x: innerWidth / 2 - 90, y: 120 }); return true; }
@@ -5614,10 +5644,15 @@ export function figureParts(host) {
     if (!turnedGroups.length) { move(); return; }
     // One step, said as the move it is: its groups written as drawn are part of it.
     const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, line: side, of });
-    const steps = ["row", "column"].map((kind) => ({ kind, targets: turnedGroups.filter((group) => shown(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
+    writeTurned(turnedGroups, shown, { merge, label, failed }, () => move(merge));
+  }
+  // Groups drawn turned to fit (`groups`: a column as a row) written the way they are drawn
+  // (`shown`), one step (`merge`) with what is done after them: `done()`.
+  function writeTurned(groups, shown, { merge, label, failed = null }, done) {
+    const steps = ["row", "column"].map((kind) => ({ kind, targets: groups.filter((group) => shown(group) === kind).map((group) => ({ type: "group", id: group.id })) }))
       .filter((step) => step.targets.length);
     const next = (index) => {
-      if (index >= steps.length) { move(merge); return; }
+      if (index >= steps.length) { done(); return; }
       act({ do: "update", targets: steps[index].targets, values: { "layout.kind": steps[index].kind } }, { merge, label, select: false, failed, then: () => next(index + 1) });
     };
     next(0);
@@ -6061,6 +6096,10 @@ export function figureParts(host) {
       colourable.length ? colourSection(colourable) : null,
       textSection(ids),
       gatherable ? showSection(ids) : null,
+      // In one row (or column) of their own, wherever in the figure each is.
+      canAlign() ? h("div.section", {}, h("div.section-title", {}, "Align"),
+        h("div.row", {}, [["row", "In a Row", "right"], ["column", "In a Column", "down"]].map(([kind, label, glyphName]) =>
+          ui.button(label, () => alignChosen(kind), { small: true, icon: glyphName, title: `Put them in one ${kind}, in the order they are seen` })))) : null,
       h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
           glyph(group.kind), h("span", {}, group.title)))),
@@ -6890,7 +6929,7 @@ export function figureParts(host) {
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
-    addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
+    addPalette, addPart, gather, groupMenu, canGroup, alignChosen, canAlign, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
     toggleWords, canStyle,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,

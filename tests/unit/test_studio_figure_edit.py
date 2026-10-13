@@ -1432,3 +1432,163 @@ def test_a_part_dragged_carries_the_others_chosen_with_it() -> None:
     # Never the group it goes into, nor itself; and with none, as ever.
     same = apply(text, {"do": "move", "id": "a", "parent": "box", "index": 0, "with": ["box", "a"]})
     assert held(same["text"]) == {"root": ["b", "box", "e"], "box": ["a", "c", "d"]}
+
+
+# A flow chart whose boxes have ended up in two columns side by side, as the editor writes
+# a box put under another (``own_line``).
+FLOW = (
+    "figure: {id: flow}\n"
+    "nodes:\n"
+    + "".join(
+        f"- {{id: {name}, label: {name.title()}}}\n"
+        for name in ("mech", "smiles", "geo", "pose", "crystal", "b", "a")
+    )
+    + "groups:\n"
+    "- {id: root, role: canvas, layout: {kind: row}, children: [mech, smiles, col1, col2, a]}\n"
+    "- {id: col1, role: layout, layout: {kind: column, align: ports}, children: [geo, pose]}\n"
+    "- {id: col2, role: layout, layout: {kind: column, align: ports}, children: [crystal, b]}\n"
+    "edges:\n"
+    "- {from: mech, to: smiles}\n- {from: smiles, to: geo}\n- {from: geo, to: crystal}\n"
+    "- {from: crystal, to: a}\n- {from: geo, to: pose}\n- {from: pose, to: b}\n"
+)
+
+
+def held(text: str) -> dict[str, list[str]]:
+    return {group["id"]: group["children"] for group in data(text)["groups"]}
+
+
+def test_shapes_chosen_in_two_columns_are_aligned_in_a_row_and_drawn_on_one_line() -> None:
+    """Shapes in different groups could not be put in one row: Group Into wanted them in
+    one row, column or group already."""
+
+    first = apply(FLOW, {"do": "line_up", "ids": ["geo", "crystal", "a"], "kind": "row"})
+    assert first["select"] == ["geo", "crystal", "a"]
+    groups = {group["id"]: group for group in data(first["text"])["groups"]}
+    # A row of their own, with no frame, where the first of them stood; the column left
+    # holding one box is that box.
+    assert groups["row"] == {
+        "id": "row",
+        "children": ["geo", "crystal", "a"],
+        "layout": {"kind": "row", "align": "ports"},
+        "role": "layout",
+    }
+    assert held(first["text"]) == {
+        "root": ["mech", "smiles", "col1", "b"],
+        "col1": ["row", "pose"],
+        "row": ["geo", "crystal", "a"],
+    }
+    second = apply(first["text"], {"do": "line_up", "ids": ["pose", "b"], "kind": "row"})
+    assert held(second["text"]) == {
+        "root": ["mech", "smiles", "col1"],
+        "col1": ["row", "row-2"],
+        "row": ["geo", "crystal", "a"],
+        "row-2": ["pose", "b"],
+    }
+    # The lines are as they were: they follow their shapes.
+    assert edges(second["text"]) == edges(FLOW)
+    compiled = compile_figure(parse(second["text"], Path.cwd()))
+    at = {
+        node.measured.spec.id: (
+            node.bounds.x + node.bounds.width / 2,
+            node.bounds.y + node.bounds.height / 2,
+        )
+        for node in compiled.fitted.nodes
+    }
+    # Each row on one line, the second under the first, "Pose" straight under "Geo" -- and
+    # the boxes before them level with the first row.
+    assert all(abs(at[name][1] - at["geo"][1]) < 1.0 for name in ("crystal", "a", "mech", "smiles"))
+    assert abs(at["b"][1] - at["pose"][1]) < 1.0 and at["pose"][1] > at["geo"][1] + 20.0
+    assert abs(at["pose"][0] - at["geo"][0]) < 1.0
+    assert at["geo"][0] < at["crystal"][0] < at["a"][0] and at["pose"][0] < at["b"][0]
+
+
+def test_shapes_in_one_row_already_are_left_as_they_are_to_the_letter() -> None:
+    # Nothing to do is nothing to undo: the file's own words come back.
+    same = apply(FLOW, {"do": "line_up", "ids": ["smiles", "mech"], "kind": "row"})
+    assert same == {"text": FLOW, "select": ["smiles", "mech"]}
+    assert apply(FLOW, {"do": "line_up", "ids": ["geo", "pose"], "kind": "column"})["text"] == FLOW
+    # Shapes a file only lists are stacked: a column already, its root still not written.
+    stacked = apply(SAMPLE_FIGURE, {"do": "line_up", "ids": ["x", "y"], "kind": "column"})
+    assert stacked["text"] == SAMPLE_FIGURE
+    # The other way, a column's two boxes are a row where the column was.
+    across = apply(FLOW, {"do": "line_up", "ids": ["geo", "pose"], "kind": "row"})
+    assert held(across["text"]) == {
+        "root": ["mech", "smiles", "row", "col2", "a"],
+        "col2": ["crystal", "b"],
+        "row": ["geo", "pose"],
+    }
+    # A group chosen with a box inside it goes whole, the box still in it.
+    whole = apply(FLOW, {"do": "line_up", "ids": ["mech", "col1", "geo"], "kind": "column"})
+    assert whole["select"] == ["mech", "col1"]
+    assert held(whole["text"]) == {
+        "root": ["column", "smiles", "col2", "a"],
+        "col1": ["geo", "pose"],
+        "col2": ["crystal", "b"],
+        "column": ["mech", "col1"],
+    }
+    compile_figure(parse(whole["text"], Path.cwd()))
+    # One shape is no row; nor are the figure's own layout and a line shapes to line up.
+    with pytest.raises(EditError, match="two or more shapes"):
+        edit(FLOW, do="line_up", ids=["geo", "root", "edge.1.mech-to-smiles"], kind="row")
+    with pytest.raises(EditError, match="isn\u2019t a way to line shapes up"):
+        edit(FLOW, do="line_up", ids=["geo", "a"], kind="grid")
+
+
+def test_groups_shapes_are_aligned_out_of_are_tidied_and_a_frame_keeps_its_shapes() -> None:
+    text = (
+        "figure: {id: f, hide: [wrap], dim: [box]}\n"
+        "nodes:\n"
+        + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcdefghi")
+        + "- {id: z, label: Z, align_with: wrap}\n"
+        "- {id: ring, kind: frame, properties: {around: 'pair, wrap, box'}}\n"
+        "groups:\n"
+        "- {id: root, role: canvas, layout: {kind: column},"
+        " children: [a, pair, wrap, z, box, named, ring]}\n"
+        "- {id: pair, role: layout, layout: {kind: row}, children: [b, c]}\n"
+        "- {id: wrap, role: layout, layout: {kind: row}, children: [d, e]}\n"
+        "- {id: box, layout: {kind: row}, children: [f, g]}\n"
+        "- {id: named, role: layout, label: Named, layout: {kind: row}, children: [h, i]}\n"
+    )
+    compile_figure(parse(text, Path.cwd()))
+    moved = apply(text, {"do": "line_up", "ids": ["a", "b", "c", "d", "f", "h"], "kind": "row"})
+    # A group left holding nothing goes; one that only arranged its parts, left with one,
+    # gives it its place -- but not one with a frame (no ``role``) or a title.
+    assert held(moved["text"]) == {
+        "root": ["row", "e", "z", "box", "named", "ring"],
+        "box": ["g"],
+        "named": ["i"],
+        "row": ["a", "b", "c", "d", "f", "h"],
+    }
+    after = data(moved["text"])
+    nodes = {node["id"]: node for node in after["nodes"]}
+    # A frame round a group that went is round what it held, or what took its place; a shape
+    # lined up with that group, with what took its place. What was hidden and is gone is
+    # not listed.
+    assert nodes["ring"]["properties"]["around"] == "b, c, e, box"
+    assert nodes["z"]["align_with"] == "e"
+    assert after["figure"] == {"id": "f", "dim": ["box"]}
+    compile_figure(parse(moved["text"], Path.cwd()))
+
+
+def test_a_column_aligned_in_a_centred_row_keeps_its_first_shape_level_with_the_row() -> None:
+    # "Tumble" beside the decision (a row arranged so, centred), "Turn" under them both:
+    # the two put in a column where "Tumble" stood, which stays level with the decision.
+    text = "figure:\n  id: f\nnodes:\n- id: ask\n  kind: decision\n  label: Rising?\n"
+    text += "- id: tumble\n  label: Tumble\n- id: turn\n  label: Turn\nedges:\n"
+    text += "- from: ask\n  to: tumble\n- from: tumble\n  to: turn\ngroups:\n"
+    text += "- id: root\n  layout: {kind: column}\n  children: [row, turn]\n"
+    text += "- id: row\n  layout: {kind: row, align: center}\n  role: layout\n"
+    text += "  children: [ask, tumble]\n"
+    moved, chosen = edit(text, do="line_up", ids=["tumble", "turn"], kind="column")
+    assert chosen == ["tumble", "turn"]
+    groups = {group["id"]: group for group in data(moved)["groups"]}
+    # (The figure's own layout stays, though it holds one row now.)
+    assert groups["root"]["children"] == ["row"]
+    assert groups["row"]["children"] == ["ask", "column"]
+    assert groups["row"]["layout"]["align"] == "ports"
+    compiled = compile_figure(parse(moved, Path.cwd()))
+    middle = {
+        node.measured.spec.id: node.bounds.y + node.bounds.height / 2
+        for node in compiled.fitted.nodes
+    }
+    assert abs(middle["ask"] - middle["tumble"]) < 1.0 and middle["turn"] > middle["tumble"]
