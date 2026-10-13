@@ -29,6 +29,7 @@ choose next (the part just added). An action is a mapping with a ``do``:
   ``above``, ``right``, ``left``), on a line of its own beside the group ``of``
   (the root if not given), centred on it; ``step``: ``id`` by ``delta`` places
   among its siblings;
+- ``align``: ``id``, on a line of its own, centred on the part or group ``with``;
 - ``duplicate``: ``ids``, with the edges between them;
 - ``paste``: parts copied from a figure (this one or another) -- ``nodes``,
   ``groups`` and ``edges`` as a file writes them, ``top`` the ones that hold the
@@ -41,7 +42,8 @@ choose next (the part just added). An action is a mapping with a ``do``:
 
 A figure file that leaves its root group out stacks its parts in a column; the
 first edit that needs the root written down (gathering, moving) writes it, as
-the file already meant.
+the file already meant. So with a part a written root leaves out, which is drawn
+at its end: the first edit that places a part among the others writes it there.
 """
 
 from __future__ import annotations
@@ -94,6 +96,10 @@ STRUCTURAL = frozenset(
 )
 """Actions that change what the figure is made of: checked before they are kept."""
 
+PLACING = STRUCTURAL - {"connect", "rename", "delete", "join", "separate"}
+"""Actions that put a part somewhere among the others: each part is held by a group the
+file writes before one is made (``_Document.hold_all``)."""
+
 
 class EditError(ValueError):
     """An edit that cannot be made; the page says why."""
@@ -136,6 +142,8 @@ def apply(
     if verb not in STRUCTURAL | {"update", "read", "show"} or handler is None:
         raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
+    if verb in PLACING:
+        document.hold_all()
     select = handler(action) or []
     if document.unchanged:
         # Nothing to do: the file's words as they were, to the letter.
@@ -651,6 +659,19 @@ class _Document:
         """The group holding ``identifier``, the root written down if that is what holds it."""
 
         return self.holder(identifier) or self.written_root()
+
+    def hold_all(self) -> None:
+        """What a written root leaves out -- a part or group added to the file by hand, into
+        none of its groups -- written into it, at its end, where it is drawn (see
+        ``parse_figure``) and where the page lists it (``model``): a part moved among them,
+        or beside one of them, finds each where it is seen."""
+
+        root = self.group(self.root)
+        if root is None:
+            return
+        loose = [item for item in self.top_level() if item != self.root]
+        if loose:
+            root.setdefault("children", []).extend(loose)
 
     def descendants(self, identifier: str) -> list[str]:
         group = self.group(identifier)
@@ -1841,9 +1862,12 @@ class _Document:
             moved = self.put_into(identifier, str(action["into"]), action.get("parent"))
             return [*moved, *self.carried(identifier, action.get("with"))]
         if action.get("line"):
-            return self.own_line(
+            left = self.leaving([identifier])
+            moved = self.own_line(
                 identifier, str(action.get("of") or self.root), str(action["line"])
             )
+            left()
+            return moved
         parent_id = action.get("parent") or self.root
         if parent_id == identifier or parent_id in self.descendants(identifier):
             raise EditError("A group can\u2019t be moved inside itself.")
@@ -1852,12 +1876,36 @@ class _Document:
         if target is None:
             raise EditError(f"There\u2019s no group named “{parent_id}”.")
         stood = self.reading_order()
+        left = self.leaving([identifier, *(str(item) for item in action.get("with") or [])])
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
-        return [identifier, *self.carried(identifier, action.get("with"), stood)]
+        moved = [identifier, *self.carried(identifier, action.get("with"), stood)]
+        left()
+        return moved
+
+    def leaving(self, parts: list[str]) -> Callable[[], None]:
+        """The lines ``parts`` are about to be moved out of, to be tidied once they are (the
+        answer, called then): a group that only arranged its parts -- a line of a row folded
+        to fit, written as it was seen; a part and its branch -- left holding nothing goes,
+        and left holding one part gives that part its place (``tidy_left``). A group with a
+        frame or a title of its own stays, whatever it is left holding."""
+
+        stood = {str(group.get("id")): list(group.get("children") or []) for group in self.groups}
+        lines = [
+            group
+            for part in dict.fromkeys(parts)
+            if (group := self.holder(part)) is not None
+            and group.get("role") == "layout"
+            and not group.get("label")
+        ]
+
+        def tidy() -> None:
+            self.tidy_left([group for group in lines if group in self.groups], stood)
+
+        return tidy
 
     def carried(
         self, identifier: str, others: object, stood: list[str] | None = None
@@ -1920,13 +1968,15 @@ class _Document:
     def _align(self, action: Mapping[str, Any]) -> list[str]:
         """``id``, on a line of its own in a row or column, centred on the part or group
         ``with`` across the way its line runs (under one part of the row over it, or under
-        the row itself); without ``with``, placed as its group places it."""
+        the row itself); without ``with``, placed as its group places it. Alone on a line
+        written for it (the last line of a row folded to fit, written as it was seen), it
+        takes that line's place first: lined up across the lines, not along its own."""
 
         identifier = str(action["id"])
         node = self.node(identifier)
         if node is None:
             raise EditError(f"There\u2019s no shape named “{identifier}”.")
-        self.parent_of(identifier)  # held somewhere written
+        line = self.parent_of(identifier)  # held somewhere written
         target = action.get("with")
         if target is None:
             node.pop("align_with", None)
@@ -1934,6 +1984,14 @@ class _Document:
         target = str(target)
         if target == identifier or (self.node(target) is None and self.group(target) is None):
             raise EditError(f"There\u2019s nothing named “{target}” to line it up with.")
+        holder = self.holder(str(line.get("id")))
+        if (
+            holder is not None
+            and line.get("children") == [identifier]
+            and target != line.get("id")
+            and self.flow_line(holder, line.get("id"))
+        ):
+            self.tidy_left([line], {})
         node["align_with"] = target
         return [identifier]
 

@@ -23,6 +23,11 @@
 // under one of the row's parts, or under the row as a whole -- { kind: "align", with,
 // of, centred } (the server's "align"), judged by where the part's middle now is
 // (`centre`, the pointer if not given). Nothing moves but it: the row keeps its places.
+// (`line`: the group that holds only it, should its line be one -- the last line of a row
+// folded to fit, as it is seen or as it was written.)
+//
+// A part or group with no box (not drawn: a group left holding nothing) has no place to go
+// beside, and is none of the parts another goes between.
 
 const MARGIN = 36;
 const PAD = 2;
@@ -113,22 +118,32 @@ export function dropPlace(model, boxes, point, id, centre = point) {
   return { parent: group.id, index: at + (after ? 1 : 0), kind, near, after, across, siblings, back };
 }
 
+// A group that only arranges its parts: no frame, no title of its own -- a line of a row
+// folded to fit, as it is seen (asSeen's) or as the server writes it.
+const arranges = (group) => Boolean(group) && group.role === "layout" && !group.label;
+
 // A part alone on its line of a column, under a line of several parts (a row) -- or over
 // one, should it be the first -- and let go on its own line, its middle within that line's
 // width: under the part of it whose middle is nearest its own, or under the line as a
 // whole, should the line's middle be nearer still. (Answers where it already is too: the
-// page reads that as staying.)
+// page reads that as staying.) Its line may be a row that only arranges it, holding
+// nothing else (`line`): the last line of a row folded to fit. And the row it goes with
+// may itself be seen folded onto lines: its parts are those of the line next to it.
 function alignUnder(model, groups, parent, boxes, point, id, centre) {
-  const holder = groups.get(parent.get(id));
-  if (!holder || (holder.layout?.kind || "column") !== "column" || groups.has(id)) return null;
+  if (groups.has(id)) return null;
+  const within = groups.get(parent.get(id));
+  const alone = arranges(within) && within.layout?.kind === "row" && (within.children || []).length === 1;
+  const line = alone ? within.id : id;
+  const holder = groups.get(parent.get(line));
+  if (!holder || (holder.layout?.kind || "column") !== "column") return null;
   const own = boxes.get(id);
   const lines = (holder.children || []).filter((child) => boxes.get(child));
-  const at = lines.indexOf(id);
+  const at = lines.indexOf(line);
   if (!own || at < 0) return null;
   const of = lines[at - 1] ?? lines[at + 1];
-  const row = of && groups.get(of);
+  const whole = of && groups.get(of);
   const box = of && boxes.get(of);
-  if (!row || !box || !(row.children || []).length) return null;
+  if (!whole || !box || !(whole.children || []).length) return null;
   // On its own line: from just past the line it goes with to the next line on (or a little
   // past where it is).
   const above = lines[at - 1] === of;
@@ -136,12 +151,19 @@ function alignUnder(model, groups, parent, boxes, point, id, centre) {
   const [low, high] = above ? [box.bottom + 2, next ? next.top - 2 : own.bottom + 40] : [next ? next.bottom + 2 : own.top - 40, box.top - 2];
   if (point.y < low || point.y > high) return null;
   if (centre.x < box.left - MARGIN || centre.x > box.right + MARGIN) return null;
+  // (Of a row folded onto lines, the line next to it: its last, under them.)
+  const held = (whole.children || []).filter((child) => boxes.get(child));
+  const nearest = (whole.layout?.kind || "column") === "column" ? groups.get(held[above ? held.length - 1 : 0]) : null;
+  const row = arranges(nearest) && nearest.layout?.kind === "row" ? nearest : whole;
   const middle = (rect) => (rect.left + rect.right) / 2;
   const targets = [{ with: of, x: middle(box), centred: true },
     ...(row.children || []).filter((child) => child !== id && boxes.get(child)).map((child) => ({ with: child, x: middle(boxes.get(child)), centred: false }))];
   const best = targets.reduce((near, each) => (Math.abs(each.x - centre.x) < Math.abs(near.x - centre.x) - 0.5 ? each : near));
+  // Where it is drawn already -- or lined up with that already, and drawn as near it as its
+  // line has room for: it stays.
+  const lined = !alone && (model.nodes || []).find((node) => node.id === id)?.align_with === best.with;
   return { kind: "align", with: best.with, of, centred: best.centred, side: above ? "below" : "above", x: best.x,
-    here: Math.abs(middle(own) - best.x) < 1.5, parent: holder.id, index: holder.children.indexOf(id) };
+    here: lined || Math.abs(middle(own) - best.x) < 1.5, parent: holder.id, index: holder.children.indexOf(line), ...(alone ? { line } : {}) };
 }
 
 // Well under a part in a row, and in line with its middle, with nothing else there (no
@@ -162,7 +184,7 @@ function underPart(model, groups, boxes, point, id, inside) {
     // a row folded onto two lines, where under a part of its first is one of its second
     // (the part dragged among them, from where it was).
     const frame = holds(boxes.get(group.id)) ? boxes.get(group.id) : null;
-    const filled = (box) => [...boxes.entries()].some(([other, rect]) => !groups.has(other) && rect !== box
+    const filled = (box) => [...boxes.entries()].some(([other, rect]) => rect && !groups.has(other) && rect !== box
       && rect.top >= box.bottom - 1 && rect.top < frame.bottom && rect.left < box.right && rect.right > box.left);
     for (const child of way === "column" ? [lowest] : group.children || []) {
       const box = boxes.get(child);
@@ -171,7 +193,7 @@ function underPart(model, groups, boxes, point, id, inside) {
       const below = point.y - box.bottom;
       const least = way === "column" ? 4 : Math.max(UNDER, (box.bottom - box.top) * 0.6);
       if (point.x < box.left - 2 || point.x > box.right + 2 || below < least || below > LINE) continue;
-      const between = [...boxes.entries()].some(([other, rect]) => other !== child && other !== id && !inside(other, id)
+      const between = [...boxes.entries()].some(([other, rect]) => rect && other !== child && other !== id && !inside(other, id)
         && (groups.has(other) ? other !== model.root && !inside(child, other) && holds(rect) : rect.top >= box.bottom && rect.top < point.y && rect.right > point.x && rect.left < point.x));
       if (!between) return { kind: "line", side: "below", of: child, parent: group.id, index: -1 };
     }
@@ -192,7 +214,7 @@ function besidePart(model, groups, parent, boxes, point, id, inside) {
   const frame = frames.reduce((least, group) => (!least || area(boxes.get(group.id)) < area(boxes.get(least.id)) ? group : least), null);
   let found = null;
   for (const [child, box] of boxes) {
-    if (child === id || groups.has(child) || inside(child, id) || !parent.has(child) || String(child).includes("~line")) continue;
+    if (!box || child === id || groups.has(child) || inside(child, id) || !parent.has(child) || String(child).includes("~line")) continue;
     if (frame && !inside(child, frame.id)) continue;
     if (point.y < box.top || point.y > box.bottom) continue;
     const right = point.x - box.right, left = box.left - point.x;
@@ -200,7 +222,7 @@ function besidePart(model, groups, parent, boxes, point, id, inside) {
     if (!off || off.by > NEAR) continue;
     // Nothing between the part and the point.
     const [from, to] = off.side === "right" ? [box.right, point.x] : [point.x, box.left];
-    const between = [...boxes.entries()].some(([other, rect]) => other !== child && other !== id && !groups.has(other) && !inside(other, id)
+    const between = [...boxes.entries()].some(([other, rect]) => rect && other !== child && other !== id && !groups.has(other) && !inside(other, id)
       && rect.left < to && rect.right > from && rect.top < point.y && rect.bottom > point.y);
     if (between || (found && found.by <= off.by)) continue;
     // In a column, only past the column's own parts that way: within them, it is in line.
@@ -217,9 +239,11 @@ function besidePart(model, groups, parent, boxes, point, id, inside) {
   const way = holder?.layout?.kind || "column";
   if (way === "row") {
     // In a row, beside it is next to it there -- as its row runs, should it run back.
-    const siblings = (holder.children || []).filter((child) => child !== id);
-    const at = siblings.indexOf(found.child);
-    const next = siblings[at + 1] && boxes.get(siblings[at + 1]);
+    // (Its place among all the row holds; the parts it is shown between, those drawn.)
+    const others = (holder.children || []).filter((child) => child !== id);
+    const siblings = others.filter((child) => boxes.get(child));
+    const at = others.indexOf(found.child);
+    const next = boxes.get(siblings[siblings.indexOf(found.child) + 1]);
     const back = Boolean(next && (next.left + next.right) / 2 < (boxes.get(found.child).left + boxes.get(found.child).right) / 2);
     const after = (found.side === "right") !== back;
     return { parent: holder.id, index: at + (after ? 1 : 0), kind: "row", near: found.child, after, across: true, siblings, back };
@@ -227,9 +251,9 @@ function besidePart(model, groups, parent, boxes, point, id, inside) {
   // In a flow (a grid, a cycle), where a part is drawn is the flow's to say: beside it is next
   // to it in the flow's order -- never a row made of the two.
   if (holder && way !== "column") {
-    const siblings = (holder.children || []).filter((child) => child !== id);
-    const at = siblings.indexOf(found.child), after = found.side === "right";
-    return { parent: holder.id, index: at + (after ? 1 : 0), kind: way, near: found.child, after, across: true, siblings };
+    const others = (holder.children || []).filter((child) => child !== id);
+    const at = others.indexOf(found.child), after = found.side === "right";
+    return { parent: holder.id, index: at + (after ? 1 : 0), kind: way, near: found.child, after, across: true, siblings: others.filter((child) => boxes.get(child)) };
   }
   return { kind: "line", side: found.side, of: found.child, parent: holder?.id || model.root, index: -1 };
 }
@@ -255,11 +279,18 @@ function ownLine(model, root, all, point, id) {
 // Whether letting go at ``place`` leaves the part where it is.
 export function stays(model, place, id) {
   if (!place) return true;
-  // Put into a line, it is never where it was.
-  if (place.kind === "line" || place.kind === "splice") return false;
+  // Put into a line between two parts, it is never where it was.
+  if (place.kind === "splice") return false;
   // Lined up as it is drawn already (under that part, or centred as it is): it stays.
   if (place.kind === "align") return Boolean(place.here);
   const holder = model.groups.find((group) => (group.children || []).includes(id));
+  // On a line of its own beside a part it is beside already, that side of it, in a row (a
+  // column) that runs so -- under the part over it in its column: it stays.
+  if (place.kind === "line") {
+    const down = place.side === "below" || place.side === "above", on = place.side === "below" || place.side === "right";
+    const at = holder ? holder.children.indexOf(place.of) : -1;
+    return at >= 0 && holder.layout?.kind === (down ? "column" : "row") && holder.children.indexOf(id) === at + (on ? 1 : -1);
+  }
   return holder?.id === place.parent && holder.children.indexOf(id) === place.index;
 }
 

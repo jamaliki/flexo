@@ -3471,6 +3471,9 @@ export function figureParts(host) {
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     // (A frame stays round its shapes: it has no place of its own to be dragged from.)
     if (nodeOf(id)?.kind === "frame") return;
+    // (Nor a part just let go, the drawing its move makes still on its way: it is where it
+    // was let go, not where the figure has it -- no place to be dragged from.)
+    if (elementsOf(id).some((element) => element.classList.contains("fig-settling"))) return;
     // One of several chosen, dragged: the others go where it is let go, after it.
     const also = state.selected.length > 1 && state.selected.includes(id)
       ? state.selected.filter((other) => other !== id && other !== model()?.root && (nodeOf(other) || groupOf(other)) && nodeOf(other)?.kind !== "frame") : [];
@@ -3563,7 +3566,8 @@ export function figureParts(host) {
   // column the way it is drawn, turned to fit or not (`drawn`) -- and a row (or column) folded
   // onto lines to fit, a long flow chart on a slide, as its lines (`folds`): each line one of
   // its own, the lines one under another (beside one another). A part moved among them is
-  // written so first, in the same step: only the part moves.
+  // written so first, in the same step: only the part moves. (Each line a group that only
+  // arranges its parts, as the server writes it: `role` "layout".)
   function asSeen() {
     const boxes = new Map();
     for (const group of model().groups) boxOf(group.id, boxes);
@@ -3581,15 +3585,24 @@ export function figureParts(host) {
       const ids = lines.map((line, index) => `${group.id}~line${index + 1}`);
       ids.forEach((line, index) => boxes.set(line, spans[index]));
       drawn.groups = [...drawn.groups.map((each) => (each.id === group.id ? { ...each, children: ids, layout: { ...(each.layout || {}), kind: way === "row" ? "column" : "row" } } : each)),
-        ...lines.map((line, index) => ({ id: ids[index], children: line, layout: { kind: way } }))];
+        ...lines.map((line, index) => ({ id: ids[index], children: line, layout: { kind: way }, role: "layout" }))];
     }
     return { boxes, drawn, folds };
+  }
+
+  // The parts at rest: one still gliding to where it is drawn -- landing from an edit just
+  // made, or sent home -- is there at once. What is dragged next is read, and written, as
+  // the figure is drawn: never as it was for a moment on the way (a row not yet folded,
+  // a part alone on a line the others had not reached).
+  function atRest() {
+    for (const node of model()?.nodes || []) for (const gliding of host.element(node.id)?.getAnimations?.() || []) gliding.finish();
   }
 
   function dragStart() {
     const id = drag.id;
     window.getSelection?.()?.removeAllRanges();
     // Where every part is now, and every group's room, from the drawing as it stands.
+    atRest();
     const { boxes, drawn, folds } = asSeen();
     const moving = elementsOf(id).map((element) => ({ element, base: element.getAttribute("transform") || "", scale: unitsPerPixel(element) }));
     lift(moving);
@@ -3757,7 +3770,8 @@ export function figureParts(host) {
     drag.parted = [];
     // Over a line: the line lit and named, and no slot -- it goes into the line.
     showLine(at?.kind === "splice" ? at : null);
-    if (!at || at.kind === "splice") { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
+    // (Nor beside the part it is beside already: let go there, it stays.)
+    if (!at || at.kind === "splice" || (at.kind === "line" && unchanged(at, drag.id))) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
     const origin = host.overlay.getBoundingClientRect();
     drag.indicator.classList.remove("centre");
     drag.zone.classList.remove("named-beside", "named-left");
@@ -3776,8 +3790,10 @@ export function figureParts(host) {
       const line = drag.boxes.get(at.of);
       const left = line && line.right - line.left >= width ? Math.max(line.left, Math.min(at.x - width / 2, line.right - width)) : at.x - width / 2;
       const slot = { left, top: own.top, right: left + width, bottom: own.bottom };
+      // (A row with no title -- a line of a row seen folded, too -- is "the row".)
+      const row = (drag.drawn || model()).groups.find((group) => group.id === at.with);
       const label = at.centred
-        ? `Centred ${at.side} the ${groupOf(at.with) && !plain(groupOf(at.with).label) ? "row" : inQuotes(nameOf(at.with))}`
+        ? `Centred ${at.side} the ${row && !plain(row.label) ? "row" : inQuotes(nameOf(at.with))}`
         : `${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
       // (Its name beside it, clear of the line down the middle; on its left at the page's
       // right edge.)
@@ -3954,7 +3970,9 @@ export function figureParts(host) {
   }
   function dragEnd(event) {
     if (drag?.started && event) drag.pointer = { x: event.clientX, y: event.clientY };
-    if (drag?.started) dragFrame();
+    // (Should where it goes not be worked out, it goes home all the same: never left where
+    // it was let go, the pointer still carrying it.)
+    try { if (drag?.started) dragFrame(); } catch (error) { dragCancel(); throw error; }
     const copy = Boolean(event?.altKey ?? drag?.copy);
     const was = dragFinish();
     if (!was) return;
@@ -3986,10 +4004,14 @@ export function figureParts(host) {
   function moveAsSeen(id, at, { folds = [], drawn = null, failed = null, also = [] } = {}) {
     // (The others chosen with it, where it goes into a row, column or group: after it.)
     const carried = also.length ? { with: also } : {};
-    // Lined up under a part of the line it goes with (or the line itself): only it moves.
+    // Lined up under a part of the line it goes with (or the line itself): only it moves --
+    // a figure folded onto lines written as seen first too, one step: the line it goes with
+    // is then a row of its own, and the last line, should it be alone on it, its own.
     if (at.kind === "align") {
       const label = at.centred ? `Centre ${inQuotes(nameOf(id))}` : `Place ${inQuotes(nameOf(id))} ${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
-      act({ do: "align", id, with: at.with }, { failed, label });
+      if (!folds.length) { act({ do: "align", id, with: at.with }, { failed, label }); return; }
+      const merge = `as-drawn:${id}:${Date.now()}`;
+      arrangeSeen(folds, { merge, label, failed }, (written) => act({ do: "align", id, with: written(at.with) }, { merge, label, failed }));
       return;
     }
     if (!folds.length) {
@@ -3999,7 +4021,7 @@ export function figureParts(host) {
     }
     const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, ...carried });
     arrangeSeen(folds, { merge, label, failed }, (written) => {
-      if (at.kind === "line") ownLine(id, written(at.of), at.side, { failed, merge, label });
+      if (at.kind === "line") ownLine(id, written(at.of), at.side, { failed, merge, label, written: true });
       else act({ do: "move", id, parent: written(at.parent), index: at.index, ...carried }, { merge, label, failed });
     });
   }
@@ -4014,9 +4036,14 @@ export function figureParts(host) {
       const copy = result.select?.[0];
       if (!copy) return;
       const options = { merge, label };
+      // (Lined up: the part alone on a line that holds only it, the copy is first put on a
+      // line of its own after it. On a line of its own: a figure drawn turned to fit is
+      // written as drawn first, as for the part itself -- ownLine.)
+      const align = () => act({ do: "align", id: copy, with: written(at.with) }, options);
       if (at.kind === "splice") act({ do: "move", id: copy, into: at.line, parent: at.parent }, options);
-      else if (at.kind === "align") act({ do: "align", id: copy, with: at.with }, options);
-      else if (at.kind === "line") ownLine(copy, written(at.of), at.side, options);
+      else if (at.kind === "align" && at.line) act({ do: "move", id: copy, parent: written(at.parent), index: at.index + 1 }, { ...options, then: align });
+      else if (at.kind === "align") align();
+      else if (at.kind === "line") ownLine(copy, written(at.of), at.side, { ...options, drawn, written: Boolean(folds.length) });
       else {
         const own = holder && at.parent === holder.id ? holder.children.indexOf(id) : -1;
         const index = own >= 0 && at.index >= own ? at.index + 1 : at.index;
@@ -4069,6 +4096,7 @@ export function figureParts(host) {
     // (The palette goes: the figure is in sight, to be let go on.)
     closeMenu();
     window.getSelection?.()?.removeAllRanges();
+    atRest();
     const { boxes, drawn, folds } = asSeen();
     const look = figureLook(), ems = parts[drag.kind]?.size || [5.5, 3.5];
     const ghost = h("div.fig-tile-ghost", {}, glyph(drag.kind), h("span", {}, parts[drag.kind].title));
@@ -5680,14 +5708,15 @@ export function figureParts(host) {
   // it was asked for, under what is on screen -- one step to undo.
   // Let go from a drag, the groups are as they were drawn when it began (`drawn`): the part
   // let go is still where it was let go, which would make its column look like a row.
-  // (`merge` and `label`: one step with what was done before it, a folded figure written as seen.)
-  function ownLine(id, of, side, { failed = null, drawn = null, merge: joined = null, label: told = null } = {}) {
+  // (`merge` and `label`: one step with what was done before it -- a copy made of it, or
+  // (`written`) a folded figure written as seen, which leaves nothing turned to write.)
+  function ownLine(id, of, side, { failed = null, drawn = null, merge: joined = null, label: told = null, written = false } = {}) {
     const shown = (group) => (drawn ? drawn.groups.find((each) => each.id === group.id)?.layout?.kind || null : shownKind(group));
-    const turnedGroups = joined ? [] : (model()?.groups || []).filter((group) => shown(group) && shown(group) !== writtenKind(group));
+    const turnedGroups = written ? [] : (model()?.groups || []).filter((group) => shown(group) && shown(group) !== writtenKind(group));
     const move = (merge = null) => act({ do: "move", id, line: side, of }, { merge: merge || joined, label: told, failed });
     if (!turnedGroups.length) { move(); return; }
     // One step, said as the move it is: its groups written as drawn are part of it.
-    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, line: side, of });
+    const merge = joined || `as-drawn:${id}:${Date.now()}`, label = told || said({ do: "move", id, line: side, of });
     writeTurned(turnedGroups, shown, { merge, label, failed }, () => move(merge));
   }
   // Groups drawn turned to fit (`groups`: a column as a row) written the way they are drawn
