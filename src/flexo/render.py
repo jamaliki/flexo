@@ -10,6 +10,7 @@ from flexo.components import (
     FIT_NEVER,
     MOTIF_LABEL_KINDS,
     OP_SYMBOLS,
+    OUTLINED_NEVER,
     VectorGrid,
     motif_area,
     motif_enabled,
@@ -25,6 +26,7 @@ from flexo.ir.semantic import NodeSpec
 from flexo.render_common import (
     SHADOW_LAYERS,
     base_rect,
+    dashes,
     paint_attributes,
     paint_override,
     render_runs,
@@ -85,7 +87,7 @@ def render_node(
         draw_icon(group, spec.id, icon, centre.x, centre.y, radius)
         return group
     if spec.kind in SHAPE_KINDS:
-        _shape(group, node, style, palette)
+        _shape(_outlined(group, spec, style), node, style, palette)
     elif spec.kind == "text" and not any(run.text.strip() for run in spec.label):
         # Text with no words yet: an unseen box where they will go, to be pointed at.
         bounds = node.bounds
@@ -97,7 +99,7 @@ def render_node(
         # Behind the body, so the box's own fill hides all but the ring.
         if spec.shadow:
             soft_shadow(group, spec.id, node.bounds, style.corner_radius.points, style, palette)
-        _render_kind(group, node, style, palette)
+        _render_kind(_outlined(group, spec, style), node, style, palette)
     _render_label(group, node, style, palette)
     badge = spec.property("badge")
     if badge:
@@ -111,6 +113,18 @@ def render_node(
             outline=None if spec.kind in {"text", "label"} else palette.get("block-stroke"),
         )
     return group
+
+
+def _outlined(group: ET.Element, spec: NodeSpec, style: LayoutStyle) -> ET.Element:
+    """Where a component's body is drawn: ``group``, or for an outline dashed or dotted
+    (``line``) a group of its own in it, so every stroke of the body is drawn that way and
+    its words and its badge are not."""
+
+    if spec.line == "solid" or spec.kind in OUTLINED_NEVER:
+        return group
+    return element(
+        group, "g", id=f"{spec.id}.outline", **dashes(spec.line, style.stroke_width.points)
+    )
 
 
 def toned(palette: Palette, spec: NodeSpec, style: LayoutStyle) -> Palette:

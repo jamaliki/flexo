@@ -50,6 +50,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   `"letter"`, ...) names the page instead, and `height=` fixes its depth.
 - A box round shapes in different groups, which moves none of them: a frame, in a file
   `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over}}`.
+- An outline dashed or dotted (what is optional, or not yet there): `line="dashed"` or
+  `"dotted"` on a shape, a group or a frame, as on an arrow (`line:` in a file).
 - A figure of several panels: `figure.panel(id)` for each (a group with no frame, lettered
   a, b, c in order; `figure.panel(id, "Title")` sets a title after the letter), on a figure
   with `layout="row"` or `layout=flexo.LayoutSpec("grid", columns=2)`.

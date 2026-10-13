@@ -4,6 +4,8 @@
 .theme-panel { border-left: 1px solid var(--line); min-height: 0; }
 .theme-form { overflow: auto; height: 100%; padding-bottom: 60px; }
 .theme-section { gap: 12px; }
+/* The settings' tabs stay at the top as the settings under them scroll. */
+.theme-tabs { position: sticky; top: 0; z-index: 2; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
 /* A setting as every field of the inspector is: its name above it (its note at the right,
    and its Reset button once it differs from the base theme, a dot after the name), its
    control under it, as wide as the panel -- the same gutter at its right as at its left. */

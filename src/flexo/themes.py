@@ -948,11 +948,23 @@ def resolve_palette(style_name: str, palette: str | Sequence[str] | None = None)
     return theme(style_name).paint(palette)
 
 
+def figure_family(style_name: str, font: str | None = None) -> str | None:
+    """The family a figure's words are set in under theme ``style_name``: its own ``font``,
+    else the one the theme sets figures in apart from other words (``figure_family``), if
+    it does. ``None``: the theme's family."""
+
+    return font or theme(style_name).style.typography.figure_family
+
+
 def figure_style(figure: FigureSpec) -> LayoutStyle:
     """The layout style a figure compiles under: its theme, in its font and conventions."""
 
     return resolve_style(
-        figure.style, figure.font, figure.conventions, figure.sketch, figure.background
+        figure.style,
+        figure_family(figure.style, figure.font),
+        figure.conventions,
+        figure.sketch,
+        figure.background,
     )
 
 

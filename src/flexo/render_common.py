@@ -42,6 +42,18 @@ def paint_override(spec: NodeSpec | GroupSpec, part: str) -> str | None:
     return None if value is None else str(value)
 
 
+def dashes(line: str, width: float) -> dict[str, object]:
+    """What strokes an outline ``width`` wide as ``line`` says: nothing for a solid one, a
+    dash pattern scaled to it for a dashed one, and for a dotted one dots a line-width
+    across (dashes of no length, with round caps)."""
+
+    if line == "dashed":
+        return {"stroke__dasharray": f"{number(4.0 * width)} {number(3.0 * width)}"}
+    if line == "dotted":
+        return {"stroke__dasharray": f"0 {number(2.5 * width)}", "stroke__linecap": "round"}
+    return {}
+
+
 def paint_attributes(
     *,
     palette: Palette,

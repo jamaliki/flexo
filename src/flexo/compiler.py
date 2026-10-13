@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
-from flexo.frames import PlacedFrame, place, room, split
+from flexo.frames import PlacedFrame, margin, place, split, title_room
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
@@ -44,6 +44,7 @@ def compile_figure(
     # (A frame goes round shapes where the layout puts them: laid out without it.)
     figure, frames = split(lettered(_resolved_shapes(figure, layout_style)))
     figure = _with_margin_for(frames, figure, layout_style)
+    figure = _with_room_for_titles(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
     if style is None and _too_large(measured):
         # Tighten the spacing before growing the page: a figure a little too
@@ -102,7 +103,7 @@ def _with_margin_for(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> F
     """``figure`` with its page's margin wider by what its frames stand out from their
     shapes: a frame round shapes at the page's edge is on the page."""
 
-    sides, top = room(frames, style)
+    out = margin(frames, style)
     if not frames:
         return figure
     groups = []
@@ -113,14 +114,44 @@ def _with_margin_for(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> F
                 group,
                 layout=replace(
                     group.layout,
-                    padding_top=Length(padding.top + top),
-                    padding_right=Length(padding.right + sides),
-                    padding_bottom=Length(padding.bottom + sides),
-                    padding_left=Length(padding.left + sides),
+                    padding_top=Length(padding.top + out),
+                    padding_right=Length(padding.right + out),
+                    padding_bottom=Length(padding.bottom + out),
+                    padding_left=Length(padding.left + out),
                 ),
             )
         groups.append(group)
     return replace(figure, groups=tuple(groups))
+
+
+TITLE_ROUNDS = 3
+"""Most times a figure is laid out to find where its frames' titles want room: making it
+over one shape can leave another at the frame's top."""
+
+
+def _with_room_for_titles(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> FigureSpec:
+    """``figure`` with room kept for the titles of its frames: laid out, each title's place
+    found (over the shape at its frame's top), and the room it wants there added -- again,
+    should that leave another shape at a frame's top."""
+
+    if not any(frame.label for frame in frames):
+        return figure
+    kept: set[tuple[str, str]] = set()
+    for _ in range(TITLE_ROUNDS):
+        try:
+            fitted = fit_figure(measure_figure(figure, style=style), style=style)
+        except FlexoError:
+            return figure  # (said by the layout proper, which follows)
+        asked = {
+            group: {where: amount for where, amount in wanted.items() if (group, where) not in kept}
+            for group, wanted in title_room(frames, fitted, style).items()
+        }
+        asked = {group: wanted for group, wanted in asked.items() if wanted}
+        if not asked:
+            break
+        kept |= {(group, where) for group, wanted in asked.items() for where in wanted}
+        figure = with_room(figure, asked, style)
+    return figure
 
 
 def _framed(
@@ -133,7 +164,7 @@ def _framed(
 ) -> Compilation:
     """The figure drawn, its frames round what they name."""
 
-    placed, said = place(frames, fitted, style)
+    placed, said = place(frames, routed, style)
     if said:
         measured = replace(measured, diagnostics=measured.diagnostics + said)
         fitted = replace(fitted, measured=measured)

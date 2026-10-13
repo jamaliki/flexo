@@ -47,7 +47,7 @@ from flexo.style import (
     VectorPreset,
     normalize_colour,
 )
-from flexo.themes import resolve_style
+from flexo.themes import figure_family, resolve_style
 from flexo.units import Extent, Length, parse_extent, pt
 from flexo.validate import normalize_and_validate
 
@@ -191,6 +191,7 @@ class _GroupDraft:
     anchor: str | None = None
     shadow: bool = False
     paint: tuple[tuple[str, str], ...] = ()
+    line: str = "solid"
     children: list[str] = field(default_factory=list)
     placements: dict[str, Cell] = field(default_factory=dict)
     """Grid cells claimed by ``at=``, collected as children are authored."""
@@ -364,6 +365,7 @@ class Figure:
                 _scoped_anchor(draft),
                 draft.shadow,
                 draft.paint,
+                draft.line,  # type: ignore[arg-type]
             )
             for draft in self._groups
         )
@@ -725,6 +727,7 @@ class GroupBuilder:
         anchor: str | None = None,
         shadow: bool = False,
         paint: Mapping[str, str] | None = None,
+        line: LineStyle = "solid",
         at: Cell | None = None,
         reverse: bool = False,
     ) -> GroupBuilder:
@@ -741,6 +744,9 @@ class GroupBuilder:
         default, its first child that is neither a label nor a spacer).
 
         ``shadow=True`` gives the container a soft drop shadow.
+
+        ``line="dashed"`` or ``"dotted"`` strokes the container's outline that way, in a
+        theme that draws it one.
 
         ``paint={"fill": ..., "stroke": ..., "label": ...}`` overrides the
         palette role for this container's body fill, body stroke, and title with
@@ -809,6 +815,7 @@ class GroupBuilder:
             anchor,
             shadow,
             _paint_parts(paint),
+            line,
             reverse=reverse,
         )
         self._claim(scoped_id)
@@ -912,6 +919,7 @@ class GroupBuilder:
         paint: Mapping[str, str] | None = None,
         motif: bool = True,
         shadow: bool = False,
+        line: LineStyle = "solid",
         at: Cell | None = None,
         input: NodeHandle | PortRef | str | None = None,
         inputs: tuple[NodeHandle | PortRef | str, ...] | list[NodeHandle | PortRef | str] = (),
@@ -945,6 +953,9 @@ class GroupBuilder:
 
         ``shadow=True`` gives the component a soft drop shadow. Paint only: a
         shadow moves nothing and reserves no space.
+
+        ``line="dashed"`` or ``"dotted"`` strokes the component's outline that way, as a
+        connector's ``line`` does its own. Paint only.
 
         ``badge="frozen"`` sets a snowflake on the component's top-right corner,
         ``"trained"`` a flame, and ``"tuned"`` a lightning bolt -- the marks
@@ -981,6 +992,7 @@ class GroupBuilder:
                 _extent(height),
                 tuple(sorted((k, freeze_property(k, v)) for k, v in resolved.items())),
                 shadow,
+                line=line,
             )
         )
         self._claim(node.id)
@@ -2057,7 +2069,9 @@ class GroupBuilder:
                 "the glyphs are centred under the block's q/k/v ports, which is a "
                 "fraction of a width the block would otherwise take from its label"
             )
-        style = resolve_style(self.figure.style, self.figure.font)
+        style = resolve_style(
+            self.figure.style, figure_family(self.figure.style, self.figure.font)
+        )
         block_width = style.resolve_extent(parse_extent(width)).points  # type: ignore[arg-type]
         offsets = _attention_offsets(tuple(options.get("ports") or ()), tuple(presets))
         presets = {name: presets[name] for name in sorted(presets, key=offsets.__getitem__)}
@@ -2311,7 +2325,9 @@ class GroupBuilder:
                 tone: TONE_NAMES.get(tone, tone.replace("-", " ").capitalize()) for tone in entries
             }
         )
-        style = resolve_style(self.figure.style, self.figure.font)
+        style = resolve_style(
+            self.figure.style, figure_family(self.figure.style, self.figure.font)
+        )
         side = pt(style.typography.size.points)
         key = self.group(
             id,

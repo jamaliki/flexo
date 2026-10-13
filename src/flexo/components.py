@@ -1053,6 +1053,12 @@ one, its width only: where its words wrap.)"""
 GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
 """Kinds whose size is their content's own, never grown around a label."""
 
+OUTLINED_NEVER = DRAWN_KINDS | {
+    "label", "spacer", "text", "icon", "image", "junction", "matrix", "attention", "graph", "inset",
+}
+"""Kinds with no outline to stroke dashed or dotted (a node's ``line``): words alone, a
+picture, a point, and the drawings whose line work is their own."""
+
 
 def centred_port(kind: str, port: PortSpec) -> bool:
     """Whether a line alone on its side at ``port`` meets the side at its middle: a port

@@ -51,6 +51,7 @@ export function mount(studio, container) {
     compact_gap: "Compact Spacing", padding_x: "Horizontal Padding", padding_y: "Vertical Padding",
     lines: "Line Style", branch: "Branch Style", merge: "Merge Style",
   };
+  Object.assign(NAMES, { font: "Text Font", title_family: "Title Font", figure_family: "Figure Font", mono_family: "Code Font", math_family: "Maths Font" });
   const said = (path, value) => {
     const key = path[path.length - 1];
     const name = path[0] === "page" && PAGE_NAMES[key] ? `${PAGE_NAMES[key]} Colour` : NAMES[key] || titled(key);
@@ -164,6 +165,10 @@ export function mount(studio, container) {
   };
 
   const section = (title, ...children) => h("div.section.theme-section", {}, h("div.section-title", {}, title), ...children);
+  // A font of the theme's: the text's, or one a kind of words is set in apart from it.
+  const font = (label, path, note, hint) => row(label, path, ui.font({ value: get(path) || "", options: catalog.fonts,
+    placeholder: (path.length > 1 && base(path)) || note, key: path.join("."), onChange: (value) => set(path, value || null, { quiet: false }) }), { hint });
+  let tab = shownTab;
   // The folder's figures and decks, and which of them are drawn in this theme: kept
   // across redraws of the form, and asked for again when documents come and go.
   let uses = themeUses(studio);
@@ -179,23 +184,35 @@ export function mount(studio, container) {
         h("div", {}, ui.field("Name", ui.input({ value: t.name || "", key: "name", onInput: (value) => set(["name"], value || null) }), { hint: "Figures and decks refer to the theme by this name" })),
         ui.field("Base Theme", ui.select({ value: t.base || "paper", options: catalog.bases.map((value) => ({ value, label: themeName({ value }) })), onChange: (value) => set(["base"], value, { quiet: false }) })),
         ui.field("Description", ui.input({ value: t.description || "", key: "description", placeholder: "What this theme is for", onInput: (value) => set(["description"], value || null) }))),
-      section("Colour",
-        h("div.setting-group-label", { title: "Colours for shapes, in order" }, "Palette"),
+      // Its settings by what they change, as a Mac inspector's tabs: colour, type, the
+      // shapes and lines drawn, and how they are spaced.
+      h("div.theme-tabs", {}, ui.segmented({ value: tab, key: "theme-tab", options: TABS.map(([value, label, title]) => ({ value, label, title })),
+        onChange: (next) => { tab = shownTab = next; renderForm(); form.scrollTop = 0; } })),
+      tab === "colour" ? [
+        section("Palette",
         paletteView(),
         choice("Tones", ["tones", "rule"], catalog.tones, { labels: { tinted: "Tinted", solid: "Solid", "accent-then-grey": "Accent Then Grey", greys: "Greys" } }),
         rule === "tinted" ? [slider("Fill Lightness", ["tones", "fill_lightness"], { min: 0.8, max: 0.99 }), slider("Fill Saturation", ["tones", "fill_chroma"], { min: 0, max: 0.15 }),
-          slider("Outline Lightness", ["tones", "stroke_lightness"], { min: 0.2, max: 0.75 }), slider("Outline Saturation", ["tones", "stroke_chroma"], { min: 0, max: 0.25 })] : null,
-        h("div.setting-group-label", {}, "Page"),
-        Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key]))),
-      section("Type",
-        row("Font", ["font"], ui.font({ value: t.font || "", options: catalog.fonts, placeholder: effective().font || "Default", key: "font", onChange: (value) => set(["font"], value || null, { quiet: false }) })),
+          slider("Outline Lightness", ["tones", "stroke_lightness"], { min: 0.2, max: 0.75 }), slider("Outline Saturation", ["tones", "stroke_chroma"], { min: 0, max: 0.25 })] : null),
+        section("Page",
+        Object.keys(effective().page || PAGE_NAMES).map((key) => colour(PAGE_NAMES[key] || key, ["page", key])))] : null,
+      tab === "type" ? [
+        // One font for everything, and any kind of words set apart from it.
+        section("Fonts",
+          font("Text", ["font"], effective().font || "Default", "Every word, unless set apart below"),
+          font("Titles", ["type", "title_family"], "Same as Text", "A deck’s slide titles and headings"),
+          font("Figures", ["type", "figure_family"], "Same as Text", "The words of figures"),
+          font("Code", ["type", "mono_family"], "Automatic", "Code, between backticks and in listings"),
+          font("Maths", ["type", "math_family"], "Automatic", "Symbols the text font lacks")),
+        section("Text",
         length("Font Size", ["type", "size"], { step: 0.5 }),
         choice("Label Weight", ["type", "label_weight"], WEIGHTS),
         choice("Title Weight", ["type", "title_weight"], WEIGHTS),
         number("Line Height", ["type", "line_height"], { step: 0.05, min: 0.8, max: 2 }),
         number("Letter Spacing", ["type", "tracking"], { step: 0.01 }),
-        choice("Title Capitalisation", ["type", "title_transform"], catalog.choices.title_transform || ["none", "upper"], { segmented: true, labels: { none: "None", upper: "All Caps" } })),
-      section("Lines & Shapes",
+        choice("Title Capitalisation", ["type", "title_transform"], catalog.choices.title_transform || ["none", "upper"], { segmented: true, labels: { none: "None", upper: "All Caps" } }))] : null,
+      tab === "shapes" ? [
+        section("Lines & Shapes",
         length("Outline Width", ["style", "stroke_width"], { step: 0.05 }),
         length("Line Width", ["style", "connector_width"], { step: 0.05 }),
         length("Corner Radius", ["style", "corner_radius"], { step: 0.5 }),
@@ -208,27 +225,28 @@ export function mount(studio, container) {
         length("Group Corner Radius", ["style", "container_radius"], { step: 0.5 }),
         choice("Shadow Style", ["style", "shadow_style"], catalog.choices.shadow_style || []),
         slider("Shadow Opacity", ["style", "shadow_opacity"], { min: 0, max: 0.5 })),
-      section("Spacing",
-        length("Shape Spacing", ["style", "gap"], { step: 1 }),
-        length("Compact Spacing", ["style", "compact_gap"], { step: 0.5 }),
-        length("Horizontal Padding", ["style", "padding_x"], { step: 0.5 }),
-        length("Vertical Padding", ["style", "padding_y"], { step: 0.5 }),
-        length("Group Padding", ["style", "group_padding"], { step: 1 })),
-      section("Drawing",
+        section("Drawing",
         choice("Line Style", ["conventions", "lines"], catalog.conventions.lines || [], { segmented: true, labels: { orthogonal: "Right Angles", straight: "Straight" } }),
         choice("Branch Style", ["conventions", "branch"], catalog.conventions.branch || [], { segmented: true, labels: { plain: "Plain", dot: "Dot" } }),
         choice("Merge Style", ["conventions", "merge"], catalog.conventions.merge || []),
         // Named once, by its row, as every switch in the panel is.
         row("Hand-Drawn Style", ["sketch"], ui.toggle({ value: Boolean(sketch), key: "sketch", onChange: (on) => set(["sketch"], on ? { roughness: 0.4 } : null, { quiet: false }) })),
-        sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null),
-      // Which of the folder's documents use it: after its own settings, however many there are.
-      section("Documents", uses),
+        sketch ? slider("Roughness", ["sketch", "roughness"], { min: 0, max: 1.5, step: 0.05 }) : null)] : null,
+      tab === "layout" ? [
+        section("Spacing",
+        length("Shape Spacing", ["style", "gap"], { step: 1 }),
+        length("Compact Spacing", ["style", "compact_gap"], { step: 0.5 }),
+        length("Horizontal Padding", ["style", "padding_x"], { step: 0.5 }),
+        length("Vertical Padding", ["style", "padding_y"], { step: 0.5 }),
+        length("Group Padding", ["style", "group_padding"], { step: 1 })),
       h("details.more.theme-more", {}, h("summary", {}, icon("chevron"), "Other Settings"),
         h("div.inner", {}, Object.entries(effective().style || {}).filter(([key]) => !SHOWN.has(key) && key !== "widths").map(([key, value]) =>
           typeof value === "string" && /pt$|mm$/.test(value) ? length(titled(key), ["style", key], { unit: value.endsWith("mm") ? "mm" : "pt" })
             : typeof value === "boolean" ? row(titled(key), ["style", key], ui.toggle({ value: get(["style", key]) ?? value, onChange: (on) => set(["style", key], on, { quiet: false }) }))
               : typeof value === "number" ? number(titled(key), ["style", key])
-                : row(titled(key), ["style", key], ui.input({ value: get(["style", key]) ?? "", placeholder: String(value ?? ""), key: `style.${key}`, onInput: (text) => set(["style", key], text || null) }))))));
+                : row(titled(key), ["style", key], ui.input({ value: get(["style", key]) ?? "", placeholder: String(value ?? ""), key: `style.${key}`, onInput: (text) => set(["style", key], text || null) })))))] : null,
+      // Which of the folder's documents use it: after its own settings, however many there are.
+      section("Documents", uses));
   });
 
   // -- the samples --
@@ -291,6 +309,10 @@ export function mount(studio, container) {
   renderStage();
 }
 
+// The settings' tabs, and the one last shown: a theme opened next starts on it.
+const TABS = [["colour", "Colour", "Palette, tones and page colours"], ["type", "Type", "Fonts, sizes and weights"],
+  ["shapes", "Shapes", "Lines, corners, arrows and shadows"], ["layout", "Layout", "Spacing and padding"]];
+let shownTab = "colour";
 const SHOWN = new Set(["stroke_width", "connector_width", "corner_radius", "arrow_shape", "container_style", "container_radius",
   "shadow_style", "shadow_opacity", "gap", "compact_gap", "padding_x", "padding_y", "group_padding"]);
 
