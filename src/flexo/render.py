@@ -36,6 +36,7 @@ from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
 from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
+from flexo.wording import anchor_of, typography_of
 
 
 def _box(bounds: Rect) -> tuple[float, float, float, float]:
@@ -1009,20 +1010,26 @@ def _render_label(
     palette: Palette,
 ) -> None:
     spec = node.measured.spec
+    area = (
+        label_area(spec.kind, node.bounds, node.measured.label, style)
+        if spec.kind in SHAPE_KINDS
+        else node.bounds
+    )
+    # Its lines in the middle of the shape, or at the side it asks for (flexo.wording),
+    # in from its edge as its words are kept from it.
+    anchor = anchor_of(spec)
+    inset = (style.padding_y if spec.kind in {"text", "label"} else style.padding_x).points
+    x = {"start": area.x + inset, "end": area.right - inset}.get(anchor, area.center.x)
     render_runs(
         parent,
         f"{spec.id}.label",
         node.measured.label,
-        x=(
-            label_area(spec.kind, node.bounds, node.measured.label, style).center.x
-            if spec.kind in SHAPE_KINDS
-            else node.bounds.center.x
-        ),
+        x=x,
         y=_label_baseline(node, style),
-        typography=style.typography,
+        typography=typography_of(spec, style.typography),
         palette=palette,
         fill_role="muted-ink" if spec.role == CAPTION_ROLE else "ink",
         # Author paint carries no role, so retheme leaves it alone (render_common).
         fill=paint_override(spec, "label"),
-        anchor="middle",
+        anchor=anchor,
     )

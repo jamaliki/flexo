@@ -129,3 +129,60 @@ def test_the_studio_offers_it_on_every_kind_with_an_outline_and_sets_it() -> Non
     document = yaml.safe_load(text)
     lines = {item["id"]: item.get("line") for item in document["nodes"] + document["groups"]}
     assert lines["plain"] == lines["later"] == lines["round"] == "dotted"
+
+
+# -- a shape's words: bold, italic, their size, where their lines stand --
+
+WORDED = """
+figure: {id: worded, style: paper}
+groups:
+- {id: root, role: canvas, layout: {kind: row}, children: [head, note, gene, wide, plain]}
+nodes:
+- {id: head, label: Encoder, properties: {bold: true}}
+- {id: note, kind: text, label: "Trained once,\nthen frozen", properties: {align: left, size: 6pt}}
+- {id: gene, kind: text, label: lacZ, properties: {italic: true}}
+- {id: wide, label: "Right\nside", width: 30mm, properties: {align: right, size: 10}}
+- {id: plain, label: Plain}
+"""
+
+
+def test_a_shapes_words_take_a_weight_a_slant_a_size_and_a_side_of_their_own() -> None:
+    """A figure's words were all set alike; a heading in bold, a gene's name in italic, a
+    note set small against its left edge had no way to be said."""
+
+    compiled = compile_figure(parse_figure(yaml.safe_load(WORDED)))
+    svg = compiled.document.text
+    assert 'font-weight="700"' in _tag(svg, "head.label") or re.search(
+        r'<text id="head.label"[^>]*>\s*<tspan[^>]*font-weight="700"', svg
+    )
+    assert re.search(r'<text id="gene.label"[^>]*>.*?font-style="italic"', svg, re.DOTALL)
+    plain = _tag(svg, "plain.label")
+    assert "font-weight" not in plain and "italic" not in plain
+    # A size of its own is what it is measured at, so its shape is the size for it.
+    assert 'font-size="6"' in _tag(svg, "note.label")
+    assert 'font-size="10"' in _tag(svg, "wide.label") and 'font-size="8"' in plain
+    sizes = {
+        node.measured.spec.id: node.measured.label.line_height for node in compiled.fitted.nodes
+    }
+    assert sizes["note"] < sizes["plain"] < sizes["wide"]
+    # Its lines at the side it asks for, in from the shape's edge; else in its middle.
+    boxes = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    left, right, middle = (_tag(svg, f"{name}.label") for name in ("note", "wide", "plain"))
+    assert 'text-anchor="start"' in left and 'text-anchor="end"' in right
+    assert 'text-anchor="middle"' in middle
+    at = lambda tag: float(re.search(r'\bx="([\d.]+)"', tag)[1])  # noqa: E731
+    assert boxes["note"].x < at(left) < boxes["note"].center.x
+    assert boxes["wide"].center.x < at(right) < boxes["wide"].right
+    assert at(middle) == pytest.approx(boxes["plain"].center.x, abs=0.01)
+
+
+def test_the_studio_says_which_kinds_take_text_styling() -> None:
+    parts = catalogue()["parts"]
+    assert parts["block"]["styled"] and parts["text"]["styled"] and parts["database"]["styled"]
+    assert not parts["structure"]["styled"] and not parts["frame"]["styled"]
+    text = apply(WORDED, {"do": "update", "targets": [{"type": "node", "id": "plain"},
+                                                      {"type": "node", "id": "head"}],
+                          "values": {"properties.italic": True, "properties.bold": None}})["text"]
+    nodes = {node["id"]: node for node in yaml.safe_load(text)["nodes"]}
+    assert nodes["plain"]["properties"] == {"italic": True}
+    assert nodes["head"].get("properties") == {"italic": True}

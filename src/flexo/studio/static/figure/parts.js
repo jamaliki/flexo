@@ -5240,6 +5240,11 @@ export function figureParts(host) {
     }
     if (mod) {
       if (event.key.toLowerCase() === "d" && state.selected.length) { event.preventDefault(); duplicate(); return true; }
+      // ⌘B and ⌘I with shapes chosen (their words not being typed): all their words bold or
+      // italic, or none when all are already.
+      if (!event.altKey && !event.shiftKey && (event.key.toLowerCase() === "b" || event.key.toLowerCase() === "i") && canStyle()) {
+        event.preventDefault(); toggleWords(event.key.toLowerCase() === "b" ? "bold" : "italic"); return true;
+      }
       // ⌥⌘G groups the shapes chosen, ⇧⌥⌘G ungroups a group, as Keynote's Arrange menu does.
       // (By the key's place: ⌥ makes another letter of it.)
       if (event.code === "KeyG" && event.altKey) {
@@ -5441,6 +5446,7 @@ export function figureParts(host) {
       shapeProblem(node, part),
       // (A structure is drawn in its own colours, by mol-sketch: no tone or colours of a shape's.)
       kind === "structure" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
+      textSection([node.id]),
       showSection([node.id]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
@@ -5915,6 +5921,46 @@ export function figureParts(host) {
     ];
   }
 
+  // -- a shape's words --
+  // Bold, italic, a size of their own, and where their lines stand in the shape: of the
+  // whole label (flexo.wording), for one shape or for all those chosen.
+  const styledKind = (id) => Boolean(nodeOf(id) && catalog.parts[nodeOf(id).kind || "block"]?.styled);
+  const wordsOf = (id, key) => nodeOf(id)?.properties?.[key];
+  function setWords(ids, values, label) {
+    const targets = ids.filter(styledKind).map((id) => ({ type: "node", id }));
+    if (targets.length) act({ do: "update", targets, values }, { select: false, label });
+  }
+  // (All bold already: none is. As ⌘B on a text box chosen in Keynote.)
+  function toggleWords(key, ids = state.selected) {
+    const parts = ids.filter(styledKind);
+    if (!parts.length) return false;
+    const on = parts.every((id) => wordsOf(id, key));
+    setWords(parts, { [`properties.${key}`]: on ? null : true }, on ? `Remove ${titled(key)}` : titled(key));
+    return true;
+  }
+  const canStyle = (ids = state.selected) => ids.some(styledKind);
+  function textSection(ids) {
+    const parts = ids.filter(styledKind);
+    if (!parts.length) return null;
+    const pressed = (key, name, keys) => {
+      const on = parts.every((id) => wordsOf(id, key));
+      const button = ui.button("", () => toggleWords(key, parts), { kind: "ghost", small: true, icon: key, title: `${name} (${keys})` });
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+      return button;
+    };
+    const aligns = parts.map((id) => wordsOf(id, "align") || "center");
+    const sizes = parts.map((id) => wordsOf(id, "size") ?? null);
+    const size = sizes.every((each) => each === sizes[0]) ? sizes[0] : null;
+    return h("div.section", {}, h("div.section-title", {}, "Text"),
+      h("div.row.text-style", {}, pressed("bold", "Bold", "⌘B"), pressed("italic", "Italic", "⌘I"),
+        ui.segmented({ value: aligns.every((each) => each === aligns[0]) ? aligns[0] : "", key: `align:${parts.join(",")}`,
+          options: [{ value: "left", label: icon("align-left"), title: "Align Left" }, { value: "center", label: icon("align-centre"), title: "Centre" }, { value: "right", label: icon("align-right"), title: "Align Right" }],
+          onChange: (value) => setWords(parts, { "properties.align": value === "center" ? null : value }, value === "center" ? "Centre Text" : `Align Text ${titled(value)}`) })),
+      ui.field("Size", ui.number({ value: size == null ? null : parseFloat(size), placeholder: "Theme’s", step: 0.5, min: 3, max: 72, unit: "pt", key: `words-size:${parts.join(",")}`,
+        onChange: (value) => setWords(parts, { "properties.size": value == null ? null : `${value}pt` }, "Change Text Size") })));
+  }
+
   // -- shown, dimmed, hidden --
   // A part is drawn plainly, faint, or not at all, where it stands: nothing else moves. (A
   // talk shows one figure many times: all of it, then one part with the rest faint.) Its
@@ -5974,6 +6020,7 @@ export function figureParts(host) {
     return [
       h("div.section.insp-top", {}, titleBlock(icon("layout"), `${ids.length} ${pluralNoun(ids)} Selected`, ids.map(nameOf).join(", "))),
       colourable.length ? colourSection(colourable) : null,
+      textSection(ids),
       gatherable ? showSection(ids) : null,
       h("div.section", {}, h("div.section-title", {}, "Group Into"),
         h("div.gather-tiles", {}, catalog.groups.map((group) => h("button.add-tile", { type: "button", disabled: !gatherable, title: group.hint, onclick: () => gather(group) },
@@ -6806,6 +6853,7 @@ export function figureParts(host) {
     idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
+    toggleWords, canStyle,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }

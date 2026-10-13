@@ -40,6 +40,7 @@ from importlib.util import find_spec
 from typing import Any
 
 from flexo.components import OUTLINED_NEVER
+from flexo.drawn import DRAWN_KINDS
 from flexo.frames import LAYERS
 from flexo.ir.semantic import EDGE_HEADS
 from flexo.pages import PAGE_SIZES, PANEL_LABELS, panel_letter
@@ -157,6 +158,8 @@ MOTIF = _field(
     hint="The drawing behind the label",
 )
 COMMON = [LABEL, TONE, BADGE, SHADOW, OUTLINE]
+WORDS_AS_DRAWN = DRAWN_KINDS | {"icon", "spacer", "junction", "image", "frame"}
+"""Kinds whose words are not a label set in the shape: a drawing's own, a frame's title."""
 
 
 def _part(
@@ -183,6 +186,9 @@ def _part(
         "hint": hint,
         "node": {"kind": kind, **(node or {})},
         "fields": [*shared, *(fields or [])],
+        # Whether its words take a weight, a slant, a size and an alignment of their own
+        # (flexo.wording): a shape with a label that flexo sets as words.
+        "styled": LABEL in shared and kind not in WORDS_AS_DRAWN,
         **extra,
     }
 
