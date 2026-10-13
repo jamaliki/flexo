@@ -213,8 +213,8 @@ tool), `write_document`, `look` (the pages as pictures, with lint), and
 same as above: read, edit the YAML, `look`, fix, `look` again. Write figures as
 YAML there (`flexo.dump_figure(spec)` shows how any Python figure reads as YAML).
 
-A folder's Python (a deck's plots) runs only once its person trusts the folder;
-the studio reads and writes only inside the folder.
+A folder's Python (a deck's plots, a figure's) runs only once its person trusts the
+folder; the studio reads and writes only inside the folder.
 
 ## Reference
 

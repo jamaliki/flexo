@@ -821,10 +821,12 @@ def _basics() -> list[dict[str, Any]]:
             {"properties": {"source": "", "function": ""}},
             [
                 _field("properties.source", "File", "file", types=["python"]),
+                # One of the functions the file offers (the figure's model lists them, read
+                # from the file); typed, where the file does not read.
                 _field(
                     "properties.function",
                     "Function",
-                    "text",
+                    "function",
                     hint="In the file: it returns a matplotlib figure",
                 ),
                 *SIZE,

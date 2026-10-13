@@ -770,14 +770,27 @@ The function is called with matplotlib set to the figure's look -- its font and
 size, its inks, the palette's tones as the colour cycle (`flexo.plots.plot_style`)
 -- and what it returns is laid out again at the shape's own size, so its words
 are the size of the figure's words whatever the panel's size. It is drawn as
-vectors, its words kept as words, and drawn again only when its file, its size or
-the figure's look changes. In the studio, **Shape › Plot** asks for the file and
-takes its first function; the figure redraws when the file is saved.
+vectors, its words kept as words, and drawn again only when its size, the
+figure's look or a file it is drawn from changes: its Python file, the data its
+function read (a CSV, however it is opened: `open`, numpy, pandas) and the
+modules it imports from beside it. Name data from the file's own folder
+(`Path(__file__).parent / "loss.csv"`), so it is found wherever the figure is
+drawn.
+
+In the studio, **Shape › Plot** asks for the file and takes its first function.
+**Function** is a pop-up of the functions the file offers, and a plot given
+another file keeps its function's name if that file has it. A corner dragged
+sets its width and height, in the unit they are written in (⇧ keeps its
+proportions; double-click for the size a plot has of itself). The figure redraws
+when the Python file, or data it read, is saved.
 
 A figure that names Python runs it when it is drawn: in a studio, only in a folder
 you have trusted. Not run -- or with matplotlib missing, or the function failing
 -- the plot is an empty box and a warning that says why, and the rest of the
-figure is drawn.
+figure is drawn. In Flexo Studio (and any studio with flexo-talk installed) the
+function runs in a process of its own, as a deck's Python does: one that takes
+longer than 30 seconds is stopped, one that crashes takes only that process with
+it, and the plot says which.
 
 ### Hiding, dimming and highlighting parts
 
