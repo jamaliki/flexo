@@ -15,7 +15,9 @@ never sees it (``split``), and it is placed once everything else has been (``pla
 centred on what it holds. It takes no room, but for its title: that has a band kept clear
 for it over the shape at the frame's top, and room beside the frame where a long title
 widens it (``title_room``), so it lies on nothing -- a line that comes down there it stops
-short of.
+short of. The title stands at the frame's top left, or at the corner its ``title_side``
+names, as a group's does: ``right``, ``bottom-left`` or ``bottom-right`` -- its band under
+the shape at the frame's bottom then, and all of this the same, seen in a mirror.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from flexo.geometry import Point, Rect
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import TextMetrics
 from flexo.ir.routed import RoutedFigure
-from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec
+from flexo.ir.semantic import TITLE_SIDES, FigureSpec, GroupSpec, NodeSpec
 from flexo.style import LayoutStyle, Palette
 
 FRAME_KIND = "frame"
@@ -50,7 +52,22 @@ class PlacedFrame:
     """The room between the frame and what it goes round."""
     title_x: float = 0.0
     """Where its title starts: at the frame's left, short of any line that comes down
-    there (``_reach``)."""
+    there (``_reach``) -- at its right, as far from there as the title is wide."""
+    title_side: str = TITLE_SIDES[0]
+    """The corner its title stands at (``title_side_of``)."""
+
+    @property
+    def title(self) -> Rect | None:
+        """Where its title is drawn: in its band, at the frame's top or at its bottom."""
+
+        if self.label is None:
+            return None
+        top = (
+            self.bounds.bottom - self.inset - self.label.height
+            if _below(self.title_side)
+            else self.bounds.y + self.inset
+        )
+        return Rect(self.title_x, top, self.label.width, self.label.height)
 
 
 def around(spec: NodeSpec) -> tuple[str, ...]:
@@ -63,6 +80,27 @@ def around(spec: NodeSpec) -> tuple[str, ...]:
 def layer_of(spec: NodeSpec) -> str:
     written = str(spec.property("layer", LAYERS[0])).strip().lower()
     return written if written in LAYERS else LAYERS[0]
+
+
+def title_side_of(spec: NodeSpec) -> str:
+    """The corner a frame's title stands at, in a group's words for it (``title_side``):
+    ``left``, the top left, where none is written -- or what is written is none of them
+    (said: ``place``)."""
+
+    written = _title_side_written(spec)
+    return written if written in TITLE_SIDES else TITLE_SIDES[0]
+
+
+def _title_side_written(spec: NodeSpec) -> str:
+    return str(spec.property("title_side") or TITLE_SIDES[0]).strip().lower()
+
+
+def _below(side: str) -> bool:
+    return side.startswith("bottom")
+
+
+def _right(side: str) -> bool:
+    return side.endswith("right")
 
 
 def split(figure: FigureSpec) -> tuple[FigureSpec, tuple[NodeSpec, ...]]:
@@ -95,7 +133,7 @@ def place(
     frames: tuple[NodeSpec, ...], routed: RoutedFigure, style: LayoutStyle
 ) -> tuple[tuple[PlacedFrame, ...], tuple[Diagnostic, ...]]:
     """Each frame round what it names, where the layout put it; and what to say of a frame
-    that names nothing there is."""
+    that names nothing there is, or has its title somewhere there is not."""
 
     if not frames:
         return (), ()
@@ -126,19 +164,39 @@ def place(
                     hint="Name the shapes or groups it goes round in its properties.around.",
                 )
             )
+        side, written = title_side_of(spec), _title_side_written(spec)
+        if written != side:
+            said.append(
+                Diagnostic(
+                    "frame.title-side.unknown",
+                    f"The frame\u2019s title can\u2019t stand at “{written}”: it is drawn at the "
+                    "top left.",
+                    Severity.WARNING,
+                    entity_id=spec.id,
+                    hint="Its properties.title_side is left (the top left), right (the top "
+                    "right), bottom-left or bottom-right.",
+                )
+            )
         if not found:
             continue
         label = _title(spec, style)
         held = _round(found)
         band = label.height + style.compact_gap.points if label is not None else 0.0
-        # (The lines that come down where its title is: through the band, clear of its gap.)
-        lines = _crossing(drawn, held.y - band, held.y - style.compact_gap.points)
-        reach, title_x = _reach(held, _heads(found), label, style, lines)
+        if _below(side):
+            # (Under its shapes, the same: the lines that go down through the band there.)
+            lines = _crossing(
+                drawn, held.bottom + style.compact_gap.points, held.bottom + band
+            )
+            ends, top = _feet(found), held.y - inset
+        else:
+            # (The lines that come down where its title is: through the band, clear of its
+            # gap.)
+            lines = _crossing(drawn, held.y - band, held.y - style.compact_gap.points)
+            ends, top = _heads(found), held.y - inset - band
+        reach, title_x = _reach(held, ends, label, style, lines, right=_right(side))
         middle = held.x + held.width / 2.0
-        bounds = Rect(
-            middle - reach, held.y - inset - band, 2.0 * reach, held.height + 2.0 * inset + band
-        )
-        placed.append(PlacedFrame(spec, bounds, label, layer_of(spec), inset, title_x))
+        bounds = Rect(middle - reach, top, 2.0 * reach, held.height + 2.0 * inset + band)
+        placed.append(PlacedFrame(spec, bounds, label, layer_of(spec), inset, title_x, side))
     return tuple(placed), tuple(said)
 
 
@@ -168,12 +226,21 @@ def _heads(boxes: list[Rect]) -> Rect:
     return _round([box for box in boxes if box.y <= top + 0.5])
 
 
+def _feet(boxes: list[Rect]) -> Rect:
+    """Those of ``boxes`` at the bottom, as one: where a title under the frame's shapes is."""
+
+    bottom = max(box.bottom for box in boxes)
+    return _round([box for box in boxes if box.bottom >= bottom - 0.5])
+
+
 def _reach(
     held: Rect,
     heads: Rect,
     label: TextMetrics | None,
     style: LayoutStyle,
     lines: list[tuple[float, float]],
+    *,
+    right: bool = False,
 ) -> tuple[float, float]:
     """How far a frame reaches either side of the middle of what it holds (``held``), and
     where its title starts.
@@ -182,13 +249,23 @@ def _reach(
     ways alike. The title starts at the frame's left; where a line comes down through its
     band (``lines``, the stretch of the band each crosses) it ends short of the line, the
     frame the wider for it. Over shapes that start further in than the frame does (the top
-    of an L) it starts with them: what is beside them is not the frame's."""
+    of an L) it starts with them: what is beside them is not the frame's.
+
+    At the frame's ``right`` it is the same seen in a mirror: the title ends at the frame's
+    right, starts past a line through its band, and ends with shapes that end further in.
+    (``heads``: the shapes its band is over -- or under, those at the frame's bottom.)"""
 
     inset = _inset(style)
     middle = held.x + held.width / 2.0
     reach = held.width / 2.0 + inset
     if label is None:
         return reach, held.x
+    if right:
+        # (Turned about the middle of what it holds, placed from the left, and turned back.)
+        turned = Rect(2.0 * middle - heads.right, heads.y, heads.width, heads.height)
+        across = [(2.0 * middle - end, 2.0 * middle - start) for start, end in lines]
+        reach, start = _reach(held, turned, label, style, across)
+        return reach, 2.0 * middle - start - label.width
     if heads.x > held.x + 0.5:
         return max(reach, heads.x + label.width + inset - middle), heads.x
     clear = style.compact_gap.points
@@ -249,7 +326,9 @@ def title_room(
     frame wider than what it holds. Each is kept in the gap before that shape -- in a row,
     a column or a grid -- else at that side of the group that holds it, where there is not
     that much free already. So the title lies on nothing (not the shape above, nor that
-    group's own title), and the frame it widens runs under nothing."""
+    group's own title), and the frame it widens runs under nothing. A title at the frame's
+    bottom has its band under each shape there instead: what is below makes way, and
+    nothing above does."""
 
     from flexo.hierarchy import parent_map
 
@@ -267,13 +346,18 @@ def title_room(
             continue
         held = _round([boxes[item] for item in named])
         band = label.height + style.compact_gap.points + inset
-        lines = _expected(named, semantic, groups, boxes, held)
-        reach, _ = _reach(held, _heads([boxes[item] for item in named]), label, style, lines)
+        corner = title_side_of(spec)
+        below = _below(corner)
+        lines = _expected(named, semantic, groups, boxes, held, below=below)
+        ends = (_feet if below else _heads)([boxes[item] for item in named])
+        reach, _ = _reach(held, ends, label, style, lines, right=_right(corner))
         wider = reach - (held.width / 2.0 + inset)
         for item in named:
             mine = boxes[item]
             for side, amount, there in (
-                ("top", band, mine.y <= held.y + 0.5),
+                ("bottom", band, mine.bottom >= held.bottom - 0.5)
+                if below
+                else ("top", band, mine.y <= held.y + 0.5),
                 ("left", wider, mine.x <= held.x + 0.5),
                 ("right", wider, mine.right >= held.right - 0.5),
             ):
@@ -293,9 +377,12 @@ def _expected(
     groups: dict[str, GroupSpec],
     boxes: dict[str, Rect],
     held: Rect,
+    *,
+    below: bool = False,
 ) -> list[tuple[float, float]]:
     """Where a line is likely to come down through a frame's title before any is routed:
-    at the middle of a shape at the frame's top that is joined to one above the frame."""
+    at the middle of a shape at the frame's top that is joined to one above the frame.
+    (A title at the frame's bottom, ``below``: of a shape there joined to one under it.)"""
 
     inside: dict[str, str] = {}
     for item in named:
@@ -312,7 +399,13 @@ def _expected(
         for mine, other in (pair, pair[::-1]):
             if mine not in inside or other in inside or mine not in boxes or other not in boxes:
                 continue
-            if boxes[inside[mine]].y <= held.y + 0.5 and boxes[other].bottom <= held.y + 0.5:
+            if below:
+                there = boxes[inside[mine]].bottom >= held.bottom - 0.5
+                beyond = boxes[other].y >= held.bottom - 0.5
+            else:
+                there = boxes[inside[mine]].y <= held.y + 0.5
+                beyond = boxes[other].bottom <= held.y + 0.5
+            if there and beyond:
                 middle = boxes[mine].x + boxes[mine].width / 2.0
                 found.append((middle, middle))
     return found
@@ -321,8 +414,9 @@ def _expected(
 def _beside(
     item: str, holder: GroupSpec, boxes: dict[str, Rect], side: str
 ) -> tuple[str | None, float]:
-    """Where in ``holder`` the room on one side of ``item`` is (over it, ``"top"``, or to
-    its ``"left"`` or ``"right"``), and how much is free there already.
+    """Where in ``holder`` the room on one side of ``item`` is (over it, ``"top"``, under
+    it, ``"bottom"``, or to its ``"left"`` or ``"right"``), and how much is free there
+    already.
 
     With nothing of the group's on that side of it, the group's own side -- and free, what
     the group's other parts stand out past it; else the gap before it (``"gap:2"``) in a
@@ -331,8 +425,18 @@ def _beside(
 
     mine = boxes[item]
     # (The side a box starts at going that way, and the one it ends at: smaller is before.)
-    lead = {"top": lambda b: b.y, "left": lambda b: b.x, "right": lambda b: -b.right}[side]
-    trail = {"top": lambda b: b.bottom, "left": lambda b: b.right, "right": lambda b: -b.x}[side]
+    lead = {
+        "top": lambda b: b.y,
+        "bottom": lambda b: -b.bottom,
+        "left": lambda b: b.x,
+        "right": lambda b: -b.right,
+    }[side]
+    trail = {
+        "top": lambda b: b.bottom,
+        "bottom": lambda b: -b.y,
+        "left": lambda b: b.right,
+        "right": lambda b: -b.x,
+    }[side]
     parts = [child for child in holder.children if child in boxes]
     before = [
         child for child in parts if child != item and trail(boxes[child]) <= lead(mine) + 0.5
@@ -340,10 +444,17 @@ def _beside(
     if not before:
         return side, lead(mine) - min(lead(boxes[child]) for child in parts)
     order = list(holder.children)
-    if holder.layout.kind == ("column" if side == "top" else "row"):
+    if holder.layout.kind == ("column" if side in ("top", "bottom") else "row"):
         nearest = max(before, key=lambda child: trail(boxes[child]))
         return f"gap:{min(order.index(item), order.index(nearest))}", 0.0
     if holder.layout.kind == "grid" and holder.layout.columns:
+        columns = holder.layout.columns
+        if side == "bottom":
+            # (The gap under its row is the one after the gap over it: the first of the
+            # rows', with no row over it.)
+            over, _ = _beside(item, holder, boxes, "top")
+            under = columns - 1 if over == "top" else int(str(over).removeprefix("gap:")) + 1
+            return f"gap:{under}", 0.0
         # The rows over it (the columns beside it), counted as they are seen; a grid's row
         # gaps come after its column gaps.
         runs, end = 0, None
@@ -351,7 +462,6 @@ def _beside(
             if end is None or lead(boxes[child]) >= end - 0.5:
                 runs += 1
             end = trail(boxes[child]) if end is None else max(end, trail(boxes[child]))
-        columns = holder.layout.columns
         gap = {"top": columns - 1 + runs - 1, "left": runs - 1, "right": columns - 1 - runs}
         return f"gap:{gap[side]}", 0.0
     return None, 0.0
@@ -447,15 +557,18 @@ def draw(
         **attributes,
     )
     if frame.label is not None:
+        # (At the frame's right its lines end together there, as a group's title's do.)
+        right = _right(frame.title_side)
         render_runs(
             group,
             f"{part}.label",
             frame.label,
-            x=frame.title_x,
-            y=bounds.y + frame.inset + frame.label.baseline,
+            x=frame.title_x + frame.label.width if right else frame.title_x,
+            y=frame.title.y + frame.label.baseline,
             typography=title_typography(style.typography),
             palette=mine,
             fill_role="ink",
             fill=paint_override(spec, "label"),
+            anchor="end" if right else None,
             weight=style.typography.title_weight,
         )

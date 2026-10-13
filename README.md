@@ -758,6 +758,23 @@ long title widens it, so the title lies on nothing -- where an arrow comes down 
 frame, it ends short of the arrow. Behind shapes that stand in filled groups, a frame is
 drawn over those groups' own fills, so it shows.
 
+The title stands at the frame's top left. `title_side` in its properties names another
+corner, in the words a group's `title_side` takes: `right` (the top right), `bottom-left`
+or `bottom-right` -- for a frame whose top shape has a line going up from it, say, where
+no title along the top would be clear of the line:
+
+```yaml
+nodes:
+- id: stage
+  kind: frame
+  label: Generation
+  properties: {around: "sample, refine", title_side: bottom-left}
+```
+
+At the bottom its band is under the shape at the frame's bottom, so what is below makes
+way and nothing above does; at the right it ends at the frame's right, and starts past a
+line through its band. Any other word is said, and the title drawn at the top left.
+
 ### A shape's words, and a picture's crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,
@@ -1185,7 +1202,8 @@ changes in words, to go back or forward to any of them.
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
-  **Layer**). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
+  **Layer**), its title at whichever corner is chosen (its **Title Position**, as a
+  group's). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
   column of their own with **Align in a Row** or **Align in a Column** (in their panel,
   their right-click menu and the palette), in the order they are seen, where the first of
   them stood: boxes of a flow chart that have ended up in two columns side by side are put

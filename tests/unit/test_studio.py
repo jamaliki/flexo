@@ -1684,6 +1684,11 @@ def test_the_figures_guide_for_agents_says_how_each_thing_is_written_and_says_it
     )
     for words in said:
         assert words in GUIDE, words
+    # Where a title stands is said of a group, and of a frame: the same four corners.
+    corners = "title_side: left|right|bottom-left|bottom-right"
+    assert GUIDE.replace("\n ", "").count(corners) == 2
+    frame = GUIDE[GUIDE.index("kind: frame") :]
+    assert "title_side" in frame[: frame.index("A plot:")]
     # The mechanisms it writes out are ones flexo draws: a real one, and one of placeholders.
     steps = (
         [

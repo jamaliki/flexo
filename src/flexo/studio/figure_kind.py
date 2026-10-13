@@ -98,7 +98,9 @@ A reaction mechanism: {id, kind: mechanism, properties: {steps: [{smiles: "[OH-:
   element's).
 A frame round shapes anywhere in the figure (in different groups too), which moves none of
   them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
-  layer: behind|front|over (a tint they show through), tone}}.
+  layer: behind|front|over (a tint they show through), tone, title_side:
+  left|right|bottom-left|bottom-right (the corner its label stands at: the top left unless
+  written -- at the bottom where a line leaves the top of what it holds)}}.
 A plot: {id, kind: plot, properties: {source: plots.py, function: name}, width, height} -- the
   matplotlib figure that function returns, in the figure's font and colours, at that size (don't
   set fonts, sizes or colours in the function: they are the figure's). It is drawn again when

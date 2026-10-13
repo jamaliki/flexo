@@ -134,8 +134,9 @@ over one shape can leave another at the frame's top."""
 
 def _with_room_for_titles(frames: tuple, figure: FigureSpec, style: LayoutStyle) -> FigureSpec:
     """``figure`` with room kept for the titles of its frames: laid out, each title's place
-    found (over the shape at its frame's top), and the room it wants there added -- again,
-    should that leave another shape at a frame's top."""
+    found (over the shape at its frame's top; under the one at its bottom, for a title
+    there), and the room it wants there added -- again, should that leave another shape
+    at a frame's top."""
 
     if not any(frame.label for frame in frames):
         return figure

@@ -42,7 +42,7 @@ from typing import Any
 from flexo.components import OUTLINED_NEVER
 from flexo.drawn import DRAWN_KINDS
 from flexo.frames import LAYERS
-from flexo.ir.semantic import EDGE_HEADS
+from flexo.ir.semantic import EDGE_HEADS, TITLE_SIDES
 from flexo.pages import PAGE_SIZES, PANEL_LABELS, panel_letter
 
 TONES = (
@@ -157,6 +157,24 @@ MOTIF = _field(
     default=True,
     hint="The drawing behind the label",
 )
+
+
+def _title_side(key: str, hint: str, **options: Any) -> dict[str, Any]:
+    """Which corner a title stands at: a group's, and a frame's."""
+
+    return _field(
+        key,
+        "Title Position",
+        "choice",
+        options=list(TITLE_SIDES),
+        labels={"left": "Top Left", "right": "Top Right", "bottom-left": "Bottom Left",
+                "bottom-right": "Bottom Right"},
+        default="left",
+        hint=hint,
+        **options,
+    )
+
+
 COMMON = [LABEL, TONE, BADGE, SHADOW, OUTLINE]
 WORDS_AS_DRAWN = DRAWN_KINDS | {"icon", "spacer", "junction", "image", "frame"}
 """Kinds whose words are not a label set in the shape: a drawing's own, a frame's title."""
@@ -864,6 +882,7 @@ def _basics() -> list[dict[str, Any]]:
                     default="behind",
                     hint="Behind its shapes, an outline in front of them, or a tint over them",
                 ),
+                _title_side("properties.title_side", "The corner its title stands at"),
                 _field(
                     "properties.around",
                     "Goes Round",
@@ -1085,15 +1104,9 @@ GROUP_FIELDS = [
         hint="Whether a frame is drawn round the shapes; a module's is named for them, and "
         "a panel has its letter instead",
     ),
-    _field(
+    _title_side(
         "title_side",
-        "Title Position",
-        "choice",
-        options=["left", "right", "bottom-left", "bottom-right"],
-        labels={"left": "Top Left", "right": "Top Right", "bottom-left": "Bottom Left",
-                "bottom-right": "Bottom Right"},
-        default="left",
-        hint="The corner its title (a panel's letter) stands at",
+        "The corner its title (a panel's letter) stands at",
         show={"role": ["container", "module", "panel"]},
     ),
     SHADOW,

@@ -11,7 +11,7 @@ import yaml
 
 import flexo
 from flexo import compile_figure
-from flexo.frames import LAYERS, around, split
+from flexo.frames import LAYERS, around, split, title_side_of
 from flexo.serialization import figure_to_document, parse_figure
 from flexo.studio.figure_edit import apply
 from flexo.studio.figure_parts import catalogue
@@ -244,6 +244,228 @@ def test_a_title_stands_over_the_shape_at_its_frames_top() -> None:
     assert _lies_on(_title(tinted), framed) == []
 
 
+SIDES = ("left", "right", "bottom-left", "bottom-right")
+
+
+def _sided(text: str, side: str | None, **only: str) -> flexo.Compilation:
+    """``text`` with the title of each of its frames (or of ``only``, by id) at ``side``."""
+
+    document = yaml.safe_load(text)
+    for node in document["nodes"]:
+        where = only.get(node["id"], side)
+        if node.get("kind") == "frame" and where is not None:
+            node["properties"]["title_side"] = where
+    return compile_figure(parse_figure(document))
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_a_frames_title_stands_at_the_corner_its_title_side_names(side: str) -> None:
+    """A title stood at the frame's top left alone: over a shape whose line goes up from
+    its top, there was nowhere for it clear of the line. It stands at any corner now, with
+    all it has at the top left: room of its own, clear of every line, the frame centred."""
+
+    titled = _sided(TITLED, side)
+    assert not titled.measured.diagnostics
+    shapes = {node.measured.spec.id: node.bounds for node in titled.fitted.nodes}
+    below, right = side.startswith("bottom"), side.endswith("right")
+    for frame in titled.frames:
+        assert frame.title_side == side == title_side_of(frame.spec)
+        title, held = frame.title, [shapes[name] for name in around(frame.spec)]
+        assert _lies_on(title, titled) == [], frame.spec.id
+        assert _struck(title, titled) == [], frame.spec.id
+        # In its band, within the frame: under the shapes at the bottom, over them at the top.
+        assert frame.bounds.x <= title.x and title.right <= frame.bounds.right + 1e-6
+        if below:
+            assert title.y > max(box.bottom for box in held)
+            assert title.bottom == pytest.approx(frame.bounds.bottom - frame.inset)
+            assert frame.bounds.y == pytest.approx(min(box.y for box in held) - frame.inset)
+        else:
+            assert title.bottom < min(box.y for box in held)
+            assert title.y == pytest.approx(frame.bounds.y + frame.inset)
+            assert frame.bounds.bottom == pytest.approx(
+                max(box.bottom for box in held) + frame.inset
+            )
+        # Still centred on what it holds, and round it.
+        middle = (min(box.x for box in held) + max(box.right for box in held)) / 2
+        assert frame.bounds.center.x == pytest.approx(middle), frame.spec.id
+        assert all(frame.bounds.x < box.x and box.right < frame.bounds.right for box in held)
+    frames = {frame.spec.id: frame for frame in titled.frames}
+    # With no line through its band it is at the frame's corner, the frame's inset from it;
+    # at the right its lines end together there.
+    free = frames["second"]
+    if right:
+        assert free.title.right == pytest.approx(free.bounds.right - free.inset)
+    else:
+        assert free.title.x == pytest.approx(free.bounds.x + free.inset)
+    svg = titled.document.text
+    drawn = re.search(r'<text id="second\.label"[^>]*>', svg)[0]
+    assert ('text-anchor="end"' in drawn) is right
+    at = float(re.search(r' x="([^"]+)"', drawn)[1])
+    assert at == pytest.approx(free.title.right if right else free.title.x, abs=1e-3)
+    baseline = float(re.search(r' y="([^"]+)"', drawn)[1])
+    assert baseline == pytest.approx(free.title.y + free.label.baseline, abs=1e-3)
+
+
+def test_a_title_at_the_right_or_the_bottom_stops_short_of_a_line_through_its_band() -> None:
+    """The arrow into "Framed" comes down its middle, and the one out of it goes down from
+    there: a title wider than the shape keeps to its own side of whichever is in its band,
+    the frame the wider for it -- past the line, at the right."""
+
+    middle = {side: _box(_sided(TITLED, side), "b").center.x for side in SIDES}
+    first = {
+        side: next(f for f in _sided(TITLED, side).frames if f.spec.id == "first")
+        for side in SIDES
+    }
+    assert first["left"].title.right < middle["left"]
+    assert first["right"].title.x > middle["right"]
+    assert first["bottom-left"].title.right < middle["bottom-left"]
+    assert first["bottom-right"].title.x > middle["bottom-right"]
+    # Without the lines none is held back: the frame is no wider than its title.
+    document = yaml.safe_load(TITLED)
+    document["edges"] = []
+    for side in SIDES:
+        free = next(
+            frame
+            for frame in _sided(yaml.safe_dump(document), side).frames
+            if frame.spec.id == "first"
+        )
+        assert free.bounds.width < first[side].bounds.width, side
+        assert free.bounds.width == pytest.approx(free.label.width + 2 * free.inset), side
+
+
+def test_a_title_at_the_bottom_has_its_room_under_the_shapes_and_moves_none_above() -> None:
+    """Its band is under the shape at the frame's bottom: what is below makes way."""
+
+    # (On a page wide enough for each, so that all are spaced alike.)
+    document = yaml.safe_load(TITLED)
+    document["figure"]["width"] = "300mm"
+    wide = yaml.safe_dump(document, sort_keys=False)
+    for node in document["nodes"]:
+        node.pop("label", None) if node.get("kind") == "frame" else None
+    plain = compile_figure(parse_figure(document))
+    top, bottom = _sided(wide, None), _sided(wide, "bottom-left")
+
+    def gap(drawn: flexo.Compilation, over: str, under: str) -> float:
+        return _box(drawn, under).y - _box(drawn, over).bottom
+
+    def inside(drawn: flexo.Compilation, group: str, shape: str) -> tuple[float, float]:
+        """How far a shape is from its group's top, and from its bottom."""
+
+        return (
+            _box(drawn, shape).y - _box(drawn, group).y,
+            _box(drawn, group).bottom - _box(drawn, shape).bottom,
+        )
+
+    # In a column the gap under the framed shape is the deeper one now; the gap over it is
+    # as it is with no title at all.
+    assert gap(top, "a", "b") > gap(plain, "a", "b") + 10
+    assert gap(top, "b", "c") == pytest.approx(gap(plain, "b", "c"))
+    assert gap(bottom, "b", "c") > gap(plain, "b", "c") + 10
+    assert gap(bottom, "a", "b") == pytest.approx(gap(plain, "a", "b"))
+    # In a module, under its first shape: the second is further down, the first no lower
+    # under the module's own title.
+    assert gap(bottom, "m", "n") > gap(plain, "m", "n") + 10
+    assert inside(bottom, "module", "m")[0] == pytest.approx(inside(plain, "module", "m")[0])
+    assert inside(top, "module", "m")[0] > inside(plain, "module", "m")[0] + 10
+    # Round a grid's last row, under the grid: its rows are no further apart for it.
+    assert gap(bottom, "p", "r") == pytest.approx(gap(plain, "p", "r"))
+    assert gap(top, "p", "r") > gap(plain, "p", "r") + 10
+    assert inside(bottom, "cells", "r")[1] > inside(plain, "cells", "r")[1] + 10
+    # Round its first row, in the gap under that row -- as over its last, for a title on top.
+    document = yaml.safe_load(wide)
+    document["nodes"][-1]["properties"] = {"around": "p, q", "title_side": "bottom-right"}
+    under = compile_figure(parse_figure(document))
+    assert gap(under, "p", "r") == pytest.approx(gap(top, "p", "r"))
+    assert inside(under, "cells", "p")[0] == pytest.approx(inside(plain, "cells", "p")[0])
+    third = next(frame for frame in under.frames if frame.spec.id == "third")
+    assert _lies_on(third.title, under) == [] and _struck(third.title, under) == []
+
+
+def test_a_title_stands_with_the_shape_at_the_corner_it_is_at() -> None:
+    """Round shapes at different heights the title is over the higher, or under the lower:
+    its room is there. At the right it ends with that shape, as at the left it starts
+    with it."""
+
+    for side, shape, edge in (
+        ("left", "dec", "x"),
+        ("right", "dec", "right"),
+        ("bottom-left", "enc", "x"),
+        ("bottom-right", "enc", "right"),
+    ):
+        framed = _sided(FRAMED, None, shared=side)
+        shared = next(frame for frame in framed.frames if frame.spec.id == "shared")
+        assert _box(framed, "dec").y < _box(framed, "enc").y
+        assert _box(framed, "dec").bottom < _box(framed, "enc").bottom
+        mine, title = _box(framed, shape), shared.title
+        if side.startswith("bottom"):
+            assert title.y > mine.bottom
+        else:
+            assert title.bottom < mine.y
+        if side in {"left", "bottom-right"}:
+            # (The shape there starts, or ends, further in than the frame does.)
+            assert getattr(title, edge) == pytest.approx(getattr(mine, edge)), side
+        assert _lies_on(title, framed) == [], side
+
+
+def test_the_top_left_is_where_a_title_stands_unless_another_corner_is_named() -> None:
+    """``left`` written is the frame as it is drawn with nothing written; and a frame with no
+    title is the same at every corner."""
+
+    for text in (FRAMED, TITLED):
+        assert _sided(text, "left").document.text == _sided(text, None).document.text
+    untitled = yaml.safe_load(FRAMED)
+    for node in untitled["nodes"]:
+        node.pop("label", None) if node.get("kind") == "frame" else None
+    bare = yaml.safe_dump(untitled, sort_keys=False)
+    for side in SIDES:
+        sided = _sided(bare, side)
+        assert sided.document.text == _sided(bare, None).document.text, side
+        assert all(frame.title is None for frame in sided.frames)
+
+
+def test_a_title_side_that_is_none_of_the_four_is_said_and_the_title_is_at_the_top_left() -> None:
+    plain = _sided(TITLED, None)
+    for written in ("top", "bottom", "Centre", 3):
+        wrong = _sided(TITLED, None, first=written)
+        said = [d for d in wrong.measured.diagnostics if d.code == "frame.title-side.unknown"]
+        assert [item.entity_id for item in said] == ["first"]
+        assert f"“{str(written).lower()}”" in said[0].message
+        assert all(side in said[0].hint for side in SIDES)
+        assert wrong.document.text == plain.document.text
+    # (As it is written by hand: in any case, with room round it.)
+    assert not _sided(TITLED, " Bottom-Right ").measured.diagnostics
+    assert _sided(TITLED, " Bottom-Right ").document.text == (
+        _sided(TITLED, "bottom-right").document.text
+    )
+
+
+def test_a_title_at_another_corner_keeps_its_frames_layer_colours_and_line() -> None:
+    document = yaml.safe_load(FRAMED)
+    document["nodes"][6]["line"] = "dashed"
+    document["nodes"][6]["properties"] |= {"paint-label": "#aa0000"}
+    document["figure"]["dim"] = ["left"]
+    text = yaml.safe_dump(document, sort_keys=False)
+    top, bottom = _sided(text, None).document.text, _sided(text, "bottom-right").document.text
+
+    def drawn(svg: str, name: str, what: str) -> str:
+        found = re.search(rf'<{what} id="{re.escape(name)}"[^>]*>', svg)[0]
+        # (All but where it is: its place, and which end of it is there.)
+        return re.sub(r' (x|y|width|height|text-anchor)="[^"]*"', "", found)
+
+    for name in ("shared", "lined", "tinted"):
+        assert drawn(top, f"{name}.body", "rect") == drawn(bottom, f"{name}.body", "rect")
+        assert drawn(top, name, "g") == drawn(bottom, name, "g")
+    for name in ("shared.label", "tinted.label", "shared.in.left.label", "shared.in.right.label"):
+        assert drawn(top, name, "text") == drawn(bottom, name, "text")
+    assert 'fill="#aa0000"' in drawn(bottom, "shared.label", "text")
+    assert "stroke-dasharray" in drawn(bottom, "shared.body", "rect")
+    # Behind its shapes still, and what is dimmed is dimmed still: the frame round it too.
+    order = [bottom.index(f'id="{name}"') for name in ("shared", "enc", "y", "lined", "tinted")]
+    assert order == sorted(order)
+    for svg in (top, bottom):
+        assert re.search(r'<g id="tinted"[^>]*data-flexo-show="dimmed"', svg)
+
+
 def test_each_layer_is_drawn_where_it_lies() -> None:
     svg = compile_figure(_figure()).document.text
     drawn = ("shared", "lined", "tinted", "enc", "dec", "y")
@@ -384,3 +606,41 @@ def test_the_editor_offers_a_frame_with_the_groups_and_not_among_the_shapes_to_a
     assert fields["properties.layer"]["options"] == ["behind", "front", "over"]
     assert fields["properties.layer"]["labels"]["over"] == "Over (See-Through)"
     assert fields["properties.around"]["more"] is True
+
+
+def test_the_editor_offers_where_a_frames_title_stands_as_it_does_a_groups() -> None:
+    """A frame's title could stand at its top left alone; a group's at any corner."""
+
+    found = catalogue()
+    keys = [field["key"] for field in found["parts"]["frame"]["fields"]]
+    assert keys[keys.index("properties.layer") + 1] == "properties.title_side"
+    side = found["parts"]["frame"]["fields"][keys.index("properties.title_side")]
+    (group,) = (field for field in found["group_fields"] if field["key"] == "title_side")
+    # The same control, its choices named and ordered alike -- shown on every frame, as a
+    # group's is on every group with a frame drawn.
+    same = ("label", "type", "options", "labels", "default")
+    assert {name: side[name] for name in same} == {name: group[name] for name in same}
+    assert side["label"] == "Title Position" and side["options"] == list(SIDES)
+    assert side["labels"]["bottom-left"] == "Bottom Left" and side["default"] == "left"
+    assert "show" not in side and "more" not in side
+
+    # Chosen, it is written in the frame's properties and drawn; the top left again, and
+    # nothing is written.
+    text = yaml.safe_dump(yaml.safe_load(TITLED), sort_keys=False)
+    target = {"type": "node", "id": "first"}
+    values = {"properties.title_side": "bottom-left"}
+    under = apply(text, {"do": "update", "target": target, "values": values})["text"]
+    assert _nodes(under)["first"]["properties"] == {"around": "b", "title_side": "bottom-left"}
+    drawn = compile_figure(parse_figure(yaml.safe_load(under)))
+    first = next(frame for frame in drawn.frames if frame.spec.id == "first")
+    assert first.title.y > _box(drawn, "b").bottom
+    back = apply(under, {"do": "update", "target": target, "values": {values.popitem()[0]: None}})
+    assert _nodes(back["text"])["first"]["properties"] == {"around": "b"}
+    # A frame copied keeps where its title stands, as it keeps its layer.
+    copied = apply(under, {"do": "duplicate", "ids": ["b", "first"]})["text"]
+    sides = [
+        node["properties"].get("title_side")
+        for node in _nodes(copied).values()
+        if node.get("kind") == "frame" and node["label"] == "Under another shape"
+    ]
+    assert sides == ["bottom-left", "bottom-left"]
