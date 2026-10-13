@@ -35,6 +35,7 @@ from flexo.routing.ink import (
     stretch_end,
     stretch_start,
 )
+from flexo.showing import mark, states
 from flexo.sketch import sketch_svg
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import (
@@ -158,6 +159,10 @@ def emit_svg(
         holder = layer(root, "layer.frames", "Frames")
         for frame in ahead:
             draw_frame(holder, frame, layout_style, paint_palette)
+    # What the figure hides or dims, drawn so where it stands (``flexo.showing``).
+    figure = routed.fitted.measured.semantic
+    shown = states(figure, [frame.spec for frame in frames])
+    mark(root, shown, [group.id for group in figure.groups], paint_palette.get("canvas"))
     if layout_style.sketch is not None:
         sketch_svg(root, layout_style.sketch, canvas=paint_palette.get("canvas"))
     embed_fonts(fonts, root, layout_style)

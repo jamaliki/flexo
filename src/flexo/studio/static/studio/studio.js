@@ -121,7 +121,10 @@ const pictures = new Map();
 // are the editable slide's alone, never a thumbnail's or a preview's.
 const PICTURE_STYLE = ":host{display:block;position:relative}svg{display:block;text-rendering:geometricPrecision}"
   + ":host(:not(.natural)) svg{width:100%;height:100%}:host(.natural) svg{max-width:100%;height:auto}"
-  + "[data-flexo-placeholder]{display:none}";
+  + "[data-flexo-placeholder]{display:none}"
+  // A part a figure hides (flexo.showing) is gone from a drawing -- and a ghost where its
+  // figure is edited (--flexo-ghosts there), to be chosen and shown again.
+  + "[data-flexo-show=hidden]{visibility:var(--flexo-ghosts,hidden);opacity:var(--flexo-ghost,1)}";
 
 export function picture(svg, hash, { natural = false } = {}) {
   const key = hash && `${natural ? "n" : "f"}:${hash}`;

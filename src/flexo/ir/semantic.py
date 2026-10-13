@@ -872,6 +872,13 @@ class FigureSpec:
     panel_labels: str = "a"
     """How the figure's panels (groups with ``role: panel``) are lettered, as the first one
     is: ``a`` (a, b, c), ``A``, ``(a)``; see ``flexo.pages``."""
+    hidden: tuple[str, ...] = ()
+    """Shapes, groups, lines and frames (by id) not drawn, their places kept: the figure
+    laid out as ever, with these left out; see ``flexo.showing``."""
+    dimmed: tuple[str, ...] = ()
+    """Those drawn faint."""
+    highlighted: tuple[str, ...] = ()
+    """Those drawn at full strength, the rest of the figure faint."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")

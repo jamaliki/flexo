@@ -65,6 +65,9 @@ from ruamel.yaml.scalarstring import (
 from flexo.ir.semantic import ID_PATTERN
 from flexo.studio.merge import merge_text
 
+SHOWN = {"hidden": "hide", "dimmed": "dim", "highlighted": "highlight"}
+"""How a part is shown where not plainly, and the figure's setting that lists such parts."""
+
 STRUCTURAL = frozenset(
     {
         "add",
@@ -72,6 +75,7 @@ STRUCTURAL = frozenset(
         "rename",
         "delete",
         "gather",
+        "panels",
         "frame",
         "ungroup",
         "move",
@@ -125,12 +129,13 @@ def apply(
     document.base = base
     verb = str(action.get("do", ""))
     handler = getattr(document, f"_{verb}", None)
-    if verb not in STRUCTURAL | {"update", "read"} or handler is None:
+    if verb not in STRUCTURAL | {"update", "read", "show"} or handler is None:
         raise EditError(f"Unknown figure edit “{verb}”.")
     was_valid = _reads(text, suffix, base)
     select = handler(action) or []
     document.tidy_alignment()
     document.tidy_frames()
+    document.tidy_shown()
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
         problem = _problem(result, suffix, base)
@@ -1250,6 +1255,11 @@ class _Document:
             # (A frame goes on round it, by its new name.)
             if isinstance(part, dict) and old in _framed(part):
                 _frame_round(part, [new if item == old else item for item in _framed(part)])
+        # (And it stays hidden, dimmed or highlighted, by its new name.)
+        settings = self.data.get("figure")
+        for key in SHOWN.values():
+            if isinstance(settings, dict) and old in (settings.get(key) or []):
+                settings[key] = [new if item == old else item for item in settings[key]]
         for edge in self.edges:
             edge["from"], edge["to"] = moved(str(edge["from"])), moved(str(edge["to"]))
             for waypoint in edge.get("waypoints") or []:
@@ -1435,6 +1445,49 @@ class _Document:
         self.data.setdefault("groups", []).append(group)
         return [identifier]
 
+    def _panels(self, action: Mapping[str, Any]) -> list[str]:
+        """The figure made one of ``count`` panels, ``columns`` across: a journal's figure
+        of several parts, in one step. What it has that is in no panel becomes one, laid out
+        as it was; the panels it lacks are added, each with a first shape to build on; and
+        the figure lays them out -- in a row (as many columns as panels), a column (one), or
+        a grid. Panels it has already are kept, however many. Answers the panels."""
+
+        count = max(1, min(int(action.get("count") or 2), 26))
+        columns = max(1, min(int(action.get("columns") or count), count))
+        root = self.written_root()
+        children: list[str] = root.setdefault("children", [])
+
+        def panel(identifier: str) -> bool:
+            return (self.group(identifier) or {}).get("role") == "panel"
+
+        frames = {str(node.get("id")) for node in self.nodes if node.get("kind") == "frame"}
+        loose = [item for item in children if not panel(item) and item not in frames]
+        if loose:
+            identifier = self.fresh("panel")
+            was = dict(root.get("layout") or {"kind": "column"})
+            carried = ("kind", "columns", "gap", "align", "justify")
+            layout = {key: was[key] for key in carried if key in was}
+            at = children.index(loose[0])
+            for item in loose:
+                children.remove(item)
+            children.insert(at, identifier)
+            self.data.setdefault("groups", []).append(
+                {"id": identifier, "role": "panel", "children": loose, "layout": layout}
+            )
+        while sum(1 for item in children if panel(item)) < count:
+            first = self._add({"kind": "block", "parent": self.root})
+            self._gather({"ids": first, "layout": "row", "role": "panel"})
+        panels = [item for item in children if panel(item)]
+        across = min(columns, len(panels))
+        kept = {key: value for key, value in (root.get("layout") or {}).items() if key == "gap"}
+        if across >= len(panels):
+            root["layout"] = {"kind": "row", **kept}
+        elif across == 1:
+            root["layout"] = {"kind": "column", **kept}
+        else:
+            root["layout"] = {"kind": "grid", "columns": across, **kept}
+        return panels
+
     def _frame(self, action: Mapping[str, Any]) -> list[str]:
         """A frame round the shapes and groups chosen (``ids``), wherever in the figure they
         are: behind them, or in front of them or over them as ``layer`` says. It is a shape
@@ -1466,6 +1519,45 @@ class _Document:
         if node is not None:
             return node.get("kind") != "frame"
         return self.group(identifier) is not None and identifier != self.root
+
+    def _show(self, action: Mapping[str, Any]) -> list[str]:
+        """Shapes, groups or frames (``ids``) hidden, dimmed, highlighted or shown plainly
+        again (``as``), where they stand: the figure's ``hide``, ``dim`` and ``highlight``
+        (``flexo.showing``). ``all``: everything shown plainly."""
+
+        settings = self.data.setdefault("figure", {})
+        ids = [str(item) for item in action.get("ids") or []]
+        how = str(action.get("as") or "shown")
+        if how != "shown" and how not in SHOWN:
+            raise EditError(f"A part can\u2019t be shown as “{how}”.")
+        for key in SHOWN.values():
+            kept = [] if action.get("all") else [
+                item for item in settings.get(key) or [] if item not in ids
+            ]
+            if kept:
+                settings[key] = kept
+            else:
+                settings.pop(key, None)
+        if how in SHOWN and ids:
+            settings[SHOWN[how]] = [*(settings.get(SHOWN[how]) or []), *ids]
+        return ids
+
+    def tidy_shown(self) -> None:
+        """Nothing hidden, dimmed or highlighted that the figure no longer has."""
+
+        settings = self.data.get("figure")
+        if not isinstance(settings, dict) or not any(settings.get(key) for key in SHOWN.values()):
+            return
+        there = {str(node.get("id")) for node in self.nodes if isinstance(node, dict)}
+        there |= {str(group.get("id")) for group in self.groups if isinstance(group, dict)}
+        there |= {identifier for identifier, _ in self.edge_ids()}
+        there |= {str(net.get("id")) for net in self.nets if isinstance(net, dict)}
+        for key in SHOWN.values():
+            kept = [item for item in settings.get(key) or [] if item in there]
+            if kept:
+                settings[key] = kept
+            else:
+                settings.pop(key, None)
 
     def tidy_frames(self) -> None:
         """No frame left round what the figure no longer has: one round nothing goes."""

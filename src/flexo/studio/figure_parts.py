@@ -1030,6 +1030,9 @@ GROUP_FIELDS = [
     ),
     SHADOW,
     {**OUTLINE, "show": {"role": ["container", "module"]}},
+    # A size of its own, for a panel that is not as large as what it holds would make it.
+    _field("layout.width", "Width", "length", hint="Empty: as wide as what it holds", more=True),
+    _field("layout.height", "Height", "length", more=True),
 ]
 
 HEAD_NAMES = {
@@ -1234,7 +1237,6 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             labels={pattern: _lettering(pattern) for pattern in PANEL_LABELS},
             default="a",
             hint="How the figure's panels are lettered, in the order they are read",
-            more=True,
         ),
     ]
 

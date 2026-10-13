@@ -46,10 +46,12 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 
 - `Figure(id, width=, theme=, palette=, font=, conventions=, sketch=, background=, layout=)`;
   `width` is `"single-column"`, `"double-column"` (default), `"presentation"`, or a length.
-  `page="nature-2"` (or `"nature-1"`, `"nature-page"`, `"cell-2"`, `"pnas-2"`, `"a4"`,
+  `page="nature-2"` (or `"nature-1"`, `"nature-page"`, `"science-2"`, `"cell-2"`, `"pnas-2"`, `"a4"`,
   `"letter"`, ...) names the page instead, and `height=` fixes its depth.
 - A box round shapes in different groups, which moves none of them: a frame, in a file
   `{id, kind: frame, label, properties: {around: "a, b", layer: behind|front|over}}`.
+- One figure shown several ways with nothing moved (a talk's build-up):
+  `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
 - An outline dashed or dotted (what is optional, or not yet there): `line="dashed"` or
   `"dotted"` on a shape, a group or a frame, as on an arrow (`line:` in a file).
 - A figure of several panels: `figure.panel(id)` for each (a group with no frame, lettered

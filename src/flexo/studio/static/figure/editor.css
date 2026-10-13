@@ -5,7 +5,10 @@
 .fig-left { border-right: 1px solid var(--line); }
 .fig-split { cursor: col-resize; background: transparent; position: relative; z-index: 2; margin: 0 -2px; }
 .fig-split:hover, .fig-split.dragging { background: var(--accent-line); }
-.fig-center { position: relative; min-width: 0; min-height: 0; }
+.fig-center { position: relative; min-width: 0; min-height: 0; --flexo-ghosts: visible; --flexo-ghost: 0.2; }
+/* A part the figure hides is a ghost where the figure is edited: there to be chosen, and
+   shown again. (Hidden by an attribute, which this is said over.) */
+.fig-center svg [data-flexo-show="hidden"] { visibility: visible; opacity: 0.2; }
 /* What can be dropped on the figure, said while files are held over it. */
 .fig-center > .drop-note { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border: 1.5px dashed var(--accent); border-radius: 99px; background: var(--raised); color: var(--accent); font-weight: 600; font-size: 12.5px; z-index: 5; pointer-events: none; box-shadow: var(--shadow-2); white-space: nowrap; }
 .fig-inspector { border-left: 1px solid var(--line); }

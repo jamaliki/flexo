@@ -134,6 +134,9 @@
           "pattern": "^[^A-Za-z0-9]*[aA][^A-Za-z0-9]*$",
           "default": "a"
         },
+        "hide": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
+        "dim": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
+        "highlight": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
         "sketch": {
           "oneOf": [
             {"type": "boolean"},

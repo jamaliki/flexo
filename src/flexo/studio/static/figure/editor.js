@@ -77,10 +77,12 @@ export function mount(studio, main) {
   const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add a Shape" });
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a Line from One Shape to Another" });
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌥⌘G)" });
+  // A figure of several parts, as a journal prints one: a panel more, or so many laid out.
+  const panelButton = ui.button("Panel", (event) => figure.panelMenu(event.currentTarget), { kind: "ghost", icon: "grid", title: "Add a Panel, or Lay the Figure Out as Panels (a, b, c)" });
   const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
   studio.tools.append(listButton);
-  studio.inserts.append(addButton, connectButton, gatherButton, deleteButton);
+  studio.inserts.append(addButton, connectButton, gatherButton, panelButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
   // ("…" only where the Mac app's save panel follows: in a browser each is saved at once.)
   studio.exports = [
@@ -829,6 +831,7 @@ export function mount(studio, main) {
     if (!chosen.length || chosen.includes(figure.model?.root)) return null;
     return chosenName() || (chosen.length > 1 ? `${chosen.length} Lines` : "Line");
   };
+  const shapesChosen = () => figure.selected.some((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root));
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
@@ -838,6 +841,20 @@ export function mount(studio, main) {
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // What is chosen hidden, dimmed or highlighted where it stands, and all of it back.
+    ...(!typingNow() && shapesChosen() ? [
+      { icon: "eye", label: "Hide", hint: "Not drawn: its place is kept", run: () => figure.showAs("hidden") },
+      { icon: "eye", label: "Dim", hint: "Drawn faint", run: () => figure.showAs("dimmed") },
+      { icon: "eye", label: "Highlight", hint: "The rest of the figure faint", run: () => figure.showAs("highlighted") },
+      { icon: "eye", label: "Show", hint: "Drawn plainly again", run: () => figure.showAs("shown") }] : []),
+    ...(figure.anyShownApart() ? [{ icon: "eye", label: "Show All", hint: "Nothing hidden, dimmed or highlighted", run: () => figure.showAll() }] : []),
+    // Arrange › Move Up and Move Down: a place back or on in its row or column (⌥ and an arrow).
+    ...(!typingNow() && figure.canMove(false) ? [{ icon: "up", label: "Move Up", keys: "⌥↑", run: () => figure.moveChosen(false) }] : []),
+    ...(!typingNow() && figure.canMove(true) ? [{ icon: "down", label: "Move Down", keys: "⌥↓", run: () => figure.moveChosen(true) }] : []),
+    // A figure of several panels: one more, or so many laid out at once.
+    { icon: "grid", label: "Add Panel", hint: "A lettered part of the figure", run: () => figure.addPanel() },
+    ...[[2, 2, "2 Across"], [3, 3, "3 Across"], [2, 1, "2 Stacked"], [4, 2, "2 × 2"], [6, 3, "3 × 2"], [6, 2, "2 × 3"]].map(([count, columns, label]) => (
+      { icon: "grid", label: `Panels: ${label}`, hint: `Lay the figure out as ${count} panels`, run: () => figure.layOutPanels(count, columns) })),
     // Arrange › Group and Ungroup, as Keynote's (the Mac menus run them by these names).
     ...(!typingNow() && figure.canGroup() ? [{ icon: "layout", label: "Group…", keys: "⌥⌘G", run: () => figure.groupMenu(gatherButton) }] : []),
     ...(!typingNow() && ungroupable() ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌥⌘G", run: () => figure.act({ do: "ungroup", id: figure.selected[0] }) }] : []),
