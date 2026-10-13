@@ -229,11 +229,41 @@ def _judged_slides(measured, fitted, routed, style):
     if plain.nodes == fitted.nodes:
         return fitted, routed, True
     plain_routed = route_figure(plain, style=style)
-    if _bends(routed) < _bends(plain_routed) and len(crossings(routed)) <= len(
-        crossings(plain_routed)
-    ):
+    bends, plain_bends = _bends(routed), _bends(plain_routed)
+    # (Bending no less, the slid layout is still the better if its lines meet their boxes
+    # nearer the middles of their sides: a branch's last step level with the one feeding it.)
+    better = bends < plain_bends or (
+        bends == plain_bends
+        and _off_middles(fitted, routed) < _off_middles(plain, plain_routed) - OFF_MIDDLE
+    )
+    if better and len(crossings(routed)) <= len(crossings(plain_routed)):
         return fitted, routed, True
     return plain, plain_routed, False
+
+
+OFF_MIDDLE = 0.5
+"""How much nearer the middles of their boxes' sides, in points over all its lines, a
+layout's lines must meet them for it to be the better of two that bend as much."""
+
+
+def _off_middles(fitted, routed: RoutedFigure) -> float:
+    """How far, in all, the ends of a figure's lines are from the middles of the sides
+    they meet: along each side, from where the line meets it to its middle."""
+
+    boxes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
+    total = 0.0
+    for edge in routed.edges:
+        if len(edge.centerline) < 2:
+            continue
+        ends = (
+            (edge.spec.source.node_id, edge.centerline[0]),
+            (edge.spec.target.node_id, edge.centerline[-1]),
+        )
+        for node_id, point in ends:
+            box = boxes.get(node_id)
+            if box is not None:
+                total += min(abs(point.x - box.center.x), abs(point.y - box.center.y))
+    return total
 
 
 def _bends(routed: RoutedFigure) -> int:

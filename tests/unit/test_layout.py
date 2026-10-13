@@ -34,6 +34,7 @@ from flexo.layout.ports import (
     _port_positions,
 )
 from flexo.routing import route_figure
+from flexo.serialization import parse_figure
 from flexo.style import STYLES, LayoutStyle, vector_stack_height
 from flexo.units import CellSpan, pt
 
@@ -1319,6 +1320,113 @@ def test_a_line_back_to_a_part_does_not_slide_it_from_where_its_flow_put_it() ->
         start, first = boxes["cycle.top.start"], boxes["cycle.steps.first"]
         assert start.x < first.center.x < start.right
         assert start.right < boxes["cycle.steps.second"].x
+
+
+def _two_branches(second: dict, *, fork: str = "Restraint\nset", more: tuple = ()) -> dict:
+    """A flow that forks: one branch runs on along the row (``over``, then ``end``), the
+    other goes under the fork (``under``) and on to ``last`` -- which stands in a column
+    under ``over``, a column the two under the fork are not merged with (``second``: framed,
+    or holding a step more)."""
+
+    return {
+        "figure": {"id": "branches"},
+        "groups": [
+            {"id": "root", "role": "canvas", "layout": {"kind": "row"},
+             "children": ["start", "one", "two", "end"]},
+            {"id": "one", "role": "layout", "layout": {"kind": "column", "align": "ports"},
+             "children": ["fork", "under"]},
+            {"id": "two", "layout": {"kind": "column"}, **second},
+        ],
+        "nodes": [
+            {"id": "start", "label": "Mechanism"},
+            {"id": "fork", "label": fork},
+            {"id": "under", "label": "Initial pose\nsampling"},
+            {"id": "over", "label": "Crystal\nstructure"},
+            {"id": "last"},
+            {"id": "end"},
+            *({"id": name, "label": "More"} for name in second["children"] if name == "more"),
+        ],
+        "edges": [
+            {"from": "start", "to": "fork"},
+            {"from": "fork", "to": "over"},
+            {"from": "over", "to": "end"},
+            {"from": "fork", "to": "under"},
+            {"from": "under", "to": "last"},
+            *more,
+        ],
+    }
+
+
+def _between_middles(routed, source: str, target: str) -> bool:
+    """Whether the line from ``source`` to ``target`` is one straight run from the middle of
+    one's side to the middle of the other's."""
+
+    boxes = {node.measured.spec.id: node.bounds for node in routed.fitted.nodes}
+    line = next(
+        edge.centerline
+        for edge in routed.edges
+        if (edge.spec.source.node_id, edge.spec.target.node_id) == (source, target)
+    )
+    level = abs(line[0].y - line[-1].y) < 1e-6
+    ends = ((boxes[source], line[0]), (boxes[target], line[-1]))
+    return _corner_count(line) == 0 and all(
+        abs((point.y - box.center.y) if level else (point.x - box.center.x)) < 0.1
+        for box, point in ends
+    )
+
+
+def test_the_last_step_of_a_branch_stands_level_with_the_step_that_feeds_it() -> None:
+    """Two branches side by side, the lower one's last step in a column of its own under
+    the upper one's: it stands level with the step feeding it, not as near the step over it
+    as that column would set it -- every line between the middles of its two boxes, the
+    upper branch on the line of the flow before it."""
+
+    routed = compile_figure(parse_figure(_two_branches({"children": ["over", "last"]}))).routed
+    boxes = {node.measured.spec.id: node.bounds for node in routed.fitted.nodes}
+    groups = {group.measured.spec.id: group for group in routed.fitted.groups}
+    assert boxes["last"].center.y == pytest.approx(boxes["under"].center.y)
+    assert boxes["last"].center.x == pytest.approx(boxes["over"].center.x)
+    for name in ("fork", "over", "end"):
+        assert boxes[name].center.y == pytest.approx(boxes["start"].center.y)
+    for source, target in (("fork", "over"), ("over", "end"), ("under", "last")):
+        assert _between_middles(routed, source, target), (source, target)
+    # Its column's frame is round it still, and within the figure.
+    assert groups["two"].content_bounds.contains_rect(boxes["last"])
+    assert groups["root"].content_bounds.contains_rect(groups["two"].bounds)
+    # Laid out where its column set it, it was nearer the step over it, its line off the
+    # middles of both its boxes.
+    plain = fit_figure(routed.fitted.measured, slide=False)
+    before = {node.measured.spec.id: node.bounds for node in plain.nodes}
+    assert before["last"].center.y < boxes["under"].center.y - 5.0
+
+
+def test_a_step_with_another_after_it_in_its_column_stays_between_the_two() -> None:
+    document = _two_branches({"role": "layout", "children": ["over", "last", "more"]})
+    fitted = compile_figure(parse_figure(document)).fitted
+    boxes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
+    assert boxes["over"].bottom < boxes["last"].top
+    assert boxes["last"].bottom < boxes["more"].top
+    assert boxes["over"].center.y == pytest.approx(boxes["fork"].center.y)
+
+
+def test_a_column_stays_on_its_flows_line_rather_than_slide_to_straighten_another() -> None:
+    """The upper branch's step is on the line of the flow before and after it, each of
+    those lines between the middles of two faces it has to itself. Its column, slid down
+    its row, would let the line into the step under it run straight -- and set both of
+    those off their middles: it stays, and that line steps down."""
+
+    document = _two_branches(
+        {"children": ["over", "last"]},
+        fork="A\nfork\nas\ntall\nas\nseven\nlines",
+        # (Joined to the step over it too, the last step is not one to stand level alone.)
+        more=({"from": "over", "to": "last"},),
+    )
+    routed = compile_figure(parse_figure(document)).routed
+    boxes = {node.measured.spec.id: node.bounds for node in routed.fitted.nodes}
+    for name in ("fork", "over", "end"):
+        assert boxes[name].center.y == pytest.approx(boxes["start"].center.y)
+    assert _between_middles(routed, "fork", "over")
+    assert _between_middles(routed, "over", "end")
 
 
 def test_a_box_widens_so_the_arrows_it_shares_a_side_with_meet_its_middle() -> None:

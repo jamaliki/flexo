@@ -20,6 +20,18 @@ runs straight from the middle of one side to the middle of the other. A line tha
 the only one on its side meets it at its middle (``flexo.routing.pins``), so that is
 the one way it runs straight. A group still slides as it did, for its lines as the
 ports could meet them: a row over a box several lines come into stays centred over it.
+
+And a box at the end of its row or column, joined by one line to a box standing beside
+that row or column (the last step of one branch, fed from the branch beside it), goes
+level with that box, further from the rest of its own line -- two branches side by side
+whose steps are of different heights, or have a line between them in one and none in the
+other, still end on one line. It goes only where the room of what holds its line allows,
+so nothing else moves.
+
+No group lined up by one of its parts (its anchor: ``flexo.layout.measure``) slides
+while a line of that part's runs between the middles of two faces it has to itself: it
+stays where its parent lined it up rather than set that line off them to straighten
+another. (A row of parts that speak for it together still slides, as it did.)
 """
 
 from __future__ import annotations
@@ -32,6 +44,7 @@ from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import lined_up
 from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
+from flexo.layout.measure import anchor_children, outward_connections
 from flexo.style import LayoutStyle
 
 _CENTER_BAND_FRACTION = 0.3
@@ -41,6 +54,9 @@ _SLIDING_ALIGNMENTS = frozenset({"center", "ports"})
 """Parents whose cross placement is a default, not a request to sit at one edge."""
 
 _EPSILON = 1e-6
+
+_CENTRED = 0.5
+"""How near level the middles of two boxes are, in points, for a line to run between them."""
 
 
 def slide_groups(
@@ -124,7 +140,63 @@ def slide_groups(
                 dx, dy = (shift, 0.0) if across == "x" else (0.0, shift)
                 by_node[node.id] = _moved_node(by_node[node.id], dx, dy)
 
+    outward = outward_connections(figure)
+    node_kinds = {node.id: node.kind for node in figure.nodes}
+
+    def voice(group_id: str) -> str | None:
+        """The one part a group's port line is taken from (``anchor_children``, down through
+        the groups it holds), or None where several speak for it together: the part its
+        parent lined up with what stands beside the group."""
+
+        while group_id in by_group:
+            spec = by_group[group_id].measured.spec
+            speakers = anchor_children(spec, node_kinds, outward.get(group_id, {}))
+            if len(speakers) != 1:
+                return None
+            group_id = speakers[0]
+        return group_id if group_id in by_node else None
+
+    def branch_ends() -> None:
+        for node in figure.nodes:
+            owner = parent.get(node.id)
+            if owner is None or joined[node.id] != 1 or owner not in by_group or node.align_with:
+                continue
+            along = {"row": "x", "column": "y"}.get(kinds.get(owner) or "")
+            holder = parent.get(owner)
+            if along is None or holder is None or holder not in by_group:
+                continue
+            other = next(
+                (
+                    end.node_id
+                    for connection in every
+                    if node.id in (connection.source.node_id, connection.target.node_id)
+                    for end in (connection.source, connection.target)
+                    if end.node_id != node.id
+                ),
+                None,
+            )
+            within = _nodes_within(owner, by_group)
+            if other is None or other in within or other not in by_node:
+                continue
+            shift = _level_shift(
+                by_node[node.id].bounds,
+                by_node[other].bounds,
+                by_group[owner],
+                by_group[holder].content_bounds,
+                [by_node[each].bounds for each in within if each != node.id],
+                [by_node[each].bounds for each in by_node if each not in within],
+                along,
+                style.gap.points,
+            )
+            if abs(shift) <= _EPSILON:
+                continue
+            dx, dy = (shift, 0.0) if along == "x" else (0.0, shift)
+            by_node[node.id] = _moved_node(by_node[node.id], dx, dy)
+            # Its line reaches as far as it now does: a frame round it is round it still.
+            by_group[owner] = _reaching(by_group[owner], by_node[node.id].bounds)
+
     lone_boxes()
+    branch_ends()
     for group_id in sorted(by_group, key=lambda name: (_depth(name, parent), order[name])):
         owner = parent.get(group_id)
         if owner is None:
@@ -142,6 +214,8 @@ def slide_groups(
             by_node,
             style,
             written,
+            settled=every,
+            voice=voice(group_id),
         )
         if abs(shift) <= _EPSILON:
             continue
@@ -152,6 +226,7 @@ def slide_groups(
             by_group[inner] = _moved_group(by_group[inner], dx, dy)
     # (Again, should the groups it sits among have slid since.)
     lone_boxes()
+    branch_ends()
     return (
         tuple(by_node[node.measured.spec.id] for node in nodes),
         tuple(by_group[group.measured.spec.id] for group in groups),
@@ -287,6 +362,78 @@ def _beside_room(
     return Rect(room.x, max(low, room.top), room.width, min(high, room.bottom) - max(low, room.top))
 
 
+def _level_shift(
+    own: Rect,
+    other: Rect,
+    line: FittedGroup,
+    room: Rect,
+    beside: list[Rect],
+    others: list[Rect],
+    along: str,
+    gap: float,
+) -> float:
+    """How far a box at the end of its row or column (``line``, running ``along`` x or y)
+    goes along it to stand level with the box its one line joins it to (``other``), or 0:
+    only away from the parts ``beside`` it on its line, only if ``other`` stands beside the
+    line rather than before or after it, only while the line -- its frame, should it have
+    one -- stays within ``room``, and never onto (or within half a gap of) one of the
+    ``others``."""
+
+    frame, parts = line.bounds, line.content_bounds
+    if along == "y":
+        aside = other.right <= frame.left + _EPSILON or other.left >= frame.right - _EPSILON
+        shift = other.center.y - own.center.y
+        last = all(box.bottom <= own.top + _EPSILON for box in beside)
+        first = all(box.top >= own.bottom - _EPSILON for box in beside)
+        moved = Rect(own.x, own.y + shift, own.width, own.height)
+        fits = (
+            room.top - _EPSILON <= moved.top - (parts.top - frame.top)
+            and moved.bottom + (frame.bottom - parts.bottom) <= room.bottom + _EPSILON
+        )
+    else:
+        aside = other.bottom <= frame.top + _EPSILON or other.top >= frame.bottom - _EPSILON
+        shift = other.center.x - own.center.x
+        last = all(box.right <= own.left + _EPSILON for box in beside)
+        first = all(box.left >= own.right - _EPSILON for box in beside)
+        moved = Rect(own.x + shift, own.y, own.width, own.height)
+        fits = (
+            room.left - _EPSILON <= moved.left - (parts.left - frame.left)
+            and moved.right + (frame.right - parts.right) <= room.right + _EPSILON
+        )
+    if not beside or not aside or not fits:
+        return 0.0
+    if not ((last and shift > _EPSILON) or (first and shift < -_EPSILON)):
+        return 0.0
+    near = moved.inflated(gap / 2.0)
+    if any(_overlap(box, near) for box in others):
+        return 0.0
+    return shift
+
+
+def _overlap(a: Rect, b: Rect) -> bool:
+    return a.left < b.right and a.right > b.left and a.top < b.bottom and a.bottom > b.top
+
+
+def _reaching(group: FittedGroup, box: Rect) -> FittedGroup:
+    """``group`` with its bounds, and the room of its parts, reaching as far as ``box``."""
+
+    def reached(rect: Rect) -> Rect:
+        left, top = min(rect.left, box.left), min(rect.top, box.top)
+        right, bottom = max(rect.right, box.right), max(rect.bottom, box.bottom)
+        return Rect(left, top, right - left, bottom - top)
+
+    content = reached(group.content_bounds)
+    if content == group.content_bounds:
+        return group
+    grown = Rect(
+        group.bounds.x + (content.x - group.content_bounds.x),
+        group.bounds.y + (content.y - group.content_bounds.y),
+        group.bounds.width + (content.width - group.content_bounds.width),
+        group.bounds.height + (content.height - group.content_bounds.height),
+    )
+    return replace(group, bounds=grown, content_bounds=content)
+
+
 def _depth(group_id: str, parent: dict[str, str]) -> int:
     depth = 0
     while group_id in parent:
@@ -337,12 +484,18 @@ def _best_shift(
     every: tuple = (),
     figure: FigureSpec | None = None,
     parents: dict[str, str] | None = None,
+    settled: tuple = (),
+    voice: str | None = None,
 ) -> float:
     """The slide that lets the most arrows run straight, centred among them, or 0.
 
     Of slides that straighten as many, one that straightens an arrow running on, from
     a part written earlier to one written later, beats one that straightens a loop back:
     a part stays where its flow put it when a line back to it is drawn.
+
+    Given all the figure's connections (``settled``) and the one part that speaks for
+    what slides (``voice``: a group's anchor), no slide at all while an arrow of that
+    part's runs between the middles of two faces it has to itself (``_settled``).
     """
 
     if across == "x":
@@ -379,6 +532,13 @@ def _best_shift(
         if pair is not None and not _blocked(
             nodes, members, other.node_id, bounds, pair[1], across
         ):
+            if mine.node_id == voice and _settled(
+                nodes[mine.node_id], nodes[other.node_id], across, settled, nodes
+            ):
+                # The group was lined up by this part, and its line runs between the
+                # middles of two faces it has to itself: no slide that straightens another
+                # is worth setting it off them.
+                return 0.0
             pairs.append(pair)
             # (Lines coming into the one port; lines it sends out to several are each their own.)
             fans.append(
@@ -480,6 +640,23 @@ def _reaches(
         _reach(
             other, second, across, faces, style, lone and _alone(other, mine, across, every, nodes)
         ),
+    )
+
+
+def _settled(
+    mine: FittedNode, other: FittedNode, across: str, every: tuple, nodes: dict[str, FittedNode]
+) -> bool:
+    """Whether the line between two boxes already runs from the middle of one's face to
+    the middle of the other's, each face that line's alone: where lining them up put it."""
+
+    if across == "x":
+        apart = abs(mine.bounds.center.x - other.bounds.center.x)
+    else:
+        apart = abs(mine.bounds.center.y - other.bounds.center.y)
+    return (
+        apart <= _CENTRED
+        and _alone(mine, other, across, every, nodes)
+        and _alone(other, mine, across, every, nodes)
     )
 
 
