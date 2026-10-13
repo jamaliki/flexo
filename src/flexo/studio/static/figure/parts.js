@@ -5478,7 +5478,8 @@ export function figureParts(host) {
       kind === "structure" ? structureProblem(node) : null,
       shapeProblem(node, part),
       // (A structure is drawn in its own colours, by mol-sketch: no tone or colours of a shape's.)
-      kind === "structure" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
+      // (A structure and a plot are drawn in colours of their own.)
+      kind === "structure" || kind === "plot" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
       textSection([node.id]),
       showSection([node.id]),
       h("div.section", {}, ui.field("Type", type),

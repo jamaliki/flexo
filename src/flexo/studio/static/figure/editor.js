@@ -536,7 +536,7 @@ export function mount(studio, main) {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
       const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
-      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : ".pdb,.cif,.mmcif,.ent";
+      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
       const actions = [{ label: "Upload…", aside: true, run: () => { upload.click(); return false; } }];
@@ -579,7 +579,9 @@ export function mount(studio, main) {
             h("span.menu-text", {}, h("span", {}, file.split("/").pop()), file.includes("/") ? h("span.menu-hint", {}, file.slice(0, file.lastIndexOf("/") + 1)) : null));
           return row;
         })
-          : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID." : "No files of this type next to the figure. Click Upload to add one."));
+          : h("div.empty", {}, types.includes("structure") ? "No structure files next to the figure. Upload a PDB or mmCIF file, or enter a PDB ID."
+            : types.includes("python") ? "No Python files next to the figure. A plot is a function in one that returns a matplotlib figure: click Upload to add the file."
+              : "No files of this type next to the figure. Click Upload to add one."));
         // The keys at the first file, to choose with the arrows.
         list.querySelector("[role=option]")?.focus({ preventScroll: true });
       });

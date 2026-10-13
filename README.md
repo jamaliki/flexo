@@ -749,6 +749,36 @@ A picture in a figure is cropped by how much is cut off each side, in hundredths
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part
 kept.
 
+### Plots in a figure
+
+A paper's figure has plots among its diagrams. A `plot` names a Python file and a
+function in it that returns a matplotlib figure (`pip install "flexo[plots]"`):
+
+```yaml
+- id: loss
+  kind: plot
+  properties: {source: plots.py, function: loss}
+  width: 60mm
+  height: 40mm
+```
+
+```python
+panel.plot("loss", "plots.py", "loss", width="60mm", height="40mm")
+```
+
+The function is called with matplotlib set to the figure's look -- its font and
+size, its inks, the palette's tones as the colour cycle (`flexo.plots.plot_style`)
+-- and what it returns is laid out again at the shape's own size, so its words
+are the size of the figure's words whatever the panel's size. It is drawn as
+vectors, its words kept as words, and drawn again only when its file, its size or
+the figure's look changes. In the studio, **Shape › Plot** asks for the file and
+takes its first function; the figure redraws when the file is saved.
+
+A figure that names Python runs it when it is drawn: in a studio, only in a folder
+you have trusted. Not run -- or with matplotlib missing, or the function failing
+-- the plot is an empty box and a warning that says why, and the rest of the
+figure is drawn.
+
 ### Hiding, dimming and highlighting parts
 
 A talk shows one figure many times: all of it, then one part with the rest faint, then

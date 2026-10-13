@@ -811,6 +811,28 @@ def _basics() -> list[dict[str, Any]]:
             common=[LABEL],
             needs_file=True,
         ),
+        # A plot is drawn by a function, at the size it is given (flexo.plots): it has no
+        # words, tone or outline of its own.
+        _part(
+            "plot",
+            "Plot",
+            "Basics",
+            "A matplotlib figure from a Python file, drawn at its size in the figure\u2019s type",
+            {"properties": {"source": "", "function": ""}},
+            [
+                _field("properties.source", "File", "file", types=["python"]),
+                _field(
+                    "properties.function",
+                    "Function",
+                    "text",
+                    hint="In the file: it returns a matplotlib figure",
+                ),
+                *SIZE,
+            ],
+            common=[],
+            needs_file=True,
+            words=["chart", "graph", "matplotlib", "curve", "data", "axes"],
+        ),
         _part("junction", "Junction", "Basics", "A point where lines meet", common=[]),
         _cells(),
         # A frame goes round shapes chosen (Group, then Frame): it is never added alone, so

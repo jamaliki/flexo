@@ -737,6 +737,14 @@ class _Document:
             item["label"] = self.structure_label(item.get("label"), properties.get("source"))
             if not item["label"]:
                 item.pop("label")
+        # A plot made of a file is that file's first function, till another is named.
+        if kind == "plot" and properties.get("source") and not properties.get("function"):
+            file = Path(str(properties["source"]))
+            file = file if file.is_absolute() else (self.base or Path.cwd()) / file
+            if offered := plot_functions(file):
+                properties["function"] = offered[0]
+        if kind == "plot":
+            properties = {key: value for key, value in properties.items() if value != ""}
         if properties:
             item["properties"] = properties
         # Put into a line (``into``, chosen or let go on): between the parts it joins.
@@ -2292,6 +2300,23 @@ def _insert_after_id(item: dict[str, Any], key: str, value: object) -> None:
     rest = {name: item.pop(name) for name in list(item) if name != "id"}
     item[key] = value
     item.update(rest)
+
+
+def plot_functions(path: Path) -> list[str]:
+    """The functions a plot's Python file offers -- those at its top, not named as its own
+    (``_helper``) -- read without running it; none if it does not read."""
+
+    import ast
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return []
+    return [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
+    ]
 
 
 def _set(item: dict[str, Any], path: list[str], value: object) -> None:

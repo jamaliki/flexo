@@ -32,6 +32,7 @@ assistant = ["anthropic>=1.9", "openai>=1.60"]  # Claude; ChatGPT and other mode
 structures = ["gemmi>=0.6"]
 molecules = ["molsketch @ git+https://github.com/jamaliki/mol-sketch#subdirectory=python"]
 pdf = ["pypdfium2>=4.30", "pillow>=10"]  # PDF pages and Illustrator files as artwork
+plots = ["matplotlib>=3.8"]  # a plot in a figure: a function returning a matplotlib figure
 
 [project.scripts]
 flexo = "flexo.cli:main"
@@ -42,6 +43,7 @@ dev = [
   "openai>=1.60",
   "gemmi>=0.6",
   "hypothesis>=6.138",
+  "matplotlib>=3.8",
   "pillow>=10",
   "pypdfium2>=5.13.0",
   "pytest>=8.4",

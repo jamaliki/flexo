@@ -168,6 +168,12 @@ def _framed(
     """The figure drawn, its frames round what they name."""
 
     placed, said = place(frames, routed, style)
+    # Its plots drawn (once: kept for the figure's own drawing), and what to say of those
+    # that were not.
+    if any(node.measured.spec.kind == "plot" for node in fitted.nodes):
+        from flexo.plots import said as plots_said
+
+        said = (*said, *plots_said(fitted.nodes, style, palette))
     if said:
         measured = replace(measured, diagnostics=measured.diagnostics + said)
         fitted = replace(fitted, measured=measured)

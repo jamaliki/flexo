@@ -1718,6 +1718,35 @@ class GroupBuilder:
 
         return self.node(id, "inset", label=label, **options)
 
+    def plot(
+        self,
+        id: str,
+        source: str | Path,
+        function: str,
+        *,
+        width: Extent | str | float | None = None,
+        height: Extent | str | float | None = None,
+        **options: object,
+    ) -> NodeHandle:
+        """A plot: the matplotlib figure that ``function`` in the Python file ``source``
+        returns, drawn at this node's size in the figure's type (``flexo.plots``).
+
+        The function is called with matplotlib set to the figure's look -- its font and
+        size, its inks, the palette's tones as the colour cycle -- and the figure it
+        returns is laid out again ``width`` by ``height`` (60 mm wide and 3:2 unless
+        said), so its words are the size of the figure's own, not scaled with it. With
+        the file not run (a folder not trusted, in a studio), matplotlib not installed,
+        or the function failing, it is an empty box and a warning that says why.
+        """
+
+        return self.node(
+            id,
+            "plot",
+            width=width,
+            height=height,
+            **_with_properties(options, source=str(source), function=function),  # type: ignore[arg-type]
+        )
+
     def image(
         self,
         id: str,

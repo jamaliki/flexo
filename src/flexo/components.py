@@ -514,6 +514,8 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # An image is exactly as big as the artwork it carries, or as big as the
         # author asked; a minimum here would pad a drawing away from its size.
         ComponentDefinition("image", Size(0.0, 0.0), _IMAGE_PORTS),
+        # A plot is a picture drawn by a function, at the size it is given (flexo.plots).
+        ComponentDefinition("plot", Size(0.0, 0.0), _IMAGE_PORTS),
         ComponentDefinition("label", Size(0.0, 0.0), ()),
         # Words with ports: "Inputs" under a tower, "Output probabilities" over
         # it -- a thing an arrow starts or ends at that is not a box.
@@ -891,6 +893,10 @@ def intrinsic_node_size(
         from flexo.drawn import picture
 
         return picture(node, style).size
+    elif node.kind == "plot":
+        from flexo.plots import plot_size
+
+        return plot_size(node, style)
     elif node.kind == "image":
         # Artwork has a size of its own, and one authored extent implies the
         # other, so image sizing answers on its own rather than through the
@@ -1051,15 +1057,18 @@ def _least_diamond(corners: list[tuple[float, float]], aspect: float) -> Size:
     return Size(width, height)
 
 
-FIT_NEVER = frozenset({"label", "spacer", "icon", "op", "vector", "volume", "image", "structure"})
+FIT_NEVER = frozenset(
+    {"label", "spacer", "icon", "op", "vector", "volume", "image", "structure", "plot"}
+)
 """Kinds sized by their content alone, or by handles of their own: no size to fit. (Text has
 one, its width only: where its words wrap.)"""
 
-GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op"})
+GROWN_NEVER = frozenset({"label", "text", "image", "vector", "spacer", "op", "plot"})
 """Kinds whose size is their content's own, never grown around a label."""
 
 OUTLINED_NEVER = DRAWN_KINDS | {
     "label", "spacer", "text", "icon", "image", "junction", "matrix", "attention", "graph", "inset",
+    "plot",
 }
 """Kinds with no outline to stroke dashed or dotted (a node's ``line``): words alone, a
 picture, a point, and the drawings whose line work is their own."""

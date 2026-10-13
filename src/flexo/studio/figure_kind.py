@@ -88,6 +88,9 @@ groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label};
 A frame round shapes anywhere in the figure (in different groups too), which moves none of
   them: a node {id, kind: frame, label, properties: {around: "id, id" (shapes or groups),
   layer: behind|front|over (a tint they show through), tone}}.
+A plot: {id, kind: plot, properties: {source: plots.py, function: name}, width, height} -- the
+  matplotlib figure that function returns, in the figure's font and colours, at that size (don't
+  set fonts, sizes or colours in the function: they are the figure's).
 A node, a group and a frame each take line: dashed|dotted for their outline, as an edge does.
 A node's properties set its whole label: bold: true, italic: true, size: 6pt, align: left|right;
   an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side).
