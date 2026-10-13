@@ -1410,3 +1410,25 @@ def test_several_parts_of_one_row_move_a_place_together() -> None:
     apart = apply(text, {"do": "shift", "ids": ["a", "c"], "by": 1})["text"]
     assert order(apart) == ["b", "a", "d", "c", "e"]
     assert order(apply(text, {"do": "shift", "ids": ["d", "e"], "by": 1})["text"]) == list("abcde")
+
+
+def test_a_part_dragged_carries_the_others_chosen_with_it() -> None:
+    """Several chosen and one of them dragged, only that one moved."""
+
+    text = (
+        "figure: {id: row}\n"
+        "groups:\n- {id: root, role: canvas, layout: {kind: row}, children: [a, b, box, e]}\n"
+        "- {id: box, layout: {kind: column}, children: [c, d]}\n"
+        "nodes:\n" + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcde")
+    )
+
+    def held(text: str) -> dict[str, list[str]]:
+        return {group["id"]: group["children"] for group in yaml.safe_load(text)["groups"]}
+
+    # Into the column, after its first: the one dragged, then the others in the order they stood.
+    moved = apply(text, {"do": "move", "id": "a", "parent": "box", "index": 1, "with": ["e", "b"]})
+    assert held(moved["text"]) == {"root": ["box"], "box": ["c", "a", "b", "e", "d"]}
+    assert moved["select"] == ["a", "b", "e"]
+    # Never the group it goes into, nor itself; and with none, as ever.
+    same = apply(text, {"do": "move", "id": "a", "parent": "box", "index": 0, "with": ["box", "a"]})
+    assert held(same["text"]) == {"root": ["b", "box", "e"], "box": ["a", "c", "d"]}

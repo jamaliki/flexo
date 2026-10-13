@@ -97,8 +97,8 @@ A figure of several panels, as a journal prints one: each panel a group with rol
   frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
   a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,
   columns: 2}, children: [first, second, ...]}).
-Labels are markup: $maths$, `code`, [words]{accent} in a colour, \\n a new line (asterisks are
-drawn as typed: no emphasis). `flexo schema` prints the full schema.
+Labels are markup: $maths$, `code`, [words]{accent} in a colour, [words]{bold} or {italic},
+\\n a new line (asterisks are drawn as typed). `flexo schema` prints the full schema.
 """
 
 

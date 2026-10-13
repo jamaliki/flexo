@@ -236,6 +236,8 @@ _COMMAND = re.compile(r"\\([A-Za-z]+|.)")
 
 _COLOURED = re.compile(r"\[([^\]\n]+)\]\{(#[0-9a-fA-F]{3,6}|[a-z][a-z0-9-]*)\}")
 """``[words]{accent}``: words in a colour -- a palette role, a friendly name, or a hex."""
+_EMPHASES = {"bold": (True, False), "italic": (False, True), "bold-italic": (True, True)}
+"""``[words]{bold}``: what is said in those braces that is no colour, as (bold, italic)."""
 _LINK = re.compile(r"\[([^\]\n]+)\]\(((?:https?|mailto|file):[^)\s]+)\)")
 """``[words](url)``: words that link somewhere."""
 
@@ -298,7 +300,20 @@ def _runs(text: str, *, breaks: bool) -> tuple[TextRun, ...]:
                 plain = []
             colour = coloured.group(2)
             inner = _runs(coloured.group(1), breaks=breaks)
-            runs.extend(replace(run, color=colour) for run in inner)
+            if colour in _EMPHASES:
+                # ``[words]{bold}``, ``{italic}``: not a colour but a weight or a slant, said
+                # the same way (a label's asterisks are drawn as typed).
+                bold, italic = _EMPHASES[colour]
+                runs.extend(
+                    replace(
+                        run,
+                        weight=max(run.weight, 700) if bold else run.weight,
+                        italic=run.italic or italic,
+                    )
+                    for run in inner
+                )
+            else:
+                runs.extend(replace(run, color=colour) for run in inner)
             index = coloured.end()
             continue
         if character == "[" and (link := _LINK.match(text, index)):

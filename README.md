@@ -741,7 +741,9 @@ A shape says how the whole of its label is set, in its properties: `bold: true`,
 `italic: true`, `size: 6pt` and `align: left` (or `right`). The size is what the
 label is measured at, so the shape is the size for it. In the studio a shape (or
 several chosen) has a **Text** section -- Bold, Italic, the side its lines stand at,
-and Size -- and ⌘B and ⌘I work on shapes chosen.
+and Size -- and ⌘B and ⌘I work on shapes chosen. Single words are bold or italic as
+coloured words are written: `[word]{bold}`, `[lacZ]{italic}` (a label's asterisks are
+drawn as typed); ⌘B and ⌘I do it to the words chosen while a label is typed.
 
 A picture in a figure is cropped by how much is cut off each side, in hundredths:
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part

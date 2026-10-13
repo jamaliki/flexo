@@ -539,6 +539,7 @@ export function figureParts(host) {
       case "rename": return `Change ID of ${name(action.id)}`;
       // A part put on a line of its own beside another makes a row (a column) of the two: said so.
       case "move": {
+        if (action.with?.length) return many([action.id, ...action.with], "Move");
         // Out of its own row (column), onto a line of its own beside it: said as its menu says it.
         if (action.line && action.of && action.of === parentOf(action.id)?.id) {
           const own = { below: "Row Below", above: "Row Above", left: "Column on the Left", right: "Column on the Right" }[action.line];
@@ -3396,7 +3397,10 @@ export function figureParts(host) {
     if (!id || id === model()?.root || !(nodeOf(id) || groupOf(id)) || !parentOf(id)) return;
     // (A frame stays round its shapes: it has no place of its own to be dragged from.)
     if (nodeOf(id)?.kind === "frame") return;
-    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey };
+    // One of several chosen, dragged: the others go where it is let go, after it.
+    const also = state.selected.length > 1 && state.selected.includes(id)
+      ? state.selected.filter((other) => other !== id && other !== model()?.root && (nodeOf(other) || groupOf(other)) && nodeOf(other)?.kind !== "frame") : [];
+    drag = { id, from: { x: event.clientX, y: event.clientY }, started: false, frame: 0, at: null, copy: event.altKey, also };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
     window.addEventListener("pointercancel", dragCancel);
@@ -3900,12 +3904,14 @@ export function figureParts(host) {
       else into();
       return;
     }
-    moveAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn, failed: () => sendHome(was) });
+    moveAsSeen(was.id, at, { folds: was.folds, drawn: was.drawn, failed: () => sendHome(was), also: was.also || [] });
   }
   // A part moved to `at` (a place in the figure as it is seen: asSeen), by a drag or a key:
   // a figure folded onto lines to fit is written as seen first, one step with the move,
   // which then goes into the lines as written.
-  function moveAsSeen(id, at, { folds = [], drawn = null, failed = null } = {}) {
+  function moveAsSeen(id, at, { folds = [], drawn = null, failed = null, also = [] } = {}) {
+    // (The others chosen with it, where it goes into a row, column or group: after it.)
+    const carried = also.length ? { with: also } : {};
     // Lined up under a part of the line it goes with (or the line itself): only it moves.
     if (at.kind === "align") {
       const label = at.centred ? `Centre ${inQuotes(nameOf(id))}` : `Place ${inQuotes(nameOf(id))} ${at.side === "below" ? "Under" : "Over"} ${inQuotes(nameOf(at.with))}`;
@@ -3914,13 +3920,13 @@ export function figureParts(host) {
     }
     if (!folds.length) {
       if (at.kind === "line") ownLine(id, at.of, at.side, { failed, drawn });
-      else act({ do: "move", id, parent: at.parent, index: at.index }, { failed });
+      else act({ do: "move", id, parent: at.parent, index: at.index, ...carried }, { failed });
       return;
     }
-    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id });
+    const merge = `as-drawn:${id}:${Date.now()}`, label = said({ do: "move", id, ...carried });
     arrangeSeen(folds, { merge, label, failed }, (written) => {
       if (at.kind === "line") ownLine(id, written(at.of), at.side, { failed, merge, label });
-      else act({ do: "move", id, parent: written(at.parent), index: at.index }, { merge, label, failed });
+      else act({ do: "move", id, parent: written(at.parent), index: at.index, ...carried }, { merge, label, failed });
     });
   }
   // A copy of a part put at `at` (as moveAsSeen puts the part itself), one step: the part
@@ -4419,7 +4425,7 @@ export function figureParts(host) {
     const original = markupOf(item[key]);
     // A label's words are names and maths, not prose: no spelling, no corrections, no links.
     // Its format bar is the slide's words': the theme's colours too.
-    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true });
+    const field = ui.markup({ value: original, rows: 1, colours: labelColours(), emphasis: "tags", links: false, spelling: false, lines: true });
     // Typed where the words are, as they look there, when the part has words drawn to
     // lie over; else in a box under it.
     // A shape with no words is typed on where they will go, what it is shown faintly there.
@@ -6185,7 +6191,7 @@ export function figureParts(host) {
         // A shape's words, while it has none, say faintly what it is, as on the drawing.
         const placeholder = field.key === "label" && item?.id && nodeOf(item.id) ? hintOf(item) : "";
         // (Words kept as runs are shown as the markup that writes them, as on the drawing.)
-        const control = ui.markup({ value: typing(key) ?? markupOf(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: false, links: false, spelling: false, lines: true, onInput: type });
+        const control = ui.markup({ value: typing(key) ?? markupOf(value), rows: 1, key, placeholder, colours: labelColours(), emphasis: "tags", links: false, spelling: false, lines: true, onInput: type });
         // Esc is done too, as it is on the drawing and in every field: the words are kept.
         control.area.addEventListener("keydown", (event) => {
           if (event.isComposing || !((event.key === "Enter" && (event.metaKey || event.ctrlKey)) || event.key === "Escape")) return;

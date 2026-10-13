@@ -230,3 +230,24 @@ def test_a_picture_in_a_figure_is_cropped(tmp_path) -> None:
     assert _tag(svg, "half.artwork.whole").startswith("<image")
     fields = {field["key"] for field in catalogue()["parts"]["image"]["fields"]}
     assert {f"properties.crop_{side}" for side in ("left", "top", "right", "bottom")} <= fields
+
+
+def test_single_words_of_a_label_are_bold_or_italic() -> None:
+    """A label's asterisks are drawn as typed, so a word in it had no way to be bold: it is
+    said as a coloured word is, ``[word]{bold}``."""
+
+    from flexo.markup import parse_label
+
+    runs = parse_label("An [important]{bold} word, [lacZ]{italic}, [both]{bold-italic}, *kept*")
+    said = {run.text: (run.weight, run.italic) for run in runs}
+    assert said["important"] == (700, False) and said["lacZ"] == (400, True)
+    assert said["both"] == (700, True) and said["An "] == (400, False)
+    assert any("*kept*" in run.text for run in runs)
+    # A colour is still a colour, and may hold a bold word.
+    (red,) = (run for run in parse_label("[warm]{accent}") if run.text == "warm")
+    assert red.color == "accent" and red.weight == 400
+    with flexo.Figure("worded") as figure:
+        figure.block("a", label="An [important]{bold} word")
+    svg = compile_figure(figure.spec).document.text
+    assert re.search(r'<tspan[^>]*font-weight="700"[^>]*>important</tspan>', svg)
+    assert "{bold}" not in svg

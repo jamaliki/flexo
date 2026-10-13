@@ -1698,12 +1698,44 @@ class _Document:
         target = self.group(parent_id) if parent_id != self.root else self.written_root()
         if target is None:
             raise EditError(f"There\u2019s no group named “{parent_id}”.")
+        # Others carried with it (``with``: several chosen, one of them dragged) go where it
+        # goes, after it, in the order they stood.
+        also = [
+            other
+            for other in dict.fromkeys(str(item) for item in action.get("with") or [])
+            if other not in (identifier, parent_id, self.root)
+            and (self.node(other) is not None or self.group(other) is not None)
+            and other not in self.descendants(identifier)
+            and parent_id not in self.descendants(other)
+        ]
+        stood = {other: place for place, other in enumerate(self.reading_order())}
+        also.sort(key=lambda other: stood.get(other, len(stood)))
         self.detach(identifier)
         children = target.setdefault("children", [])
         index = action.get("index")
         index = len(children) if index is None else max(0, min(int(index), len(children)))
         children.insert(index, identifier)
-        return [identifier]
+        for other in also:
+            self.parent_of(other)
+            self.detach(other)
+            children.insert(children.index(identifier) + 1 + also.index(other), other)
+        return [identifier, *also]
+
+    def reading_order(self) -> list[str]:
+        """Every part and group in the order it is read: the root's children, each followed
+        by what it holds."""
+
+        found: list[str] = []
+        left = [self.root]
+        while left:
+            one = left.pop(0)
+            group = self.group(one)
+            held = list((group or {}).get("children") or []) if one != self.root or group else []
+            if one == self.root and group is None:
+                held = list(self.written_root().get("children") or [])
+            found += [item for item in held if item not in found]
+            left = [*held, *left]
+        return found
 
     def put_into(self, identifier: str, into: str, parent: object = None) -> list[str]:
         """A shape let go on a line (``into``) between two others: put into it, between them
