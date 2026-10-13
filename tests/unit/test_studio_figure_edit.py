@@ -1388,3 +1388,25 @@ def test_a_picture_added_with_a_width_keeps_it_and_joins_nothing(tmp_path: Path)
     compiled = compile_figure(parse(result["text"], tmp_path))
     assert not [item for item in compiled.measured.diagnostics if item.code == "layout.width.grown"]
 
+
+
+def test_several_parts_of_one_row_move_a_place_together() -> None:
+    """⌥ and an arrow moved one part a place; several chosen did not move at all."""
+
+    text = (
+        "figure: {id: row}\n"
+        "groups:\n- {id: root, role: canvas, layout: {kind: row}, children: [a, b, c, d, e]}\n"
+        "nodes:\n" + "".join(f"- {{id: {name}, label: {name.upper()}}}\n" for name in "abcde")
+    )
+
+    def order(text: str) -> list[str]:
+        return yaml.safe_load(text)["groups"][0]["children"]
+
+    on = apply(text, {"do": "shift", "ids": ["b", "c"], "by": 1})
+    assert order(on["text"]) == ["a", "d", "b", "c", "e"] and on["select"] == ["b", "c"]
+    back = apply(on["text"], {"do": "shift", "ids": ["c", "b"], "by": -1})["text"]
+    assert order(back) == ["a", "b", "c", "d", "e"]
+    # Apart, each moves a place and they stay in their order; at the end, they stay put.
+    apart = apply(text, {"do": "shift", "ids": ["a", "c"], "by": 1})["text"]
+    assert order(apart) == ["b", "a", "d", "c", "e"]
+    assert order(apply(text, {"do": "shift", "ids": ["d", "e"], "by": 1})["text"]) == list("abcde")

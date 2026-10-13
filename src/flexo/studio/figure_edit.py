@@ -76,6 +76,7 @@ STRUCTURAL = frozenset(
         "delete",
         "gather",
         "panels",
+        "shift",
         "frame",
         "ungroup",
         "move",
@@ -1660,6 +1661,27 @@ class _Document:
                 held = [item for item in _framed(node) if item != identifier]
                 _frame_round(node, [*held, *(item for item in inside if item not in held)])
         return inside
+
+    def _shift(self, action: Mapping[str, Any]) -> list[str]:
+        """Several parts of one row, column or group (``ids``) moved a place back or on
+        together (``by``: -1 or 1), in the order they stand: what was before the first of
+        them is after the last (or the other way), and nothing else moves."""
+
+        ids = [str(item) for item in action.get("ids") or []]
+        on = int(action.get("by") or 1) > 0
+        if not ids:
+            return []
+        holders = {id(self.parent_of(item)) for item in ids}
+        if len(holders) != 1:
+            raise EditError("Select shapes that are in the same row, column or group.")
+        children: list[str] = self.parent_of(ids[0])["children"]
+        places = sorted(children.index(item) for item in ids)
+        # (Each from the end they move toward, so one never jumps another of them.)
+        for place in reversed(places) if on else places:
+            other = place + (1 if on else -1)
+            if 0 <= other < len(children) and children[other] not in ids:
+                children[place], children[other] = children[other], children[place]
+        return ids
 
     def _move(self, action: Mapping[str, Any]) -> list[str]:
         identifier = str(action["id"])

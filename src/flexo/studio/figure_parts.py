@@ -789,7 +789,25 @@ def _basics() -> list[dict[str, Any]]:
             "Basics",
             "An image or drawing from a file",
             {"properties": {"source": ""}},
-            [_field("properties.source", "File", "file", types=["image"]), *SIZE],
+            [
+                _field("properties.source", "File", "file", types=["image"]),
+                *SIZE,
+                # Cropped: so much of it cut off each side (flexo.artwork.crop_of).
+                *(
+                    _field(
+                        f"properties.crop_{side}",
+                        f"Crop {side.title()}",
+                        "number",
+                        min=0,
+                        max=90,
+                        step=1,
+                        unit="%",
+                        hint="How much of the picture is cut off this side",
+                        more=True,
+                    )
+                    for side in ("left", "top", "right", "bottom")
+                ),
+            ],
             common=[LABEL],
             needs_file=True,
         ),

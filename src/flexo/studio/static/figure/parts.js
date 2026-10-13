@@ -525,6 +525,7 @@ export function figureParts(host) {
       case "duplicate": return many(action.ids, "Duplicate");
       // (A module made of the shapes chosen is said so: "Make Module".)
       case "frame": return "Add Frame";
+      case "shift": return many(action.ids, "Move");
       case "panels": return action.count > panelsNow() && action.count === panelsNow() + 1 && panelsNow() ? "Add Panel" : `Lay Out as ${action.count} Panels`;
       case "gather": return action.role === "module" ? "Make Module" : action.role === "panel" ? (action.ids?.length ? "Make Panel" : "Add Panel") : action.ids?.length ? many(action.ids, "Group") : "Add Group";
       case "ungroup": return `Ungroup ${name(action.id)}`;
@@ -1842,7 +1843,20 @@ export function figureParts(host) {
   }
   // A part one place back or on in its row or column, as ⌥ and an arrow move it: the Mac's
   // Arrange › Move Up and Move Down.
+  // Several chosen, all in one row, column or group: moved a place together.
+  function shiftable() {
+    const parts = state.selected.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
+    if (parts.length < 2 || parts.length !== state.selected.length) return false;
+    const holders = new Set(parts.map((id) => parentOf(id)?.id ?? null));
+    return holders.size === 1;
+  }
+  function shiftChosen(on) {
+    if (!shiftable()) return false;
+    act({ do: "shift", ids: [...state.selected], by: on ? 1 : -1 });
+    return true;
+  }
   function moveChosen(on) {
+    if (state.selected.length > 1) return shiftChosen(on);
     const id = chosenOne();
     if (!id || running || queue.length) return false;
     const across = parentOf(id) && drawnKind(parentOf(id)) === "row";
@@ -1851,7 +1865,7 @@ export function figureParts(host) {
     nudge(id, key);
     return true;
   }
-  const canMove = (on) => { const id = chosenOne(); if (!id) return false; const across = parentOf(id) && drawnKind(parentOf(id)) === "row"; return Boolean(nudgePlace(id, across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp")); };
+  const canMove = (on) => { if (state.selected.length > 1) return shiftable(); const id = chosenOne(); if (!id) return false; const across = parentOf(id) && drawnKind(parentOf(id)) === "row"; return Boolean(nudgePlace(id, across ? (on ? "ArrowRight" : "ArrowLeft") : on ? "ArrowDown" : "ArrowUp")); };
 
   // -- lines --
   function toggleConnect(force) {
@@ -5285,6 +5299,13 @@ export function figureParts(host) {
     // ⌥ (or ⇧) and an arrow move the part a place that way, as it is seen (nudge): a shape
     // laid out by the figure moves among the others, not by a few points.
     if ((event.altKey || event.shiftKey) && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      // Several of one row, column or group move a place together, as they stand.
+      if (state.selected.length > 1) {
+        if (!shiftable()) return false;
+        event.preventDefault();
+        if (!running && !queue.length) shiftChosen(event.key === "ArrowDown" || event.key === "ArrowRight");
+        return true;
+      }
       const id = chosenOne();
       if (!id) return false;
       event.preventDefault();

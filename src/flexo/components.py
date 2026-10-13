@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from itertools import pairwise
 from math import log2
 
-from flexo.artwork import node_artwork
+from flexo.artwork import crop_of, node_artwork
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.drawn import DRAWN_KINDS
 from flexo.geometry import Point, Rect, Side, Size
@@ -807,6 +807,11 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
     if width is not None and height is not None:
         return Size(width, height)
     aspect = artwork.aspect
+    # (Cropped, it is as large as the part of it kept: flexo.artwork.crop_of.)
+    kept = crop_of(node)
+    across, down = (kept[2], kept[3]) if kept else (1.0, 1.0)
+    if aspect is not None:
+        aspect *= across / down
     if aspect is None:
         raise FlexoError(
             Diagnostic(
@@ -824,8 +829,8 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
         drawn = max(0.0, height - chrome.height)
         return Size(max(drawn * aspect + chrome.width, least_width), height)
     return Size(
-        max((artwork.width or 0.0) + chrome.width, least_width),
-        (artwork.height or 0.0) + chrome.height,
+        max((artwork.width or 0.0) * across + chrome.width, least_width),
+        (artwork.height or 0.0) * down + chrome.height,
     )
 
 

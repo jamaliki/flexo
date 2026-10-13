@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.artwork import node_artwork, picture_href
+from flexo.artwork import crop_of, node_artwork, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     FIT_NEVER,
@@ -873,11 +873,36 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         else node.bounds
     )
     artwork = node_artwork(spec)
+    kept = crop_of(spec)
+    if kept is not None and artwork.width and artwork.height:
+        # Cropped: the part of it kept fills the bounds, through a window on the whole of
+        # it (a nested drawing, which shows what its viewBox names and no more).
+        whole_w, whole_h = artwork.width, artwork.height
+        window = element(
+            parent,
+            "svg",
+            id=f"{spec.id}.artwork",
+            x=bounds.x,
+            y=bounds.y,
+            width=bounds.width,
+            height=bounds.height,
+            viewBox=" ".join(
+                number(value)
+                for value in (
+                    kept[0] * whole_w, kept[1] * whole_h, kept[2] * whole_w, kept[3] * whole_h
+                )
+            ),
+            preserveAspectRatio=_ARTWORK_FIT,
+        )
+        bounds = Rect(0.0, 0.0, whole_w, whole_h)
+        parent, part = window, f"{spec.id}.artwork.whole"
+    else:
+        part = f"{spec.id}.artwork"
     if artwork.format in {"png", "jpeg"}:
         element(
             parent,
             "image",
-            id=f"{spec.id}.artwork",
+            id=part,
             x=bounds.x,
             y=bounds.y,
             width=bounds.width,
@@ -888,7 +913,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         return
     nested = ET.fromstring(artwork.markup)
     for name, value in (
-        ("id", f"{spec.id}.artwork"),
+        ("id", part),
         ("x", number(bounds.x)),
         ("y", number(bounds.y)),
         ("width", number(bounds.width)),

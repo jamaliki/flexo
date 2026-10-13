@@ -157,6 +157,29 @@ def _data_uri(resolved: str, stamp: int, format: str) -> str:
     return f"data:image/{format};base64,{encoded}"
 
 
+CROP_SIDES = ("crop_left", "crop_top", "crop_right", "crop_bottom")
+"""An image's properties that trim its artwork: how much of it is cut off each side, in
+hundredths of its width (left, right) or height (top, bottom)."""
+
+
+def crop_of(spec: NodeSpec) -> tuple[float, float, float, float] | None:
+    """The part of an image's artwork that is kept -- x, y, width and height as fractions
+    of it -- from what its properties trim off each side (``CROP_SIDES``): ``None`` for
+    all of it. At least a twentieth is kept each way, whatever is asked."""
+
+    def trimmed(name: str) -> float:
+        try:
+            return min(max(float(spec.property(name, 0) or 0), 0.0), 95.0) / 100.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    left, top, right, bottom = (trimmed(name) for name in CROP_SIDES)
+    if not (left or top or right or bottom):
+        return None
+    width, height = max(1.0 - left - right, 0.05), max(1.0 - top - bottom, 0.05)
+    return (min(left, 1.0 - width), min(top, 1.0 - height), width, height)
+
+
 def node_artwork(spec: NodeSpec) -> Artwork:
     """The artwork an ``image`` node names, loaded and sanitized.
 

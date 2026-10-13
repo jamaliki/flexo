@@ -186,3 +186,47 @@ def test_the_studio_says_which_kinds_take_text_styling() -> None:
     nodes = {node["id"]: node for node in yaml.safe_load(text)["nodes"]}
     assert nodes["plain"]["properties"] == {"italic": True}
     assert nodes["head"].get("properties") == {"italic": True}
+
+
+def test_a_picture_in_a_figure_is_cropped(tmp_path) -> None:
+    """A picture in a figure was all of it or none: a panel of a larger image, or a plot
+    without its margin, had to be cut in another program first."""
+
+    import struct
+    import zlib
+
+    from flexo.artwork import crop_of
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        check = struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        return struct.pack(">I", len(data)) + tag + data + check
+
+    rows = b"".join(b"\x00" + b"\xd0\x30\x30" * 100 + b"\x30\x50\xd0" * 100 for _ in range(100))
+    header = struct.pack(">IIBBBBB", 200, 100, 8, 2, 0, 0, 0)
+    picture = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows))
+    (tmp_path / "halves.png").write_bytes(picture + chunk(b"IEND", b""))
+    source = str(tmp_path / "halves.png")
+    with flexo.Figure("cropped") as figure:
+        figure.node("whole", "image", width="40mm", properties={"source": source})
+        figure.node("half", "image", width="40mm", properties={"source": source, "crop_left": 50})
+        figure.node(
+            "middle", "image", properties={"source": source, "crop_top": 25, "crop_bottom": 25}
+        )
+    spec = figure.spec
+    assert crop_of(spec.node("whole")) is None
+    assert crop_of(spec.node("half")) == (0.5, 0.0, 0.5, 1.0)
+    compiled = compile_figure(spec)
+    boxes = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    # As large as the part of it kept: half of a picture twice as wide as tall is square,
+    # and one with no size of its own is the size of what is left of it.
+    assert boxes["whole"].width == pytest.approx(2 * boxes["whole"].height)
+    assert boxes["half"].width == pytest.approx(boxes["half"].height)
+    assert boxes["middle"].width == pytest.approx(4 * boxes["middle"].height)
+    svg = compiled.document.text
+    window = _tag(svg, "half.artwork")
+    # Drawn through a window on the whole of it: what its viewBox names, and no more.
+    assert window.startswith("<svg") and re.search(r'viewBox="[\d.]+ 0 [\d.]+ [\d.]+"', window)
+    assert _tag(svg, "whole.artwork").startswith("<image")
+    assert _tag(svg, "half.artwork.whole").startswith("<image")
+    fields = {field["key"] for field in catalogue()["parts"]["image"]["fields"]}
+    assert {f"properties.crop_{side}" for side in ("left", "top", "right", "bottom")} <= fields
