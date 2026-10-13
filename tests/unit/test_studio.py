@@ -1569,6 +1569,43 @@ def test_a_theme_is_drawn_on_samples_and_its_changes_named(tmp_path: Path) -> No
     assert made.name == "Lab full theme.yaml" and "studio-test" in made.read_text()
 
 
+def test_a_theme_is_shown_first_on_what_another_package_leads_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Figures alone showed a theme: a typeface changed for a deck's titles, its text or its
+    code changed nothing on the page. A package that shows a theme on more (flexo-talk, on
+    slides) now leads with what it has for that, before the figures."""
+
+    from flexo.studio import theme_kind
+
+    class Slides:
+        title = "Slides"
+
+        def pages(self, theme: str, base: Path, hints: dict) -> list:
+            return []
+
+        def lead(self, theme: str, base: Path, hints: dict) -> list:
+            return [("type-slide", "Type on a slide", lambda: f"<svg data-theme='{theme}'/>")]
+
+    class Broken(Slides):
+        def lead(self, theme: str, base: Path, hints: dict) -> list:
+            raise RuntimeError("nothing to lead with")
+
+    kind = ThemeKind()
+    document = {"theme": {"name": "led", "base": "paper"}}
+    monkeypatch.setattr(theme_kind, "_specimens", lambda: {"slides": Slides(), "no": Broken()})
+    drawing = kind.draw(document, tmp_path, {})
+    assert [page.id for page in drawing.pages] == ["type-slide", "sample", "system"]
+    # (A slide is shown as wide as its card, a figure at its own size: the page is told.)
+    assert [page.extra for page in drawing.pages] == [{"slide": True}, {}, {}]
+    assert "data-theme='led" in drawing.pages[0].svg
+    assert kind.catalog()["specimens"][0] == {"name": "figures", "title": "Overview"}
+    # With no such package there are the figures, called what they are.
+    monkeypatch.setattr(theme_kind, "_specimens", lambda: {})
+    assert [page.id for page in kind.draw(document, tmp_path, {}).pages] == ["sample", "system"]
+    assert kind.catalog()["specimens"][0] == {"name": "figures", "title": "Figures"}
+
+
 def test_a_theme_file_changed_is_read_again(tmp_path: Path) -> None:
     from flexo.theme_files import register_theme
     from flexo.themes import resolve_palette

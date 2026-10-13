@@ -152,7 +152,8 @@ class ThemeKind:
             "conventions": {key: list(values) for key, values in CHOICES.items()},
             "tones": list(TONE_RULES),
             "specimens": [
-                {"name": "figures", "title": "Figures"},
+                # (Its figures -- and, from a package that shows more with them, that too.)
+                {"name": "figures", "title": "Overview" if _leading() else "Figures"},
                 *(
                     {"name": name, "title": provider.title}
                     for name, provider in _specimens().items()
@@ -221,8 +222,12 @@ class ThemeKind:
         ).hexdigest()
         info = {"effective": _effective(name), "tones": _tones(name)}
         messages: list[Message] = []
+        slides: set[str] = set()
         if specimen == "figures":
+            leads = _leads(name, base, hints)
+            slides = {identifier for identifier, _, _ in leads}
             makers = [
+                *leads,
                 ("sample", "A pipeline", lambda: _sample(name, SAMPLE)),
                 ("system", "A system", lambda: _sample(name, SYSTEM)),
             ]
@@ -245,7 +250,8 @@ class ThemeKind:
             key = f"{stamp}:{identifier}"
             svg = self._pages.get(key)
             if svg is None and drew and time.perf_counter() - started > BUDGET:
-                pages.append(Page(identifier, "", label, pending=True))
+                shape = _shape(identifier, slides)
+                pages.append(Page(identifier, "", label, extra=shape, pending=True))
                 continue
             if svg is None:
                 try:
@@ -259,7 +265,7 @@ class ThemeKind:
                 self._pages[key] = svg
                 while len(self._pages) > 120:
                     self._pages.popitem(last=False)
-            pages.append(Page(identifier, svg, label))
+            pages.append(Page(identifier, svg, label, extra=_shape(identifier, slides)))
         files = [path for path in _theme_files(document, base)]
         return Drawing(pages, messages, files, info)
 
@@ -334,6 +340,34 @@ def _sample(name: str, sample: dict[str, Any]) -> str:
 
     spec = replace(parse_figure(copy.deepcopy(sample)), style=name)
     return compile_figure(spec).document.text
+
+
+def _shape(identifier: str, slides: set[str]) -> dict[str, Any]:
+    """What the page is told of a sample beside its drawing: that it is a slide, shown as
+    wide as its card, where a figure is shown at its own size."""
+
+    return {"slide": True} if identifier in slides else {}
+
+
+def _leading() -> list[Any]:
+    """The packages that show a theme on something of theirs first, with its figures."""
+
+    return [provider for provider in _specimens().values() if hasattr(provider, "lead")]
+
+
+def _leads(name: str, base: Path, hints: dict[str, Any]) -> list[tuple[str, str, Any]]:
+    """What those packages show first (``lead``, as ``pages``): from flexo-talk a slide
+    with a title, text, code and maths, so a change of typeface is seen on every kind of
+    words and not on a figure's alone. One that can't be had is left out: the figures are
+    still shown."""
+
+    found: list[tuple[str, str, Any]] = []
+    for provider in _leading():
+        try:
+            found += provider.lead(name, base, hints)
+        except Exception:
+            continue
+    return found
 
 
 def _specimens() -> dict[str, Any]:
