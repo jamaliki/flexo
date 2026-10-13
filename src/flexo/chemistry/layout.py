@@ -901,7 +901,7 @@ def _separate(molecule: Molecule, least: float = 0.9) -> None:
             0.35
             + 0.22 * (item.hydrogens > 0)
             + 0.1 * (item.hydrogens > 1)
-            + 0.15 * (len(item.element) > 1)
+            + 0.15 * (len(item.symbol) > 1)
         )
 
     for _ in range(30):

@@ -157,7 +157,7 @@ def sheet(
         atoms.append(
             {
                 "index": original,
-                "element": molecule.atoms[original].element,
+                "element": molecule.atoms[original].symbol,
                 "name": molecule.name(original),
                 "number": _number(molecule, original),
                 "x": round(place.point[0] + dx, 2),

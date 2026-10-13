@@ -340,12 +340,34 @@ mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
 makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
 pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
 
+A mechanism may be schematic. A bracket atom whose symbol is no element is a
+placeholder, drawn as it is written -- `[X]`, `[Nu-]`, `[E]`, `[LG]`, `[EWG]`, `[R']`,
+`[R1]` (its digits raised: R¹), or `[*Ar]`, `[*B]` for a symbol that is also an
+element's -- with any number of bonds and no hydrogens of its own. Its valence is
+unknown, so it has a pair to give wherever an arrow starts from it and nothing is
+refused on its account; its charge is kept all the same (X attacking ends X⁺, Z
+taking a bond's pair Z⁻), and the real atoms beside it are checked as ever.
+
+```python
+figure.root.mechanism("sigma", [
+    {"smiles": "[X:1].[Y:2][Z:3]", "arrows": ["1 -> 2", "2-3 -> 3"]},
+])
+figure.root.mechanism("pi", [
+    {"smiles": "[Nu-:1].[E:2]=[Z:3]", "arrows": ["1 -> 2", "2=3 -> 3"]},
+])
+```
+
 The arrows are not decoration: each moves electrons, and the next structure is what
 they make -- a step with no SMILES is drawn from them, its atoms where they were, the
 attacking molecule brought in beside the atom it bonds to, a leaving group set apart.
 A step written out is checked against them. An arrow that cannot be is said in words:
 carbon given ten electrons ("as a bond to it forms, another must break"), a lone pair
 that is not there, a fishhook left without its partner, a hydrogen with two bonds.
+A symbol that is no element is no longer refused, being a placeholder: check the
+letters of what is drawn, since an element mistyped into none (`[Xx]` for `[Xe]`) is
+drawn as it is written. Capitals where an element has a small letter (`[CL]`, `[BR]`)
+are still refused, with what was meant, as are a small first letter (`[cl]`), a `*`
+with no name, and hydrogens counted on a placeholder (`[XH2]`: write `[X]([H])[H]`).
 After the last step with arrows comes what they make. With `partial=True` a step that
 cannot be is drawn as far as it goes, its arrows on it, instead of refused (as it is
 between one arrow and the next while a step is drawn); `flexo.mechanism.mechanism_states`
@@ -376,7 +398,8 @@ back down the bond they leave; a pair re-forming its own atom's double bond curl
 from beside the bond down onto it, and two half arrows making a bond meet in its
 middle from either side. Of the curves that would do, the smoothest is drawn that
 crosses no bond, no other arrow and no charge, and bends one way only; charges move
-out of the arrows' way. Other lone pairs are drawn with `lone_pairs="all"`; a radical
+out of the arrows' way. Other lone pairs are drawn with `lone_pairs="all"` (on a
+placeholder, those arrows have left on it; as written it has none to show); a radical
 is a dot. A step's `place` puts its molecules where you want them, each named by one of
 its atoms: `{5: {"move": [-1, 0.5], "turn": 30, "flip": True}}` takes the molecule with
 atom 5 a bond left and half a bond down from where it is laid out, turned 30 degrees

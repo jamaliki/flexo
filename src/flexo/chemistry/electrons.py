@@ -16,6 +16,11 @@ The arrows of a step move their electrons together, and the step is then checked
 every bond keeps an even number of electrons, no second-row atom holds more than
 eight, no hydrogen more than two. A step drawn by hand is compared, atom by atom,
 with what the arrows before it make.
+
+A placeholder (``[X]``, ``[Nu-]``) is not checked: its valence is unknown, so it has a
+pair to give wherever an arrow starts from it and takes whatever bonds it is given. Its
+charge is kept all the same, from the one it is written with: up one for a pair given
+into a bond, down one for a bond's pair taken.
 """
 
 from __future__ import annotations
@@ -113,10 +118,33 @@ def target_bond(arrow: Arrow) -> tuple[int, int] | None:
     return None
 
 
+def lent(molecule: Molecule, arrows: list[Arrow]) -> Molecule:
+    """``molecule`` with each placeholder holding the electrons ``arrows`` take from it:
+    its valence is unknown, so it has a pair -- for a fishhook, one electron -- wherever
+    an arrow starts from it, its charge as it was. The molecule itself, if none is lent."""
+
+    taken: dict[int, int] = {}
+    for arrow in arrows:
+        if len(arrow.source) == 1:
+            taken[arrow.source[0]] = taken.get(arrow.source[0], 0) + arrow.electrons
+    short = {
+        index: count
+        for index, count in taken.items()
+        if molecule.atoms[index].placeholder and molecule.atoms[index].lone < count
+    }
+    if not short:
+        return molecule
+    molecule = molecule.copy()
+    for index, count in short.items():
+        molecule.atoms[index].lone = count
+    return molecule
+
+
 def push(molecule: Molecule, arrows: list[Arrow], *, step: str = "") -> Molecule:
     """The molecule after ``arrows`` move their electrons, all together; a step that
     cannot be raises a ``MechanismError`` saying why."""
 
+    molecule = lent(molecule, arrows)
     after = molecule.copy()
     lone = [atom.lone for atom in molecule.atoms]
     shared: dict[frozenset[int], int] = {
@@ -180,8 +208,14 @@ def push(molecule: Molecule, arrows: list[Arrow], *, step: str = "") -> Molecule
         atom.lone = lone[index]
     changed = {atom for arrow in arrows for atom in (*arrow.source, *arrow.target)}
     for index in changed:
-        after.atoms[index].chirality = ""
-        after.atoms[index].charge = after.charge_of(index)
+        atom = after.atoms[index]
+        atom.chirality = ""
+        if atom.placeholder:
+            # No group to reckon from: its charge moves by the electrons it gave or took.
+            held = molecule.atoms[index].lone + molecule.bonded(index)
+            atom.charge += held - atom.lone - after.bonded(index)
+        else:
+            atom.charge = after.charge_of(index)
     _check(after, changed, where)
     return after
 
@@ -189,6 +223,8 @@ def push(molecule: Molecule, arrows: list[Arrow], *, step: str = "") -> Molecule
 def _check(molecule: Molecule, changed: set[int], where: str) -> None:
     for index in sorted(changed):
         atom = molecule.atoms[index]
+        if atom.placeholder:
+            continue  # its valence is unknown: nothing is refused on its account
         bonded = molecule.bonded(index)
         around = atom.lone + 2 * bonded
         name = molecule.name(index)
@@ -236,9 +272,9 @@ def compare(made: Molecule, drawn: Molecule, *, step: str, before: str) -> list[
         a, b = ours[number], theirs[number]
         one, two = made.atoms[a], drawn.atoms[b]
         name = made.name(a)
-        if one.element != two.element:
+        if (one.element, one.placeholder) != (two.element, two.placeholder):
             said.append(
-                f"{step} draws atom {number} as {two.element}; {before} has it as {one.element}."
+                f"{step} draws atom {number} as {two.symbol}; {before} has it as {one.symbol}."
             )
             continue
         q1, q2 = made.charge_of(a), drawn.charge_of(b)
@@ -254,7 +290,8 @@ def compare(made: Molecule, drawn: Molecule, *, step: str, before: str) -> list[
                 f"{before}'s arrows leave {name} with {h1} hydrogen{'s' * (h1 != 1)}; "
                 f"{step} draws {h2}."
             )
-        if one.lone % 2 != two.lone % 2:
+        # A placeholder's electrons cannot be written: a radical on one is not looked for.
+        if not one.placeholder and one.lone % 2 != two.lone % 2:
             left = "a radical" if one.lone % 2 else "with no radical"
             drawn_as = "as one" if two.lone % 2 else "without one"
             said.append(f"{before}'s arrows leave {name} {left}; {step} draws it {drawn_as}.")

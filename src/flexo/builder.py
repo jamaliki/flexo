@@ -1406,11 +1406,15 @@ class GroupBuilder:
         ``"5 -> 2"`` (a lone pair on atom 5 to atom 2), ``"2=3 -> 3"`` (a bond's electrons to
         an atom), ``"1=2 -> 2-6"`` (a bond moved), ``"~>"`` for a fishhook; several at once
         as a list or separated by ``;``. Atoms are their SMILES atom maps (``[O-:5]``). A
-        step with no SMILES is drawn from the arrows before it; one with a SMILES is
-        checked against them. ``lone_pairs`` is ``used`` (those arrows leave), ``all`` or
-        ``none``; ``charges`` ``circled`` or ``plain``; ``per_row`` how many structures
-        a row holds. The curly arrows are drawn in one ink: magenta, or ``arrow_colour`` --
-        a colour (``"#c0392b"``) or the theme's ``ink``, ``muted`` or ``accent``.
+        bracket atom that is no element is a placeholder, drawn as written
+        (``[X:1].[Y:2][Z:3]``, ``[Nu-:1]``, ``[R1]``; ``[*Ar]`` for a symbol that is also an
+        element's): it has a pair wherever an arrow starts from it, nothing is refused on
+        its account, and its charge is kept. A step with no SMILES is drawn from the arrows
+        before it; one with a SMILES is checked against them. ``lone_pairs`` is ``used``
+        (those arrows leave), ``all`` or ``none``; ``charges`` ``circled`` or ``plain``;
+        ``per_row`` how many structures a row holds. The curly arrows are drawn in one ink:
+        magenta, or ``arrow_colour`` -- a colour (``"#c0392b"``) or the theme's ``ink``,
+        ``muted`` or ``accent``.
         ``partial`` draws a mechanism with a step that cannot be as far as that step,
         its arrows on it, rather than refusing it (``flexo.mechanism.mechanism_states``
         says what is wrong).

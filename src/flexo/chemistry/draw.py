@@ -8,8 +8,9 @@ centred on its place, with its hydrogens on the side its bonds leave free (``OH`
 ``HO``, ``H₂N``). A bond stops short of a label by the margin. A double bond in a
 ring lies inside it, its inner line shortened; one to a labelled end atom (``C=O``)
 is centred on its bond; one between two carbons lies on the side its substituents
-are. Charges are circled, as mechanisms draw them, or written after the symbol.
-Lone pairs are pairs of dots in the widest gaps an atom has, a radical one dot.
+are. A placeholder is its symbol, set as an atom's is, the digits after its letters
+raised (``R¹``). Charges are circled, as mechanisms draw them, or written after the
+symbol. Lone pairs are pairs of dots in the widest gaps an atom has, a radical one dot.
 
 Everything is in points, y down: shapes and words for ``flexo.drawn``.
 """
@@ -22,10 +23,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from flexo.chemistry.layout import rings
-from flexo.chemistry.molecule import Molecule
+from flexo.chemistry.molecule import Atom, Molecule
 from flexo.drawn import Shape, Words, path
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import TextRun
+from flexo.text import SHIFTED_SIZE
 
 type Point = tuple[float, float]
 type Box = tuple[float, float, float, float]
@@ -322,11 +324,11 @@ def _label(
     atom = molecule.atoms[index]
     place = drawn.atoms[index]
     x, y = place.point
-    symbol = (TextRun(atom.element),)
+    symbol = _symbol(atom)
+    element_width = pen.measure(symbol).width
     if atom.isotope is not None:
-        symbol = (TextRun(str(atom.isotope), baseline_shift="super"), TextRun(atom.element))
+        symbol = (TextRun(str(atom.isotope), baseline_shift="super"), *symbol)
     symbol_metrics = pen.measure(symbol)
-    element_width = pen.measure((TextRun(atom.element),)).width
     cap = symbol_metrics.cap_height or 0.7 * pen.u
     baseline = y + cap / 2.0
     hydrogens = ()
@@ -365,6 +367,13 @@ def _label(
         (start, baseline - cap, start + metrics.width, baseline + metrics.descent * 0.3)
     )
     place.ink.append(drawn.boxes[-1])
+    if atom.placeholder and len(symbol) > 1 and symbol[1].baseline_shift == "super":
+        # Its number stands above the capitals (raised by 0.45 of the size at most): a
+        # charge beside it, and an arrow into it, keep off that too.
+        left, right = (symbol_left + pen.measure(symbol[:count]).width for count in (1, 2))
+        top = baseline - 0.45 * pen.u - SHIFTED_SIZE * cap
+        drawn.boxes.append((left, top, right, baseline - cap))
+        place.ink.append(drawn.boxes[-1])
     if side in {"left", "right"} and hydrogens:
         place.label = (start, baseline - cap, start + metrics.width, baseline)
         place.label_side = side
@@ -382,6 +391,24 @@ def _label(
     direction = {"right": 0.0, "left": math.pi, "up": -math.pi / 2, "down": math.pi / 2}[side]
     if hydrogens or charge:
         place.taken.append(direction)
+
+
+def _symbol(atom: Atom) -> tuple[TextRun, ...]:
+    """An atom's symbol as it is set: its element -- or a placeholder's letters, the digits
+    after them raised as an R group's number is (``R¹``), its primes as written."""
+
+    if not atom.placeholder:
+        return (TextRun(atom.element),)
+    letters = atom.placeholder.rstrip("0123456789'\u2032")
+    rest = atom.placeholder[len(letters) :]
+    digits = rest.rstrip("'\u2032")
+    primes = rest[len(digits) :]
+    runs = [TextRun(letters)]
+    if digits:
+        runs.append(TextRun(digits, baseline_shift="super"))
+    if primes:
+        runs.append(TextRun(primes))
+    return tuple(runs)
 
 
 def _hydrogen_side(taken: list[float]) -> str:
