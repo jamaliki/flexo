@@ -1060,6 +1060,7 @@ class _Document:
             (self.node_of(str(e["from"])), self.node_of(str(e["to"]))) == ends for e in self.edges
         ):
             raise EditError(f"“{source}” and “{target}” are already connected.")
+        self.outside_frames(*ends)
         node = self.node(target)
         target = self.free_input(target)
         if node is not None and node.get("kind") == "attention":
@@ -1076,6 +1077,39 @@ class _Document:
             return identifier
         self.data.setdefault("edges", []).append({"from": source, "to": target})
         return self.edge_ids()[-1][0]
+
+    def held_by(self, frame: str) -> set[str]:
+        """The shapes a frame goes round: those it names, and all the groups it names hold."""
+
+        node = self.node(frame) or {}
+        named = _framed(node)
+        return {
+            item
+            for one in named
+            for item in (one, *self.descendants(one))
+            if self.node(item) is not None
+        }
+
+    def outside_frames(self, *ends: str) -> None:
+        """A line between ``ends`` (shapes, by id) is one that can be drawn where an end is a
+        frame: a line ends at a frame from outside it, never from a shape it goes round (nor
+        from a frame all of whose shapes it goes round)."""
+
+        for frame in ends:
+            node = self.node(frame)
+            if node is None or node.get("kind") != "frame":
+                continue
+            held = self.held_by(frame)
+            for other in ends:
+                if other == frame:
+                    continue
+                there = self.node(other) or {}
+                within = self.held_by(other) if there.get("kind") == "frame" else None
+                if other in held or (within and within <= held):
+                    raise EditError(
+                        f"A line can\u2019t end at “{self.said(node)}” from inside it: the "
+                        f"frame goes round “{self.said(there) if there else other}”."
+                    )
 
     def free_input(self, target: str) -> str:
         """Where a line into ``target`` lands: its ``input``, or, for a part whose inputs
@@ -1168,6 +1202,10 @@ class _Document:
             if key in {"depart", "arrive"} and kind == "edge":
                 self.end_side(item, key, value)
                 continue
+            if key in {"from", "to"} and kind == "edge" and value:
+                # (An end taken to a frame: from outside it, as a new line to it is.)
+                other = item.get("to" if key == "from" else "from")
+                self.outside_frames(self.node_of(str(value)), self.node_of(str(other)))
             if kind == "net" and key.startswith("side:"):
                 self.net_side(item, key.removeprefix("side:"), value)
                 continue
@@ -1357,8 +1395,9 @@ class _Document:
                 if net is None:
                     raise EditError(f"There\u2019s nothing named “{identifier}” to delete.")
                 self.nets.remove(net)
-        # A part taken out of a chain leaves the chain joined round it.
-        self.rejoin(nodes)
+        # A part taken out of a chain leaves the chain joined round it. (A frame is no part
+        # of one: the lines that end at it go with it.)
+        self.rejoin({item for item in nodes if (self.node(item) or {}).get("kind") != "frame"})
         pair = None
         if action.get("rejoin") and len(nodes) == 1:
             # A part put beside another as a branch and taken out again at once (an Add Shape
@@ -1667,6 +1706,12 @@ class _Document:
             else:
                 self.nodes.remove(node)
                 self.detach(str(node.get("id")))
+                # Its lines go with it: there is no frame for them to end at.
+                gone = str(node.get("id"))
+                for edge in list(self.edges):
+                    if gone in {self.node_of(str(edge["from"])), self.node_of(str(edge["to"]))}:
+                        self.edges.remove(edge)
+                mend(self.data)
 
     def _arrange(self, action: Mapping[str, Any]) -> list[str]:
         """A row (or column) written as it is seen folded onto lines to fit (``lines``, each

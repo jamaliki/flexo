@@ -326,10 +326,11 @@ class _Content:
             if tagger is not None:
                 tag = tagger(item, within) or within
             if isinstance(item, Group):
-                if "data-flexo-math" in item.data:
-                    self.formula(item, tag)
-                else:
-                    self.items(item.items, tag)
+                with self.clipping(item):
+                    if "data-flexo-math" in item.data:
+                        self.formula(item, tag)
+                    else:
+                        self.items(item.items, tag)
                 continue
             with self.marking(item, tag):
                 if isinstance(item, Shape):
@@ -386,10 +387,25 @@ class _Content:
             self.items_unmarked(group.items)
             self.hidden_words(group, words)
 
+    @contextlib.contextmanager
+    def clipping(self, group: Group):
+        """What ``group`` draws, shown only within its clip where it keeps one: what the
+        drawing could not cut to it -- a curve, words -- is drawn whole."""
+
+        if group.clip is None:
+            yield
+            return
+        left, top, right, bottom = group.clip
+        width, height = max(right - left, 0.0), max(bottom - top, 0.0)
+        self.ops.append(f"q {_n(left)} {_n(top)} {_n(width)} {_n(height)} re W n")
+        yield
+        self.ops.append("Q")
+
     def items_unmarked(self, items) -> None:
         for item in items:
             if isinstance(item, Group):
-                self.items_unmarked(item.items)
+                with self.clipping(item):
+                    self.items_unmarked(item.items)
             elif isinstance(item, Shape):
                 self.shape(item)
             elif isinstance(item, Text):

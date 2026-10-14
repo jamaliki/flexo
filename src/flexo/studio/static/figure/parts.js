@@ -22,7 +22,7 @@
 
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
 import { mergeText, follows } from "/static/studio/merge.js";
-import { dropPlace, stays, lineAt, groupAt, endAt, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
+import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -995,7 +995,7 @@ export function figureParts(host) {
     // not inside it (its panel's Add Shape Inside… adds there). The figure chosen: at its end.
     if (id && groupOf(id) && (id === model().root || groupOf(id).implied)) return { parent: id, text: "Adds to the end of the figure" };
     if (id && groupOf(id)) return { after: id, text: `Adds after ${inQuotes(nameOf(id))}` };
-    // (A frame chosen is no place in the figure: nothing goes after it, or is joined to it.)
+    // (A frame chosen is no place in the figure: nothing goes after it.)
     if (id && nodeOf(id)?.kind === "frame") return { text: "Adds to the end of the figure" };
     if (id && nodeOf(id)) return { after: id, source: state.chain ? id : null, text: addWhere(id, state.chain).text, from: id };
     // A line chosen: into it, between the two it joins.
@@ -1963,6 +1963,11 @@ export function figureParts(host) {
     }
     if (!connecting.source) { connecting.source = id; select([id], { reveal: false }); return; }
     if (id === connecting.source) return;
+    // (A frame and a shape it goes round: the figure would refuse it -- said here, the line
+    // still to be ended somewhere else.)
+    for (const [frame, other] of [[id, connecting.source], [connecting.source, id]]) {
+      if (holds(frame, other)) { toast(`A line can’t end at ${inQuotes(nameOf(frame))} from inside it: the frame goes round ${inQuotes(nameOf(other))}.`, { icon: "info" }); return; }
+    }
     const source = connecting.source;
     state.connecting = null;
     host.changed();
@@ -2312,8 +2317,17 @@ export function figureParts(host) {
     const stop = (event) => event.stopPropagation();
     // ⌥-clicked or right-clicked, a + opens the palette of shapes, to choose what it adds.
     const choose = (event, into = null) => { event.preventDefault(); stop(event); addPalette(event.currentTarget, into ? { into } : { next: id }); };
-    // (A frame takes no line, and nothing comes after it: no + beside one.)
-    if (box && nodeOf(id)?.kind !== "frame") {
+    // A frame is no place in the figure, so nothing comes after it -- but a line may start at
+    // it: its + dragged to a shape draws one, and clicked, asks for the shape (Connect to…).
+    if (box && nodeOf(id)?.kind === "frame") {
+      const { side, x, y } = plusPlace(id, box, null, false);
+      views.push(h(`button.fig-next.${side}`, {
+        type: "button", style: { left: `${x}px`, top: `${y}px` },
+        title: `Draw a line from ${inQuotes(nameOf(id))}: drag to a shape, or click and then click the shape`,
+        onpointerdown: (event) => { stop(event); if (event.button === 0) linkStart(event, id); }, ondblclick: stop, onmousemove: stop,
+        onclick: (event) => { stop(event); toggleConnect(true); }, oncontextmenu: (event) => { event.preventDefault(); stop(event); },
+      }, icon("plus")));
+    } else if (box) {
       const kind = nextKind(nodeOf(id));
       const { branch } = addWhere(id, true, kind);
       const { side, x, y } = plusPlace(id, box, branch?.towards, sizable);
@@ -2808,7 +2822,9 @@ export function figureParts(host) {
   function linkStart(event, id) {
     if (linking || ending || bendingNow) return;
     const outer = host.overlay.getBoundingClientRect();
-    const shapes = (model()?.nodes || []).filter((node) => node.id !== id).map((node) => ({ id: node.id, ...shapeSeen(node.id, outer) })).filter((shape) => shape.left !== undefined);
+    // (Never a frame and a shape it goes round: there is no way to it from inside.)
+    const shapes = (model()?.nodes || []).filter((node) => node.id !== id && !holds(id, node.id) && !holds(node.id, id))
+      .map((node) => ({ id: node.id, ...endShape(node.id, outer) })).filter((shape) => shape.left !== undefined);
     linking = { id, from: shapeSeen(id, outer), shapes, start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, to: null };
     window.addEventListener("pointermove", linkMove);
     window.addEventListener("pointerup", linkUp);
@@ -2841,9 +2857,11 @@ export function figureParts(host) {
     const { drawing, way, head, outline, tip, from, shapes } = linking;
     const outer = host.overlay.getBoundingClientRect();
     const point = { x: linking.pointer.x - outer.left, y: linking.pointer.y - outer.top };
-    // The shape under the pointer: the smallest that holds it.
-    const under = shapes.filter((shape) => point.x >= shape.left && point.x <= shape.right && point.y >= shape.top && point.y <= shape.bottom)
-      .sort((a, b) => (a.right - a.left) * (a.bottom - a.top) - (b.right - b.left) * (b.bottom - b.top))[0] || null;
+    // The shape under the pointer: the smallest that holds it. A frame is under it only at
+    // its outline or its title -- what is inside a frame is the shapes', or nobody's, and a
+    // line let go there is drawn to nothing -- and a shape there comes before it.
+    const under = shapes.filter((shape) => (shape.hollow ? endOff(shape, point) <= FRAME_REACH : point.x >= shape.left && point.x <= shape.right && point.y >= shape.top && point.y <= shape.bottom))
+      .sort((a, b) => Number(Boolean(a.hollow)) - Number(Boolean(b.hollow)) || (a.right - a.left) * (a.bottom - a.top) - (b.right - b.left) * (b.bottom - b.top))[0] || null;
     linking.to = under?.id || null;
     // From its shape's edge, toward the pointer -- to the other's edge, over one.
     const middle = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
@@ -2905,6 +2923,29 @@ export function figureParts(host) {
     const rect = host.element(id)?.getBoundingClientRect();
     return rect && (rect.width || rect.height) ? { left: rect.left - outer.left, top: rect.top - outer.top, right: rect.right - outer.left, bottom: rect.bottom - outer.top } : null;
   }
+  // A shape as a line's end is taken to it: where it is drawn -- and, a frame, that it is its
+  // outline and its title alone (`hollow`, `title`: drop.js's endOff), not what it goes round.
+  function endShape(id, outer) {
+    const seen = shapeSeen(id, outer);
+    if (!seen || nodeOf(id)?.kind !== "frame") return seen;
+    const words = host.element(id)?.querySelector?.('[id$=".label"]')?.getBoundingClientRect?.();
+    const title = words && (words.width || words.height) ? { left: words.left - outer.left, top: words.top - outer.top, right: words.right - outer.left, bottom: words.bottom - outer.top } : null;
+    return { ...seen, hollow: true, title };
+  }
+  // How near a frame's outline (in pixels, on either side of it) a line dragged from a + is
+  // let go to end at the frame.
+  const FRAME_REACH = 8;
+  // Whether `frame` is a frame that goes round `id`: names it, or a group that holds it --
+  // or, `id` a frame too, goes round all that one does.
+  const roundOf = (frame) => (nodeOf(frame)?.kind === "frame" ? String(nodeOf(frame).properties?.around || "").split(",").map((item) => item.trim()).filter(Boolean) : []);
+  function holds(frame, id) {
+    const round = roundOf(frame);
+    if (!round.length) return false;
+    const within = (one) => round.some((item) => item === one || (groupOf(item) && inside(one, item)));
+    if (nodeOf(id)?.kind !== "frame") return within(id);
+    const theirs = roundOf(id);
+    return theirs.length > 0 && theirs.every(within);
+  }
   function endsSeen(id) {
     const element = host.element(id), outer = host.overlay?.getBoundingClientRect();
     const edge = edgeOf(id), net = netOf(id);
@@ -2937,8 +2978,10 @@ export function figureParts(host) {
     event.stopPropagation();
     const edge = edgeOf(id), outer = host.overlay.getBoundingClientRect();
     const own = nodeOfRef(end.ref), far = edge ? nodeOfRef(edge[end.key === "from" ? "to" : "from"]) : null;
-    const shapes = (edge ? model().nodes.map((node) => node.id).filter((node) => node === own || node !== far) : [own])
-      .map((node) => ({ id: node, ...shapeSeen(node, outer) })).filter((shape) => shape.left !== undefined);
+    // (To a frame, at its outline or its title -- but never one that goes round the line's
+    // other end, nor a shape the frame at its other end goes round.)
+    const shapes = (edge ? model().nodes.map((node) => node.id).filter((node) => node === own || (node !== far && !holds(node, far) && !holds(far, node))) : [own])
+      .map((node) => ({ id: node, ...endShape(node, outer) })).filter((shape) => shape.left !== undefined);
     ending = { id, end, own, shapes, line: host.element(id), start: { x: event.clientX, y: event.clientY }, pointer: null, moved: false, frame: 0, at: null };
     window.addEventListener("pointermove", endMove);
     window.addEventListener("pointerup", endUp);
@@ -5577,7 +5620,21 @@ export function figureParts(host) {
     // (Lines joined into one, it is among their ends.)
     const joined = (model().nets || []).filter((net) => [...(net.sources || []), ...(net.targets || [])].some((ref) => nodeOfRef(ref) === node.id));
     const shown = part.fields.filter((field) => field.key !== "properties.tone");
-    // A frame is a box round other shapes: of no other type, on no line, in no row.
+    // The lines that start or end at it, each to be chosen or deleted, and one more drawn.
+    const linesSection = (more = null) => h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length + joined.length)),
+      lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
+        h("button.link", { type: "button", onclick: () => select([edge.id]) },
+          nodeOfRef(edge.from) === node.id ? ["To ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["From ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
+          edge.label ? h("span.muted", {}, ` · ${plain(edge.label)}`) : null),
+        // The line goes; the shape stays chosen.
+        ui.button("", () => remove([edge.id], [node.id]), { kind: "ghost", small: true, icon: "close", title: "Delete Line" })))) : null,
+      joined.length ? h("div.line-list", {}, joined.map((net) => h("div.line-row", {},
+        h("button.link", { type: "button", onclick: () => select([net.id]) }, glyph("net"), " ", nameOf(net.id),
+          net.label ? h("span.muted", {}, ` · ${plain(net.label)}`) : null)))) : null,
+      h("div.row", {},
+        ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }), more));
+    // A frame is a box round other shapes: of no other type, in no row -- and lines end at
+    // it as at a shape.
     if (kind === "frame") {
       return [
         h("div.section.insp-top", {}, crumbs(node.id),
@@ -5585,6 +5642,7 @@ export function figureParts(host) {
         colourSection([{ type: "node", id: node.id, item: node }]),
         showSection([node.id]),
         h("div.section", {}, fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
+        linesSection(),
         h("div.section", {}, advanced(idField(node.id, "node"))),
       ];
     }
@@ -5600,21 +5658,9 @@ export function figureParts(host) {
       showSection([node.id]),
       h("div.section", {}, ui.field("Type", type),
         fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
-      h("div.section", {}, h("div.section-title", {}, "Lines", h("span.count", {}, lines.length + joined.length)),
-        lines.length ? h("div.line-list", {}, lines.map((edge) => h("div.line-row", {},
-          h("button.link", { type: "button", onclick: () => select([edge.id]) },
-            nodeOfRef(edge.from) === node.id ? ["To ", h("b", {}, nameOf(nodeOfRef(edge.to)))] : ["From ", h("b", {}, nameOf(nodeOfRef(edge.from)))],
-            edge.label ? h("span.muted", {}, ` · ${plain(edge.label)}`) : null),
-          // The line goes; the shape stays chosen.
-          ui.button("", () => remove([edge.id], [node.id]), { kind: "ghost", small: true, icon: "close", title: "Delete Line" })))) : null,
-        joined.length ? h("div.line-list", {}, joined.map((net) => h("div.line-row", {},
-          h("button.link", { type: "button", onclick: () => select([net.id]) }, glyph("net"), " ", nameOf(net.id),
-            net.label ? h("span.muted", {}, ` · ${plain(net.label)}`) : null)))) : null,
-        h("div.row", {},
-          ui.button("Connect to…", () => { select([node.id]); toggleConnect(true); }, { small: true, icon: "right" }),
-          // Chosen already, it is not chosen again: the panel would be drawn anew, and the
-          // palette lose the button it opens by.
-          ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; if (chosenOne() !== node.id) select([node.id]); addPalette(anchor.isConnected ? anchor : null); }, { small: true, icon: "plus" }))),
+      // (Chosen already, it is not chosen again: the panel would be drawn anew, and the
+      // palette lose the button it opens by.)
+      linesSection(ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; if (chosenOne() !== node.id) select([node.id]); addPalette(anchor.isConnected ? anchor : null); }, { small: true, icon: "plus" })),
       ownLineSection(node.id),
       lineUpSection(node),
       h("div.section", {}, advanced(idField(node.id, "node"))),

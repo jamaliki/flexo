@@ -379,12 +379,24 @@ export function groupAt(model, boxes, point, id = null) {
 // side "north", "east", "south" or "west" and `at` the middle of that side, where the end
 // will meet it. Over a shape's middle, side "" (wherever the figure puts it) at its centre.
 // Over none, null.
+// A frame (`hollow`) is round other shapes, and what is inside it is theirs or nobody's: a
+// line ends at its outline -- the point within `reach` of it, inside the frame or out -- or
+// at its title (`title`, the words' box: side "", as over a shape's middle).
 const END_REACH = 12;
 const MIDDLE = 0.35;
+const overBox = (box, point) => Boolean(box) && point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+// How far `point` is from where a line may end at `shape`: 0 over it (a frame: over its
+// title), else how far outside it (a frame: from its outline, on either side of it).
+export function endOff(shape, point) {
+  const out = Math.hypot(Math.max(shape.left - point.x, 0, point.x - shape.right), Math.max(shape.top - point.y, 0, point.y - shape.bottom));
+  if (!shape.hollow || out > 0) return out;
+  if (overBox(shape.title, point)) return 0;
+  return Math.min(point.x - shape.left, shape.right - point.x, point.y - shape.top, shape.bottom - point.y);
+}
 export function endAt(shapes, point, reach = END_REACH) {
   let best = null;
   for (const shape of shapes) {
-    const off = Math.hypot(Math.max(shape.left - point.x, 0, point.x - shape.right), Math.max(shape.top - point.y, 0, point.y - shape.bottom));
+    const off = endOff(shape, point);
     if (off > reach) continue;
     const area = (shape.right - shape.left) * (shape.bottom - shape.top);
     if (!best || off < best.off - 0.5 || (Math.abs(off - best.off) <= 0.5 && area < best.area)) best = { shape, off, area };
@@ -392,8 +404,9 @@ export function endAt(shapes, point, reach = END_REACH) {
   if (!best) return null;
   const { id, left, top, right, bottom } = best.shape;
   const middle = { x: (left + right) / 2, y: (top + bottom) / 2 };
+  if (best.shape.hollow && overBox(best.shape.title, point)) return { id, side: "", at: middle };
   const across = (point.x - middle.x) / Math.max((right - left) / 2, 1), down = (point.y - middle.y) / Math.max((bottom - top) / 2, 1);
-  if (Math.max(Math.abs(across), Math.abs(down)) < MIDDLE) return { id, side: "", at: middle };
+  if (!best.shape.hollow && Math.max(Math.abs(across), Math.abs(down)) < MIDDLE) return { id, side: "", at: middle };
   if (Math.abs(across) >= Math.abs(down)) return across > 0 ? { id, side: "east", at: { x: right, y: middle.y } } : { id, side: "west", at: { x: left, y: middle.y } };
   return down > 0 ? { id, side: "south", at: { x: middle.x, y: bottom } } : { id, side: "north", at: { x: middle.x, y: top } };
 }

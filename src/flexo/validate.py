@@ -395,6 +395,10 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                             ),
                         )
                     )
+    # A line may end at a frame, from outside it (flexo.frames).
+    from flexo.frames import refused
+
+    diagnostics.extend(refused(figure))
     return tuple(diagnostics)
 
 

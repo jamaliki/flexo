@@ -48,6 +48,7 @@ from flexo.components import (
     titled,
 )
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
+from flexo.frames import FRAME_KIND
 from flexo.geometry import Point, Rect, Side, segment_crosses_rect, segments
 from flexo.hierarchy import ancestors, parent_map, routing_boundary
 from flexo.ir.fitted import FittedFigure, FittedNode
@@ -383,7 +384,12 @@ def route_figure(
         edges,
         nets,
         solids=(
-            *(rect for node in fitted.nodes for rect in caption_solids(node)),
+            *(
+                rect
+                for node in fitted.nodes
+                if node.measured.spec.kind != FRAME_KIND  # (round shapes, and none itself)
+                for rect in caption_solids(node)
+            ),
             *(
                 rect
                 for group in fitted.groups
@@ -1057,6 +1063,10 @@ class _Scene:
         zones: list[Zone] = list(self.title_zones) + list(self.border_zones)
         for node in self.solid:
             zones.extend(self._node_zones(node, route_clearance(node.measured.spec, self.style)))
+        # A frame is in no other line's way; a line that ends at it keeps out of it, as
+        # out of a box.
+        for node in _frames_of(pins):
+            zones.extend(self._node_zones(node, route_clearance(node.measured.spec, self.style)))
         owned: set[str] = set()
         for pin in pins:
             owned.update(ancestors(self.parents, pin.node.measured.spec.id))
@@ -1089,6 +1099,12 @@ class _Scene:
         for point in (*(pin.point for pin in pins), *(pin.escape for pin in pins), *extra):
             xs.append(point.x)
             ys.append(point.y)
+        for node in _frames_of(pins):
+            # (And may run round it: along it, and clear of it.)
+            ring = node.bounds.inflated(route_clearance(node.measured.spec, self.style))
+            for rect in (node.bounds, ring):
+                xs.extend((rect.left, rect.right))
+                ys.extend((rect.top, rect.bottom))
         xs.extend((boundary.left, boundary.right))
         ys.extend((boundary.top, boundary.bottom))
         zones = self._zones(pins)
@@ -1299,6 +1315,17 @@ class _Scene:
             self.canvas.inflated(-margin),
             *(group.bounds for group in self.containers),
         )
+
+
+def _frames_of(pins: list[Pin]) -> list[FittedNode]:
+    """The frames among the parts ``pins`` are on: those this route ends at."""
+
+    found: dict[str, FittedNode] = {}
+    for pin in pins:
+        spec = pin.node.measured.spec
+        if spec.kind == FRAME_KIND:
+            found.setdefault(spec.id, pin.node)
+    return list(found.values())
 
 
 class _Traffic:
