@@ -8,7 +8,8 @@
 // be written there.
 
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing } from "/static/studio/studio.js";
-import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines } from "/static/kinds/figure/parts.js";
+import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
+import { describeDrawing } from "/static/kinds/figure/drawing.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -111,7 +112,7 @@ export function mount(studio, main) {
   function boxOf(id) {
     const target = elementOf(id);
     if (!target) return null;
-    const outer = page.getBoundingClientRect(), inner = target.getBoundingClientRect();
+    const outer = page.getBoundingClientRect(), inner = drawnRect(target);
     if (!inner.width && !inner.height) return null;
     return { left: inner.left - outer.left - 3, top: inner.top - outer.top - 3, width: inner.width + 6, height: inner.height + 6 };
   }
@@ -126,6 +127,8 @@ export function mount(studio, main) {
     element: elementOf,
     idOf: (id) => id,
     box: boxOf,
+    // What an SVG picture's file has of words and colours, for its panel to restyle.
+    drawing: (source) => describeDrawing(studio, source),
     changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
     settled: () => placeMarks(),
     // A part let go: a drawing kept back while it was carried is put in (see `drawn`).

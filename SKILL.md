@@ -62,6 +62,9 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
 - A shape's words set apart: `properties={"bold": True}`, `"italic"`, `"size": "6pt"`,
   `"align": "left"`; a picture cropped: `properties={"crop_left": 10, ...}` (hundredths).
+- An SVG picture's words are in the figure's font; `properties={"font": "drawn"}` keeps its
+  file's faces, `"texts": [{"id": "text1", "words": "...", "size": 12, "bold": True}]` and
+  `"colours": {"#4a90d9": "#2e7d32"}` restyle it -- its file is never changed.
 - An outline dashed or dotted (what is optional, or not yet there): `line="dashed"` or
   `"dotted"` on a shape, a group or a frame, as on an arrow (`line:` in a file).
 - A figure of several panels: `figure.panel(id)` for each (a group with no frame, lettered

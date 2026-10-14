@@ -232,6 +232,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._files(_one(query, "file"), types))
         elif route == "/api/raw":
             self._raw(query)
+        elif route == "/api/drawing":
+            self._json(self._drawing(query))
+        elif route == "/api/drawn":
+            self._drawn(query)
         elif route == "/api/picture":
             # A photograph a drawing names: its address carries its version, so it keeps.
             path = workspace.path(_one(query, "path"))
@@ -566,6 +570,63 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(
                 "Content-Disposition", f"attachment; filename*=UTF-8''{quote(target.name)}"
             )
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _picture_file(self, query: dict[str, list[str]]) -> Path:
+        """A picture in the folder, named from a document's own folder."""
+
+        base = self.workspace.path(_one(query, "file")).parent
+        target = (base / _one(query, "path")).resolve()
+        self.workspace.relative(target)  # inside the folder, or PermissionError
+        if not target.is_file():
+            raise FileNotFoundError(f"no file {_one(query, 'path')}")
+        return target
+
+    def _drawing(self, query: dict[str, list[str]]) -> dict[str, object]:
+        """An SVG picture's texts and colours as its file has them, for its panel to show
+        and change (``flexo.restyle.described``); none for a photograph, or an SVG that
+        does not read. ``stamp``: when the file last changed."""
+
+        from flexo.artwork import load_artwork
+        from flexo.diagnostics import FlexoError
+        from flexo.restyle import described
+
+        target = self._picture_file(query)
+        stamp = target.stat().st_mtime_ns
+        if target.suffix.lower() != ".svg":
+            return {"texts": [], "colours": [], "stamp": stamp}
+        try:
+            return {**described(load_artwork("drawing", str(target))), "stamp": stamp}
+        except FlexoError as error:
+            return {"texts": [], "colours": [], "stamp": stamp, "problem": explain(error)}
+
+    def _drawn(self, query: dict[str, list[str]]) -> None:
+        """An SVG picture as a slide draws it -- its words in ``family`` (the deck's figure
+        font) or as ``font`` says, its ``texts`` and ``colours`` (JSON) changed -- carrying
+        the faces it is drawn in: its thumbnail, an ``<img>`` the page's faces do not reach."""
+
+        from flexo.artwork import load_artwork
+        from flexo.restyle import restyle_of, restyled
+
+        target = self._picture_file(query)
+
+        def given(name: str) -> object:
+            words = (query.get(name) or [""])[0]
+            return json.loads(words) if words else None
+
+        font = (query.get("font") or [""])[0] or None
+        restyle = restyle_of(font, given("texts"), given("colours"))
+        family = (query.get("family") or [""])[0] or "IBM Plex Sans"
+        art = restyled(load_artwork("drawing", str(target)), restyle, family, embed=True)
+        data = art.markup.encode("utf-8") if art.format == "svg" else target.read_bytes()
+        self.send_response(200)
+        kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_header("Content-Type", "image/svg+xml" if art.format == "svg" else kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox")
         self.end_headers()
         self.wfile.write(data)
 

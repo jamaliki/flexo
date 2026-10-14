@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.artwork import crop_of, node_artwork, picture_href
+from flexo.artwork import crop_of, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     FIT_NEVER,
@@ -874,7 +874,13 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         if node.measured.label.lines
         else node.bounds
     )
-    artwork = node_artwork(spec)
+    from flexo.restyle import node_picture
+    from flexo.svg_resources import fonts_are_linked
+
+    # An SVG's words in the figure's font (or as it says), drawn by every output from the
+    # same face: carried in it, but on the page that loads the faces itself.
+    family = style.typography.family
+    artwork = node_picture(spec, family, embed=not fonts_are_linked())
     kept = crop_of(spec)
     if kept is not None and artwork.width and artwork.height:
         # Cropped: the part of it kept fills the bounds, through a window on the whole of

@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from itertools import pairwise
 from math import log2
 
-from flexo.artwork import crop_of, node_artwork
+from flexo.artwork import crop_of
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.drawn import DRAWN_KINDS
 from flexo.geometry import Point, Rect, Side, Size
@@ -796,7 +796,10 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
     as large as the file it carries.
     """
 
-    artwork = node_artwork(node)
+    from flexo.restyle import node_picture
+
+    # (An SVG's words in the figure's font, or as it says: grown to hold them, it may be wider.)
+    artwork = node_picture(node, style.typography.family)
     band = label_band_height(node.kind, label, style)
     chrome = (
         Size(
