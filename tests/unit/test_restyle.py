@@ -381,3 +381,61 @@ def test_the_studio_tells_a_pictures_panel_its_words_and_draws_its_thumbnail(
         workspace.close()
         server.shutdown()
         server.server_close()
+
+
+# A figure Flexo wrote, edited in Inkscape: its fonts carried in the file as data, its words
+# sized with their unit as attributes (``18px``), a panel of it a nested drawing.
+FONT = "data:font/otf;base64,T1RUTwANAIAAAwBQ"
+REEDITED = f"""\
+<svg xmlns="http://www.w3.org/2000/svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="350mm" height="100mm" viewBox="0 0 992 283" inkscape:version="1.4.3">
+  <defs><style>@font-face{{font-family:'Fira Math';
+    src:url({FONT}) format('opentype')}}</style></defs>
+  <g id="root">
+    <text id="title.label" x="496" y="34" text-anchor="middle" font-family="'DejaVu Sans'"
+       font-size="18px" fill="#242126">Annealed SMC</text>
+    <svg id="stage" x="15" y="85" width="230" height="160" viewBox="0 0 310 215">
+      <rect x="1" y="1" width="308" height="213" rx="8" fill="#ffffff" stroke="#d4d0d8"
+         stroke-width="2px" opacity="50%"/>
+      <text id="text2" x="155" y="28" font-family="'DejaVu Sans'" font-size="15px"
+         font-weight="bold" text-anchor="middle">1. Sample the prior</text>
+    </svg>
+    <text id="maths" x="300" y="260" font-family="'Fira Math'" font-size="12pt">E<tspan
+       font-size="65%" baseline-shift="sub">R1</tspan></text>
+    <text id="note" x="600" y="250" font-family="'DejaVu Sans'" font-size="10px"><tspan
+       x="600" dy="0">Schematic poses,</tspan><tspan x="600" dy="1.2em">two lines</tspan></text>
+  </g>
+</svg>
+"""
+
+
+def test_a_flexo_figure_edited_in_inkscape_is_read_listed_and_restyled(tmp_path: Path) -> None:
+    """Flexo's own SVG, edited in Inkscape, was refused as a picture -- its fonts, carried in
+    the file as data, read as a reference outside it -- and, once read, its words were not:
+    a size written with its unit (``18px``) stopped the reading, so its panel listed no words
+    and its thumbnail and pictured drawing carried none of the faces they are set in."""
+
+    path = tmp_path / "figure.svg"
+    path.write_text(REEDITED, encoding="utf-8")
+    art = load_artwork("picture", str(path))
+    texts = read_texts(art.markup)
+    # A length is in its drawing's user units: a pixel is one, a point four thirds of one,
+    # an em and a percentage shares of the font's size.
+    assert texts["label"].size == pytest.approx(18.0)
+    assert texts["text2"].size == pytest.approx(15.0 * 230 / 310)  # its panel's own scale
+    maths = texts["maths"]
+    assert maths.size == pytest.approx(16.0)
+    runs = [run for line in maths.lines for run in line.runs]
+    assert runs[1].size == pytest.approx(16.0 * 0.65)
+    assert runs[1].baseline > runs[0].baseline  # lowered, as a subscript is
+    note = texts["note"]
+    assert note.lines[1].baseline - note.lines[0].baseline == pytest.approx(1.2 * 10.0)
+    found = described(art)["texts"]
+    assert sorted(text["lines"] for text in found) == sorted(
+        [["Annealed SMC"], ["1. Sample the prior"], ["ER1"], ["Schematic poses,", "two lines"]]
+    )
+    restyled_art = restyled(art, Restyle(), "Figtree", embed=True)
+    assert "data:font/otf" in restyled_art.markup or "data:font/" in restyled_art.markup
+    for text in texts_of(restyled_art.markup).values():
+        assert "Figtree" in (text.get("style") or "")

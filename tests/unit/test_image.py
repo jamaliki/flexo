@@ -258,6 +258,11 @@ def test_artwork_carries_no_palette_role_and_survives_retheme(tmp_path: Path) ->
             "image.svg.external-reference",
         ),
         (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><style>@font-face{'
+            "font-family:A;src:url(https://example.invalid/a.otf)}</style></svg>",
+            "image.svg.external-reference",
+        ),
+        (
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><circle r="4"',
             "image.svg.invalid",
         ),

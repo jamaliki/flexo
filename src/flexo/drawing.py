@@ -646,7 +646,7 @@ def _read_one(
     for part in ("fill", "stroke"):
         if part in own and child.get(f"data-flexo-{part}") is None:
             context.pop(f"data-flexo-{part}", None)
-    alpha = opacity * float(own.get("opacity", "1"))
+    alpha = opacity * _fraction(own.get("opacity"))
     placed = _compose(matrix, _parse_transform(child.get("transform")))
     clip = own.get("clip-path", "")
     shown: Region | None = None
@@ -1301,8 +1301,55 @@ def _nested_svg(element: ET.Element) -> Image:
 
 
 def _float(element: ET.Element, name: str, default: float = 0.0) -> float:
-    value = element.get(name)
-    return float(value) if value not in (None, "") else default
+    return _number(element.get(name), default)
+
+
+_USER_UNITS = {"": 1.0, "px": 1.0, "pt": 4 / 3, "pc": 16.0, "mm": 96 / 25.4, "cm": 96 / 2.54,
+               "in": 96.0}
+"""A length's unit in the user units of the drawing it is in: a CSS pixel is one."""
+_NUMBER = re.compile(
+    r"\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(px|pt|pc|mm|cm|in|em|%)?\s*"
+)
+
+
+def _number(value: object, default: float = 0.0, *, em: float | None = None) -> float:
+    """An SVG number, or a length in the user units of its drawing, as Inkscape and Flexo's
+    own SVGs write them: ``18``, ``18px`` (the same), ``12pt``, ``4.9mm``; ``1.2em`` and
+    ``65%`` as shares of ``em``, the font's size, where there is one. ``default`` for what
+    is not one."""
+
+    if value is None:
+        return default
+    match = _NUMBER.fullmatch(str(value))
+    if match is None:
+        return default
+    number, unit = float(match.group(1)), match.group(2) or ""
+    if unit in {"em", "%"}:
+        if em is None:
+            return default
+        return number * em * (0.01 if unit == "%" else 1.0)
+    return number * _USER_UNITS[unit]
+
+
+def _fraction(value: object, default: float = 1.0) -> float:
+    """An opacity: ``0.5`` or ``50%``."""
+
+    text = str(value).strip() if value is not None else ""
+    if text.endswith("%"):
+        return _number(text[:-1], default * 100.0) / 100.0
+    return _number(text, default) if text else default
+
+
+def _shift(value: object, size: float) -> float:
+    """A ``baseline-shift`` in user units, up: a length, a share of the font's ``size``
+    (``33%``, ``0.3em``), or ``super`` and ``sub``, as browsers raise and lower them."""
+
+    keyword = str(value).strip() if value is not None else ""
+    if keyword == "super":
+        return size / 3.0
+    if keyword == "sub":
+        return -size / 5.0
+    return _number(keyword or None, 0.0, em=size)
 
 
 def _paint(context: dict[str, str], opacity: float) -> Paint:
@@ -1320,10 +1367,10 @@ def _paint(context: dict[str, str], opacity: float) -> Paint:
     )
     return Paint(
         fill=fill,
-        fill_opacity=float(context.get("fill-opacity", "1")),
+        fill_opacity=_fraction(context.get("fill-opacity")),
         stroke=colour("stroke"),
-        stroke_width=float(context.get("stroke-width", "1")),
-        stroke_opacity=float(context.get("stroke-opacity", "1")),
+        stroke_width=_number(context.get("stroke-width"), 1.0),
+        stroke_opacity=_fraction(context.get("stroke-opacity")),
         dash=dash,
         linecap=context.get("stroke-linecap", "butt"),
         linejoin=context.get("stroke-linejoin", "miter"),
@@ -1638,7 +1685,7 @@ def _arrowhead(
     paint = Paint(
         fill=body.get("fill") if filled else None,
         stroke=body.get("stroke") if body.get("stroke") not in (None, "none") else None,
-        stroke_width=float(body.get("stroke-width", line.stroke_width)),
+        stroke_width=_number(body.get("stroke-width"), line.stroke_width),
         linecap=body.get("stroke-linecap", "round"),
         linejoin=body.get("stroke-linejoin", "round"),
         opacity=line.opacity,
@@ -1673,7 +1720,7 @@ def _marker_shape(local: list[Segment]) -> str:
 
 def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
     family = context.get("font-family", "sans-serif").split(",")[0].strip().strip("'\"")
-    size = float(context.get("font-size", "8"))
+    size = _number(context.get("font-size"), 8.0, em=8.0)
     weight = _weight(context.get("font-weight"))
     anchor = context.get("text-anchor", "start")
     x = _float(element, "x")
@@ -1692,33 +1739,33 @@ def _text(element: ET.Element, context: dict[str, str]) -> Text | None:
         if not lines or ("x" in attributes and "y" not in attributes):
             # A new line: Flexo starts each with an ``x`` (and a ``dy`` after the first).
             if lines and "dy" in attributes:
-                step = float(attributes["dy"])
+                step = _number(attributes["dy"], em=size)
                 line_height = line_height or step
                 line_baseline += step
             lines.append([])
-            pen = float(attributes.get("x", x))
-            run_baseline = float(attributes["y"]) if "y" in attributes else line_baseline
+            pen = _number(attributes.get("x"), x)
+            run_baseline = _number(attributes.get("y"), line_baseline)
             if "y" in attributes:
                 line_baseline = run_baseline
         elif "x" in attributes:
             # A piece placed absolutely on the same line (a plotting library's maths,
             # often a character at a time): only a real step back breaks the flow.
-            step = float(attributes["x"])
-            if step < pen - 0.15 * float(attributes.get("font-size", size)):
+            step = _number(attributes["x"], pen)
+            if step < pen - 0.15 * _number(attributes.get("font-size"), size, em=size):
                 simple = False
             pen = step
-            run_baseline = float(attributes["y"])
+            run_baseline = _number(attributes.get("y"), run_baseline)
         if "dx" in attributes:
-            step = float(attributes["dx"])
+            step = _number(attributes["dx"], em=size)
             if step < -1e-6:
                 simple = False
             pen += step
         run_family = attributes.get("font-family", family).split(",")[0].strip().strip("'\"")
-        run_size = float(attributes.get("font-size", size))
+        run_size = _number(attributes.get("font-size"), size, em=size)
         declared = attributes.get("font-weight")
         run_weight = _weight(declared) if declared is not None else weight
         italic = attributes.get("font-style", "normal") in {"italic", "oblique"}
-        shift = float(attributes.get("baseline-shift", "0") or 0) + line_baseline - run_baseline
+        shift = _shift(attributes.get("baseline-shift"), size) + line_baseline - run_baseline
         for face, part, family_name in _faces_for(run_family, run_weight, italic, text):
             width = _advance(face, run_weight, part) * run_size
             lines[-1].append(
