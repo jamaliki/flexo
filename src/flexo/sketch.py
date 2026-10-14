@@ -599,12 +599,15 @@ def sketch_svg(root: ET.Element, sketch: Sketch, *, canvas: str = "#ffffff") -> 
 
 
 def _skipped(element: ET.Element, parents: dict[ET.Element, ET.Element]) -> bool:
-    """Parts drawn for their exact shape: clip paths, images' frames inside defs."""
+    """Parts drawn for their exact shape: clip paths, images' frames inside defs -- and
+    what another hand drew already (a molecule mol-sketch drew, ``data-flexo-drawn``)."""
 
     node: ET.Element | None = element
     while node is not None:
         tag = local_name(node.tag)
         if tag in {"clipPath", "mask", "pattern", "linearGradient", "radialGradient", "filter"}:
+            return True
+        if node.get("data-flexo-drawn") is not None:
             return True
         node = parents.get(node)
     return False

@@ -1461,8 +1461,10 @@ class GroupBuilder:
 
         ``source`` is a PDB or mmCIF file, or a PDB ID to fetch. The look follows the
         theme unless ``look`` names one (``engraved-colour``, ``watercolour``,
-        ``ink``, ...). ``colors`` maps a chain, residue, subunit, or entity to a colour
-        -- a hex colour or one of the figure's tones, so a chain can match its domain
+        ``ink``, ``flat``: PyMOL's flat, outlined style, in the theme's fills, nested
+        as shapes that ``flexo retheme`` recolours ...). ``colors`` maps a chain,
+        residue, subunit, or entity to a colour -- a hex colour or one of the
+        figure's tones, so a chain can match its domain
         on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
         it; ``cartoon``, ``sticks``, and ``surface`` are mol-sketch selections of what
         to draw, and ``site`` marks an active site (``"ligand"``: the largest ligand's

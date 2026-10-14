@@ -287,6 +287,15 @@ structure's panel shows these settings in mol-sketch's own sections, each with
 what the look gives it until it is given its own. Install the `molecules` extra
 (or `pip install path/to/mol-sketch/python`).
 
+`look="flat"` draws it as PyMOL's flat, outlined figures are drawn -- solid colours,
+a darker shade on a ribbon's far side, thin even outlines, round sticks -- and in the
+figure's own colours: helices in the accent's fill, strands in the warm fill, loops in
+the neutral fill, a chain or residue in its tone's fill, outlines and words in ink. It
+is nested as shapes rather than a picture, so it stays sharp at any size, the PDF
+carries it as vectors, and each shape records the role it was painted in, so `flexo
+retheme` recolours it with the rest of the figure. In a sketched theme it keeps its
+own clean line.
+
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
 ```python

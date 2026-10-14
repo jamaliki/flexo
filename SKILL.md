@@ -119,6 +119,8 @@ gene, per domain, per condition), and has ports where arrows belong.
 - `structure(id, "1ubq" or "model.cif", look=, colors={"A": "kinase"}, yaw=,
   pitch=, cartoon=, sticks=, surface=, site=)`: a molecule drawn by hand by
   mol-sketch (the `molecules` extra); a chain can take the tone of its domain.
+  `look="flat"`: PyMOL's flat, outlined style in the theme's fills, as vector shapes
+  that `flexo retheme` recolours.
 
 **Grids**: `cells(id, grid, key, ...)` draws a grid written as text, one row per
 line and one symbol per word (`.` empty), or rows of values -- a plate map, a

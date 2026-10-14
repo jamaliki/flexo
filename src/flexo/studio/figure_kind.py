@@ -487,14 +487,18 @@ def settings_of(spec, identifier: str) -> dict[str, Any]:
     its look's, the figure's colours, and its own -- with mol-sketch's looks and palettes:
     what the studio shows beside the settings a structure may be given."""
 
+    from flexo.emit import _tone_map
     from flexo.structures import structure_settings
     from flexo.studio.figure_edit import EditError
-    from flexo.themes import figure_palette, figure_style
+    from flexo.themes import figure_palette, figure_style, with_tone_roles
 
     node = next((item for item in spec.nodes if item.id == identifier), None)
     if node is None or node.kind != "structure":
         raise EditError(f"“{identifier}” isn't a structure.")
-    return structure_settings(node, figure_style(spec), figure_palette(spec))
+    style = figure_style(spec)
+    # The figure's tones as it is drawn with them, so a chain coloured by a tone is one.
+    palette = with_tone_roles(figure_palette(spec)).with_tones(_tone_map(spec, style))
+    return structure_settings(node, style, palette)
 
 
 def fetched(pdb_id: str) -> str:
