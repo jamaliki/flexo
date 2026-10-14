@@ -20,7 +20,7 @@
 // after, and each part slides from where it was to where it is.
 //   chooseFile({ title, types }), focus(where), nothing()  (the panel when nothing is chosen).
 
-import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName, roving } from "/static/studio/studio.js";
 import { mergeText, follows } from "/static/studio/merge.js";
 import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
 
@@ -380,6 +380,11 @@ export function widenLines(svg) {
   }
 }
 
+// A structure's pane chosen, and its sections opened or folded: kept for whoever is looking,
+// from one structure to the next -- a figure's or one on a slide.
+let structurePane = "look";
+const openSections = new Map();
+
 // Where words are typed: a key there is the field's.
 const TYPING = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
 const typingIn = (node) => Boolean(node?.closest?.(TYPING));
@@ -618,12 +623,18 @@ export function figureParts(host) {
         if (all("width", "height") && target.type === "node") return values.width !== null || values.height !== null ? `Resize ${name(id)}`
           : nodeOf(id)?.kind === "plot" ? `Reset Size of ${name(id)}` : `Fit ${name(id)} to Its Words`;
         if (all("bend", "lean")) return values.bend === null && values.lean === null ? "Reset Bend" : "Bend Line";
-        // mol-sketch's settings, by the setting's label: "Change Line Width".
+        // mol-sketch's settings, by the setting's label: "Change Line Width"; a section's
+        // given back to the look, by its title: "Reset Pen".
         const style = keys.filter((key) => key.startsWith("properties.style"));
         if (style.length && style.length === keys.length) {
-          if (keys[0] === "properties.style" && values[keys[0]] === null) return "Reset Rendering";
-          const label = style.length === 1 ? styleLabel(id, style[0].replace(/^properties\.style\.?/, "")) : null;
-          return label ? `Change ${titled(label)}` : "Change Rendering";
+          if (keys[0] === "properties.style" && values[keys[0]] === null) return "Reset All Settings";
+          const names = style.map((key) => key.replace(/^properties\.style\.?/, ""));
+          if (style.length > 1 && style.every((key) => values[key] === null)) {
+            const section = styleSection(id, names);
+            return section ? `Reset ${titled(section)}` : "Reset Settings";
+          }
+          const label = style.length === 1 ? styleLabel(id, names[0]) : null;
+          return label ? `Change ${titled(label)}` : "Change Settings";
         }
         if (all("properties.palette")) return "Change Palette";
         if (all("properties.colors")) return "Change Colours";
@@ -653,6 +664,11 @@ export function figureParts(host) {
   function styleLabel(id, key) {
     const drawing = (partOf(nodeOf(id))?.fields || []).find((field) => field.type === "molsketch");
     return (drawing?.sections || []).flatMap((section) => section.fields).find((field) => field.key === key)?.label || null;
+  }
+  // The section of mol-sketch's settings that holds all of these.
+  function styleSection(id, keys) {
+    const drawing = (partOf(nodeOf(id))?.fields || []).find((field) => field.type === "molsketch");
+    return (drawing?.sections || []).find((section) => keys.every((key) => section.fields.some((field) => field.key === key)))?.title || null;
   }
 
   // `afresh`: the figure as another's edit or an undo left it, its words shown in the field
@@ -5656,8 +5672,11 @@ export function figureParts(host) {
       kind === "structure" || kind === "plot" ? null : colourSection([{ type: "node", id: node.id, item: node }]),
       textSection([node.id]),
       showSection([node.id]),
+      // (A structure's own fields are among mol-sketch's settings, in its panes: its words stay here.)
       h("div.section", {}, ui.field("Type", type),
-        fields(shown, node, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
+        fields(kind === "structure" ? shown.filter((field) => !inPanes(part).has(field.key)) : shown, node,
+          (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
+      kind === "structure" ? structurePanes(node, part, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`) : null,
       // (Chosen already, it is not chosen again: the panel would be drawn anew, and the
       // palette lose the button it opens by.)
       linesSection(ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; if (chosenOne() !== node.id) select([node.id]); addPalette(anchor.isConnected ? anchor : null); }, { small: true, icon: "plus" })),
@@ -6318,7 +6337,9 @@ export function figureParts(host) {
   }
 
 
-  function fields(list, item, write, scope) {
+  // Whether a field of `list` shows for `item`: one shown only while another key has a value
+  // (`show`), while it has.
+  function shownFor(list, item) {
     const holds = (key, wanted) => {
       const value = valueAt(item, key) ?? list.find((f) => f.key === key)?.default;
       return Array.isArray(wanted) ? wanted.includes(value) : value === wanted;
@@ -6326,7 +6347,10 @@ export function figureParts(host) {
     // (Words the figure draws are never out of reach: a field of them that has some shows,
     // whatever else is chosen -- a line's back label, drawn under it.)
     const worded = (field) => field.type === "markup" && Boolean(plain(valueAt(item, field.key)).trim());
-    const shown = list.filter((field) => !field.show || worded(field) || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted)));
+    return (field) => !field.show || worded(field) || Object.entries(field.show).every(([key, wanted]) => holds(key, wanted));
+  }
+  function fields(list, item, write, scope) {
+    const shown = list.filter(shownFor(list, item));
     write = keepingHidden(list, item, write, scope);
     // Fields few reach for are folded away under the rest -- open, if one of them is set.
     const more = shown.filter((field) => field.more);
@@ -6399,14 +6423,43 @@ export function figureParts(host) {
         // A structure's selection is sent once typed, and said when it selects nothing.
         const control = typedField({ value, key, onCommit: set });
         const note = h("div.field-problem.warning", { hidden: true });
+        // What is drawn as a cartoon (sticks, a surface): those most reached for a click
+        // away, the look's (or the scene's) by default -- what that is, faintly in the field.
+        const chips = field.chips ? selectionChips(field, value, set, key) : null;
         settingsOf(item.id).then((settings) => {
+          if (chips && value == null) control.placeholder = settings?.style?.[`reps.${field.key.replace(/^properties\./, "")}`] || "None";
           const said = settings?.selections?.[field.key];
           if (!said || drafts.has(key) || typing(key) !== null) return;
           clear(note, icon("warning"), h("span", {}, said));
           note.hidden = false;
           control.classList.add("invalid");
         });
-        return ui.field(field.label, h("div.field-stack", {}, control, note), options);
+        return ui.field(field.label, h("div.field-stack", {}, chips, control, note), options);
+      }
+      case "step": {
+        // A scene's steps by the names it gives them, the one drawn chosen; its number typed,
+        // until they are known.
+        const at = Number(value ?? field.default ?? 1);
+        const source = String(item?.properties?.source ?? "").trim();
+        const list = h("div.mol-steps", { role: "radiogroup", "aria-label": field.label });
+        const named = (names) => {
+          const rows = names.map((name, index) => h(`button.mol-step${index + 1 === at ? ".on" : ""}`, {
+            type: "button", role: "radio", "aria-checked": String(index + 1 === at), title: `Draw step ${index + 1}`,
+            onclick: () => { if (index + 1 !== at) set(index + 1 === (field.default ?? 1) ? null : index + 1); },
+          }, h("span.mol-step-number", {}, String(index + 1)), h("span.mol-step-name", {}, name || `Step ${index + 1}`)));
+          clear(list, rows);
+          roving(list, () => rows, key);
+        };
+        const known = stepsKnown.get(source);
+        if (known) named(known);
+        else list.append(typedField({ value, key, placeholder: String(field.default ?? 1), number: { min: field.min, step: 1, integer: true }, onCommit: set }));
+        settingsOf(item.id).then((settings) => {
+          const names = settings?.steps || [];
+          if (!names.length) return;
+          stepsKnown.set(source, names);
+          if (JSON.stringify(names) !== JSON.stringify(known) && typing(key) === null) named(names);
+        });
+        return h("div.field.mol-steps-field", { title: field.hint || "" }, list);
       }
       case "function": {
         // A plot's function: one of those its Python file offers (the figure's `functions`,
@@ -6537,7 +6590,8 @@ export function figureParts(host) {
       case "molpalette":
         return ui.field(field.label, groupPalette(item, value, set), options);
       case "molsketch":
-        return styleSections(field, item, write);
+        // (A structure's mol-sketch settings are its panes: structurePanes.)
+        return null;
       default:
         return null;
     }
@@ -6716,7 +6770,11 @@ export function figureParts(host) {
     const key = JSON.stringify([id, nodeOf(id)?.properties]);
     if (!settingsAsked.has(key)) {
       if (settingsAsked.size > 40) settingsAsked.clear();
-      settingsAsked.set(key, host.run({ do: "structure-settings", id }, { merge: null }).then((result) => result?.settings || null).catch(() => null));
+      settingsAsked.set(key, host.run({ do: "structure-settings", id }, { merge: null }).then((result) => {
+        const settings = result?.settings || null;
+        if (settings?.style && Object.keys(settings.style).length) knownSettings.set(id, settings);
+        return settings;
+      }).catch(() => null));
     }
     return settingsAsked.get(key);
   }
@@ -6740,11 +6798,23 @@ export function figureParts(host) {
     return button;
   }
 
-  // Every section of mol-sketch's style the studio offers, folded away; one holding
-  // settings of the structure's own says how many. Each setting shows what the look
-  // (and the figure) make it until it is given its own; emptied, it is the look's again.
-  const openSections = new Set();
-  function styleSections(field, item, write) {
+  // -- a structure's panes --
+  // A structure has more settings than one column holds calmly -- its look, what is drawn and
+  // in which colours, a scene's chemistry, its site, a density map, its labels, its camera --
+  // so each is a pane a tab away, as mol-sketch's own app lays them out, of sections that
+  // fold. A setting shows what the look (and the figure) give it until it has its own; a
+  // section holding settings of the structure's own says how many, and gives them back. The
+  // pane chosen and the sections opened stay so for whoever is looking (structurePane,
+  // openSections), from one structure to the next.
+  // What a structure was last drawn with, and a scene's steps: shown at once as its panel is
+  // drawn again, while what it is drawn with now is asked for.
+  const knownSettings = new Map();
+  const stepsKnown = new Map();
+  // The fields a structure's panes hold, by key: those not shown above them.
+  const inPanes = (part) => new Set((part.fields || []).flatMap((field) => field.type === "molsketch"
+    ? ["properties.style", ...(field.panes || []).flatMap((pane) => pane.sections.flatMap((section) => section.fields.filter((each) => each.own).map((each) => each.key)))]
+    : []));
+  function ownStyle(item) {
     const own = {};
     const walk = (value, prefix) => {
       for (const [key, part] of Object.entries(value || {})) {
@@ -6753,83 +6823,212 @@ export function figureParts(host) {
       }
     };
     walk(item.properties?.style, "");
-    const fills = [];
-    const look = h("span.hint", {}, "Loading…");
-    const ownCount = Object.keys(own).length;
-    // Chains and residues given colours of their own are drawn in them, over these.
-    const coloured = (item.properties?.colors || []).some((row) => row?.group && row?.color);
-    const sections = field.sections.map((section) => {
-      const count = section.fields.filter((each) => own[each.key] !== undefined).length;
-      const control = (each) => {
-        const merge = `style:${item.id}:${each.key}`;
-        const waiting = typed.get(merge);
-        const shown = waiting && `properties.style.${each.key}` in waiting ? waiting[`properties.style.${each.key}`] ?? undefined : own[each.key];
-        const send = (next) => write({ [`properties.style.${each.key}`]: next }, merge);
-        return styleControl(each, shown, fills, each.type === "colour" ? (next) => paced(merge, () => send(next)) : send, merge);
-      };
-      // Colours as a row of wells; the rest two to a row, their hints on hover.
-      const colours = section.fields.filter((each) => each.type === "colour");
-      const rest = section.fields.filter((each) => each.type !== "colour");
-      const details = h("details.more.mol-section", { open: openSections.has(section.title) },
-        h("summary", {}, icon("chevron"), section.title, count ? h("span.count", {}, count) : null),
-        h("div.inner", {},
-          rest.length ? h("div.mol-grid", {}, rest.map(control)) : null,
-          colours.length ? h("div.mol-colours", { title: coloured && colours.some((each) => each.key.startsWith("palette."))
-            ? "Chains and residues given a colour under Colours are drawn in it; these colours show where none is given." : "" }, colours.map(control)) : null));
-      details.addEventListener("toggle", () => { if (details.open) openSections.add(section.title); else openSections.delete(section.title); });
-      // A section for one way of drawing (engraved ribbons) shows while it is drawn that way.
-      if (section.show && !count) {
-        details.hidden = true;
-        fills.push((drawn) => { details.hidden = !Object.entries(section.show).every(([key, wanted]) => drawn[key] === wanted); });
+    return own;
+  }
+  function structurePanes(node, part, write, scope) {
+    const drawing = part.fields.find((field) => field.type === "molsketch");
+    if (!drawing?.panes) return null;
+    const own = ownStyle(node);
+    const byKey = new Map(part.fields.map((field) => [field.key, field]));
+    const shows = shownFor(part.fields, node);
+    const given = (key) => { const value = valueAt(node, key); return value !== undefined && value !== null && value !== ""; };
+    const scene = /\.json$/i.test(String(node.properties?.source ?? "").trim());
+    const writeOwn = keepingHidden(part.fields, node, write, scope);
+    const asked = settingsOf(node.id);
+    const ownIn = (list) => list.filter((field) => !field.own && own[field.key] !== undefined);
+    const everyField = (pane) => pane.sections.flatMap((section) => section.fields);
+    // A pane for a scene alone, or for a molecule read from its coordinates (a map) unless
+    // something in it is set.
+    const set = (pane) => ownIn(everyField(pane)).length > 0 || everyField(pane).some((field) => field.own && field.key !== "properties" && given(field.key));
+    const panes = drawing.panes.filter((pane) => pane.scene === undefined || pane.scene === scene || (pane.scene === false && set(pane)));
+    const body = h("div.mol-pane");
+    const tabs = panes.map((pane) => h(`button.mol-tab${ownIn(everyField(pane)).length ? ".owned" : ""}`, {
+      type: "button", role: "tab", title: pane.hint, "data-pane": pane.key, onclick: () => choose(pane),
+    }, icon(pane.icon), h("span.mol-tab-name", {}, pane.title)));
+    const strip = h("div.mol-tabs", { role: "tablist", "aria-label": "Structure Settings" }, tabs);
+    const keys = roving(strip, () => tabs, "mol-tabs");
+    function choose(pane) {
+      structurePane = pane.key;
+      for (const tab of tabs) {
+        const on = tab.dataset.pane === pane.key;
+        tab.classList.toggle("on", on);
+        tab.setAttribute("aria-selected", String(on));
+        if (on) keys.mark(tab);
       }
+      clear(body, paneOf(pane));
+    }
+
+    // One pane's sections; each setting told what it is drawn with as soon as that is known
+    // (`fills`): what it was last drawn with first, its own settings over it.
+    function paneOf(pane) {
+      const fills = [];
+      const sections = pane.sections.map((section) => sectionOf(pane, section, fills)).filter(Boolean);
+      const fill = (settings) => {
+        const drawn = { ...(settings.style || {}), ...own };
+        for (const each of fills) each(drawn, settings.inherited || settings.style || {}, settings);
+      };
+      const before = knownSettings.get(node.id);
+      if (before) fill(before);
+      asked.then((settings) => { if (settings && settings !== before) fill(settings); });
+      return sections;
+    }
+
+    function sectionOf(pane, section, fills) {
+      const owned = ownIn(section.fields);
+      if (section.needs && !given(section.needs) && !owned.length) return null;
+      const grid = [], wells = [];
+      for (const placed of section.fields) {
+        if (placed.own) {
+          const field = byKey.get(placed.key);
+          if (!field || !shows(field)) continue;
+          const control = ownControl(field);
+          // (Named by its section already -- Site, View -- it is not named again.)
+          if (control && field.label === section.title) control.classList.add("untitled");
+          grid.push(control);
+        } else (placed.type === "colour" ? wells : grid).push(setting(placed, fills));
+      }
+      if (!grid.length && !wells.length) return null;
+      // Colours as rows of wells, under the names of their kinds where they are of several.
+      const groups = [...new Set(wells.map((well) => well.dataset.group || ""))];
+      const colours = groups.map((group) => [groups.length > 1 && group ? h("div.mol-subhead", {}, group) : null,
+        h("div.mol-colours", {}, wells.filter((well) => (well.dataset.group || "") === group))]);
+      const reset = owned.length ? ui.button("Reset", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        write(Object.fromEntries(owned.map((field) => [`properties.style.${field.key}`, null])), null);
+      }, { small: true, kind: "ghost", title: `Give ${inSentence(section.title)} back to the look` }) : null;
+      const name = `${pane.key}:${section.title}`;
+      const details = h("details.mol-section", { open: openSections.get(name) ?? section.open },
+        h("summary", {}, icon("chevron"), h("span.mol-section-title", {}, section.title),
+          owned.length ? h("span.count", { title: `${counted(owned.length, "setting")} of its own` }, String(owned.length)) : null, reset),
+        h("div.inner", {}, grid.length ? h("div.mol-grid", {}, grid) : null, colours));
+      details.addEventListener("toggle", () => openSections.set(name, details.open));
       return details;
+    }
+
+    // One of the structure's own fields, edited as anywhere: a switch across the pane, a
+    // number half of it.
+    function ownControl(field) {
+      if (field.type === "bool") {
+        const on = valueAt(node, field.key) ?? field.default ?? false;
+        return h("div.field.mol-switch", { title: field.hint || "" }, ui.toggle({ value: on, label: field.label, key: `${scope}:${field.key}`,
+          onChange: (next) => writeOwn({ [field.key]: next === (field.default ?? false) ? null : next }, `${scope}:${field.key}`) }));
+      }
+      const control = fieldControl(field, node, writeOwn, scope);
+      if (control && (field.type === "number" || field.type === "integer")) control.classList.add("half");
+      return control;
+    }
+
+    // One of mol-sketch's settings, shown only while the structure is drawn so where it
+    // says (an engraved ribbon's lines) -- or while it has its own.
+    function setting(field, fills) {
+      const merge = `style:${node.id}:${field.key}`;
+      const waiting = typed.get(merge);
+      const value = waiting && `properties.style.${field.key}` in waiting ? waiting[`properties.style.${field.key}`] ?? undefined : own[field.key];
+      const send = (next) => write({ [`properties.style.${field.key}`]: next }, merge);
+      const control = styleControl(field, value, fills, field.type === "colour" ? (next) => paced(merge, () => send(next)) : send, merge);
+      if (field.group) control.dataset.group = field.group;
+      if (field.show && value === undefined) {
+        control.hidden = true;
+        fills.push((drawn) => {
+          control.hidden = !Object.entries(field.show).every(([key, wanted]) => (Array.isArray(wanted) ? wanted.includes(drawn[key]) : drawn[key] === wanted));
+        });
+      }
+      return control;
+    }
+
+    const all = Object.keys(own).length;
+    const look = h("span.hint", {}, knownSettings.get(node.id)?.look ? `Look: ${titled(knownSettings.get(node.id).look)}` : "");
+    asked.then((settings) => {
+      if (!settings || settings.problem && !settings.style) look.textContent = "Settings unavailable";
+      else look.textContent = settings.look ? `Look: ${titled(settings.look)}` : "";
     });
-    settingsOf(item.id).then((settings) => {
-      if (!settings || settings.problem && !settings.style) { look.textContent = "Rendering settings unavailable"; return; }
-      look.textContent = settings.look ? `Look: ${titled(settings.look)}` : "";
-      for (const fill of fills) fill(settings.style || {});
-    });
-    return h("div.mol-style", {},
-      h("div.mol-style-head", {}, h("span.section-title", {}, field.label), look,
-        ownCount ? ui.button("Reset All", () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh" }) : null),
-      sections);
+    choose(panes.find((pane) => pane.key === structurePane) || panes[0]);
+    return h("div.section.mol-panel", {},
+      h("div.mol-head", {}, h("span.section-title", {}, drawing.label), look,
+        all ? ui.button("Reset All", () => write({ "properties.style": null }, null), { small: true, kind: "ghost", icon: "refresh", title: "Give every setting back to the look" }) : null),
+      strip, body);
   }
 
-  // One setting: what the look gives it shows until it has its own.
+  // A selection's choices most reached for, one chosen: Default (the look's, or the
+  // scene's), None, and the rest.
+  function selectionChips(field, value, set, key) {
+    const now = value ?? null;
+    const chips = field.chips.map((chip) => h(`button.mol-chip${chip.value === now ? ".on" : ""}`, {
+      type: "button", role: "radio", "aria-checked": String(chip.value === now),
+      title: chip.value === null ? "As the look draws it" : chip.value === "none" ? "Nothing" : chip.value,
+      onclick: () => { if (chip.value !== now) set(chip.value); },
+    }, chip.label));
+    const row = h("div.mol-chips", { role: "radiogroup", "aria-label": field.label }, chips);
+    roving(row, () => chips, `${key}:chips`);
+    return row;
+  }
+
+  // One setting: what the look gives it shows until it has its own (`inherited`, the look's
+  // and the figure's; `drawn`, with the structure's own over them).
   function styleControl(field, value, fills, set, key) {
-    const said = (drawn) => (drawn === null || drawn === undefined ? "" : typeof drawn === "number" ? String(Math.round(drawn * 1000) / 1000) : String(drawn));
+    const said = (drawn) => (drawn === null || drawn === undefined ? "" : typeof drawn === "number" ? String(Math.round(drawn * 1000) / 1000)
+      : Array.isArray(drawn) ? drawn.join(", ") : String(field.words?.[drawn] ?? drawn));
     const options = {};
     const titled = (node) => { if (field.hint) node.title = field.hint; node.classList.toggle("own", value !== undefined); return node; };
     switch (field.type) {
       case "choice": {
         const select = ui.select({ value: value ?? "", options: [{ value: "", label: "Default" }, ...field.options.map((option) => ({ value: option, label: choiceLabel(field, option), icon: field.icons?.[option] }))],
           onChange: (next) => set(next || null) });
-        fills.push((drawn) => { const inherited = drawn[field.key]; select.relabel("", inherited === null || inherited === undefined || inherited === "" ? "Default" : `Default (${choiceLabel(field, said(inherited))})`); });
+        fills.push((drawn, inherited) => { const was = inherited[field.key]; select.relabel("", was === null || was === undefined || was === "" ? "Default" : `Default (${choiceLabel(field, said(was))})`); });
         return titled(ui.field(field.label, select, options));
       }
       case "bool": {
-        const select = ui.select({ value: value === undefined ? "" : value ? "on" : "off", options: [{ value: "", label: "Default" }, { value: "on", label: "On" }, { value: "off", label: "Off" }],
-          onChange: (next) => set(next === "" ? null : next === "on") });
-        fills.push((drawn) => { select.relabel("", `Default (${drawn[field.key] ? "On" : "Off"})`); });
-        return titled(ui.field(field.label, select, options));
+        // A switch shows what is drawn; turned to what the look gives, it is the look's again.
+        let looks = null;
+        const toggle = ui.toggle({ value: Boolean(value), label: field.label, key, onChange: (next) => set(next === looks ? null : next) });
+        fills.push((drawn, inherited) => {
+          looks = Boolean(inherited[field.key]);
+          if (value === undefined) toggle.querySelector("input").checked = looks;
+        });
+        return titled(h("div.field.mol-switch", {}, toggle));
       }
       case "integer":
       case "number": {
+        // A number or a word (map.smooth: "auto"), typed.
+        if (field.words) {
+          const control = typedField({ value: value === undefined ? undefined : said(value), key, onCommit: (text) => {
+            const typedIn = String(text ?? "").trim();
+            const word = Object.entries(field.words).find(([name, label]) => [name, label.toLowerCase()].includes(typedIn.toLowerCase()))?.[0];
+            if (!typedIn) set(null);
+            else if (word) set(word);
+            else if (Number.isFinite(Number(typedIn))) set(Number(typedIn));
+          } });
+          fills.push((drawn, inherited) => { control.placeholder = said(inherited[field.key]) || field.placeholder || ""; });
+          return titled(ui.field(field.label, control, options));
+        }
         const control = typedField({ value, key, onCommit: set,
           number: { min: field.min, max: field.max, step: field.step, integer: field.type === "integer", unit: field.unit } });
         // What it is drawn with, else what leaving it empty means ("Recommended").
-        fills.push((drawn) => { control.input.placeholder = said(drawn[field.key]) || field.placeholder || ""; });
+        fills.push((drawn, inherited) => { control.input.placeholder = said(inherited[field.key]) || field.placeholder || ""; });
+        const node = titled(ui.field(field.label, control, options));
+        node.classList.add("half");
+        return node;
+      }
+      case "numbers": {
+        // Several numbers, with commas between: "0.7, 1, 1.5".
+        const control = typedField({ value: value === undefined ? undefined : said(value), key, onCommit: (text) => {
+          const numbers = String(text ?? "").split(/[\s,]+/).filter(Boolean).map(Number);
+          if (!numbers.length) set(null);
+          else if (numbers.every(Number.isFinite)) set(numbers);
+        } });
+        fills.push((drawn, inherited) => { control.placeholder = said(inherited[field.key]); });
         return titled(ui.field(field.label, control, options));
       }
       case "colour": {
         const control = ui.colour({ value, title: field.label, onChange: set, key });
         // Unset, the well shows the look's colour, faintly.
-        fills.push((drawn) => { if (value === undefined && /^#[0-9a-f]{6}$/i.test(drawn[field.key] || "")) control.querySelector(".colour-chip").style.background = drawn[field.key]; });
+        fills.push((drawn, inherited) => { if (value === undefined && /^#[0-9a-f]{6}$/i.test(inherited[field.key] || "")) control.querySelector(".colour-chip").style.background = inherited[field.key]; });
         return titled(h("div.mol-colour", {}, control, h("span", {}, field.label)));
       }
       default: {
         const input = typedField({ value, key, onCommit: set });
-        fills.push((drawn) => { input.placeholder = said(drawn[field.key]) || field.placeholder || ""; });
+        fills.push((drawn, inherited) => { input.placeholder = said(inherited[field.key]) || field.placeholder || ""; });
         return titled(ui.field(field.label, input, options));
       }
     }

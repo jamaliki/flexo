@@ -236,29 +236,65 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-turn-tip { position: absolute; z-index: 5; transform: translateX(-50%); pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 .fig-turning { opacity: 0.15; transition: opacity 0.12s; }
 
-/* A structure's mol-sketch settings: sections folded away, each setting showing the look's until it has its own. */
-.mol-style { display: grid; gap: 2px; margin-top: 8px; }
-.mol-style-head { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-.mol-style-head .section-title { margin: 0; }
-.mol-style-head .hint { flex: 1; color: var(--ink-3); font: var(--text-hint); }
-.mol-section summary .count { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: var(--text-hint); }
-.mol-section .colour-well.unset .colour-chip { opacity: 0.55; }
-.mol-section { padding: 7px 0 5px; border-top: 1px solid var(--line); }
-.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; font: var(--text-label); color: var(--ink-2); }
+/* A structure's settings: panes a tab away, as mol-sketch's own app has them, each of sections
+   that fold; a setting shows the look's until it has its own, named then in the accent. */
+.mol-panel { gap: 10px; }
+.mol-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.mol-head .hint { flex: 1; min-width: 0; color: var(--ink-3); font: var(--text-hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The tabs, drawn as a segmented control is: each its icon over its name, the chosen one
+   raised; kept in sight as a long pane scrolls under them. */
+.mol-tabs { position: sticky; top: 6px; z-index: 3; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1px; margin: 0 -6px; padding: 2px; border-radius: 8px;
+  background: linear-gradient(var(--seg-track), var(--seg-track)), var(--panel); box-shadow: 0 0 0 6px var(--panel); }
+.mol-tab { position: relative; display: grid; justify-items: center; align-content: center; gap: 3px; min-width: 0; height: 44px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; font: 500 10px/1.2 var(--font); }
+.mol-tab svg { width: 16px; height: 16px; }
+.mol-tab-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mol-tab:hover { color: var(--ink); }
+.mol-tab.on { background: var(--seg-on); color: var(--ink); box-shadow: var(--seg-shadow); }
+.mol-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+/* A pane holding settings of the structure's own has a dot, as a document with edits has. */
+.mol-tab.owned::after { content: ""; position: absolute; top: 6px; right: calc(50% - 15px); width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.mol-pane { display: grid; }
+.mol-section { padding: 6px 0; border-top: 1px solid var(--line); }
+.mol-section:first-child { border-top: 0; }
+.mol-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; min-height: 26px; font: var(--text-label); color: var(--ink-2); }
 .mol-section > summary::-webkit-details-marker { display: none; }
-.mol-section > summary svg { width: 14px; height: 14px; transition: transform 0.15s; }
-.mol-section[open] > summary svg { transform: rotate(90deg); }
-.mol-section > .inner { display: grid; gap: 8px; margin-top: 8px; }
-.mol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; grid-auto-flow: row dense; }
-.mol-grid > .field { min-width: 0; }
-/* A pop-up across the panel, as Keynote's are, its choice read whole ("Default (Secondary
-   Structure)"); numbers two to a row. */
-.mol-grid > .field:has(> .select) { grid-column: 1 / -1; }
-.mol-grid > .field.own > label, .mol-grid > .field.own .label { color: var(--accent); }
-.mol-colours { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; }
-/* Each well's name on one line ("Nucleic Acid"), four wells to a row. */
-.mol-colour { display: grid; justify-items: center; gap: 2px; width: 64px; font: var(--text-hint); color: var(--ink-3); text-align: center; white-space: nowrap; }
+.mol-section > summary > svg { width: 14px; height: 14px; flex: none; transition: transform 0.15s; }
+.mol-section[open] > summary > svg { transform: rotate(90deg); }
+.mol-section > summary .count { padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font: var(--text-hint); }
+.mol-section > summary .btn { margin-left: auto; }
+.mol-section > .inner { display: grid; gap: 10px; margin: 6px 0 8px; }
+/* Numbers two to a row; pop-ups, switches, words and tables across the pane. */
+.mol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; grid-auto-flow: row dense; }
+.mol-grid > * { min-width: 0; grid-column: 1 / -1; }
+.mol-grid > .half { grid-column: auto; }
+.mol-grid > [hidden] { display: none; }
+.mol-grid > .untitled > .label { display: none; }
+.mol-grid > .field.own > .label, .mol-switch.own .switch > span:not(.track) { color: var(--accent); }
+.mol-switch .switch { min-height: 22px; }
+/* Colours as wells, a row of each kind under its name. */
+.mol-subhead { margin-bottom: -4px; font: var(--text-hint); color: var(--ink-3); }
+.mol-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px 6px; }
+.mol-colour { display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; font: var(--text-hint); line-height: 1.25; color: var(--ink-3); text-align: center; }
+.mol-colour[hidden] { display: none; }
 .mol-colour.own { color: var(--accent); }
+.mol-colour .colour-control { position: relative; }
+.mol-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
+.mol-colour .colour-well.unset .colour-chip { opacity: 0.55; }
+/* What is drawn as a cartoon (sticks, a surface): its choices most reached for, as chips. */
+.mol-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mol-chip { height: 22px; padding: 0 9px; border-radius: 99px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink-2); font: var(--text-small); cursor: pointer; white-space: nowrap; }
+.mol-chip:hover { background: var(--sunken); color: var(--ink); }
+.mol-chip.on { border-color: transparent; background: var(--accent-soft); color: var(--accent); font-weight: 560; }
+.mol-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* A scene's steps, by name, the one drawn chosen. */
+.mol-steps { display: grid; gap: 2px; }
+.mol-step { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); text-align: left; font: var(--text-small); cursor: pointer; }
+.mol-step:hover { background: var(--sunken); color: var(--ink); }
+.mol-step.on { background: var(--accent-soft); color: var(--ink); }
+.mol-step:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.mol-step-number { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--sunken); color: var(--ink-3); font: 600 11px/1 var(--font); font-variant-numeric: tabular-nums; }
+.mol-step.on .mol-step-number { background: var(--accent); color: var(--accent-ink); }
+.mol-step-name { min-width: 0; overflow-wrap: anywhere; }
 /* The field a shape's problem is about, shown from the message that says it. */
 .field.wanted input, .field.wanted .select, .records.wanted .records-scroll { outline: 2px solid var(--error); outline-offset: 1px; border-radius: 4px; }
 /* A stand-in shaped as its part (a diamond, a circle): its outline is drawn inside it. */

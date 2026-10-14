@@ -153,6 +153,15 @@ const ICONS = {
   pencil: "M10.5 2.5l3 3L6 13H3v-3z",
   theme: "M8 2a6 6 0 100 12 1.5 1.5 0 001.2-2.4 1.5 1.5 0 011.2-2.4H12a2 2 0 002-2C14 4.4 11.3 2 8 2zM5 8h.01M6.5 5h.01M9.5 5h.01",
   deck: "M2 3h12v8H2zM5.5 14h5M8 11v3",
+  // A structure's panes: its look's pen, a molecule, a scene, an active site, a density map,
+  // labels and the camera (mol-sketch's own).
+  pen: "M3 13l1.5-4L11 2.5a1.4 1.4 0 012 2L6.5 11 3 13zM9.5 4l2 2",
+  molecule: "M8 2l5 3v6l-5 3-5-3V5zM8 2v4M13 11l-3.5-2M3 11l3.5-2",
+  scene: "M2.5 3h11v10h-11zM6.5 6l3.5 2-3.5 2z",
+  site: "M8 2v2.5M8 11.5V14M2 8h2.5M11.5 8H14M8 11.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z",
+  density: "M3 5.5C3 3.5 5 2 8 2s5 1.5 5 3.5-1 3-1 4.5 1 1.5 1 2.5c0 1.5-2 2-5 2s-5-.5-5-2c0-1 1-1 1-2.5S3 7.5 3 5.5z",
+  tag: "M2.5 3.5h8l3 4.5-3 4.5h-8zM5.5 8h.01",
+  camera: "M2 5.5h3l1.2-2h3.6l1.2 2h3v7.5H2zM8 11a2.4 2.4 0 100-4.8A2.4 2.4 0 008 11z",
   // A line's arrowheads, each on the end of a short line (filled ones in FILLS).
   "head-arrow": "M1.5 8H9",
   "head-triangle": "M1.5 8H9",
