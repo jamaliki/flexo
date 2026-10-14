@@ -2419,8 +2419,8 @@ export function figureParts(host) {
     if (sizable) {
       const theirs = [...host.overlay.querySelectorAll(".size-handle")].map((handle) => handle.getBoundingClientRect()).filter((rect) => rect.width);
       // (A molecule's or a picture's at the corners of its picture, the size it is given: not
-      // of its words over it.)
-      const picture = fits ? null : host.element(id)?.querySelector("image")?.getBoundingClientRect();
+      // of its words over it. A molecule drawn as shapes is a group as large as its picture.)
+      const picture = fits ? null : host.element(id)?.querySelector("image, [data-flexo-drawn]")?.getBoundingClientRect();
       const whole = host.element(id)?.getBoundingClientRect(), pad = whole?.width ? (box.width - whole.width) / 2 : 0;
       const at = picture?.width ? { left: picture.left - outer.left - pad, top: picture.top - outer.top - pad, width: picture.width + 2 * pad, height: picture.height + 2 * pad } : box;
       // Text has a handle at each side instead, as a Keynote text box has: dragged, it sets how
@@ -2479,7 +2479,7 @@ export function figureParts(host) {
     event.preventDefault();
     event.stopPropagation();
     const element = host.element(id);
-    const picture = element?.querySelector("image") || element;
+    const picture = element?.querySelector("image, [data-flexo-drawn]") || element;
     const box = picture?.getBoundingClientRect();
     const unit = element?.getScreenCTM?.()?.a;
     if (!box || !box.width || !unit) return;

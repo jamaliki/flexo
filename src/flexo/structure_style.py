@@ -170,9 +170,16 @@ SECTIONS: tuple[dict[str, Any], ...] = (
             _choice(
                 "stick_style",
                 "Stick Style",
-                ("auto", "engraved", "sketch"),
-                "Automatic matches the ribbons",
-                labels={"auto": "Automatic", **STROKE_LABELS},
+                ("auto", "engraved", "sketch", "flat"),
+                "Automatic matches the ribbons. Flat is PyMOL's: solid colour, round joints",
+                labels={"auto": "Automatic", **STROKE_LABELS, "flat": "Flat"},
+            ),
+            _choice(
+                "stick_outline",
+                "Stick Outline",
+                ("auto", "on", "off"),
+                "Flat sticks inked round; Automatic when ribbons are drawn",
+                labels={"auto": "Automatic", "on": "On", "off": "Off"},
             ),
             _number(
                 "stick_radius", "Stick Radius", low=0.02, step=0.02, hint="In ångströms", unit="Å"

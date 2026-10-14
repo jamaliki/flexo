@@ -173,12 +173,25 @@ def _image(
     width: float,
     height: float,
 ) -> None:
-    """A picture's image box, filled: a molecule drawn by mol-sketch, embedded as a PNG."""
+    """A picture's image box, filled: a molecule drawn by mol-sketch, embedded as a PNG --
+    or, in a look drawn as shapes, its drawing nested as an ``<svg>``, in a group marked
+    as mol-sketch's (the hand that redraws a sketched figure leaves it be) with an unpainted
+    box the size of the picture (what the studio measures it by, and sizes it by)."""
 
     import base64
 
-    from flexo.structures import structure_png
+    from flexo.structures import structure_png, structure_svg
 
+    markup = structure_svg(spec, style, palette, width, height)
+    if markup is not None:
+        holder = element(parent, "g", id=identifier, data_flexo_drawn="mol-sketch")
+        element(holder, "rect", x=x, y=y, width=width, height=height, fill="none")
+        nested = ET.fromstring(markup)
+        for name, value in (("x", x), ("y", y), ("width", width), ("height", height)):
+            nested.set(name, _number(value))
+        nested.set("preserveAspectRatio", "xMidYMid meet")
+        holder.append(nested)
+        return
     data = structure_png(spec, style, palette, width, height)
     element(
         parent,

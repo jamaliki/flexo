@@ -50,6 +50,112 @@ def test_a_structure_is_a_panel_with_the_molecule_in_the_figures_colours() -> No
     assert model.width >= 120 and model.height >= 90
 
 
+def _flat_figure(style: str = "paper") -> str:
+    with flexo.Figure("flat", style=style) as figure:
+        row = figure.root.row("row", gap=20)
+        row.structure(
+            "model", DATA / "1a7g.cif", label="E2", look="flat", width=120, height=90,
+            colors={"E": "Viral"}, sticks="(sidechain or name CA) and resi 300-305",
+        )
+        row.block("tag", label="E2 protein", tone="Viral")
+    return compile_figure(figure.spec).document.text
+
+
+def _molecule(svg: str):
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(svg)
+    return next(item for item in root.iter() if item.get("id") == "row.model.molecule")
+
+
+def test_a_flat_structure_is_shapes_painted_by_the_figures_roles() -> None:
+    pytest.importorskip("molsketch")
+    from flexo.colour import srgb_mix
+    from flexo.themes import resolve_palette, with_tone_roles
+
+    svg = _flat_figure()
+    group = _molecule(svg)
+    assert group.get("data-flexo-drawn") == "mol-sketch"
+    tags = [item.tag.rsplit("}", 1)[-1] for item in group.iter()]
+    assert "svg" in tags and "image" not in tags  # shapes, not a picture
+    # The chain in its tone's fill, its far side a shade of it, its lines in ink.
+    palette = with_tone_roles(resolve_palette("paper"))
+    fills = {
+        (item.get("data-flexo-fill"), item.get("data-flexo-fill-shade"), item.get("fill"))
+        for item in group.iter() if item.get("data-flexo-fill")
+    }
+    tone = next(role for role, _, _ in fills if role.startswith("tone-") and role.endswith("-fill"))
+    assert (tone, None, palette.get(tone)) in fills
+    shaded = {(colour, shade) for role, shade, colour in fills if role == tone and shade}
+    assert shaded and all(
+        colour == srgb_mix(palette.get(tone), palette.get("ink"), float(shade))
+        for colour, shade in shaded
+    )
+    assert any(item.get("data-flexo-stroke") == "ink" for item in group.iter())
+
+
+def test_a_flat_structure_is_recoloured_with_the_figure() -> None:
+    pytest.importorskip("molsketch")
+    from flexo.colour import srgb_mix
+    from flexo.theme import retheme_svg
+    from flexo.themes import resolve_palette, with_tone_roles
+
+    dark = with_tone_roles(resolve_palette("dark"))
+    group = _molecule(retheme_svg(_flat_figure(), dark))
+    for item in group.iter():
+        for part in ("fill", "stroke"):
+            role = item.get(f"data-flexo-{part}")
+            if not role:
+                continue
+            shade = item.get(f"data-flexo-{part}-shade")
+            wanted = dark.get(role)
+            if shade:
+                wanted = srgb_mix(wanted, dark.get("ink"), float(shade))
+            assert item.get(part) == wanted
+
+
+def test_a_flat_structure_keeps_its_line_in_a_sketched_theme() -> None:
+    pytest.importorskip("molsketch")
+    plain, sketched = _molecule(_flat_figure("paper")), _molecule(_flat_figure("sketch"))
+    shapes = lambda group: sum(1 for item in group.iter() if item.tag.endswith("path"))  # noqa: E731
+    assert shapes(sketched) == shapes(plain)  # each shape as mol-sketch drew it
+
+
+def test_a_flat_structure_is_vectors_in_the_pdf() -> None:
+    pytest.importorskip("molsketch")
+    from flexo.pdf import pdf_bytes
+
+    data = pdf_bytes(_flat_figure())
+    assert b"/Subtype /Image" not in data  # no picture: the molecule is paths
+
+
+def test_the_settings_of_a_structure_coloured_by_a_tone_are_shown(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.serialization import dump_figure
+    from flexo.studio.figure_kind import FigureKind
+    from flexo.themes import resolve_palette, with_tone_roles
+
+    with flexo.Figure("toned", style="paper") as figure:
+        row = figure.root.row("row", gap=20)
+        row.structure("model", DATA / "1a7g.cif", look="flat", colors={"E": "Viral"})
+        row.block("tag", label="E2 protein", tone="Viral")
+    action = {"do": "structure-settings", "id": "row.model"}
+    settings = FigureKind().act({"text": dump_figure(figure.spec)}, action, tmp_path)["settings"]
+    assert settings["look"] == "flat"
+    # Drawn in the figure's colours: its helices in the accent's fill.
+    assert settings["style"]["palette.helix"] == with_tone_roles(resolve_palette("paper")).get(
+        "accent-fill"
+    )
+
+
+def test_shades_are_mixed_as_mol_sketch_mixes_them() -> None:
+    from flexo.colour import srgb_mix
+
+    # Half of one step rounds up, as JavaScript's Math.round does (not to even).
+    assert srgb_mix("#000000", "#020202", 0.25) == "#010101"
+    assert srgb_mix("#e8796b", "#000000", 0.165) == "#c26559"
+
+
 def test_without_mol_sketch_a_structure_says_how_to_get_it(monkeypatch) -> None:
     import builtins
 

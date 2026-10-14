@@ -30,6 +30,19 @@ def to_hex(rgb: Sequence[float]) -> str:
     return "#" + "".join(f"{round(min(1.0, max(0.0, channel)) * 255):02x}" for channel in rgb)
 
 
+def srgb_mix(first: str, second: str, amount: float) -> str:
+    """``first`` moved ``amount`` of the way to ``second`` as mol-sketch moves it: each
+    channel in sRGB, rounded half up -- so a shade mol-sketch drew is found again, and
+    drawn again in another palette, to the last digit."""
+
+    # In whole channel values, as mol-sketch has them: no rounding on the way there and back.
+    start = [round(channel * 255) for channel in to_rgb(first)]
+    end = [round(channel * 255) for channel in to_rgb(second)]
+    return "#" + "".join(
+        f"{math.floor(a + (b - a) * amount + 0.5):02x}" for a, b in zip(start, end, strict=True)
+    )
+
+
 def _linear(channel: float) -> float:
     return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
 

@@ -25,6 +25,14 @@ watercolour, pen and ink -- as a panel of the figure:
 mol-sketch is an optional dependency (``pip install "flexo[molecules]"``, or the
 ``python`` folder of a mol-sketch clone). The picture is drawn at print
 resolution and embedded, so the editable SVG, the PDF, and the slides carry it.
+
+In the **flat** look (PyMOL's flat, outlined figures) the molecule is shapes instead:
+mol-sketch's SVG nested in the figure's, so it stays sharp at any size and the PDF
+carries it as vectors. It is painted in the figure's own roles -- helices in the
+accent's fill, strands in the warm fill, loops in the neutral fill, a chain or a tone
+in that tone's fill, outlines in ink -- and every shape records the role it was
+painted in (and, for a ribbon's darker side, how far toward the ink), so ``flexo
+retheme`` recolours the molecule with the rest of the figure.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ import functools
 import re
 import struct
 import threading
+import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +66,13 @@ LOOKS = (
     "chalkboard",
     "assembly-cartoon",
     "assembly-surface",
+    "textbook",
+    "flat",
 )
+
+VECTOR_LOOKS = frozenset({"flat"})
+"""Looks whose molecule is nested as shapes, not embedded as a picture. (Its drawing is
+checked all the same: anything a picture holds better is drawn as one; see ``_PICTURED``.)"""
 
 
 @atexit.register
@@ -471,6 +486,113 @@ def structure_png(
         return _hatched(width / height)
 
 
+def structure_svg(
+    node: NodeSpec, style: LayoutStyle, palette: Palette, width: float, height: float
+) -> str | None:
+    """The molecule as shapes: mol-sketch's drawing at ``width`` by ``height`` points, as
+    an ``<svg>`` to nest in the figure's, every shape painted in a colour of the figure's
+    marked with the role it was painted by -- or None, for a look drawn as a picture
+    (``VECTOR_LOOKS``), a drawing a picture holds better, or one mol-sketch failed to draw
+    (``structure_png`` then draws it, or says why)."""
+
+    ask = _ask(node, style, palette)
+    if ask.look not in VECTOR_LOOKS or _failed.get(_failing(ask)):
+        return None
+    try:
+        markup = _one_at_a_time(_render_svg, ask, width / height)
+    except Exception:
+        return None  # structure_png meets the same failure, and says it
+    return None if markup is None else _own_ids(markup, f"{node.id}.molecule")
+
+
+_PICTURED = ("<image", "mix-blend-mode", "<filter", "<pattern", "<mask", "Gradient", "<clipPath")
+"""What a drawing as shapes would hold that the figure's other readers (the PDF, the
+slides) only approximate -- pictures, blends, blurs, fills of a picture, clips other than
+a rectangle: a drawing with any of them is embedded as a picture instead."""
+
+
+@functools.lru_cache(maxsize=32)
+def _render_svg(ask: _Ask, aspect: float) -> str | None:
+    figure = _drawn(ask)
+    long_side = 1200  # as _render draws it: the same pen weight against the molecule
+    size = (
+        (long_side, round(long_side / aspect))
+        if aspect >= 1
+        else (round(long_side * aspect), long_side)
+    )
+    if ask.site_labels and ask.site:
+        figure.label_site(size)
+    # No paper laid down: the figure's page is under it (its colour is still the paper's).
+    figure.set(**{"paper.transparent": True})
+    text = figure.svg(size, scale=1.0)
+    if any(mark in text for mark in _PICTURED):
+        return None
+    shading = float(figure.style.get("shading") or 0.0)
+    return _painted_by_role(text, ask, min(max(0.3 * shading, 0.0), 1.0))
+
+
+def _painted_by_role(text: str, ask: _Ask, shade: float) -> str:
+    """mol-sketch's SVG with every fill and line in a colour the figure handed it marked
+    with that colour's role -- and the one darker shade a flat ribbon takes of its colour
+    on its far side, with the role and how far toward the ink -- so ``flexo retheme``
+    paints it again."""
+
+    from flexo.colour import srgb_mix
+
+    ink = _hex(dict(ask.paints).get("ink", "#000000"))
+    found: dict[str, tuple[str, float]] = {}
+    for role, colour in ask.paints:
+        found.setdefault(_hex(colour), (role, 0.0))
+    for role, colour in ask.paints:
+        if shade > 0 and role not in {"ink", "canvas"}:
+            found.setdefault(srgb_mix(_hex(colour), ink, shade), (role, shade))
+    root = ET.fromstring(text)
+    for item in root.iter():
+        for part in ("fill", "stroke"):
+            value = item.get(part)
+            if value is None or not value.startswith("#"):
+                continue
+            hit = found.get(_hex(value))
+            if hit is None:
+                continue
+            role, amount = hit
+            item.set(f"data-flexo-{part}", role)
+            if amount:
+                item.set(f"data-flexo-{part}-shade", f"{amount:.4g}")
+    return ET.tostring(root, encoding="unicode")
+
+
+def _hex(colour: str) -> str:
+    """A colour as ``#rrggbb`` in lower case, as mol-sketch writes it."""
+
+    text = colour.strip().lower()
+    if len(text) == 4 and text.startswith("#"):
+        text = "#" + "".join(digit * 2 for digit in text[1:])
+    return text
+
+
+def _own_ids(markup: str, prefix: str) -> str:
+    """mol-sketch's SVG with its ids (clip paths and the like, numbered from 1 in every
+    drawing) made the molecule's own, so two molecules in a figure never share one."""
+
+    if ' id="' not in markup:
+        return markup
+    root = ET.fromstring(markup)
+    renamed = {}
+    for item in root.iter():
+        identifier = item.get("id")
+        if identifier:
+            renamed[identifier] = f"{prefix}.{identifier}"
+            item.set("id", renamed[identifier])
+    for item in root.iter():
+        for name, value in item.attrib.items():
+            if "#" in value:
+                item.set(name, re.sub(r"(url\(#|^#)([^)\s]+)",
+                                      lambda m: m.group(1) + renamed.get(m.group(2), m.group(2)),
+                                      value))
+    return ET.tostring(root, encoding="unicode")
+
+
 _failed: dict[tuple, str] = {}
 """Why mol-sketch failed to draw a structure, by what it was drawn from (its colours aside)."""
 
@@ -540,6 +662,9 @@ class _Ask:
     site_labels: bool = False
     solvent: bool = False
     """Whether its waters and lone ions are drawn (as small dots, floating free)."""
+    paints: tuple[tuple[str, str], ...] = ()
+    """Each colour handed to mol-sketch by a role of the figure's, as (role, colour), the
+    roles that matter most first: what a molecule drawn as shapes is painted by."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -550,6 +675,12 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     if look not in LOOKS:
         raise _fail(node, "look", f'look "{look}" is not a mol-sketch look.', hint=", ".join(LOOKS))
     paper = palette.get("canvas", "#ffffff")
+    ink = palette.get("ink", "#000000")
+    # A flat molecule is filled with its tones, as the figure's shapes are; the other looks
+    # draw in lines, and take a tone's line colour.
+    flat = look == "flat"
+    part = "fill" if flat else "stroke"
+    paints = [("ink", ink)]  # outlines first: a tone of the same colour is not what they are
     colours = []
     for group, colour in _colours(node):
         if not colour.startswith("#"):
@@ -558,7 +689,8 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
                 raise _fail(
                     node, "colors", f'"{colour}" is neither a colour nor a tone of the figure.'
                 )
-            colour = palette.get(f"tone-{index}-stroke")
+            colour = palette.get(f"tone-{index}-{part}")
+            paints.append((f"tone-{index}-{part}", colour))
         colours.append((group, colour))
     view = tuple(
         (name, float(value))  # type: ignore[arg-type]
@@ -573,11 +705,25 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     site = node.property("site")
     # The figure's own colours where it has them: its ink, and -- when a protein map
     # in the figure draws helices and strands -- theirs, so the two agree.
-    roles = [("ink", palette.get("ink", "#000000"))]
+    roles = [("ink", ink)]
+    if flat:
+        # Flat, the whole molecule is in the figure's colours: helices in the accent's
+        # fill, strands in the warm one, loops in the neutral fill (a protein map's tones
+        # win, below), words, charges and a mechanism's arrows in ink, hydrogen bonds in
+        # the accent's line.
+        for key, role in (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
+                          ("label", "ink"), ("charge", "ink"), ("arrow", "ink"),
+                          ("hbond", "accent-stroke")):
+            roles.append((key, palette.get(role)))
     for tone, key in (("helix", "helix"), ("strand", "sheet")):
         index = palette.tone_index(tone)
         if index is not None:
-            roles.append((key, palette.get(f"tone-{index}-stroke")))
+            roles.append((key, palette.get(f"tone-{index}-{part}")))
+            paints.append((f"tone-{index}-{part}", palette.get(f"tone-{index}-{part}")))
+    if flat:
+        paints += [(role, palette.get(role)) for role in ("accent-fill", "warm-fill", "block-fill",
+                                                          "accent-stroke")]
+    paints.append(("canvas", paper))  # last: a fill as white as the page is still a fill
     path = Path(source).expanduser()
     if path.exists() and outside(path):
         raise _fail(node, "source", "The structure file is outside the folder.")
@@ -606,6 +752,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         None if within is None else float(within),  # type: ignore[arg-type]
         bool(node.property("site_labels")),
         bool(node.property("solvent")),
+        tuple(paints),
     )
 
 

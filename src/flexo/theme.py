@@ -15,12 +15,10 @@ def retheme_svg(svg_text: str, palette: Palette) -> str:
     palette = with_tone_roles(palette)
     root = ET.fromstring(svg_text)
     for item in root.iter():
-        fill_role = item.get("data-flexo-fill")
-        stroke_role = item.get("data-flexo-stroke")
-        if fill_role:
-            item.set("fill", palette.get(fill_role))
-        if stroke_role:
-            item.set("stroke", palette.get(stroke_role))
+        for part in ("fill", "stroke"):
+            role = item.get(f"data-flexo-{part}")
+            if role:
+                item.set(part, _painted(palette, role, item.get(f"data-flexo-{part}-shade")))
     root.set("data-flexo-palette", palette.name)
     metadata = root.find(f"{{{SVG_NS}}}metadata")
     if metadata is not None and metadata.text:
@@ -31,3 +29,15 @@ def retheme_svg(svg_text: str, palette: Palette) -> str:
         except json.JSONDecodeError:
             pass
     return xml_document(root)
+
+
+def _painted(palette: Palette, role: str, shade: str | None) -> str:
+    """What ``role`` paints in ``palette``; with a ``shade``, that colour so far toward the
+    ink (a flat ribbon's far side, as mol-sketch shades it)."""
+
+    colour = palette.get(role)
+    if not shade:
+        return colour
+    from flexo.colour import srgb_mix
+
+    return srgb_mix(colour, palette.get("ink"), float(shade))
