@@ -447,17 +447,32 @@ def embed_fonts(stylesheet: ET.Element, root: ET.Element, style: LayoutStyle) ->
             used = {ord(character) for character in mine if loaded.has(character)}
             if not used:
                 continue
-            data = _subset(face, loaded.raw, frozenset(used))
-            weight = f"{face.weight_min} {face.weight_max}" if face.variable else str(face.weight)
-            fmt = "opentype" if face.source.lower().endswith(".otf") else "truetype"
-            mime = "font/otf" if fmt == "opentype" else "font/ttf"
-            encoded = base64.b64encode(data).decode("ascii")
-            rules.append(
-                f"@font-face{{font-family:'{face.family}';"
-                f"font-style:{'italic' if face.italic else 'normal'};font-weight:{weight};"
-                f"src:url(data:{mime};base64,{encoded}) format('{fmt}');}}"
-            )
+            rules.append(font_face_rule(face, frozenset(used)))
     stylesheet.text = "".join(rules)
+
+
+def font_face_rule(face: FontFace, codepoints: frozenset[int]) -> str:
+    """An ``@font-face`` rule carrying ``face`` cut down to ``codepoints`` (those it has)."""
+
+    loaded = load_face(face)
+    kept = frozenset(point for point in codepoints if point in loaded.codepoints)
+    data = _subset(face, loaded.raw, kept)
+    weight = f"{face.weight_min} {face.weight_max}" if face.variable else str(face.weight)
+    fmt = "opentype" if face.source.lower().endswith(".otf") else "truetype"
+    mime = "font/otf" if fmt == "opentype" else "font/ttf"
+    encoded = base64.b64encode(data).decode("ascii")
+    return (
+        f"@font-face{{font-family:'{face.family}';"
+        f"font-style:{'italic' if face.italic else 'normal'};font-weight:{weight};"
+        f"src:url(data:{mime};base64,{encoded}) format('{fmt}');}}"
+    )
+
+
+def fonts_are_linked() -> bool:
+    """Whether a drawing is drawn for a page that loads the bundled faces itself
+    (``fonts_linked``): one drawn apart from it carries those it uses."""
+
+    return _LINKED.get()
 
 
 @cache

@@ -535,8 +535,9 @@ export const ui = {
 
   // A font, from a pop-up button: its menu lists the fonts there are, each name in its own
   // face, those most often wanted first, and typing finds one -- or names one not listed.
-  // Empty is `placeholder`.
-  font({ value, options = [], placeholder = "Default", onChange, key } = {}) {
+  // Empty is `placeholder`; `specials` ([{ value, label }]) are choices that are no one font,
+  // listed under it (a picture's As Drawn).
+  font({ value, options = [], placeholder = "Default", specials = [], onChange, key } = {}) {
     // The system's own faces (".SF NS") are not for documents: not offered.
     options = options.filter((name) => !String(name).startsWith("."));
     const suggested = suggestedFonts(options);
@@ -544,7 +545,8 @@ export const ui = {
     const node = h("button.select.font-pick", { type: "button", "aria-haspopup": "menu", title: "Choose a Font" }, label, icon("chevron-down"));
     if (key) node.dataset.key = key;
     let current = value || "";
-    const show = () => { label.textContent = current || placeholder; node.classList.toggle("default", !current); };
+    const special = (name) => specials.find((each) => each.value === name)?.label;
+    const show = () => { label.textContent = special(current) || current || placeholder; node.classList.toggle("default", !current); };
     const pick = (next) => {
       closeMenu();
       if (next === current) return;
@@ -565,6 +567,7 @@ export const ui = {
         const all = [...new Set([...options, ...suggested])].sort((a, b) => a.localeCompare(b));
         clear(list,
           query ? null : item("", placeholder),
+          query ? null : specials.map((each) => item(each.value, each.label)),
           query || !suggested.length ? null : [h("div.menu-title", {}, "Suggested"), suggested.map((name) => item(name, name, true)), h("div.menu-title", {}, "All Fonts")],
           all.filter((name) => !query || name.toLowerCase().includes(query)).map((name) => item(name, name, true)),
           typed && !all.some((name) => name.toLowerCase() === query) ? item(typed, `Use “${typed}”`) : null);

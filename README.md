@@ -817,6 +817,28 @@ A picture in a figure is cropped by how much is cut off each side, in hundredths
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part
 kept.
 
+An SVG picture's words -- a drawing pasted from Inkscape, say -- are set in the figure's
+font, so the studio, the PNG, the PDF and every viewer draw the same face, and the picture
+grows to hold them should they reach past its page. Its properties may say otherwise, and
+change its words and colours without touching its file:
+
+```yaml
+- id: sketch
+  kind: image
+  properties:
+    source: assets/sketch.svg
+    font: drawn                 # the faces the file names (as found); or a family
+    texts:                      # by the text's id in the file (with none: text: 3)
+    - {id: text1, words: "Encoder\nblock", size: 20, bold: true, colour: "#c0392b"}
+    colours: {"#4a90d9": "#2e7d32"}   # every use of a colour, drawn in another
+```
+
+A text's size is in points at the drawing's own size. The file stays as its program wrote
+it, to be opened there again; a change to a text it no longer has is passed over. In the
+studio its panel has **Words** -- the font, and each text's words, size, bold, italic and
+colour, in the order they are read -- and **Colours**, a well for each colour it is painted
+in.
+
 ### Plots in a figure
 
 A paper's figure has plots among its diagrams. A `plot` names a Python file and a

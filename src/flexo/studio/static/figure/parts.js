@@ -23,6 +23,7 @@
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, inQuotes, typingName, roving } from "/static/studio/studio.js";
 import { mergeText, follows } from "/static/studio/merge.js";
 import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
+import { drawingSections } from "/static/kinds/figure/drawing.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -459,6 +460,30 @@ function throttled(run, ms = 100) {
     timer = setTimeout(fire, ms);
   };
   return (...args) => { waiting = args; if (!timer) fire(); };
+}
+
+// Where a part is drawn on the page: a drawing nested in it (a picture's, a plot's) by the
+// box it is drawn in -- the part's own -- not by what is drawn inside that box, by which a
+// browser measures a nested drawing (smaller, or past it and cut off).
+export function drawnRect(element) {
+  const whole = element.getBoundingClientRect(), children = [...(element.children || [])];
+  if (!children.some((child) => child.localName === "svg")) return whole;
+  let box = null;
+  for (const child of children) {
+    const rect = child.localName === "svg" ? viewportRect(child) : child.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) continue;
+    box = box ? new DOMRect(Math.min(box.left, rect.left), Math.min(box.top, rect.top),
+      Math.max(box.right, rect.right) - Math.min(box.left, rect.left), Math.max(box.bottom, rect.bottom) - Math.min(box.top, rect.top)) : rect;
+  }
+  return box || whole;
+}
+function viewportRect(svg) {
+  const matrix = svg.parentNode?.getScreenCTM?.();
+  if (!matrix) return svg.getBoundingClientRect();
+  const x = svg.x.baseVal.value, y = svg.y.baseVal.value, width = svg.width.baseVal.value, height = svg.height.baseVal.value;
+  const corners = [[x, y], [x + width, y + height]].map(([px, py]) => new DOMPoint(px, py).matrixTransform(matrix));
+  const left = Math.min(corners[0].x, corners[1].x), top = Math.min(corners[0].y, corners[1].y);
+  return new DOMRect(left, top, Math.abs(corners[1].x - corners[0].x), Math.abs(corners[1].y - corners[0].y));
 }
 
 // A stylesheet of the figure's, asked for once -- and again, should the studio not have
@@ -3503,7 +3528,7 @@ export function figureParts(host) {
     if (boxes.has(id)) return boxes.get(id);
     let box = null;
     // A part's drawing; a group's frame and label, if it has them, and what it holds.
-    const drawn = host.element(id)?.getBoundingClientRect();
+    const element = host.element(id), drawn = element && drawnRect(element);
     if (drawn && (drawn.width || drawn.height)) box = { left: drawn.left, top: drawn.top, right: drawn.right, bottom: drawn.bottom };
     for (const child of groupOf(id)?.children || []) {
       const inner = boxOf(child, boxes);
@@ -5677,6 +5702,7 @@ export function figureParts(host) {
         fields(kind === "structure" ? shown.filter((field) => !inPanes(part).has(field.key)) : shown, node,
           (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`)),
       kind === "structure" ? structurePanes(node, part, (values, merge, hold) => update({ type: "node", id: node.id }, values, merge, hold), `node:${node.id}`) : null,
+      kind === "image" ? pictureSections(node) : null,
       // (Chosen already, it is not chosen again: the panel would be drawn anew, and the
       // palette lose the button it opens by.)
       linesSection(ui.button("Add Shape After…", (event) => { const anchor = event.currentTarget; if (chosenOne() !== node.id) select([node.id]); addPalette(anchor.isConnected ? anchor : null); }, { small: true, icon: "plus" })),
@@ -5684,6 +5710,24 @@ export function figureParts(host) {
       lineUpSection(node),
       h("div.section", {}, advanced(idField(node.id, "node"))),
     ];
+  }
+
+  // A picture's words and colours, restyled (drawing.js): its font, each text's words and
+  // look, and each colour it is painted in -- kept in its properties, never in its file.
+  function pictureSections(node) {
+    return drawingSections({ source: node.properties?.source, describe: host.drawing, scope: `node:${node.id}`,
+      family: figureFamily(),
+      fonts: (catalog.figure_fields || []).find((field) => field.key === "figure.font")?.options || [],
+      current: () => nodeOf(node.id)?.properties || {},
+      write: (values, { label, merge = null, hold = false }) => act({ do: "update", target: { type: "node", id: node.id },
+        values: Object.fromEntries(Object.entries(values).map(([key, value]) => [`properties.${key}`, value])) }, { merge, hold, select: false, label }) });
+  }
+
+  // The figure's font, as its shapes' words are drawn in it (none known while it has none).
+  function figureFamily() {
+    const root = host.element(model()?.root);
+    const label = [...(root?.querySelectorAll('[data-flexo-entity="component"] [id$=".label"]') || [])][0];
+    return label ? getComputedStyle(label).fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "") : null;
   }
 
   // A part lined up with another anywhere in the figure, across the way its row or column

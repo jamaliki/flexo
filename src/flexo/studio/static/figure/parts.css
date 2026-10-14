@@ -346,3 +346,12 @@ body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !i
 .text-style { display: flex; align-items: center; gap: 6px; }
 .text-style > .btn { flex: none; }
 .text-style > .segmented { flex: 1; }
+
+/* A picture's words and colours (drawing.js): its sections are the panel's, each text its
+   words over a row of its look, each colour a well. */
+.drawing-sections { display: contents; }
+.drawing-texts { display: grid; gap: 12px; }
+.drawing-text { display: grid; gap: 6px; }
+.drawing-size { flex: 1; min-width: 0; max-width: 96px; }
+.drawing-wells { display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.section-title .drawing-reset { margin-left: auto; }

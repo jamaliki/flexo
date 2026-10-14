@@ -90,7 +90,13 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label, title_side:
   left|right|bottom-left|bottom-right (where its label stands)}; the root group (figure.root,
   "root" by default) holds the rest. A file without groups stacks its nodes.
-A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. A molecule's
+A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. An SVG's words
+  are set in the figure's font, the same in every output; its properties may say otherwise --
+  font: drawn (the faces its file names, as found) or a family; texts: [{id: text1 (the text's
+  id in the file; one with none is text: 3, its place among the file's texts), words:
+  "two\nlines", size (pt, at the drawing's own size), bold, italic, colour: "#c0392b"}];
+  colours: {"#4a90d9": "#2e7d32"} (every use of a colour, drawn in another). The file itself is
+  never changed: a text it no longer has is passed over. A molecule's
   structure: {id, kind: structure, properties: {source: a .pdb or .cif file in the folder, or a
   mol-sketch scene (.json: a reaction drawn with its orbitals, lone pairs, arrows and measures),
   step (a scene's: 1, its first; drawn as its arrows finish), look (engraved-colour, textbook,
