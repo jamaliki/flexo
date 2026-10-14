@@ -709,9 +709,11 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     if flat:
         # Flat, the whole molecule is in the figure's colours: helices in the accent's
         # fill, strands in the warm one, loops in the neutral fill (a protein map's tones
-        # win, below), words in ink, hydrogen bonds in the accent's line.
+        # win, below), words, charges and a mechanism's arrows in ink, hydrogen bonds in
+        # the accent's line.
         for key, role in (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
-                          ("label", "ink"), ("hbond", "accent-stroke")):
+                          ("label", "ink"), ("charge", "ink"), ("arrow", "ink"),
+                          ("hbond", "accent-stroke")):
             roles.append((key, palette.get(role)))
     for tone, key in (("helix", "helix"), ("strand", "sheet")):
         index = palette.tone_index(tone)
