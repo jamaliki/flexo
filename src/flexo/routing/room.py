@@ -16,6 +16,7 @@ from dataclasses import replace
 from itertools import pairwise
 
 from flexo.components import TRANSPARENT_KINDS
+from flexo.frames import FRAME_KIND
 from flexo.geometry import Point, Rect, segment_crosses_rect
 from flexo.hierarchy import bounded_owner, parent_map
 from flexo.ir.routed import RoutedFigure
@@ -237,6 +238,11 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
     # no room to spread: that gap grows by a lane.
     for spot, across_x in _crowded(routed, style.port_spacing.points):
         widen(spot, across_x, style.port_spacing.points)
+    # A line to a frame run along its outline, nearer than a line keeps from a box: a frame
+    # takes no room, so the gap it stands in was laid out as narrow as without it -- that
+    # gap grows, for the line to keep clear of it as of a box.
+    for spot, across_x, amount in _hugging(routed, clearance, lane):
+        widen(spot, across_x, amount)
     for owner_id, count in above.items():
         # A lane per connector over the contents, with clearance either side.
         group = routed.fitted.group(owner_id)
@@ -463,6 +469,44 @@ def _crowded(routed: RoutedFigure, lane: float) -> list[tuple[Point, bool]]:
                 spots.append((Point((a.x + c.x) / 2.0, middle), True))
             else:
                 spots.append((Point(middle, (a.y + c.y) / 2.0), False))
+    return spots
+
+
+def _hugging(
+    routed: RoutedFigure, clearance: float, lane: float
+) -> list[tuple[Point, bool, float]]:
+    """Where a line to a frame runs along the frame's outline nearer than ``clearance``:
+    the middle of the stretch, whether the line is apart from the outline along x, and how
+    much wider the gap it runs in has to be for a lane clear of the frame."""
+
+    frames = {
+        node.measured.spec.id: node.bounds
+        for node in routed.fitted.nodes
+        if node.measured.spec.kind == FRAME_KIND
+    }
+    spots: list[tuple[Point, bool, float]] = []
+    for edge in routed.edges:
+        for end in (edge.spec.source.node_id, edge.spec.target.node_id):
+            frame = frames.get(end)
+            if frame is None:
+                continue
+            for a, b in pairwise(edge.centerline):
+                upright = abs(a.x - b.x) < 1e-6
+                if upright == (abs(a.y - b.y) < 1e-6):
+                    continue
+                if upright:
+                    low, high = max(min(a.y, b.y), frame.top), min(max(a.y, b.y), frame.bottom)
+                    apart = max(frame.left - a.x, a.x - frame.right)
+                else:
+                    low, high = max(min(a.x, b.x), frame.left), min(max(a.x, b.x), frame.right)
+                    apart = max(frame.top - a.y, a.y - frame.bottom)
+                # (Its last run, into the frame, meets the outline across it: alongside
+                # nothing.)
+                if high - low <= lane or apart >= clearance - 1e-3 or apart < -1e-3:
+                    continue
+                middle = (low + high) / 2.0
+                spot = Point(a.x, middle) if upright else Point(middle, a.y)
+                spots.append((spot, upright, clearance - apart + lane))
     return spots
 
 

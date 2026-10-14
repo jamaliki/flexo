@@ -659,6 +659,44 @@ def test_a_line_ends_at_a_frames_outline_on_the_side_that_faces_its_other_end() 
     assert short == pytest.approx(_box(drawn, "r").y - _line(drawn, "p", "r").shaft[-1].y)
 
 
+def test_a_line_to_a_frame_keeps_clear_of_its_outline_as_of_a_box() -> None:
+    """A frame takes no room: round shapes a gap from another, its outline stands nearer that
+    other than the gap. A line from it to the frame's far side ran down that outline, and
+    left its box off the middle: that gap grows, for the line to keep a box's clearance."""
+
+    from flexo.style import STYLES
+
+    figure = {
+        "figure": {"id": "pipeline"},
+        "groups": [
+            {"id": "root", "role": "canvas", "layout": {"kind": "row"},
+             "children": ["api", "back", "frame"]},
+            {"id": "back", "role": "layout", "layout": {"kind": "column"},
+             "children": ["queue", "store"]},
+        ],
+        "nodes": [
+            {"id": "api", "label": "API"}, {"id": "queue", "label": "Orders"},
+            {"id": "store", "label": "Store"},
+            {"id": "frame", "kind": "frame", "label": "Backend",
+             "properties": {"around": "queue, store", "title_side": "bottom-left"}},
+        ],
+        "edges": [
+            {"from": "queue", "to": "store"},
+            {"from": "api", "to": "frame", "arrive": "south"},
+        ],
+    }
+    drawn = compile_figure(parse_figure(figure))
+    line = _line(drawn, "api", "frame").centerline
+    frame, api = _frame(drawn, "frame").bounds, _box(drawn, "api")
+    clearance = STYLES["paper"].route_clearance.points
+    assert line[0].y == pytest.approx(api.center.y)
+    assert _side_met(frame, line[-1]) == "south"
+    for a, b in pairwise(line[:-1]):
+        if a.x == b.x and min(a.y, b.y) < frame.bottom:
+            assert frame.left - a.x >= clearance - 1e-6 or a.x - frame.right >= clearance - 1e-6
+    assert not _enters(line, frame)
+
+
 def test_a_line_to_a_frame_moves_no_shape_and_the_other_lines_go_through_the_frame() -> None:
     """A frame takes no room: nor does a line to it. What is laid out is laid out without
     the line, and the lines of the shapes the frame goes round cross its outline as they
