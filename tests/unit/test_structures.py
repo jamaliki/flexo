@@ -454,6 +454,107 @@ def test_a_numbers_note_never_says_its_unit_again() -> None:
             assert words[field["unit"]] not in field["hint"].lower(), field["label"]
 
 
+def test_every_field_of_mol_sketchs_style_is_offered_or_said_why_not() -> None:
+    """The studio's panes offer every field of mol-sketch's style -- once each -- but those
+    it says why it leaves out: the figure's own (its paper, set on every structure it draws),
+    those the structure's own fields set, and those that change nothing a figure draws. A
+    field mol-sketch adds is offered, or said why not, before this passes."""
+
+    ms = pytest.importorskip("molsketch")
+    from flexo.structure_style import NOT_OFFERED, PANES, SECTIONS, THE_FIGURES
+    from flexo.structures import UNSET, _fields
+
+    def walk(value: dict, prefix: str = "") -> set[str]:
+        names: set[str] = set()
+        for key, item in value.items():
+            names |= walk(item, f"{prefix}{key}.") if isinstance(item, dict) else {prefix + key}
+        return names
+
+    every = walk(ms.default_style()) | UNSET
+    assert every == _fields()
+    offered = [field["key"] for section in SECTIONS for field in section["fields"]]
+    assert len(offered) == len(set(offered)), "a setting offered twice"
+    assert not set(offered) - every, "a setting mol-sketch lacks"
+    assert not set(offered) & set(NOT_OFFERED), "a setting offered and left out"
+    assert not set(NOT_OFFERED) - every, "a setting left out that mol-sketch lacks"
+    missing = every - set(offered) - set(NOT_OFFERED)
+    assert not missing, f"mol-sketch's {sorted(missing)} neither offered nor said why not"
+    assert set(THE_FIGURES) <= set(NOT_OFFERED) and all(NOT_OFFERED.values())
+    # Each pane is of sections, and every section of the panes is in one.
+    assert [pane["key"] for pane in PANES] == [
+        "look", "molecule", "scene", "site", "map", "labels", "camera"
+    ]
+    assert {section["pane"] for section in SECTIONS} == {pane["key"] for pane in PANES}
+
+
+def test_a_structures_own_fields_are_each_in_one_of_its_panes() -> None:
+    """A structure's panel is its words, then its panes: each of its own fields (its file,
+    what it draws, its site, its map, its view) is in one of them, where it belongs."""
+
+    from flexo.structure_style import PANES
+    from flexo.studio.figure_parts import catalogue
+
+    part = catalogue({"themes": [], "palettes": {}, "fonts": [], "components": []})["parts"][
+        "structure"
+    ]
+    placed = [
+        field["key"]
+        for pane in PANES
+        for section in pane["sections"]
+        for field in section["fields"]
+        if field.get("own")
+    ]
+    fields = [field["key"] for field in part["fields"] if field["type"] != "molsketch"]
+    assert sorted(placed) == sorted(key for key in fields if key != "label")
+    assert not [field for field in part["fields"] if field.get("more")]
+    # What is drawn as a cartoon, sticks or a surface, a click away: the look's, none, or one
+    # of those most reached for.
+    sticks = next(field for field in part["fields"] if field["key"] == "properties.sticks")
+    assert [chip["value"] for chip in sticks["chips"]][:3] == [None, "none", "hetatm and not water"]
+
+
+def test_the_studio_is_told_a_scenes_steps_and_what_a_setting_is_without_its_own(
+    tmp_path: Path,
+) -> None:
+    """A scene's steps, by the names it gives them, for the studio to choose one by; and each
+    setting as the look (and the figure) give it, beside what the structure is drawn with --
+    what a setting goes back to when it is no longer the structure's own."""
+
+    pytest.importorskip("molsketch")
+    from flexo.serialization import dump_figure
+    from flexo.studio.figure_kind import FigureKind
+
+    def settings(**options: object) -> dict:
+        with flexo.Figure("asked") as figure:
+            figure.root.structure("model", _scene(), look="textbook", **options)  # type: ignore[arg-type]
+        action = {"do": "structure-settings", "id": "model"}
+        return FigureKind().act({"text": dump_figure(figure.spec)}, action, tmp_path)["settings"]
+
+    plain = settings()
+    assert plain["steps"] == ["\u03c0* attack: precursor", "Tetrahedral alkoxide"]
+    assert plain["inherited"] == plain["style"]
+    own = settings(style={"show": {"orbitals": False}, "line": {"width": 3}}, step=3)
+    # (A step it lacks is said, and its steps still named.)
+    assert own["steps"] == plain["steps"] and "problem" in own
+    own = settings(style={"show": {"orbitals": False}, "line": {"width": 3}})
+    assert own["style"]["show.orbitals"] is False and own["style"]["line.width"] == 3
+    assert own["inherited"]["show.orbitals"] is True
+    assert own["inherited"]["line.width"] == plain["style"]["line.width"] != 3
+
+
+def test_none_drawn_as_sticks_is_meant_and_not_said_to_select_nothing(tmp_path: Path) -> None:
+    pytest.importorskip("molsketch")
+    from flexo.serialization import dump_figure
+    from flexo.studio.figure_kind import FigureKind
+
+    with flexo.Figure("bare") as figure:
+        figure.root.structure("model", DATA / "1a7g.cif", sticks="none", surface="chain Q")
+    action = {"do": "structure-settings", "id": "model"}
+    found = FigureKind().act({"text": dump_figure(figure.spec)}, action, tmp_path)["settings"]
+    assert found["style"]["reps.sticks"].startswith("none")
+    assert list(found["selections"]) == ["properties.surface"]
+
+
 def test_structures_drawn_at_once_make_one_engine_between_them() -> None:
     """The studio draws on a thread per request: two structures drawn at once once made two
     engines, and a molecule read into the one let go was asked of the other ("unknown input

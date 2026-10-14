@@ -52,7 +52,7 @@ import struct
 import threading
 import xml.etree.ElementTree as ET
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from flexo.confine import outside
@@ -61,6 +61,7 @@ from flexo.drawn import Picture, Shape, Words, path, units
 from flexo.geometry import Side, Size
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings, TextRun
+from flexo.structure_style import THE_FIGURES
 from flexo.style import LayoutStyle, Palette
 
 LOOKS = (
@@ -389,6 +390,22 @@ def _scene_name(path: Path) -> str | None:
     return name.strip() if isinstance(name, str) and name.strip() else None
 
 
+def scene_steps(path: Path) -> list[str]:
+    """A scene's steps, by the names it gives them ("π* attack: precursor"; "" for one it
+    names not): none for a file that is not a scene, or does not read."""
+
+    import json
+
+    if not is_scene(path):
+        return []
+    try:
+        steps = json.loads(path.read_text(encoding="utf-8")).get("keyframes") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    named = (step.get("name") if isinstance(step, dict) else None for step in steps)
+    return [name.strip() if isinstance(name, str) else "" for name in named]
+
+
 def structure_caption(path: Path) -> str | None:
     """What a structure file says it holds, as a person would write it, with its PDB ID:
     ``E2 DNA-binding domain (1A7G)`` for a file titled THE CRYSTAL STRUCTURE OF THE E2
@@ -671,11 +688,15 @@ def structure_settings(node: NodeSpec, style: LayoutStyle, palette: Palette) -> 
         {} if problem is None or problem.code == "colors"
         else {"problem": problem.title, "reason": problem.reason}
     )
+    # A scene's steps, by name, even when the one it asks for is not among them.
+    source = node.property("source")
+    steps = scene_steps(Path(source).expanduser()) if isinstance(source, str) else []
     if problem is not None and not problem.drawn:
-        return {"style": {}, "looks": list(LOOKS), "palettes": {}, "chains": [], **said}
+        return {"style": {}, "looks": list(LOOKS), "palettes": {}, "chains": [], "steps": steps,
+                **said}
     ask = _ask(node, style, palette)
     try:
-        return {**_one_at_a_time(_settings, ask), **said}
+        return {**_one_at_a_time(_settings, ask), "steps": steps, **said}
     except _Unknown as error:
         raise _fail(node, error.code, str(error), hint=error.hint) from None
 
@@ -939,12 +960,7 @@ def _drawn(ask: _Ask):
     # (structure_problem).
     _, missing = _chains(figure, ask.colours)
     figure = figure.look(ask.look)
-    figure.set(
-        palette={"paper": ask.paper, **dict(ask.roles)},
-        # A scene's own captions and step labels are the app's; the figure names
-        # the panel itself.
-        **{"paper.grain": 0, "paper.wash": 0, "show.caption": False, "show.step_label": False},
-    )
+    figure.set(palette={"paper": ask.paper, **dict(ask.roles)}, **THE_FIGURES)
     if ask.group_palette:
         if ask.group_palette not in ms.palettes():
             raise _Unknown(
@@ -1063,8 +1079,16 @@ def _settings(ask: _Ask) -> dict[str, object]:
     atoms = _atoms(ask.source, ask.stamp) if selected else ()
     name = _called((figure._info().get("structure") or {}).get("name"))
     found = ((key, _selection_problem(text, atoms, name, chains)) for key, text in selected)
+    style = flat(figure.style, "")
+    # What each setting is without the structure's own: its look's, and the figure's
+    # colours. (Its map and its site are left out: neither sets a field it offers.)
+    inherited = (
+        flat(_drawn(replace(ask, style=(), density=None, site=None)).style, "")
+        if ask.style else style
+    )
     return {
-        "style": flat(figure.style, ""),
+        "style": style,
+        "inherited": inherited,
         "look": ask.look,
         "looks": ms.looks(),
         "palettes": ms.palettes(),
@@ -1221,7 +1245,8 @@ def _selection(text: str):
 def _selection_problem(text: str, atoms: tuple[_Atom, ...], name: str, chains: list[str]) -> str:
     """Why ``text`` selects nothing of the molecule, in a sentence -- or nothing."""
 
-    if not text.strip():
+    # (None is nothing, as meant: what a structure draws none of is said so.)
+    if not text.strip() or text.strip().lower() == "none":
         return ""
     try:
         test = _selection(text)

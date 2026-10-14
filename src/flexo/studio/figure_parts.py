@@ -18,7 +18,13 @@ edited:
 - ``file``: a file beside the figure, of the given ``types`` (the studio's: ``image``,
   ``structure``);
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
-  at a time by buttons, as one turns a molecule in a viewer.
+  at a time by buttons, as one turns a molecule in a viewer;
+- ``step``: which of a mol-sketch scene's steps is drawn, chosen by the names it gives them;
+- ``molsketch``: a structure's mol-sketch settings, laid out in ``panes``
+  (``flexo.structure_style``), which hold the structure's other fields too.
+
+A structure's selection (a ``text`` field) may carry ``chips``: the selections most reached
+for, each a click away (``None``: what the look draws).
 
 A ``records`` column is edited as a field of the same type is, or as a ``chain`` (one of
 the structure's chains, offered from a menu; residues and the like typed) or a ``colour``
@@ -502,10 +508,19 @@ def _bench() -> list[dict[str, Any]]:
 
 
 def _structure() -> dict[str, Any]:
-    from flexo.structure_style import SECTIONS
+    from flexo.structure_style import PANES, SECTIONS
     from flexo.structures import LOOKS, SCHEMES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
+
+    def drawn_as(key: str, label: str, hint: str, chips: dict[str, str]) -> dict[str, Any]:
+        # What is drawn as a cartoon, sticks or a surface: a mol-sketch selection, one of
+        # those most reached for a click away (none: "none"; the look's, or the scene's, when
+        # it has none of its own).
+        offered = [{"label": "Default", "value": None}, {"label": "None", "value": "none"}]
+        offered += [{"label": name, "value": value} for name, value in chips.items()]
+        return _field(key, label, "text", hint=hint, chips=offered)
+
     return _part(
         "structure",
         "Structure",
@@ -521,17 +536,16 @@ def _structure() -> dict[str, Any]:
                 types=["structure"],
                 hint="PDB, mmCIF, or a mol-sketch scene (.json)",
             ),
-            # (A scene's: which of its steps, drawn as its arrows finish. A molecule read
-            # from its coordinates has the one.)
+            # (A scene's: which of its steps, drawn as its arrows finish, chosen by its name. A
+            # molecule read from its coordinates has the one.)
             _field(
                 "properties.step",
                 "Step",
-                "integer",
+                "step",
                 min=1,
                 default=1,
                 hint="Which of a scene\u2019s steps is drawn: 1 is its first",
             ),
-            _field("properties", "View", "view", hint="Or drag its rotate handle"),
             # (The theme's look, named so: not "Default", which reads as a look of its own
             # beside the one it is -- Engraved Colour, on a light theme.)
             _field(
@@ -552,13 +566,37 @@ def _structure() -> dict[str, Any]:
                 hint="Flat\u2019s own coral helices and amber strands, or the figure\u2019s tones",
                 show={"properties.look": "flat"},
             ),
-            # mol-sketch's own settings: its palettes, colours of one's own, what is
-            # drawn, the site, a density map, and every field of its style.
             _field(
                 "properties.palette",
                 "Palette",
                 "molpalette",
                 hint="Colours given to residues and chains in turn",
+            ),
+            drawn_as(
+                "properties.cartoon",
+                "Cartoon",
+                "Drawn as ribbons: polymer",
+                {"Polymer": "polymer", "Protein": "protein", "Nucleic Acid": "nucleic"},
+            ),
+            drawn_as(
+                "properties.sticks",
+                "Sticks",
+                "Drawn as sticks: resi 57+102+195",
+                {"Ligands": "hetatm and not water", "Side Chains": "sidechain", "All": "all"},
+            ),
+            drawn_as(
+                "properties.surface",
+                "Surface",
+                "Drawn as a surface: chain A",
+                {"Polymer": "polymer", "All": "all"},
+            ),
+            # Off, the waters and lone ions a crystal holds are left out: they float free of
+            # the molecule, as stray dots.
+            _field(
+                "properties.solvent",
+                "Waters and Ions",
+                "bool",
+                hint="Draw the waters and lone ions where they lie",
             ),
             _field(
                 "properties.colors",
@@ -576,67 +614,44 @@ def _structure() -> dict[str, Any]:
                 hint="These override the palette, the look and its colours (such as Helices)",
             ),
             _field(
-                "properties.cartoon", "Cartoon", "text", hint="Drawn as ribbons: polymer", more=True
-            ),
-            _field(
-                "properties.sticks",
-                "Sticks",
-                "text",
-                hint="Drawn as sticks: resi 57+102+195",
-                more=True,
-            ),
-            _field(
-                "properties.surface",
-                "Surface",
-                "text",
-                hint="Drawn as a surface: chain A",
-                more=True,
-            ),
-            _field(
                 "properties.site",
                 "Site",
                 "text",
                 hint="Highlighted: resi 57+102, or ligand for its pocket",
-                more=True,
             ),
             _field(
                 "properties.site_within",
                 "Pocket Radius",
                 "number",
-                hint="In ångströms around the ligand (default 5)",
-                more=True,
+                unit="Å",
+                hint="Round the ligand (default 5)",
                 show={"properties.site": "ligand"},
             ),
-            _field("properties.site_labels", "Label site residues", "bool", more=True),
-            # Off, the waters and lone ions a crystal holds are left out: they float free of
-            # the molecule, as stray dots.
-            _field(
-                "properties.solvent",
-                "Waters and Ions",
-                "bool",
-                hint="Draw the waters and lone ions where they lie",
-                more=True,
-            ),
+            _field("properties.site_labels", "Label Site Residues", "bool"),
             _field(
                 "properties.density",
                 "Map File",
                 "text",
                 hint="auto for the entry's own map, an EMDB ID, or a map file",
-                more=True,
             ),
-            _field("properties.width", "Width", "number", more=True),
-            _field("properties.height", "Height", "number", more=True),
-            _field("properties.yaw", "Yaw", "number", unit="°", more=True),
-            _field("properties.pitch", "Pitch", "number", unit="°", more=True),
-            _field("properties.roll", "Roll", "number", unit="°", more=True),
-            _field("properties.zoom", "Zoom", "number", more=True),
+            _field("properties", "View", "view", hint="Or drag its rotate handle"),
+            _field("properties.yaw", "Yaw", "number", unit="°"),
+            _field("properties.pitch", "Pitch", "number", unit="°"),
+            _field("properties.roll", "Roll", "number", unit="°"),
+            _field("properties.zoom", "Zoom", "number"),
+            _field("properties.pan_x", "Offset X", "number", hint="A fraction of the frame"),
+            _field("properties.pan_y", "Offset Y", "number", hint="A fraction of the frame"),
+            _field("properties.width", "Width", "number"),
+            _field("properties.height", "Height", "number"),
+            # mol-sketch's own settings -- every field of its style but the figure's own --
+            # in panes, as its app lays them out, with the structure's fields above among them.
             _field(
-                "properties.pan_x", "Offset X", "number", hint="A fraction of the frame", more=True
+                "properties.style",
+                "Settings",
+                "molsketch",
+                panes=list(PANES),
+                sections=list(SECTIONS),
             ),
-            _field(
-                "properties.pan_y", "Offset Y", "number", hint="A fraction of the frame", more=True
-            ),
-            _field("properties.style", "Rendering", "molsketch", sections=list(SECTIONS)),
         ],
         # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
         # and nothing round it.)
