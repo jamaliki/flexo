@@ -1346,7 +1346,30 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             default="a",
             hint="How the figure's panels are lettered, in the order they are read",
         ),
+        *SIZE_FIELDS,
     ]
+
+
+def _size(key: str, title: str, hint: str) -> dict[str, Any]:
+    # (Of the figure's own, not its page's: a figure on a slide has them too -- ``sized``.)
+    return _field(
+        f"figure.{key}", title, "number", min=0.25, max=4, step=0.05, unit="\u00d7", default=1,
+        hint=hint, sized=True,
+    )
+
+
+SIZE_FIELDS = [
+    _size(
+        "spacing",
+        "Spacing",
+        "Of the theme\u2019s: the room between shapes, round a group\u2019s and kept by lines",
+    ),
+    _size("shape_padding", "Shape Padding", "Of the theme\u2019s: the room inside shapes"),
+    _size("line_width", "Line Width", "Of the theme\u2019s; a line\u2019s own width is its own"),
+    _size("head_size", "Arrowhead Size", "Of the theme\u2019s; a line\u2019s own size is of this"),
+]
+"""How much room and how heavy lines a figure has, each as a share of its theme's (flexo's
+``FigureSpec.spacing`` ...): for one figure drawn tighter or looser than the rest."""
 
 
 def _lettering(pattern: str) -> str:

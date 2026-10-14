@@ -14,6 +14,7 @@ from flexo.components import COMPONENTS, normalize_node
 from flexo.conventions import parse_conventions
 from flexo.geometry import Side
 from flexo.ir.semantic import (
+    FIGURE_SIZES,
     EdgeSpec,
     FigureSpec,
     GroupSpec,
@@ -136,6 +137,7 @@ def parse_figure(document: object) -> FigureSpec:
         hidden=tuple(figure_data.get("hide", ())),
         dimmed=tuple(figure_data.get("dim", ())),
         highlighted=tuple(figure_data.get("highlight", ())),
+        **{name: figure_data[name] for name in FIGURE_SIZES if name in figure_data},
         nodes=tuple(_node(item) for item in document["nodes"]),
         edges=tuple(edges),
         nets=tuple(_net(item, reference) for item in document.get("nets", [])),
@@ -250,6 +252,9 @@ def _figure_data(figure: FigureSpec) -> dict[str, object]:
     for key, named in shown:
         if named:
             result[key] = list(named)
+    for name in FIGURE_SIZES:
+        if getattr(figure, name) != 1.0:
+            result[name] = getattr(figure, name)
     return result
 
 
@@ -366,10 +371,18 @@ def _net_data(net: NetSpec) -> dict[str, object]:
 
 
 def _group_data(group: GroupSpec) -> dict[str, object]:
+    layout = _layout_data(group.layout)
+    if (
+        group.role == "layout"
+        and layout.keys() & set(PADDINGS) == {"padding"}
+        and (group.layout.padding == Length(0.0))
+    ):
+        # (Padding nothing is how such a group is read: ``_group``.)
+        del layout["padding"]
     result: dict[str, object] = {
         "id": group.id,
         "children": list(group.children),
-        "layout": _layout_data(group.layout),
+        "layout": layout,
     }
     if group.collision_policy != "disjoint":
         result["collision_policy"] = group.collision_policy
@@ -618,15 +631,25 @@ def _waypoint(data: dict[str, Any]) -> Waypoint:
     )
 
 
+PADDINGS = ("padding", "padding_top", "padding_right", "padding_bottom", "padding_left")
+"""How a group's padding is written: all round, or a side's own."""
+
+
 def _group(data: dict[str, Any]) -> GroupSpec:
     layout = data["layout"]
+    role = data.get("role", "container")
+    padding = _optional_length(layout.get("padding"))
+    if role == "layout" and not any(key in layout for key in PADDINGS):
+        # A group that draws nothing pads nothing, as one made in Python does
+        # (``GroupBuilder.group``): padding would only be a wider gap round it, unexplained.
+        padding = Length(0.0)
     return GroupSpec(
         id=data["id"],
         children=tuple(data["children"]),
         layout=LayoutSpec(
             kind=layout["kind"],
             gap=_optional_length(layout.get("gap")),
-            padding=_optional_length(layout.get("padding")),
+            padding=padding,
             align=layout.get("align", "auto"),
             justify=layout.get("justify", "start"),
             columns=layout.get("columns"),
@@ -651,7 +674,7 @@ def _group(data: dict[str, Any]) -> GroupSpec:
         ),
         collision_policy=data.get("collision_policy", "disjoint"),
         label=_label(data.get("label", "")),
-        role=data.get("role", "container"),
+        role=role,
         title_side=data.get("title_side", "left"),
         anchor=data.get("anchor"),
         shadow=data.get("shadow", False),

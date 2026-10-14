@@ -60,7 +60,10 @@ figure: {id, style (a theme: paper, tikz, dark, sketch, ... or a theme file), pa
   (single-column, double-column, or a length: 89mm for a column of Nature's, 183mm for two;
   90mm, 144mm and 184mm are Science's one, one and a half, and two),
   height (a length, for a page of a fixed size: 210mm x 297mm is A4; left out, the page is as
-  tall as the figure), panel_labels (a, A, (a): how panels are lettered)}
+  tall as the figure), panel_labels (a, A, (a): how panels are lettered), spacing,
+  shape_padding, line_width, head_size (each a share of the theme's, 1 by default: spacing 0.6
+  is the room between shapes, round groups and kept by lines at 0.6 of the theme's -- for a
+  figure tighter, or with smaller arrowheads, than the rest)}
 nodes: each {id, label, kind (block by default; text, op, circle, feature-strip, mlp,
   attention, channels, inset, ...), properties: {tone: encoder|head|attention|..., badge, ...}}
 Genetics: kind construct, properties {parts: [{type: promoter|rbs|cds|terminator|operator|origin|

@@ -73,6 +73,12 @@ class _Fitter:
         if self.slide:
             nodes, groups = slide_groups(semantic, nodes, groups, self.kinds, self.style)
             nodes = aligned_with(semantic, nodes, groups, self.kinds)
+            # (A branch's last box gone on past the end of the figure to stand level with
+            # the box that feeds it: the page goes on with it -- ``branch_ends``.)
+            root = next(group for group in groups if group.measured.spec.id == semantic.root)
+            canvas = Size(
+                max(canvas.width, root.bounds.right), max(canvas.height, root.bounds.bottom)
+            )
         # Then a box several straight arrows share a side of grows until they meet
         # its middle, so the boxes they come from keep their centres.
         nodes = widen_boxes(self.measured.semantic, nodes, groups, self.kinds, self.style)

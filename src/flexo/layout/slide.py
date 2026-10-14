@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+from itertools import pairwise
 
 from flexo.components import centred_port
 from flexo.geometry import Point, Rect, Side
@@ -178,7 +179,7 @@ def slide_groups(
             within = _nodes_within(owner, by_group)
             if other is None or other in within or other not in by_node:
                 continue
-            shift = _level_shift(
+            shift, over = _level_shift(
                 by_node[node.id].bounds,
                 by_node[other].bounds,
                 by_group[owner],
@@ -190,10 +191,18 @@ def slide_groups(
             )
             if abs(shift) <= _EPSILON:
                 continue
+            outer = _holders(owner, parent)
+            if over > _EPSILON and not _room_beyond(
+                outer, over, along, by_node, by_group, parent, style.gap.points
+            ):
+                continue
             dx, dy = (shift, 0.0) if along == "x" else (0.0, shift)
             by_node[node.id] = _moved_node(by_node[node.id], dx, dy)
-            # Its line reaches as far as it now does: a frame round it is round it still.
+            # Its line reaches as far as it now does: a frame round it is round it still --
+            # and every group round that, the page too, where it reaches past their end.
             by_group[owner] = _reaching(by_group[owner], by_node[node.id].bounds)
+            for inner, group_id in pairwise((owner, *outer)):
+                by_group[group_id] = _reaching(by_group[group_id], by_group[inner].bounds)
 
     lone_boxes()
     branch_ends()
@@ -371,13 +380,15 @@ def _level_shift(
     others: list[Rect],
     along: str,
     gap: float,
-) -> float:
+) -> tuple[float, float]:
     """How far a box at the end of its row or column (``line``, running ``along`` x or y)
     goes along it to stand level with the box its one line joins it to (``other``), or 0:
     only away from the parts ``beside`` it on its line, only if ``other`` stands beside the
-    line rather than before or after it, only while the line -- its frame, should it have
-    one -- stays within ``room``, and never onto (or within half a gap of) one of the
-    ``others``."""
+    line rather than before or after it, and never onto (or within half a gap of) one of the
+    ``others`` -- and how far past the end of ``room`` the line (its frame, should it have
+    one) then reaches. Going on past its end -- down a column, right along a row -- the room
+    grows that far, if nothing stands in the way (``branch_ends``); before its start it may
+    not go, as what is there would have to move."""
 
     frame, parts = line.bounds, line.content_bounds
     if along == "y":
@@ -386,28 +397,69 @@ def _level_shift(
         last = all(box.bottom <= own.top + _EPSILON for box in beside)
         first = all(box.top >= own.bottom - _EPSILON for box in beside)
         moved = Rect(own.x, own.y + shift, own.width, own.height)
-        fits = (
-            room.top - _EPSILON <= moved.top - (parts.top - frame.top)
-            and moved.bottom + (frame.bottom - parts.bottom) <= room.bottom + _EPSILON
-        )
+        before = room.top - _EPSILON <= moved.top - (parts.top - frame.top)
+        over = moved.bottom + (frame.bottom - parts.bottom) - room.bottom
     else:
         aside = other.bottom <= frame.top + _EPSILON or other.top >= frame.bottom - _EPSILON
         shift = other.center.x - own.center.x
         last = all(box.right <= own.left + _EPSILON for box in beside)
         first = all(box.left >= own.right - _EPSILON for box in beside)
         moved = Rect(own.x + shift, own.y, own.width, own.height)
-        fits = (
-            room.left - _EPSILON <= moved.left - (parts.left - frame.left)
-            and moved.right + (frame.right - parts.right) <= room.right + _EPSILON
-        )
-    if not beside or not aside or not fits:
-        return 0.0
+        before = room.left - _EPSILON <= moved.left - (parts.left - frame.left)
+        over = moved.right + (frame.right - parts.right) - room.right
+    if not beside or not aside or not before or (over > _EPSILON and shift <= 0.0):
+        return 0.0, 0.0
     if not ((last and shift > _EPSILON) or (first and shift < -_EPSILON)):
-        return 0.0
+        return 0.0, 0.0
     near = moved.inflated(gap / 2.0)
     if any(_overlap(box, near) for box in others):
-        return 0.0
-    return shift
+        return 0.0, 0.0
+    return shift, max(over, 0.0)
+
+
+def _holders(group_id: str, parent: dict[str, str]) -> list[str]:
+    """The groups ``group_id`` is in, from its own holder out to the figure's root."""
+
+    found = []
+    while group_id in parent:
+        group_id = parent[group_id]
+        found.append(group_id)
+    return found
+
+
+def _room_beyond(
+    holders: list[str],
+    over: float,
+    along: str,
+    nodes: dict[str, FittedNode],
+    groups: dict[str, FittedGroup],
+    parent: dict[str, str],
+    gap: float,
+) -> bool:
+    """Whether each of ``holders`` -- the groups round a line that is to reach ``over``
+    past the end of the first of them -- may grow that far ``along`` its end: nothing of
+    another group's is there, nor a ``gap`` past it. (The figure's root may always: its
+    page grows.)"""
+
+    reach = over + gap - _EPSILON
+    for group_id in holders[:-1]:
+        box = groups[group_id].bounds
+        grown = (
+            Rect(box.x, box.bottom, box.width, reach)
+            if along == "y"
+            else Rect(box.right, box.y, reach, box.height)
+        )
+        mine = _nodes_within(group_id, groups)
+        if any(_overlap(node.bounds, grown) for name, node in nodes.items() if name not in mine):
+            return False
+        around = {group_id, *_holders(group_id, parent)}
+        if any(
+            _overlap(other.bounds, grown)
+            for name, other in groups.items()
+            if name not in around and name not in _groups_within(group_id, groups)
+        ):
+            return False
+    return True
 
 
 def _overlap(a: Rect, b: Rect) -> bool:

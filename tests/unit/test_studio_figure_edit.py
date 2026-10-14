@@ -1470,6 +1470,31 @@ def test_shapes_are_gathered_into_a_panel_that_has_its_letter_not_a_title(tmp_pa
     assert "role" not in next(group for group in data(text)["groups"] if group["id"] == "panel")
 
 
+def test_a_figure_is_drawn_tighter_with_sizes_of_its_own(tmp_path: Path) -> None:
+    """Its panel's Sizes -- Spacing, Shape Padding, Line Width, Arrowhead Size -- each a share
+    of its theme's, written in its file and drawn: on a slide too (they are offered there)."""
+
+    fields = {field["key"]: field for field in catalogue()["figure_fields"]}
+    sized = [key for key, field in fields.items() if field.get("sized")]
+    assert sized == [
+        "figure.spacing", "figure.shape_padding", "figure.line_width", "figure.head_size"
+    ]
+    assert all(fields[key]["unit"] == "\u00d7" and fields[key]["default"] == 1 for key in sized)
+    figure = {"type": "figure"}
+    text, _ = edit(SAMPLE_FIGURE, do="update", target=figure, values={"figure.spacing": 0.5})
+    assert data(text)["figure"]["spacing"] == 0.5
+    loose = FigureKind().draw({"text": SAMPLE_FIGURE}, tmp_path)
+    tight = FigureKind().draw({"text": text}, tmp_path)
+    assert not [message for message in tight.messages if message.severity == "error"]
+    assert _page_height(tight) < _page_height(loose)
+
+
+def _page_height(drawing) -> float:
+    import re
+
+    return float(re.search(r'viewBox="0 0 [\d.]+ ([\d.]+)"', drawing.pages[0].svg).group(1))
+
+
 def test_a_figures_page_is_chosen_by_name_or_typed(tmp_path: Path) -> None:
     """Page Size sets the page's width and height together (a column of a journal's has no
     height: the page is as tall as the figure); a page too small is drawn, and said in the
