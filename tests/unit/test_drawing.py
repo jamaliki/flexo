@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -166,3 +167,81 @@ def test_a_shape_filled_with_one_picture_is_that_picture_cropped_to_the_shape() 
     # A picture cut by a clip it is drawn in shows only what the clip keeps -- if it cuts it.
     assert cut.clip == (0.0, 0.0, 60.0, 100.0) and whole.clip is None
     assert ink_bounds(Drawing(200.0, 100.0, Group(None, [kept]))) == (10.0, 10.0, 110.0, 90.0)
+
+
+def test_a_group_keeps_its_clip_where_what_it_holds_cannot_be_cut_to_it() -> None:
+    def clipped(name: str, inside: str) -> str:
+        return f'<g id="{name}" clip-path="url(#c)">{inside}</g>'
+
+    paint = 'fill="#fee4ce" stroke="#824c0d"'
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+        '<clipPath id="c"><rect x="0" y="0" width="50" height="100"/></clipPath>'
+        + clipped("round", f'<rect x="10" y="5" width="80" height="20" rx="4" {paint}/>')
+        + clipped("words", '<text x="40" y="40" font-size="8">Shared weights</text>')
+        + clipped("blended", '<rect x="10" y="45" width="20" height="10" fill="#edc976" '
+                             'style="mix-blend-mode:multiply"/>')
+        + clipped("square", f'<rect id="body" x="10" y="60" width="80" height="30" {paint}/>')
+        + "</svg>"
+    )
+    groups = {group.id: group for group in read_drawing(svg).root.items}
+    # A curve and words are kept whole, and what blends is blended within the clip: their
+    # group keeps it, for a writer to show only what of them it keeps.
+    for name in ("round", "words", "blended"):
+        assert groups[name].clip == (0.0, 0.0, 50.0, 100.0)
+    (body,) = groups["round"].items
+    assert body.kind == "rect" and body.width == 80.0
+    # A rectangle is cut exactly, its fill and its outline apart: the outline is not drawn
+    # along the cut, and goes on round the corner it starts at.
+    assert groups["square"].clip is None
+    fill, outline = groups["square"].items
+    assert (fill.id, fill.x, fill.width, fill.paint.stroke) == ("body", 10.0, 40.0, None)
+    assert outline.paint.fill is None and outline.paint.stroke == "#824c0d"
+    assert [s.kind for s in outline.segments] == ["M", "L", "L", "L"]
+    assert [s.points[0] for s in outline.segments] == [(50.0, 90.0), (10.0, 90.0), (10.0, 60.0),
+                                                       (50.0, 60.0)]
+    # And the portable SVG shows only what the clip keeps.
+    from flexo.portable import portable_svg
+
+    portable = portable_svg(svg)
+    for name in ("round", "words", "blended"):
+        assert re.search(
+            rf'<clipPath id="{name}.clip">\s*<rect x="0" y="0" width="50" height="100" />\s*'
+            rf'</clipPath>\s*<g id="{name}" clip-path="url\(#{name}.clip\)">',
+            portable,
+        )
+    assert 'clip-path="url(#square.clip)"' not in portable
+
+
+def test_a_writer_that_cannot_clip_is_given_what_a_clip_shows_cut_to_it_curves_and_all() -> None:
+    from flexo.drawing import cut_to_clips
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+        '<clipPath id="c"><rect x="0" y="0" width="50" height="100"/></clipPath>'
+        '<g id="disc" clip-path="url(#c)"><circle cx="50" cy="50" r="40" fill="#f00"/></g>'
+        '<g id="part" clip-path="url(#c)">'
+        '<rect id="body" x="10" y="5" width="80" height="20" rx="4" '
+        'fill="#fee4ce" stroke="#824c0d"/>'
+        '<text x="60" y="15" font-size="8">Out</text><text x="5" y="15" font-size="8">In</text>'
+        "</g></svg>"
+    )
+    disc, part = (cut_to_clips(group) for group in read_drawing(svg).root.items)
+    # The circle's left half, drawn with its own left arcs.
+    (half,) = disc.items
+    assert disc.clip is None and half.kind == "path"
+    assert [s.kind for s in half.segments] == ["M", "C", "C", "Z"]
+    assert half.segments[0].points == ((50.0, 90.0),)
+    assert half.segments[2].points[-1] == (50.0, 10.0)
+    assert (half.x, half.width) == (pytest.approx(10.0), pytest.approx(40.0))
+    # A rounded box both filled and outlined: its fill cut to the clip, its corners still
+    # round, and its outline in one run that is never drawn along the cut.
+    fill, outline, words = part.items
+    assert fill.id == "body" and fill.paint.stroke is None and fill.segments[-1].kind == "Z"
+    assert sum(s.kind == "C" for s in fill.segments) == 2
+    assert all(p[0] <= 50.0 for s in fill.segments for p in s.points)
+    assert outline.paint.fill is None and outline.segments[-1].kind != "Z"
+    ends = [outline.segments[0].points[0], outline.segments[-1].points[-1]]
+    assert ends == [(50.0, 25.0), (50.0, 5.0)]
+    # Words reaching into the clip are kept whole; words outside it are left out.
+    assert isinstance(words, Text) and words.lines[0].runs[0].text == "In"

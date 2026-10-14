@@ -298,6 +298,49 @@ def test_a_framed_figure_is_exported(tmp_path: Path) -> None:
     assert any(path.suffix == ".png" for path in tmp_path.iterdir())
 
 
+def test_the_part_of_a_frame_in_a_group_shows_only_there_in_every_output() -> None:
+    """The part drawn again over a module's fill is the whole frame, clipped to the module:
+    unclipped, the part over the right module would cover the left one's shapes."""
+
+    import zlib
+
+    from flexo.export import rasterise
+    from flexo.pdf import _n, _png_decode, pdf_bytes
+    from flexo.portable import portable_svg
+    from flexo.svg import number
+
+    compiled = compile_figure(_figure())
+    svg = compiled.document.text
+    portable = portable_svg(svg)
+    streams = re.findall(rb"stream\n(.*?)\nendstream", pdf_bytes(svg), re.S)
+    drawn = b"".join(zlib.decompress(found) for found in streams if found[:2] == b"x\x9c")
+    for module in ("left", "right"):
+        box = _box(compiled, module)
+        edges = (box.x, box.y, box.width, box.height)
+        rect = 'x="{}" y="{}" width="{}" height="{}"'.format(*(number(v) for v in edges))
+        assert re.search(
+            rf'<clipPath id="(\w+)">\s*<rect {re.escape(rect)} />\s*</clipPath>\s*'
+            rf'<g clip-path="url\(#\1\)">\s*<rect [^>]*id="shared\.in\.{module}\.body"',
+            portable,
+        )
+        assert ("q " + " ".join(_n(v) for v in edges) + " re W n").encode() in drawn
+    # Drawn from the portable SVG, the left module is as the SVG draws it: its input, its
+    # encoder and its title are not under the frame's part in the right module.
+    left = _box(compiled, "left")
+    across, _, channels, written = _png_decode(rasterise(svg, dpi=72))
+    *_, outlined = _png_decode(rasterise(portable, dpi=72))
+    spots = [
+        (y * across + x) * channels
+        for y in range(int(left.y), int(left.y + left.height))
+        for x in range(int(left.x), int(left.x + left.width))
+    ]
+    unlike = [
+        at for at in spots
+        if any(abs(written[at + c] - outlined[at + c]) > 40 for c in range(channels))
+    ]
+    assert len(unlike) < len(spots) // 200
+
+
 # -- the editor's side --
 
 
