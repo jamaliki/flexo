@@ -459,9 +459,17 @@ def _sanitize(node_id: str, path: Path, root: ET.Element) -> None:
                 _require_internal(node_id, path, match.group(1))
 
 
+_EMBEDDED_FONT = re.compile(
+    r"data:(font/|application/(x-)?font|application/vnd\.ms-opentype|application/octet-stream)",
+    re.IGNORECASE,
+)
+"""A font carried in the file itself (an ``@font-face`` source), as Flexo's own SVGs carry
+theirs: as self-contained as an inlined bitmap."""
+
+
 def _require_internal(node_id: str, path: Path, reference: str) -> None:
-    value = reference.strip()
-    if value.startswith("#") or value.startswith("data:image/"):
+    value = reference.strip().strip("'\"")
+    if value.startswith("#") or value.startswith("data:image/") or _EMBEDDED_FONT.match(value):
         return
     raise _error(
         "image.svg.external-reference",
