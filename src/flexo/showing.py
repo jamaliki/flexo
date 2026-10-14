@@ -94,6 +94,13 @@ def states(figure: FigureSpec, frames: Iterable[NodeSpec] = ()) -> dict[str, str
             shown[shape] = HIDDEN
         elif shape in dimmed or (lit and shape not in lit):
             shown[shape] = DIMMED
+    # A line that ends at a frame is shown as its frame is, as one to a shape is: those
+    # frames first.
+    joined = {end for edge in figure.edges for end in (edge.source.node_id, edge.target.node_id)}
+    joined |= {port.node_id for net in figure.nets for port in (*net.sources, *net.targets)}
+    for frame, round_ in held.items():
+        if frame in joined:
+            of(frame, [one for one in within(round_) if one in set(shapes)], every=True)
     for edge in figure.edges:
         of(edge.id, (edge.source.node_id, edge.target.node_id))
     for net in figure.nets:

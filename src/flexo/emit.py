@@ -125,8 +125,14 @@ def emit_svg(
     from flexo.themes import with_tone_roles
 
     # (A frame's colour is one of the figure's, as a shape's is.)
+    # (Its frames with its shapes, each once: one that lines end at is among them already.)
+    drawn = {frame.spec.id for frame in frames}
     toned = (
-        replace(semantic, nodes=semantic.nodes + tuple(frame.spec for frame in frames))
+        replace(
+            semantic,
+            nodes=tuple(node for node in semantic.nodes if node.id not in drawn)
+            + tuple(frame.spec for frame in frames),
+        )
         if frames
         else semantic
     )

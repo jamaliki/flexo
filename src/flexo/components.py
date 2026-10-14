@@ -16,14 +16,16 @@ from flexo.ir.semantic import NodeSpec, PortSpec
 from flexo.shapes import SHAPE_KINDS, shape_size
 from flexo.style import LayoutStyle
 
-TRANSPARENT_KINDS = frozenset({"spacer", "junction"})
+TRANSPARENT_KINDS = frozenset({"spacer", "junction", "frame"})
 """Node kinds nothing has to keep clear of: they paint no ink a route can spoil.
 
 Routing, port adaptation, and lint all read this one set, so a kind treated as an
 obstacle in only some of those passes cannot happen. A spacer holds a lane open
 and a junction *is* connector ink, which is why neither blocks a run -- but a
 caption is words on the page, and words are not transparent (see
-``CAPTION_KINDS``).
+``CAPTION_KINDS``). A frame is round other shapes, and the lines between them and
+the rest of the figure go through it: only a line that ends at the frame keeps out
+of it (``flexo.frames``, and the router's zones).
 """
 
 TITLED_KINDS = frozenset(
@@ -521,8 +523,9 @@ COMPONENTS: dict[str, ComponentDefinition] = {
         # it -- a thing an arrow starts or ends at that is not a box.
         ComponentDefinition("text", Size(0.0, 0.0), _TEXT_PORTS),
         ComponentDefinition("spacer", Size(0.0, 0.0), ()),
-        # (A box round other shapes, placed once they are: see ``flexo.frames``.)
-        ComponentDefinition("frame", Size(0.0, 0.0), ()),
+        # (A box round other shapes, placed once they are: see ``flexo.frames``. A line
+        # may end at it, as at a box: on the side that faces its other end.)
+        ComponentDefinition("frame", Size(0.0, 0.0), _STANDARD),
         # A badge's mark on its own, as large as the author asks (a legend key).
         ComponentDefinition("icon", Size(0.0, 0.0), ()),
         # Genetic designs (flexo.genetics): a construct's parts on a backbone, its

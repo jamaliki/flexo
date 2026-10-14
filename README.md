@@ -758,6 +758,41 @@ long title widens it, so the title lies on nothing -- where an arrow comes down 
 frame, it ends short of the arrow. Behind shapes that stand in filled groups, a frame is
 drawn over those groups' own fills, so it shows.
 
+The title stands at the frame's top left. `title_side` in its properties names another
+corner, in the words a group's `title_side` takes: `right` (the top right), `bottom-left`
+or `bottom-right` -- for a frame whose top shape has a line going up from it, say, where
+no title along the top would be clear of the line:
+
+```yaml
+nodes:
+- id: stage
+  kind: frame
+  label: Generation
+  properties: {around: "sample, refine", title_side: bottom-left}
+```
+
+At the bottom its band is under the shape at the frame's bottom, so what is below makes
+way and nothing above does; at the right it ends at the frame's right, and starts past a
+line through its band. Any other word is said, and the title drawn at the top left.
+
+A line may start or end at a frame, as at a shape -- from a shape the frame does not go
+round:
+
+```yaml
+edges:
+- {from: restraints, to: stage, arrive: south}
+```
+
+It meets the frame's outline, its arrowhead on it, at the middle of the side that faces
+its other end, or of the side `arrive` names (`depart`, where it leaves a frame):
+`north`, `south`, `east` or `west`. Several lines on one side each have a place along it,
+as on a box's, clear of any line that goes through that side to a shape inside; and a
+line that ends at the frame never runs inside it. Such a line moves nothing: the figure
+is laid out without it, and every other line goes through the frame as before. Between a
+frame and a shape it goes round there is no way from outside, and the line is refused
+(`frame.line.inside`). A line that branches (a net) may end at a frame too; a line to a
+frame that is hidden or dimmed is hidden or dimmed with it.
+
 ### A shape's words, and a picture's crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,
@@ -1185,7 +1220,12 @@ changes in words, to go back or forward to any of them.
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
   are, in whatever groups: behind them, in front of them or over them as a tint (its
-  **Layer**). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
+  **Layer**), its title at whichever corner is chosen (its **Title Position**, as a
+  group's). A line is drawn to a frame as to a shape: a shape's **+** dragged and let go
+  on the frame's outline or its title (inside it, on none of its shapes, is nowhere), or
+  the frame's own **+** dragged to a shape -- clicked, it asks for the shape, as
+  **Connect to…** in its panel does; a chosen line's end dragged round the frame takes
+  another side of it. Shapes chosen anywhere in the figure, in whatever groups, go in one row or
   column of their own with **Align in a Row** or **Align in a Column** (in their panel,
   their right-click menu and the palette), in the order they are seen, where the first of
   them stood: boxes of a flow chart that have ended up in two columns side by side are put
