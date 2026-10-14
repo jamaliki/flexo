@@ -65,10 +65,14 @@ def _said(error: Any) -> str:
     if kind == "enum":
         choices = ", ".join(str(item) for item in expected)
         return f"should be one of {choices}, not {described(value)}"
-    if kind in {"minimum", "exclusiveMinimum"}:
+    if kind == "minimum":
         return f"should be at least {expected}, not {described(value)}"
-    if kind in {"maximum", "exclusiveMaximum"}:
+    if kind == "exclusiveMinimum":
+        return f"should be more than {expected}, not {described(value)}"
+    if kind == "maximum":
         return f"should be at most {expected}, not {described(value)}"
+    if kind == "exclusiveMaximum":
+        return f"should be less than {expected}, not {described(value)}"
     if kind == "minItems":
         return f"needs at least {expected} item{'s' if expected != 1 else ''}"
     if kind == "pattern":

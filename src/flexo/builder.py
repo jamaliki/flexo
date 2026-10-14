@@ -213,6 +213,10 @@ class Figure:
     its width, and its height where the page has one.
     ``panel_labels`` is how the figure's panels (``figure.panel``) are lettered, as
     the first one is: ``"a"`` by default, or ``"A"``, ``"(a)"``.
+    ``spacing``, ``shape_padding``, ``line_width`` and ``head_size`` make this figure's
+    room between its shapes, room inside them, lines and arrowheads smaller or larger
+    than its theme makes them, each as a share of the theme's: ``spacing=0.5`` is half
+    the room.
 
     ``theme`` picks the whole look -- type, line work, and colour rules -- from
     ``flexo.THEMES`` (``"paper"``, ``"tikz"``, ``"dark"``, ``"swiss"``, ...), or
@@ -253,6 +257,10 @@ class Figure:
         hide: tuple[str, ...] | list[str] = (),
         dim: tuple[str, ...] | list[str] = (),
         highlight: tuple[str, ...] | list[str] = (),
+        spacing: float = 1.0,
+        shape_padding: float = 1.0,
+        line_width: float = 1.0,
+        head_size: float = 1.0,
     ) -> None:
         if theme is not None and style is not None and theme != style:
             raise ValueError("theme= and style= name the same thing; pass only one")
@@ -267,6 +275,12 @@ class Figure:
         self.height = Length.parse(height) if height is not None else None
         self.panel_labels = panel_labels
         self.hide, self.dim, self.highlight = tuple(hide), tuple(dim), tuple(highlight)
+        self.sizes = {
+            "spacing": spacing,
+            "shape_padding": shape_padding,
+            "line_width": line_width,
+            "head_size": head_size,
+        }
         from flexo.theme_files import is_file_reference, register_palette, register_theme
 
         self.style = theme or style or "paper"
@@ -389,6 +403,7 @@ class Figure:
                 hidden=self.hide,
                 dimmed=self.dim,
                 highlighted=self.highlight,
+                **self.sizes,
                 nodes=tuple(self._nodes),
                 edges=tuple(
                     replace(

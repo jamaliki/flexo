@@ -34,8 +34,10 @@ from flexo.layout.ports import (
     _port_positions,
 )
 from flexo.routing import route_figure
-from flexo.serialization import parse_figure
+from flexo.serialization import figure_to_document, parse_figure
 from flexo.style import STYLES, LayoutStyle, vector_stack_height
+from flexo.svg import number
+from flexo.themes import figure_style
 from flexo.units import CellSpan, pt
 
 
@@ -1379,7 +1381,8 @@ def test_the_last_step_of_a_branch_stands_level_with_the_step_that_feeds_it() ->
     """Two branches side by side, the lower one's last step in a column of its own under
     the upper one's: it stands level with the step feeding it, not as near the step over it
     as that column would set it -- every line between the middles of its two boxes, the
-    upper branch on the line of the flow before it."""
+    upper branch on the line of the flow before it. Its column's frame then reaches past
+    the bottom of the figure, and the page grows with it."""
 
     routed = compile_figure(parse_figure(_two_branches({"children": ["over", "last"]}))).routed
     boxes = {node.measured.spec.id: node.bounds for node in routed.fitted.nodes}
@@ -1390,14 +1393,38 @@ def test_the_last_step_of_a_branch_stands_level_with_the_step_that_feeds_it() ->
         assert boxes[name].center.y == pytest.approx(boxes["start"].center.y)
     for source, target in (("fork", "over"), ("over", "end"), ("under", "last")):
         assert _between_middles(routed, source, target), (source, target)
-    # Its column's frame is round it still, and within the figure.
+    # Its column's frame is round it still, and within the figure, on its page.
     assert groups["two"].content_bounds.contains_rect(boxes["last"])
     assert groups["root"].content_bounds.contains_rect(groups["two"].bounds)
+    page = routed.fitted.canvas_size
+    assert groups["root"].bounds.bottom == pytest.approx(page.height)
     # Laid out where its column set it, it was nearer the step over it, its line off the
-    # middles of both its boxes.
+    # middles of both its boxes -- on a shorter page, the frame round it the tallest thing.
     plain = fit_figure(routed.fitted.measured, slide=False)
     before = {node.measured.spec.id: node.bounds for node in plain.nodes}
     assert before["last"].center.y < boxes["under"].center.y - 5.0
+    assert plain.canvas_size.height < page.height - 5.0
+
+
+def test_a_last_step_stays_where_its_column_ends_with_something_under_the_branches() -> None:
+    """With a shape a gap under the branches, there is no room past them to grow into: the
+    last step stays where its column set it, its line off the middle, and nothing overlaps."""
+
+    document = _two_branches({"children": ["over", "last"]})
+    root = document["groups"][0]
+    document["groups"] = [
+        {"id": "root", "role": "canvas", "layout": {"kind": "column"},
+         "children": ["band", "below"]},
+        {**root, "id": "band", "role": "layout"},
+        *document["groups"][1:],
+    ]
+    document["nodes"].append({"id": "below", "label": "Under it all"})
+    fitted = compile_figure(parse_figure(document)).fitted
+    boxes = {node.measured.spec.id: node.bounds for node in fitted.nodes}
+    groups = {group.measured.spec.id: group for group in fitted.groups}
+    assert boxes["last"].center.y < boxes["under"].center.y - 5.0
+    assert groups["two"].bounds.bottom < boxes["below"].top
+    assert groups["two"].bounds.bottom <= groups["band"].content_bounds.bottom + 1e-6
 
 
 def test_a_step_with_another_after_it_in_its_column_stays_between_the_two() -> None:
@@ -1518,3 +1545,128 @@ def test_a_box_lined_up_with_a_part_is_centred_under_it_however_it_is_joined() -
         (line,) = compilation.routed.edges
         assert line.centerline[0].x == pytest.approx(centres["b"])
         assert line.centerline[-1].x == pytest.approx(centres["e"])
+
+
+# -- a figure's own sizes --
+
+
+def _sized(**sizes: float) -> dict:
+    """A flow along a row (``a`` to ``b``), and beside it, in a frame, a box no line meets
+    under a box it is joined to -- a figure with ``sizes`` of its own."""
+
+    return {
+        "figure": {"id": "sized", **sizes},
+        "groups": [
+            {"id": "root", "role": "canvas", "layout": {"kind": "row"},
+             "children": ["a", "b", "framed"]},
+            {"id": "framed", "role": "container", "label": "Framed",
+             "layout": {"kind": "column"}, "children": ["c", "d", "e"]},
+        ],
+        "nodes": [{"id": name, "label": f"Step {name.upper()} of the flow"} for name in "abcde"],
+        "edges": [{"from": "a", "to": "b"}, {"from": "c", "to": "d"}],
+    }
+
+
+def _laid_out(document: dict) -> tuple[dict, dict, str]:
+    compiled = compile_figure(parse_figure(document))
+    boxes = {node.measured.spec.id: node.bounds for node in compiled.fitted.nodes}
+    groups = {group.measured.spec.id: group for group in compiled.fitted.groups}
+    return boxes, groups, compiled.document.text
+
+
+def test_a_group_that_draws_nothing_pads_nothing_however_it_is_written() -> None:
+    """A group with no frame (``role: layout``), as the studio makes one to put parts in a
+    row, padded round its parts in a file as one made in Python is not: the gap round it
+    was the theme's padding twice over, wider than any gap the figure asked for."""
+
+    with Figure("plain") as figure:
+        figure.block("start", label="Start")
+        with figure.row("band", role="layout") as band:
+            band.block("a", label="A")
+            band.block("b", label="B")
+    written = parse_figure({
+        "figure": {"id": "plain"},
+        "groups": [
+            {"id": "root", "role": "canvas", "layout": {"kind": "column", "justify": "center"},
+             "children": ["start", "band"]},
+            {"id": "band", "role": "layout", "layout": {"kind": "row"}, "children": ["a", "b"]},
+        ],
+        "nodes": [{"id": "start", "label": "Start"}, {"id": "a", "label": "A"},
+                  {"id": "b", "label": "B"}],
+    })
+    made, read = compile_figure(figure.spec).fitted, compile_figure(written).fitted
+    assert [node.bounds for node in read.nodes] == [node.bounds for node in made.nodes]
+    band = next(group for group in read.groups if group.measured.spec.id == "band")
+    assert band.bounds == band.content_bounds
+    # Written again, it is written as it was: no padding of its own.
+    assert "padding" not in figure_to_document(written)["groups"][1]["layout"]
+    # Padding it is given, it has.
+    document = figure_to_document(written)
+    document["groups"][1]["layout"]["padding"] = "6pt"
+    band = next(
+        group
+        for group in compile_figure(parse_figure(document)).fitted.groups
+        if group.measured.spec.id == "band"
+    )
+    assert band.content_bounds.x - band.bounds.x == pytest.approx(6.0)
+
+
+def test_a_figures_spacing_is_a_share_of_its_themes_and_the_gap_an_arrow_needs_shrinks() -> None:
+    """``spacing: 0.5``: half the room between shapes, round a frame's contents and kept by
+    lines -- and so a gap an arrow runs across, which no gap asked for could make smaller."""
+
+    boxes, groups, _ = _laid_out(_sized())
+    tight_boxes, tight_groups, _ = _laid_out(_sized(spacing=0.5))
+    style = STYLES["paper"]
+    # Between two boxes no line joins: the theme's gap, then half of it.
+    assert boxes["e"].top - boxes["d"].bottom == pytest.approx(style.gap.points)
+    assert tight_boxes["e"].top - tight_boxes["d"].bottom == pytest.approx(style.gap.points / 2)
+    # Round the frame's contents, the same.
+    for found, share in ((groups, 1.0), (tight_groups, 0.5)):
+        frame = found["framed"]
+        assert frame.bounds.bottom - frame.content_bounds.bottom == pytest.approx(
+            style.group_padding.points * share
+        )
+    # Across an arrow: as much as it needs, less with less room round it.
+    for a, b in (("a", "b"),):
+        assert tight_boxes[b].left - tight_boxes[a].right < boxes[b].left - boxes[a].right - 3.0
+    assert tight_boxes["d"].top - tight_boxes["c"].bottom < boxes["d"].top - boxes["c"].bottom - 3.0
+    # The gap a group asks for is still no smaller than its arrow needs.
+    document = _sized()
+    document["groups"][0]["layout"]["gap"] = "1pt"
+    asked, _, _ = _laid_out(document)
+    assert asked["b"].left - asked["a"].right == pytest.approx(boxes["b"].left - boxes["a"].right)
+
+
+def test_a_figures_padding_lines_and_arrowheads_are_shares_of_its_themes() -> None:
+    boxes, _, svg = _laid_out(_sized())
+    small_boxes, _, small = _laid_out(_sized(shape_padding=0.5, line_width=0.5, head_size=0.5))
+    style = STYLES["paper"]
+    # A box is narrower by half its padding either side, its words as wide as they were.
+    assert boxes["a"].width - small_boxes["a"].width == pytest.approx(style.padding_x.points)
+    # Its lines are drawn half as wide; their heads, half as large, need less room.
+    width = style.connector_width.points
+    assert f'stroke-width="{number(width)}"' in svg
+    assert f'stroke-width="{number(width / 2)}"' in small
+    spec = parse_figure(_sized(head_size=0.5, line_width=0.5))
+    sized = figure_style(spec)
+    assert sized.arrow_length.points == pytest.approx(style.arrow_length.points / 2)
+    assert sized.arrow_width.points == pytest.approx(style.arrow_width.points / 2)
+    assert sized.connector_width.points == pytest.approx(width / 2)
+    assert sized.gap == style.gap and sized.padding_x == style.padding_x
+    gap = small_boxes["b"].left - small_boxes["a"].right
+    assert gap < boxes["b"].left - boxes["a"].right - 2.0
+
+
+def test_a_figures_sizes_are_written_where_they_are_its_own_and_kept_in_bounds() -> None:
+    spec = parse_figure(_sized(spacing=0.6, head_size=0.75))
+    figure = figure_to_document(spec)["figure"]
+    assert (figure["spacing"], figure["head_size"]) == (0.6, 0.75)
+    assert "shape_padding" not in figure and "line_width" not in figure
+    assert parse_figure(figure_to_document(spec)) == spec
+    for wrong in (0, -1, 11, "small", True):
+        with pytest.raises((FlexoError, ValueError)):
+            parse_figure(_sized(spacing=wrong))
+    with Figure("tight", spacing=0.5, head_size=0.8) as made:
+        made.block("a", label="A")
+    assert (made.spec.spacing, made.spec.head_size, made.spec.line_width) == (0.5, 0.8, 1.0)

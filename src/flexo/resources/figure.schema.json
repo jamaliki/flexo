@@ -137,6 +137,10 @@
         "hide": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
         "dim": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
         "highlight": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
+        "spacing": {"type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 1},
+        "shape_padding": {"type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 1},
+        "line_width": {"type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 1},
+        "head_size": {"type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 1},
         "sketch": {
           "oneOf": [
             {"type": "boolean"},

@@ -201,6 +201,11 @@ JOINT_STYLES = ("dot", "arrow", "auto")
 """How a branch is marked where it meets the trunk of its net."""
 TITLE_SIDES = ("left", "right", "bottom-left", "bottom-right")
 """Where a group may anchor its title along its own top edge."""
+FIGURE_SIZES = ("spacing", "shape_padding", "line_width", "head_size")
+"""What a figure may have smaller or larger than its theme has it, each as a share of the
+theme's (``FigureSpec.spacing`` ...)."""
+MOST_SIZE = 10.0
+"""The most any of them may be, times the theme's."""
 _ZERO_LENGTH = Length(0.0)
 
 
@@ -884,10 +889,31 @@ class FigureSpec:
     """Those drawn faint."""
     highlighted: tuple[str, ...] = ()
     """Those drawn at full strength, the rest of the figure faint."""
+    spacing: float = 1.0
+    """The room between its shapes, round a group's contents, and kept by its lines, as a
+    share of the theme's: ``0.5`` is half as much (``flexo.themes.figure_style``)."""
+    shape_padding: float = 1.0
+    """The room inside its shapes, round their words, as a share of the theme's."""
+    line_width: float = 1.0
+    """How heavy its lines are, as a share of the theme's; a line's own ``width`` is its own."""
+    head_size: float = 1.0
+    """How large its arrowheads are, as a share of the theme's; a line's own ``head_size`` is
+    a share of this."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")
         _validate_id(self.root, "Root group ID")
+        for name in FIGURE_SIZES:
+            share = getattr(self, name)
+            if (
+                isinstance(share, bool)
+                or not isinstance(share, int | float)
+                or not (0.0 < share <= MOST_SIZE)
+            ):
+                raise ValueError(
+                    f'{name} {share!r} for figure "{self.id}" must be a share of the theme\'s, '
+                    f"more than 0 and at most {MOST_SIZE:g}"
+                )
 
     def node(self, node_id: str) -> NodeSpec:
         return next(node for node in self.nodes if node.id == node_id)

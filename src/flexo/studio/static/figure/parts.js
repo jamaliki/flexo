@@ -6119,13 +6119,22 @@ export function figureParts(host) {
     return [
       // Named as its file is, where it has one of its own.
       h("div.section.insp-top", {}, titleBlock(icon("figure"), host.name?.() || "Figure", counts)),
-      h("div.section", {}, fields(catalog.figure_fields, { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
+      h("div.section", {}, fields(catalog.figure_fields.filter((field) => !field.sized), { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
+      sizes(),
       // What is hidden or dimmed, brought back from here too: with it chosen it can't be
       // seen to choose.
       anyShownApart() ? h("div.section", {}, h("div.section-title", {}, "Show"),
         h("div.hint-line", {}, shownSummary()),
         h("div.row", {}, ui.button("Show All", () => showAll(), { small: true, icon: "eye" }))) : null,
     ];
+  }
+
+  // The figure's own room and lines -- its spacing, its shapes' padding, its lines' width
+  // and its arrowheads, each a share of its theme's: for one figure drawn tighter than the
+  // rest. In its panel, and in the panel of the slide it is on (the deck asks for them).
+  function sizes() {
+    return h("div.section", {}, h("div.section-title", {}, "Sizes"),
+      fields(catalog.figure_fields.filter((field) => field.sized), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure-sizes"));
   }
 
   // -- a shape's words --
@@ -7070,7 +7079,7 @@ export function figureParts(host) {
     // (A part on its way, till it lands: a slide's frame round the figure waits for it.)
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, markViews, hint, key, panel, wantsRoom,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, sizes, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, alignChosen, canAlign, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
     toggleWords, canStyle,

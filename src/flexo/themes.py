@@ -957,15 +957,59 @@ def figure_family(style_name: str, font: str | None = None) -> str | None:
 
 
 def figure_style(figure: FigureSpec) -> LayoutStyle:
-    """The layout style a figure compiles under: its theme, in its font and conventions."""
+    """The layout style a figure compiles under: its theme, in its font and conventions,
+    with its own spacing, padding, lines and arrowheads (``sized``)."""
 
-    return resolve_style(
-        figure.style,
-        figure_family(figure.style, figure.font),
-        figure.conventions,
-        figure.sketch,
-        figure.background,
+    return sized(
+        resolve_style(
+            figure.style,
+            figure_family(figure.style, figure.font),
+            figure.conventions,
+            figure.sketch,
+            figure.background,
+        ),
+        figure,
     )
+
+
+SPACING = (
+    "gap",
+    "compact_gap",
+    "group_padding",
+    "connector_standoff",
+    "elbow_radius",
+    "route_clearance",
+    "caption_clearance",
+    "route_boundary_clearance",
+    "route_lane_spacing",
+    "port_spacing",
+)
+"""The theme's room a figure's ``spacing`` is a share of: between its shapes, round a
+group's contents, and what its lines keep -- from what they leave and point at, from each
+other, and round their bends. (The gap a line's arrow is laid out across is made of these
+and the arrowhead, so it shrinks with them: ``layout.gaps``.)"""
+PADDING = ("padding_x", "padding_y")
+"""The room inside a shape, round its words: what ``shape_padding`` is a share of."""
+LINES = ("connector_width",)
+HEADS = ("arrow_length", "arrow_width")
+
+
+def sized(style: LayoutStyle, figure: FigureSpec) -> LayoutStyle:
+    """``style`` with a figure's own sizes, each a share of the theme's: its ``spacing``,
+    ``shape_padding``, ``line_width`` and ``head_size``."""
+
+    changes = {
+        name: Length(getattr(style, name).points * share)
+        for share, names in (
+            (figure.spacing, SPACING),
+            (figure.shape_padding, PADDING),
+            (figure.line_width, LINES),
+            (figure.head_size, HEADS),
+        )
+        if share != 1.0
+        for name in names
+    }
+    return replace(style, **changes) if changes else style
 
 
 def figure_palette(figure: FigureSpec) -> Palette:
