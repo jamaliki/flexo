@@ -503,17 +503,34 @@ def _bench() -> list[dict[str, Any]]:
 
 def _structure() -> dict[str, Any]:
     from flexo.structure_style import SECTIONS
-    from flexo.structures import LOOKS
+    from flexo.structures import LOOKS, SCHEMES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
     return _part(
         "structure",
         "Structure",
         "Biology",
-        "A molecule\u2019s structure, from a PDB or mmCIF file",
+        "A molecule\u2019s structure, from a PDB or mmCIF file, or a mol-sketch scene: a "
+        "reaction with its orbitals",
         {"label": "Structure", "properties": {"source": ""}},
         [
-            _field("properties.source", "File", "file", types=["structure"]),
+            _field(
+                "properties.source",
+                "File",
+                "file",
+                types=["structure"],
+                hint="PDB, mmCIF, or a mol-sketch scene (.json)",
+            ),
+            # (A scene's: which of its steps, drawn as its arrows finish. A molecule read
+            # from its coordinates has the one.)
+            _field(
+                "properties.step",
+                "Step",
+                "integer",
+                min=1,
+                default=1,
+                hint="Which of a scene\u2019s steps is drawn: 1 is its first",
+            ),
             _field("properties", "View", "view", hint="Or drag its rotate handle"),
             # (The theme's look, named so: not "Default", which reads as a look of its own
             # beside the one it is -- Engraved Colour, on a light theme.)
@@ -524,6 +541,16 @@ def _structure() -> dict[str, Any]:
                 options=["", *LOOKS],
                 labels={"": "Theme\u2019s Look"},
                 hint="The look the figure's theme gives structures",
+            ),
+            _field(
+                "properties.scheme",
+                "Colour Scheme",
+                "choice",
+                options=list(SCHEMES),
+                labels={"look": "The Look\u2019s", "figure": "The Figure\u2019s"},
+                default="look",
+                hint="Flat\u2019s own coral helices and amber strands, or the figure\u2019s tones",
+                show={"properties.look": "flat"},
             ),
             # mol-sketch's own settings: its palettes, colours of one's own, what is
             # drawn, the site, a density map, and every field of its style.

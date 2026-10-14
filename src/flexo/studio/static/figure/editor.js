@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines } from "/static/kinds/figure/parts.js";
 
 const LINE = 12.5 * 1.6;
@@ -263,6 +263,9 @@ export function mount(studio, main) {
   // Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
   // shape they are let go on, in the group they are let go in, or else after what is chosen.
   const PICTURE_FILE = /\.(png|jpe?g|svg|pdf|ai)$/i, STRUCTURE_FILE = /\.(pdb|cif|mmcif|ent)$/i;
+  // A .json dropped is a structure when it is a mol-sketch scene (it has steps), not a
+  // figure or a theme written in JSON.
+  const sceneFile = async (file) => /\.json$/i.test(file.name) && (await file.slice(0, 4_000_000).text()).includes('"keyframes"');
   const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
   let dropNote = null;
   const dropSaid = (said) => {
@@ -298,17 +301,23 @@ export function mount(studio, main) {
     if (!files.length || !figure.model) return;
     // Taken now, before anything is waited for: later, the browser would have opened the file.
     event.preventDefault();
-    const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name));
-    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator) and structure files (PDB, mmCIF) can be added to a figure.", { icon: "info", seconds: 6 }); return; }
     // Where: beside the shape under the pointer, in the group under it, or else at the
     // figure's end -- never into the line of whatever happens to be chosen, as a shape added
     // from the palette goes: a picture let go on the desk joins nothing.
     const under = figure.idAt(event);
-    const where = under && figure.nodeOf(under) && figure.nodeOf(under).kind !== "frame" ? { after: under }
-      : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : {};
+    await addFiles(files, under && figure.nodeOf(under) && figure.nodeOf(under).kind !== "frame" ? { after: under }
+      : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : {});
+  });
+  // Files added to the figure, dropped or pasted: where `where` says, else after what is
+  // chosen (as a shape added from the palette).
+  async function addFiles(files, where) {
+    const scenes = new Set();
+    for (const file of files) if (await sceneFile(file)) scenes.add(file);
+    const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name) || scenes.has(file));
+    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator), structure files (PDB, mmCIF) and mol-sketch scenes can be added to a figure.", { icon: "info", seconds: 6 }); return; }
     try {
       for (const file of taken) {
-        const kind = STRUCTURE_FILE.test(file.name) ? "structure" : "image";
+        const kind = STRUCTURE_FILE.test(file.name) || scenes.has(file) ? "structure" : "image";
         if (catalog.parts[kind]?.unavailable) { toast(`${file.name}: ${catalog.parts[kind].unavailable}`, { icon: "info", seconds: 6 }); continue; }
         const width = kind === "image" ? await fittingWidth(file) : null;
         await figure.addPart(kind, where, { file: await studio.upload(file), width });
@@ -317,7 +326,7 @@ export function mount(studio, main) {
     } catch (error) {
       toast(`Couldn’t add ${taken.length > 1 ? "the files" : taken[0].name}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
     }
-  });
+  }
   page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
   // Right-click, as on a slide: what is under the pointer is chosen, and its menu offers what
   // can be done with it (a line: a shape inserted into it) -- Cut, Copy and Paste among it, as
@@ -543,7 +552,7 @@ export function mount(studio, main) {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
       const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
-      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent";
+      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent,.json";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
       const actions = [{ label: "Upload…", aside: true, run: () => { upload.click(); return false; } }];
@@ -635,7 +644,7 @@ export function mount(studio, main) {
   // -- copied, cut and pasted --
   // The shapes chosen, with what they hold and the lines between them, as a slide's figure's
   // are copied (in the deck's own format): pasted after what is chosen -- in this figure,
-  // another, or onto a slide.
+  // another, or onto a slide. Pictures copied elsewhere are pasted after it too.
   const CLIP = "application/x-flexo-deck";
   let clipboard = null;
   const typingNow = () => Boolean(typing(document.activeElement) || document.querySelector(".scrim"));
@@ -683,17 +692,27 @@ export function mount(studio, main) {
     const clip = copyNow(event);
     if (clip) figure.remove(undefined, [], { cut: true }); else if (ownsClip()) uncopied(true);
   });
-  document.addEventListener("paste", (event) => {
+  document.addEventListener("paste", async (event) => {
     keyed = null;
     if (!ownsClip() || event.defaultPrevented) return;
+    const data = event.clipboardData;
     let clip = null;
-    try { clip = JSON.parse(event.clipboardData?.getData(CLIP) || "null"); } catch { clip = null; }
+    try { clip = JSON.parse(data?.getData(CLIP) || "null"); } catch { clip = null; }
     // A clipboard that keeps only words: what was copied here, if they are its words.
-    if (!clip && clipboard && event.clipboardData?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
-    if (clip?.what !== "parts" || !clip.parts?.top?.length) return;
+    if (!clip && clipboard && data?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
+    if (clip?.what === "parts" && clip.parts?.top?.length) { event.preventDefault(); figure.paste(clip.parts); return; }
+    // Pictures and structure files copied elsewhere are added after what is chosen -- and a
+    // drawing (Inkscape's) as its SVG, not as the picture of it the web view hands over.
+    const files = [...(data?.files || [])], drawing = pastedDrawing(data);
+    if (!drawing && !files.length) return;
     event.preventDefault();
-    figure.paste(clip.parts);
+    const drawn = await drawing;
+    if (drawn || files.length) await addFiles(drawn ? [drawn] : files);
   });
+  // The web view offers Edit › Paste and ⌘V to a page with nothing typed in only when the page
+  // asks first (the studio's beforepaste): the figure asks whenever it takes a paste, pictures
+  // copied elsewhere too -- not only when shapes were copied here.
+  document.addEventListener("beforepaste", (event) => { if (ownsClip()) event.preventDefault(); });
   // A web view that gives no copy, cut or paste to a page with nothing to type in (a Mac
   // app's, whose Edit menu waits for a selection) still passes the keys: if no such event
   // follows them, the page does it itself, with what it copied (as a deck's does).

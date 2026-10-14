@@ -1,0 +1,319 @@
+{
+ "name": "π* attack (carbonyl addition)",
+ "view": {
+  "yaw": -24,
+  "pitch": 14,
+  "roll": 0,
+  "zoom": 1.266,
+  "panX": -0.0,
+  "panY": 0.005
+ },
+ "look": "textbook",
+ "reps": {
+  "sticks": "all",
+  "cartoon": "",
+  "surface": ""
+ },
+ "keyframes": [
+  {
+   "name": "π* attack: precursor",
+   "hold": 40,
+   "transition": 56,
+   "caption": "Hydroxide's lone pair meets π*(C=O) above the plane, at 105° to C=O (Bürgi–Dunitz): the lobe is larger on C.",
+   "atoms": {
+    "Nu": {
+     "el": "O",
+     "pos": [
+      -0.764,
+      2.849,
+      0.0
+     ],
+     "charge": -1,
+     "lp": [
+      [
+       0.259,
+       -0.966,
+       0.002
+      ],
+      [
+       -0.087,
+       0.32,
+       -0.943
+      ],
+      [
+       0.702,
+       0.534,
+       0.47
+      ]
+     ]
+    },
+    "HNu": {
+     "el": "H",
+     "pos": [
+      -1.612,
+      2.957,
+      0.457
+     ]
+    },
+    "C": {
+     "el": "C",
+     "pos": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "color": "C"
+    },
+    "O": {
+     "el": "O",
+     "pos": [
+      1.21,
+      0.0,
+      0.0
+     ],
+     "lp": [
+      [
+       0.5,
+       -0.866,
+       0.0
+      ],
+      [
+       0.5,
+       0.866,
+       -0.0
+      ]
+     ]
+    },
+    "H1": {
+     "el": "H",
+     "pos": [
+      -0.58,
+      0.0,
+      0.935
+     ]
+    },
+    "H2": {
+     "el": "H",
+     "pos": [
+      -0.58,
+      0.0,
+      -0.935
+     ]
+    }
+   },
+   "bonds": [
+    [
+     "Nu",
+     "HNu",
+     1
+    ],
+    [
+     "C",
+     "O",
+     2
+    ],
+    [
+     "C",
+     "H1",
+     1
+    ],
+    [
+     "C",
+     "H2",
+     1
+    ]
+   ],
+   "orbitals": [
+    {
+     "type": "n",
+     "atom": "Nu",
+     "lp": 0,
+     "label": "n(O)"
+    },
+    {
+     "type": "pi*",
+     "bond": [
+      "C",
+      "O"
+     ],
+     "toward": "Nu",
+     "label": "π*(C=O)"
+    }
+   ],
+   "measures": [
+    {
+     "distance": [
+      "Nu",
+      "C"
+     ],
+     "window": [
+      2.95,
+      0.45
+     ]
+    },
+    {
+     "angle": [
+      "Nu",
+      "C",
+      "O"
+     ],
+     "window": [
+      105,
+      10
+     ],
+     "radius": 0.5
+    },
+    {
+     "torsion": [
+      "H1",
+      "O",
+      "C",
+      "Nu"
+     ],
+     "label": "τ(H–O=C···O) {v}"
+    }
+   ],
+   "arrows": [
+    {
+     "from": {
+      "lp": "Nu",
+      "i": 0
+     },
+     "to": {
+      "atom": "C"
+     },
+     "bulge": 0.3,
+     "side": -1
+    },
+    {
+     "from": {
+      "bond": [
+       "C",
+       "O"
+      ]
+     },
+     "to": {
+      "atom": "O"
+     },
+     "bulge": 0.6,
+     "side": -1,
+     "curl": 0.55
+    }
+   ]
+  },
+  {
+   "name": "Tetrahedral alkoxide",
+   "hold": 40,
+   "transition": 56,
+   "caption": "C–O formed, the π bond broken: the carbonyl oxygen now carries the charge.",
+   "atoms": {
+    "Nu": {
+     "el": "O",
+     "pos": [
+      -0.37,
+      1.381,
+      0.0
+     ],
+     "lp": [
+      [
+       -0.086,
+       0.322,
+       -0.943
+      ],
+      [
+       0.703,
+       0.533,
+       0.471
+      ]
+     ]
+    },
+    "HNu": {
+     "el": "H",
+     "pos": [
+      -1.219,
+      1.489,
+      0.457
+     ]
+    },
+    "C": {
+     "el": "C",
+     "pos": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "color": "C"
+    },
+    "O": {
+     "el": "O",
+     "pos": [
+      1.356,
+      -0.107,
+      -0.0
+     ],
+     "charge": -1,
+     "lp": [
+      [
+       0.258,
+       -0.966,
+       -0.0
+      ],
+      [
+       0.369,
+       0.444,
+       -0.817
+      ],
+      [
+       0.369,
+       0.444,
+       0.817
+      ]
+     ]
+    },
+    "H1": {
+     "el": "H",
+     "pos": [
+      -0.42,
+      -0.493,
+      0.89
+     ]
+    },
+    "H2": {
+     "el": "H",
+     "pos": [
+      -0.42,
+      -0.493,
+      -0.89
+     ]
+    }
+   },
+   "bonds": [
+    [
+     "Nu",
+     "HNu",
+     1
+    ],
+    [
+     "C",
+     "O",
+     1
+    ],
+    [
+     "C",
+     "H1",
+     1
+    ],
+    [
+     "C",
+     "H2",
+     1
+    ],
+    [
+     "Nu",
+     "C",
+     1
+    ]
+   ]
+  }
+ ]
+}

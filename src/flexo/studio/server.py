@@ -48,8 +48,10 @@ FILE_TYPES = {
     "figure": (".yaml", ".yml", ".json"),
     "python": (".py",),
     "theme": (".yaml", ".yml", ".json"),
-    "structure": (".pdb", ".cif", ".mmcif", ".ent"),
+    "structure": (".pdb", ".cif", ".mmcif", ".ent", ".json"),
 }
+"""The files each kind of thing is chosen from, by their endings. (A ``.json`` is a
+structure only when it is a mol-sketch scene: ``_files``.)"""
 
 
 class Server(ThreadingHTTPServer):
@@ -408,11 +410,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _files(self, name: str, types: list[str]) -> dict[str, Any]:
         folder = self.workspace.path(name).parent
+        from flexo.structures import is_scene
+
         suffixes = tuple(suffix for kind in types for suffix in FILE_TYPES.get(kind, ()))
+        # A .json chosen as a structure is a mol-sketch scene, not a figure or a theme.
+        any_json = any(".json" in FILE_TYPES.get(kind, ()) for kind in types if kind != "structure")
         found = [
             file.relative_to(folder).as_posix()
             for file in sorted(walk(folder))
             if file.suffix.lower() in suffixes
+            and (file.suffix.lower() != ".json" or any_json or is_scene(file))
         ]
         return {"files": found[:500]}
 

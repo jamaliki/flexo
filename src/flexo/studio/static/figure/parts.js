@@ -148,7 +148,7 @@ export function pageTitle(size) {
 
 // A structure's name from its file: a PDB ID in capitals, any other file by its name.
 export function fileLabel(source) {
-  const stem = String(source).split("/").pop().replace(/\.(pdb|cif|mmcif|ent)$/i, "");
+  const stem = String(source).split("/").pop().replace(/\.(pdb|cif|mmcif|ent|json)$/i, "");
   return /^[0-9][A-Za-z0-9]{3}$/.test(stem) ? stem.toUpperCase() : stem;
 }
 // The colour a tone is seen in on the drawing: the outline of a tinted shape, the fill of a

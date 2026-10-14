@@ -181,6 +181,23 @@ def test_a_new_file_is_made_from_its_kind_or_given_data(served: tuple[str, Works
     assert "id: given" in (workspace.root / "b.yaml").read_text(encoding="utf-8")
 
 
+def test_a_structure_is_chosen_from_structure_files_and_mol_sketch_scenes(
+    served: tuple[str, Workspace],
+) -> None:
+    """A .json is offered as a structure only when it is a mol-sketch scene: a figure or a
+    theme written in JSON is not one."""
+
+    base, workspace = served
+    (workspace.root / "1abc.pdb").write_text("HEADER\n", encoding="utf-8")
+    scene, other = '{"name": "Attack", "keyframes": []}', '{"figure": {"id": "f"}, "nodes": []}'
+    (workspace.root / "attack.json").write_text(scene, encoding="utf-8")
+    (workspace.root / "other.json").write_text(other, encoding="utf-8")
+    found = call(f"{base}/api/files?file=figure.yaml&types=structure", workspace.token)[1]["files"]
+    assert "1abc.pdb" in found and "attack.json" in found and "other.json" not in found
+    found = call(f"{base}/api/files?file=figure.yaml&types=figure", workspace.token)[1]["files"]
+    assert "other.json" in found
+
+
 def test_pictures_beside_the_document_are_listed_and_uploaded(
     served: tuple[str, Workspace],
 ) -> None:
@@ -1832,6 +1849,81 @@ def test_the_page_merges_as_the_server_does() -> None:
         [merge3(*case, notes), notes] for case, notes in zip(cases, noted, strict=True)
     ]
     assert equal == [True, True, False, False, False, False, False]
+
+
+DRAWING = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<!-- Created with Inkscape -->\n'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><circle r="4"/></svg>\n'
+)
+PASTES = """
+const pasted = (files = [], words = "", html = "") => ({
+  files: files.map((name) => new File(["x"], name)),
+  getData: (type) => (type === "text/plain" ? words : type === "text/html" ? html : ""),
+});
+// What a paste brings as a drawing: "now" when nothing is waited for, else the file (or null).
+const brought = async (paste) => {
+  const drawing = pastedDrawing(paste);
+  if (!drawing) return "now";
+  const file = await drawing;
+  return file && { name: file.name, type: file.type, words: await file.text() };
+};
+const asked = [];
+const app = (answer) => {
+  const clipboard_drawing = () => { asked.push(1); return answer(); };
+  globalThis.pywebview = { api: { clipboard_drawing } };
+};
+const cases = [];
+for (const paste of [pasted(["image.png"]), pasted([], DRAWING), pasted([], "Words")]) {
+  cases.push(await brought(paste));
+}
+app(async () => DRAWING);
+for (const paste of [pasted(["image.png"]), pasted(["image.tiff"]), pasted(), pasted([], "Words"),
+  pasted(["figure.pdf"]), pasted(["logo.svg"]), pasted(["image.png", "notes.txt"]),
+  pasted([], "", "<b>Words</b>")]) cases.push(await brought(paste));
+const many = asked.length;
+app(async () => "");
+cases.push(await brought(pasted(["image.png"])));
+app(async () => { throw new Error("gone"); });
+cases.push(await brought(pasted(["image.png"])));
+const words = [DRAWING, "  <svg>\\n</svg>  ",
+  "<!DOCTYPE svg [ <!ENTITY a 'b'> ]><svg viewBox='0 0 1 1'></svg>",
+  "See <svg></svg>", "<svg>", "<svgx></svgx>", "", null].map(svgOfWords);
+console.log(JSON.stringify({ cases, many, words }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_drawing_copied_in_another_app_is_pasted_as_its_svg() -> None:
+    """Inkscape copies a drawing as SVG and as a PNG of it, and the web view hands the page
+    only the PNG: pasted, the drawing was a picture of it. The Mac app reads the SVG for the
+    page when a picture alone (or nothing it reads) came; words, files copied in the Finder
+    and a picture in a browser are pasted as they were, with nothing waited for."""
+
+    script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/clipboard.js"
+    code = (
+        f"import {{ pastedDrawing, svgOfWords }} from {json.dumps(script.as_uri())};\n"
+        f"const DRAWING = {json.dumps(DRAWING)};\n" + PASTES
+    )
+    done = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    found = json.loads(done.stdout)
+    drawing = {"name": "image.svg", "type": "image/svg+xml", "words": DRAWING.strip()}
+    from_app = {**drawing, "words": DRAWING}
+    # In a browser: only words that are a drawing.
+    assert found["cases"][:3] == ["now", drawing, "now"]
+    # In the Mac app: the drawing beside a picture, or alone; never for words, a PDF, an SVG
+    # file, a picture with another file, or formatted words -- and the app asked only then.
+    assert found["cases"][3:11] == [from_app, from_app, from_app, "now", "now", "now", "now", "now"]
+    assert found["many"] == 3
+    # (None there, or the app not answering: the picture is pasted.)
+    assert found["cases"][11:] == [None, None]
+    assert found["words"] == [
+        DRAWING.strip(),
+        "<svg>\n</svg>",
+        "<!DOCTYPE svg [ <!ENTITY a 'b'> ]><svg viewBox='0 0 1 1'></svg>",
+        None, None, None, None, None,
+    ]
 
 
 FAKE_PAGE = """
