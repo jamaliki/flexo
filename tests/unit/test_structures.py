@@ -137,7 +137,9 @@ def test_the_settings_of_a_structure_coloured_by_a_tone_are_shown(tmp_path: Path
 
     with flexo.Figure("toned", style="paper") as figure:
         row = figure.root.row("row", gap=20)
-        row.structure("model", DATA / "1a7g.cif", look="flat", colors={"E": "Viral"})
+        row.structure(
+            "model", DATA / "1a7g.cif", look="flat", colors={"E": "Viral"}, scheme="figure"
+        )
         row.block("tag", label="E2 protein", tone="Viral")
     action = {"do": "structure-settings", "id": "row.model"}
     settings = FigureKind().act({"text": dump_figure(figure.spec)}, action, tmp_path)["settings"]
@@ -146,6 +148,105 @@ def test_the_settings_of_a_structure_coloured_by_a_tone_are_shown(tmp_path: Path
     assert settings["style"]["palette.helix"] == with_tone_roles(resolve_palette("paper")).get(
         "accent-fill"
     )
+
+
+def test_a_flat_structure_is_in_the_looks_own_colours_unless_it_asks_for_the_figures(
+    tmp_path: Path,
+) -> None:
+    """mol-sketch's Flat: coral helices, amber strands, near-white loops, teal hydrogen
+    bonds -- left as they are, the ink and a chain's own colour apart. ``scheme: figure``
+    paints it in the figure's tones; a scheme it lacks is said."""
+
+    ms = pytest.importorskip("molsketch")
+    from flexo.serialization import dump_figure
+    from flexo.studio.figure_kind import FigureKind
+
+    flat = ms.load(str(DATA / "1a7g.cif")).look("flat").style
+    found = {}
+    for scheme in (None, "figure"):
+        with flexo.Figure("flat", style="paper") as figure:
+            figure.root.structure("model", DATA / "1a7g.cif", look="flat", scheme=scheme)
+        action = {"do": "structure-settings", "id": "model"}
+        text = dump_figure(figure.spec)
+        found[scheme] = FigureKind().act({"text": text}, action, tmp_path)["settings"]["style"]
+    for key in ("helix", "sheet", "loop", "hbond"):
+        assert found[None][f"palette.{key}"] == flat["palette"][key]
+    assert found["figure"]["palette.helix"] != flat["palette"]["helix"]
+    with flexo.Figure("odd") as figure:
+        figure.root.structure("model", DATA / "1a7g.cif", look="flat", scheme="pastel")
+    problem = structure_problem(figure.spec.nodes[0], figure_style(figure.spec))
+    assert problem is not None and problem.code == "structure.scheme"
+    assert "look, figure" in (problem.hint or "")
+
+
+def _scene(name: str = "pi_star.json") -> Path:
+    return DATA / name
+
+
+def test_a_scene_is_drawn_at_the_end_of_its_step_with_its_arrows_in() -> None:
+    """A mol-sketch scene (a reaction, in steps) is a structure's source: drawn where its
+    step's hold ends -- its curly arrows grow over the end of the hold, and at its start are
+    not there yet -- and its next step, the product, at the end of that one's."""
+
+    ms = pytest.importorskip("molsketch")
+    from flexo.structures import _ask, _frame, _loaded
+
+    with flexo.Figure("steps") as figure:
+        row = figure.root.row("row", gap=20)
+        for step in (1, 2):
+            row.structure(f"s{step}", _scene(), label=f"Step {step}", look="textbook", step=step)
+    style = figure_style(figure.spec)
+    scene = ms.load(str(_scene()))
+    starts = scene.frames("keyframes")
+    holds = [step.get("hold", 24) for step in scene.scene()["keyframes"]]
+    for index, node in enumerate(figure.spec.nodes):
+        ask = _ask(node, style, flexo.themes.figure_palette(figure.spec))
+        assert _frame(_loaded(ask.source, ask.stamp), ask) == starts[index] + holds[index] - 2
+    compiled = compile_figure(figure.spec)
+    assert not [d for d in lint_compilation(compiled).diagnostics if d.severity is Severity.ERROR]
+    assert all(structure_problem(node, style) is None for node in figure.spec.nodes)
+    # Drawn there, its arrows are in it: the first step's picture is not the one at its start.
+    at = {}
+    for frame in (0, starts[0] + holds[0] - 2):
+        at[frame] = scene.copy().look("textbook").render((400, 300), frame=frame).png()
+    assert at[0] != at[starts[0] + holds[0] - 2]
+
+
+def test_a_step_a_scene_lacks_is_said_with_the_steps_it_has() -> None:
+    pytest.importorskip("molsketch")
+    for step, said in ((3, "This scene has 2 steps: step 3 is not one of them."),
+                       (1.5, "A scene's step is a whole number")):
+        with flexo.Figure("steps") as figure:
+            figure.root.structure("model", _scene(), look="textbook", step=step)
+        problem = structure_problem(figure.spec.nodes[0], figure_style(figure.spec))
+        assert problem is not None and problem.code == "structure.step"
+        assert said in problem.message
+        assert 'id="model.problem"' in compile_figure(figure.spec).document.text
+
+
+def test_a_scene_is_named_for_itself_and_only_a_scene_is_one(tmp_path: Path) -> None:
+    from flexo.structures import is_scene, structure_caption
+
+    assert is_scene(_scene())
+    assert structure_caption(_scene()) == "π* attack (carbonyl addition)"
+    figure = tmp_path / "figure.json"
+    figure.write_text('{"figure": {"id": "f"}, "nodes": []}', encoding="utf-8")
+    assert not is_scene(figure) and not is_scene(DATA / "1a7g.cif")
+
+
+def test_a_scenes_orbitals_and_measures_take_colours_of_ones_own(tmp_path: Path) -> None:
+    """Colours mol-sketch leaves out until given -- a scene's filled and empty orbitals, its
+    measures and their windows, hydrogen bonds -- are settings a structure may set."""
+
+    pytest.importorskip("molsketch")
+    with flexo.Figure("coloured") as figure:
+        figure.root.structure(
+            "model", _scene(), look="textbook",
+            style={"palette": {"filled": "#1a9e3a", "empty": "#7a3db8", "window": "#dddddd"},
+                   "lone_pair_style": "lobes"},
+        )
+    assert structure_problem(figure.spec.nodes[0], figure_style(figure.spec)) is None
+    assert 'id="model.problem"' not in compile_figure(figure.spec).document.text
 
 
 def test_shades_are_mixed_as_mol_sketch_mixes_them() -> None:

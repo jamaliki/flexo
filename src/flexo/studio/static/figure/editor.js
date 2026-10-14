@@ -263,6 +263,9 @@ export function mount(studio, main) {
   // Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
   // shape they are let go on, in the group they are let go in, or else after what is chosen.
   const PICTURE_FILE = /\.(png|jpe?g|svg|pdf|ai)$/i, STRUCTURE_FILE = /\.(pdb|cif|mmcif|ent)$/i;
+  // A .json dropped is a structure when it is a mol-sketch scene (it has steps), not a
+  // figure or a theme written in JSON.
+  const sceneFile = async (file) => /\.json$/i.test(file.name) && (await file.slice(0, 4_000_000).text()).includes('"keyframes"');
   const carriesFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
   let dropNote = null;
   const dropSaid = (said) => {
@@ -298,8 +301,10 @@ export function mount(studio, main) {
     if (!files.length || !figure.model) return;
     // Taken now, before anything is waited for: later, the browser would have opened the file.
     event.preventDefault();
-    const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name));
-    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator) and structure files (PDB, mmCIF) can be added to a figure.", { icon: "info", seconds: 6 }); return; }
+    const scenes = new Set();
+    for (const file of files) if (await sceneFile(file)) scenes.add(file);
+    const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name) || scenes.has(file));
+    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator), structure files (PDB, mmCIF) and mol-sketch scenes can be added to a figure.", { icon: "info", seconds: 6 }); return; }
     // Where: beside the shape under the pointer, in the group under it, or else at the
     // figure's end -- never into the line of whatever happens to be chosen, as a shape added
     // from the palette goes: a picture let go on the desk joins nothing.
@@ -308,7 +313,7 @@ export function mount(studio, main) {
       : under && figure.groupOf(under) && under !== figure.model.root ? { parent: under } : {};
     try {
       for (const file of taken) {
-        const kind = STRUCTURE_FILE.test(file.name) ? "structure" : "image";
+        const kind = STRUCTURE_FILE.test(file.name) || scenes.has(file) ? "structure" : "image";
         if (catalog.parts[kind]?.unavailable) { toast(`${file.name}: ${catalog.parts[kind].unavailable}`, { icon: "info", seconds: 6 }); continue; }
         const width = kind === "image" ? await fittingWidth(file) : null;
         await figure.addPart(kind, where, { file: await studio.upload(file), width });
@@ -543,7 +548,7 @@ export function mount(studio, main) {
       let done = false;
       const finish = (value) => { if (!done) { done = true; resolve(value); box.close(); } };
       const list = h("div.list-rows", {}, h("div.empty", {}, h("div.spinner")));
-      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent";
+      const accept = types.includes("image") ? "image/*,.svg,.pdf,.ai" : types.includes("python") ? ".py" : ".pdb,.cif,.mmcif,.ent,.json";
       const upload = h("input", { type: "file", accept, hidden: true,
         onchange: async () => { const file = upload.files[0]; if (file) finish(await studio.upload(file)); } });
       const actions = [{ label: "Upload…", aside: true, run: () => { upload.click(); return false; } }];

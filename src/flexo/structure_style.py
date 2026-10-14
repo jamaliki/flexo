@@ -138,9 +138,11 @@ SECTIONS: tuple[dict[str, Any], ...] = (
             _colour("palette.N", "Nitrogen"),
             _colour("palette.O", "Oxygen"),
             _colour("palette.S", "Sulphur"),
+            _colour("palette.H", "Hydrogen"),
             _colour("palette.ink", "Ink"),
             _colour("palette.hatch", "Hatching"),
             _colour("palette.accent", "Accent"),
+            _colour("palette.hbond", "Hydrogen Bonds"),
         ],
     },
     {
@@ -185,6 +187,15 @@ SECTIONS: tuple[dict[str, Any], ...] = (
                 "stick_radius", "Stick Radius", low=0.02, step=0.02, hint="In ångströms", unit="Å"
             ),
             _number(
+                "stick_h_scale",
+                "Hydrogen Sticks",
+                low=0.1,
+                high=1,
+                step=0.05,
+                hint="A bond to a hydrogen, a share of a stick: a proton reads lighter",
+                unit=TIMES,
+            ),
+            _number(
                 "sphere_scale",
                 "Sphere Size",
                 low=0,
@@ -205,6 +216,40 @@ SECTIONS: tuple[dict[str, Any], ...] = (
             _switch("show.hbonds", "Hydrogen Bonds"),
             _switch("show.valence", "Double Bonds", "Draw double and triple bonds as such"),
             _switch("construction", "Construction Lines", "Faint pencil lines under the drawing"),
+        ],
+    },
+    {
+        # A scene's chemistry: what a reaction drawn with its orbitals is drawn with.
+        "title": "Orbitals and Measures",
+        "fields": [
+            _switch("show.orbitals", "Orbitals", "A scene\u2019s orbitals, drawn as lobes"),
+            _choice(
+                "orbital_style",
+                "Orbital Style",
+                ("auto", "engraved", "sketch"),
+                "Engraved: inked lobes with a ruled tint; Sketch: in the look\u2019s own medium",
+                labels={"auto": "Automatic", "engraved": "Engraved", "sketch": "Sketch"},
+            ),
+            _colour("palette.filled", "Filled Orbitals"),
+            _colour("palette.empty", "Empty Orbitals"),
+            _switch(
+                "show.measures",
+                "Measures",
+                "A scene\u2019s distances, angles and torsions, with their windows",
+            ),
+            _colour("palette.measure", "Measure Lines"),
+            _colour("palette.window", "Windows"),
+            _switch("show.lone_pairs", "Lone Pairs"),
+            _choice(
+                "lone_pair_style",
+                "Lone Pair Style",
+                ("dots", "bold", "lobes"),
+                "Dots beside the atom, bold dots set off from it, or a lobe holding each pair",
+                labels={"dots": "Dots", "bold": "Bold", "lobes": "Lobes"},
+            ),
+            _switch("show.charges", "Charges"),
+            _colour("palette.charge", "Charge Signs"),
+            _colour("palette.arrow", "Arrows"),
         ],
     },
     {

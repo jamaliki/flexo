@@ -28,11 +28,18 @@ resolution and embedded, so the editable SVG, the PDF, and the slides carry it.
 
 In the **flat** look (PyMOL's flat, outlined figures) the molecule is shapes instead:
 mol-sketch's SVG nested in the figure's, so it stays sharp at any size and the PDF
-carries it as vectors. It is painted in the figure's own roles -- helices in the
-accent's fill, strands in the warm fill, loops in the neutral fill, a chain or a tone
-in that tone's fill, outlines in ink -- and every shape records the role it was
-painted in (and, for a ribbon's darker side, how far toward the ink), so ``flexo
-retheme`` recolours the molecule with the rest of the figure.
+carries it as vectors. It is in the look's own colours -- coral helices, amber strands,
+near-white loops, teal hydrogen bonds -- or, with ``scheme: figure``, painted in the
+figure's own roles -- helices in the accent's fill, strands in the warm fill, loops in
+the neutral fill, a chain or a tone in that tone's fill, outlines in ink -- and every
+shape records the role it was painted in (and, for a ribbon's darker side, how far
+toward the ink), so ``flexo retheme`` recolours the molecule with the rest of the
+figure.
+
+A **scene** -- a mol-sketch ``.json`` of steps, such as a reaction drawn with its
+orbitals, lone pairs, curly arrows and the distances and angles it is posed at -- is drawn
+as a structure too: at the end of the step ``step`` names (1, its first, by default),
+where its arrows are drawn in full.
 """
 
 from __future__ import annotations
@@ -69,6 +76,10 @@ LOOKS = (
     "textbook",
     "flat",
 )
+
+SCHEMES = ("look", "figure")
+"""Whose colours a flat structure is in: its look's own (mol-sketch's Flat: coral helices,
+amber strands, near-white loops, teal hydrogen bonds), or the figure's tones."""
 
 VECTOR_LOOKS = frozenset({"flat"})
 """Looks whose molecule is nested as shapes, not embedded as a picture. (Its drawing is
@@ -353,13 +364,41 @@ NAMED = 32
 """How long (characters) a structure's name from its file may be before it is cut short."""
 
 
+def is_scene(path: Path) -> bool:
+    """Whether a ``.json`` file is a mol-sketch scene (it has steps: ``keyframes``), not a
+    figure, a deck or a theme written in JSON."""
+
+    if path.suffix.lower() != ".json":
+        return False
+    try:
+        with path.open(encoding="utf-8", errors="replace") as file:
+            return '"keyframes"' in file.read(4_000_000)
+    except OSError:
+        return False
+
+
+def _scene_name(path: Path) -> str | None:
+    """A scene's own name for what it draws ("Proton transfer"), if it gives one."""
+
+    import json
+
+    try:
+        name = json.loads(path.read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
 def structure_caption(path: Path) -> str | None:
     """What a structure file says it holds, as a person would write it, with its PDB ID:
     ``E2 DNA-binding domain (1A7G)`` for a file titled THE CRYSTAL STRUCTURE OF THE E2
     DNA-BINDING DOMAIN FROM HUMAN PAPILLOMAVIRUS AT 2.4 ANGSTROMS. Its title, without how
     it was solved and from what, at what resolution -- else the first protein it names
-    (never a bare DNA or RNA). None for a file that names nothing."""
+    (never a bare DNA or RNA). A scene, the name it gives itself. None for a file that names
+    nothing."""
 
+    if is_scene(path):
+        return _scene_name(path)
     try:
         text = path.read_text(encoding="utf-8", errors="replace")[:400_000]
     except OSError:
@@ -665,6 +704,8 @@ class _Ask:
     paints: tuple[tuple[str, str], ...] = ()
     """Each colour handed to mol-sketch by a role of the figure's, as (role, colour), the
     roles that matter most first: what a molecule drawn as shapes is painted by."""
+    step: int = 1
+    """Which of a scene's steps is drawn (1, its first), once its arrows are in: ``_frame``."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -677,8 +718,14 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     paper = palette.get("canvas", "#ffffff")
     ink = palette.get("ink", "#000000")
     # A flat molecule is filled with its tones, as the figure's shapes are; the other looks
-    # draw in lines, and take a tone's line colour.
+    # draw in lines, and take a tone's line colour. Flat, it is in the look's own colours
+    # (mol-sketch's: coral helices, amber strands) unless it asks for the figure's.
+    scheme = str(node.property("scheme") or "look").strip().lower()
+    if scheme not in SCHEMES:
+        said = f'scheme "{scheme}" is neither of a structure\'s.'
+        raise _fail(node, "scheme", said, hint=", ".join(SCHEMES))
     flat = look == "flat"
+    figured = flat and scheme == "figure"
     part = "fill" if flat else "stroke"
     paints = [("ink", ink)]  # outlines first: a tone of the same colour is not what they are
     colours = []
@@ -706,21 +753,23 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     # The figure's own colours where it has them: its ink, and -- when a protein map
     # in the figure draws helices and strands -- theirs, so the two agree.
     roles = [("ink", ink)]
-    if flat:
-        # Flat, the whole molecule is in the figure's colours: helices in the accent's
-        # fill, strands in the warm one, loops in the neutral fill (a protein map's tones
-        # win, below), words, charges and a mechanism's arrows in ink, hydrogen bonds in
-        # the accent's line.
+    if figured:
+        # Flat in the figure's colours, the whole molecule is: helices in the accent's fill,
+        # strands in the warm one, loops in the neutral fill (a protein map's tones win,
+        # below), words, charges, a mechanism's arrows and its measures in ink, hydrogen
+        # bonds in the accent's line -- and a scene's orbitals, filled in the warm fill and
+        # empty in the accent's, the window they are measured against in the neutral fill.
         for key, role in (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
                           ("label", "ink"), ("charge", "ink"), ("arrow", "ink"),
-                          ("hbond", "accent-stroke")):
+                          ("hbond", "accent-stroke"), ("filled", "warm-fill"),
+                          ("empty", "accent-fill"), ("measure", "ink"), ("window", "block-fill")):
             roles.append((key, palette.get(role)))
     for tone, key in (("helix", "helix"), ("strand", "sheet")):
         index = palette.tone_index(tone)
         if index is not None:
             roles.append((key, palette.get(f"tone-{index}-{part}")))
             paints.append((f"tone-{index}-{part}", palette.get(f"tone-{index}-{part}")))
-    if flat:
+    if figured:
         paints += [(role, palette.get(role)) for role in ("accent-fill", "warm-fill", "block-fill",
                                                           "accent-stroke")]
     paints.append(("canvas", paper))  # last: a fill as white as the page is still a fill
@@ -735,6 +784,10 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     pan = (node.property("pan_x"), node.property("pan_y"))
     within = node.property("site_within")
     group_palette = node.property("palette")
+    step = node.property("step")
+    if step is not None and (isinstance(step, bool) or not isinstance(step, int | float) or step < 1
+                             or step != int(step)):
+        raise _fail(node, "step", "A scene's step is a whole number, from 1 for its first.")
     return _Ask(
         str(path) if path.exists() else source.strip(),
         path.stat().st_mtime if path.exists() else 0.0,
@@ -753,6 +806,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         bool(node.property("site_labels")),
         bool(node.property("solvent")),
         tuple(paints),
+        1 if step is None else int(step),
     )
 
 
@@ -824,6 +878,31 @@ def _loaded(source: str, stamp: float):
     return ms.load(source) if Path(source).exists() else ms.fetch(source)
 
 
+HOLD = 24
+"""The frames a scene's step is held for where it does not say (mol-sketch's own default)."""
+
+
+def _frame(figure, ask: _Ask) -> int | None:
+    """The frame a scene (a mol-sketch ``.json`` of steps) is drawn at: the last drawing of
+    its step's hold, where its arrows are drawn in full -- they grow over the end of the hold,
+    and are not there at its start -- as mol-sketch draws a reaction's figure. None for a
+    molecule read from its coordinates, whose frame is only which wobble its lines take."""
+
+    if Path(ask.source).suffix.lower() != ".json":
+        return None
+    steps = figure.scene().get("keyframes") or []
+    if ask.step > max(len(steps), 1):
+        said = f"{len(steps)} step{'s' if len(steps) != 1 else ''}"
+        raise _Unknown("step", f"This scene has {said}: step {ask.step} is not one of them.",
+                       f"A step from 1 to {len(steps)}.")
+    if not steps:
+        return None
+    start = figure.frames("keyframes")[ask.step - 1]
+    hold = int(steps[ask.step - 1].get("hold") or HOLD)
+    # (Drawn on twos: the last drawing of the hold is two frames before its end.)
+    return start + max(hold - 2, 0)
+
+
 @functools.lru_cache(maxsize=1)
 def _fields() -> frozenset[str]:
     """Every field of mol-sketch's style, by dotted name."""
@@ -836,7 +915,15 @@ def _fields() -> frozenset[str]:
             names += walk(item, f"{prefix}{key}.") if isinstance(item, dict) else [f"{prefix}{key}"]
         return names
 
-    return frozenset(walk(ms.default_style(), ""))
+    return frozenset(walk(ms.default_style(), "")) | UNSET
+
+
+UNSET = frozenset(
+    f"palette.{key}" for key in ("filled", "empty", "window", "measure", "hbond")
+)
+"""Colours of mol-sketch's style that it leaves out until given, choosing them from the
+paper, the ink and the hatching meanwhile: a scene's orbitals, its measures and their
+windows, and hydrogen bonds."""
 
 
 def _drawn(ask: _Ask):
@@ -845,6 +932,9 @@ def _drawn(ask: _Ask):
     import molsketch as ms
 
     figure = _loaded(ask.source, ask.stamp).copy()
+    frame = _frame(figure, ask)
+    if frame is not None:
+        figure.frame(frame)
     # A colour for a chain the molecule lacks would show nowhere: it is left out, and said
     # (structure_problem).
     _, missing = _chains(figure, ask.colours)

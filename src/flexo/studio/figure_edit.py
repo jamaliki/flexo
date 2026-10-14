@@ -1011,7 +1011,7 @@ class _Document:
         from flexo.structures import structure_caption
 
         name = str(label or "").strip()
-        stem = re.sub(r"\.(pdb|cif|mmcif|ent)$", "", Path(str(source or "")).name, flags=re.I)
+        stem = re.sub(r"\.(pdb|cif|mmcif|ent|json)$", "", Path(str(source or "")).name, flags=re.I)
         if not source or (name and name.lower() != stem.lower()):
             return name or None
         path = Path(str(source))

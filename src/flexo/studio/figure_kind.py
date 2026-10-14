@@ -88,7 +88,11 @@ groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label, 
   left|right|bottom-left|bottom-right (where its label stands)}; the root group (figure.root,
   "root" by default) holds the rest. A file without groups stacks its nodes.
 A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. A molecule's
-  structure: {id, kind: structure, properties: {source: a .pdb or .cif file in the folder}}.
+  structure: {id, kind: structure, properties: {source: a .pdb or .cif file in the folder, or a
+  mol-sketch scene (.json: a reaction drawn with its orbitals, lone pairs, arrows and measures),
+  step (a scene's: 1, its first; drawn as its arrows finish), look (engraved-colour, textbook,
+  flat, ...), scheme (flat: look, its own coral and amber, or figure, the figure's tones), width,
+  height, style: {mol-sketch's settings: show: {orbitals, measures}, lone_pair_style, ...}}}.
 A reaction mechanism: {id, kind: mechanism, properties: {steps: [{smiles: "[OH-:5].[CH3:1]
   [C:2](=[O:3])[Cl:4]", arrows: ["5 -> 2", "2=3 -> 3"], label, reagents, conditions},
   {arrows: ["3 -> 2", "2-4 -> 4"]}]}} -- the atoms its arrows name are mapped ([O-:5] is 5); an

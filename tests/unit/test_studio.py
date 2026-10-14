@@ -181,6 +181,23 @@ def test_a_new_file_is_made_from_its_kind_or_given_data(served: tuple[str, Works
     assert "id: given" in (workspace.root / "b.yaml").read_text(encoding="utf-8")
 
 
+def test_a_structure_is_chosen_from_structure_files_and_mol_sketch_scenes(
+    served: tuple[str, Workspace],
+) -> None:
+    """A .json is offered as a structure only when it is a mol-sketch scene: a figure or a
+    theme written in JSON is not one."""
+
+    base, workspace = served
+    (workspace.root / "1abc.pdb").write_text("HEADER\n", encoding="utf-8")
+    scene, other = '{"name": "Attack", "keyframes": []}', '{"figure": {"id": "f"}, "nodes": []}'
+    (workspace.root / "attack.json").write_text(scene, encoding="utf-8")
+    (workspace.root / "other.json").write_text(other, encoding="utf-8")
+    found = call(f"{base}/api/files?file=figure.yaml&types=structure", workspace.token)[1]["files"]
+    assert "1abc.pdb" in found and "attack.json" in found and "other.json" not in found
+    found = call(f"{base}/api/files?file=figure.yaml&types=figure", workspace.token)[1]["files"]
+    assert "other.json" in found
+
+
 def test_pictures_beside_the_document_are_listed_and_uploaded(
     served: tuple[str, Workspace],
 ) -> None:

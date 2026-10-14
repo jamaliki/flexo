@@ -1455,14 +1455,19 @@ class GroupBuilder:
         palette: str | None = None,
         style: Mapping[str, object] | None = None,
         density: str | Path | None = None,
+        scheme: str | None = None,
+        step: int | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
 
-        ``source`` is a PDB or mmCIF file, or a PDB ID to fetch. The look follows the
-        theme unless ``look`` names one (``engraved-colour``, ``watercolour``,
-        ``ink``, ``flat``: PyMOL's flat, outlined style, in the theme's fills, nested
-        as shapes that ``flexo retheme`` recolours ...). ``colors`` maps a chain,
+        ``source`` is a PDB or mmCIF file, a PDB ID to fetch, or a mol-sketch scene
+        (``.json``: a reaction with its orbitals, say), drawn at the end of its step
+        ``step`` (1, its first). The look follows the theme unless ``look`` names one
+        (``engraved-colour``, ``watercolour``, ``ink``, ``textbook``, ``flat``: PyMOL's
+        flat, outlined style, nested as shapes -- in its own colours, or with
+        ``scheme="figure"`` in the theme's fills, which ``flexo retheme`` recolours
+        ...). ``colors`` maps a chain,
         residue, subunit, or entity to a colour -- a hex colour or one of the
         figure's tones, so a chain can match its domain
         on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
@@ -1491,6 +1496,7 @@ class GroupBuilder:
             ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
             ("palette", palette), ("density", None if density is None else str(density)),
+            ("scheme", scheme), ("step", step),
         ):
             if value is not None:
                 properties[name] = value
