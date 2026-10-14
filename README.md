@@ -1241,7 +1241,9 @@ changes in words, to go back or forward to any of them.
   them stood: boxes of a flow chart that have ended up in two columns side by side are put
   back on one line. A shape, a group and a frame each have an **Outline**: solid, dashed or
   dotted, as a line has its Line Style. Pictures and drawings (PNG, JPEG, SVG, PDF) and structure files dropped on
-  the figure are added to it, beside the shape they are let go on. With nothing chosen the figure's **Page
+  the figure are added to it, beside the shape they are let go on; pasted (⌘V), after the shape
+  chosen -- a drawing copied in Inkscape as the SVG it is (in the Mac app), not a picture of
+  it. With nothing chosen the figure's **Page
   Size** is chosen by name -- a column or a page of Nature's, Cell's or PNAS's, A4,
   US Letter -- or typed as a **Width** and **Height** of your own (Custom…); a
   page with no height is as tall as the figure. A part (or a whole group) dragged on the drawing goes to another
