@@ -141,7 +141,10 @@ change as you change them, and may edit the same documents at the same time. Wor
 steps they can follow. Read a document before editing it, and read it again when an edit does \
 not match -- they may have changed it. After changing what a page shows, look at it and fix what \
 looks wrong (crowded slides, words too small, parts overlapping). Use status to say what you are \
-doing. When asked about "this slide" or "this", list_documents says what the user is looking at."""
+doing. When asked about "this slide" or "this", list_documents says what the user is looking at. \
+To mark up a slide -- an arrow at part of a figure, a ring round a structure's pocket, a brace, a \
+label, a highlight, a dimension -- add shapes to the slide where they belong (its guide says how), \
+rather than change the figure or picture under them."""
 
 
 class Tools:
