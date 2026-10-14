@@ -211,3 +211,37 @@ def test_a_group_keeps_its_clip_where_what_it_holds_cannot_be_cut_to_it() -> Non
             portable,
         )
     assert 'clip-path="url(#square.clip)"' not in portable
+
+
+def test_a_writer_that_cannot_clip_is_given_what_a_clip_shows_cut_to_it_curves_and_all() -> None:
+    from flexo.drawing import cut_to_clips
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">'
+        '<clipPath id="c"><rect x="0" y="0" width="50" height="100"/></clipPath>'
+        '<g id="disc" clip-path="url(#c)"><circle cx="50" cy="50" r="40" fill="#f00"/></g>'
+        '<g id="part" clip-path="url(#c)">'
+        '<rect id="body" x="10" y="5" width="80" height="20" rx="4" '
+        'fill="#fee4ce" stroke="#824c0d"/>'
+        '<text x="60" y="15" font-size="8">Out</text><text x="5" y="15" font-size="8">In</text>'
+        "</g></svg>"
+    )
+    disc, part = (cut_to_clips(group) for group in read_drawing(svg).root.items)
+    # The circle's left half, drawn with its own left arcs.
+    (half,) = disc.items
+    assert disc.clip is None and half.kind == "path"
+    assert [s.kind for s in half.segments] == ["M", "C", "C", "Z"]
+    assert half.segments[0].points == ((50.0, 90.0),)
+    assert half.segments[2].points[-1] == (50.0, 10.0)
+    assert (half.x, half.width) == (pytest.approx(10.0), pytest.approx(40.0))
+    # A rounded box both filled and outlined: its fill cut to the clip, its corners still
+    # round, and its outline in one run that is never drawn along the cut.
+    fill, outline, words = part.items
+    assert fill.id == "body" and fill.paint.stroke is None and fill.segments[-1].kind == "Z"
+    assert sum(s.kind == "C" for s in fill.segments) == 2
+    assert all(p[0] <= 50.0 for s in fill.segments for p in s.points)
+    assert outline.paint.fill is None and outline.segments[-1].kind != "Z"
+    ends = [outline.segments[0].points[0], outline.segments[-1].points[-1]]
+    assert ends == [(50.0, 25.0), (50.0, 5.0)]
+    # Words reaching into the clip are kept whole; words outside it are left out.
+    assert isinstance(words, Text) and words.lines[0].runs[0].text == "In"

@@ -1057,6 +1057,234 @@ def _clip_polyline(line: list[Point], region: Region) -> list[list[Point]]:
     return runs
 
 
+# -- cutting, for a writer that cannot clip ----------------------------------------------
+
+
+def cut_to_clips(group: Group) -> Group:
+    """``group`` as a writer that cannot clip (a slide program) draws it: what each group in
+    it keeping a clip holds, cut to the clip -- curves exactly, a shape both filled and
+    outlined as its fill and its outline, a dashed line's dashes started again at the cut --
+    words reaching into the clip kept whole and words outside it left out, and no clip kept."""
+
+    return Group(group.id, _cut_items(group.items, group.clip), dict(group.data), group.label)
+
+
+def _cut_items(
+    items: list[Shape | Text | Image | Group], region: Region | None
+) -> list[Shape | Text | Image | Group]:
+    kept: list[Shape | Text | Image | Group] = []
+    for item in items:
+        if isinstance(item, Group):
+            inner = region if item.clip is None else _intersect(item.clip, region)
+            held = _cut_items(item.items, inner)
+            if held:
+                kept.append(Group(item.id, held, dict(item.data), item.label))
+        elif region is None:
+            kept.append(item)
+        elif isinstance(item, Shape):
+            kept.extend(_cut_shape(item, region))
+        elif isinstance(item, Text):
+            corners = _corners(item)
+            xs, ys = [x for x, _ in corners], [y for _, y in corners]
+            if not corners or _meets((min(xs), min(ys), max(xs), max(ys)), region):
+                kept.append(item)
+        else:
+            box = (item.x, item.y, item.x + item.width, item.y + item.height)
+            shown = box if item.clip is None else _intersect(box, item.clip)
+            if _meets(shown, region):
+                # (An oval crop is kept as it is: an oval cut square is no crop a picture has.)
+                cut = _intersect(shown, region)
+                kept.append(item if item.oval or cut == shown else replace(item, clip=cut))
+    return kept
+
+
+def _meets(box: Region, region: Region) -> bool:
+    return box[0] < region[2] and box[2] > region[0] and box[1] < region[3] and box[3] > region[1]
+
+
+def _cut_shape(shape: Shape, region: Region) -> list[Shape]:
+    """``shape`` cut to ``region`` exactly, curves and all: no line drawn along the cut."""
+
+    left, top, right, bottom = region
+    points = [p for segment in shape.segments for p in segment.points]
+    if not points or all(_inside(p, region) for p in points):
+        return [shape]
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    pad = shape.paint.stroke_width / 2.0 if shape.paint.stroke else 0.0
+    if not _meets((min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad), region):
+        return []
+    if shape.paint.fill and shape.paint.stroke:
+        fill = replace(shape, paint=replace(shape.paint, stroke=None, stroke_role=None),
+                       arrowheads=())
+        outline = replace(shape, id=None, paint=replace(shape.paint, fill=None, fill_role=None))
+        return _cut_shape(fill, region) + _cut_shape(outline, region)
+    kept: list[Segment] = []
+    for pieces, closed in _paths(shape.segments):
+        if shape.paint.fill:
+            if pieces[-1][-1] != pieces[0][0]:
+                pieces = [*pieces, (pieces[-1][-1], pieces[0][0])]
+            for axis, bound, side in ((0, left, 1.0), (0, right, -1.0), (1, top, 1.0),
+                                      (1, bottom, -1.0)):
+                pieces = _cut_contour(pieces, axis, bound, side)
+            if pieces:
+                kept += _drawn(pieces, closed=True)
+        elif all(_inside(p, region) for piece in pieces for p in piece):
+            kept += _drawn(pieces, closed=closed)
+        else:
+            for run in _cut_runs(pieces, closed, region):
+                kept += _drawn(run, closed=False)
+    if not kept:
+        return []
+    points = [p for segment in kept for p in segment.points]
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    heads = tuple(head for head in shape.arrowheads if _inside(head.tip, region))
+    return [replace(shape, kind="path", segments=tuple(kept), x=min(xs), y=min(ys),
+                    width=max(xs) - min(xs), height=max(ys) - min(ys), radius=0.0,
+                    arrowheads=heads)]
+
+
+type _Piece = tuple[Point, ...]
+"""A line (its two ends) or a cubic curve (its start, its two controls and its end)."""
+
+
+def _inside(point: Point, region: Region) -> bool:
+    left, top, right, bottom = region
+    return left - 1e-9 <= point[0] <= right + 1e-9 and top - 1e-9 <= point[1] <= bottom + 1e-9
+
+
+def _paths(segments: tuple[Segment, ...]) -> list[tuple[list[_Piece], bool]]:
+    """Each subpath of ``segments`` as its lines and curves, and whether it is closed."""
+
+    paths: list[tuple[list[_Piece], bool]] = []
+    start = current = (0.0, 0.0)
+    for segment in segments:
+        if segment.kind == "M":
+            start = current = segment.points[0]
+            paths.append(([], False))
+            continue
+        if not paths or paths[-1][1]:
+            start = current
+            paths.append(([], False))
+        if segment.kind == "Z":
+            if current != start:
+                paths[-1][0].append((current, start))
+            paths[-1] = (paths[-1][0], True)
+            current = start
+        else:
+            paths[-1][0].append((current, *segment.points))
+            current = segment.points[-1]
+    return [(pieces, closed) for pieces, closed in paths if pieces]
+
+
+def _drawn(pieces: list[_Piece], *, closed: bool) -> list[Segment]:
+    if closed and len(pieces) > 1 and len(pieces[-1]) == 2 and pieces[-1][-1] == pieces[0][0]:
+        pieces = pieces[:-1]  # (the closing line is the close's own)
+    drawn = [Segment("M", (pieces[0][0],))]
+    drawn += [Segment("L" if len(piece) == 2 else "C", piece[1:]) for piece in pieces]
+    return [*drawn, Segment("Z")] if closed else drawn
+
+
+def _at(piece: _Piece, t: float) -> Point:
+    """The point ``t`` of the way along ``piece``."""
+
+    points = list(piece)
+    while len(points) > 1:
+        points = [(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) for a, b in pairwise(points)]
+    return points[0]
+
+
+def _split(piece: _Piece, at: list[float]) -> list[_Piece]:
+    """``piece`` in pieces, cut at each of ``at`` (rising, within 0 and 1), by de Casteljau:
+    each piece ends at the very point the next starts at."""
+
+    pieces: list[_Piece] = []
+    done = 0.0
+    for t in at:
+        local = (t - done) / (1.0 - done)
+        levels = [list(piece)]
+        while len(levels[-1]) > 1:
+            levels.append([(a[0] + (b[0] - a[0]) * local, a[1] + (b[1] - a[1]) * local)
+                           for a, b in pairwise(levels[-1])])
+        pieces.append(tuple(level[0] for level in levels))
+        piece = tuple(level[-1] for level in reversed(levels))
+        done = t
+    return [*pieces, piece]
+
+
+def _crossings(piece: _Piece, axis: int, bound: float) -> list[float]:
+    """Where, between its ends, ``piece`` crosses the line on which ``axis`` is ``bound``."""
+
+    values = [point[axis] - bound for point in piece]
+    if len(values) == 2:
+        first, last = values
+        return [first / (first - last)] if first * last < 0 else []
+    p0, p1, p2, p3 = values
+    a, b, c = -p0 + 3 * p1 - 3 * p2 + p3, 3 * p0 - 6 * p1 + 3 * p2, 3 * p1 - 3 * p0
+
+    def value(t: float) -> float:
+        return ((a * t + b) * t + c) * t + p0
+
+    # Between where it turns, it runs one way: it crosses there once at most, found by halving.
+    turns = [0.0, 1.0]
+    if abs(a) > 1e-12:
+        square = b * b - 3 * a * c
+        if square >= 0:
+            turns += [(-b - math.sqrt(square)) / (3 * a), (-b + math.sqrt(square)) / (3 * a)]
+    elif abs(b) > 1e-12:
+        turns.append(-c / (2 * b))
+    roots = []
+    for low, high in pairwise(sorted(t for t in turns if 0.0 <= t <= 1.0)):
+        below = value(low) < 0
+        if value(low) * value(high) >= 0:
+            continue
+        for _ in range(60):
+            middle = (low + high) / 2.0
+            if (value(middle) < 0) == below:
+                low = middle
+            else:
+                high = middle
+        roots.append((low + high) / 2.0)
+    return roots
+
+
+def _cut_contour(pieces: list[_Piece], axis: int, bound: float, side: float) -> list[_Piece]:
+    """Sutherland-Hodgman, curves and all: the closed outline ``pieces`` cut to the side of
+    the line ``axis`` = ``bound`` that ``side`` keeps, joined along the line where it was cut."""
+
+    kept: list[_Piece] = []
+    for whole in pieces:
+        for piece in _split(whole, _crossings(whole, axis, bound)):
+            if side * (_at(piece, 0.5)[axis] - bound) < -1e-9:
+                continue
+            if kept and kept[-1][-1] != piece[0]:
+                kept.append((kept[-1][-1], piece[0]))
+            kept.append(piece)
+    if kept and kept[-1][-1] != kept[0][0]:
+        kept.append((kept[-1][-1], kept[0][0]))
+    return kept
+
+
+def _cut_runs(pieces: list[_Piece], closed: bool, region: Region) -> list[list[_Piece]]:
+    """The runs of the line ``pieces`` within ``region``, curves and all."""
+
+    left, top, right, bottom = region
+    runs: list[list[_Piece]] = []
+    for whole in pieces:
+        at = sorted({t for axis, bound in ((0, left), (0, right), (1, top), (1, bottom))
+                     for t in _crossings(whole, axis, bound)})
+        for piece in _split(whole, at):
+            if not _inside(_at(piece, 0.5), region):
+                continue
+            if runs and runs[-1][-1][-1] == piece[0]:
+                runs[-1].append(piece)
+            else:
+                runs.append([piece])
+    if closed and len(runs) > 1 and runs[-1][-1][-1] == runs[0][0][0]:
+        # Round the corner it starts at in one piece, joined there as it was.
+        runs[0] = runs.pop() + runs[0]
+    return runs
+
+
 def _nested_svg(element: ET.Element) -> Image:
     """Artwork nested as its own ``<svg>``: a picture of that SVG, kept as vectors."""
 
