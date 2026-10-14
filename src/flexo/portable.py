@@ -12,8 +12,9 @@ keep their ids and layer names, and each text keeps its words as an
 
 from __future__ import annotations
 
+import itertools
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
 from flexo.outline import glyph_outline, shape, underline
@@ -50,7 +51,7 @@ def portable_svg(
     )
     if drawing.root.id:
         svg.set("id", drawing.root.id)
-    _items(svg, drawing.root.items)
+    _items(svg, drawing.root.items, itertools.count(1))
     ET.register_namespace("", SVG_NS)
     ET.register_namespace("inkscape", INKSCAPE_NS)
     ET.indent(svg, space=" ")
@@ -67,9 +68,14 @@ def path_data(segments: Iterable[Segment]) -> str:
     return " ".join(parts)
 
 
-def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) -> None:
+def _items(
+    parent: ET.Element, items: Iterable[Shape | Text | Image | Group], clips: Iterator[int]
+) -> None:
+    """``items`` drawn in ``parent``; ``clips`` numbers the clips that have no name of their own."""
+
     for item in items:
         if isinstance(item, Group):
+            at = len(parent)
             group = ET.SubElement(parent, svg_tag("g"))
             if item.id:
                 group.set("id", item.id)
@@ -77,9 +83,15 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
                 group.set(inkscape_attr("label"), item.label)
             for name, value in item.data.items():
                 group.set(name, value)
-            _items(group, item.items)
+            _items(group, item.items, clips)
             if not len(group) and not item.id:
                 parent.remove(group)
+            elif item.clip is not None:
+                # What the drawing could not cut to the group's clip -- a curve, words -- is
+                # drawn whole, and shows only within it.
+                clip = _clip(item.clip, f"{item.id}.clip" if item.id else f"clip{next(clips)}")
+                parent.insert(at, clip)
+                group.set("clip-path", f"url(#{clip.get('id')})")
         elif isinstance(item, Shape):
             _shape(parent, item)
         elif isinstance(item, Text):
@@ -88,7 +100,9 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
             holder = parent
             if item.clip is not None:
                 # A picture cropped shows only what of it is kept: a rectangle, or an oval.
-                holder = _clipped(parent, item)
+                name = f"{item.id}.clip" if item.id else f"clip{next(clips)}"
+                parent.append(_clip(item.clip, name, oval=item.oval))
+                holder = ET.SubElement(parent, svg_tag("g"), {"clip-path": f"url(#{name})"})
             image = ET.SubElement(
                 holder,
                 svg_tag("image"),
@@ -110,17 +124,16 @@ def _items(parent: ET.Element, items: Iterable[Shape | Text | Image | Group]) ->
                 image.set("transform", f"matrix({sx} 0 0 {sy} {number(ex)} {number(ey)})")
 
 
-def _clipped(parent: ET.Element, item: Image) -> ET.Element:
-    """A group showing only what of ``item`` its clip keeps, for the picture to go in."""
+def _clip(
+    region: tuple[float, float, float, float], name: str, *, oval: bool = False
+) -> ET.Element:
+    """The clip ``name`` keeping ``region`` (``left, top, right, bottom``), or the oval in it."""
 
-    left, top, right, bottom = item.clip or (0.0, 0.0, 0.0, 0.0)
+    left, top, right, bottom = region
     # (A clip that keeps none of it keeps nothing: never a box turned inside out.)
     right, bottom = max(right, left), max(bottom, top)
-    # Named for the picture, or else by how many clips come before it: one of its own.
-    count = sum(1 for _ in parent.iter(svg_tag("clipPath")))
-    name = f"{item.id}.clip" if item.id else f"clip{count + 1}"
-    clip = ET.SubElement(parent, svg_tag("clipPath"), {"id": name})
-    if item.oval:
+    clip = ET.Element(svg_tag("clipPath"), {"id": name})
+    if oval:
         ET.SubElement(clip, svg_tag("ellipse"), {
             "cx": number((left + right) / 2.0), "cy": number((top + bottom) / 2.0),
             "rx": number((right - left) / 2.0), "ry": number((bottom - top) / 2.0),
@@ -130,7 +143,7 @@ def _clipped(parent: ET.Element, item: Image) -> ET.Element:
             "x": number(left), "y": number(top),
             "width": number(right - left), "height": number(bottom - top),
         })
-    return ET.SubElement(parent, svg_tag("g"), {"clip-path": f"url(#{name})"})
+    return clip
 
 
 def _paint(element: ET.Element, paint: Paint) -> None:
