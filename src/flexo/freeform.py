@@ -31,15 +31,22 @@ Kinds by their family:
   ``cross`` (``arm``), ``check``, ``cloud``, ``bubble`` (a speech bubble whose ``tail``
   points anywhere; its ``body`` rounded, a rectangle or an oval), and the highlights:
   ``highlight`` (a translucent box) and ``ring`` (an ellipse drawn round something);
-- **text**: a box of words (``at``, and ``width`` to wrap them in).
+- **text**: a box of words (``at``, and ``width`` to wrap them in);
+- **inset**: a zoom inset, a box showing part ``of`` what its page holds (a slide's object, a
+  figure's part) magnified, joined to it (``flexo.insets``): never turned nor mirrored.
+- **path**: any outline, as SVG path data (``d``, ``flexo.pathdata``: every command, its
+  pieces as many as it has -- holes too -- open or closed), filled by its ``fill_rule``
+  (``nonzero`` or ``evenodd``); its box is what it draws, so it has no ``at`` or ``size``,
+  turns and mirrors about that box's middle as a box does, and its words are set in it.
 
 A box turns (``rotate``, degrees clockwise about its middle) and mirrors (``flip``). Every
 shape is painted by the theme unless it says otherwise: ``fill`` and ``line`` are a theme's
 colour by name (``accent``, ``accent2``, ``accent-fill`` its light tint, ``muted``,
 ``ink``, ``paper``, ``grey``, or any palette role) -- so a change of theme repaints them
--- or ``#rrggbb``, kept as written, or ``none``. ``line_width``, ``dash`` (``solid``,
-``dashed``, ``dotted``), ``cap``, ``join``, the arrowheads at each end (``start``, ``end``:
-``none``, ``triangle``, ``open``, ``stealth``, ``dot``, ``circle``, ``bar``,
+-- or ``#rrggbb``, kept as written, or ``none``; a fill may be a gradient
+(``flexo.gradients``). ``line_width``, ``dash`` (``solid``, ``dashed``, ``dotted``, or its own
+lengths: ``[6, 3]``), ``line_opacity``, ``cap``, ``join``, the arrowheads at each end
+(``start``, ``end``: ``none``, ``triangle``, ``open``, ``stealth``, ``dot``, ``circle``, ``bar``,
 ``diamond``) and their ``head_size``, ``fill_opacity``, ``opacity`` and ``shadow`` say the
 rest. Words (``text``, in the slide's markup) are set in the shape -- a closed shape's
 inside its outline, a line's beside it -- by ``font_size``, ``bold``, ``italic``,
@@ -67,6 +74,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import Any
 
+from flexo import pathdata
 from flexo.svg import element, number
 
 # -- the vocabulary -----------------------------------------------------------------------
@@ -113,13 +121,30 @@ BOXED = (
     "bubble",
     "highlight",
     "ring",
+    "inset",
 )
-"""The closed shapes, each drawn in a box (``at``, ``size``)."""
-KINDS = (*LINES, *TRACED, *BOXED, "text")
-"""Every kind of shape, but a group of them (``group``, its ``shapes``)."""
+"""The closed shapes, each drawn in a box (``at``, ``size``): a zoom inset too, a box showing
+part of something else magnified (``flexo.insets``)."""
+KINDS = (*LINES, *TRACED, *BOXED, "text", "path", "picture")
+"""Every kind of shape, but a group of them (``group``, its ``shapes``). (A picture -- a
+drawing's part no shape draws, kept as it was drawn (``flexo.shape_pictures``) -- is made by a
+drawing's import: no editor offers it among the others, ``SECTIONS``.)"""
 
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Lines", ("line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen")),
+    (
+        "Lines",
+        (
+            "line",
+            "arrow",
+            "double-arrow",
+            "curved-arrow",
+            "elbow",
+            "arc",
+            "polyline",
+            "pen",
+            "path",
+        ),
+    ),
     (
         "Shapes",
         (
@@ -165,7 +190,7 @@ LABELS = {
     "elbow": "Elbow Connector",
     "arc": "Arc",
     "polyline": "Polyline",
-    "pen": "Pen",
+    "pen": "Pencil",
     "rectangle": "Rectangle",
     "rounded-rectangle": "Rounded Rectangle",
     "ellipse": "Oval",
@@ -194,9 +219,16 @@ LABELS = {
     "highlight": "Highlight",
     "ring": "Highlight Ring",
     "text": "Text Box",
+    "inset": "Zoom Inset",
+    "path": "Path",
+    "picture": "Picture",
     "group": "Group",
 }
 """What a person calls each kind (never a slide's own objects' names: Text Box, Speech Bubble)."""
+
+TOOLS = {"path": "Pen"}
+"""What the tool that draws a kind is called, where that is not the kind's own name: the pen
+draws a path (point by point, as a Bézier pen does), the pencil (``pen``) by hand."""
 
 HEADS = ("none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond")
 """The ends a line may have."""
@@ -209,6 +241,7 @@ SIDES = ("top", "right", "bottom", "left", "centre")
 FLIPS = ("horizontal", "vertical", "both")
 BODIES = ("rounded", "rectangle", "oval")
 ROUTES = ("across", "down")
+FILL_RULES = ("nonzero", "evenodd")
 
 _LINE = {"fill": "none", "line": "accent", "line_width": 2.0, "cap": "round", "join": "round"}
 _CLOSED = {
@@ -247,6 +280,19 @@ STYLES: dict[str, dict[str, object]] = {
     "dimension": {**_MEASURE, "line_width": 1.25, "start": "bar", "end": "bar"},
     "scale-bar": {**_MEASURE, "line_width": 4.0},
     "text": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
+    "inset": {
+        "fill": "paper",
+        "line": "accent",
+        "line_width": 1.5,
+        "cap": "butt",
+        "join": "miter",
+        "align": "start",
+        "valign": "top",
+        "bold": True,
+        "padding": 4.0,
+    },
+    "path": _CLOSED,
+    "picture": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
 }
 """How each kind is painted when it says nothing: the theme's accent, its outlines a little
 lighter than its lines; measures in ink; words on nothing."""
@@ -275,6 +321,7 @@ PARAMETERS: dict[str, dict[str, object]] = {
     "bubble": {"body": "rounded", "corner": 10.0},
     "polyline": {"closed": False},
     "pen": {"closed": False},
+    "path": {"fill_rule": "nonzero"},
 }
 """Each kind's own settings, as they are when it says nothing of them."""
 
@@ -296,10 +343,12 @@ SIZES: dict[str, tuple[float, float]] = {
     "highlight": (200.0, 40.0),
     "cloud": (180.0, 120.0),
     "text": (240.0, 40.0),
+    "inset": (200.0, 150.0),
     **{kind: (160.0, 0.0) for kind in LINES},
     "brace": (0.0, 160.0),
     "bracket": (0.0, 160.0),
     **{kind: (160.0, 0.0) for kind in TRACED},
+    "picture": (160.0, 100.0),
 }
 """How large a shape is made by a click, without a drag: a box's width and height, a line's
 run across and down."""
@@ -308,6 +357,7 @@ STYLE_KEYS = (
     "fill",
     "fill_opacity",
     "line",
+    "line_opacity",
     "line_width",
     "dash",
     "cap",
@@ -324,13 +374,29 @@ PLACE_KEYS = {
     "points": ("points",),
     "box": ("at", "size", "rotate", "flip"),
     "text": ("at", "width", "rotate"),
+    "path": ("d", "rotate", "flip"),
 }
 COMMON_KEYS = ("kind", "id", *STYLE_KEYS, *TEXT_KEYS)
+INSET_KEYS = (
+    "of",
+    "region",
+    "frame_line",
+    "frame_width",
+    "frame_dash",
+    "connector_line",
+    "connector_width",
+    "connector_dash",
+)
+"""What a zoom inset says besides its box (``flexo.insets``): what it shows part ``of``, the
+``region`` of it shown, and how the frame round that region and the lines joining it to the
+box are drawn (each as the box's outline, unless it says)."""
 
 
 def family(kind: str) -> str:
-    """``line``, ``points``, ``box``, ``text`` or ``group``: how a kind is placed."""
+    """``line``, ``points``, ``box``, ``text``, ``path`` or ``group``: how a kind is placed."""
 
+    if kind == "path":
+        return "path"
     if kind in LINES:
         return "line"
     if kind in TRACED:
@@ -343,10 +409,11 @@ def family(kind: str) -> str:
 
 
 def closed(spec: Mapping[str, Any]) -> bool:
-    """Whether a shape is closed, its words set inside it."""
+    """Whether a shape is closed, its words set inside it. (A path is, open or not: it is
+    filled as SVG fills one, and its words are set in its box.)"""
 
     kind = spec.get("kind")
-    return kind in BOXED or (kind in TRACED and bool(spec.get("closed")))
+    return kind in BOXED or kind == "path" or (kind in TRACED and bool(spec.get("closed")))
 
 
 def keys_of(kind: str) -> tuple[str, ...]:
@@ -354,11 +421,14 @@ def keys_of(kind: str) -> tuple[str, ...]:
 
     if kind == "group":
         return ("kind", "id", "shapes", "opacity")
+    if kind == "inset":
+        return (*COMMON_KEYS, *PLACE_KEYS["box"], *INSET_KEYS)
     return (
         *COMMON_KEYS,
         *PLACE_KEYS[family(kind)],
         *PARAMETERS.get(kind, {}),
         *(("tail",) if kind == "bubble" else ()),
+        *(("source",) if kind == "picture" else ()),
     )
 
 
@@ -370,6 +440,7 @@ def defaults(kind: str) -> dict[str, object]:
         "fill_opacity": 1.0,
         "line": "accent",
         "line_width": 2.0,
+        "line_opacity": 1.0,
         "dash": "solid",
         "cap": "butt",
         "join": "miter",
@@ -638,8 +709,11 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
         "points": ("points",),
         "box": ("at", "size"),
         "text": ("at",),
+        "path": ("d",),
         "group": ("shapes",),
-    }[form]
+    }[form] + (("source",) if kind == "picture" else ())
+    if kind == "inset":
+        needed = (*needed, "of")
     for key in needed:
         if key not in made:
             example = {
@@ -649,6 +723,9 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
                 "at": "[100, 100]",
                 "size": "[160, 100]",
                 "shapes": "a list of shapes",
+                "of": "body[0] (on a slide) or a part's id (on a figure)",
+                "d": pathdata.EXAMPLE,
+                "source": "assets/drawing-1.svg",
             }[key]
             raise ShapeError(key, f"A {kind} needs {key}, such as {key}: {example}.")
     return made
@@ -659,15 +736,26 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         if isinstance(value, bool) or not isinstance(value, str | int) or not str(value).strip():
             raise ShapeError(key, f"id must be a name, such as box1, not {value!r}.")
         return str(value)
+    if key == "fill" and isinstance(value, Mapping):
+        from flexo import gradients
+
+        try:
+            return gradients.checked(value, colour_of, key)
+        except ValueError as error:
+            raise ShapeError(key, str(error)) from None
     if key in ("fill", "line", "colour"):
         return None if key == "colour" and value is None else colour_of(value, key)
-    if key in ("fill_opacity", "opacity"):
+    if key in INSET_KEYS:
+        return _inset_value(key, value)
+    if key in ("fill_opacity", "opacity", "line_opacity"):
         return _number(value, key, 0.0, 1.0, "0.5")
     if key == "line_width":
         return _number(value, key, 0.0, 200.0, "2 (points)")
     if key == "head_size":
         return _number(value, key, 0.25, 6.0, "1.5 (times the usual)")
     if key == "dash":
+        if not isinstance(value, str) and isinstance(value, Sequence):
+            return _dashes(value)
         return _choice(value, key, DASHES)
     if key == "cap":
         return _choice(value, key, CAPS)
@@ -775,9 +863,99 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         return _choice(value, key, ROUTES)
     if key == "body":
         return _choice(value, key, BODIES)
+    if key == "d":
+        return _path_data(value)
+    if key == "source":
+        if not isinstance(value, str) or not value.strip():
+            raise ShapeError(
+                key,
+                f"source must be a picture's file, such as assets/drawing-1.svg, not {value!r}.",
+            )
+        return value.strip()
+    if key == "fill_rule":
+        named = {"even-odd": "evenodd", "non-zero": "nonzero"}
+        return _choice(
+            named.get(value, value) if isinstance(value, str) else value, key, FILL_RULES
+        )
     raise ShapeError(
         key, f"Unknown key {key} for a {kind}."
     )  # pragma: no cover - keys_of lists them all
+
+
+def _inset_value(key: str, value: object) -> object:
+    """A zoom inset's own setting, checked (``INSET_KEYS``)."""
+
+    if key == "of":
+        if isinstance(value, bool) or not isinstance(value, str | int) or not str(value).strip():
+            raise ShapeError(
+                key,
+                f"of must name what the inset shows part of: an object of a slide (body[0]) or "
+                f"a part of a figure (its id), not {value!r}.",
+            )
+        return str(value).strip()
+    if key == "region":
+        said = (
+            "region must be the part shown, [x, y, width, height] as fractions of what it "
+            f"shows part of, such as [0.4, 0.3, 0.2, 0.2], not {value!r}."
+        )
+        if (
+            isinstance(value, str)
+            or not isinstance(value, Sequence)
+            or len(value) != 4
+            or any(
+                isinstance(item, bool)
+                or not isinstance(item, int | float)
+                or not math.isfinite(item)
+                for item in value
+            )
+        ):
+            raise ShapeError(key, said)
+        x, y, w, h = (float(item) for item in value)
+        if w <= 0.0 or h <= 0.0 or x < -1e-6 or y < -1e-6 or x + w > 1.0001 or y + h > 1.0001:
+            raise ShapeError(key, said)
+        return [x, y, w, h]
+    if key.endswith("_line"):
+        return colour_of(value, key)
+    if key.endswith("_width"):
+        return _number(value, key, 0.0, 200.0, "1.5 (points)")
+    return _choice(value, key, DASHES)
+
+
+def _dashes(value: Sequence[object]) -> list[float]:
+    """A dash pattern as its lengths, in points: dash, gap, dash, gap..."""
+
+    if (
+        not 2 <= len(value) <= 16
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, int | float)
+            or not math.isfinite(item)
+            or not 0.0 <= item <= 1000.0
+            for item in value
+        )
+        or not any(item > 0 for item in value)
+    ):
+        raise ShapeError(
+            "dash",
+            "dash must be solid, dashed, dotted, or its lengths in points (a dash, a gap, ...), "
+            f"such as [6, 3], not {list(value)!r}.",
+        )
+    return [float(item) for item in value]
+
+
+def _path_data(value: object) -> str:
+    """A path's outline as written (``d``), checked: SVG path data, read as ``flexo.pathdata``
+    reads it, what is wrong said in words."""
+
+    if not isinstance(value, str):
+        raise ShapeError(
+            "d", f"d must be SVG path data, such as {pathdata.EXAMPLE}, not {value!r}."
+        )
+    try:
+        pathdata.parsed(value)
+    except pathdata.PathError as error:
+        raise ShapeError("d", str(error)) from None
+    return value
 
 
 # -- geometry ------------------------------------------------------------------------------
@@ -852,6 +1030,9 @@ class Geometry:
     """A line's ends, as drawn (glued ends where they are glued)."""
     extra: list[list[Segment]] = field(default_factory=list)
     """Strokes drawn besides the outline, unfilled: none, for now."""
+    data: str | None = None
+    """Its outline as SVG path data, where that is kept with what was read (a path's, written
+    once however often it is drawn); else it is written from ``segments``."""
 
     @property
     def centre(self) -> Point:
@@ -991,7 +1172,7 @@ def _closed_outline(
     kind = spec["kind"]
     ss = min(w, h)
     cx, cy = x + w / 2.0, y + h / 2.0
-    if kind in ("rectangle", "rounded-rectangle", "highlight"):
+    if kind in ("rectangle", "rounded-rectangle", "highlight", "inset", "picture"):
         return _rounded_box(x, y, w, h, float(spec.get("corner") or 0.0))
     if kind in ("ellipse", "ring"):
         return _ellipse(cx, cy, w / 2.0, h / 2.0)
@@ -1692,6 +1873,8 @@ def geometry(
         left, top = min(b[0] for b in boxes), min(b[1] for b in boxes)
         right, bottom = max(b[2] for b in boxes), max(b[3] for b in boxes)
         return Geometry([], False, (left, top, right - left, bottom - top))
+    if form == "path":
+        return _path_geometry(spec)
     if form in ("box", "text"):
         x, y = (float(value) for value in spec["at"])
         if form == "text":
@@ -1703,14 +1886,15 @@ def geometry(
         else:
             w, h = (float(value) for value in spec["size"])
         cx, cy = x + w / 2.0, y + h / 2.0
-        turn = float(spec.get("rotate") or 0.0)
+        # (A zoom inset shows what it magnifies as it is: never turned, nor mirrored.)
+        turn = float(spec.get("rotate") or 0.0) if kind != "inset" else 0.0
         if form == "text":
             segments = _rounded_box(x, y, w, h, 0.0)
             area = (x, y, w, h)
         else:
             segments = _closed_outline(spec, x, y, w, h)
             area = _area(spec, x, y, w, h)
-            if kind != "bubble":
+            if kind not in ("bubble", "inset"):
                 segments = _flipped(segments, spec.get("flip"), cx, cy)
                 flipped = _flipped(
                     [("M", area[0], area[1]), ("L", area[0] + area[2], area[1] + area[3])],
@@ -1752,6 +1936,38 @@ def geometry(
     ys = [value for segment in segments for value in segment[2::2]]
     box = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)) if xs else (a[0], a[1], 0.0, 0.0)
     return Geometry(segments, False, box, 0.0, heads, None, label, (a, b))
+
+
+def _path_geometry(spec: Mapping[str, Any]) -> Geometry:
+    """A path as drawn: its outline as read, in its box (what it draws), mirrored about that
+    box's middle as it says, turned about it; its words in the box; an arrowhead at the start
+    of its first piece and the end of its last, where those are open."""
+
+    read = pathdata.parsed(str(spec["d"]))
+    x, y, w, h = read.box
+    flip = spec.get("flip") or None
+    segments = _flipped(list(read.segments), flip, x + w / 2.0, y + h / 2.0)
+    made = Geometry(segments, True, read.box, float(spec.get("rotate") or 0.0), [], read.box)
+    first_open, last_open = read.opens
+    ends = {
+        **spec,
+        "start": spec.get("start") if first_open else "none",
+        "end": spec.get("end") if last_open else "none",
+    }
+    if (ends["start"] or "none") != "none" or (ends["end"] or "none") != "none":
+        made.heads, made.segments = _headed(ends, segments)
+    elif read.plain and not flip:
+        # (Written plainly, it is drawn as written: a long path is not written out again.)
+        made.data = str(spec["d"])
+    else:
+        made.data = read.kept(("data", flip), lambda: path_data(segments))
+    return made
+
+
+def path_open(spec: Mapping[str, Any]) -> bool:
+    """Whether a path's first piece or its last is open: arrowheads go there."""
+
+    return any(pathdata.parsed(str(spec["d"])).opens)
 
 
 def _half_way(points: Sequence[Point]) -> tuple[Point, Point]:
@@ -1798,6 +2014,8 @@ def bounds(
     """``left, top, right, bottom`` of what a shape draws, turned as it is (its heads too)."""
 
     made = made or geometry(spec)
+    if spec.get("kind") == "path" and made.segments:
+        return _path_bounds(made)
     points: list[Point] = []
     for segments in [made.segments, *(head.segments for head in made.heads)]:
         for segment in segments:
@@ -1814,6 +2032,21 @@ def bounds(
         max(p[0] for p in points),
         max(p[1] for p in points),
     )
+
+
+def _path_bounds(made: Geometry) -> tuple[float, float, float, float]:
+    """What a path draws: its curves' own reach, not their controls', turned as it is."""
+
+    x, y, w, h = made.box
+    if not made.turn and not made.heads:
+        return (x, y, x + w, y + h)
+    left, top, right, bottom = pathdata.extent(made.segments, made.turn, made.centre)
+    for head in made.heads:
+        for point in flattened(head.segments, 1):
+            px, py = _turned(point, made.centre, made.turn)
+            left, top = min(left, px), min(top, py)
+            right, bottom = max(right, px), max(bottom, py)
+    return (left, top, right, bottom)
 
 
 def flattened(segments: Sequence[Segment], steps: int = 8) -> list[Point]:
@@ -1847,12 +2080,20 @@ class Target:
     box: tuple[float, float, float, float]
     turn: float = 0.0
     outline: list[Point] | None = None
+    traced: pathdata.Outline | None = None
+    """A path's outline -- its rings, holes and all, and where a line meets it on each side --
+    found from it when first asked."""
 
 
 def target_of(spec: Mapping[str, Any], made: Geometry | None = None) -> Target:
     """A shape as something a line is glued to."""
 
     made = made or geometry(spec)
+    if spec.get("kind") == "path":
+        read = pathdata.parsed(str(spec["d"]))
+        return Target(
+            made.box, made.turn, None, pathdata.Outline(read, spec.get("flip"), made.turn)
+        )
     outline = None
     if made.closed:
         outline = [_turned(point, made.centre, made.turn) for point in flattened(made.segments)]
@@ -1860,8 +2101,11 @@ def target_of(spec: Mapping[str, Any], made: Geometry | None = None) -> Target:
 
 
 def sites(target: Target) -> dict[str, Point]:
-    """Where a line glued to ``target`` meets it, by side: its sides' middles and its centre."""
+    """Where a line glued to ``target`` meets it, by side: its sides' middles and its centre
+    (a path's on its outline, level with its middle)."""
 
+    if target.traced is not None:
+        return target.traced.sites()
     x, y, w, h = target.box
     centre = (x + w / 2.0, y + h / 2.0)
     places = {
@@ -1932,7 +2176,11 @@ def glued(
                 continue
             other = points[1 - index]
             side = end.get("side") or facing(target, other)  # type: ignore[union-attr]
-            if side == "centre":
+            if side == "centre" and target.traced is not None:
+                centre = sites(target)["centre"]
+                met = pathdata.crossing(target.traced.rings(), centre, other)
+                points[index] = met or centre
+            elif side == "centre":
                 centre = sites(target)["centre"]
                 outline = target.outline or [
                     _turned(p, centre, target.turn)
@@ -1958,6 +2206,11 @@ def paint(value: object, palette: object) -> tuple[str | None, str | None]:
 
     if value is None or value == "none":
         return None, None
+    if isinstance(value, Mapping):
+        # A gradient: its colour half way along, where one colour is wanted.
+        from flexo import gradients
+
+        return gradients.middle(value, lambda colour: paint(colour, palette)), None
     text = str(value)
     if text.startswith("#"):
         return text, None
@@ -1970,6 +2223,8 @@ def dash_array(spec: Mapping[str, Any]) -> tuple[float, ...]:
     apart -- what shows, a round or square cap's reach included."""
 
     dash = spec.get("dash") or "solid"
+    if not isinstance(dash, str):
+        return tuple(float(value) for value in dash)
     if dash == "solid":
         return ()
     width = max(float(spec.get("line_width") or 0.0), 0.1)
@@ -2009,6 +2264,14 @@ def draw(
         group.set("transform", f"rotate({number(made.turn)} {number(cx)} {number(cy)})")
     if float(spec.get("opacity", 1.0)) < 1.0:
         group.set("opacity", number(float(spec["opacity"])))
+    if spec.get("kind") == "path" and spec.get("fill_rule") == "evenodd":
+        # (On the group, so its shadow is filled as it is.)
+        group.set("fill-rule", "evenodd")
+    if spec.get("kind") == "picture":
+        from flexo import shape_pictures
+
+        shape_pictures.draw(group, spec, made)
+        return group
     fill, fill_role = paint(spec.get("fill"), palette)
     stroke, stroke_role = paint(spec.get("line"), palette)
     width = float(spec.get("line_width") or 0.0)
@@ -2016,6 +2279,13 @@ def draw(
         stroke = None
     if not made.closed:
         fill = None
+    if fill and isinstance(spec.get("fill"), Mapping):
+        from flexo import gradients
+
+        fill = gradients.element(
+            group, ident, spec["fill"], made.box, lambda colour: paint(colour, palette)
+        )
+        fill_role = None
     if spec.get("shadow") and shadow is not None and (fill or stroke):
         _shadow(group, ident, made, fill is not None, width if stroke else 0.0, palette, shadow)
     attributes: dict[str, object] = {"fill": fill or "none"}
@@ -2032,11 +2302,19 @@ def draw(
         }
         if stroke_role:
             attributes["data__flexo__stroke"] = stroke_role
+        if float(spec.get("line_opacity", 1.0)) < 1.0:
+            attributes["stroke_opacity"] = float(spec["line_opacity"])
         dashes = dash_array(spec)
         if dashes:
             attributes["stroke_dasharray"] = " ".join(number(value) for value in dashes)
     if made.segments and (fill or stroke):
-        element(group, "path", id=f"{ident}.outline", d=path_data(made.segments), **attributes)
+        element(
+            group,
+            "path",
+            id=f"{ident}.outline",
+            d=made.data or path_data(made.segments),
+            **attributes,
+        )
     for head in made.heads:
         if not stroke:
             continue
@@ -2050,6 +2328,10 @@ def draw(
             }
         if stroke_role:
             paint_of["data__flexo__" + ("fill" if head.filled else "stroke")] = stroke_role
+        if float(spec.get("line_opacity", 1.0)) < 1.0:
+            paint_of["fill_opacity" if head.filled else "stroke_opacity"] = float(
+                spec["line_opacity"]
+            )
         element(
             group, "path", id=f"{ident}.head-{head.end}", d=path_data(head.segments), **paint_of
         )
@@ -2071,7 +2353,7 @@ def _shadow(
 
     colour = palette.get("shadow")  # type: ignore[attr-defined]
     held = element(group, "g", id=f"{ident}.shadow")
-    data = path_data(made.segments)
+    data = made.data or path_data(made.segments)
     if shadow.style == "hard" or shadow.spread <= 0.0:
         element(
             held,
@@ -2110,7 +2392,8 @@ def _shadow(
 
 
 def moved(spec: Mapping[str, Any], dx: float, dy: float) -> dict[str, Any]:
-    """A shape moved by ``dx``, ``dy``: its box, its points, its tail; glued ends stay glued."""
+    """A shape moved by ``dx``, ``dy``: its box, its points, its tail, a path's outline
+    (written again, ``flexo.pathdata``); glued ends stay glued."""
 
     made = dict(spec)
     if made.get("kind") == "group":
@@ -2128,6 +2411,8 @@ def moved(spec: Mapping[str, Any], dx: float, dy: float) -> dict[str, Any]:
             made[key] = [end[0] + dx, end[1] + dy]
     if made.get("points") is not None:
         made["points"] = [[x + dx, y + dy] for x, y in made["points"]]
+    if made.get("kind") == "path" and isinstance(made.get("d"), str) and (dx or dy):
+        made["d"] = pathdata.moved(made["d"], dx, dy)
     return made
 
 
@@ -2166,6 +2451,7 @@ __all__ = [
     "normalised",
     "paint",
     "path_data",
+    "path_open",
     "role_of",
     "sites",
     "target_of",
@@ -2179,6 +2465,7 @@ def catalogue() -> dict[str, Any]:
     return {
         "sections": [{"name": name, "kinds": list(kinds)} for name, kinds in SECTIONS],
         "labels": dict(LABELS),
+        "tools": dict(TOOLS),
         "families": {kind: family(kind) for kind in (*KINDS, "group")},
         "defaults": {kind: defaults(kind) for kind in KINDS},
         "sizes": {kind: list(size) for kind, size in SIZES.items()},

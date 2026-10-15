@@ -103,6 +103,13 @@ class ThemeKind:
             raise ValueError(f"{path.name} is not a theme file")
         return data
 
+    def references(self, data: Any, base: Path) -> list[Any]:
+        """The files a theme file names (its fonts), for a bundle of it."""
+
+        from flexo.bundle import theme_references
+
+        return theme_references(data, base)
+
     def save(self, path: Path, document: dict[str, Any], previous: str | None = None) -> None:
         if path.suffix.lower() == ".json":
             path.write_text(

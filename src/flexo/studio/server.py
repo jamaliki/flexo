@@ -331,6 +331,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"file": workspace.duplicate(name, str(data.get("to") or ""), who).name})
         elif route == "/api/export":
             self._export(workspace.open(name), data)
+        elif route == "/api/copy":
+            # What the page copies, drawn for other apps: its picture and its SVG.
+            from flexo.studio import copying
+
+            self._json(copying.answer(workspace, data))
+        elif route == "/api/import-drawing":
+            # A drawing pasted or dropped, made the page's own shapes (flexo.svgimport).
+            from flexo.studio.importing import imported
+
+            self._json(imported(workspace, name, data))
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
             # connected, renamed): the kind answers with the document as it would be.
@@ -350,6 +360,11 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/trust":
             workspace.trust()
             self._json({"ok": True})
+        elif route == "/api/bundle/unpack":
+            # File > Unpack Bundle: the bundle edited here, written out as a plain folder.
+            from flexo.studio.bundles import unpack_beside
+
+            self._json({"folder": str(unpack_beside(workspace))})
         elif route == "/api/presence":
             file, where, doing = data.get("file"), data.get("where"), data.get("doing")
             workspace.set_presence(who, file, where, doing, str(data.get("client") or ""))
@@ -410,6 +425,8 @@ class Handler(BaseHTTPRequestHandler):
             "activity": list(workspace.activity)[-120:],
             "assistant": _assistant(workspace).state(),
             "start": self.start_file,
+            # A bundle (one .flexo file) edited here: named as it is (flexo.studio.bundles).
+            "bundle": workspace.bundle.info() if getattr(workspace, "bundle", None) else None,
         }
 
     def _files(self, name: str, types: list[str]) -> dict[str, Any]:
@@ -473,6 +490,16 @@ class Handler(BaseHTTPRequestHandler):
         # One part of the document, exported by itself (a figure on a slide).
         part = data.get("part")
         write = doc.kind.export if part is None else getattr(doc.kind, "export_part", None)
+        if formats == ["flexo"]:
+            # A bundle: the document and every file it names, as one file (flexo.bundle).
+            from flexo.studio.bundles import exported
+
+            def write(document, base, stem, formats, into=None):
+                made, doc.kind.export_notes = exported(
+                    workspace, doc, document, into or base / "build"
+                )
+                return [made]
+
         if write is None:
             self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} exports no parts")
             return
@@ -751,17 +778,30 @@ def start(
     port: int = 0,
     kind: str | None = None,
     browser: bool = True,
-    trusted: bool = True,
+    trusted: bool | None = None,
     offered: tuple[str, ...] | None = None,
 ) -> tuple[ThreadingHTTPServer, Workspace]:
-    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``).
-    Code the folder brings runs only if it is ``trusted`` (the app asks; a person who
-    starts ``flexo studio`` in a folder has chosen it). ``offered`` are the kinds of
-    document the page offers to make (all, if not given)."""
+    """A studio server for a folder or a file in it (not yet serving: call ``serve_forever``),
+    or a bundle (``.flexo``). Code the folder brings runs only if it is ``trusted`` (the app
+    asks; a person who starts ``flexo studio`` in a folder has chosen it, but a bundle is
+    trusted only once its person has said so). ``offered`` are the kinds of document the
+    page offers to make (all, if not given)."""
 
     path = Path(target or ".").resolve()
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
-    workspace = Workspace(folder, kind=kind, trusted=trusted, offered=offered)
+    keeper = None
+    if path.suffix.lower() == ".flexo":
+        # A bundle: unpacked into a folder of its own, edited there, saved back into it.
+        from flexo.studio.bundles import opened
+
+        keeper = opened(path)
+        folder, start_file = keeper.root, keeper.document
+        # Someone else's until its person trusts it: its Python runs only then. (Another
+        # bundle put in its place is asked about again.)
+        trusted = (keeper.trusted if trusted is None else trusted) and not keeper.replaced
+    workspace = Workspace(folder, kind=kind, trusted=trusted is not False, offered=offered)
+    if keeper is not None:
+        keeper.attach(workspace)
     handler = type("StudioHandler", (Handler,), {"workspace": workspace, "start_file": start_file})
     server = Server(("127.0.0.1", port), handler)
     if port:
@@ -788,7 +828,11 @@ def serve(
 
     server, workspace = start(target, port=port, kind=kind, browser=browser)
     print(f"flexo studio: {workspace.address}")  # type: ignore[attr-defined]
-    print(f"  folder {workspace.root} (Ctrl+C to stop)")
+    keeper = getattr(workspace, "bundle", None)
+    if keeper is not None:
+        print(f"  bundle {keeper.path}, saved as it is edited (Ctrl+C to stop)")
+    else:
+        print(f"  folder {workspace.root} (Ctrl+C to stop)")
     print("  agents join with: claude mcp add flexo-studio -- flexo studio mcp")
     sys.stdout.flush()
     # Stopped as Ctrl+C stops it (a `kill`, a session ending): edits it has taken that are

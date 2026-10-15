@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import itertools
 import math
 import re
 import struct
@@ -148,6 +149,7 @@ class _Writer:
         self.fonts: dict[tuple[FontFace, int], _Font] = {}
         self.states: dict[tuple[float, float, str], str] = {}
         self.images: list[tuple[str, int]] = []
+        self.shadings: list[tuple[str, int]] = []
         self.tags = tags
         self.language = language
         self.document = _Element("Document")
@@ -211,10 +213,11 @@ class _Writer:
             for (fill, stroke, blend), name in self.states.items()
         )
         images = " ".join(f"/{name} {number} 0 R" for name, number in self.images)
+        shadings = " ".join(f"/{name} {number} 0 R" for name, number in self.shadings)
         self.put(
             resources,
             f"<< /ProcSet [/PDF /Text /ImageC] /Font << {fonts} >> /ExtGState << {states} >> "
-            f"/XObject << {images} >> >>".encode(),
+            f"/XObject << {images} >> /Shading << {shadings} >> >>".encode(),
         )
         listed = " ".join(f"{kid} 0 R" for kid in kids)
         self.put(tree, f"<< /Type /Pages /Kids [{listed}] /Count {len(kids)} >>".encode())
@@ -291,6 +294,46 @@ class _Writer:
         if key not in self.states:
             self.states[key] = f"G{len(self.states)}"
         return self.states[key]
+
+    def shading(self, gradient) -> str:
+        """A gradient's shading, written once, named for the page's resources: axial along
+        (0, 0) to (1, 0), or radial out from (0, 0) to 1, in its own frame."""
+
+        stops = list(gradient.stops)
+        if stops[0][0] > 0.0:
+            stops.insert(0, (0.0, *stops[0][1:]))
+        if stops[-1][0] < 1.0:
+            stops.append((1.0, *stops[-1][1:]))
+        functions = []
+        bounds = []
+        for (_, first, _), (end, second, _) in itertools.pairwise(stops):
+            functions.append(
+                f"<< /FunctionType 2 /Domain [0 1] /C0 [{_rgb(_colour(first) or '#000000')}] "
+                f"/C1 [{_rgb(_colour(second) or '#000000')}] /N 1 >>"
+            )
+            bounds.append(end)
+        bounds = bounds[:-1]
+        # (A stitching function's bounds rise strictly: stops at one place a hair apart.)
+        for index in range(1, len(bounds)):
+            bounds[index] = max(bounds[index], bounds[index - 1] + 1e-5)
+        bounds = [min(max(value, 1e-5), 1.0 - 1e-5) for value in bounds]
+        if len(functions) == 1:
+            function = functions[0]
+        else:
+            function = (
+                f"<< /FunctionType 3 /Domain [0 1] /Functions [{' '.join(functions)}] "
+                f"/Bounds [{' '.join(_n(value) for value in bounds)}] "
+                f"/Encode [{' '.join('0 1' for _ in functions)}] >>"
+            )
+        coords = "0 0 1 0" if gradient.kind == "linear" else "0 0 0 0 0 1"
+        kind = 2 if gradient.kind == "linear" else 3
+        number = self.add(
+            f"<< /ShadingType {kind} /ColorSpace /DeviceRGB /Coords [{coords}] "
+            f"/Function {function} /Extend [true true] >>".encode()
+        )
+        name = f"Sh{len(self.shadings)}"
+        self.shadings.append((name, number))
+        return name
 
     def font(self, face: FontFace, weight: int) -> _Font:
         weight = weight if face.variable else face.weight
@@ -449,6 +492,10 @@ class _Content:
         )
 
     def paint(self, paint: Paint, segments: Sequence[Segment]) -> None:
+        if paint.gradient is not None and paint.fill is not None:
+            # A gradient fill: the path cut out, the gradient drawn through it; then its line.
+            self.gradient(paint, segments)
+            paint = replace(paint, fill=None, gradient=None)
         fill = _colour(paint.fill)
         stroke = _colour(paint.stroke) if paint.stroke_width > 0 else None
         if fill is None and stroke is None:
@@ -467,7 +514,26 @@ class _Content:
             if paint.dash and any(value > 0 for value in paint.dash):
                 ops.append(f"[{' '.join(_n(value) for value in paint.dash)}] 0 d")
         ops.append(_path(segments))
-        ops.append("B" if fill and stroke else "f" if fill else "S")
+        rule = "*" if fill and paint.fill_rule == "evenodd" else ""
+        ops.append(f"B{rule}" if fill and stroke else f"f{rule}" if fill else "S")
+        ops.append("Q")
+
+    def gradient(self, paint: Paint, segments: Sequence[Segment]) -> None:
+        gradient = paint.gradient
+        a, b, c, d, e, f = gradient.matrix  # type: ignore[union-attr]
+        if abs(a * d - b * c) < 1e-12:
+            return
+        name = self.writer.shading(gradient)
+        ops = self.ops
+        ops.append("q")
+        # (Its stops' own opacity, which a shading has none of: their mean, on the fill.)
+        stops = gradient.stops  # type: ignore[union-attr]
+        alpha = paint.fill_opacity * paint.opacity * (sum(s[2] for s in stops) / len(stops))
+        if alpha < 1.0 or paint.blend != "normal":
+            ops.append(f"/{self.writer.state(alpha, 1.0, paint.blend)} gs")
+        ops.append(_path(segments))
+        ops.append("W* n" if paint.fill_rule == "evenodd" else "W n")
+        ops.append(f"{_n(a)} {_n(b)} {_n(c)} {_n(d)} {_n(e)} {_n(f)} cm /{name} sh")
         ops.append("Q")
 
     def shape(self, item: Shape) -> None:
@@ -660,6 +726,9 @@ class _Content:
                 clip = f"{_path(_oval(cx, cy, rx, ry))} W n "
             else:
                 clip = f"{_n(region[0])} {_n(region[1])} {_n(2.0 * rx)} {_n(2.0 * ry)} re W n "
+        if item.outline:
+            # Masked by a shape: within its outline too.
+            clip += f"{_path(item.outline)} W n "
         self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 

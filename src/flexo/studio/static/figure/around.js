@@ -22,8 +22,8 @@ export const sideOf = (spec) => spec.side || (["brace", "bracket"].includes(spec
 
 // `spec` given the places that draw it round `box`: a box's at and size, a box of words' at
 // and width, a line along its side (a brace, a bracket and a dimension pointing away), points
-// stretched over it.
-export function placedRound(spec, [x, y, w, h], family) {
+// stretched over it -- and a path's outline, by `fit` (freeform.js's `fittedPath`).
+export function placedRound(spec, [x, y, w, h], family, fit = null) {
   const made = { ...spec }, form = family(spec.kind);
   if (form === "box") { made.at = [x, y]; made.size = [w, h]; }
   else if (form === "text") { made.at = [x, y]; made.width = Math.max(w, 1); }
@@ -36,6 +36,6 @@ export function placedRound(spec, [x, y, w, h], family) {
     const xs = spec.points.map((p) => p[0]), ys = spec.points.map((p) => p[1]);
     const left = Math.min(...xs), top = Math.min(...ys), across = Math.max(...xs) - left || 1, down = Math.max(...ys) - top || 1;
     made.points = spec.points.map(([px, py]) => [x + (px - left) / across * w, y + (py - top) / down * h]);
-  }
+  } else if (form === "path" && fit && typeof spec.d === "string") made.d = fit(spec.d, [x, y, w, h]);
   return made;
 }

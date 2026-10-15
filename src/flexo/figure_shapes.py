@@ -32,7 +32,7 @@ feature ``spike.feature2``, a tree's tip ``tree.tip3``):
   brace 4, the rest 6) -- a box's ``at`` and ``size``, a box of words' ``at`` and ``width``,
   a line's ``from`` and ``to`` along their ``side`` (a brace or a bracket on their
   ``right``, pointing away, unless said; any other line at their ``bottom``), lines through
-  points stretched over them.
+  points and a path's outline stretched over them.
 
 A part a shape names that the figure does not have is said, as a warning: an end glued to it
 stays where it was, a shape on it is drawn from the figure's top left, and one round only
@@ -58,7 +58,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from flexo import freeform
+from flexo import freeform, insets, pathdata
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.svg import element, layer, number
 
@@ -254,6 +254,9 @@ def attached(spec: Mapping[str, Any]) -> list[str]:
     found: list[str] = []
     if spec.get("on") is not None:
         found.append(str(spec["on"]))
+    if spec.get("kind") == "inset" and spec.get("of") is not None:
+        # (A zoom inset is shown as what it magnifies is.)
+        found.append(str(spec["of"]))
     found += [str(item) for item in spec.get("around") or []]
     for key in ("from", "to"):
         end = spec.get(key)
@@ -332,6 +335,8 @@ def placed_round(spec: Mapping[str, Any], box: Box) -> dict[str, Any]:
             "bottom": ("br", "bl") if away else ("bl", "br"),
         }[side]
         made["from"], made["to"] = corners[ends[0]], corners[ends[1]]
+    elif form == "path" and isinstance(spec.get("d"), str):
+        made["d"] = pathdata.fitted(spec["d"], (x, y, w, h))
     elif form == "points":
         points = [list(map(float, point)) for point in spec.get("points") or []]
         if points:
@@ -431,7 +436,9 @@ class Overlay:
             if gone:
                 self.placed.append(None)
                 continue
-            self.placed.append(Placed(index, name, made, bool(spec.get("behind"))))
+            # (A zoom inset is never behind the parts: what it magnifies may hold it.)
+            behind = bool(spec.get("behind")) and spec.get("kind") != "inset"
+            self.placed.append(Placed(index, name, made, behind))
 
     def _unglued(
         self,
@@ -693,7 +700,7 @@ class _Painter:
                 if spec.get("id") is not None:
                     self.ids.setdefault(str(spec["id"]), ident)
                 form = freeform.family(str(spec["kind"]))
-                if form in ("box", "text"):
+                if form in ("box", "text", "path"):
                     if spec["kind"] == "text":
                         self.sized[ident] = self._text_size(freeform.normalised(spec))
                     made = freeform.geometry(spec, size=self.sized.get(ident))
@@ -782,14 +789,30 @@ class _Painter:
         form = freeform.family(kind)
         ends = freeform.glued(shape, self.find) if form == "line" else None
         made = freeform.geometry(shape, ends, self.sized.get(ident))
-        drawn = freeform.draw(
-            parent,
-            spec,
-            made,
-            ident,
-            self.palette,
-            self.shadow if spec.get("shadow") else None,
-        )
+        if kind == "inset":
+            # Part of a part, magnified: drawn again from the figure's own drawing of it.
+            of = str(spec.get("of") or "")
+            source = self.overlay.box_of(of) if of else None
+            drawn = insets.draw(
+                parent,
+                spec,
+                made,
+                ident,
+                self.palette,
+                source=source,
+                target=of if source is not None else None,
+                shadow=self.shadow,
+            )
+            drawn.set("data-flexo-of", of)
+        else:
+            drawn = freeform.draw(
+                parent,
+                spec,
+                made,
+                ident,
+                self.palette,
+                self.shadow if spec.get("shadow") else None,
+            )
         drawn.set("data-flexo-shape", kind)
         drawn.set(inkscape_attr("label"), freeform.LABELS.get(kind, "Shape"))
         drawn.set("data-flexo-box", " ".join(number(value) for value in made.box))

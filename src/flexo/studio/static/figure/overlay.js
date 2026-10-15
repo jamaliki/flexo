@@ -9,16 +9,18 @@
 // drawn with a click on a part goes round it. An end let go on a part, or on a piece of one (a
 // protein's feature, a tree's tip), is glued to it.
 
-import { h, ui, menu } from "/static/studio/studio.js";
+import { h, ui, menu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
 import { shapeEditor, shapeLabel, shapeIcon } from "/static/studio/shapes.js";
+import * as Insets from "/static/studio/insets.js";
 import { aroundBox, placedRound as placeRound, sideOf } from "/static/kinds/figure/around.js";
+import { CONVERT, convertible, convertCommand } from "/static/studio/toparts.js";
 
 // The kinds a click on a part draws round it.
 const ROUNDABLE = new Set(["ring", "ellipse", "highlight", "rectangle", "rounded-rectangle", "cloud", "brace", "bracket", "dimension"]);
 // What a shape on a figure says besides how it is drawn.
 const OWN = ["on", "around", "margin", "side", "behind", "locked"];
-const PLACES = { box: ["at", "size"], text: ["at", "width"], line: ["from", "to"], points: ["points"] };
+const PLACES = { box: ["at", "size"], text: ["at", "width"], line: ["from", "to"], points: ["points"], path: ["d"] };
 // Pieces of a drawing that are no part to point at of their own: a part's words, its box.
 const PIECE_ENDS = /\.(label|body|outline|shadow|hit|text|container|components|connectors|artwork)$/;
 
@@ -35,7 +37,7 @@ const sorted = (value) => (Array.isArray(value) ? value.map(sorted) : value && t
 const alike = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 
 // (Round parts, as the figure draws them: around.js.)
-const placedRound = (spec, box) => placeRound(spec, box, F.family);
+const placedRound = (spec, box) => placeRound(spec, box, F.family, F.fittedPath);
 
 // The figure editor's shapes: `studio`, the figure's parts (`figure`, parts.js), its page (the
 // element its <svg> is in), the stage and the middle (`center`), the toolbar's Draw button;
@@ -54,7 +56,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   const list = () => waiting?.list || drawn();
   const writtenNow = () => waiting?.written || (Array.isArray(figure.model?.shapes) ? figure.model.shapes : []);
   const boxes = () => info.boxes || {};
-  const svg = () => page.querySelector(":scope > svg");
+  const svg = () => page.querySelector(":scope > svg:not(.shape-layer)");
   const nameOf = (id) => (figure.typeOf(id) ? figure.nameOf(id) : id);
 
   // -- what the figure holds, a shape may be glued to, put on or drawn round --
@@ -235,7 +237,29 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     ungrouped: (group) => ({ ...(group.on !== undefined ? { on: group.on } : {}), ...(group.behind ? { behind: true } : {}), ...(group.locked ? { locked: true } : {}) }),
     commands: (picks, name) => showCommands(picks, name),
     panel: (picks, specs, tools) => attachPanel(picks, specs, tools),
+    // A zoom inset's part, as the figure laid it out and drew it (its own id, in its units).
+    insetSource: (spec, toFrame) => {
+      const id = spec?.of !== undefined ? String(spec.of) : "", box = id ? boxes()[id] || piece(id, toFrame)?.box : null;
+      if (!box || !svg()?.querySelector(`[id="${CSS.escape(id)}"]`)) return null;
+      return { box: [...box], target: id, toShapes: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 } };
+    },
   });
+
+  // Add Zoom Inset, with a part chosen: a box beside it showing its middle magnified, on it
+  // (moving with it as the figure is laid out), chosen at once -- one step.
+  const insettable = (id) => Boolean(id && id !== figure.model?.root && (figure.nodeOf(id) || figure.groupOf(id)) && boxes()[id]);
+  function addInset(id) {
+    if (!insettable(id)) return false;
+    // (Beside it, the page growing to hold it where the figure has no room: as large as a
+    // part of it would be.)
+    const view = svg()?.viewBox?.baseVal, [vx, vy, vw, vh] = view && view.width ? [view.x, view.y, view.width, view.height] : [0, 0, 600, 400];
+    const frame = [vx - vw * 0.5, vy - vh * 0.5, vw * 2, vh * 2];
+    const spec = { ...Insets.fresh(boxes()[id], frame, { of: id, margin: 12 }), on: id };
+    const index = list().length;
+    edit((all) => [...all, spec], { label: "Add Zoom Inset" });
+    editor.choose([index]);
+    return true;
+  }
 
   // -- shown plainly, faint, or not at all: the figure's own hide and dim --
   const shownAs = (spec, index) => {
@@ -267,10 +291,28 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   function showCommands(picks, name) {
     const ways = picks.map((index) => shownAs(list()[index], index));
     return [
+      // Those that draw a diagram made the figure's own parts (figure_convert.py).
+      ...(convertible(picks.map((index) => list()[index])) ? [convertCommand(() => toParts(picks), name)] : []),
       ...(ways.every((way) => way === "hidden") ? [] : [{ icon: "eye", label: "Hide", hint: `${name}: not drawn, its place kept`, run: () => showAs(picks, "hidden") }]),
       ...(ways.every((way) => way === "dimmed") ? [] : [{ icon: "eye", label: "Dim", hint: `${name}: drawn faint`, run: () => showAs(picks, "dimmed") }]),
       ...(ways.every((way) => way === "shown") ? [] : [{ icon: "eye", label: "Show", hint: `${name}: drawn plainly again`, run: () => showAs(picks, "shown") }]),
     ];
+  }
+
+  // -- Convert to Figure Parts --
+  // The shapes chosen made the figure's parts, in one step: sent with where each is drawn and
+  // each part's box, as drawn here (the figure is not drawn again to find them); what was
+  // made chosen, and said.
+  async function toParts(picks) {
+    if (!figure.model) return;
+    await figure.idle?.();
+    const shapes = list(), placed = picks.map((index) => shapes[index]);
+    const drawnHere = !waiting && placed.every(Boolean);
+    editor.clear({ quiet: true });
+    figure.act({ do: "convert", shapes: picks, ...(drawnHere ? { placed: copyOf(placed), boxes: copyOf(boxes()) } : {}) }, {
+      label: CONVERT,
+      then: (result) => { if (result?.said) toast(`${result.said}.`, { icon: "figure", seconds: 4 }); },
+    });
   }
 
   // -- what it moves with: the inspector's own section --
@@ -398,5 +440,5 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     return at >= 0 ? { index: at, name: shapes[at] ? shapeLabel(shapes[at]) : `Shape ${at + 1}` } : null;
   }
 
-  return { ...editor, took, drawnWith, afresh, swallow, rows, named, written };
+  return { ...editor, took, drawnWith, afresh, swallow, rows, named, written, addInset, insettable };
 }

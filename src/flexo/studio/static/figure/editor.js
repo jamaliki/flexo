@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing, pastedOwn, copyOut, copiedHere, drawingPaster, DRAWING_FILE } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
 import { figureShapes } from "/static/kinds/figure/overlay.js";
@@ -101,6 +101,9 @@ export function mount(studio, main) {
     { icon: "image", label: exportLabel("PNG"), run: () => studio.exportFiles(["png"]) },
     "-",
     { icon: "export", label: exportLabel("All Formats"), run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    "-",
+    // The figure and every file it names, as one file to send (flexo.bundle).
+    { icon: "export", label: exportLabel("Flexo Bundle"), hint: "The figure and every file it names, as one file", run: () => studio.exportFiles(["flexo"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // A drawing kept back while a part is carried, and how long after it is let go the one
@@ -109,8 +112,12 @@ export function mount(studio, main) {
   let kept = null, putKept = () => {};
 
   // -- the drawing's parts, edited --
+  // The figure's drawing: the page's own <svg>, never the layer the shapes drawn over it are
+  // edited on (shapes.js), which may be in the page before the drawing is -- sized as the
+  // drawing, it would stay that size, too small to press a shape on.
+  const drawingOf = () => page.querySelector(":scope > svg:not(.shape-layer)");
   const elementOf = (id) => {
-    const svg = page.querySelector("svg");
+    const svg = drawingOf();
     // (Asked for by its id, not by going through every element that has one: a molecule
     // drawn as shapes has thousands.)
     return (svg && id != null && svg.querySelector(`[id="${CSS.escape(String(id))}"]`)) || null;
@@ -198,6 +205,22 @@ export function mount(studio, main) {
   shapes = figureShapes({ studio, figure, page, stage, center, button: drawButton,
     changed: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); studio.focus(shapes.any() ? { label: `Figure · ${shapes.label()}` } : null); },
     clipItems: () => clipItems() });
+  // A drawing pasted or dropped (Inkscape's): shapes over the figure, centred where the
+  // pointer is on it (else on its middle), on no part -- or, as asked or too large, the
+  // picture part it was (drawingpaste.js).
+  let pointer = null;
+  for (const name of ["pointermove", "dragover"]) center.addEventListener(name, (event) => { pointer = [event.clientX, event.clientY]; }, { passive: true });
+  const drawings = drawingPaster({
+    studio, shapes, markup: "figure",
+    place: () => {
+      const box = page.querySelector("svg")?.getBoundingClientRect();
+      const over = pointer && box && pointer[0] >= box.left && pointer[0] <= box.right && pointer[1] >= box.top && pointer[1] <= box.bottom;
+      return { centre: over ? shapes.pointAt(...pointer) : box ? shapes.pointAt(box.left + box.width / 2, box.top + box.height / 2) : [100, 100] };
+    },
+    asPicture: (file) => addFiles([file], undefined, { pictures: true }),
+    taken: () => [...(figure.model?.nodes || []), ...(figure.model?.groups || []), ...(figure.model?.edges || [])].map((item) => item.id).filter(Boolean),
+  });
+  document.addEventListener("keydown", (event) => { if (studio.active && !typingNow()) drawings.key(event); });
   let greeted = false;  // (a new figure's one shape opened for its words: see the end)
   // Keys typed while it was on its way, just made, are typed again once it is open: its
   // one shape's words (shell.js's create).
@@ -259,7 +282,7 @@ export function mount(studio, main) {
   }
   const zoomBy = (factor, at = null) => setZoom((state.zoom ?? fitScale()) * factor, at);
   function fitPage() {
-    const svg = page.querySelector("svg");
+    const svg = drawingOf();
     if (!svg) return;
     const scale = state.zoom ?? fitScale();
     svg.style.width = `${natural.width * scale}px`;
@@ -338,7 +361,7 @@ export function mount(studio, main) {
     try {
       const picture = new Image();
       await new Promise((loaded, failed) => { picture.onload = loaded; picture.onerror = failed; picture.src = address; });
-      const most = (page.querySelector("svg")?.viewBox?.baseVal?.width || 0) / 2;
+      const most = (drawingOf()?.viewBox?.baseVal?.width || 0) / 2;
       return most && picture.naturalWidth * 0.75 > most ? `${Math.round(most)}pt` : null;
     } catch { return null; } finally { URL.revokeObjectURL(address); }
   }
@@ -357,7 +380,12 @@ export function mount(studio, main) {
   });
   // Files added to the figure, dropped or pasted: where `where` says, else after what is
   // chosen (as a shape added from the palette).
-  async function addFiles(files, where) {
+  async function addFiles(files, where, { pictures = false } = {}) {
+    // A drawing (an SVG, a PDF's page) is shapes over the figure, unless it is too large or a
+    // picture was asked for (drawingpaste.js).
+    for (const file of pictures ? [] : files.filter((one) => DRAWING_FILE.test(one.name))) await drawings.add(file);
+    if (!pictures) files = files.filter((one) => !DRAWING_FILE.test(one.name));
+    if (!files.length) return;
     const scenes = new Set();
     for (const file of files) if (await sceneFile(file)) scenes.add(file);
     const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name) || scenes.has(file));
@@ -390,6 +418,7 @@ export function mount(studio, main) {
     if (!figure.model) return;
     menu(point, [{ icon: "plus", label: "Add Shape…", run: () => figure.addPalette(point) },
       { icon: "shape", label: "Draw Shape…", run: () => shapes.chooser(point) },
+      { icon: "copy", label: "Copy Figure", keys: "⌘C", run: () => clipChosen(false) },
       { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
       { icon: "target", label: "Select All", keys: "⌘A", run: () => figure.chooseAll() }]);
   }
@@ -712,7 +741,25 @@ export function mount(studio, main) {
     return parts ? { what: "parts", parts, label: parts.top.length > 1 ? `${parts.top.length} shapes` : "shape" } : null;
   };
   const plainOf = (clip) => (clip.what === "shapes" ? clip.shapes.map((shape) => plain(String(shape?.text ?? ""))).filter(Boolean).join("\n") || clip.label
-    : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
+    : clip.what === "block" ? clip.words || clip.label
+      : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
+  // Nothing chosen, the whole figure is copied: for other apps, its drawing; for a slide, the
+  // figure (its file) as an object on it, as a slide's figure is copied.
+  const wholeFigure = () => {
+    if (!figure.model || figure.selected.length || shapes.any()) return null;
+    const words = (figure.model.nodes || []).map((node) => plain(node.label)).filter(Boolean).join("\n");
+    return { what: "block", block: { figure: studio.file }, label: "figure", words: words || studio.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "") };
+  };
+  // What is copied, drawn (copyout.js): the figure's drawing, and the ids in it of what is copied
+  // -- the parts chosen with the lines between them, or the shapes drawn over it chosen; all of
+  // it, the whole figure.
+  const copiedDrawing = (clip) => {
+    const page = [...(studio.pages?.values?.() || [])][0];
+    const shapeId = (index) => { const spec = shapes.list()[index]; return spec?.id !== undefined && spec?.id !== null ? String(spec.id) : `shapes.${index}`; };
+    const keep = clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
+      : clip.what === "shapes" ? shapes.chosen().map(shapeId) : [];
+    return { svg: page?.svg || "", keep, text: plainOf(clip), clip, title: clip.what === "block" ? studio.file.split("/").pop() : clip.label };
+  };
   // Pasted: shapes drawn over the figure -- from it, another figure or a slide -- as shapes
   // drawn over it; parts of a figure as parts.
   const pasteClip = (clip) => (clip?.what === "shapes" ? shapes.paste(clip) : clip?.parts ? figure.paste(clip.parts) : null);
@@ -722,10 +769,12 @@ export function mount(studio, main) {
   const uncopied = (cut = false) => { const why = figure.uncopied(cut); if (why) toast(why, { icon: "info", seconds: 3 }); };
   const ownsClip = () => studio.active && !typingNow() && !wordsChosen() && Boolean(figure.model);
   function clipChosen(cut) {
-    const clip = clipOf();
+    const clip = clipOf() || (cut ? null : wholeFigure());
     if (!clip) { uncopied(cut); return; }
-    clipboard = clip;
-    navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
+    // (The whole figure is pasted onto a slide, not into a figure: none to paste here.)
+    clipboard = clip.what === "block" ? null : clip;
+    const wrote = navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
+    copyOut(studio, copiedDrawing(clip), wrote);
     if (cut) cutAway(clip); else copied(clip);
   }
   const cutAway = (clip) => (clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
@@ -735,13 +784,14 @@ export function mount(studio, main) {
     { icon: "copy", label: "Copy", keys: "⌘C", disabled: !clipOf(), run: () => clipChosen(false) },
     { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
   ];
-  function copyNow(event) {
-    const clip = ownsClip() ? clipOf() : null;
+  function copyNow(event, cut = false) {
+    const clip = ownsClip() ? clipOf() || (cut ? null : wholeFigure()) : null;
     if (!clip) return null;
     event.preventDefault();
-    clipboard = clip;
+    clipboard = clip.what === "block" ? null : clip;
     event.clipboardData?.setData(CLIP, JSON.stringify(clip));
     event.clipboardData?.setData("text/plain", plainOf(clip));
+    copyOut(studio, copiedDrawing(clip));
     return clip;
   }
   document.addEventListener("copy", (event) => {
@@ -751,7 +801,7 @@ export function mount(studio, main) {
   });
   document.addEventListener("cut", (event) => {
     keyed = null;
-    const clip = copyNow(event);
+    const clip = copyNow(event, true);
     if (clip) cutAway(clip); else if (ownsClip()) uncopied(true);
   });
   document.addEventListener("paste", async (event) => {
@@ -762,15 +812,28 @@ export function mount(studio, main) {
     try { clip = JSON.parse(data?.getData(CLIP) || "null"); } catch { clip = null; }
     // A clipboard that keeps only words: what was copied here, if they are its words.
     if (!clip && clipboard && data?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
+    // (Copied in another of the studio's documents, where the clipboard keeps its words alone.)
+    if (!clip) clip = copiedHere(data);
     if (clip?.what === "parts" && clip.parts?.top?.length) { event.preventDefault(); figure.paste(clip.parts); return; }
     if (clip?.what === "shapes" && Array.isArray(clip.shapes) && clip.shapes.length) { event.preventDefault(); shapes.paste(clip); return; }
+    // Flexo's own copy of what a figure does not take (an object, a slide): nothing pasted --
+    // never the picture of it the clipboard has for other apps.
+    if (clip) return;
     // Pictures and structure files copied elsewhere are added after what is chosen -- and a
     // drawing (Inkscape's) as its SVG, not as the picture of it the web view hands over.
-    const files = [...(data?.files || [])], drawing = pastedDrawing(data);
+    const files = [...(data?.files || [])], drawing = pastedDrawing(data), own = pastedOwn(data);
     if (!drawing && !files.length) return;
     event.preventDefault();
+    // Copied in a window of another folder: what it is, not the picture beside it.
+    const theirs = await own;
+    if (theirs) {
+      if (theirs.what === "parts" && theirs.parts?.top?.length) figure.paste(theirs.parts);
+      else if (theirs.what === "shapes" && Array.isArray(theirs.shapes) && theirs.shapes.length) shapes.paste(theirs);
+      return;
+    }
     const drawn = await drawing;
-    if (drawn || files.length) await addFiles(drawn ? [drawn] : files);
+    if (drawn) { await drawings.shapesOf(drawn); return; }
+    if (files.length) await addFiles(files);
   });
   // The web view offers Edit › Paste and ⌘V to a page with nothing typed in only when the page
   // asks first (the studio's beforepaste): the figure asks whenever it takes a paste, pictures
@@ -881,14 +944,14 @@ export function mount(studio, main) {
     showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
-      if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
+      if (!drawingOf()) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
       page.style.opacity = "0.45";
       return;
     }
     page.style.opacity = "";
     const before = figure.landing();
     page.innerHTML = drawn.svg.replace(/^<\?xml[^>]*>\s*/, "");
-    const svg = ownResources(page.querySelector("svg"));
+    const svg = ownResources(drawingOf());
     widenLines(svg);
     page.append(hover, marks);
     const view = svg.viewBox.baseVal;
@@ -965,13 +1028,22 @@ export function mount(studio, main) {
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
     ...(!typingNow() && clipOf() ? [{ icon: "cut", label: `Cut ${clipName(clipOf())}`, keys: "⌘X", run: () => clipChosen(true) },
       { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),
+    // Nothing chosen: the whole figure, for a slide or another app.
+    ...(!typingNow() && !clipOf() && wholeFigure() ? [{ icon: "copy", label: "Copy Figure", keys: "⌘C", run: () => clipChosen(false) }] : []),
     ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => pasteClip(clipboard) }] : []),
+    // A drawing on the clipboard, as one picture or in its own colours (drawingpaste.js).
+    ...(typingNow() ? [] : drawings.commands()),
     // What is drawn over the figure: every kind to draw, and what those chosen can do
     // (overlay.js) -- the Mac app's Insert › Shapes and Arrange run them by these names.
     ...(typingNow() ? [] : shapes.commands()),
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V) of the shapes chosen.
+    ...(!typingNow() && figure.canCopyStyle() ? [{ icon: "copy", label: "Copy Style", keys: "⌥⌘C", hint: chosenName() || "", run: () => figure.copyStyle() }] : []),
+    ...(!typingNow() && figure.canPasteStyle() ? [{ icon: "paste", label: "Paste Style", keys: "⌥⌘V", hint: chosenName() || "", run: () => figure.pasteStyle() }] : []),
+    // Insert › Zoom Inset: part of the shape chosen, magnified beside it.
+    ...(!typingNow() && figure.selected.length === 1 && shapes.insettable(figure.selected[0]) ? [{ icon: "plus", label: "Add Zoom Inset", hint: figure.nameOf(figure.selected[0]), run: () => shapes.addInset(figure.selected[0]) }] : []),
     // Format › Bold and Italic: of all the words of the shapes chosen (⌘B, ⌘I).
     ...(!typingNow() && figure.canStyle() ? [
       { icon: "bold", label: "Bold", keys: "⌘B", run: () => figure.toggleWords("bold") },

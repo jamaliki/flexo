@@ -135,7 +135,8 @@ shapes: drawn over the figure where they are put, taking no room -- what you wou
   (bend, lean), elbow, arc, polyline and pen (points), rectangle, rounded-rectangle, ellipse,
   triangle, diamond, polygon, star, block arrows (arrow-right...), chevron, plus, cross, check,
   cloud, bubble (tail), brace and bracket (depth, tip), dimension, scale-bar, highlight, ring,
-  text (at, width), group (shapes). Lines take from and to, boxes at and size (rotate, flip).
+  text (at, width), path (d: SVG path data, fill_rule: nonzero|evenodd; any outline, holes
+  too; no at or size), group (shapes). Lines take from and to, boxes at and size (rotate, flip).
   Places are the figure's points, y down, from its top left as laid out -- so attach them to
   its parts, which the layout moves: an end glued to a part, to: {part: encoder, side:
   top|right|bottom|left|centre} (any node, group or frame by id, or a piece of one its drawing
@@ -146,9 +147,14 @@ shapes: drawn over the figure where they are put, taking no room -- what you wou
   or #rrggbb, line_width, dash (dashed, dotted), start and end heads (triangle, open, stealth,
   dot, circle, bar, diamond), head_size, opacity, fill_opacity, shadow; words: text (the
   figure's label markup), font_size, bold, italic, colour, align, valign. behind: true draws one
-  under the parts; hide, dim and highlight name a shape by its id. E.g.
+  under the parts; hide, dim and highlight name a shape by its id. A zoom inset, kind: inset,
+  of: a part (on: that part too, to move with it), region: [x, y, width, height] as fractions
+  of the part, at and size, shows that region magnified in its box, joined to it by two lines
+  (frame_line, connector_line, their _width and _dash; text a corner label). E.g.
   shapes: [{kind: ring, around: [encoder]}, {kind: arrow, from: [20, 10], to: {part: decoder,
   side: top}, text: "here"}, {kind: text, on: decoder, at: [0, -16], text: bottleneck}].
+  A diagram pasted as shapes (boxes with words, arrows, a titled box round some) becomes the
+  figure's own parts with the convert_to_figure_parts tool: laid out and themed as drawn.
 A figure of several panels, as a journal prints one: each panel a group with role: panel (no
   frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
   a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,
@@ -200,6 +206,13 @@ class FigureKind:
     def parse(self, text: str) -> dict[str, Any]:
         yaml.safe_load(text)  # refuse what does not read, before anyone sees it
         return {"text": text}
+
+    def references(self, data: Any, base: Path) -> list[Any]:
+        """The files a figure file (``data``, as it reads) names, for a bundle of it."""
+
+        from flexo.bundle import figure_references
+
+        return figure_references(data, base)
 
     def theme_of(self, document: dict[str, Any]) -> str | None:
         data = yaml.safe_load(document["text"])
@@ -273,6 +286,7 @@ class FigureKind:
             "document": {**document, "text": result["text"]},
             "select": result["select"],
             "model": model(result["text"], suffix=suffix, base=base),
+            **({"said": result["said"]} if result.get("said") else {}),
         }
 
     def check(self, document: dict[str, Any], base: Path) -> list[str]:
@@ -521,6 +535,11 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
         # (The data a plot names is its figure's too: found from the figure's folder.)
         if isinstance(properties, dict) and node.get("kind") == PLOT_KIND and "data" in properties:
             properties["data"] = beside(base, properties["data"])
+    if "shapes" in document:
+        from flexo.shape_pictures import anchored
+
+        # (A picture among the shapes drawn over it is found as a part's picture is.)
+        document["shapes"] = anchored(document["shapes"], base)
     return parse_figure(document)
 
 

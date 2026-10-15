@@ -116,6 +116,33 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "convert_to_figure_parts",
+        "description": (
+            "Make shapes drawn as a diagram -- boxes with words in them, arrows between them, "
+            "words alone, a box round some with a title over it, as pasted from Inkscape -- a "
+            "figure's own parts: shapes, lines and groups, laid out as drawn, in the figure's "
+            "theme, editable as any figure. In a figure file, `shapes` are shapes drawn over it "
+            "and become its parts; in a deck, the shapes on `slide` (1 is the first) become a "
+            "figure on that slide. `shapes` names them by id, or by place in the list (0 is the "
+            "first); leave it out for all of them. What is no part of a diagram (a highlight, a "
+            "brace, a free curve) stays a shape, attached to the parts. Says what it made."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string"},
+                "shapes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "The shapes, by id or by place (\"0\" is the first).",
+                },
+                "slide": {"type": "integer", "description": "For a deck: the slide's number."},
+            },
+            "required": ["file"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "status",
         "description": (
             "Tell the people in the studio what you are doing now, in a few words ('Tightening "
@@ -322,6 +349,35 @@ class Tools:
             summary.append("No warnings.")
         return [*blocks, _text("\n".join(summary))]
 
+    def _convert_to_figure_parts(
+        self, file: str, shapes: list[str | int] | None = None, slide: int | None = None
+    ) -> list[dict[str, Any]]:
+        doc = self.workspace.open(file)
+        act = getattr(doc.kind, "act", None)
+        if act is None or doc.kind.name not in ("figure", "deck"):
+            raise ValueError(
+                f"{doc.name} is a {doc.kind.name}: a figure's shapes, or a slide's, are made parts"
+            )
+        with doc.lock:
+            document, version = doc.document, doc.version
+        if doc.kind.name == "deck":
+            if slide is None:
+                raise ValueError("Say which slide's shapes: slide (1 is the first).")
+            slides = document.get("slides") or []
+            if not 1 <= slide <= len(slides):
+                raise ValueError(f"There is no slide {slide}; {doc.name} has {len(slides)}.")
+            drawn = slides[slide - 1].get("shapes") or []
+            action: dict[str, Any] = {"do": "convert", "slide": slide - 1}
+        else:
+            written = yaml.safe_load(document["text"])  # (JSON reads as YAML)
+            drawn = (written if isinstance(written, dict) else {}).get("shapes") or []
+            action = {"do": "convert"}
+        action["shapes"] = _places(drawn, shapes)
+        result = act(document, action, doc.path.parent)
+        new_version, _ = doc.update(result["document"], version, self.who)
+        said = result.get("said") or "Made the figure's parts"
+        return [_text(f"{said}, in {doc.name}: now version {new_version}.")]
+
     def _status(
         self, doing: str, file: str | None = None, page: int | None = None
     ) -> list[dict[str, Any]]:
@@ -340,6 +396,28 @@ def _dump(kind, document: Any) -> str:
 def _parse(kind, text: str) -> Any:
     parse = getattr(kind, "parse", None)
     return parse(text) if parse else yaml.safe_load(text)
+
+
+def _places(drawn: list[Any], named: list[str | int] | None) -> list[int]:
+    """The places in ``drawn`` (a list of shapes) of the shapes ``named`` by id or by place:
+    all of them, none named."""
+
+    if not named:
+        return list(range(len(drawn)))
+    ids = {
+        str(shape.get("id")): index
+        for index, shape in enumerate(drawn)
+        if isinstance(shape, dict) and shape.get("id") is not None
+    }
+    places = []
+    for name in named:
+        if isinstance(name, int) or (str(name).isdigit() and str(name) not in ids):
+            places.append(int(name))
+        elif str(name) in ids:
+            places.append(ids[str(name)])
+        else:
+            raise ValueError(f"There is no shape {name!r} there.")
+    return places
 
 
 def _where(where: Any) -> str:

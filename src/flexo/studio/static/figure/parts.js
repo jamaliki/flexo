@@ -24,6 +24,7 @@ import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, 
 import { mergeText, follows } from "/static/studio/merge.js";
 import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
 import { drawingSections } from "/static/kinds/figure/drawing.js";
+import * as Styles from "/static/studio/styles.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -980,7 +981,7 @@ export function figureParts(host) {
     for (const target of action.targets || [action.target]) {
       const item = target?.type === "node" ? nodeOf(target.id) : target?.type === "group" ? groupOf(target.id) : target?.type === "edge" ? edgeOf(target.id) : null;
       if (!item) continue;
-      for (const [key, value] of Object.entries(action.values || {})) {
+      for (const [key, value] of Object.entries(target.values || action.values || {})) {
         if (key === "id" || key === "kind") continue;
         const path = key.split("."), last = path.pop();
         let at = item;
@@ -5555,6 +5556,14 @@ export function figureParts(host) {
       if (!event.altKey && !event.shiftKey && (event.key.toLowerCase() === "b" || event.key.toLowerCase() === "i") && canStyle()) {
         event.preventDefault(); toggleWords(event.key.toLowerCase() === "b" ? "bold" : "italic"); return true;
       }
+      // ⌥⌘C and ⌥⌘V: Copy and Paste Style, of the parts chosen (by the key's place: ⌥ makes
+      // another letter of it).
+      if (event.altKey && !event.shiftKey && (event.code === "KeyC" || event.code === "KeyV") && state.selected.length) {
+        if (event.code === "KeyC" ? !canCopyStyle() : !canPasteStyle()) return false;
+        event.preventDefault();
+        if (event.code === "KeyC") copyStyle(); else pasteStyle();
+        return true;
+      }
       // ⌘G groups the shapes chosen and ⇧⌘G ungroups a group -- with ⌥ too, as Keynote's
       // Arrange menu has them. (With ⌥, by the key's place: it makes another letter of it.)
       if (event.altKey ? event.code === "KeyG" : event.key.toLowerCase() === "g") {
@@ -6282,6 +6291,8 @@ export function figureParts(host) {
   // and its arrowheads, each a share of its theme's: for one figure drawn tighter than the
   // rest. In its panel, and in the panel of the slide it is on (the deck asks for them).
   function sizes() {
+    // (None till the figure is read: a figure just put on a slide is chosen before it is.)
+    if (!model()) return null;
     return h("div.section", {}, h("div.section-title", {}, "Sizes"),
       fields(catalog.figure_fields.filter((field) => field.sized), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure-sizes"));
   }
@@ -6304,6 +6315,14 @@ export function figureParts(host) {
     return true;
   }
   const canStyle = (ids = state.selected) => ids.some(styledKind);
+  // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V): the look of the one part chosen -- its tone,
+  // its own colours, its outline, its words -- put on those chosen, each as it takes it
+  // (styles.js), one step; a shape's copied (drawn over a figure, on a slide) as it maps.
+  const styled = () => ({ selected: state.selected, model: model(), nodeOf, groupOf, edgeOf, netOf, nameOf, act });
+  const canCopyStyle = () => Styles.chosenParts(styled()).length === 1;
+  const canPasteStyle = () => Boolean(Styles.copiedStyle()) && Styles.chosenParts(styled()).length > 0;
+  const copyStyle = () => { if (!Styles.copyPartStyle(styled())) return false; toast("Style copied", { icon: "copy", seconds: 1.5 }); return true; };
+  const pasteStyle = () => Styles.pastePartStyle(styled(), host.roles?.() || {});
   function textSection(ids) {
     const parts = ids.filter(styledKind);
     if (!parts.length) return null;
@@ -7412,7 +7431,7 @@ export function figureParts(host) {
     idAt, click, dblclick, marks, markViews, hint, key, panel, sizes, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, alignChosen, canAlign, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
-    toggleWords, canStyle,
+    toggleWords, canStyle, copyStyle, pasteStyle, canCopyStyle, canPasteStyle,
     openInline, placeInline, closeInline, typeSoon, takeBackWaiting, waitingLabel, putBackWaiting, takenLabel, heldEdits, takenEdits,
   };
 }
