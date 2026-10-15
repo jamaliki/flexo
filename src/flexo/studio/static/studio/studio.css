@@ -805,6 +805,9 @@ body:has(.scrim:not(.palette-scrim)) .toasts { visibility: hidden; }
 .toast.error svg { color: inherit; }
 .toast a { color: inherit; font-weight: 600; }
 .toast.error a { color: inherit; }
+/* A note's own action (a drawing pasted as shapes: Place as Picture). */
+.toast .toast-action { margin-left: 8px; font: inherit; font-weight: 600; color: inherit; background: none; border: 1px solid var(--toast-line); border-radius: var(--radius); padding: 2px 8px; cursor: pointer; }
+.toast .toast-action:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .toast svg { width: 16px; height: 16px; flex: none; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 

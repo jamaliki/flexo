@@ -9,6 +9,7 @@ export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes
 import { start } from "./shell.js";
 export { ownResources } from "./drawings.js";
 export { pastedDrawing, svgOfWords } from "./clipboard.js";
+export { drawingPaster, clipboardDrawing, DRAWING_FILE } from "./drawingpaste.js";
 
 // Draw a form again without taking the field someone is typing in away from them. Words
 // another person added or took away before the caret move it along, so it stays where
