@@ -729,7 +729,7 @@ export function mount(studio, main) {
   // What is copied, drawn (copyout.js): the figure's drawing, and the ids in it of what is copied
   // -- the parts chosen with the lines between them, or the shapes drawn over it chosen; all of
   // it, the whole figure.
-  const drawingOf = (clip) => {
+  const copiedDrawing = (clip) => {
     const page = [...(studio.pages?.values?.() || [])][0];
     const shapeId = (index) => { const spec = shapes.list()[index]; return spec?.id !== undefined && spec?.id !== null ? String(spec.id) : `shapes.${index}`; };
     const keep = clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
@@ -750,7 +750,7 @@ export function mount(studio, main) {
     // (The whole figure is pasted onto a slide, not into a figure: none to paste here.)
     clipboard = clip.what === "block" ? null : clip;
     const wrote = navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
-    copyOut(studio, drawingOf(clip), wrote);
+    copyOut(studio, copiedDrawing(clip), wrote);
     if (cut) cutAway(clip); else copied(clip);
   }
   const cutAway = (clip) => (clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
@@ -767,7 +767,7 @@ export function mount(studio, main) {
     clipboard = clip.what === "block" ? null : clip;
     event.clipboardData?.setData(CLIP, JSON.stringify(clip));
     event.clipboardData?.setData("text/plain", plainOf(clip));
-    copyOut(studio, drawingOf(clip));
+    copyOut(studio, copiedDrawing(clip));
     return clip;
   }
   document.addEventListener("copy", (event) => {
