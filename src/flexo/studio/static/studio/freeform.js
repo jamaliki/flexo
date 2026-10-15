@@ -5,7 +5,10 @@
 //
 // Nothing here touches the page: a shape is a mapping (as written in its document), its
 // geometry plain numbers, its drawing SVG markup -- so the same code draws an icon, a preview
-// on a slide, and the test's shapes in Node.
+// on a slide, and the test's shapes in Node. A path's outline is read as flexo.pathdata reads
+// it (pathdata.js), once, however often it is drawn.
+
+import * as P from "./pathdata.js";
 
 export const LINES = ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "brace", "bracket", "dimension", "scale-bar"];
 export const TRACED = ["polyline", "pen"];
@@ -14,10 +17,10 @@ export const BOXED = [
   "parallelogram", "trapezoid", "arrow-right", "arrow-left", "arrow-up", "arrow-down", "arrow-left-right",
   "chevron", "plus", "cross", "check", "cloud", "bubble", "highlight", "ring", "inset",
 ];
-export const KINDS = [...LINES, ...TRACED, ...BOXED, "text"];
+export const KINDS = [...LINES, ...TRACED, ...BOXED, "text", "path"];
 
 export const SECTIONS = [
-  ["Lines", ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen"]],
+  ["Lines", ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen", "path"]],
   ["Shapes", ["rectangle", "rounded-rectangle", "ellipse", "triangle", "right-triangle", "diamond", "parallelogram",
     "trapezoid", "polygon", "star", "plus", "cross", "check", "cloud"]],
   ["Arrows & Callouts", ["arrow-right", "arrow-left", "arrow-up", "arrow-down", "arrow-left-right", "chevron", "bubble"]],
@@ -28,7 +31,7 @@ export const SECTIONS = [
 
 export const LABELS = {
   line: "Line", arrow: "Arrow", "double-arrow": "Double Arrow", "curved-arrow": "Curved Arrow",
-  elbow: "Elbow Connector", arc: "Arc", polyline: "Polyline", pen: "Pen", rectangle: "Rectangle",
+  elbow: "Elbow Connector", arc: "Arc", polyline: "Polyline", pen: "Pencil", rectangle: "Rectangle",
   "rounded-rectangle": "Rounded Rectangle", ellipse: "Oval", triangle: "Triangle",
   "right-triangle": "Right Triangle", diamond: "Diamond", polygon: "Polygon", star: "Star",
   parallelogram: "Parallelogram", trapezoid: "Trapezoid", "arrow-right": "Right Arrow",
@@ -36,8 +39,12 @@ export const LABELS = {
   "arrow-left-right": "Left-Right Arrow", chevron: "Chevron", plus: "Plus", cross: "Cross",
   check: "Check Mark", cloud: "Cloud", bubble: "Speech Bubble", brace: "Brace", bracket: "Bracket",
   dimension: "Dimension Line", "scale-bar": "Scale Bar", highlight: "Highlight", ring: "Highlight Ring",
-  text: "Text Box", inset: "Zoom Inset", group: "Group",
+  text: "Text Box", inset: "Zoom Inset", path: "Path", group: "Group",
 };
+
+// What the tool that draws a kind is called, where that is not the kind's own name: the pen
+// draws a path.
+export const TOOLS = { path: "Pen" };
 
 export const HEADS = ["none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond"];
 export const DASHES = ["solid", "dashed", "dotted"];
@@ -68,6 +75,7 @@ export const STYLES = {
   text: { fill: "none", line: "none", line_width: 1.5, cap: "butt", join: "miter" },
   // A zoom inset (insets.js): on the page, outlined, its label at its top left.
   inset: { fill: "paper", line: "accent", line_width: 1.5, cap: "butt", join: "miter", align: "start", valign: "top", bold: true, padding: 4 },
+  path: CLOSED,
 };
 
 export const PARAMETERS = {
@@ -91,6 +99,7 @@ export const PARAMETERS = {
   bubble: { body: "rounded", corner: 10 },
   polyline: { closed: false },
   pen: { closed: false },
+  path: { fill_rule: "nonzero" },
 };
 
 export const SIZES = {
@@ -105,15 +114,19 @@ export const SIZES = {
   ...Object.fromEntries(TRACED.map((kind) => [kind, [160, 0]])),
 };
 
-// How a kind is placed: from one point to another, through points, in a box, words, or a group.
+// How a kind is placed: from one point to another, through points, in a box, words, an outline
+// of its own (a path), or a group.
 export function family(kind) {
+  if (kind === "path") return "path";
   if (LINES.includes(kind)) return "line";
   if (TRACED.includes(kind)) return "points";
   if (kind === "text") return "text";
   if (kind === "group") return "group";
   return "box";
 }
-export const isClosed = (spec) => BOXED.includes(spec?.kind) || (TRACED.includes(spec?.kind) && Boolean(spec.closed));
+export const isClosed = (spec) => BOXED.includes(spec?.kind) || spec?.kind === "path" || (TRACED.includes(spec?.kind) && Boolean(spec.closed));
+// Whether a path's first piece or its last is open: arrowheads go there.
+export const pathOpen = (spec) => P.parsedOf(spec).opens.some(Boolean);
 
 export function defaults(kind) {
   const style = { fill: "none", fill_opacity: 1, line: "accent", line_width: 2, dash: "solid", cap: "butt", join: "miter",
@@ -127,7 +140,10 @@ export function defaults(kind) {
 export function normalised(spec) {
   const kind = String(spec.kind);
   if (kind === "group") return { opacity: 1, ...spec, shapes: (spec.shapes || []).map(normalised) };
-  const made = { ...defaults(kind), ...Object.fromEntries(Object.entries(spec).filter(([, value]) => value !== null && value !== undefined)) };
+  // (A path moved here keeps its outline as it was moved, its words not yet written.)
+  const held = kind === "path" ? P.heldBy(spec) : null;
+  const made = held ? { ...defaults(kind) } : { ...defaults(kind), ...Object.fromEntries(Object.entries(spec).filter(([, value]) => value !== null && value !== undefined)) };
+  if (held) for (const key of Object.keys(spec)) { if (key === "d") P.lazily(made, held); else if (spec[key] !== null && spec[key] !== undefined) made[key] = spec[key]; }
   if (kind === "bubble" && (made.tail === null || made.tail === undefined) && made.at && made.size) {
     const [x, y] = made.at, [w, h] = made.size;
     made.tail = [x + w * 0.25, y + h + h * 0.45];
@@ -625,8 +641,10 @@ function headed(spec, segments) {
 // and where its words go -- inside it (`area`), or beside it (`label`). `ends`: a line's
 // ends where it is glued; `size`: a text box's, as its words make it.
 export function geometry(spec, ends = null, size = null) {
+  const written = spec;
   spec = normalised(spec);
   const kind = spec.kind, form = family(kind);
+  if (form === "path") return pathGeometry(spec, P.parsedOf(written));
   if (form === "group") {
     const boxes = spec.shapes.map((child) => bounds(child));
     const left = Math.min(...boxes.map((b) => b[0])), top = Math.min(...boxes.map((b) => b[1]));
@@ -674,6 +692,27 @@ export function geometry(spec, ends = null, size = null) {
   return { segments, closed: false, box, turn: 0, heads, area: null, label, ends: [a, b] };
 }
 
+// A path as drawn: its outline as read, in its box, mirrored about that box's middle as it
+// says, turned about it; its words in the box; arrowheads where its first or last piece is open.
+// (Its segments are made when first wanted: a drawing moved a frame at a time needs only its
+// paths' boxes.)
+function pathGeometry(spec, read) {
+  const [x, y, w, h] = read.box, flip = spec.flip || null;
+  const outline = () => read.kept(`flipped ${flip}`, () => flipped(read.segments, flip, x + w / 2, y + h / 2));
+  const made = { closed: true, box: read.box, turn: Number(spec.rotate || 0), heads: [], area: read.box, label: null, ends: null };
+  // (What its heads are drawn by, not the whole of it: its words are not written for them.)
+  const ends = { line_width: spec.line_width, head_size: spec.head_size, start: read.opens[0] ? spec.start : "none", end: read.opens[1] ? spec.end : "none" };
+  if ((ends.start || "none") !== "none" || (ends.end || "none") !== "none") {
+    [made.heads, made.segments] = headed(ends, outline());
+    return made;
+  }
+  Object.defineProperty(made, "segments", { get: outline, set(value) { Object.defineProperty(made, "segments", { value, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true });
+  // (Unmirrored, it is drawn as its words say it, to a hundredth: written once, quickly.)
+  const data = () => (flip ? read.kept(`data ${flip}`, () => pathData(outline())) : read.words());
+  Object.defineProperty(made, "data", { get: data, set(value) { Object.defineProperty(made, "data", { value, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true });
+  return made;
+}
+
 export const centreOf = (made) => [made.box[0] + made.box[2] / 2, made.box[1] + made.box[3] / 2];
 
 // The corners of a shape's frame, turned as it is.
@@ -683,8 +722,25 @@ export function corners(made) {
 }
 
 // left, top, right, bottom of what a shape draws, turned as it is.
+const pathBounds = new WeakMap();
 export function bounds(spec, made = null) {
   made ||= geometry(spec);
+  if (spec.kind === "path") {
+    // What a path draws: its curves' own reach, not their controls', turned as it is.
+    const [x, y, w, h] = made.box;
+    if (!made.turn && !made.heads.length) return [x, y, x + w, y + h];
+    if (!pathBounds.has(made)) {
+      const centre = centreOf(made), out = P.extent(made.segments, made.turn, centre);
+      for (const one of made.heads) {
+        for (const point of flattened(one.segments, 1)) {
+          const [px, py] = turned(point, centre, made.turn);
+          out[0] = Math.min(out[0], px); out[1] = Math.min(out[1], py); out[2] = Math.max(out[2], px); out[3] = Math.max(out[3], py);
+        }
+      }
+      pathBounds.set(made, out);
+    }
+    return [...pathBounds.get(made)];
+  }
   const points = [];
   for (const segments of [made.segments, ...made.heads.map((one) => one.segments)]) {
     for (const [, ...values] of segments) for (let n = 0; n < values.length; n += 2) points.push([values[n], values[n + 1]]);
@@ -709,6 +765,22 @@ export function flattened(segments, steps = 8) {
   return out;
 }
 
+// Whether `point` is on what a line may be glued to: in a path's outline (by its fill rule
+// where it is filled), in a shape's, else in its box.
+export function over(target, point) {
+  if (target.traced) {
+    const [x, y, w, h] = target.box, local = unturned(point, [x + w / 2, y + h / 2], target.turn || 0);
+    if (local[0] < x || local[0] > x + w || local[1] < y || local[1] > y + h) return false;
+    return P.inside(target.traced.rings(), point, target.rule || "nonzero");
+  }
+  if (target.outline) return inside(target.outline, point);
+  const [x, y, w, h] = target.box, local = unturned(point, [x + w / 2, y + h / 2], target.turn || 0);
+  return local[0] >= x && local[0] <= x + w && local[1] >= y && local[1] <= y + h;
+}
+// A path's outline as path data, every point mapped (see `mapped`): for a host that places one
+// in a box of its own (a figure's, round parts).
+export const fittedPath = (data, box) => P.fitted(data, box);
+
 export function pathData(segments) {
   const number = (value) => { const text = (Math.abs(value) < 5e-8 ? 0 : value).toFixed(5).replace(/0+$/, "").replace(/\.$/, ""); return text === "-0" ? "0" : text || "0"; };
   return segments.map(([kind, ...values]) => [kind, ...values.map(number)].join(" ")).join(" ");
@@ -719,11 +791,14 @@ export function pathData(segments) {
 // A shape as something a line is glued to: its box, its turn, its outline on the page.
 export function targetOf(spec, made = null) {
   made ||= geometry(spec);
+  // (A path's outline -- holes and all -- and where a line meets it, found when first asked.)
+  if (spec.kind === "path") return { box: made.box, turn: made.turn, outline: null, traced: P.outline(P.parsedOf(spec), spec.flip, made.turn), rule: spec.fill_rule || "nonzero" };
   const centre = centreOf(made);
   return { box: made.box, turn: made.turn, outline: made.closed ? flattened(made.segments).map((point) => turned(point, centre, made.turn)) : null };
 }
 
 export function sites(target) {
+  if (target.traced) return target.traced.sites();
   const [x, y, w, h] = target.box, centre = [x + w / 2, y + h / 2];
   const places = { top: [x + w / 2, y], right: [x + w, y + h / 2], bottom: [x + w / 2, y + h], left: [x, y + h / 2], centre };
   return Object.fromEntries(Object.entries(places).map(([side, point]) => [side, turned(point, centre, target.turn || 0)]));
@@ -763,7 +838,10 @@ export function glued(spec, find) {
       const target = targets[n];
       if (!target) return;
       const other = points[1 - n], side = end.side || facing(target, other);
-      if (side === "centre") {
+      if (side === "centre" && target.traced) {
+        const centre = sites(target).centre;
+        points[n] = P.crossing(target.traced.rings(), centre, other) || centre;
+      } else if (side === "centre") {
         const centre = sites(target).centre, [x, y, w, h] = target.box;
         const outline = target.outline || [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map((p) => turned(p, centre, target.turn || 0));
         points[n] = met(outline, centre, other) || centre;
@@ -802,13 +880,14 @@ export function svg(spec, made = null, roles = {}, { id = "" } = {}) {
     if (dashes.length) attributes.push(`stroke-dasharray="${dashes.join(" ")}"`);
   }
   const parts = [];
-  if (made.segments.length && (fill || stroke)) parts.push(`<path d="${pathData(made.segments)}" ${attributes.join(" ")}/>`);
+  if (made.segments.length && (fill || stroke)) parts.push(`<path d="${made.data || pathData(made.segments)}" ${attributes.join(" ")}/>`);
   for (const one of stroke ? made.heads : []) {
     parts.push(`<path d="${pathData(one.segments)}" fill="${one.filled ? escape(stroke) : "none"}"${one.stroked ? ` stroke="${escape(stroke)}" stroke-width="${width}" stroke-linecap="${one.kind === "open" ? "round" : "butt"}" stroke-linejoin="round"` : ""}/>`);
   }
   const turn = made.turn ? ` transform="rotate(${made.turn} ${cx} ${cy})"` : "";
   const fade = Number(spec.opacity ?? 1) < 1 ? ` opacity="${Number(spec.opacity)}"` : "";
-  return `<g${id ? ` id="${escape(id)}"` : ""}${turn}${fade}>${parts.join("")}</g>`;
+  const rule = spec.kind === "path" && spec.fill_rule === "evenodd" ? ' fill-rule="evenodd"' : "";
+  return `<g${id ? ` id="${escape(id)}"` : ""}${turn}${fade}${rule}>${parts.join("")}</g>`;
 }
 
 // -- moving, sizing, turning (as an editor does) ---------------------------------------------
@@ -817,6 +896,8 @@ const isEnd = (end) => end && !Array.isArray(end) && typeof end === "object";
 
 // A shape moved by dx, dy: its box, points and tail; a glued end stays glued (its `at` moved).
 export function moved(spec, dx, dy) {
+  // (A path's outline moved as it was read, its words written only when they are read.)
+  if (spec.kind === "path" && (dx || dy)) return P.withOutline(spec, P.shifted(P.parsedOf(spec), dx, dy));
   const made = { ...spec };
   if (made.kind === "group") { made.shapes = (made.shapes || []).map((child) => moved(child, dx, dy)); return made; }
   for (const key of ["at", "tail"]) if (Array.isArray(made[key])) made[key] = [made[key][0] + dx, made[key][1] + dy];
@@ -830,8 +911,10 @@ export function moved(spec, dx, dy) {
 }
 
 // A shape's points mapped by `map` ([x, y] to [x, y]): every point it is placed by -- its box
-// (by its corners: for a map that only stretches and moves), its ends, points and tail.
+// (by its corners: for a map that only stretches and moves), its ends, points and tail, and
+// every point of a path's outline (its curves' controls too).
 export function mapped(spec, map, { box = true } = {}) {
+  if (spec.kind === "path") return P.withOutline(spec, P.remapped(P.parsedOf(spec), map));
   const made = { ...spec };
   if (made.kind === "group") { made.shapes = (made.shapes || []).map((child) => mapped(child, map, { box })); return made; }
   if (box && Array.isArray(made.at)) {
@@ -858,6 +941,13 @@ export function mapped(spec, map, { box = true } = {}) {
 export function turnedAbout(spec, degrees, pivot) {
   if (spec.kind === "group") return { ...spec, shapes: (spec.shapes || []).map((child) => turnedAbout(child, degrees, pivot)) };
   const form = family(spec.kind);
+  if (form === "path") {
+    // (As a box: its middle turned about the pivot, itself about its middle.)
+    const made = geometry(spec), centre = centreOf(made), now = turned(centre, pivot, degrees);
+    const shifted = moved(spec, now[0] - centre[0], now[1] - centre[1]), angle = mod(Number(spec.rotate || 0) + degrees, 360);
+    shifted.rotate = Math.abs(angle) < 1e-9 || Math.abs(angle - 360) < 1e-9 ? 0 : Math.round(angle * 1000) / 1000;
+    return shifted;
+  }
   if (form === "box" || form === "text") {
     const made = geometry(spec), centre = centreOf(made), now = turned(centre, pivot, degrees);
     const shifted = moved(spec, now[0] - centre[0], now[1] - centre[1]);
@@ -893,6 +983,7 @@ export function simplified(points, tolerance = 1.5) {
 // filled, or a box of words).
 export function hits(spec, made, point, slack) {
   const centre = centreOf(made), local = made.turn ? unturned(point, centre, made.turn) : point;
+  if (spec.kind === "path") return hitsPath(spec, made, local, slack);
   spec = normalised(spec);
   if (spec.kind === "text") {
     const [x, y, w, h] = made.box;
@@ -903,6 +994,29 @@ export function hits(spec, made, point, slack) {
   const reach = slack + Number(spec.line_width || 0) / 2;
   for (let n = 1; n < outline.length; n += 1) if (segmentDistance(local, outline[n - 1], outline[n]) <= reach) return true;
   if (made.closed && outline.length > 2 && segmentDistance(local, outline[outline.length - 1], outline[0]) <= reach) return true;
+  for (const one of made.heads) {
+    const points = flattened(one.segments);
+    if (one.filled && inside(points, local)) return true;
+    for (let n = 1; n < points.length; n += 1) if (segmentDistance(local, points[n - 1], points[n]) <= reach) return true;
+  }
+  return false;
+}
+
+// A path is hit near its outline, or in it where it is filled (or closed): found among its
+// pieces as they are kept with what was read, and only if the point is near its box at all.
+function hitsPath(spec, made, local, slack) {
+  const look = normalised(spec), read = P.parsedOf(spec), [x, y, w, h] = made.box;
+  const reach = slack + Number(look.line_width || 0) / 2;
+  const margin = reach + (made.heads.length ? headSize(look)[0] + 6 * Number(look.line_width || 0) : 0);
+  if (local[0] < x - margin || local[0] > x + w + margin || local[1] < y - margin || local[1] > y + h + margin) return false;
+  const flip = look.flip, cx = x + w / 2, cy = y + h / 2;
+  // (Its pieces are kept unmirrored: the point is mirrored instead.)
+  const at = [flip === "horizontal" || flip === "both" ? 2 * cx - local[0] : local[0], flip === "vertical" || flip === "both" ? 2 * cy - local[1] : local[1]];
+  const pieces = read.kept("rings", () => P.rings(read.segments));
+  const outlines = pieces.map(([points]) => points);
+  const filled = look.fill && look.fill !== "none";
+  if ((filled || pieces.every(([, shut]) => shut)) && P.inside(outlines, at, look.fill_rule)) return true;
+  if (P.distance(outlines, at, pieces.map(([, shut]) => shut)) <= reach) return true;
   for (const one of made.heads) {
     const points = flattened(one.segments);
     if (one.filled && inside(points, local)) return true;

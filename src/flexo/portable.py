@@ -156,6 +156,8 @@ def _paint(element: ET.Element, paint: Paint) -> None:
     element.set("fill", paint.fill or "none")
     if paint.fill and paint.fill_opacity != 1.0:
         element.set("fill-opacity", number(paint.fill_opacity))
+    if paint.fill and paint.fill_rule == "evenodd":
+        element.set("fill-rule", "evenodd")
     if paint.stroke:
         element.set("stroke", paint.stroke)
         element.set("stroke-width", number(paint.stroke_width))

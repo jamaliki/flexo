@@ -20,6 +20,29 @@ PALETTE = with_tone_roles(resolve_palette("paper", "default"))
 SCRIPT = Path(freeform.__file__).parent / "studio" / "static" / "studio" / "freeform.js"
 
 
+HOLED = "M 10 10 C 20 0 40 0 50 10 L 50 40 Z M 20 20 L 30 20 L 30 30 Z"
+DONUT = (
+    "M 100 50 A 50 50 0 1 1 0 50 A 50 50 0 1 1 100 50 Z "
+    "M 75 50 A 25 25 0 1 0 25 50 A 25 25 0 1 0 75 50 Z"
+)
+PATHS = [
+    {"kind": "path", "d": HOLED, "fill_rule": "evenodd", "text": "words"},
+    {"kind": "path", "d": HOLED, "rotate": 30, "flip": "horizontal", "fill": "accent"},
+    {"kind": "path", "d": DONUT, "flip": "both", "rotate": 200},
+    {"kind": "path", "d": "M 0 0 C 50 -50 100 50 150 0", "start": "dot", "end": "triangle"},
+    {"kind": "path", "d": "m 0 0 q 30 30 60 0 t 60 0", "end": "stealth", "rotate": 45},
+    {
+        "kind": "path",
+        "d": "M 0 0 L 40 0 L 40 40 Z M 60 60 L 90 60",
+        "start": "triangle",
+        "end": "bar",
+    },
+    {"kind": "path", "d": "M 5 5 h 20 v 20 h -20 z", "start": "triangle", "end": "triangle"},
+]
+"""Paths: holes, mirrored and turned, open with heads (at an open end only), arcs and
+quadratics."""
+
+
 def every_kind() -> list[dict]:
     """A shape of every kind, and of each kind's settings worth seeing apart."""
 
@@ -106,6 +129,7 @@ def every_kind() -> list[dict]:
         },
         {"kind": "triangle", "at": [0, 0], "size": [100, 80], "apex": 0.0, "flip": "vertical"},
         {"kind": "text", "at": [10, 20], "width": 300},
+        *PATHS,
         {
             "kind": "group",
             "shapes": [
@@ -357,6 +381,147 @@ def test_a_turned_shapes_sides_turn_with_it() -> None:
     assert freeform.sites(box)["right"] == pytest.approx((50.0, 75.0))
 
 
+# -- paths --
+
+
+def test_a_path_is_read_as_written_and_drawn_in_its_box() -> None:
+    spec = {
+        "kind": "path",
+        "d": HOLED,
+        "fill_rule": "evenodd",
+        "fill": "accent",
+        "line": "ink",
+        "line_width": 1.5,
+        "text": "words",
+    }
+    assert freeform.checked(spec) == spec
+    made = freeform.geometry(spec)
+    # Its box is what it draws (the curve reaches 2.5 above its ends, not its controls' 0).
+    assert made.box == pytest.approx((10.0, 2.5, 40.0, 37.5))
+    assert made.closed and made.area == made.box and made.turn == 0.0
+    root = ET.Element("svg")
+    group = freeform.draw(root, spec, made, "p", PALETTE, freeform.Shadow())
+    assert group.get("fill-rule") == "evenodd"
+    outline = group.find("{http://www.w3.org/2000/svg}path")
+    assert outline.get("d") == HOLED
+    assert freeform.closed(spec) and freeform.family("path") == "path"
+    assert freeform.LABELS["path"] == "Path" and "path" in freeform.KINDS
+    # Drawn by the pen, among the lines; the pencil draws by hand.
+    assert "path" in dict(freeform.SECTIONS)["Lines"]
+    assert freeform.TOOLS["path"] == "Pen" and freeform.LABELS["pen"] == "Pencil"
+
+
+def test_a_path_turns_and_mirrors_about_its_boxs_middle() -> None:
+    plain = freeform.geometry({"kind": "path", "d": "M 0 0 L 100 0 L 100 50"})
+    mirrored = freeform.geometry({"kind": "path", "d": "M 0 0 L 100 0 L 100 50", "flip": "both"})
+    assert mirrored.box == plain.box
+    assert [list(segment) for segment in mirrored.segments] == [
+        ["M", 100.0, 50.0],
+        ["L", 0.0, 50.0],
+        ["L", 0.0, 0.0],
+    ]
+    spec = {"kind": "path", "d": "M 0 0 L 100 0 L 100 50 L 0 50 Z", "rotate": 90}
+    made = freeform.geometry(spec)
+    assert made.turn == 90.0 and made.centre == (50.0, 25.0)
+    assert freeform.bounds(spec, made) == pytest.approx((25.0, -25.0, 75.0, 75.0))
+    root = ET.Element("svg")
+    group = freeform.draw(root, spec, made, "p", PALETTE)
+    assert group.get("transform") == "rotate(90 50 25)"
+
+
+def test_a_paths_heads_go_on_its_open_ends_only() -> None:
+    open_path = freeform.geometry(
+        {"kind": "path", "d": "M 0 0 C 50 -50 100 50 150 0", "start": "dot", "end": "triangle"}
+    )
+    assert [head.end for head in open_path.heads] == ["start", "end"]
+    assert open_path.heads[1].tip == pytest.approx((150.0, 0.0))
+    # Under the triangle the curve is cut short.
+    assert open_path.segments[-1][-2] < 150.0
+    closed_path = freeform.geometry(
+        {"kind": "path", "d": "M 0 0 L 40 0 L 40 40 Z", "start": "dot", "end": "triangle"}
+    )
+    assert closed_path.heads == []
+    # Its first piece closed and its last open: an end, and no start.
+    both = freeform.geometry(
+        {
+            "kind": "path",
+            "d": "M 0 0 L 40 0 L 40 40 Z M 60 60 L 90 60",
+            "start": "dot",
+            "end": "bar",
+        }
+    )
+    assert [head.end for head in both.heads] == ["end"]
+    assert freeform.path_open({"kind": "path", "d": "M 0 0 L 40 0 L 40 40 Z M 60 60 L 90 60"})
+    assert not freeform.path_open({"kind": "path", "d": "M 0 0 L 40 0 L 40 40 Z"})
+
+
+def test_a_path_moved_is_written_again() -> None:
+    spec = {"kind": "path", "id": "p", "d": "m 10 10 h 20 v 20 z", "rotate": 15}
+    moved = freeform.moved(spec, 5, -2.5)
+    assert moved == {"kind": "path", "id": "p", "d": "M 15 7.5 L 35 7.5 L 35 27.5 Z", "rotate": 15}
+    # Not moved, it is as written.
+    assert freeform.moved(spec, 0, 0)["d"] == "m 10 10 h 20 v 20 z"
+    group = freeform.moved({"kind": "group", "shapes": [spec]}, 1, 1)
+    assert group["shapes"][0]["d"] == "M 11 11 L 31 11 L 31 31 Z"
+
+
+@pytest.mark.parametrize(
+    ("spec", "key", "words"),
+    [
+        ({"kind": "path"}, "d", "A path needs d"),
+        ({"kind": "path", "d": "L 1 1"}, "d", "a path starts with M"),
+        ({"kind": "path", "d": 12}, "d", "d must be SVG path data"),
+        ({"kind": "path", "d": "M 0 0 C 1 2"}, "d", "C at character 7 needs 6 numbers"),
+        ({"kind": "path", "d": "M 0 0 L 1 1", "at": [0, 0]}, "at", "Unknown key at for a path"),
+        ({"kind": "path", "d": "M 0 0 L 1 1", "size": [1, 1]}, "size", "Unknown key size"),
+        (
+            {"kind": "path", "d": "M 0 0 L 1 1", "fill_rule": "odd"},
+            "fill_rule",
+            "fill_rule must be one of nonzero, evenodd",
+        ),
+    ],
+)
+def test_what_is_wrong_with_a_path_is_said_under_its_key(spec: dict, key: str, words: str) -> None:
+    with pytest.raises(freeform.ShapeError) as raised:
+        freeform.checked(spec)
+    assert raised.value.key == key
+    assert words in str(raised.value)
+
+
+def test_a_figures_path_written_wrong_is_said_where_it_is() -> None:
+    from flexo.figure_shapes import read
+
+    shapes = [{"kind": "arrow", "from": [0, 0], "to": [1, 1]}] * 3 + [{"kind": "path", "d": "L 1"}]
+    found, said = read(shapes)
+    assert found[3] is None
+    assert said[0].message.startswith("shapes[3].d: a path starts with M")
+
+
+def test_a_lines_end_is_glued_to_a_paths_outline() -> None:
+    # A ring: its sides' sites are on its outline, level with its middle.
+    ring = freeform.target_of({"kind": "path", "d": DONUT})
+    sites = freeform.sites(ring)
+    assert sites["right"] == pytest.approx((100.0, 50.0), abs=0.05)
+    assert sites["top"] == pytest.approx((50.0, 0.0), abs=0.05)
+    assert sites["centre"] == (50.0, 50.0)
+    # At its centre an end stops at its outline -- the outer one, its hole passed over.
+    line = {"kind": "arrow", "from": [300, 50], "to": {"shape": "ring", "side": "centre"}}
+    end = freeform.glued(line, lambda _: ring)[1]
+    assert math.hypot(end[0] - 50, end[1] - 50) == pytest.approx(50.0, abs=0.3)
+    # A wedge's sides are where its outline is, level with its middle (or straight above it):
+    # not its box's.
+    wedge = freeform.target_of({"kind": "path", "d": "M 0 0 L 100 50 L 0 100 Z"})
+    assert freeform.sites(wedge)["right"] == pytest.approx((100.0, 50.0))
+    assert freeform.sites(wedge)["top"] == pytest.approx((50.0, 25.0))
+    # Turned, its sites turn with it.
+    turned = freeform.target_of({"kind": "path", "d": "M 0 0 L 100 50 L 0 100 Z", "rotate": 90})
+    assert freeform.sites(turned)["right"] == pytest.approx((50.0, 100.0))
+    glued = freeform.glued(
+        {"kind": "arrow", "from": [50, 300], "to": {"shape": "wedge"}}, lambda _: turned
+    )
+    assert glued[1] == pytest.approx((50.0, 100.0))
+
+
 # -- the studio's twin --
 
 
@@ -372,7 +537,8 @@ def test_the_studios_shapes_are_drawn_as_these_are() -> None:
         "return { segments: made.segments, heads: made.heads.map((head) => head.segments), "
         "area: made.area, box: made.box, turn: made.turn, label: made.label, "
         "bounds: f.bounds(spec, made) }; });\n"
-        "const tables = { sections: f.SECTIONS, labels: f.LABELS, heads: f.HEADS, sizes: f.SIZES, "
+        "const tables = { sections: f.SECTIONS, labels: f.LABELS, tools: f.TOOLS, heads: f.HEADS, "
+        "sizes: f.SIZES, "
         "defaults: Object.fromEntries(f.KINDS.map((kind) => [kind, f.defaults(kind)])) };\n"
         "console.log(JSON.stringify({ out, tables }));\n"
     )
@@ -383,6 +549,7 @@ def test_the_studios_shapes_are_drawn_as_these_are() -> None:
     tables = answered["tables"]
     assert [[name, list(kinds)] for name, kinds in freeform.SECTIONS] == tables["sections"]
     assert tables["labels"] == freeform.LABELS
+    assert tables["tools"] == freeform.TOOLS
     assert list(freeform.HEADS) == tables["heads"]
     assert {kind: list(size) for kind, size in freeform.SIZES.items()} == tables["sizes"]
     assert {kind: freeform.defaults(kind) for kind in freeform.KINDS} == tables["defaults"]
@@ -428,3 +595,69 @@ def test_the_cloud_is_a_figures_cloud() -> None:
         assert [value for point in segment.points for value in point] == pytest.approx(
             list(ours), abs=1e-4
         )
+
+
+def test_the_studios_paths_are_glued_to_and_moved_as_these_are() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is not installed")
+    script = (
+        f"import * as f from {json.dumps(SCRIPT.as_uri())};\n"
+        f"const paths = {json.dumps(PATHS)};\n"
+        "console.log(JSON.stringify(paths.map((spec) => {\n"
+        "  const target = f.targetOf(spec, f.geometry(spec));\n"
+        "  const glued = ['top', 'right', 'bottom', 'left', 'centre', null].map((side) =>\n"
+        "    f.glued({ kind: 'arrow', from: [300, 40],\n"
+        "      to: { shape: 'p', ...(side ? { side } : {}) } }, () => target));\n"
+        "  const moved = f.moved(spec, 2.5, -4);\n"
+        "  const group = f.moved({ kind: 'group', shapes: [spec] }, 1, 1);\n"
+        "  return { sites: f.sites(target), glued, moved: moved.d, keys: Object.keys(moved),\n"
+        "    group: group.shapes[0].d, bounds: f.bounds(moved),\n"
+        "    copy: JSON.parse(JSON.stringify(moved)) };\n"
+        "})));\n"
+    )
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], capture_output=True, text=True, check=True
+    )
+    for spec, theirs in zip(PATHS, json.loads(result.stdout), strict=True):
+        target = freeform.target_of(spec)
+        for side, point in freeform.sites(target).items():
+            assert list(point) == pytest.approx(theirs["sites"][side], abs=1e-9), (spec, side)
+        for side, other in zip(
+            ("top", "right", "bottom", "left", "centre", None), theirs["glued"], strict=True
+        ):
+            line = {"kind": "arrow", "from": [300, 40], "to": {"shape": "p"}}
+            if side:
+                line["to"]["side"] = side
+            ours = freeform.glued(line, lambda _, target=target: target)
+            assert [list(point) for point in ours] == [
+                pytest.approx(point, abs=1e-9) for point in other
+            ], (spec, side)
+        moved = freeform.moved(spec, 2.5, -4)
+        # Moved, its outline is written again -- in its place among its keys.
+        assert theirs["moved"] == moved["d"] and theirs["keys"] == list(moved)
+        assert theirs["copy"] == moved
+        assert theirs["group"] == freeform.moved(spec, 1, 1)["d"]
+        assert list(freeform.bounds(moved)) == pytest.approx(theirs["bounds"], abs=0.01)
+
+
+def test_a_paths_holes_are_kept_in_the_pdf_and_the_portable_svg() -> None:
+    import re
+    import zlib
+
+    from flexo.drawing import read_drawing
+    from flexo.pdf import pdf_bytes
+    from flexo.portable import portable_svg
+    from flexo.svg import svg_tag
+
+    root = ET.Element(svg_tag("svg"), width="200", height="200", viewBox="0 0 200 200")
+    for index, rule in enumerate(("evenodd", "nonzero")):
+        spec = {"kind": "path", "d": DONUT, "fill_rule": rule, "fill": "accent", "line": "none"}
+        freeform.draw(root, spec, freeform.geometry(spec), f"p{index}", PALETTE)
+    text = ET.tostring(root, encoding="unicode")
+    painted = [item for item in read_drawing(text).walk() if getattr(item, "segments", None)]
+    assert [item.paint.fill_rule for item in painted] == ["evenodd", "nonzero"]
+    streams = re.findall(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes(text), re.S)
+    content = b"".join(zlib.decompress(stream) for stream in streams if stream[:1] == b"x")
+    assert content.count(b"\nf*") + content.count(b" f*") == 1
+    assert portable_svg(text).count('fill-rule="evenodd"') == 1

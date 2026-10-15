@@ -20,7 +20,7 @@ import { CONVERT, convertible, convertCommand } from "/static/studio/toparts.js"
 const ROUNDABLE = new Set(["ring", "ellipse", "highlight", "rectangle", "rounded-rectangle", "cloud", "brace", "bracket", "dimension"]);
 // What a shape on a figure says besides how it is drawn.
 const OWN = ["on", "around", "margin", "side", "behind", "locked"];
-const PLACES = { box: ["at", "size"], text: ["at", "width"], line: ["from", "to"], points: ["points"] };
+const PLACES = { box: ["at", "size"], text: ["at", "width"], line: ["from", "to"], points: ["points"], path: ["d"] };
 // Pieces of a drawing that are no part to point at of their own: a part's words, its box.
 const PIECE_ENDS = /\.(label|body|outline|shadow|hit|text|container|components|connectors|artwork)$/;
 
@@ -37,7 +37,7 @@ const sorted = (value) => (Array.isArray(value) ? value.map(sorted) : value && t
 const alike = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 
 // (Round parts, as the figure draws them: around.js.)
-const placedRound = (spec, box) => placeRound(spec, box, F.family);
+const placedRound = (spec, box) => placeRound(spec, box, F.family, F.fittedPath);
 
 // The figure editor's shapes: `studio`, the figure's parts (`figure`, parts.js), its page (the
 // element its <svg> is in), the stage and the middle (`center`), the toolbar's Draw button;

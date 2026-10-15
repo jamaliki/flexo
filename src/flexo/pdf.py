@@ -467,7 +467,8 @@ class _Content:
             if paint.dash and any(value > 0 for value in paint.dash):
                 ops.append(f"[{' '.join(_n(value) for value in paint.dash)}] 0 d")
         ops.append(_path(segments))
-        ops.append("B" if fill and stroke else "f" if fill else "S")
+        rule = "*" if fill and paint.fill_rule == "evenodd" else ""
+        ops.append(f"B{rule}" if fill and stroke else f"f{rule}" if fill else "S")
         ops.append("Q")
 
     def shape(self, item: Shape) -> None:
