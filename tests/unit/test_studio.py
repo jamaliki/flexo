@@ -1914,12 +1914,12 @@ def test_a_drawing_copied_in_another_app_is_pasted_as_its_svg() -> None:
     # In a browser: only words that are a drawing.
     assert found["cases"][:3] == ["now", drawing, "now"]
     # In the Mac app: the drawing beside a picture of any kind (an SVG file, a picture with
-    # another file), alone, or beside a file and no words -- asked first, so the picture
-    # never wins; never for words or formatted words, and the app asked only then.
+    # another file), alone, or beside a file, or HTML, and no words (Inkscape's canvas) --
+    # asked first, so the picture never wins; never for words, and the app asked only then.
     assert found["cases"][3:11] == [
-        from_app, from_app, from_app, "now", from_app, from_app, from_app, "now"
+        from_app, from_app, from_app, "now", from_app, from_app, from_app, from_app
     ]
-    assert found["many"] == 6
+    assert found["many"] == 7
     # (None there, or the app not answering: the picture is pasted.)
     assert found["cases"][11:] == [None, None]
     assert found["words"] == [

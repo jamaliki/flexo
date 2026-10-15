@@ -26,9 +26,9 @@ const pictured = (file) => svgNamed(file) || PICTURE.test(file?.name || "") || /
 // comes, it is the drawing, never a picture of it (Paste as Picture is for that):
 // - words that are a whole SVG drawing, or its SVG under a type of its own (image/svg+xml,
 //   Inkscape's);
-// - in the Mac app, whenever a picture of any kind is pasted, or nothing the page reads as
-//   words: the drawing the app finds on the clipboard, first -- so the PNG of it Inkscape
-//   puts beside it (which is all the web view hands the page) never wins;
+// - in the Mac app, whenever a picture of any kind is pasted, or no words: the drawing the
+//   app finds on the clipboard, first -- so the picture of it Inkscape puts beside it (all
+//   the web view hands the page: a JPEG, a PNG, and its canvas HTML) never wins;
 // - a file pasted that is an SVG (one copied in the Finder; one a web view hands over): read.
 // Words or a file named as the web view names a picture pasted ("image.svg"), for the folder
 // it is saved in; a file pasted keeps its own name.
@@ -44,7 +44,9 @@ export function pastedDrawing(data) {
   const app = globalThis.pywebview?.api;
   const files = [...(data?.files || [])];
   const file = files.find(svgNamed);
-  const ask = Boolean(app?.clipboard_drawing) && (files.some(pictured) || (!words.trim() && !data?.getData?.("text/html")));
+  // (No words: an HTML of no words beside them -- Inkscape's "Inkscape Output", a canvas
+  // script -- is no reason not to ask.)
+  const ask = Boolean(app?.clipboard_drawing) && (files.some(pictured) || !words.trim());
   if (!ask && !file) return null;
   return (async () => {
     if (ask) {

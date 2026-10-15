@@ -276,6 +276,7 @@ const transfer = ({ words = "", html = "", types = {}, files = [] } = {}) => ({
 });
 const png = new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
 const tiff = new File([new Uint8Array([73, 73, 42, 0])], "image.tiff", { type: "image/tiff" });
+const jpeg = new File([new Uint8Array([255, 216, 255])], "image.jpeg", { type: "image/jpeg" });
 const pdf = new File(["%%PDF-1.4"], "paper.pdf", { type: "application/pdf" });
 const asked = [];
 // The Mac app, its clipboard holding `answer` (an SVG, "" for none, or an Error: unread).
@@ -317,7 +318,11 @@ const cases = {
   inkscape_type: await outcome(transfer({ types: { "image/x-inkscape-svg": SVG } })),
   svg_words: await outcome(transfer({ words: SVG })),
   words: await outcome(transfer({ words: "Hello" }), app(SVG)),
-  formatted_words: await outcome(transfer({ words: "", html: "<b>Hello</b>" }), app(SVG)),
+  formatted_words: await outcome(transfer({ words: "Hello", html: "<b>Hello</b>" }), app(SVG)),
+  // Inkscape 1.3's, as the web view hands it: a JPEG of it, its canvas HTML, no words.
+  inkscape_captured:
+    await outcome(transfer({ files: [jpeg], html: "<canvas></canvas>" }), app(SVG)),
+  inkscape_html_alone: await outcome(transfer({ html: "<canvas></canvas>" }), app(SVG)),
   a_photo_in_a_browser: await outcome(transfer({ files: [png] })),
   a_photo_in_the_app: await outcome(transfer({ files: [png] }), app("")),
   a_pdf_in_the_app: await outcome(transfer({ files: [pdf] }), app("")),
@@ -349,6 +354,8 @@ def test_a_paste_brings_the_drawing_however_the_clipboard_holds_it() -> None:
     # Inkscape's, in the Mac app: the web view hands a PNG of it (or nothing, or a TIFF beside
     # its words): the app's SVG, asked first.
     for case in (
+        "inkscape_captured",
+        "inkscape_html_alone",
         "inkscape_in_the_app",
         "inkscape_with_a_texts_words",
         "inkscape_handed_nothing",
