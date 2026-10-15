@@ -110,15 +110,22 @@ export function alignTools(ctx) {
     if (!ctx.picks().length) return false;
     ctx.showPanel?.();
     ctx.renderInspector();
-    requestAnimationFrame(() => {
+    // (Drawn at once; else a moment later. Never waiting on a frame: a window behind others
+    // draws none.)
+    const show = (again) => {
       const node = [...document.querySelectorAll(".align-section")].find((each) => each.offsetParent !== null);
-      if (!node) { toast("Show the inspector (Format) to align them", { icon: "align-left", seconds: 3 }); return; }
+      if (!node) {
+        if (again) setTimeout(() => show(false), 60);
+        else toast("Show the inspector (Format) to align them", { icon: "align-left", seconds: 3 });
+        return;
+      }
       node.scrollIntoView({ block: "nearest" });
       node.classList.remove("shown");
       void node.offsetWidth;
       node.classList.add("shown");
       node.querySelector("button.select, button:not(:disabled)")?.focus({ focusVisible: true });
-    });
+    };
+    show(true);
     return true;
   }
 
@@ -184,7 +191,7 @@ export function alignTools(ctx) {
   // -- the inspector --
 
   function focusGap() {
-    requestAnimationFrame(() => { const input = [...document.querySelectorAll(".align-section [data-key='shape.align-gap']")].find((node) => node.offsetParent !== null); input?.focus(); input?.select?.(); });
+    setTimeout(() => { const input = [...document.querySelectorAll(".align-section [data-key='shape.align-gap']")].find((node) => node.offsetParent !== null); input?.focus(); input?.select?.(); }, 80);
     return true;
   }
   const button = (glyph, title, run) => ui.button("", run, { kind: "ghost", small: true, icon: glyph, title });
