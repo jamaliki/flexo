@@ -10,7 +10,8 @@
 // on it, following it after -- and a curve by its middle; its own handles (a corner, a tail, a
 // star's points) shape it. Each catches at the page's edges and middle, and the edges and
 // middles of the other shapes and of what the page holds, a guide drawn where it does (⌘:
-// none). The arrows nudge it (⇧: ten points); double-clicked, its words are typed in it.
+// none; with snapping off, none and no glue, ⌘ catching and gluing: snapping.js). The arrows
+// nudge it (⇧: ten points); double-clicked, its words are typed in it.
 // Everything moves on the page at once, drawn here (freeform.js) as the page will draw it;
 // the page's own drawing takes its place as it comes. The pen draws a path point by point, a
 // path's points are edited where it is (a double-click, Edit Points), any shape is made a path
@@ -24,6 +25,7 @@ import * as P from "/static/studio/pathdata.js";
 import * as O from "/static/studio/pathops.js";
 import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
+import * as Snap from "/static/studio/snapping.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -684,7 +686,8 @@ export function shapeEditor(host) {
   function step(event) {
     const g = gesture;
     if (!g) return;
-    const point = toFrame(event), free = event.metaKey || event.ctrlKey;
+    // (Free of guides and glue: snapping off, or ⌘ held while it is on -- snapping.js.)
+    const point = toFrame(event), free = Snap.free(event);
     guides.replaceChildren();
     if (g.type === "move") stepMove(g, point, event, free);
     else if (g.type === "size") stepSize(g, point, event, free);
@@ -916,6 +919,8 @@ export function shapeEditor(host) {
   // the part), at the site nearest the pointer -- a side's middle, or its centre -- else
   // nothing.
   function glueAt(point, own, event) {
+    // (Snapping off, or ⌘ held while it is on: nothing is glued -- nor looked for.)
+    if (Snap.free(event)) return null;
     const reach = 10 / unit();
     let best = null;
     const consider = (target, glue) => {
@@ -940,7 +945,7 @@ export function shapeEditor(host) {
       if (piece) consider(piece, { [glueKey]: piece.name });
       for (const [name, object] of objectsNow()) consider(object, { [glueKey]: name });
     }
-    if (!best || event?.metaKey || event?.ctrlKey) return null;
+    if (!best) return null;
     return best;
   }
   // What the page holds an end is glued to, by name, as it is called ("Encoder", "List").
@@ -1004,7 +1009,7 @@ export function shapeEditor(host) {
     gesture.started = true;
   }
   function stepAdjust(g, point, event, free) {
-    const values = g.adjust.set(point, free);
+    const values = g.adjust.set(point, free, event);
     const made = { ...g.originals[0], ...values };
     g.values = values;
     live = new Map([[g.index, made]]);

@@ -510,6 +510,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .spacer { flex: 1; }
 .bar-group { display: flex; align-items: center; gap: 2px; }
 .bar-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
+/* A zoom bar's rule, between its sizes and the magnet (snapping, magnet.js). */
+.zoom-sep { flex: none; width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
 .main { position: relative; min-height: 0; }
 
 /* -- controls -- */

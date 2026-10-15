@@ -4,7 +4,8 @@
 // The pen draws one point by point: a click puts a corner, a drag a smooth point whose handles
 // it pulls out either side (⇧: along one of eight ways), a click on its first point closes it,
 // Return or a double-click ends it open, ⌫ takes back its last point, Esc its last segment and
-// again the whole of it; each point catches at the guides the editor's others do (⌘: none).
+// again the whole of it; each point catches at the guides the editor's others do (⌘: none;
+// with snapping off, none, ⌘ catching: snapping.js).
 //
 // A path's points are edited in place (a double-click on it, or Edit Points): a point or a
 // handle dragged (⌥: a smooth point's handle on its own, a corner then), a point
@@ -22,6 +23,7 @@
 import * as F from "./freeform.js";
 import * as P from "./pathdata.js";
 import * as O from "./pathops.js";
+import * as Snap from "./snapping.js";
 
 const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const SNAP = 7; // pixels: how near the first point closes, a point or handle is caught
@@ -63,10 +65,11 @@ function penTool(ctx) {
     ctx.guides.replaceChildren();
     ctx.hideTip?.();
   }
-  // Where a point goes: along one of eight ways from `from` (⇧), else caught at a guide (⌘: free).
+  // Where a point goes: along one of eight ways from `from` (⇧), else caught at a guide (⌘: free;
+  // snapping off, free but for ⌘).
   function placed(point, event, from) {
     if (event.shiftKey && from) return eightWays(point, from);
-    if (event.metaKey || event.ctrlKey) return point;
+    if (Snap.free(event)) return point;
     return ctx.caught(point, state.targets);
   }
   function press(event) {
@@ -333,7 +336,7 @@ function pointEditor(ctx) {
       const [p, n] = g.key.split(":").map(Number), pressed = O.toPage(now.frame, now.pieces[p].anchors[n].at);
       if (event.shiftKey) { const dx = to[0] - g.from[0], dy = to[1] - g.from[1]; to = Math.abs(dx) > Math.abs(dy) ? [to[0], g.from[1]] : [g.from[0], to[1]]; }
       let target = [pressed[0] + to[0] - g.from[0], pressed[1] + to[1] - g.from[1]];
-      if (!(event.metaKey || event.ctrlKey) && !event.shiftKey) target = ctx.caught(target, g.targets);
+      if (!Snap.free(event) && !event.shiftKey) target = ctx.caught(target, g.targets);
       const a = O.toLocal(now.frame, pressed), b = O.toLocal(now.frame, target), dx = b[0] - a[0], dy = b[1] - a[1];
       for (const key of state.chosen) {
         const [q, m] = key.split(":").map(Number), one = pieces[q]?.anchors[m];
@@ -348,7 +351,7 @@ function pointEditor(ctx) {
     } else if (g.type === "handle") {
       // A handle: caught at the guides; a smooth point's other handle turning with it, as long
       // as it was (⌥: left where it is, the point a corner).
-      const target = event.metaKey || event.ctrlKey ? point : ctx.caught(point, g.targets);
+      const target = Snap.free(event) ? point : ctx.caught(point, g.targets);
       const one = pieces[g.p].anchors[g.n], other = g.side === "in" ? "out" : "in", wasSmooth = O.smooth(now.pieces[g.p].anchors[g.n]);
       one[g.side] = O.toLocal(now.frame, target);
       if (wasSmooth && !event.altKey && one[other]) {
