@@ -976,6 +976,11 @@ export function mount(studio, main) {
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
+    // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V) of the shapes chosen.
+    ...(!typingNow() && figure.canCopyStyle() ? [{ icon: "copy", label: "Copy Style", keys: "⌥⌘C", hint: chosenName() || "", run: () => figure.copyStyle() }] : []),
+    ...(!typingNow() && figure.canPasteStyle() ? [{ icon: "paste", label: "Paste Style", keys: "⌥⌘V", hint: chosenName() || "", run: () => figure.pasteStyle() }] : []),
+    // Insert › Zoom Inset: part of the shape chosen, magnified beside it.
+    ...(!typingNow() && figure.selected.length === 1 && shapes.insettable(figure.selected[0]) ? [{ icon: "plus", label: "Add Zoom Inset", hint: figure.nameOf(figure.selected[0]), run: () => shapes.addInset(figure.selected[0]) }] : []),
     // Format › Bold and Italic: of all the words of the shapes chosen (⌘B, ⌘I).
     ...(!typingNow() && figure.canStyle() ? [
       { icon: "bold", label: "Bold", keys: "⌘B", run: () => figure.toggleWords("bold") },

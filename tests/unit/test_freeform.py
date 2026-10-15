@@ -70,9 +70,18 @@ def every_kind() -> list[dict]:
         shapes.append({"kind": kind, "points": [[10, 10], [60, 90], [110, 30]], "closed": True})
         shapes.append({"kind": kind, "points": [[10, 10], [60, 90]]})
     for kind in freeform.BOXED:
-        shapes.append({"kind": kind, "at": [40, 50], "size": [180, 110]})
+        # (A zoom inset needs what it shows part of: it is never turned nor mirrored.)
+        of = {"of": "body[0]"} if kind == "inset" else {}
+        shapes.append({"kind": kind, "at": [40, 50], "size": [180, 110], **of})
         shapes.append(
-            {"kind": kind, "at": [40, 50], "size": [90, 150], "rotate": 30, "flip": "horizontal"}
+            {
+                "kind": kind,
+                "at": [40, 50],
+                "size": [90, 150],
+                "rotate": 30,
+                "flip": "horizontal",
+                **of,
+            }
         )
     shapes += [
         {"kind": "polygon", "at": [0, 0], "size": [100, 100], "sides": 3},

@@ -186,6 +186,9 @@ class Image:
     cropped, or cut by a clip it is drawn in; ``None`` where it shows whole."""
     oval: bool = False
     """Whether only the oval within ``clip`` shows (a picture cropped round)."""
+    outline: tuple[Segment, ...] = ()
+    """The outline only what is within shows, on the page, as well as within ``clip``: a
+    picture masked by a shape (``flexo.masks``); none, where it is not."""
 
     def placed(self, width: float, height: float) -> tuple[float, float, float, float]:
         """Where a picture of ``width`` by ``height`` is drawn: ``x, y, w, h``."""
@@ -347,6 +350,9 @@ def read_drawing(svg_text: str) -> Drawing:
 @dataclass(frozen=True, slots=True)
 class _Environment:
     ids: dict[str | None, ET.Element]
+    using: set[int] = field(default_factory=set)
+    """The elements being drawn again by a ``<use>`` now: one that uses itself (a zoom inset
+    of what holds it) is drawn once, never round and round."""
 
     @property
     def markers(self) -> dict[str | None, ET.Element]:
@@ -658,10 +664,12 @@ def _read_one(
     start = len(group.items)
     _read_element(child, tag, group, context, alpha, environment, placed)
     added = group.items[start:]
-    if shown is not None and not all(_unclipped(item, shown) for item in added):
+    kept = child.get("data-flexo-inset") is not None
+    if shown is not None and added and (kept or not all(_unclipped(i, shown) for i in added)):
         # What could not be cut to the clip exactly -- a curve, words -- is drawn whole, or
         # blends: its group keeps the clip, for a writer to show only what of it the clip
-        # keeps, blended within it.
+        # keeps, blended within it. (A zoom inset's view keeps its clip, cut or not: what it
+        # shows, for a writer that draws it as one picture.)
         if tag in {"g", "a", "switch"} and isinstance(added[0], Group):
             added[0].clip = shown
         else:
@@ -689,11 +697,16 @@ def _read_element(
     elif tag == "use":
         reference = child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or ""
         target = environment.ids.get(reference.lstrip("#"))
-        if target is not None and target is not child:
+        if target is not None and target is not child and id(target) not in environment.using:
             moved = _compose(placed, (1.0, 0.0, 0.0, 1.0, _float(child, "x"), _float(child, "y")))
             used = Group(child.get("id"))
-            _read_one(target, used, context, alpha, environment, moved)
-            group.items.extend(used.items)
+            environment.using.add(id(target))
+            try:
+                _read_one(target, used, context, alpha, environment, moved)
+            finally:
+                environment.using.discard(id(target))
+            # (Drawn again, with no ids of their own: an id names one thing in a drawing.)
+            group.items.extend(_unnamed(item) for item in used.items)
     elif tag in {"rect", "circle", "ellipse", "path", "line", "polyline", "polygon"}:
         # A rectangle or oval filled with one picture is that picture, cropped to it.
         picture = _patterned(child, tag, context, environment, placed)
@@ -725,6 +738,15 @@ def _read_element(
             _viewport(child, group, context, alpha, environment, placed)
         else:
             group.items.append(_transformed(_nested_svg(child), placed))
+
+
+def _unnamed(item: Shape | Text | Image | Group) -> Shape | Text | Image | Group:
+    """``item`` drawn again by a ``<use>``: what it is, but none of its ids."""
+
+    if isinstance(item, Group):
+        return Group(None, [_unnamed(child) for child in item.items], dict(item.data), item.label,
+                     item.clip)
+    return replace(item, id=None)
 
 
 _UNDRAWN = frozenset(
@@ -791,7 +813,7 @@ def _patterned(
     once, which is how a picture cropped is drawn -- shown only within the shape: None
     for any other fill."""
 
-    if tag not in {"rect", "circle", "ellipse"}:
+    if tag not in {"rect", "circle", "ellipse", "path"}:
         return None
     found = re.fullmatch(r"\s*url\(\s*['\"]?#([^)'\"]+)['\"]?\s*\)\s*", context.get("fill", ""))
     pattern = environment.ids.get(found.group(1)) if found else None
@@ -815,6 +837,19 @@ def _patterned(
     href = source.get("href") or source.get("{http://www.w3.org/1999/xlink}href") or ""
     fit = source.get("preserveAspectRatio", "xMidYMid meet")
     picture = _transformed(Image(element.get("id"), x, y, width, height, href, fit), matrix)
+    if tag == "path":
+        # A picture masked by a shape: shown within its outline.
+        outline = tuple(
+            Segment(s.kind, tuple(_map(matrix, p) for p in s.points))
+            for s in parse_path(element.get("d", ""))
+        )
+        points = [p for segment in outline for p in segment.points]
+        if not points:
+            return None
+        shape = (min(p[0] for p in points), min(p[1] for p in points),
+                 max(p[0] for p in points), max(p[1] for p in points))
+        region = _intersect(shape, _region_of(context.get("-flexo-clip")))
+        return replace(picture, clip=region, outline=outline)
     if tag == "rect":
         left, top = _float(element, "x"), _float(element, "y")
         right, bottom = left + _float(element, "width"), top + _float(element, "height")

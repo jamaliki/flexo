@@ -146,7 +146,10 @@ shapes: drawn over the figure where they are put, taking no room -- what you wou
   or #rrggbb, line_width, dash (dashed, dotted), start and end heads (triangle, open, stealth,
   dot, circle, bar, diamond), head_size, opacity, fill_opacity, shadow; words: text (the
   figure's label markup), font_size, bold, italic, colour, align, valign. behind: true draws one
-  under the parts; hide, dim and highlight name a shape by its id. E.g.
+  under the parts; hide, dim and highlight name a shape by its id. A zoom inset, kind: inset,
+  of: a part (on: that part too, to move with it), region: [x, y, width, height] as fractions
+  of the part, at and size, shows that region magnified in its box, joined to it by two lines
+  (frame_line, connector_line, their _width and _dash; text a corner label). E.g.
   shapes: [{kind: ring, around: [encoder]}, {kind: arrow, from: [20, 10], to: {part: decoder,
   side: top}, text: "here"}, {kind: text, on: decoder, at: [0, -16], text: bottleneck}].
   A diagram pasted as shapes (boxes with words, arrows, a titled box round some) becomes the
