@@ -821,7 +821,7 @@ shapes:
   text: here
 - {kind: text, on: decoder, at: [0, -16], text: bottleneck} # on a part: moves with it
 - {kind: brace, around: [x, encoder], text: front end}     # a brace beside them, on their right
-- {kind: highlight, around: [latent], behind: true}       # under the parts, over the page
+- {kind: highlight, around: [latent], behind: true}       # a backdrop the part stands on
 ```
 
 Places are the figure's points, y down, from its top left as it is laid out. Since the
@@ -838,17 +838,18 @@ an end stays where it was, a shape on it is drawn from the figure's top left.
 Shapes are painted by the figure's palette (`accent` is its first tone, `accent2-fill` its
 second's tint, `muted`, `ink`, `paper`, `grey`, or `#rrggbb`) and their words are set in its
 font, at its size unless they say; they are drawn over everything, in the order listed (or,
-`behind: true`, under the parts), and the page grows to hold one that reaches past it, on any
-side, moving nothing. The figure's `hide`, `dim` and `highlight` name a shape by its `id`, as
+`behind: true`, under the parts, over the box of the group that holds them: a backdrop they
+stand on), and the page grows to hold one that reaches past it, on any side, moving nothing. The figure's `hide`, `dim` and `highlight` name a shape by its `id`, as
 they name parts; a shape attached to parts is shown as they are unless it is named itself.
 In Python, `figure.shape("ring", around=["encoder"])`, `figure.shape("arrow", from_=[20, 10],
 to={"part": "decoder"})`.
 
 In the studio, Draw in the figure's toolbar offers every kind: drag on the figure to draw
 one (a click makes it its usual size -- or, for a ring, a highlight, a box or a brace, a click
-on a part draws it round that part), and it is moved, sized, turned, bent, glued, styled,
-grouped, stacked and copied as on a slide. A shape drawn on a part is put on it, and moves
-with it; its panel's **Moves With** chooses another part, or none.
+on a part draws it round that part, a filled one behind it so that it hides nothing), and it
+is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide. A
+shape drawn on a part is put on it, and moves with it; its panel's **Moves With** chooses
+another part, or none, and **Drawn** puts it in front of the parts or behind them.
 
 ### A shape's words, and a picture's crop
 

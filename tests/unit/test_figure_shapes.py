@@ -227,7 +227,7 @@ def test_a_part_that_is_gone_is_a_warning_and_an_end_stays_where_it_was() -> Non
 # -- drawing -------------------------------------------------------------------------------
 
 
-def test_shapes_are_drawn_over_everything_and_behind_on_the_page() -> None:
+def test_shapes_are_drawn_over_everything_and_behind_under_the_parts() -> None:
     svg = drawn(
         figure(
             shapes=[
@@ -244,8 +244,9 @@ def test_shapes_are_drawn_over_everything_and_behind_on_the_page() -> None:
     ).document.text
     root = ET.fromstring(svg)
     layers = [item.get("id") for item in root]
-    assert layers.index("layer.shapes-behind") == layers.index("layer.background") + 1
     assert layers.index("layer.shapes") > layers.index("root")
+    order = [item.get("id") for item in root.iter() if item.get("id")]
+    assert order.index("root.shapes-behind") < order.index("root.components") < order.index("x")
     arrow = element(svg, "pointer")
     assert arrow.get("data-flexo-shape") == "arrow"
     assert arrow.get("{http://www.inkscape.org/namespaces/inkscape}label") == "Arrow"
@@ -531,3 +532,27 @@ def test_a_shape_named_and_hidden_in_one_step() -> None:
         TEXT, {"do": "shapes", "shapes": named, "show": {"ids": ["ring"], "as": "dimmed"}}
     )["text"]
     assert model(text)["figure"]["dim"] == ["ring"] and model(text)["shapes"][0]["id"] == "ring"
+
+
+def test_a_shape_behind_its_parts_is_over_their_groups_box_and_under_them() -> None:
+    document = {
+        "figure": {"id": "f"},
+        "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}, {"id": "c", "label": "C"}],
+        "groups": [
+            {"id": "root", "children": ["m", "c"], "layout": {"kind": "row"}},
+            {"id": "m", "role": "module", "children": ["a", "b"], "layout": {"kind": "row"}},
+        ],
+        "shapes": [
+            {"kind": "ellipse", "around": ["a"], "behind": True},
+            {"kind": "rounded-rectangle", "around": ["m"], "behind": True},
+            {"kind": "star", "at": [300, 10], "size": [40, 40], "behind": True},
+        ],
+    }
+    root = ET.fromstring(drawn(document).document.text)
+    order = [item.get("id") for item in root.iter() if item.get("id")]
+    # Round a part in a module: over the module's own box, under the part -- never hiding it.
+    assert order.index("m.container") < order.index("shapes.0") < order.index("a")
+    # Round the module, and free: over the figure's own box (filled), under the module.
+    assert order.index("root.container") < order.index("shapes.1") < order.index("m.container")
+    assert order.index("root.container") < order.index("shapes.2") < order.index("c")
+    assert element(drawn(document).document.text, "m.shapes-behind") is not None

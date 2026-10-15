@@ -1850,7 +1850,8 @@ export function shapeEditor(host) {
       out.push(h("div.row", {}, ui.button("Group", () => group(), { small: true, icon: "layout", title: "Group (⌘G)" })));
     }
     if (picks.some((index) => shapesOf()[index]?.kind === "group")) out.push(h("div.row", {}, ui.button("Ungroup", () => ungroup(), { small: true, icon: "layout", title: "Ungroup (⇧⌘G)" })));
-    out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.behind), label: host.behindLabel || "Behind Slide Content", key: "shape.behind",
+    // (Where the page's own settings have it -- a figure's, In Front or Behind -- not here.)
+    if (!host.behindInPanel) out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.behind), label: host.behindLabel || "Behind Slide Content", key: "shape.behind",
       onChange: (on) => set({ behind: on }, on ? behindNames[0] : behindNames[1]) }));
     out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.locked), label: "Locked", key: "shape.locked", onChange: (on) => lock(on) }));
     return out;

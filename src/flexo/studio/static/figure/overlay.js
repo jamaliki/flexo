@@ -157,15 +157,19 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     const on = partUnder(at);
     return on ? { ...spec, on } : spec;
   }
-  // Drawn with a click on a part, a ring (a highlight, a box, a brace) goes round it.
+  // Drawn with a click on a part, a ring (a highlight, a box, a brace) goes round it -- and one
+  // filled, so that it would hide the part, behind it: a backdrop the part stands on.
   function drawnAt(kind, point, press) {
     if (!ROUNDABLE.has(kind)) return null;
     const under = press && figure.idAt(press);
     const id = under && under !== figure.model?.root && (figure.nodeOf(under) || figure.groupOf(under)) ? under : partUnder(point);
     if (!id || !boxes()[id]) return null;
-    const spec = { kind, around: [id] };
+    const spec = { kind, around: [id], ...(hides(spec0(kind)) ? { behind: true } : {}) };
     return placedRound(spec, aroundBox([boxes()[id]], marginOf(spec), kind));
   }
+  const spec0 = (kind) => F.normalised({ kind });
+  // Whether a shape would hide what it is drawn over: a fill of its own, more than half there.
+  const hides = (spec) => F.isClosed(spec) && spec.fill && spec.fill !== "none" && Number(spec.fill_opacity ?? 1) > 0.5;
 
   // -- edits, through the figure's own --
   let lastJob = null;
@@ -220,7 +224,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     wordsLabel: (spec) => (spec.text ? "Edit Text" : "Add Text"),
     verb: "Draw", noun: "figure", chooserLabel: "Draw Shape…", crumb: () => "Figure", fontOwner: "Figure",
     source: () => `figure:${studio.file}`,
-    behindNames: ["Send Behind the Figure", "Bring Above the Figure"], behindLabel: "Behind the Figure",
+    behindNames: ["Send Behind the Figure", "Bring Above the Figure"], behindInPanel: true,
     armHint: (kind, label) => (ROUNDABLE.has(kind) ? `${label}: drag on the figure to draw it, or click a part to draw it round that · Esc to stop` : null),
     ownKeys: OWN,
     attachNew, drawnAt,
@@ -270,7 +274,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   }
 
   // -- what it moves with: the inspector's own section --
-  function attachPanel(picks, specs, { slider }) {
+  function attachPanel(picks, specs, { slider, set }) {
     const shapes = list(), chosen = picks.map((index) => shapes[index]).filter(Boolean);
     if (!chosen.length) return [];
     const options = [{ value: "", label: "Nothing — stays where it is" }, ...[...parts()].map(([id, part]) => ({ value: id, label: part.label }))];
@@ -329,6 +333,12 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
         }, { small: true, kind: "ghost", icon: "shape", title: "Sized to it, and sized again as the figure is laid out" }));
       }
     }
+    // In front of the figure's parts or behind them, a backdrop they stand on.
+    const behind = chosen.every((spec) => spec.behind), front = chosen.every((spec) => !spec.behind);
+    out.push(ui.field("Drawn", ui.segmented({ value: behind ? "behind" : front ? "front" : null, key: "shape.layer",
+      options: [{ value: "front", label: "In Front" }, { value: "behind", label: "Behind" }],
+      onChange: (value) => set({ behind: value === "behind" }, value === "behind" ? "Send Behind the Figure" : "Bring Above the Figure") }),
+    { hint: "Behind, it is a backdrop the parts stand on: over the box of the group that holds them" }));
     const ways = picks.map((index) => shownAs(shapes[index], index));
     out.push(ui.field("Shown", ui.segmented({ value: ways.every((way) => way === ways[0]) ? ways[0] : null, key: "shape.shown",
       options: [{ value: "shown", label: "Plainly" }, { value: "dimmed", label: "Faint" }, { value: "hidden", label: "Hidden" }],

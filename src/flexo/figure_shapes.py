@@ -38,9 +38,10 @@ A part a shape names that the figure does not have is said, as a warning: an end
 stays where it was, a shape on it is drawn from the figure's top left, and one round only
 such parts is not drawn.
 
-Shapes are drawn over everything (``behind``: under the figure's parts, over its page), in
-the order listed, painted by the figure's palette (``accent`` its first tone's colour,
-``muted`` its muted ink, ...) and their words set in its font, at its size unless they say.
+Shapes are drawn over everything (``behind``: under the figure's parts, over the box of the
+innermost group that holds them -- a backdrop a part sits on), in the order listed, painted
+by the figure's palette (``accent`` its first tone's colour, ``muted`` its muted ink, ...)
+and their words set in its font, at its size unless they say.
 None takes room: the layout never sees them (``flexo.compiler``), and the page grows to hold
 one that reaches past it, on any side, moving nothing. Each is drawn as ``shapes.2`` (its
 place in the list), or as its own ``id``, which the figure's ``hide``, ``dim`` and
@@ -374,6 +375,10 @@ class Overlay:
     """``left, top, right, bottom`` of all the shapes draw, words and all."""
     named: dict[str, Box] = field(default_factory=dict)
     """The pieces of parts the shapes name, found in the drawing, by id."""
+    groups: tuple[Any, ...] = ()
+    """The figure's groups as laid out (``GroupSpec``): where a shape behind its parts is
+    drawn among them."""
+    root: str = "root"
 
     def box_of(self, name: str, piece: Callable[[str], Box | None] | None = None) -> Box | None:
         if name in self.boxes:
@@ -481,20 +486,78 @@ class Overlay:
         if not drawn:
             return
         painter = _Painter(self)
-        holders: dict[bool, ET.Element] = {}
+        over: ET.Element | None = None
+        backdrops: dict[str, ET.Element] = {}
         for one in drawn:
-            if one.behind not in holders:
-                holders[one.behind] = layer(
-                    root,
-                    "layer.shapes-behind" if one.behind else "layer.shapes",
-                    "Shapes Behind" if one.behind else "Shapes",
-                )
-            painter.draw(holders[one.behind], one)
-        if True in holders and under is not None:
-            # (Under the figure's parts: just over its page.)
-            root.remove(holders[True])
-            root.insert(list(root).index(under) + 1, holders[True])
+            if not one.behind:
+                if over is None:
+                    over = layer(root, "layer.shapes", "Shapes")
+                painter.draw(over, one)
+                continue
+            home = self.home_of(one.spec)
+            if home not in backdrops:
+                backdrops[home] = self._backdrop(root, home, under)
+            painter.draw(backdrops[home], one)
         self.reach = painter.reach
+
+    def home_of(self, spec: Mapping[str, Any]) -> str:
+        """The group a shape behind the figure's parts is drawn in: the innermost that holds
+        all it is attached to (round a group, the one that holds that group); the figure's
+        own, attached to nothing. It is drawn over that group's fill, under what it holds --
+        a backdrop a part sits on, never one a group's box hides."""
+
+        from flexo.hierarchy import ancestors
+
+        parents = {child: group.id for group in self.groups for child in group.children}
+        parts = []
+        for part in attached(spec):
+            if part not in parents:
+                # (A piece of a part is its part's.)
+                part = next((node for node in parents if part.startswith(f"{node}.")), part)
+            if part in parents:
+                parts.append(part)
+        if not parts:
+            return self.root
+        chains = [ancestors(parents, part) for part in parts]
+        common = next(group for group in chains[0] if all(group in chain for chain in chains))
+        roles = {group.id: group.role for group in self.groups}
+        # (A group that only arranges what it holds is drawn as nothing: the one round it.)
+        while roles.get(common) == "layout" and common in parents:
+            common = parents[common]
+        return common
+
+    def _backdrop(self, root: ET.Element, home: str, under: ET.Element | None) -> ET.Element:
+        """Where the shapes behind the parts of the group ``home`` are drawn: in its layer,
+        after its own box (and the frames behind its shapes), before what it holds -- else,
+        should it draw no layer of its own, just over the figure's page."""
+
+        from flexo.svg import inkscape_attr
+
+        group = next(
+            (
+                item
+                for item in root.iter()
+                if item.get("id") == home and item.get(inkscape_attr("groupmode")) == "layer"
+            ),
+            None,
+        )
+        components = (
+            next((item for item in group if item.get("id") == f"{home}.components"), None)
+            if group is not None
+            else None
+        )
+        if group is not None and components is not None:
+            holder = ET.Element(
+                components.tag,
+                {"id": f"{home}.shapes-behind", inkscape_attr("label"): "Shapes Behind"},
+            )
+            group.insert(list(group).index(components), holder)
+            return holder
+        holder = layer(root, "layer.shapes-behind", "Shapes Behind")
+        if under is not None:
+            root.remove(holder)
+            root.insert(list(root).index(under) + 1, holder)
+        return holder
 
     def _wanted(self) -> set[str]:
         """The parts the shapes name that are not shapes, groups or frames: pieces of their

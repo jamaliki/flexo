@@ -254,6 +254,8 @@ def _framed(
             style,
             palette,
             boxes=part_boxes(routed.fitted, placed),
+            groups=routed.fitted.measured.semantic.groups,
+            root=routed.fitted.measured.semantic.root,
         )
         if shapes
         else None
