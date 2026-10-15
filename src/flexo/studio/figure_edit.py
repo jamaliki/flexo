@@ -1168,10 +1168,12 @@ class _Document:
     def _update(self, action: Mapping[str, Any]) -> list[str]:
         many = action.get("targets")
         if many:
-            # The same values for several things at once (parts coloured together): one edit.
+            # The same values for several things at once (parts coloured together): one edit --
+            # or each its own (a style pasted on a shape and a group, as each takes it).
             chosen: list[str] = []
             for target in many:
-                chosen += self._update({"target": target, "values": action.get("values")})
+                values = target.get("values", action.get("values"))
+                chosen += self._update({"target": target, "values": values})
             return chosen
         target = action.get("target") or {}
         kind, identifier = target.get("type"), str(target.get("id", ""))
@@ -2753,8 +2755,9 @@ class _Document:
         edge[end] = node if there == usual else f"{node}.{there}"
 
 
-FLOWED = frozenset({"at", "size", "tail", "from", "to", "around", "points"})
-"""A shape's lists written on one line: its points, ``[x, y]``, and the parts it goes round."""
+FLOWED = frozenset({"at", "size", "tail", "from", "to", "around", "points", "region"})
+"""A shape's lists written on one line: its points, ``[x, y]``, the parts it goes round, and
+the region a zoom inset shows."""
 
 
 def _number(value: Any) -> Any:

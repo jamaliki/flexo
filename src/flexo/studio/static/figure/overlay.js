@@ -12,6 +12,7 @@
 import { h, ui, menu } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
 import { shapeEditor, shapeLabel, shapeIcon } from "/static/studio/shapes.js";
+import * as Insets from "/static/studio/insets.js";
 import { aroundBox, placedRound as placeRound, sideOf } from "/static/kinds/figure/around.js";
 
 // The kinds a click on a part draws round it.
@@ -235,7 +236,29 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     ungrouped: (group) => ({ ...(group.on !== undefined ? { on: group.on } : {}), ...(group.behind ? { behind: true } : {}), ...(group.locked ? { locked: true } : {}) }),
     commands: (picks, name) => showCommands(picks, name),
     panel: (picks, specs, tools) => attachPanel(picks, specs, tools),
+    // A zoom inset's part, as the figure laid it out and drew it (its own id, in its units).
+    insetSource: (spec, toFrame) => {
+      const id = spec?.of !== undefined ? String(spec.of) : "", box = id ? boxes()[id] || piece(id, toFrame)?.box : null;
+      if (!box || !svg()?.querySelector(`[id="${CSS.escape(id)}"]`)) return null;
+      return { box: [...box], target: id, toShapes: { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 } };
+    },
   });
+
+  // Add Zoom Inset, with a part chosen: a box beside it showing its middle magnified, on it
+  // (moving with it as the figure is laid out), chosen at once -- one step.
+  const insettable = (id) => Boolean(id && id !== figure.model?.root && (figure.nodeOf(id) || figure.groupOf(id)) && boxes()[id]);
+  function addInset(id) {
+    if (!insettable(id)) return false;
+    // (Beside it, the page growing to hold it where the figure has no room: as large as a
+    // part of it would be.)
+    const view = svg()?.viewBox?.baseVal, [vx, vy, vw, vh] = view && view.width ? [view.x, view.y, view.width, view.height] : [0, 0, 600, 400];
+    const frame = [vx - vw * 0.5, vy - vh * 0.5, vw * 2, vh * 2];
+    const spec = { ...Insets.fresh(boxes()[id], frame, { of: id, margin: 12 }), on: id };
+    const index = list().length;
+    edit((all) => [...all, spec], { label: "Add Zoom Inset" });
+    editor.choose([index]);
+    return true;
+  }
 
   // -- shown plainly, faint, or not at all: the figure's own hide and dim --
   const shownAs = (spec, index) => {
@@ -398,5 +421,5 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     return at >= 0 ? { index: at, name: shapes[at] ? shapeLabel(shapes[at]) : `Shape ${at + 1}` } : null;
   }
 
-  return { ...editor, took, drawnWith, afresh, swallow, rows, named, written };
+  return { ...editor, took, drawnWith, afresh, swallow, rows, named, written, addInset, insettable };
 }

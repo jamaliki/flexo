@@ -16,6 +16,8 @@
 
 import { h, icon, ui, menu, popover, closeMenu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
+import * as I from "/static/studio/insets.js";
+import * as Styles from "/static/studio/styles.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -203,6 +205,9 @@ export function shapeEditor(host) {
   // A piece of what the page holds, named by an end glued to it (a protein's feature), as the
   // host finds it.
   const pieceNamed = (name) => host.piece?.(name, screenToFrame) || null;
+  // What a zoom inset magnifies, as the host finds it: its box in the shapes' units, the id of
+  // its drawing, and how that drawing's units are the shapes' (insets.js's markup).
+  const insetSource = (spec) => (spec?.kind === "inset" ? host.insetSource?.(spec, screenToFrame) || null : null);
   // A shape's frame on the slide: its corners, turned as it is.
   const cornersOf = (made) => F.corners(made);
   const boundsOf = (index) => { const spec = specAt(index), made = geometryOf(index); return made ? F.bounds(spec, made) : null; };
@@ -300,7 +305,10 @@ export function shapeEditor(host) {
   }
   function preview(index, spec, made = null) {
     const node = S("g", { "data-index": index });
-    node.innerHTML = F.svg(spec, made || geometryOf(index, spec), roles());
+    // (A zoom inset, as the page will draw it: what it shows drawn again from the page's own.)
+    const source = insetSource(spec);
+    node.innerHTML = source ? I.markup(spec, made || geometryOf(index, spec), roles(), { source: source.box, target: source.target, toShapes: source.toShapes, clipId: `flexo-inset-clip-${index}` })
+      : F.svg(spec, made || geometryOf(index, spec), roles());
     previews.append(node);
     setAside(index, { hidden: true });
   }
@@ -382,11 +390,14 @@ export function shapeEditor(host) {
     }
     const centre = F.centreOf(made), [x, y, w, h] = made.box;
     const turnAt = turned([x + w / 2, y - 24 * px], centre, made.turn);
-    marks.append(S("line", { x1: turned([x + w / 2, y], centre, made.turn)[0], y1: turned([x + w / 2, y], centre, made.turn)[1], x2: turnAt[0], y2: turnAt[1], class: "shape-stalk", "stroke-width": px }));
-    handle(turnAt, "turn", "grab", (event) => startTurn(event, [index]), "Drag to rotate (⇧: by 15°) · Double-click to set it straight").addEventListener("dblclick", () => straighten([index]));
+    // (A zoom inset is never turned.)
+    if (spec.kind !== "inset") {
+      marks.append(S("line", { x1: turned([x + w / 2, y], centre, made.turn)[0], y1: turned([x + w / 2, y], centre, made.turn)[1], x2: turnAt[0], y2: turnAt[1], class: "shape-stalk", "stroke-width": px }));
+      handle(turnAt, "turn", "grab", (event) => startTurn(event, [index]), "Drag to rotate (⇧: by 15°) · Double-click to set it straight").addEventListener("dblclick", () => straighten([index]));
+    }
     const names = spec.kind === "text" ? ["e", "w"] : BOX_HANDLES;
     for (const name of names) handle(turned(boxPoint(made.box, name), centre, made.turn), "size", resizeCursor(name, made.turn), (event) => startSize(event, [index], name), "Drag to resize (⇧: keep its proportions · ⌥: about its middle)");
-    for (const adjust of boxHandles(spec, made)) handle(adjust.at, "adjust", "pointer", (event) => startAdjust(event, index, adjust), adjust.title);
+    for (const adjust of boxHandles(spec, made)) handle(adjust.at, adjust.kind || "adjust", adjust.cursor || "pointer", (event) => startAdjust(event, index, adjust), adjust.title);
   }
   function placeMany(picks) {
     const box = unionOf(picks);
@@ -438,6 +449,8 @@ export function shapeEditor(host) {
         return { ratio: round(clamp(ux * Math.cos(angle) + uy * Math.sin(angle), 0.05, 0.95)) };
       } });
     }
+    // A zoom inset's region, on what it magnifies: its corners and its middle.
+    if (kind === "inset") { const source = insetSource(spec); if (source) out.push(...I.handles(spec, source.box)); }
     const arrows = { "arrow-right": [1, 0], "arrow-left": [-1, 0], "arrow-up": [0, -1], "arrow-down": [0, 1], "arrow-left-right": [1, 0] };
     if (arrows[kind]) {
       const [ax, ay] = arrows[kind], across = ax !== 0;
@@ -804,9 +817,11 @@ export function shapeEditor(host) {
       const index = g.indices[0], spec = g.originals[0];
       // Its middle where the new box's is, on the slide (it turns about its own middle).
       const middle = turned([left + width / 2, top + height / 2], g.centre, g.turn);
-      const resized = spec.kind === "text"
+      let resized = spec.kind === "text"
         ? { ...spec, at: rounded([middle[0] - width / 2, middle[1] - (measured(index)?.[1] || h) / 2]), width: round(width) }
         : { ...spec, at: rounded([middle[0] - width / 2, middle[1] - height / 2]), size: [round(width), round(height)] };
+      // A zoom inset's region keeps the box's proportions: what it shows is never stretched.
+      if (spec.kind === "inset") { const source = insetSource(spec); if (source) resized = I.matched(resized, source.box); }
       live.set(index, resized);
       if (spec.kind === "text") setAside(index, { transform: `translate(${resized.at[0] - spec.at[0]} 0)` });
       else preview(index, resized);
@@ -967,7 +982,7 @@ export function shapeEditor(host) {
     putBack();
     preview(g.index, made);
     followGlued([g.index]);
-    const shown = Object.entries(values).filter(([key]) => key !== "tail").map(([key, value]) => `${keyName(key)} ${Array.isArray(value) ? "" : value}`).join(" · ");
+    const shown = Object.entries(values).filter(([key]) => !["tail", "region", "size"].includes(key)).map(([key, value]) => `${keyName(key)} ${Array.isArray(value) ? "" : value}`).join(" · ");
     if (shown) say(shown, event);
   }
   const keyName = (key) => ({ corner: "Corner", apex: "Top", slant: "Slant", inset: "Inset", point: "Point", arm: "Arms", ratio: "Points", head: "Head", shaft: "Shaft", bend: "Bend", lean: "Lean", elbow: "Middle", tip: "Tip", depth: "Depth" })[key] || key;
@@ -1353,6 +1368,9 @@ export function shapeEditor(host) {
     if (mod && k.toLowerCase() === "d") { duplicate(); return true; }
     if (mod && k.toLowerCase() === "a") { choose(shapesOf().map((_, n) => n).filter((n) => shapesOf()[n])); return true; }
     if (mod && k.toLowerCase() === "l") { lock(!event.altKey); return true; }
+    // ⌥⌘C and ⌥⌘V (by the key's place: ⌥ makes another letter of it): Copy and Paste Style.
+    if (mod && event.altKey && !event.shiftKey && event.code === "KeyC") { copyStyle(); return true; }
+    if (mod && event.altKey && !event.shiftKey && event.code === "KeyV") { pasteStyle(); return true; }
     if (mod && event.shiftKey && k.toLowerCase() === "f") { order(event.altKey ? "forward" : "front"); return true; }
     if (mod && event.shiftKey && k.toLowerCase() === "b") { order(event.altKey ? "backward" : "back"); return true; }
     if (mod) return false;
@@ -1514,7 +1532,7 @@ export function shapeEditor(host) {
     const mirror = (spec) => {
       if (spec.kind === "group") return { ...spec, shapes: (spec.shapes || []).map(mirror) };
       const form = F.family(spec.kind);
-      if (form === "box" && spec.kind !== "bubble") {
+      if (form === "box" && spec.kind !== "bubble" && spec.kind !== "inset") {
         const made = F.geometry(spec), centre = F.centreOf(made);
         const now = across ? [2 * cx - centre[0], centre[1]] : [centre[0], 2 * cy - centre[1]];
         const moved = F.moved(spec, round(now[0] - centre[0]), round(now[1] - centre[1]));
@@ -1535,6 +1553,21 @@ export function shapeEditor(host) {
       return out;
     };
     edit((list) => { for (const index of picks) list[index] = mirror(list[index]); }, across ? "Flip Horizontally" : "Flip Vertically");
+  }
+
+  // Copy Style: how the one chosen is drawn, to put on others (here, on another page, on a
+  // figure's parts). Paste Style: what was copied put on those chosen, one step.
+  function copyStyle() {
+    const picks = chosenNow();
+    if (picks.length !== 1) return false;
+    Styles.keepStyle(Styles.shapeStyle(shapesOf()[picks[0]]));
+    toast("Style copied", { icon: "copy", seconds: 1.5 });
+    return true;
+  }
+  function pasteStyle() {
+    const style = Styles.copiedStyle(), picks = chosenNow().filter((index) => !shapesOf()[index]?.locked);
+    if (!style || !picks.length) return false;
+    return edit((list) => { for (const index of picks) list[index] = Styles.onShape(list[index], style); }, "Paste Style");
   }
 
   // Settings changed on every shape chosen, one step (a slider dragged, one run).
@@ -1624,7 +1657,8 @@ export function shapeEditor(host) {
     if (host.canDraw()) {
       out.push({ icon: "shape", label: host.chooserLabel || "Add Shape…", hint: "Lines, arrows, shapes, callouts, braces, measures and text boxes", run: () => chooser(host.shapeButton()) });
       // (Each also by the name the Mac app's Insert › Shapes runs it by, whatever the page.)
-      for (const kind of F.KINDS) out.push({ icon: "shape", label: `${verb} ${F.LABELS[kind]}`, also: verb === "Draw" ? [] : [`Draw ${F.LABELS[kind]}`], hint: `Drag on the ${noun} to draw it`, run: () => arm(kind) });
+      // (A zoom inset is added for what it magnifies, never drawn on its own.)
+      for (const kind of F.KINDS.filter((each) => each !== "inset")) out.push({ icon: "shape", label: `${verb} ${F.LABELS[kind]}`, also: verb === "Draw" ? [] : [`Draw ${F.LABELS[kind]}`], hint: `Drag on the ${noun} to draw it`, run: () => arm(kind) });
     }
     const picks = chosenNow();
     if (!picks.length || words) return out;
@@ -1649,6 +1683,9 @@ export function shapeEditor(host) {
         { icon: "distribute-down", label: "Distribute Vertically", hint: name, run: () => distribute("down") }] : []),
       { icon: "flip-across", label: "Flip Horizontally", hint: name, run: () => flip("horizontal") },
       { icon: "flip-down", label: "Flip Vertically", hint: name, run: () => flip("vertical") },
+      // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V): how one is drawn, put on others.
+      ...(picks.length === 1 ? [{ icon: "copy", label: "Copy Style", keys: "⌥⌘C", hint: name, run: () => copyStyle() }] : []),
+      ...(Styles.copiedStyle() && !locked ? [{ icon: "paste", label: "Paste Style", keys: "⌥⌘V", hint: `${Styles.styleName(Styles.copiedStyle())}’s, on ${name}`, run: () => pasteStyle() }] : []),
       ...(host.commands ? host.commands(picks, name, { set, edit, choose }) : []),
       ...(one && one.kind !== "group" && !locked ? [{ icon: "pencil", label: one.text ? "Edit Text" : "Add Text", hint: name, run: () => editWords(picks[0], { selectAll: true }) }] : []),
     );
@@ -1743,7 +1780,7 @@ export function shapeEditor(host) {
     style.push(ui.field("Opacity", slider(count === 1 ? specs[0].opacity : shared("opacity"), 0, 1, 0.05, (value) => set({ opacity: value }, "Change Opacity", "opacity"), "shape.opacity", true)));
     sections.push(h("div.section", {}, h("div.section-title", {}, "Style"), style));
     // The kind's own settings, where every shape chosen is of one kind.
-    const own = kinds.size === 1 ? ownFields([...kinds][0], shared) : [];
+    const own = kinds.size === 1 ? ownFields([...kinds][0], shared, strokes) : [];
     if (own.length) sections.push(h("div.section", {}, h("div.section-title", {}, F.LABELS[[...kinds][0]] || "Shape"), own));
     // Words, for shapes that hold them.
     if (flat.length && !kinds.has("group")) {
@@ -1780,7 +1817,7 @@ export function shapeEditor(host) {
     input.addEventListener("input", () => { said.textContent = percent ? `${Math.round(Number(input.value) * 100)}%` : input.value; onChange(Number(input.value)); });
     return h("div.row.range-row", {}, input, said);
   }
-  function ownFields(kind, shared) {
+  function ownFields(kind, shared, strokes = []) {
     const number = (key, label, options) => ui.field(label, ui.number({ value: shared(key) ?? null, placeholder: "Mixed", key: `shape.${key}`, ...options,
       onChange: (value) => set({ [key]: value }, `Change ${label}`) }));
     const share = (key, label, min = 0, max = 1) => ui.field(label, slider(shared(key), min, max, 0.01, (value) => set({ [key]: value }, `Change ${label}`, key), `shape.${key}`));
@@ -1803,6 +1840,20 @@ export function shapeEditor(host) {
       case "brace": return [number("depth", "Depth", { min: -500, max: 500, step: 1, unit: "pt" }), share("curl", "Curl"), share("tip", "Tip", 0.05, 0.95)];
       case "bracket": return [number("depth", "Depth", { min: -500, max: 500, step: 1, unit: "pt" }), share("curl", "Rounding")];
       case "polyline": case "pen": return [ui.field("Closed", ui.toggle({ value: Boolean(shared("closed")), key: "shape.closed", onChange: (on) => set({ closed: on }, on ? "Close Shape" : "Open Shape") }))];
+      // A zoom inset's frame round the part it shows, and the lines joining them: each as its
+      // outline unless set (None: not drawn).
+      case "inset": return [["frame", "Frame"], ["connector", "Lines"]].flatMap(([piece, title]) => [
+        // (Unset, the outline's colour is shown: what it is drawn in.)
+        ui.field(title, ui.swatches({ value: (shared(`${piece}_line`) ?? shared("line")) === "none" ? null : shared(`${piece}_line`) ?? shared("line") ?? undefined, colours: strokes, none: true, noneTitle: "None", custom: true, key: `shape.${piece}_line`,
+          onChange: (value) => set({ [`${piece}_line`]: value ?? "none" }, `Change ${title}`, `${piece}-line`) })),
+        h("div.row", {},
+          ui.field("Width", ui.number({ value: shared(`${piece}_width`) ?? null, placeholder: "As Outline", min: 0, max: 200, step: 0.25, unit: "pt", key: `shape.${piece}_width`,
+            onChange: (value) => set({ [`${piece}_width`]: value }, `Change ${title}`) })),
+          ui.field("Dash", ui.select({ value: shared(`${piece}_dash`) ?? "", key: `shape.${piece}_dash`,
+            options: [{ value: "", label: "As Outline" }, { value: "solid", label: "Solid" }, { value: "dashed", label: "Dashed" }, { value: "dotted", label: "Dotted" }],
+            onChange: (value) => set({ [`${piece}_dash`]: value || null }, `Change ${title}`) }))),
+      ]).concat([ui.button("Frame and Lines as Outline", () => set(Object.fromEntries(["frame_line", "frame_width", "frame_dash", "connector_line", "connector_width", "connector_dash"].map((key) => [key, null])), "Change Zoom Inset"),
+        { small: true, kind: "ghost", icon: "refresh" })]);
       default: return [];
     }
   }
@@ -1829,7 +1880,7 @@ export function shapeEditor(host) {
         ui.field("Width", ui.number({ value: one.size[0], min: 1, step: 1, unit: "pt", key: "shape.w", onChange: resize(0) })),
         ui.field("Height", ui.number({ value: one.size[1], min: 1, step: 1, unit: "pt", key: "shape.h", onChange: resize(1) }))));
     }
-    if (one && ["box", "text"].includes(F.family(one.kind))) {
+    if (one && ["box", "text"].includes(F.family(one.kind)) && one.kind !== "inset") {
       out.push(ui.field("Rotate", ui.number({ value: Number(one.rotate || 0), min: -360, max: 360, step: 1, unit: "°", key: "shape.rotate",
         onChange: (value) => edit((list) => { const turned = ((Number(value || 0) % 360) + 360) % 360; if (turned) list[picks[0]].rotate = turned; else delete list[picks[0]].rotate; }, "Rotate Shape") })));
     }
@@ -1868,7 +1919,7 @@ export function shapeEditor(host) {
 
   return {
     press, hover, leave, dblclick, context, key, place, drawn, panel, commands, menuItems, clip, paste, touched,
-    choose, clear, restore, arm, disarm, chooser, remove, duplicate, group, ungroup, align, distribute, order, flip, lock,
+    choose, clear, restore, arm, disarm, chooser, remove, duplicate, group, ungroup, align, distribute, order, flip, lock, copyStyle, pasteStyle,
     chosen: chosenNow,
     list: shapesOf,
     set,

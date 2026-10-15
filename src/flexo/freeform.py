@@ -31,7 +31,9 @@ Kinds by their family:
   ``cross`` (``arm``), ``check``, ``cloud``, ``bubble`` (a speech bubble whose ``tail``
   points anywhere; its ``body`` rounded, a rectangle or an oval), and the highlights:
   ``highlight`` (a translucent box) and ``ring`` (an ellipse drawn round something);
-- **text**: a box of words (``at``, and ``width`` to wrap them in).
+- **text**: a box of words (``at``, and ``width`` to wrap them in);
+- **inset**: a zoom inset, a box showing part ``of`` what its page holds (a slide's object, a
+  figure's part) magnified, joined to it (``flexo.insets``): never turned nor mirrored.
 
 A box turns (``rotate``, degrees clockwise about its middle) and mirrors (``flip``). Every
 shape is painted by the theme unless it says otherwise: ``fill`` and ``line`` are a theme's
@@ -113,8 +115,10 @@ BOXED = (
     "bubble",
     "highlight",
     "ring",
+    "inset",
 )
-"""The closed shapes, each drawn in a box (``at``, ``size``)."""
+"""The closed shapes, each drawn in a box (``at``, ``size``): a zoom inset too, a box showing
+part of something else magnified (``flexo.insets``)."""
 KINDS = (*LINES, *TRACED, *BOXED, "text")
 """Every kind of shape, but a group of them (``group``, its ``shapes``)."""
 
@@ -194,6 +198,7 @@ LABELS = {
     "highlight": "Highlight",
     "ring": "Highlight Ring",
     "text": "Text Box",
+    "inset": "Zoom Inset",
     "group": "Group",
 }
 """What a person calls each kind (never a slide's own objects' names: Text Box, Speech Bubble)."""
@@ -247,6 +252,17 @@ STYLES: dict[str, dict[str, object]] = {
     "dimension": {**_MEASURE, "line_width": 1.25, "start": "bar", "end": "bar"},
     "scale-bar": {**_MEASURE, "line_width": 4.0},
     "text": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
+    "inset": {
+        "fill": "paper",
+        "line": "accent",
+        "line_width": 1.5,
+        "cap": "butt",
+        "join": "miter",
+        "align": "start",
+        "valign": "top",
+        "bold": True,
+        "padding": 4.0,
+    },
 }
 """How each kind is painted when it says nothing: the theme's accent, its outlines a little
 lighter than its lines; measures in ink; words on nothing."""
@@ -296,6 +312,7 @@ SIZES: dict[str, tuple[float, float]] = {
     "highlight": (200.0, 40.0),
     "cloud": (180.0, 120.0),
     "text": (240.0, 40.0),
+    "inset": (200.0, 150.0),
     **{kind: (160.0, 0.0) for kind in LINES},
     "brace": (0.0, 160.0),
     "bracket": (0.0, 160.0),
@@ -326,6 +343,19 @@ PLACE_KEYS = {
     "text": ("at", "width", "rotate"),
 }
 COMMON_KEYS = ("kind", "id", *STYLE_KEYS, *TEXT_KEYS)
+INSET_KEYS = (
+    "of",
+    "region",
+    "frame_line",
+    "frame_width",
+    "frame_dash",
+    "connector_line",
+    "connector_width",
+    "connector_dash",
+)
+"""What a zoom inset says besides its box (``flexo.insets``): what it shows part ``of``, the
+``region`` of it shown, and how the frame round that region and the lines joining it to the
+box are drawn (each as the box's outline, unless it says)."""
 
 
 def family(kind: str) -> str:
@@ -354,6 +384,8 @@ def keys_of(kind: str) -> tuple[str, ...]:
 
     if kind == "group":
         return ("kind", "id", "shapes", "opacity")
+    if kind == "inset":
+        return (*COMMON_KEYS, *PLACE_KEYS["box"], *INSET_KEYS)
     return (
         *COMMON_KEYS,
         *PLACE_KEYS[family(kind)],
@@ -640,6 +672,8 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
         "text": ("at",),
         "group": ("shapes",),
     }[form]
+    if kind == "inset":
+        needed = (*needed, "of")
     for key in needed:
         if key not in made:
             example = {
@@ -649,6 +683,7 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
                 "at": "[100, 100]",
                 "size": "[160, 100]",
                 "shapes": "a list of shapes",
+                "of": "body[0] (on a slide) or a part's id (on a figure)",
             }[key]
             raise ShapeError(key, f"A {kind} needs {key}, such as {key}: {example}.")
     return made
@@ -661,6 +696,8 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         return str(value)
     if key in ("fill", "line", "colour"):
         return None if key == "colour" and value is None else colour_of(value, key)
+    if key in INSET_KEYS:
+        return _inset_value(key, value)
     if key in ("fill_opacity", "opacity"):
         return _number(value, key, 0.0, 1.0, "0.5")
     if key == "line_width":
@@ -778,6 +815,45 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
     raise ShapeError(
         key, f"Unknown key {key} for a {kind}."
     )  # pragma: no cover - keys_of lists them all
+
+
+def _inset_value(key: str, value: object) -> object:
+    """A zoom inset's own setting, checked (``INSET_KEYS``)."""
+
+    if key == "of":
+        if isinstance(value, bool) or not isinstance(value, str | int) or not str(value).strip():
+            raise ShapeError(
+                key,
+                f"of must name what the inset shows part of: an object of a slide (body[0]) or "
+                f"a part of a figure (its id), not {value!r}.",
+            )
+        return str(value).strip()
+    if key == "region":
+        said = (
+            "region must be the part shown, [x, y, width, height] as fractions of what it "
+            f"shows part of, such as [0.4, 0.3, 0.2, 0.2], not {value!r}."
+        )
+        if (
+            isinstance(value, str)
+            or not isinstance(value, Sequence)
+            or len(value) != 4
+            or any(
+                isinstance(item, bool)
+                or not isinstance(item, int | float)
+                or not math.isfinite(item)
+                for item in value
+            )
+        ):
+            raise ShapeError(key, said)
+        x, y, w, h = (float(item) for item in value)
+        if w <= 0.0 or h <= 0.0 or x < -1e-6 or y < -1e-6 or x + w > 1.0001 or y + h > 1.0001:
+            raise ShapeError(key, said)
+        return [x, y, w, h]
+    if key.endswith("_line"):
+        return colour_of(value, key)
+    if key.endswith("_width"):
+        return _number(value, key, 0.0, 200.0, "1.5 (points)")
+    return _choice(value, key, DASHES)
 
 
 # -- geometry ------------------------------------------------------------------------------
@@ -991,7 +1067,7 @@ def _closed_outline(
     kind = spec["kind"]
     ss = min(w, h)
     cx, cy = x + w / 2.0, y + h / 2.0
-    if kind in ("rectangle", "rounded-rectangle", "highlight"):
+    if kind in ("rectangle", "rounded-rectangle", "highlight", "inset"):
         return _rounded_box(x, y, w, h, float(spec.get("corner") or 0.0))
     if kind in ("ellipse", "ring"):
         return _ellipse(cx, cy, w / 2.0, h / 2.0)
@@ -1703,14 +1779,15 @@ def geometry(
         else:
             w, h = (float(value) for value in spec["size"])
         cx, cy = x + w / 2.0, y + h / 2.0
-        turn = float(spec.get("rotate") or 0.0)
+        # (A zoom inset shows what it magnifies as it is: never turned, nor mirrored.)
+        turn = float(spec.get("rotate") or 0.0) if kind != "inset" else 0.0
         if form == "text":
             segments = _rounded_box(x, y, w, h, 0.0)
             area = (x, y, w, h)
         else:
             segments = _closed_outline(spec, x, y, w, h)
             area = _area(spec, x, y, w, h)
-            if kind != "bubble":
+            if kind not in ("bubble", "inset"):
                 segments = _flipped(segments, spec.get("flip"), cx, cy)
                 flipped = _flipped(
                     [("M", area[0], area[1]), ("L", area[0] + area[2], area[1] + area[3])],

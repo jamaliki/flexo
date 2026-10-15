@@ -103,6 +103,12 @@ def _items(
                 name = f"{item.id}.clip" if item.id else f"clip{next(clips)}"
                 parent.append(_clip(item.clip, name, oval=item.oval))
                 holder = ET.SubElement(parent, svg_tag("g"), {"clip-path": f"url(#{name})"})
+            if item.outline:
+                # Masked by a shape, only what is within its outline.
+                name = f"{item.id}.mask" if item.id else f"clip{next(clips)}"
+                shape_ = ET.SubElement(parent, svg_tag("clipPath"), {"id": name})
+                ET.SubElement(shape_, svg_tag("path"), {"d": path_data(item.outline)})
+                holder = ET.SubElement(holder, svg_tag("g"), {"clip-path": f"url(#{name})"})
             image = ET.SubElement(
                 holder,
                 svg_tag("image"),

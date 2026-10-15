@@ -58,7 +58,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from flexo import freeform
+from flexo import freeform, insets
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.svg import element, layer, number
 
@@ -254,6 +254,9 @@ def attached(spec: Mapping[str, Any]) -> list[str]:
     found: list[str] = []
     if spec.get("on") is not None:
         found.append(str(spec["on"]))
+    if spec.get("kind") == "inset" and spec.get("of") is not None:
+        # (A zoom inset is shown as what it magnifies is.)
+        found.append(str(spec["of"]))
     found += [str(item) for item in spec.get("around") or []]
     for key in ("from", "to"):
         end = spec.get(key)
@@ -431,7 +434,9 @@ class Overlay:
             if gone:
                 self.placed.append(None)
                 continue
-            self.placed.append(Placed(index, name, made, bool(spec.get("behind"))))
+            # (A zoom inset is never behind the parts: what it magnifies may hold it.)
+            behind = bool(spec.get("behind")) and spec.get("kind") != "inset"
+            self.placed.append(Placed(index, name, made, behind))
 
     def _unglued(
         self,
@@ -782,14 +787,30 @@ class _Painter:
         form = freeform.family(kind)
         ends = freeform.glued(shape, self.find) if form == "line" else None
         made = freeform.geometry(shape, ends, self.sized.get(ident))
-        drawn = freeform.draw(
-            parent,
-            spec,
-            made,
-            ident,
-            self.palette,
-            self.shadow if spec.get("shadow") else None,
-        )
+        if kind == "inset":
+            # Part of a part, magnified: drawn again from the figure's own drawing of it.
+            of = str(spec.get("of") or "")
+            source = self.overlay.box_of(of) if of else None
+            drawn = insets.draw(
+                parent,
+                spec,
+                made,
+                ident,
+                self.palette,
+                source=source,
+                target=of if source is not None else None,
+                shadow=self.shadow,
+            )
+            drawn.set("data-flexo-of", of)
+        else:
+            drawn = freeform.draw(
+                parent,
+                spec,
+                made,
+                ident,
+                self.palette,
+                self.shadow if spec.get("shadow") else None,
+            )
         drawn.set("data-flexo-shape", kind)
         drawn.set(inkscape_attr("label"), freeform.LABELS.get(kind, "Shape"))
         drawn.set("data-flexo-box", " ".join(number(value) for value in made.box))

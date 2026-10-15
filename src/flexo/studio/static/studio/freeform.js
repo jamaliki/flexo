@@ -12,7 +12,7 @@ export const TRACED = ["polyline", "pen"];
 export const BOXED = [
   "rectangle", "rounded-rectangle", "ellipse", "triangle", "right-triangle", "diamond", "polygon", "star",
   "parallelogram", "trapezoid", "arrow-right", "arrow-left", "arrow-up", "arrow-down", "arrow-left-right",
-  "chevron", "plus", "cross", "check", "cloud", "bubble", "highlight", "ring",
+  "chevron", "plus", "cross", "check", "cloud", "bubble", "highlight", "ring", "inset",
 ];
 export const KINDS = [...LINES, ...TRACED, ...BOXED, "text"];
 
@@ -36,7 +36,7 @@ export const LABELS = {
   "arrow-left-right": "Left-Right Arrow", chevron: "Chevron", plus: "Plus", cross: "Cross",
   check: "Check Mark", cloud: "Cloud", bubble: "Speech Bubble", brace: "Brace", bracket: "Bracket",
   dimension: "Dimension Line", "scale-bar": "Scale Bar", highlight: "Highlight", ring: "Highlight Ring",
-  text: "Text Box", group: "Group",
+  text: "Text Box", inset: "Zoom Inset", group: "Group",
 };
 
 export const HEADS = ["none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond"];
@@ -66,6 +66,8 @@ export const STYLES = {
   dimension: { ...MEASURE, line_width: 1.25, start: "bar", end: "bar" },
   "scale-bar": { ...MEASURE, line_width: 4 },
   text: { fill: "none", line: "none", line_width: 1.5, cap: "butt", join: "miter" },
+  // A zoom inset (insets.js): on the page, outlined, its label at its top left.
+  inset: { fill: "paper", line: "accent", line_width: 1.5, cap: "butt", join: "miter", align: "start", valign: "top", bold: true, padding: 4 },
 };
 
 export const PARAMETERS = {
@@ -97,7 +99,7 @@ export const SIZES = {
   diamond: [120, 120], triangle: [120, 104], "right-triangle": [120, 104],
   plus: [100, 100], cross: [100, 100], check: [100, 80], chevron: [100, 80],
   "arrow-up": [80, 140], "arrow-down": [80, 140], highlight: [200, 40], cloud: [180, 120],
-  text: [240, 40],
+  text: [240, 40], inset: [200, 150],
   ...Object.fromEntries(LINES.map((kind) => [kind, [160, 0]])),
   brace: [0, 160], bracket: [0, 160],
   ...Object.fromEntries(TRACED.map((kind) => [kind, [160, 0]])),
@@ -265,7 +267,7 @@ function callout(spec, x, y, w, h) {
 
 function closedOutline(spec, x, y, w, h) {
   const kind = spec.kind, ss = Math.min(w, h), cx = x + w / 2, cy = y + h / 2;
-  if (["rectangle", "rounded-rectangle", "highlight"].includes(kind)) return roundedBox(x, y, w, h, Number(spec.corner || 0));
+  if (["rectangle", "rounded-rectangle", "highlight", "inset"].includes(kind)) return roundedBox(x, y, w, h, Number(spec.corner || 0));
   if (kind === "ellipse" || kind === "ring") return ellipse(cx, cy, w / 2, h / 2);
   if (kind === "triangle") return polygon([[x, y + h], [x + w * Number(spec.apex), y], [x + w, y + h]]);
   if (kind === "right-triangle") return polygon([[x, y], [x + w, y + h], [x, y + h]]);
@@ -634,13 +636,14 @@ export function geometry(spec, ends = null, size = null) {
   if (form === "box" || form === "text") {
     const [x, y] = spec.at.map(Number);
     const [w, h] = form === "text" ? (size || [Number(spec.width || SIZES.text[0]), SIZES.text[1]]) : spec.size.map(Number);
-    const cx = x + w / 2, cy = y + h / 2, turn = Number(spec.rotate || 0);
+    // (A zoom inset shows what it magnifies as it is: never turned, nor mirrored.)
+    const cx = x + w / 2, cy = y + h / 2, turn = kind === "inset" ? 0 : Number(spec.rotate || 0);
     let segments, room;
     if (form === "text") { segments = roundedBox(x, y, w, h, 0); room = [x, y, w, h]; }
     else {
       segments = closedOutline(spec, x, y, w, h);
       room = area(spec, x, y, w, h);
-      if (kind !== "bubble") {
+      if (kind !== "bubble" && kind !== "inset") {
         segments = flipped(segments, spec.flip, cx, cy);
         const corners = flipped([["M", room[0], room[1]], ["L", room[0] + room[2], room[1] + room[3]]], spec.flip, cx, cy);
         const xs = [corners[0][1], corners[1][1]], ys = [corners[0][2], corners[1][2]];

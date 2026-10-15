@@ -660,6 +660,9 @@ class _Content:
                 clip = f"{_path(_oval(cx, cy, rx, ry))} W n "
             else:
                 clip = f"{_n(region[0])} {_n(region[1])} {_n(2.0 * rx)} {_n(2.0 * ry)} re W n "
+        if item.outline:
+            # Masked by a shape: within its outline too.
+            clip += f"{_path(item.outline)} W n "
         self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 
