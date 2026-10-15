@@ -465,12 +465,17 @@ function throttled(run, ms = 100) {
 // Where a part is drawn on the page: a drawing nested in it (a picture's, a plot's) by the
 // box it is drawn in -- the part's own -- not by what is drawn inside that box, by which a
 // browser measures a nested drawing (smaller, or past it and cut off).
+// However deep it is: a structure's drawing as shapes is nested in its molecule's group, and
+// measured by what is drawn inside it -- the whole protein, past the panel that shows a
+// site zoomed into -- would have the part chosen, dragged and hovered as all of that.
 export function drawnRect(element) {
-  const whole = element.getBoundingClientRect(), children = [...(element.children || [])];
-  if (!children.some((child) => child.localName === "svg")) return whole;
+  if (!element) return undefined;
+  if (element.localName === "svg" && element.ownerSVGElement) return viewportRect(element);
+  const whole = element.getBoundingClientRect();
+  if (!element.querySelector?.("svg")) return whole;
   let box = null;
-  for (const child of children) {
-    const rect = child.localName === "svg" ? viewportRect(child) : child.getBoundingClientRect();
+  for (const child of element.children || []) {
+    const rect = drawnRect(child);
     if (!rect || (!rect.width && !rect.height)) continue;
     box = box ? new DOMRect(Math.min(box.left, rect.left), Math.min(box.top, rect.top),
       Math.max(box.right, rect.right) - Math.min(box.left, rect.left), Math.max(box.bottom, rect.bottom) - Math.min(box.top, rect.top)) : rect;
@@ -484,6 +489,48 @@ function viewportRect(svg) {
   const corners = [[x, y], [x + width, y + height]].map(([px, py]) => new DOMPoint(px, py).matrixTransform(matrix));
   const left = Math.min(corners[0].x, corners[1].x), top = Math.min(corners[0].y, corners[1].y);
   return new DOMRect(left, top, Math.abs(corners[1].x - corners[0].x), Math.abs(corners[1].y - corners[0].y));
+}
+
+// Where mol-sketch draws a point of its scene, turned to (yaw, pitch, roll) and framed as
+// it frames it (classic/engine.js: computeFit and makeProjector): about the middle of what
+// it draws, the box round all that turned fitted to the render (as _render draws it, its
+// long side 1200), then zoomed and panned -- shrunk to a canvas `width` by `height`. So a
+// site zoomed into turns where it is in the box, as the drawing will have it.
+export function moleculeProjector(view, { yaw, pitch, roll }, width, height) {
+  const [cy, sy, cp, sp, cr, sr] = [yaw, yaw, pitch, pitch, roll, roll].map((value, index) => (index % 2 ? Math.sin : Math.cos)(value * Math.PI / 180));
+  const [x0, y0, z0] = view.centre;
+  // As mol-sketch turns it: about y by yaw, x by pitch, then z by roll; y up.
+  const turn = ([x, y, z]) => {
+    x -= x0; y -= y0; z -= z0;
+    const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
+    const y1 = cp * y - sp * z1, z2 = sp * y + cp * z1;
+    return [cr * x1 - sr * y1, sr * x1 + cr * y1, z2];
+  };
+  const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+  for (const point of view.fit) {
+    const turned = turn(point);
+    for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], turned[k]); high[k] = Math.max(high[k], turned[k]); }
+  }
+  if (!view.fit.length) { low.fill(0); high.fill(0); }
+  const [rx, ry] = [(low[0] + high[0]) / 2, (low[1] + high[1]) / 2];
+  const [spanX, spanY, spanZ] = [0, 1, 2].map((k) => Math.max(high[k] - low[k], 1));
+  const { long_side: long, foot, head } = view.frame;
+  const [W, H] = width >= height ? [long, Math.round(long * height / width)] : [Math.round(long * width / height), long];
+  const { zoom, pan_x: panX, pan_y: panY, fov } = view.camera;
+  const reach = Math.max(spanX, spanY) / 2 + 1.5, opening = fov * Math.PI / 180;
+  const eye = opening > 0.002 ? reach / Math.tan(opening / 2) : Infinity;
+  const nearer = eye === Infinity ? 1 : eye / Math.max(eye - spanZ / 2, eye * 0.3);
+  const base = Math.min((W * 0.9) / (spanX + 2.6), (H * (1 - foot - head) - 24) / (spanY + 2.4)) * zoom / Math.pow(nearer, 0.7);
+  const ox = W / 2 - rx * base + panX * W, oy = (H * (1 - foot + head)) / 2 + ry * base + panY * H;
+  const shrink = width / W;
+  return {
+    perAngstrom: base * shrink,
+    at(point) {
+      const [x, y, z] = turn(point);
+      const d = eye === Infinity ? 1 : Math.min(4, Math.max(0.2, eye / (eye - z)));
+      return [(ox + (x - rx) * base * d + rx * base) * shrink, (oy - ((y - ry) * base * d + ry * base)) * shrink, z, d];
+    },
+  };
 }
 
 // A stylesheet of the figure's, asked for once -- and again, should the studio not have
@@ -1230,12 +1277,12 @@ export function figureParts(host) {
   // goes: on whichever side of the figure it fits (over a panel, if need be, as a popover
   // floats), its top level with the figure's; else at the window's side away from the shape.
   function besideFigure(node) {
-    const figure = host.element(model()?.root)?.getBoundingClientRect();
+    const figure = drawnRect(host.element(model()?.root));
     const own = node?.isConnected ? node.getBoundingClientRect() : null;
     if (!figure?.width || !own?.width) return;
     const apart = (a, b) => a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom;
     if (apart(own, figure)) return;
-    const chosen = state.selected.map((id) => host.element(id)?.getBoundingClientRect()).find((box) => box?.width) || figure;
+    const chosen = state.selected.map((id) => drawnRect(host.element(id))).find((box) => box?.width) || figure;
     const top = Math.max(8, Math.min(figure.top, innerHeight - 8 - own.height));
     const gap = 12;
     const left = figure.right + gap + own.width <= innerWidth - 8 ? figure.right + gap
@@ -1248,9 +1295,9 @@ export function figureParts(host) {
     const box = anchor?.getBoundingClientRect?.();
     if (anchor && (!box || box.width || box.height)) return anchor;
     const id = state.selected[state.selected.length - 1];
-    const at = id && host.element(id)?.getBoundingClientRect();
+    const at = id && drawnRect(host.element(id));
     if (at?.width) return { x: at.left, y: at.bottom + 8 };
-    const root = host.element(model()?.root)?.getBoundingClientRect();
+    const root = drawnRect(host.element(model()?.root));
     return root?.width ? { x: root.left, y: root.top + 12 } : { x: innerWidth / 2 - 196, y: 120 };
   }
 
@@ -1502,7 +1549,7 @@ export function figureParts(host) {
     const others = (model()?.nodes || []).filter((node) => node.id !== after).map((node) => ({ id: node.id, box: host.box(node.id) })).filter((other) => other.box);
     // On a slide, the figure's own box is kept to as well: a stand-in outside it reads as a
     // part of something else.
-    const root = bounded ? host.element(model()?.root)?.getBoundingClientRect() : null;
+    const root = bounded ? drawnRect(host.element(model()?.root)) : null;
     const frame = root?.width ? { left: root.left - page.left - gap, top: root.top - page.top - gap, right: root.right - page.left + gap, bottom: root.bottom - page.top + gap } : null;
     const outside = ({ left, top }) => (!frame ? 0 : width * height
       - Math.max(0, Math.min(left + width, frame.right) - Math.max(left, frame.left)) * Math.max(0, Math.min(top + height, frame.bottom) - Math.max(top, frame.top)));
@@ -2023,7 +2070,7 @@ export function figureParts(host) {
     for (const kind of ["node", "group"]) {
       const items = kind === "node" ? model()?.nodes || [] : (model()?.groups || []).filter((g) => g.id !== model().root);
       for (const item of items) {
-        const box = host.element(item.id)?.getBoundingClientRect();
+        const box = drawnRect(host.element(item.id));
         if (!box || !box.width || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) continue;
         const area = box.width * box.height;
         if (!best || area < best.area) best = { id: item.id, area };
@@ -2064,7 +2111,7 @@ export function figureParts(host) {
     let best = null;
     for (const node of model()?.nodes || []) {
       if (!inside(node.id, group)) continue;
-      const box = host.element(node.id)?.getBoundingClientRect();
+      const box = drawnRect(host.element(node.id));
       if (!box?.width || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) continue;
       if (!best || box.width * box.height < best.area) best = { id: node.id, area: box.width * box.height };
     }
@@ -2237,7 +2284,7 @@ export function figureParts(host) {
     const radius = 12;
     // (All its words: its label, and the words under it the other way, a reversible step's.)
     const words = [...element.querySelectorAll("text")].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width);
-    const shapes = (model()?.nodes || []).map((node) => host.element(node.id)?.getBoundingClientRect()).filter((rect) => rect?.width);
+    const shapes = (model()?.nodes || []).map((node) => drawnRect(host.element(node.id))).filter((rect) => rect?.width);
     const offHandles = (spot) => handles.every((handle) => Math.hypot(spot.x - outer.left - handle.x, spot.y - outer.top - handle.y) >= radius + 9);
     const meets = (spot, rect, room = radius) => rect && rect.width && spot.x + room > rect.left && spot.x - room < rect.right && spot.y + room > rect.top && spot.y - room < rect.bottom;
     // Every line's points, in the window's pixels: its own, and the others'.
@@ -2437,7 +2484,7 @@ export function figureParts(host) {
     }
     // A molecule chosen is moved by dragging, and copied by ⌥-dragging, like any part; it is
     // turned by its handle.
-    const molecule = box && nodeOf(id)?.kind === "structure" ? moleculeOf(id)?.getBoundingClientRect() : null;
+    const molecule = box && nodeOf(id)?.kind === "structure" ? drawnRect(moleculeOf(id)) : null;
     if (molecule?.width) {
       views.push(h("button.fig-rotate", {
         type: "button", title: "Drag to rotate the molecule",
@@ -2449,7 +2496,7 @@ export function figureParts(host) {
     for (const [id, { element, since }] of redrawing) {
       const now = moleculeOf(id);
       if (!now || now !== element || Date.now() - since > 20000) { redrawing.delete(id); continue; }
-      const at = now.getBoundingClientRect();
+      const at = drawnRect(now);
       views.push(h("div.fig-redrawing", { title: "Drawing…", style: { left: `${at.left - outer.left + 10}px`, top: `${at.top - outer.top + 10}px` } }, h("span.spinner")));
     }
     // A molecule or picture chosen has a handle at each corner: dragged, it is drawn
@@ -2461,8 +2508,8 @@ export function figureParts(host) {
       const theirs = [...host.overlay.querySelectorAll(".size-handle")].map((handle) => handle.getBoundingClientRect()).filter((rect) => rect.width);
       // (A molecule's or a picture's at the corners of its picture, the size it is given: not
       // of its words over it. A molecule drawn as shapes is a group as large as its picture.)
-      const picture = fits ? null : host.element(id)?.querySelector("image, [data-flexo-drawn]")?.getBoundingClientRect();
-      const whole = host.element(id)?.getBoundingClientRect(), pad = whole?.width ? (box.width - whole.width) / 2 : 0;
+      const picture = fits ? null : drawnRect(host.element(id)?.querySelector("image, [data-flexo-drawn]"));
+      const whole = drawnRect(host.element(id)), pad = whole?.width ? (box.width - whole.width) / 2 : 0;
       const at = picture?.width ? { left: picture.left - outer.left - pad, top: picture.top - outer.top - pad, width: picture.width + 2 * pad, height: picture.height + 2 * pad } : box;
       // Text has a handle at each side instead, as a Keynote text box has: dragged, it sets how
       // wide its words run before they wrap, snapping to the width they take of themselves.
@@ -2521,7 +2568,7 @@ export function figureParts(host) {
     event.stopPropagation();
     const element = host.element(id);
     const picture = element?.querySelector("image, [data-flexo-drawn]") || element;
-    const box = picture?.getBoundingClientRect();
+    const box = drawnRect(picture);
     const unit = element?.getScreenCTM?.()?.a;
     if (!box || !box.width || !unit) return;
     const west = corner.endsWith("w"), north = corner.startsWith("n");
@@ -2639,7 +2686,7 @@ export function figureParts(host) {
     drawing.append(outline);
     const tip = h("div.fig-turn-tip", { hidden: true });
     // (A person's name, under its figure: its band, which stays as it is.)
-    const figure = node?.kind === "person" ? host.element(`${id}.body`)?.getBoundingClientRect() : null;
+    const figure = node?.kind === "person" ? drawnRect(host.element(`${id}.body`)) : null;
     const band = figure?.height ? Math.max(0, box.bottom - figure.bottom) / unit : 0;
     // (A text's words are shown wrapping where they will as it is dragged, its own hidden.)
     const words = sideways ? textPreview(id, node, unit) : null;
@@ -2961,7 +3008,7 @@ export function figureParts(host) {
   // -- `key` the end's ("from" or "to"; a joined line's, its ref), `at` where it meets its
   // shape, `from` where the piece of the line into it starts.
   function shapeSeen(id, outer) {
-    const rect = host.element(id)?.getBoundingClientRect();
+    const rect = drawnRect(host.element(id));
     return rect && (rect.width || rect.height) ? { left: rect.left - outer.left, top: rect.top - outer.top, right: rect.right - outer.left, bottom: rect.bottom - outer.top } : null;
   }
   // A shape as a line's end is taken to it: where it is drawn -- and, a frame, that it is its
@@ -3367,9 +3414,10 @@ export function figureParts(host) {
 
   // -- a structure turned by dragging its handle --
   // Chosen, a molecule is turned by its handle as in a viewer: across turns it (yaw), up
-  // and down tilts it (pitch). While it turns, its chains' trace is drawn turning over
-  // it -- in mol-sketch's own frame, so it lies as the molecule will -- and once let go,
-  // the molecule is drawn at the new turn.
+  // and down tilts it (pitch). While it turns, what it draws is drawn turning over it --
+  // its atoms drawn as sticks, an active site's thicker, and its chains' trace faint --
+  // framed as mol-sketch frames it, so a site zoomed into turns where it is and lies as
+  // the molecule will; once let go, the molecule is drawn at the new turn.
   const views = new Map();
   const moleculeOf = (id) => host.element(`${id}.molecule`);
   async function viewOf(id) {
@@ -3384,7 +3432,7 @@ export function figureParts(host) {
     event.stopPropagation();
     const molecule = moleculeOf(id);
     if (!molecule) return;
-    const outer = host.overlay.getBoundingClientRect(), box = molecule.getBoundingClientRect();
+    const outer = host.overlay.getBoundingClientRect(), box = drawnRect(molecule);
     const ratio = window.devicePixelRatio || 1;
     const canvas = h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
       style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
@@ -3415,49 +3463,82 @@ export function figureParts(host) {
     }
     if (!turning.frame) turning.frame = requestAnimationFrame(() => { if (turning) { turning.frame = 0; turnDraw(); } });
   }
+  // Each element as the sticks are coloured, near enough to tell them apart while turning;
+  // a site's carbons darker than the rest's.
+  const ELEMENTS = { C: "#a2a7af", N: "#3a6fd8", O: "#e0453a", S: "#e2b23a", P: "#ef8a26", H: "#d4d4d4", SE: "#e2a23a" };
+  const SITE_CARBON = "#4e5562";
   function turnDraw() {
     const { canvas, view, tip } = turning;
     if (!turning.moved) return;
-    const { yaw, pitch, roll } = turnAngles();
-    tip.textContent = `Yaw ${Math.round(yaw)}° · Pitch ${Math.round(pitch)}°`;
+    const angles = turnAngles();
+    tip.textContent = `Yaw ${Math.round(angles.yaw)}° · Pitch ${Math.round(angles.pitch)}°`;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
-    if (!view?.chains?.length) return;
-    const [cy, sy, cp, sp, cr, sr] = [yaw, yaw, pitch, pitch, roll, roll].map((value, index) => (index % 2 ? Math.sin : Math.cos)(value * Math.PI / 180));
-    // As mol-sketch turns it: about y by yaw, x by pitch, then z by roll; y up on the page.
-    const chains = view.chains.map((chain) => chain.map(([x, y, z]) => {
-      const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
-      const y2 = cp * y - sp * z1, z2 = sp * y + cp * z1;
-      return [cr * x1 - sr * y2, -(sr * x1 + cr * y2), z2];
-    }));
-    const all = chains.flat();
-    const [left, right] = [Math.min(...all.map((p) => p[0])), Math.max(...all.map((p) => p[0]))];
-    const [top, bottom] = [Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[1]))];
-    const [near, far] = [Math.max(...all.map((p) => p[2])), Math.min(...all.map((p) => p[2]))];
-    const pad = 0.08 * Math.min(canvas.width, canvas.height);
-    const scale = Math.min((canvas.width - 2 * pad) / Math.max(right - left, 1), (canvas.height - 2 * pad) / Math.max(bottom - top, 1));
-    const at = ([x, y]) => [canvas.width / 2 + (x - (left + right) / 2) * scale, canvas.height / 2 + (y - (top + bottom) / 2) * scale];
+    if (!view?.centre || !(view.chains.length || view.atoms.length)) return;
+    const { at, perAngstrom } = moleculeProjector(view, angles, canvas.width, canvas.height);
     // (The accent as a colour a canvas takes: the Mac's may be named, AccentColor, not given.)
     const probe = h("span", { style: { color: "var(--accent)", display: "none" } });
     host.overlay.append(probe);
-    const ink = getComputedStyle(probe).color || "#0a7aff";
+    const accent = getComputedStyle(probe).color || "#0a7aff";
     probe.remove();
+    const ratio = window.devicePixelRatio || 1;
     context.lineCap = "round";
     context.lineJoin = "round";
-    // Segments far to near, the near ones darker and thicker: the trace reads in depth.
-    const segments = chains.flatMap((chain) => chain.slice(1).map((point, index) => [chain[index], point]));
+    // The ribbons' trace, faint: where the chain runs round what is drawn as sticks.
+    const segments = view.chains.flatMap((chain) => {
+      const placed = chain.map(at);
+      return placed.slice(1).map((point, index) => [placed[index], point]);
+    });
+    const depths = segments.flatMap(([a, b]) => [a[2], b[2]]);
+    const [near, far] = [Math.max(...depths), Math.min(...depths)];
+    // Far to near, the near ones darker and thicker: the trace reads in depth.
     segments.sort((a, b) => (a[0][2] + a[1][2]) - (b[0][2] + b[1][2]));
-    const ratio = window.devicePixelRatio || 1;
+    const sticks = view.atoms.length > 0;
+    context.strokeStyle = accent;
     for (const [a, b] of segments) {
       const depth = near > far ? ((a[2] + b[2]) / 2 - far) / (near - far) : 1;
-      context.strokeStyle = ink;
-      context.globalAlpha = 0.25 + 0.75 * depth;
-      context.lineWidth = (1.2 + 2.2 * depth) * ratio;
+      context.globalAlpha = (sticks ? 0.12 : 0.25) + (sticks ? 0.38 : 0.75) * depth;
+      context.lineWidth = (1 + 2 * depth) * ratio;
       context.beginPath();
-      context.moveTo(...at(a));
-      context.lineTo(...at(b));
+      context.moveTo(a[0], a[1]);
+      context.lineTo(b[0], b[1]);
       context.stroke();
     }
+    // The atoms drawn as sticks (an active site's thicker), each bond's halves in its atoms'
+    // colours, outlined, far to near.
+    const atoms = view.atoms.map(([x, y, z, element, site]) => ({ at: at([x, y, z]), element: String(element).toUpperCase(), site: !!site }));
+    const colour = (atom) => (atom.element === "C" && atom.site ? SITE_CARBON : ELEMENTS[atom.element] || "#9a6cd5");
+    const width = (atom) => Math.max(1.5 * ratio, 2 * view.sticks.radius * perAngstrom * (atom.site ? view.sticks.site : 1) * atom.at[3]);
+    const bonded = new Set(view.bonds.flat());
+    const bonds = view.bonds.map(([a, b]) => [atoms[a], atoms[b]]).sort((p, q) => (p[0].at[2] + p[1].at[2]) - (q[0].at[2] + q[1].at[2]));
+    context.globalAlpha = 1;
+    const outline = Math.max(1, 0.9 * ratio);
+    for (const [a, b] of bonds) {
+      const middle = [(a.at[0] + b.at[0]) / 2, (a.at[1] + b.at[1]) / 2];
+      const thick = Math.min(width(a), width(b));
+      context.strokeStyle = "rgba(20, 22, 26, 0.85)";
+      context.lineWidth = thick + 2 * outline;
+      context.beginPath();
+      context.moveTo(a.at[0], a.at[1]);
+      context.lineTo(b.at[0], b.at[1]);
+      context.stroke();
+      for (const end of [a, b]) {
+        context.strokeStyle = colour(end);
+        context.lineWidth = thick;
+        context.beginPath();
+        context.moveTo(end.at[0], end.at[1]);
+        context.lineTo(middle[0], middle[1]);
+        context.stroke();
+      }
+    }
+    // An atom bonded to none (an ion, a lone water) as a dot.
+    atoms.forEach((atom, index) => {
+      if (bonded.has(index)) return;
+      context.fillStyle = colour(atom);
+      context.beginPath();
+      context.arc(atom.at[0], atom.at[1], width(atom), 0, 2 * Math.PI);
+      context.fill();
+    });
     context.globalAlpha = 1;
   }
   function turnFinish() {
@@ -3811,11 +3892,11 @@ export function figureParts(host) {
     const tag = drag?.tag;
     if (!tag) return;
     const outer = host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
-    const carried = [...drag.moving.map((item) => item.element), drag.ghost].filter(Boolean).map((element) => element.getBoundingClientRect());
+    const carried = [...drag.moving.map((item) => item.element), drag.ghost].filter(Boolean).map((element) => drawnRect(element));
     const right = Math.max(at.at.x + 12, ...carried.map((rect) => rect.right + 10));
     const left = Math.min(at.at.x - 12, ...carried.map((rect) => rect.left - 10)) - wide;
     const top = Math.min(at.at.y - 12, ...carried.map((rect) => rect.top - 8)) - high / 2, bottom = Math.max(at.at.y + 12, ...carried.map((rect) => rect.bottom + 8)) + high / 2;
-    const shapes = (model()?.nodes || []).filter((node) => node.id !== drag.id).map((node) => host.element(node.id)?.getBoundingClientRect()).filter((rect) => rect?.width);
+    const shapes = (model()?.nodes || []).filter((node) => node.id !== drag.id).map((node) => drawnRect(host.element(node.id))).filter((rect) => rect?.width);
     const clear = ([x, y]) => x > outer.left && x + wide < outer.right - 4
       && !shapes.some((rect) => x < rect.right && x + wide > rect.left && y - high / 2 < rect.bottom && y + high / 2 > rect.top);
     const middle = at.at.x - wide / 2;
@@ -4421,7 +4502,7 @@ export function figureParts(host) {
     if (!state.landing || Date.now() - state.landing > 6000 || !model()) return null;
     const before = new Map();
     for (const node of model().nodes) {
-      const box = host.element(node.id)?.getBoundingClientRect();
+      const box = drawnRect(host.element(node.id));
       if (box && (box.width || box.height)) before.set(node.id, box);
     }
     before.settling = state.settling;
@@ -4464,7 +4545,7 @@ export function figureParts(host) {
     for (const node of model()?.nodes || []) {
       const element = host.element(node.id);
       if (!element) continue;
-      const now = element.getBoundingClientRect();
+      const now = drawnRect(element);
       const was = before.get(node.id) || before.get(state.renamed.get(node.id));
       moved ||= !was || Math.hypot(centre(was).x - centre(now).x, centre(was).y - centre(now).y) >= 0.5;
       added ||= !was;

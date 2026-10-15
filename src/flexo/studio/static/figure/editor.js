@@ -107,7 +107,9 @@ export function mount(studio, main) {
   // -- the drawing's parts, edited --
   const elementOf = (id) => {
     const svg = page.querySelector("svg");
-    return svg && [...svg.querySelectorAll("[id]")].find((el) => el.id === id);
+    // (Asked for by its id, not by going through every element that has one: a molecule
+    // drawn as shapes has thousands.)
+    return (svg && id != null && svg.querySelector(`[id="${CSS.escape(String(id))}"]`)) || null;
   };
   function boxOf(id) {
     const target = elementOf(id);

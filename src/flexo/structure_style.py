@@ -389,7 +389,11 @@ _MOLECULE = _pane(
                     "side_chain_helper", "Side Chains Only", "Leave backbone atoms to the ribbon"
                 ),
                 _switch("show.H", "Hydrogens"),
-                _switch("show.valence", "Double Bonds", "Draw double and triple bonds as such"),
+                _switch(
+                    "show.valence",
+                    "Double and Triple Bonds",
+                    "Each drawn as such, in the sticks of a residue or a ligand",
+                ),
                 _switch("show.hbonds", "Hydrogen Bonds", "As dotted lines"),
                 _colour("palette.hbond", "Hydrogen Bonds", "Their dots"),
             ),

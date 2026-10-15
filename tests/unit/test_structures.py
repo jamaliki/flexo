@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -321,14 +323,49 @@ def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> N
     assert out["document"]["text"] == text
     view = out["view"]
     assert view["camera"]["yaw"] == 40 and view["camera"]["pitch"] == -10
+    assert view["camera"]["zoom"] == 1 and view["camera"]["pan_x"] == 0
     points = [point for chain in view["chains"] for point in chain]
     assert len(points) > 50 and all(len(point) == 3 for point in points)
-    # Centred, so the page turns it about its middle.
+    # Turned about the middle of what it draws, as mol-sketch turns it: the fit's outermost
+    # points hold the box round all of it.
+    fit = view["fit"]
+    assert 6 <= len(fit) < 300
     for k in range(3):
-        values = [point[k] for point in points]
-        assert abs(max(values) + min(values)) < 0.1
+        assert abs((max(p[k] for p in fit) + min(p[k] for p in fit)) / 2 - view["centre"][k]) < 0.01
+    assert view["frame"] == {"long_side": 1200, "foot": 0.0, "head": 0.0}
     with pytest.raises(EditError, match="isn't a structure"):
         FigureKind().act({"text": text}, {"do": "structure-view", "id": "tag"}, tmp_path)
+
+
+def test_a_site_zoomed_into_turns_as_it_is_framed(tmp_path: Path) -> None:
+    """Dragged round, a molecule zoomed into its active site shows the site where the drawing
+    has it -- its atoms, as sticks, framed and zoomed as mol-sketch frames them -- not the
+    whole protein fitted to the box."""
+
+    pytest.importorskip("molsketch")
+    from flexo.studio.figure_kind import FigureKind
+
+    source = DATA / "1a7g.cif"
+    text = (
+        "figure: {id: site}\n"
+        "nodes:\n"
+        "  - id: model\n    kind: structure\n"
+        f"    properties: {{source: {source}, look: flat, site: resi 327+335, zoom: 3, "
+        "pan_x: 0.1, pan_y: -0.05}\n"
+    )
+    view = FigureKind().act({"text": text}, {"do": "structure-view", "id": "model"}, tmp_path)[
+        "view"
+    ]
+    assert view["camera"]["zoom"] == 3
+    assert (view["camera"]["pan_x"], view["camera"]["pan_y"]) == (0.1, -0.05)
+    site = [atom for atom in view["atoms"] if atom[4]]
+    # The two histidines' side chains, from their alpha carbons (the ribbon has the rest of
+    # their backbone), with their bonds.
+    assert len(site) == 2 * 7 and {atom[3] for atom in site} == {"C", "N"}
+    assert view["bonds"] and all(
+        0 <= a < len(view["atoms"]) and 0 <= b < len(view["atoms"]) for a, b in view["bonds"]
+    )
+    assert view["sticks"]["radius"] > 0 and view["sticks"]["site"] >= 1
 
 
 def test_a_structure_takes_mol_sketch_settings_over_its_look(tmp_path: Path) -> None:
@@ -758,3 +795,51 @@ def test_a_structure_is_named_for_what_its_file_holds_and_a_long_name_wraps(tmp_
     codes = [item.code for item in lint_compilation(compiled).diagnostics]
     assert "layout.text.overflow" not in codes
     assert len(compiled.routed.fitted.node("row.model").measured.label.lines) == 2
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_editor_frames_a_turning_molecule_as_mol_sketch_does() -> None:
+    """The page's projector is mol-sketch's (computeFit, makeProjector): the box round what is
+    drawn, turned, fitted to the render -- 90% of its width, its height less 24 pixels, an
+    atom's room kept round it -- then zoomed and panned, shrunk to the canvas."""
+
+    from test_pages import _studio
+
+    corners = [[x, y, z] for x in (-10, 10) for y in (-5, 5) for z in (-2, 2)]
+    view = {
+        "centre": [0, 0, 0],
+        "fit": corners,
+        "frame": {"long_side": 1200, "foot": 0.0, "head": 0.0},
+        "camera": {"zoom": 1, "pan_x": 0, "pan_y": 0, "fov": 0},
+    }
+
+    def placed(points, camera=None, turn=(0, 0, 0), size=(1200, 600)):
+        shown = {**view, "camera": {**view["camera"], **(camera or {})}}
+        angles = dict(zip(("yaw", "pitch", "roll"), turn, strict=True))
+        code = (
+            f"(() => {{ const p = parts.moleculeProjector({json.dumps(shown)}, "
+            f"{json.dumps(angles)}, {size[0]}, {size[1]}); "
+            f"return {{ per: p.perAngstrom, at: {json.dumps(points)}.map((q) => p.at(q)) }}; }})()"
+        )
+        return _studio(code)
+
+    base = min(1200 * 0.9 / (20 + 2.6), (600 - 24) / (10 + 2.4))
+    seen = placed([[0, 0, 0], [10, 0, 0], [0, 5, 0]])
+    assert seen["per"] == pytest.approx(base)
+    (x0, y0, *_), (x1, y1, *_), (x2, y2, *_) = seen["at"]
+    assert (x0, y0) == pytest.approx((600, 300))
+    assert (x1 - x0, y1 - y0) == pytest.approx((10 * base, 0))
+    assert (x2 - x0, y2 - y0) == pytest.approx((0, -5 * base))  # y up, the page's y down
+    # Zoomed and panned as mol-sketch does: about the middle, then moved by shares of it.
+    moved = {"zoom": 3, "pan_x": 0.1, "pan_y": -0.05}
+    (x0, y0, *_), (x1, *_) = placed([[0, 0, 0], [10, 0, 0]], moved)["at"]
+    assert (x0, y0) == pytest.approx((600 + 120, 300 - 30))
+    assert x1 - x0 == pytest.approx(30 * base)
+    # A canvas half the size: everything half as far.
+    (x0, y0, *_), (x1, *_) = placed([[0, 0, 0], [10, 0, 0]], size=(600, 300))["at"]
+    assert (x0, y0, x1 - x0) == pytest.approx((300, 150, 5 * base))
+    # Turned a quarter about y: x goes into the page, z comes to the right -- and the box
+    # round it, turned, is framed again.
+    turned = placed([[0, 0, 0], [10, 0, 0], [0, 0, 2]], turn=(90, 0, 0))["at"]
+    (x0, *_), (x1, *_), (x2, *_) = turned
+    assert x1 == pytest.approx(x0, abs=1e-6) and x2 > x0
