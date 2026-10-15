@@ -1,0 +1,56 @@
+/* Shapes drawn where they are put (shapes.js) -- on a slide, over a figure: their frames,
+   handles and guides over the page, in its own units; the popover of their kinds; their
+   words typed in them; their settings in the inspector. */
+.shape-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 6; }
+.shape-mark { fill: none; stroke: var(--accent); }
+.shape-mark.hover { stroke: var(--accent-line); stroke-dasharray: 5 3; }
+.shape-mark.along { stroke: var(--accent); stroke-opacity: 0.3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none; }
+.shape-mark.along.hover { stroke-opacity: 0.15; }
+.shape-mark.group-frame { stroke-dasharray: 4 3; }
+.shape-handle { fill: #ffffff; stroke: var(--accent); pointer-events: all; touch-action: none; }
+.shape-handle:hover { fill: var(--accent); }
+.shape-handle.adjust { fill: #ffc21a; stroke: #8a5d00; }
+.shape-handle.adjust:hover { fill: #ffdc6b; }
+.shape-handle.bend { fill: var(--accent); stroke: #ffffff; }
+.shape-stalk { stroke: var(--accent); }
+.shape-guide { stroke: #e8590c; }
+.shape-target { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--accent); }
+.shape-site { fill: #ffffff; stroke: var(--accent); }
+.shape-site.on { fill: var(--accent); }
+.shape-lock { color: var(--ink-3); }
+.shape-menu { width: 348px; }
+.shape-grid { display: grid; gap: 2px; max-height: min(70vh, 560px); overflow: auto; padding: 0 2px 4px; }
+.shape-section { padding-top: 6px; }
+.shape-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.shape-pick { display: grid; justify-items: center; gap: 1px; padding: 6px 2px 5px; border: 0; background: none; border-radius: 7px; color: var(--ink); font: 500 10.5px/1.2 var(--font); cursor: pointer; }
+.shape-pick:hover, .shape-pick:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
+.shape-icon { width: 32px; height: 24px; overflow: visible; }
+.shape-name { max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.range-row { gap: 8px; align-items: center; }
+.range-row .range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.range-value { min-width: 38px; text-align: right; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.row.heads { gap: 8px; align-items: end; }
+.row.heads .field { flex: 1; }
+.arrange-row { gap: 2px; flex-wrap: wrap; }
+/* The size or turn a drag makes, by the pointer. */
+.shape-layer + .size-tip, .size-tip.shape-tip { position: absolute; z-index: 30; pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink, #fff); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
+/* Words typed in a shape where the page has no editor of its own for them (a figure's): a
+   box of its words, where they are drawn. */
+.shape-words.plain { position: absolute; z-index: 20; display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; border-radius: 4px; box-shadow: 0 0 0 2px var(--accent), 0 0 0 5.5px var(--accent-soft); }
+.shape-words.plain.middle { justify-content: center; }
+.shape-words.plain.bottom { justify-content: flex-end; }
+.shape-words.plain .plain-words { display: block; width: 100%; box-sizing: border-box; margin: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; line-height: 1.22; caret-color: var(--accent); font-kerning: normal; text-rendering: geometricPrecision; }
+/* A figure's page being drawn on, or a shape on it dragged. */
+.fig-page.shape-drawing, .fig-page.shape-drawing * { cursor: crosshair !important; }
+.fig-page.shape-dragging .fig-hover, .fig-page.shape-drawing .fig-hover { visibility: hidden; }
+/* In a figure's inspector: the way back up and the shape's own buttons, on one line. */
+.fig .block-top { display: grid; gap: 10px 2px; grid-template-columns: minmax(0, 1fr) repeat(4, auto); align-items: center; }
+.fig .block-top > .crumbs { grid-row: 1; grid-column: 1; gap: 2px; }
+.fig .block-top > .block-actions { display: contents; }
+.fig .block-top > .block-actions > .btn.icon { grid-row: 1; }
+.fig .block-top > :not(.crumbs):not(.block-actions) { grid-column: 1 / -1; }
+.fig .shape-round { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* Those drawn over a figure, in its list of shapes. */
+.tree-row .shape-glyph { display: inline-grid; place-items: center; color: var(--ink-3); }
+.tree-row .shape-glyph .shape-icon { width: 20px; height: 15px; }
+.tree-row.on .shape-glyph { color: var(--accent); }

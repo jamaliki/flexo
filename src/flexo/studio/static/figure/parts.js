@@ -1748,7 +1748,9 @@ export function figureParts(host) {
     if (!gone.length) return;
     if (emptied(gone, { cut })) return;
     const kept = keep.filter((id) => typeOf(id) && !gone.includes(id));
-    act({ do: "delete", ids: gone }, { select: false, label: cut ? said({ do: "delete", ids: gone }).replace(/^Delete\b/, "Cut") : null });
+    // (Where each was, for shapes drawn over the figure on one to stay where they are: the host's.)
+    const origins = host.origins?.(gone);
+    act({ do: "delete", ids: gone, ...(origins && Object.keys(origins).length ? { origins } : {}) }, { select: false, label: cut ? said({ do: "delete", ids: gone }).replace(/^Delete\b/, "Cut") : null });
     // (At once: a ⌫ pressed again before the figure comes back acts on nothing.)
     select(kept, { reveal: false });
     if (!kept.length) open();
@@ -3604,6 +3606,9 @@ export function figureParts(host) {
     const left = Math.min(start.x, pointer.x) - outer.left, top = Math.min(start.y, pointer.y) - outer.top;
     const width = Math.abs(pointer.x - start.x), height = Math.abs(pointer.y - start.y);
     Object.assign(banding.node.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    // Shapes drawn over the figure it touches, where it touches any, are what it chooses (the
+    // host's), as on a slide.
+    if (host.band?.(outer.left + left, outer.top + top, outer.left + left + width, outer.top + top + height)) { banding.touched = "drawn"; return; }
     // Every shape whose drawing it reaches -- a shape's, not the group round it, which would
     // choose all it holds as one.
     const touched = (model().nodes || []).map((node) => node.id).filter((id) => {
