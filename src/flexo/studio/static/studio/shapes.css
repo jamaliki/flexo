@@ -54,3 +54,11 @@
 .tree-row .shape-glyph { display: inline-grid; place-items: center; color: var(--ink-3); }
 .tree-row .shape-glyph .shape-icon { width: 20px; height: 15px; }
 .tree-row.on .shape-glyph { color: var(--accent); }
+/* A path's points being edited (pathtools.js): its anchors, those chosen filled, their handles. */
+.path-anchor { fill: #ffffff; stroke: var(--accent); }
+.path-anchor.chosen { fill: var(--accent); }
+.path-handle { fill: var(--accent); stroke: #ffffff; }
+.path-arm { stroke: var(--accent); fill: none; }
+.path-band { fill: color-mix(in srgb, var(--accent) 8%, transparent); stroke: var(--accent); stroke-dasharray: 3 2; }
+.path-ink { fill: none; stroke: var(--accent); }
+.path-close { fill: var(--accent); stroke: #ffffff; }

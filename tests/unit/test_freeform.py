@@ -397,7 +397,9 @@ def test_a_path_is_read_as_written_and_drawn_in_its_box() -> None:
     assert outline.get("d") == HOLED
     assert freeform.closed(spec) and freeform.family("path") == "path"
     assert freeform.LABELS["path"] == "Path" and "path" in freeform.KINDS
-    assert all("path" not in kinds for _, kinds in freeform.SECTIONS)
+    # Drawn by the pen, among the lines; the pencil draws by hand.
+    assert "path" in dict(freeform.SECTIONS)["Lines"]
+    assert freeform.TOOLS["path"] == "Pen" and freeform.LABELS["pen"] == "Pencil"
 
 
 def test_a_path_turns_and_mirrors_about_its_boxs_middle() -> None:
@@ -526,7 +528,8 @@ def test_the_studios_shapes_are_drawn_as_these_are() -> None:
         "return { segments: made.segments, heads: made.heads.map((head) => head.segments), "
         "area: made.area, box: made.box, turn: made.turn, label: made.label, "
         "bounds: f.bounds(spec, made) }; });\n"
-        "const tables = { sections: f.SECTIONS, labels: f.LABELS, heads: f.HEADS, sizes: f.SIZES, "
+        "const tables = { sections: f.SECTIONS, labels: f.LABELS, tools: f.TOOLS, heads: f.HEADS, "
+        "sizes: f.SIZES, "
         "defaults: Object.fromEntries(f.KINDS.map((kind) => [kind, f.defaults(kind)])) };\n"
         "console.log(JSON.stringify({ out, tables }));\n"
     )
@@ -537,6 +540,7 @@ def test_the_studios_shapes_are_drawn_as_these_are() -> None:
     tables = answered["tables"]
     assert [[name, list(kinds)] for name, kinds in freeform.SECTIONS] == tables["sections"]
     assert tables["labels"] == freeform.LABELS
+    assert tables["tools"] == freeform.TOOLS
     assert list(freeform.HEADS) == tables["heads"]
     assert {kind: list(size) for kind, size in freeform.SIZES.items()} == tables["sizes"]
     assert {kind: freeform.defaults(kind) for kind in freeform.KINDS} == tables["defaults"]

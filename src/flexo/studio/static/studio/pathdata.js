@@ -361,6 +361,14 @@ export function remapped(entry, map) {
   for (let n = 0; n < from.length; n += 2) { const [x, y] = map([from[n], from[n + 1]]); out[n] = rounded(x); out[n + 1] = rounded(y); }
   return fresh(entry.kinds, out, { opens: entry.opens, rounded: true });
 }
+// Segments as what is read, to a hundredth: a path drawn or edited here, its words written only
+// when they are first read.
+export function readOf(segments) {
+  let kinds = "";
+  const values = [];
+  for (const segment of segments) { kinds += segment[0]; for (let n = 1; n < segment.length; n += 1) values.push(rounded(segment[n])); }
+  return fresh(kinds, values, { rounded: true });
+}
 export const normalised = (data) => remapped(parsed(data), (point) => point).words();
 export const moved = (data, dx, dy) => shifted(parsed(data), dx, dy).words();
 export const mapped = (data, map) => remapped(parsed(data), map).words();

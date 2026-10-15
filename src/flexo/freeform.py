@@ -121,11 +121,23 @@ BOXED = (
 )
 """The closed shapes, each drawn in a box (``at``, ``size``)."""
 KINDS = (*LINES, *TRACED, *BOXED, "text", "path")
-"""Every kind of shape, but a group of them (``group``, its ``shapes``). (A path is drawn by a
-tool of its own, or written: no editor offers it among the others, ``SECTIONS``.)"""
+"""Every kind of shape, but a group of them (``group``, its ``shapes``)."""
 
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Lines", ("line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen")),
+    (
+        "Lines",
+        (
+            "line",
+            "arrow",
+            "double-arrow",
+            "curved-arrow",
+            "elbow",
+            "arc",
+            "polyline",
+            "pen",
+            "path",
+        ),
+    ),
     (
         "Shapes",
         (
@@ -171,7 +183,7 @@ LABELS = {
     "elbow": "Elbow Connector",
     "arc": "Arc",
     "polyline": "Polyline",
-    "pen": "Pen",
+    "pen": "Pencil",
     "rectangle": "Rectangle",
     "rounded-rectangle": "Rounded Rectangle",
     "ellipse": "Oval",
@@ -204,6 +216,10 @@ LABELS = {
     "group": "Group",
 }
 """What a person calls each kind (never a slide's own objects' names: Text Box, Speech Bubble)."""
+
+TOOLS = {"path": "Pen"}
+"""What the tool that draws a kind is called, where that is not the kind's own name: the pen
+draws a path (point by point, as a Bézier pen does), the pencil (``pen``) by hand."""
 
 HEADS = ("none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond")
 """The ends a line may have."""
@@ -2299,6 +2315,7 @@ def catalogue() -> dict[str, Any]:
     return {
         "sections": [{"name": name, "kinds": list(kinds)} for name, kinds in SECTIONS],
         "labels": dict(LABELS),
+        "tools": dict(TOOLS),
         "families": {kind: family(kind) for kind in (*KINDS, "group")},
         "defaults": {kind: defaults(kind) for kind in KINDS},
         "sizes": {kind: list(size) for kind, size in SIZES.items()},

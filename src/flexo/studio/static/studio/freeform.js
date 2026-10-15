@@ -20,7 +20,7 @@ export const BOXED = [
 export const KINDS = [...LINES, ...TRACED, ...BOXED, "text", "path"];
 
 export const SECTIONS = [
-  ["Lines", ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen"]],
+  ["Lines", ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen", "path"]],
   ["Shapes", ["rectangle", "rounded-rectangle", "ellipse", "triangle", "right-triangle", "diamond", "parallelogram",
     "trapezoid", "polygon", "star", "plus", "cross", "check", "cloud"]],
   ["Arrows & Callouts", ["arrow-right", "arrow-left", "arrow-up", "arrow-down", "arrow-left-right", "chevron", "bubble"]],
@@ -31,7 +31,7 @@ export const SECTIONS = [
 
 export const LABELS = {
   line: "Line", arrow: "Arrow", "double-arrow": "Double Arrow", "curved-arrow": "Curved Arrow",
-  elbow: "Elbow Connector", arc: "Arc", polyline: "Polyline", pen: "Pen", rectangle: "Rectangle",
+  elbow: "Elbow Connector", arc: "Arc", polyline: "Polyline", pen: "Pencil", rectangle: "Rectangle",
   "rounded-rectangle": "Rounded Rectangle", ellipse: "Oval", triangle: "Triangle",
   "right-triangle": "Right Triangle", diamond: "Diamond", polygon: "Polygon", star: "Star",
   parallelogram: "Parallelogram", trapezoid: "Trapezoid", "arrow-right": "Right Arrow",
@@ -41,6 +41,10 @@ export const LABELS = {
   dimension: "Dimension Line", "scale-bar": "Scale Bar", highlight: "Highlight", ring: "Highlight Ring",
   text: "Text Box", path: "Path", group: "Group",
 };
+
+// What the tool that draws a kind is called, where that is not the kind's own name: the pen
+// draws a path.
+export const TOOLS = { path: "Pen" };
 
 export const HEADS = ["none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond"];
 export const DASHES = ["solid", "dashed", "dotted"];

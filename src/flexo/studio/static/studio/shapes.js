@@ -12,10 +12,15 @@
 // middles of the other shapes and of what the page holds, a guide drawn where it does (⌘:
 // none). The arrows nudge it (⇧: ten points); double-clicked, its words are typed in it.
 // Everything moves on the page at once, drawn here (freeform.js) as the page will draw it;
-// the page's own drawing takes its place as it comes.
+// the page's own drawing takes its place as it comes. The pen draws a path point by point, a
+// path's points are edited where it is (a double-click, Edit Points), any shape is made a path
+// (Make Editable) and shapes are combined into one (pathtools.js, pathops.js).
 
 import { h, icon, ui, menu, popover, closeMenu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
+import * as P from "/static/studio/pathdata.js";
+import * as O from "/static/studio/pathops.js";
+import { pathTools } from "/static/studio/pathtools.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -35,6 +40,8 @@ const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 // What a shape is called, as the studio names it: "Arrow", "Speech Bubble", "Group".
 export const shapeLabel = (spec) => (spec?.kind === "group" ? "Group" : F.LABELS[spec?.kind] || "Shape");
+// What the tool that draws a kind is called: its own name, but the pen's (which draws a path).
+const toolName = (kind) => F.TOOLS?.[kind] || F.LABELS[kind];
 const plural = (count, word = "Shape") => (count === 1 ? word : `${count} ${word}s`);
 
 // Each kind as the popover draws it, small: its outline in the ink of the menu.
@@ -42,6 +49,7 @@ function iconSpec(kind) {
   const form = F.family(kind);
   const thin = { line_width: 1.6 };
   if (kind === "polyline") return { kind, points: [[4, 19], [11, 7], [19, 16], [28, 5]], ...thin };
+  if (kind === "path") return { kind, d: "M 4 19 C 8 3 17 21 28 5", fill: "none", ...thin };
   if (kind === "pen") return { kind, points: [[4, 17], [9, 8], [15, 15], [21, 7], [28, 12]], ...thin };
   if (kind === "brace") return { kind, from: [12, 3], to: [12, 21], depth: 8, ...thin };
   if (kind === "bracket") return { kind, from: [13, 3], to: [13, 21], depth: 6, ...thin };
@@ -218,6 +226,7 @@ export function shapeEditor(host) {
     closeWords();
     chosen = [...new Set(indices)].filter((index) => Number.isInteger(index)).sort((a, b) => a - b);
     chosenOn = slideIndex();
+    if (tools?.points.active() && !chosen.includes(tools.points.index())) tools.points.leave({ quiet: true });
     if (chosen.length) host.leaveOthers();
     if (!quiet) { place(); host.renderInspector(); host.reportFocus(); }
   }
@@ -312,6 +321,8 @@ export function shapeEditor(host) {
     handles.replaceChildren();
     if (!page()) return;
     if (words) placeWords();
+    // (A path's points being edited: they are what is shown.)
+    if (tools?.points.active()) { tools.points.place(); return; }
     const picks = chosenNow();
     const px = 1 / unit();
     if (hovered !== null && !picks.includes(hovered) && !gesture && shapesOf()[hovered]) outline(hovered, "hover");
@@ -522,8 +533,10 @@ export function shapeEditor(host) {
   // -- the pointer --
 
   function press(event) {
+    if (tools?.points.active() && tools.points.press(event)) { event.shapes = true; return true; }
     if (event.button !== 0) return false;
     if (words && words.node.contains(event.target)) return false;
+    if (tool?.kind === "path") { paths().pen.press(event); event.shapes = true; return true; }
     if (tool) { startDraw(event); event.shapes = true; return true; }
     if (event.target.closest?.(".shape-handle")) return true;
     const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
@@ -540,6 +553,8 @@ export function shapeEditor(host) {
     return true;
   }
   function hover(event) {
+    if (tool?.kind === "path") return paths().pen.hover(event);
+    if (tools?.points.active()) return true;
     if (gesture || tool) return true;
     const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
     if (index !== hovered) { hovered = index; place(); }
@@ -547,10 +562,13 @@ export function shapeEditor(host) {
   }
   function leave() { if (hovered !== null) { hovered = null; place(); } }
   function dblclick(event) {
+    if (tools?.points.active()) return tools.points.dblclick(event);
     const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
     if (index === null) return false;
     const spec = shapesOf()[index];
     if (!spec || spec.kind === "group" || spec.locked) return true;
+    // A path double-clicked: its points, to edit (its words by Return, or Edit Text).
+    if (spec.kind === "path") { choose([index]); paths().points.start(index); return true; }
     choose([index]);
     editWords(index, { point: { x: event.clientX, y: event.clientY } });
     return true;
@@ -1082,14 +1100,18 @@ export function shapeEditor(host) {
 
   function arm(kind) {
     closeWords();
+    tools?.points.leave();
     tool = { kind };
     page()?.classList.add("shape-drawing");
+    // (The pen draws a path point by point: pathtools.js.)
+    if (kind === "path") { paths().pen.arm(); return; }
     const label = F.LABELS[kind];
     toast(kind === "polyline" ? `${label}: click each point, and double-click (or Return) at the last · Esc to stop`
-      : kind === "pen" ? `Pen: draw on the ${noun} · Esc to stop`
+      : kind === "pen" ? `${label}: draw on the ${noun} · Esc to stop`
         : host.armHint?.(kind, label) || `${label}: drag on the ${noun} to draw it, or click for its usual size · Esc to stop`, { icon: "shape", seconds: 3 });
   }
   function disarm() {
+    if (tool?.kind === "path") tools?.pen.stop();
     tool = null;
     page()?.classList.remove("shape-drawing");
   }
@@ -1616,14 +1638,68 @@ export function shapeEditor(host) {
     host.reportFocus();
   }
 
+  // -- paths: the pen, a path's points, Make Editable, shapes combined (pathtools.js) --
+
+  let tools = null;
+  function paths() {
+    tools ||= pathTools({
+      S, previews, marks, guides, handles, toFrame, unit, specAt, geometryOf, edit, add, preview, putBack, place, say, roles, disarm, noun,
+      hideTip: () => { tip.hidden = true; },
+      snapTargets, caught: (point, targets) => caught(point, { targets }, false),
+      toast: (words, options = {}) => toast(words, { icon: "shape", seconds: 3, ...options }),
+      swallowRelease: (cancelled) => host.swallowRelease(cancelled),
+      renderInspector: () => host.renderInspector(),
+      remove: (index) => { chosen = [index]; chosenOn = slideIndex(); remove(); },
+    });
+    return tools;
+  }
+  const COMBINED = [["union", "Union Shapes"], ["subtract", "Subtract Shapes"], ["intersect", "Intersect Shapes"], ["exclude", "Exclude Shapes"]];
+  // Whether a shape is filled within an outline of its own (a group's, all of its shapes).
+  const filled = (spec) => Boolean(spec) && (spec.kind === "group" ? (spec.shapes || []).length > 0 && spec.shapes.every(filled) : F.isClosed(spec));
+  function pathCommands(picks, name, locked) {
+    if (locked) return [];
+    const list = shapesOf(), one = picks.length === 1 ? list[picks[0]] : null, out = [];
+    if (one?.kind === "path") out.push({ icon: "pen", label: "Edit Points", hint: "Drag its points and handles · double-click one: smooth or a corner", run: () => paths().points.start(picks[0]) });
+    if (picks.some((index) => O.editableKind(list[index]))) out.push({ icon: "shape", label: "Make Editable", also: ["Convert to Path"], hint: `${name}, as a path of the same outline`, run: () => makeEditable() });
+    if (picks.length > 1 && picks.every((index) => filled(list[index]))) {
+      for (const [operation, label] of COMBINED) out.push({ icon: "layout", label, also: [`Combine Shapes: ${label.split(" ")[0]}`], hint: `${name}, as one path`, run: () => combine(operation) });
+    }
+    return out;
+  }
+  function makeEditable() {
+    const picks = chosenNow().filter((index) => O.editableKind(shapesOf()[index]) && !shapesOf()[index].locked);
+    if (!picks.length) return;
+    const label = picks.length === 1 ? `Make ${shapeLabel(shapesOf()[picks[0]])} Editable` : `Make ${plural(picks.length)} Editable`;
+    const made = picks.map((index) => O.editable(specAt(index), geometryOf(index)));
+    edit((list) => { picks.forEach((index, n) => { list[index] = made[n]; }); }, label);
+    host.reportFocus();
+  }
+  // The shapes chosen made one path -- by `operation` -- styled as the one at the back, where
+  // it was; what was glued to them left where it was drawn.
+  function combine(operation) {
+    const picks = chosenNow().filter((index) => filled(shapesOf()[index]));
+    if (picks.length < 2) return;
+    const outlines = picks.flatMap((index) => O.outlinesOf(specAt(index), geometryOf(index)));
+    const made = O.combined(operation, outlines);
+    const label = COMBINED.find(([one]) => one === operation)[1];
+    if (!made) { toast("Nothing is left: those shapes do not overlap", { icon: "shape", seconds: 3 }); return; }
+    const back = shapesOf()[picks[0]];
+    const spec = { kind: "path", d: P.written(made), fill_rule: "evenodd", ...O.styleOf(back), ...Object.fromEntries(ownKeys.filter((key) => back[key] !== undefined).map((key) => [key, back[key]])) };
+    const gone = new Set(picks.flatMap((index) => namesIn(shapesOf()[index])));
+    const at = picks[0] - 0;
+    edit((list) => list.flatMap((item, index) => (index === at ? [spec] : picks.includes(index) ? [] : [item && unglued(item, gone, index)])), label, { after: [at] });
+    host.undoNote?.(`${plural(picks.length)} combined`, { icon: "shape" });
+    host.reportFocus();
+  }
+
   // -- the popover and the commands --
 
   function chooser(anchor) {
     const sections = (catalog.sections || F.SECTIONS.map(([name, kinds]) => ({ name, kinds }))).map((section) => (Array.isArray(section) ? { name: section[0], kinds: section[1] } : section));
     const grid = h("div.shape-grid", { role: "menu" }, sections.map((section) => [
       h("div.menu-title.shape-section", {}, section.name),
-      h("div.shape-row", {}, section.kinds.map((kind) => h("button.shape-pick", { type: "button", role: "menuitem", title: F.LABELS[kind], "aria-label": F.LABELS[kind],
-        onclick: () => { closeMenu(); arm(kind); } }, shapeIcon(kind), h("span.shape-name", {}, F.LABELS[kind])))),
+      h("div.shape-row", {}, section.kinds.map((kind) => h("button.shape-pick", { type: "button", role: "menuitem", title: toolName(kind), "aria-label": toolName(kind),
+        onclick: () => { closeMenu(); arm(kind); } }, shapeIcon(kind), h("span.shape-name", {}, toolName(kind))))),
     ]));
     popover(anchor, [h("div.menu-title", {}, "Shapes"), grid], { className: "shape-menu" });
     grid.querySelector("button")?.focus({ preventScroll: true });
@@ -1634,8 +1710,8 @@ export function shapeEditor(host) {
     if (host.canDraw()) {
       out.push({ icon: "shape", label: host.chooserLabel || "Add Shape…", hint: "Lines, arrows, shapes, callouts, braces, measures and text boxes", run: () => chooser(host.shapeButton()) });
       // (Each also by the name the Mac app's Insert › Shapes runs it by, whatever the page.)
-      // (A path is drawn by a tool of its own, not a drag.)
-      for (const kind of F.KINDS.filter((one) => one !== "path")) out.push({ icon: "shape", label: `${verb} ${F.LABELS[kind]}`, also: verb === "Draw" ? [] : [`Draw ${F.LABELS[kind]}`], hint: `Drag on the ${noun} to draw it`, run: () => arm(kind) });
+      // (A path by its tool's name: the pen.)
+      for (const kind of F.KINDS) out.push({ icon: kind === "path" ? "pen" : "shape", label: `${verb} ${toolName(kind)}`, also: verb === "Draw" ? [] : [`Draw ${toolName(kind)}`], hint: kind === "path" ? `Click and drag on the ${noun}, point by point` : `Drag on the ${noun} to draw it`, run: () => arm(kind) });
     }
     const picks = chosenNow();
     if (!picks.length || words) return out;
@@ -1662,6 +1738,7 @@ export function shapeEditor(host) {
       { icon: "flip-down", label: "Flip Vertically", hint: name, run: () => flip("vertical") },
       ...(host.commands ? host.commands(picks, name, { set, edit, choose }) : []),
       ...(one && one.kind !== "group" && !locked ? [{ icon: "pencil", label: one.text ? "Edit Text" : "Add Text", hint: name, run: () => editWords(picks[0], { selectAll: true }) }] : []),
+      ...pathCommands(picks, name, locked),
     );
     return out;
   }
@@ -1678,6 +1755,9 @@ export function shapeEditor(host) {
     items.push({ icon: "front", label: "Arrange", items: ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"].map(named) },
       { icon: "align-left", label: "Align", items: ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map(named) });
     const rest = ["Group", "Ungroup", "Lock", "Unlock", "Flip Horizontally", "Flip Vertically"].map(named).filter(Boolean);
+    // (A path's points, any shape as a path, shapes combined into one.)
+    const outlined = ["Edit Points", "Make Editable", ...COMBINED.map(([, label]) => label)].map(named).filter(Boolean);
+    if (outlined.length) rest.push("-", ...outlined);
     items.push(...rest, "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
     // (A menu of the studio's has no submenus: Arrange and Align are their items, in place.)
     return items.flatMap((item) => (item?.items ? item.items.filter(Boolean).map((sub) => ({ ...sub })) : [item])).filter(Boolean)
@@ -1899,7 +1979,9 @@ export function shapeEditor(host) {
     list: shapesOf,
     set,
     any: () => chosenNow().length > 0,
-    busy: () => Boolean(gesture?.started || drawingNow),
+    busy: () => Boolean(gesture?.started || drawingNow || tools?.pen.drawing() || tools?.points.busy()),
+    editPoints: (index) => paths().points.start(index),
+    editingPoints: () => Boolean(tools?.points.active()),
     armed: () => Boolean(tool),
     typing: () => Boolean(words),
     closeWords,
