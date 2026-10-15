@@ -1,0 +1,449 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="160mm"
+   viewBox="0 0 210 160"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.3 (0e150ed, 2023-07-21)"
+   sodipodi:docname="boxes-arrows.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.9"
+     inkscape:cx="396"
+     inkscape:cy="302"
+     inkscape:current-layer="layer-modules" />
+  <defs
+     id="defs1">
+    <marker
+       style="overflow:visible"
+       id="ArrowWideHeavy"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Wide, heavy arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         d="m 1,0 -3,3 h -2 l 3,-3 -3,-3 h 2 z"
+         id="path-awh" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Triangle"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Triangle arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.5)"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt"
+         d="M 5.77,0 -2.88,5 V -5 Z"
+         id="path135" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="ArrowWide"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Wide arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;stroke:context-stroke;stroke-width:1;stroke-linecap:butt"
+         d="M 3,-3 0,0 3,3"
+         transform="rotate(180,0.125,0)"
+         sodipodi:nodetypes="ccc"
+         id="path-aw" />
+    </marker>
+    <marker
+       inkscape:stockid="Arrow1Lend"
+       orient="auto"
+       refY="0"
+       refX="0"
+       id="Arrow1Lend"
+       style="overflow:visible"
+       inkscape:isstock="true">
+      <path
+         id="path-a1le"
+         d="M 0,0 5,-5 -12.5,0 5,5 Z"
+         style="fill:#000000;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:1pt;stroke-opacity:1"
+         transform="matrix(-0.8,0,0,-0.8,-10,0)" />
+    </marker>
+    <marker
+       inkscape:stockid="Arrow1Mstart"
+       orient="auto"
+       refY="0"
+       refX="0"
+       id="Arrow1Mstart"
+       style="overflow:visible"
+       inkscape:isstock="true">
+      <path
+         id="path-a1ms"
+         d="M 0,0 5,-5 -12.5,0 5,5 Z"
+         style="fill:#000000;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:1pt;stroke-opacity:1"
+         transform="matrix(0.4,0,0,0.4,4,0)" />
+    </marker>
+    <marker
+       inkscape:stockid="Arrow1Mend"
+       orient="auto"
+       refY="0"
+       refX="0"
+       id="Arrow1Mend"
+       style="overflow:visible"
+       inkscape:isstock="true">
+      <path
+         id="path-a1me"
+         d="M 0,0 5,-5 -12.5,0 5,5 Z"
+         style="fill:#000000;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:1pt;stroke-opacity:1"
+         transform="matrix(-0.4,0,0,-0.4,-4,0)" />
+    </marker>
+  </defs>
+  <g
+     inkscape:label="Background"
+     inkscape:groupmode="layer"
+     id="layer-background"
+     sodipodi:insensitive="true">
+    <rect
+       style="fill:#f2f2f2;fill-opacity:1;stroke:#4d4d4d;stroke-width:0.4;stroke-linejoin:round;stroke-dasharray:2.4,1.2;stroke-dashoffset:0;stroke-opacity:1"
+       id="rect-group-box"
+       width="64"
+       height="62"
+       x="73"
+       y="58"
+       ry="2"
+       inkscape:label="transformer block outline" />
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-size:3.175px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif Italic';text-align:end;text-anchor:end;fill:#4d4d4d;stroke-width:0.264583"
+       x="134.5"
+       y="117.5"
+       id="text-group-label"><tspan
+         sodipodi:role="line"
+         id="tspan-group-label"
+         style="stroke-width:0.264583"
+         x="134.5"
+         y="117.5">Transformer block ×N</tspan></text>
+  </g>
+  <g
+     inkscape:label="Modules"
+     inkscape:groupmode="layer"
+     id="layer-modules">
+    <text
+       xml:space="preserve"
+       style="font-weight:bold;font-size:6.35px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif Bold';text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+       x="105"
+       y="13"
+       id="text-title"><tspan
+         sodipodi:role="line"
+         id="tspan-title"
+         style="stroke-width:0.264583"
+         x="105"
+         y="13">Language model pipeline</tspan></text>
+    <g
+       id="g-input"
+       inkscape:label="Input">
+      <rect
+         style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-input"
+         width="40"
+         height="16"
+         x="15"
+         y="25"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+         x="35"
+         y="34.5"
+         id="text-input"><tspan
+           sodipodi:role="line"
+           id="tspan-input"
+           style="stroke-width:0.264583"
+           x="35"
+           y="34.5">Input text</tspan></text>
+    </g>
+    <g
+       id="g-tokenizer"
+       inkscape:label="Tokenizer">
+      <rect
+         style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-tokenizer"
+         width="40"
+         height="16"
+         x="85"
+         y="25"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+         x="105"
+         y="34.5"
+         id="text-tokenizer"><tspan
+           sodipodi:role="line"
+           id="tspan-tokenizer"
+           style="stroke-width:0.264583"
+           x="105"
+           y="34.5">Tokenizer</tspan></text>
+    </g>
+    <g
+       id="g-embedding"
+       inkscape:label="Embedding">
+      <rect
+         style="fill:#9dc3e6;fill-opacity:1;stroke:#1f4e79;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-embedding"
+         width="40"
+         height="16"
+         x="155"
+         y="25"
+         rx="3"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+         x="175"
+         y="31.84"
+         id="text-embedding"><tspan
+           sodipodi:role="line"
+           id="tspan-embedding-1"
+           style="stroke-width:0.264583"
+           x="175"
+           y="31.84">Embedding</tspan><tspan
+           sodipodi:role="line"
+           style="stroke-width:0.264583"
+           x="175"
+           y="37.13"
+           id="tspan-embedding-2">lookup</tspan></text>
+    </g>
+    <!-- the two modules inside the dashed box are not grouped with their labels,
+         as often happens after an ungroup -->
+    <rect
+       style="fill:#f4b183;fill-opacity:1;stroke:#843c0c;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       id="rect-attention"
+       width="40"
+       height="16"
+       x="85"
+       y="68"
+       ry="3" />
+    <text
+       xml:space="preserve"
+       style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+       x="105"
+       y="77.5"
+       id="text-attention"><tspan
+         sodipodi:role="line"
+         id="tspan-attention"
+         style="stroke-width:0.264583"
+         x="105"
+         y="77.5">Self-attention</tspan></text>
+    <rect
+       style="fill:#f4b183;fill-opacity:1;stroke:#843c0c;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+       id="rect-ffn"
+       width="40"
+       height="16"
+       x="85"
+       y="96"
+       ry="3" />
+    <text
+       xml:space="preserve"
+       style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+       x="105"
+       y="102.84"
+       id="text-ffn"><tspan
+         sodipodi:role="line"
+         id="tspan-ffn-1"
+         style="stroke-width:0.264583"
+         x="105"
+         y="102.84">Feed-forward</tspan><tspan
+         sodipodi:role="line"
+         style="stroke-width:0.264583"
+         x="105"
+         y="108.13"
+         id="tspan-ffn-2">network</tspan></text>
+    <g
+       id="g-decoder"
+       inkscape:label="Decoder">
+      <rect
+         style="fill:#ffffff;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-decoder"
+         width="40"
+         height="16"
+         x="155"
+         y="96"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+         x="175"
+         y="105.5"
+         id="text-decoder"><tspan
+           sodipodi:role="line"
+           id="tspan-decoder"
+           style="stroke-width:0.264583"
+           x="175"
+           y="105.5">Decoder</tspan></text>
+    </g>
+    <g
+       id="g-head"
+       inkscape:label="Output head">
+      <rect
+         style="fill:#a9d18e;fill-opacity:1;stroke:#385723;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-head"
+         width="40"
+         height="16"
+         x="155"
+         y="130"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-size:4.23333px;line-height:1.25;font-family:sans-serif;text-align:center;text-anchor:middle;fill:#000000;stroke-width:0.264583"
+         x="175"
+         y="136.84"
+         id="text-head"><tspan
+           sodipodi:role="line"
+           id="tspan-head-1"
+           style="stroke-width:0.264583"
+           x="175"
+           y="136.84">Output</tspan><tspan
+           sodipodi:role="line"
+           style="stroke-width:0.264583"
+           x="175"
+           y="142.13"
+           id="tspan-head-2">head</tspan></text>
+    </g>
+    <g
+       id="g-loss"
+       inkscape:label="Loss">
+      <rect
+         style="fill:#595959;fill-opacity:1;stroke:#000000;stroke-width:0.5;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
+         id="rect-loss"
+         width="40"
+         height="16"
+         x="15"
+         y="130"
+         ry="3" />
+      <text
+         xml:space="preserve"
+         style="font-weight:bold;font-size:4.23333px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif Bold';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.264583"
+         x="35"
+         y="139.5"
+         id="text-loss"><tspan
+           sodipodi:role="line"
+           id="tspan-loss"
+           style="fill:#ffffff;stroke-width:0.264583"
+           x="35"
+           y="139.5">Loss</tspan></text>
+    </g>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     id="layer-connectors"
+     inkscape:label="Connectors">
+    <!-- straight Inkscape connectors (rerouted by Inkscape on load) -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#ArrowWideHeavy)"
+       d="M 55,33 H 85"
+       id="connector-input-tokenizer"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#g-input"
+       inkscape:connection-end="#g-tokenizer"
+       inkscape:label="input to tokenizer" />
+    <!-- straight pen-tool arrows that stop short of the target box -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Triangle)"
+       d="m 125.5,33 h 27.5"
+       id="path-tokenizer-embedding"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Triangle)"
+       d="M 105,41.5 V 65.8"
+       id="path-tokenizer-attention"
+       sodipodi:nodetypes="cc" />
+    <!-- double-headed: one auto-start-reverse marker used for both ends -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#ArrowWideHeavy);marker-end:url(#ArrowWideHeavy)"
+       d="m 105,86.5 v 7"
+       id="path-attention-ffn"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Triangle)"
+       d="m 125.5,104 h 27.5"
+       id="path-ffn-decoder"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Triangle)"
+       d="M 175,112.5 V 127.8"
+       id="path-decoder-head"
+       sodipodi:nodetypes="cc" />
+    <!-- legacy 0.92 marker on a long arrow -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow1Lend)"
+       d="M 154.5,138 H 57.5"
+       id="path-head-loss"
+       sodipodi:nodetypes="cc" />
+    <!-- dashed double-headed feedback arrow with legacy start/end markers -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:1.5,1;stroke-dashoffset:0;stroke-opacity:1;marker-start:url(#Arrow1Mstart);marker-end:url(#Arrow1Mend)"
+       d="M 35,129 V 42"
+       id="path-loss-input"
+       sodipodi:nodetypes="cc" />
+    <!-- double-headed with the 1.x Wide arrow (auto-start-reverse) -->
+    <path
+       style="fill:none;stroke:#1f4e79;stroke-width:0.6;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#ArrowWide);marker-end:url(#ArrowWide)"
+       d="M 57,128 83,113"
+       id="path-loss-ffn"
+       sodipodi:nodetypes="cc" />
+    <!-- elbow (orthogonal) Inkscape connector -->
+    <path
+       style="fill:none;stroke:#000000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#ArrowWideHeavy)"
+       d="M 175,41 V 76 H 125"
+       id="connector-embedding-attention"
+       inkscape:connector-type="orthogonal"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#g-embedding"
+       inkscape:connection-end="#rect-attention"
+       inkscape:label="embedding to attention (elbow)" />
+    <text
+       xml:space="preserve"
+       style="font-size:3.175px;line-height:1.25;font-family:sans-serif;fill:#000000;stroke-width:0.264583"
+       x="139"
+       y="135.8"
+       id="text-logits"><tspan
+         sodipodi:role="line"
+         id="tspan-logits"
+         style="stroke-width:0.264583"
+         x="139"
+         y="135.8">logits</tspan></text>
+  </g>
+</svg>
