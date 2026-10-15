@@ -128,6 +128,27 @@ A node's properties set its whole label: bold: true, italic: true, size: 6pt, al
   an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side).
 figure: {hide: [ids], dim: [ids], highlight: [ids]} leaves parts out, draws them faint, or draws
   all but them faint -- where they stand, nothing moved (one figure shown several ways in a talk).
+shapes: drawn over the figure where they are put, taking no room -- what you would open Inkscape
+  for: an arrow at a part, a ring round some, a brace and its words beside a stack, a highlight
+  behind a word, a dimension line, a box of words. Each is a slide's shape (the same words: one
+  copied from a slide pastes here): {kind, id, ...}, kinds line, arrow, double-arrow, curved-arrow
+  (bend, lean), elbow, arc, polyline and pen (points), rectangle, rounded-rectangle, ellipse,
+  triangle, diamond, polygon, star, block arrows (arrow-right...), chevron, plus, cross, check,
+  cloud, bubble (tail), brace and bracket (depth, tip), dimension, scale-bar, highlight, ring,
+  text (at, width), group (shapes). Lines take from and to, boxes at and size (rotate, flip).
+  Places are the figure's points, y down, from its top left as laid out -- so attach them to
+  its parts, which the layout moves: an end glued to a part, to: {part: encoder, side:
+  top|right|bottom|left|centre} (any node, group or frame by id, or a piece of one its drawing
+  names, such as spike.feature2 or tree.tip3); on: encoder, the shape's places from that part's
+  top left; around: [encoder, decoder] with margin (points; a ring passes their corners), the
+  shape sized round them -- a brace, bracket or dimension along their side (right unless said).
+  Style: fill and line are theme colours (accent, accent2, accent-fill, muted, ink, paper, grey)
+  or #rrggbb, line_width, dash (dashed, dotted), start and end heads (triangle, open, stealth,
+  dot, circle, bar, diamond), head_size, opacity, fill_opacity, shadow; words: text (the
+  figure's label markup), font_size, bold, italic, colour, align, valign. behind: true draws one
+  under the parts; hide, dim and highlight name a shape by its id. E.g.
+  shapes: [{kind: ring, around: [encoder]}, {kind: arrow, from: [20, 10], to: {part: decoder,
+  side: top}, text: "here"}, {kind: text, on: decoder, at: [0, -16], text: bottleneck}].
 A figure of several panels, as a journal prints one: each panel a group with role: panel (no
   frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
   a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,
@@ -271,7 +292,7 @@ class FigureKind:
             "fonts": list(available_families()),
             "components": sorted(COMPONENTS),
         }
-        return {**found, "editor": catalogue(found)}
+        return {**found, "editor": catalogue(found), "shapes": shapes_catalogue()}
 
     def draw(
         self, document: dict[str, Any], base: Path, hints: dict[str, Any] | None = None
@@ -293,6 +314,8 @@ class FigureKind:
         wrong: set[str] = set()  # the shapes drawn as plain boxes
         # A line to a shape there is none of is left out, and said; the rest is drawn.
         document = _strays(document, said_first)
+        # So is a shape drawn over the figure that is written wrong: each keeps its place.
+        document, drawn_over = _shapes_apart(document, said_first)
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
         except (yaml.YAMLError, json.JSONDecodeError) as error:
@@ -311,7 +334,15 @@ class FigureKind:
         # So too a shape found wanting as it is drawn (a plasmid of -5 bp, a tree whose
         # Newick does not read).
         try:
-            drawn = _despite(document, base, spec, info, said_first, wrong, compile_figure)
+            drawn = _despite(
+                document,
+                base,
+                spec,
+                info,
+                said_first,
+                wrong,
+                lambda spec: compile_figure(_shaped(spec, drawn_over)),
+            )
         except Exception as error:
             return Drawing([], [Message(explain(error), "error")], info=info)
         if drawn is None:
@@ -319,6 +350,7 @@ class FigureKind:
         spec, compilation = drawn
         report = lint_compilation(compilation)
         info["tones"] = _tones(spec)
+        info |= _drawn_over(compilation, spec, drawn_over)
         page = Page(
             spec.id, compilation.document.text, label=spec.id, extra={"outline": outline(spec)}
         )
@@ -349,6 +381,7 @@ class FigureKind:
         said: list[Message] = []
         wrong: set[str] = set()
         document = _strays(document, said)
+        document, drawn_over = _shapes_apart(document, said)
         info = {"model": model(document["text"], suffix=document.get("suffix", ".yaml"))}
         try:
             spec = parse(document["text"], base, suffix=document.get("suffix", ".yaml"))
@@ -363,7 +396,9 @@ class FigureKind:
             info,
             said,
             wrong,
-            lambda spec: build(spec, into or base / "build", stem=stem, formats=tuple(formats)),
+            lambda spec: build(
+                _shaped(spec, drawn_over), into or base / "build", stem=stem, formats=tuple(formats)
+            ),
         )
         if made is None:
             raise ValueError(" ".join(message.text for message in said))
@@ -376,6 +411,17 @@ class FigureKind:
             result.outputs.editable_svg.unlink()
             written.remove(result.outputs.editable_svg)
         return written
+
+
+def shapes_catalogue() -> dict[str, Any]:
+    """The shapes a figure may have drawn over it (``flexo.figure_shapes``), for the editor:
+    their kinds by section, names, defaults and sizes, what a figure says of one besides, and
+    how far one drawn round parts stands out from them."""
+
+    from flexo.figure_shapes import MARGIN, MARGINS, SHAPE_KEYS
+    from flexo.freeform import catalogue
+
+    return {**catalogue(), "keys": list(SHAPE_KEYS), "margin": MARGIN, "margins": dict(MARGINS)}
 
 
 def _plot_files(spec, base: Path) -> list[Path]:
@@ -647,6 +693,101 @@ def _strays(document: dict[str, Any], said: list[Message]) -> dict[str, Any]:
     return {**document, "text": text}
 
 
+def _shapes_apart(
+    document: dict[str, Any], said: list[Message]
+) -> tuple[dict[str, Any], list[dict[str, Any] | None] | None]:
+    """The figure without the shapes drawn over it, and those shapes, each checked
+    (``flexo.figure_shapes``): one written wrong -- or named as a part of the figure is --
+    is said in ``said`` and is ``None``, keeping its place in the list, so the rest are drawn
+    as they are numbered. None for a figure with no shapes (or that does not read)."""
+
+    from flexo.figure_shapes import read, shape_names
+
+    json_file = document.get("suffix", ".yaml") == ".json"
+    try:
+        data = json.loads(document["text"]) if json_file else yaml.safe_load(document["text"])
+    except (yaml.YAMLError, json.JSONDecodeError, TypeError):
+        return document, None
+    if not isinstance(data, dict) or "shapes" not in data:
+        return document, None
+    found, problems = read(data.pop("shapes"))
+    said += [Message(item.message, "error", item.entity_id or "", code=item.code)
+             for item in problems]
+    # (Named as a part of the figure is: which would an end glued to it be glued to?)
+    taken = {str(item.get("id")) for key in ("nodes", "groups", "edges", "nets")
+             for item in data.get(key) or [] if isinstance(item, dict) and item.get("id")}
+    for index, spec in enumerate(found):
+        clash = [name for name in shape_names(spec or {}) if name in taken]
+        if clash:
+            said.append(Message(f"shapes[{index}].id: a shape is called {clash[0]}, as a part "
+                                "of the figure is: each needs a name of its own.", "error",
+                                clash[0], code="shape.id.taken"))
+            found[index] = None
+    text = (
+        json.dumps(data, indent=2, ensure_ascii=False)
+        if json_file
+        else yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    )
+    return {**document, "text": text}, found
+
+
+def _shaped(spec: Any, shapes: list[dict[str, Any] | None] | None) -> Any:
+    """``spec`` with the shapes drawn over it again (``_shapes_apart``): one written wrong
+    holds its place, drawing nothing."""
+
+    from dataclasses import replace
+
+    from flexo.ir.semantic import FreeShape
+
+    if not shapes:
+        return spec
+    return replace(spec, shapes=tuple(FreeShape.of(item) for item in shapes))
+
+
+def _drawn_over(compilation: Any, spec: Any, shapes: list[dict[str, Any] | None] | None) -> dict:
+    """What the page needs to edit the shapes drawn over the figure as it draws them: each
+    as it is placed (``shapes``, by its place in the list; ``None`` where none is drawn), the
+    box of each part a shape may be glued to or put on (``boxes``), the figure's colours by
+    their palette roles, and the size and family its words are set in."""
+
+    from flexo.emit import _tone_map
+    from flexo.figure_shapes import part_boxes
+    from flexo.themes import figure_palette, figure_style, with_tone_roles
+
+    def rounded(box: tuple) -> list[float]:
+        return [round(float(value), 3) for value in box]
+
+    overlay = compilation.shapes
+    boxes = part_boxes(compilation.routed.fitted, compilation.frames)
+    if overlay is not None:
+        boxes |= overlay.named
+    style = figure_style(spec)
+    palette = with_tone_roles(figure_palette(spec)).with_tones(_tone_map(spec, style))
+    placed: list[Any] = []
+    if overlay is not None:
+        placed = [_rounded(one.spec) if one is not None else None for one in overlay.placed]
+    typography = style.typography
+    return {
+        "shapes": placed if shapes else [],
+        "boxes": {name: rounded(box) for name, box in boxes.items()},
+        "roles": dict(palette.paints),
+        "sizes": {"words": typography.size.points},
+        "fonts": {"body": typography.family},
+    }
+
+
+def _rounded(value: Any) -> Any:
+    """Places to a thousandth of a point, for the page."""
+
+    if isinstance(value, float):
+        return round(value, 3)
+    if isinstance(value, dict):
+        return {key: _rounded(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rounded(item) for item in value]
+    return value
+
+
 def _stand_in(
     document: dict[str, Any],
     base: Path,
@@ -816,9 +957,29 @@ def _read_figure(data: Any) -> dict[str, Any] | None:
             pairs = {(item, hub) if merge else (hub, item) for item in branches}
             nets[str(net["id"])] = {"net": net, "hub": hub, "merge": merge, "pairs": pairs}
     rest = {
-        key: value for key, value in data.items() if key not in {"nodes", "edges", "groups", "nets"}
+        key: value
+        for key, value in data.items()
+        if key not in {"nodes", "edges", "groups", "nets", "shapes"}
     }
-    return {"nodes": nodes, "edges": edges, "groups": groups, "nets": nets, "rest": rest}
+    drawn = data.get("shapes") if isinstance(data.get("shapes"), list) else []
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "groups": groups,
+        "nets": nets,
+        "rest": rest,
+        "drawn": drawn,
+    }
+
+
+def _shape_called(shape: Any) -> str:
+    """A shape drawn over a figure as the activity names it: "an arrow", "a highlight ring"."""
+
+    from flexo.freeform import LABELS
+
+    kind = shape.get("kind") if isinstance(shape, dict) else None
+    label = LABELS.get(str(kind), "Shape").lower()
+    return f"{'an' if label[:1] in 'aeiou' else 'a'} {label}"
 
 
 def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dict] | None:
@@ -958,6 +1119,17 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
             notes.append({"text": "rearranged the figure", "where": None})
     elif old["groups"] != new["groups"] and not added and not gone:
         notes.append({"text": "rearranged the figure", "where": None})
+    # What is drawn over it: one shape added or deleted by its name ("added an arrow").
+    was, now = old.get("drawn") or [], new.get("drawn") or []
+    if was != now:
+        if len(now) == len(was) + 1:
+            shape = next((item for item in now if item not in was), now[-1])
+            notes.append({"text": f"added {_shape_called(shape)}", "where": None})
+        elif len(now) == len(was) - 1:
+            shape = next((item for item in was if item not in now), was[-1])
+            notes.append({"text": f"deleted {_shape_called(shape)}", "where": None})
+        else:
+            notes.append({"text": "edited the shapes drawn over it", "where": None})
     if old["rest"] != new["rest"]:
         notes.append({"text": "changed the figure's settings", "where": None})
     return notes[:4] if notes else None
@@ -1003,7 +1175,7 @@ def _same_shapes(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
     nodes = {
         ids.get(key, key): {**node, "id": ids.get(key, key)} for key, node in old["nodes"].items()
     }
-    parts = {part: swap(old[part]) for part in ("edges", "groups", "nets")}
+    parts = {part: swap(old[part]) for part in ("edges", "groups", "nets", "drawn") if part in old}
     return {**old, "nodes": nodes, **parts}
 
 

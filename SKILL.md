@@ -58,6 +58,13 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   a matplotlib figure; flexo sets the font, sizes and colours and lays it out at that size.
   It is drawn again when a file it reads changes; `data=["loss.h5", "runs/*.parquet"]`
   (`properties.data`) names data read by a library that opens files itself (HDF5, Parquet).
+- Arrows, rings, braces, highlights, dimensions and labels drawn over a figure (no Inkscape):
+  its `shapes:`, each a slide's shape (`flexo.freeform`), taking no room. Attach them to the
+  parts they mark, so they follow the layout: `to: {part: encoder, side: top}` glues a
+  line's end, `on: encoder` puts a shape's places from that part's top left, `around:
+  [encoder, decoder]` (with `margin`) draws a ring, a highlight, a box or a brace round them.
+  `figure.shape("ring", around=["encoder"])` in Python. `behind: true` draws one under the
+  parts; `hide`/`dim`/`highlight` name one by its `id`.
 - One figure shown several ways with nothing moved (a talk's build-up):
   `Figure(..., hide=[ids], dim=[ids], highlight=[ids])`, in a file `figure: {hide: [...]}`.
 - A shape's words set apart: `properties={"bold": True}`, `"italic"`, `"size": "6pt"`,

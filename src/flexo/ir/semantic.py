@@ -54,6 +54,28 @@ class Settings:
         return nested
 
 
+@dataclass(frozen=True, slots=True)
+class FreeShape:
+    """A shape drawn over a figure where it is put -- an arrow at a part, a ring round some,
+    a brace and its words, a highlight (``flexo.figure_shapes``) -- as ``flexo.freeform``
+    reads it, checked. Held as its words (JSON), so a figure stays hashable and comparable;
+    ``spec`` is it as a mapping again."""
+
+    written: str
+
+    @classmethod
+    def of(cls, spec: object) -> FreeShape:
+        import json
+
+        return cls(json.dumps(spec, ensure_ascii=False, separators=(",", ":")))
+
+    @property
+    def spec(self) -> dict:
+        import json
+
+        return json.loads(self.written)
+
+
 type PropertyValue = Scalar | tuple[Record, ...] | tuple[str, ...] | Settings
 """What a node property holds: one scalar, a list of records, a list of names (a plot's
 ``data``), or a set of settings."""
@@ -899,6 +921,9 @@ class FigureSpec:
     head_size: float = 1.0
     """How large its arrowheads are, as a share of the theme's; a line's own ``head_size`` is
     a share of this."""
+    shapes: tuple[FreeShape, ...] = ()
+    """What is drawn over it where it is put, in its own units from its top left, or attached
+    to its parts (``flexo.figure_shapes``): the layout never sees them."""
 
     def __post_init__(self) -> None:
         _validate_id(self.id, "Figure ID")

@@ -10,6 +10,7 @@
 import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
+import { figureShapes } from "/static/kinds/figure/overlay.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -76,14 +77,17 @@ export function mount(studio, main) {
 
   // -- the bar --
   const addButton = ui.button("Shape", (event) => figure.addPalette(event.currentTarget), { icon: "plus", kind: "ghost", title: "Add a Shape" });
+  // Draw: lines, arrows, rings, braces, highlights, measures and words, drawn over the figure
+  // where they are wanted, and kept on the parts they are drawn on (overlay.js).
+  const drawButton = ui.button("Draw", (event) => shapes.chooser(event.currentTarget), { icon: "shape", kind: "ghost", title: "Draw over the Figure: arrows, rings, braces, highlights, measures and words, kept on its parts" });
   const connectButton = ui.button("Connect", () => figure.toggleConnect(), { kind: "ghost", icon: "right", title: "Draw a Line from One Shape to Another" });
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌘G)" });
   // A figure of several parts, as a journal prints one: a panel more, or so many laid out.
   const panelButton = ui.button("Panel", (event) => figure.panelMenu(event.currentTarget), { kind: "ghost", icon: "grid", title: "Add a Panel, or Lay the Figure Out as Panels (a, b, c)" });
-  const deleteButton = ui.button("Delete", () => figure.remove(), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
+  const deleteButton = ui.button("Delete", () => (shapes.any() ? shapes.remove() : figure.remove()), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
   studio.tools.append(listButton);
-  studio.inserts.append(addButton, connectButton, gatherButton, panelButton, deleteButton);
+  studio.inserts.append(addButton, drawButton, connectButton, gatherButton, panelButton, deleteButton);
   // In the Export menu's order, for the Mac app's File › Export To.
   // ("…" only where the Mac app's save panel follows: in a browser each is saved at once.)
   studio.exports = [
@@ -118,6 +122,8 @@ export function mount(studio, main) {
     if (!inner.width && !inner.height) return null;
     return { left: inner.left - outer.left - 3, top: inner.top - outer.top - 3, width: inner.width + 6, height: inner.height + 6 };
   }
+  // What is drawn over the figure (overlay.js), made once the figure's parts are.
+  let shapes = null;
   const figure = figureParts({
     catalog,
     overlay: page,
@@ -131,7 +137,22 @@ export function mount(studio, main) {
     box: boxOf,
     // What an SVG picture's file has of words and colours, for its panel to restyle.
     drawing: (source) => describeDrawing(studio, source),
-    changed: () => { placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint(); },
+    changed: () => {
+      // (A part chosen, no shape drawn over the figure is.)
+      if (figure.selected.length && shapes?.any()) shapes.clear({ quiet: true });
+      placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint();
+    },
+    // A band across the figure chooses the shapes drawn over it that it touches, where it
+    // touches any (overlay.js); else its parts.
+    band: (left, top, right, bottom) => {
+      if (!shapes) return false;
+      const touched = shapes.touched(left, top, right, bottom);
+      if (touched.length) { if (figure.selected.length) figure.select([], { reveal: false }); shapes.choose(touched); return true; }
+      if (shapes.any()) shapes.clear();
+      return false;
+    },
+    // Where each part deleted was (its top left), for the shapes on it to stay where they are.
+    origins: (ids) => Object.fromEntries(ids.map((id) => [id, studio.info?.boxes?.[id]?.slice(0, 2)]).filter(([, at]) => at)),
     settled: () => placeMarks(),
     // A part let go: a drawing kept back while it was carried is put in (see `drawn`).
     dragged: () => setTimeout(putKept, KEPT_BACK),
@@ -173,6 +194,10 @@ export function mount(studio, main) {
       return null;
     },
   });
+  // What is drawn over the figure (overlay.js): chosen, moved, sized and typed in on it.
+  shapes = figureShapes({ studio, figure, page, stage, center, button: drawButton,
+    changed: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); studio.focus(shapes.any() ? { label: `Figure · ${shapes.label()}` } : null); },
+    clipItems: () => clipItems() });
   let greeted = false;  // (a new figure's one shape opened for its words: see the end)
   // Keys typed while it was on its way, just made, are typed again once it is open: its
   // one shape's words (shell.js's create).
@@ -190,7 +215,8 @@ export function mount(studio, main) {
 
   function renderBar() {
     const chosen = figure.selected;
-    deleteButton.disabled = !chosen.length || chosen.includes(figure.model?.root);
+    deleteButton.disabled = (!chosen.length || chosen.includes(figure.model?.root)) && !shapes?.any();
+    drawButton.disabled = !figure.model;
     connectButton.classList.toggle("on", Boolean(figure.connecting));
     // (Shapes to group chosen: an empty group is added from the palette's Layout.)
     gatherButton.disabled = !figure.model || !figure.canGroup();
@@ -256,13 +282,29 @@ export function mount(studio, main) {
   function placeMarks() {
     placeHover();
     clear(marks, figure.markViews());
+    shapes?.place();
   }
-  page.addEventListener("click", (event) => { if (!event.target.closest(".fig-inline")) figure.click(event); });
-  page.addEventListener("pointerdown", (event) => { if (!event.target.closest(".fig-inline")) figure.pointerdown(event); });
-  stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting && !figure.justDragged) figure.select([]); });
+  // A shape drawn over the figure is pressed before what it is drawn over -- and one being
+  // drawn, wherever the press is (overlay.js); a click let go after such a press is its.
+  page.addEventListener("click", (event) => {
+    if (event.target.closest(".fig-inline, .shape-words")) return;
+    if (shapes.swallow() || shapes.armed()) return;
+    if (shapes.any() && !event.shiftKey && !event.metaKey) shapes.clear();
+    figure.click(event);
+  });
+  page.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".fig-inline, .shape-words")) return;
+    if (!figure.connecting && shapes.press(event)) return;
+    figure.pointerdown(event);
+  });
+  stage.addEventListener("click", (event) => { if (event.target === stage && !figure.connecting && !figure.justDragged && !shapes.swallow()) { shapes.clear({ quiet: true }); figure.select([]); } });
   // Pressed on the desk round the page and dragged, a band chooses the shapes it touches, as
   // from the page's own empty space.
-  stage.addEventListener("pointerdown", (event) => { if (event.target === stage && figure.model) figure.band(event); });
+  stage.addEventListener("pointerdown", (event) => {
+    // (A shape being drawn may start off the page: the page grows to hold it.)
+    if (shapes.armed() && !page.contains(event.target) && shapes.press(event)) return;
+    if (event.target === stage && figure.model) figure.band(event);
+  });
 
   // Files dropped on the figure are added to it: pictures and drawings (PNG, JPEG, SVG, PDF,
   // Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
@@ -332,7 +374,7 @@ export function mount(studio, main) {
       toast(`Couldn’t add ${taken.length > 1 ? "the files" : taken[0].name}: ${error.message}`, { kind: "error", icon: "error", seconds: 6 });
     }
   }
-  page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline")) figure.dblclick(event); });
+  page.addEventListener("dblclick", (event) => { if (!event.target.closest(".fig-inline, .shape-words") && !shapes.dblclick(event)) figure.dblclick(event); });
   // Right-click, as on a slide: what is under the pointer is chosen, and its menu offers what
   // can be done with it (a line: a shape inserted into it) -- Cut, Copy and Paste among it, as
   // the slide's object menu has them; on nothing (the page, or the desk round it), Add Shape.
@@ -347,12 +389,14 @@ export function mount(studio, main) {
     figure.select([]);
     if (!figure.model) return;
     menu(point, [{ icon: "plus", label: "Add Shape…", run: () => figure.addPalette(point) },
-      { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && figure.paste(clipboard.parts) },
+      { icon: "shape", label: "Draw Shape…", run: () => shapes.chooser(point) },
+      { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
       { icon: "target", label: "Select All", keys: "⌘A", run: () => figure.chooseAll() }]);
   }
   page.addEventListener("contextmenu", (event) => {
-    if (event.target.closest(".fig-inline")) return;
+    if (event.target.closest(".fig-inline, .shape-words")) return;
     event.preventDefault();
+    if (shapes.context(event)) return;
     const point = { x: event.clientX, y: event.clientY }, id = figure.model ? figure.idAt(event) : null;
     if (id && id !== figure.model.root) partMenu(point, id);
     else pageMenu(point);
@@ -371,10 +415,12 @@ export function mount(studio, main) {
   }
   page.addEventListener("mousemove", (event) => {
     if (figure.dragging) return;
+    // A shape drawn over the figure pointed at frames itself (overlay.js).
+    if (shapes.hover(event)) { pointed = null; hover.hidden = true; return; }
     pointed = figure.idAt(event);
     placeHover();
   });
-  page.addEventListener("mouseleave", () => { pointed = null; hover.hidden = true; });
+  page.addEventListener("mouseleave", () => { pointed = null; hover.hidden = true; shapes.leave(); });
 
   // -- the outline --
   const outlineBody = h("div.tree");
@@ -437,7 +483,9 @@ export function mount(studio, main) {
       h("span.tree-name", {}, figure.nameOf(line.id)),
       // Its words beside its name -- unless its name says them already (a line beside its twin).
       line.label && !figure.nameOf(line.id).includes(inQuotes(oneLine(line.label))) ? h("span.tree-id", {}, oneLine(line.label)) : null))
-      : h("div.empty.small", {}, "No lines"));
+      : h("div.empty.small", {}, "No lines"),
+      // What is drawn over the figure, where it is (overlay.js): listed only once there is some.
+      ...(shapes?.rows().length ? [h("div.tree-head", {}, "Drawn Over", h("span.count", {}, shapes.rows().length)), shapes.rows()] : []));
   }
 
   let dragging = null;
@@ -523,7 +571,8 @@ export function mount(studio, main) {
   function renderInspector() {
     root.classList.toggle("wide", figure.wantsRoom());
     keepFocus(inspectorBody, () => {
-      clear(inspectorBody, figure.model ? figure.panel()
+      // (A shape drawn over the figure chosen: its panel, as a slide's shape's.)
+      clear(inspectorBody, figure.model && shapes?.any() ? shapes.panel() : figure.model ? figure.panel()
         : h("div.empty", {}, "This file can’t be read as a figure. Fix it in Source; the messages below the drawing show where."));
     });
   }
@@ -656,10 +705,17 @@ export function mount(studio, main) {
   // Words chosen to copy in the panel or a message -- not on the drawing.
   const wordsChosen = () => { const chosenWords = window.getSelection(); return Boolean(chosenWords?.toString()) && !page.contains(chosenWords.anchorNode); };
   const clipOf = () => {
+    // Shapes drawn over the figure chosen (overlay.js): those, as a slide's are copied.
+    const drawn = figure.model && shapes ? shapes.clip() : null;
+    if (drawn) return drawn;
     const parts = figure.model ? figure.clip() : null;
     return parts ? { what: "parts", parts, label: parts.top.length > 1 ? `${parts.top.length} shapes` : "shape" } : null;
   };
-  const plainOf = (clip) => clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n");
+  const plainOf = (clip) => (clip.what === "shapes" ? clip.shapes.map((shape) => plain(String(shape?.text ?? ""))).filter(Boolean).join("\n") || clip.label
+    : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
+  // Pasted: shapes drawn over the figure -- from it, another figure or a slide -- as shapes
+  // drawn over it; parts of a figure as parts.
+  const pasteClip = (clip) => (clip?.what === "shapes" ? shapes.paste(clip) : clip?.parts ? figure.paste(clip.parts) : null);
   const clipName = (clip) => clip.label.replace(/(^|\s)\p{L}/gu, (first) => first.toUpperCase());
   const copied = (clip) => toast(`${clip.label.charAt(0).toUpperCase()}${clip.label.slice(1)} copied`, { icon: "copy", seconds: 1.5 });
   // (Lines chosen alone: why nothing was copied is said, not left to look done.)
@@ -670,13 +726,14 @@ export function mount(studio, main) {
     if (!clip) { uncopied(cut); return; }
     clipboard = clip;
     navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
-    if (cut) figure.remove(undefined, [], { cut: true }); else copied(clip);
+    if (cut) cutAway(clip); else copied(clip);
   }
+  const cutAway = (clip) => (clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
   // Greyed out, as a Mac menu's are, when there is nothing to cut, copy or paste.
   const clipItems = () => [
     { icon: "cut", label: "Cut", keys: "⌘X", disabled: !clipOf(), run: () => clipChosen(true) },
     { icon: "copy", label: "Copy", keys: "⌘C", disabled: !clipOf(), run: () => clipChosen(false) },
-    { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && figure.paste(clipboard.parts) },
+    { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
   ];
   function copyNow(event) {
     const clip = ownsClip() ? clipOf() : null;
@@ -695,7 +752,7 @@ export function mount(studio, main) {
   document.addEventListener("cut", (event) => {
     keyed = null;
     const clip = copyNow(event);
-    if (clip) figure.remove(undefined, [], { cut: true }); else if (ownsClip()) uncopied(true);
+    if (clip) cutAway(clip); else if (ownsClip()) uncopied(true);
   });
   document.addEventListener("paste", async (event) => {
     keyed = null;
@@ -706,6 +763,7 @@ export function mount(studio, main) {
     // A clipboard that keeps only words: what was copied here, if they are its words.
     if (!clip && clipboard && data?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
     if (clip?.what === "parts" && clip.parts?.top?.length) { event.preventDefault(); figure.paste(clip.parts); return; }
+    if (clip?.what === "shapes" && Array.isArray(clip.shapes) && clip.shapes.length) { event.preventDefault(); shapes.paste(clip); return; }
     // Pictures and structure files copied elsewhere are added after what is chosen -- and a
     // drawing (Inkscape's) as its SVG, not as the picture of it the web view hands over.
     const files = [...(data?.files || [])], drawing = pastedDrawing(data);
@@ -729,7 +787,7 @@ export function mount(studio, main) {
     setTimeout(() => {
       if (keyed !== letter) return;
       keyed = null;
-      if (letter === "v") { if (clipboard) figure.paste(clipboard.parts); return; }
+      if (letter === "v") { if (clipboard) pasteClip(clipboard); return; }
       clipChosen(letter === "x");
     }, 80);
   }, true);
@@ -747,6 +805,9 @@ export function mount(studio, main) {
     }
     if (typing(event.target)) return;
     const mod = event.metaKey || event.ctrlKey;
+    // Shapes drawn over the figure chosen (or one being drawn): their keys -- the arrows nudge,
+    // ⌫ deletes, ⌘G groups, Esc puts the tool down (overlay.js).
+    if (shapes.key(event)) { event.preventDefault(); return; }
     // ⌘+ and ⌘− zoom the drawing, not the page round it; ⌘0 shows it at its actual size, and
     // ⇧⌘0 fits it to the window, as a deck's slide.
     if (mod && !event.altKey && ["=", "+", "-", "_"].includes(event.key)) {
@@ -764,7 +825,7 @@ export function mount(studio, main) {
 
   // -- what the drawing brings --
   // Where a message is, as the page names it: a part by its name, the figure as the Figure.
-  const placeName = (where) => (figure.typeOf(where) ? figure.nameOf(where)
+  const placeName = (where) => (figure.typeOf(where) ? figure.nameOf(where) : shapes?.named(where) ? shapes.named(where).name
     : where === figure.model?.figure?.id ? "Figure" : where.replace(/^line /, "Line "));
   const showMessages = () => {
     clear(note, messages.map((message) => h(`div.message.${message.severity}${message.where ? ".link" : ""}`,
@@ -775,6 +836,12 @@ export function mount(studio, main) {
         // line's, at its end that is at no shape).
         else if (["node", "edge"].includes(figure.typeOf(message.where))) figure.revealProblem(message.where, String(message.code || "").split(".").pop());
         else if (figure.typeOf(message.where)) figure.select([message.where]);
+        // A shape drawn over the figure, chosen (one written wrong is not drawn: its Source).
+        else if (shapes?.named(message.where)) {
+          const { index } = shapes.named(message.where);
+          if (shapes.list()[index]) shapes.choose([index]);
+          else { state.tab = "source"; showTab(); }
+        }
       } },
       icon(message.severity === "error" ? "error" : message.severity === "note" ? "info" : "warning"),
       // Where it is, by the name the part is shown by, not its ID (the figure as a whole, not
@@ -792,18 +859,22 @@ export function mount(studio, main) {
   // is kept back until the part is let go: the drawing its move makes comes after it and is
   // the one put in; let go where it was, the one kept back is, a moment later.
   studio.on("drawn", (result) => {
-    if (figure.dragging) { kept = result; return; }
+    // (So too while a shape drawn over it is: looked for again shortly.)
+    if (figure.dragging || shapes.busy()) { kept = result; if (shapes.busy()) setTimeout(putKept, 250); return; }
     kept = null;
     drawn(result);
   });
   putKept = () => {
     if (!kept || figure.dragging) return;
+    if (shapes.busy()) { setTimeout(putKept, 250); return; }
     const result = kept;
     kept = null;
     drawn(result);
   };
   function drawn(result) {
     messages = result.messages || [];
+    // What it says of the shapes drawn over it, before its parts are taken (overlay.js).
+    shapes.took(result.info, result.info?.model);
     if (result.info?.model) figure.setModel(result.info.model, { afresh, back: travelled });
     afresh = false;
     travelled = false;
@@ -827,6 +898,8 @@ export function mount(studio, main) {
     if (page.parentNode !== stage) clear(stage, page);
     fitPage();
     figure.land(before);
+    // The shapes drawn over it, as it placed them, placed on it.
+    shapes.drawnWith();
     // A new figure, its one shape with no words yet: chosen, its words typed at once.
     if (!greeted) {
       greeted = true;
@@ -836,9 +909,16 @@ export function mount(studio, main) {
   }
 
   // Someone else's change, or undo: the source follows, keeping the caret on its words.
-  studio.on("change", ({ quiet, source }) => {
-    if (source === "history" || source === "remote") afresh = true;
+  studio.on("change", ({ quiet, source, entry }) => {
+    if (source === "history" || source === "remote") { afresh = true; shapes.afresh(); }
     if (source === "history") travelled = true;
+    // Undone or redone, a change of the shapes drawn over the figure chooses them again (not
+    // the parts its drawing brings back).
+    if (source === "history" && entry?.shapes) {
+      travelled = false;
+      figure.select([], { reveal: false });
+      shapes.restore(entry, studio.future[studio.future.length - 1]?.said === entry);
+    }
     if (quiet || area.value === studio.doc.text) return;
     const { selectionStart: start, selectionEnd: end, scrollTop } = area;
     const before = area.value;
@@ -885,7 +965,10 @@ export function mount(studio, main) {
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
     ...(!typingNow() && clipOf() ? [{ icon: "cut", label: `Cut ${clipName(clipOf())}`, keys: "⌘X", run: () => clipChosen(true) },
       { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),
-    ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => figure.paste(clipboard.parts) }] : []),
+    ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => pasteClip(clipboard) }] : []),
+    // What is drawn over the figure: every kind to draw, and what those chosen can do
+    // (overlay.js) -- the Mac app's Insert › Shapes and Arrange run them by these names.
+    ...(typingNow() ? [] : shapes.commands()),
     ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),

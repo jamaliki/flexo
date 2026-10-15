@@ -803,6 +803,54 @@ frame and a shape it goes round there is no way from outside, and the line is re
 (`frame.line.inside`). A line that branches (a net) may end at a frame too; a line to a
 frame that is hidden or dimmed is hidden or dimmed with it.
 
+### Shapes drawn over a figure: arrows, rings, braces, labels
+
+What used to be drawn on a finished figure in Inkscape -- an arrow pointing at a part, a
+ring round some, a brace and its words beside a stack, a highlight behind a word, a
+dimension line, a box of words -- is the figure's own `shapes`, drawn over it where they are
+put and taking no room in its layout. Each is written as a slide's shape is
+(`flexo.freeform`: the same kinds and settings, so a shape copied from a slide pastes onto a
+figure, and back):
+
+```yaml
+shapes:
+- {kind: ring, around: [encoder]}                          # round a part, as it is laid out
+- kind: arrow
+  from: [20, 10]
+  to: {part: decoder, side: top}                           # glued to a part's side
+  text: here
+- {kind: text, on: decoder, at: [0, -16], text: bottleneck} # on a part: moves with it
+- {kind: brace, around: [x, encoder], text: front end}     # a brace beside them, on their right
+- {kind: highlight, around: [latent], behind: true}       # a backdrop the part stands on
+```
+
+Places are the figure's points, y down, from its top left as it is laid out. Since the
+layout moves parts as a figure is edited, a shape is best attached to them, by id -- a shape,
+a group, a frame, or a piece of one its drawing names (a protein's feature `spike.feature2`,
+a tree's tip `tree.tip3`): a line's end glued to a part, `{part: id, side: top}` (a side's
+middle, `centre` to stop at its box, or, left out, the side facing the other end; `at` keeps
+where it was, should the part go); a whole shape `on` a part, its places from that part's top
+left; or a shape `around` parts, sized round them `margin` points out -- a ring through the
+corners of their box, a brace, a bracket or a dimension along their `side` (`right` for a
+brace unless said). A part named that the figure does not have is a warning, not an error:
+an end stays where it was, a shape on it is drawn from the figure's top left.
+
+Shapes are painted by the figure's palette (`accent` is its first tone, `accent2-fill` its
+second's tint, `muted`, `ink`, `paper`, `grey`, or `#rrggbb`) and their words are set in its
+font, at its size unless they say; they are drawn over everything, in the order listed (or,
+`behind: true`, under the parts, over the box of the group that holds them: a backdrop they
+stand on), and the page grows to hold one that reaches past it, on any side, moving nothing. The figure's `hide`, `dim` and `highlight` name a shape by its `id`, as
+they name parts; a shape attached to parts is shown as they are unless it is named itself.
+In Python, `figure.shape("ring", around=["encoder"])`, `figure.shape("arrow", from_=[20, 10],
+to={"part": "decoder"})`.
+
+In the studio, Draw in the figure's toolbar offers every kind: drag on the figure to draw
+one (a click makes it its usual size -- or, for a ring, a highlight, a box or a brace, a click
+on a part draws it round that part, a filled one behind it so that it hides nothing), and it
+is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide. A
+shape drawn on a part is put on it, and moves with it; its panel's **Moves With** chooses
+another part, or none, and **Drawn** puts it in front of the parts or behind them.
+
 ### A shape's words, and a picture's crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,

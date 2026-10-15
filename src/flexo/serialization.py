@@ -17,6 +17,7 @@ from flexo.ir.semantic import (
     FIGURE_SIZES,
     EdgeSpec,
     FigureSpec,
+    FreeShape,
     GroupSpec,
     LayoutSpec,
     NetSpec,
@@ -122,6 +123,7 @@ def parse_figure(document: object) -> FigureSpec:
     palette = str(figure_data.get("palette", "default"))
     if is_file_reference(palette):
         palette = register_palette(palette)[0]
+    shapes = _shapes(document.get("shapes"))
     figure = FigureSpec(
         id=figure_data["id"],
         width=_length_or_preset(figure_data.get("width", "double-column")),
@@ -143,8 +145,24 @@ def parse_figure(document: object) -> FigureSpec:
         nets=tuple(_net(item, reference) for item in document.get("nets", [])),
         groups=tuple(groups),
         schema_version=document.get("schema_version", 1),
+        shapes=shapes,
     )
     return normalize_and_validate(figure)
+
+
+def _shapes(written: object) -> tuple[FreeShape, ...]:
+    """A figure's shapes drawn over it (``flexo.figure_shapes``), each checked: one written
+    wrong is said under its place in the list (``shapes[2].fill``)."""
+
+    if written is None:
+        return ()
+    from flexo.diagnostics import FlexoError
+    from flexo.figure_shapes import read
+
+    found, said = read(written)
+    if said:
+        raise FlexoError(said)
+    return tuple(FreeShape.of(spec) for spec in found if spec is not None)
 
 
 def _written_steps(document: object) -> object:
@@ -207,6 +225,8 @@ def figure_to_document(figure: FigureSpec) -> dict[str, Any]:
     }
     if semantic.nets:
         document["nets"] = [_net_data(net) for net in semantic.nets]
+    if semantic.shapes:
+        document["shapes"] = [shape.spec for shape in semantic.shapes]
     validate_document(document)
     return document
 

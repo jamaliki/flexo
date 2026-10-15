@@ -1,8 +1,9 @@
 """Shapes drawn where they are put: lines, arrows, boxes, callouts, braces and measures.
 
-A slide's drawing layer (flexo-talk) is made of these, and so, later, is what is drawn over
-a figure: a ring round part of a structure, an arrow pointing at a residue, a brace and its
-label beside a stack, a highlight behind a word, a dimension line saying "3.1 Å". Each is
+A slide's drawing layer (flexo-talk) is made of these, and so is what is drawn over a figure
+(``flexo.figure_shapes``): a ring round part of a structure, an arrow pointing at a residue, a
+brace and its label beside a stack, a highlight behind a word, a dimension line saying
+"3.1 Å". Each is
 written as a mapping that says what it is and where -- ``{kind: arrow, from: [120, 300],
 to: [260, 220]}`` -- and drawn here from that alone: its outline, its arrowheads, its
 shadow, and where its words go. The studio's editor draws the same outlines as it is
@@ -45,7 +46,8 @@ inside its outline, a line's beside it -- by ``font_size``, ``bold``, ``italic``
 ``colour``, ``font``, ``align``, ``valign`` and ``padding``.
 
 An end of a line may be glued to a shape (``{shape: box1, side: right}``) or to what else
-its writer can name (a slide's objects: ``{object: "body[0]"}``), at a side's middle
+its writer can name (a slide's objects: ``{object: "body[0]"}``; a figure's parts:
+``{part: encoder}``), at a side's middle
 (``top``, ``right``, ``bottom``, ``left``), its ``centre`` (the line stopping at its
 outline) or, left out, the side facing the line's other end; ``at`` keeps where it was, for
 when what it was glued to is gone. ``glued`` finds where such an end is.
@@ -529,20 +531,25 @@ def _point(value: object, key: str) -> list[float]:
     return [float(value[0]), float(value[1])]
 
 
+GLUED_TO = ("shape", "object", "part")
+"""What a line's end may name to be glued to: another shape, a slide's object, a figure's
+part."""
+
+
 def _end(value: object, key: str) -> list[float] | dict[str, object]:
     """A line's end: a point, or what it is glued to (``{shape: box1, side: right}``,
-    ``{object: "body[0]"}``), with where it was (``at``)."""
+    ``{object: "body[0]"}``, ``{part: encoder}``), with where it was (``at``)."""
 
     if not isinstance(value, Mapping):
         return _point(value, key)
     said = (
         f"{key} must be a point ([x, y]) or what it is glued to, such as "
-        f'{{shape: box1, side: right}} or {{object: "body[0]"}}'
+        f'{{shape: box1, side: right}}, {{object: "body[0]"}} or {{part: encoder}}'
     )
-    unknown = [name for name in value if name not in ("shape", "object", "side", "at")]
+    unknown = [name for name in value if name not in (*GLUED_TO, "side", "at")]
     if unknown:
         raise ShapeError(key, f"{said}: it has {', '.join(map(str, unknown))}.")
-    named = [name for name in ("shape", "object") if value.get(name) is not None]
+    named = [name for name in GLUED_TO if value.get(name) is not None]
     if (
         len(named) != 1
         or not isinstance(value[named[0]], str | int)

@@ -26,6 +26,12 @@
       "type": "array",
       "minItems": 1,
       "items": {"$ref": "#/$defs/group"}
+    },
+    "shapes": {
+      "description": "Shapes drawn over the figure where they are put -- arrows, rings, braces, highlights, measures, words -- in its units from its top left, or attached to its parts (on, around, an end's {part: id}); each as flexo.freeform reads it (flexo.figure_shapes).",
+      "type": "array",
+      "items": {"type": "object", "required": ["kind"]},
+      "default": []
     }
   },
   "$defs": {
