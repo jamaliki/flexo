@@ -890,14 +890,41 @@ def _one_at_a_time(work, *args):
             return work(*args)
 
 
-@functools.lru_cache(maxsize=8)
 def _loaded(source: str, stamp: float):
-    """The molecule, read once (or fetched) and copied for each way it is drawn."""
+    """The molecule, read once (or fetched) and copied for each way it is drawn. A PDB ID a
+    bundle keeps the entry of (``flexo.bundle``) is read from the bundle's: no network."""
 
+    from flexo.bundle import kept_entry
+    from flexo.confine import folder_root
+
+    kept = None if Path(source).exists() else kept_entry(source, folder_root.get())
+    if kept is not None:
+        return _read_kept(str(kept), kept.stat().st_mtime_ns, source.strip().upper())
+    return _read(source, stamp)
+
+
+@functools.lru_cache(maxsize=8)
+def _read(source: str, stamp: float):
     import molsketch as ms
 
     del stamp  # part of the cache key: an edited file is read again
     return ms.load(source) if Path(source).exists() else ms.fetch(source)
+
+
+@functools.lru_cache(maxsize=8)
+def _read_kept(path: str, stamp: int, pid: str):
+    import molsketch as ms
+
+    del stamp
+    return ms.load(Path(path), name=pid)
+
+
+def _forget_loaded() -> None:
+    _read.cache_clear()
+    _read_kept.cache_clear()
+
+
+_loaded.cache_clear = _forget_loaded  # type: ignore[attr-defined]
 
 
 HOLD = 24

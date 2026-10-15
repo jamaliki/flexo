@@ -4,6 +4,7 @@
 import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables } from "./ui.js";
 import { Session } from "./session.js";
 import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
+import { bundles, bundleName } from "./bundles.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -75,7 +76,8 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 
 // A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
 // (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
-const docName = (file) => String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+// (A bundle's document is named as the bundle is: bundles.js.)
+const docName = (file) => bundleName(file) ?? String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
 
 // A file renamed: what is said of it, with the file it is now to open.
 function movedNote(workspace, text, moved) {
@@ -475,6 +477,7 @@ export class Workspace {
         break;
       }
       case "assistant": this.emit("assistant", event); break;
+      case "bundle": this.emit("bundle", event); break;
       default: break;
     }
   }
@@ -509,6 +512,7 @@ export async function start() {
   }
   const workspace = new Workspace(info);
   window.flexoStudio = workspace;
+  bundles(workspace);
   // Settled once the tabs open when the page was last left are open again: what an app
   // around the page asks (open this document) waits for it, rather than being undone.
   let settled;
@@ -680,8 +684,8 @@ export async function start() {
   // A folder someone else made runs none of its own Python until its person says so: said
   // here, once, for every slide whose plot waits (each slide only marks where it goes).
   const trustBar = h("div.trust-bar", { hidden: true }, icon("warning"),
-    h("div.trust-words", {}, h("b", {}, "This folder’s Python hasn’t been run. "),
-      "Its plots and figures appear once you trust the folder. Trust it only if you know where it came from."),
+    h("div.trust-words", {}, h("b", {}, `This ${workspace.info.bundle ? "bundle" : "folder"}’s Python hasn’t been run. `),
+      `Its plots and figures appear once you trust the ${workspace.info.bundle ? "bundle" : "folder"}. Trust it only if you know where it came from.`),
     ui.button("Trust and Run", async () => {
       try { await workspace.api("/api/trust", {}); }
       catch (error) { toast(`Could not trust the folder: ${error.message}`, { kind: "error", icon: "error" }); }

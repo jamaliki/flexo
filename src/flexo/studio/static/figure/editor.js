@@ -101,6 +101,9 @@ export function mount(studio, main) {
     { icon: "image", label: exportLabel("PNG"), run: () => studio.exportFiles(["png"]) },
     "-",
     { icon: "export", label: exportLabel("All Formats"), run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
+    "-",
+    // The figure and every file it names, as one file to send (flexo.bundle).
+    { icon: "export", label: exportLabel("Flexo Bundle"), hint: "The figure and every file it names, as one file", run: () => studio.exportFiles(["flexo"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // A drawing kept back while a part is carried, and how long after it is let go the one

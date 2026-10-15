@@ -207,6 +207,13 @@ class FigureKind:
         yaml.safe_load(text)  # refuse what does not read, before anyone sees it
         return {"text": text}
 
+    def references(self, data: Any, base: Path) -> list[Any]:
+        """The files a figure file (``data``, as it reads) names, for a bundle of it."""
+
+        from flexo.bundle import figure_references
+
+        return figure_references(data, base)
+
     def theme_of(self, document: dict[str, Any]) -> str | None:
         data = yaml.safe_load(document["text"])
         figure = data.get("figure") if isinstance(data, dict) else None

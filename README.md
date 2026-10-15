@@ -1262,7 +1262,39 @@ uv run flexo retheme build/slice.editable.svg "Deep Sea Harvest" -o build/slice.
 uv run flexo schema
 uv run flexo studio                      # edit this folder's figures and themes in the browser
 uv run flexo studio mcp                  # the studio's tools for an agent (MCP over stdio)
+uv run flexo bundle figure.yaml -o figure.flexo   # the figure and every file it names, as one file
+uv run flexo unbundle figure.flexo -o figure/     # a bundle written out as a plain folder
+uv run flexo build figure.flexo          # built straight from a bundle (--trust to run its Python)
+uv run flexo studio figure.flexo         # edited as a folder, saved back into the bundle
 ```
+
+### Bundles: one file to send
+
+A figure (or a deck, with flexo-talk) is a folder: its document, pictures, data, plots'
+Python, structures, maps and theme files. A **bundle** (`.flexo`) is all of that as one
+file -- to email, AirDrop or Slack, open on another computer, edit, save and send back, as
+Keynote's `.key` is one file. It is a zip:
+
+```text
+manifest.json              {"format": "flexo-bundle", "version": 1, "document": "talk.yaml",
+                            "kind": "deck", "app": "Flexo Studio 0.3.0", "created": ...,
+                            "modified": ..., "files": 14, "missing": [...], "outside": [...]}
+talk.yaml                  the document, at its root
+figures/model.yaml         every file it names, under the name it names it by --
+data/loss.csv              and every file those name: a figure file's pictures, a theme's
+plots.py, helpers.py       fonts, the modules a plot imports from beside it, the files its
+assets/drawing-part-1.svg  words name, a plot's data
+.flexo/pdb/1UBQ.cif        a PDB entry a structure names by its ID, as it was fetched
+```
+
+Nothing the document says is rewritten. A file it names that is missing, or outside its
+folder (`../logo.png`, a whole path), is left out and said, in the manifest and as it is
+bundled. A bundle someone sends is read as one from a stranger: no name out of it, no
+link, nothing larger than 3 GB however small it is packed -- and its Python runs only once
+its person trusts it. The studio opens a bundle into a working folder of its own (in
+`~/Library/Application Support/flexo/bundles`, or the XDG data folder) and writes it back,
+whole, a moment after each change; a bundle saved on another computer meanwhile is taken
+in, as a file changed on disk is.
 
 ### The studio: edit with people and agents, live
 

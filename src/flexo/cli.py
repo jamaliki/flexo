@@ -32,9 +32,32 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subcommands = result.add_subparsers(dest="command")
 
-    build = subcommands.add_parser("build", help="Compile a YAML or JSON figure specification.")
+    build = subcommands.add_parser(
+        "build", help="Compile a YAML or JSON figure specification, or a figure's bundle (.flexo)."
+    )
     build.add_argument("source", type=Path)
     _output_arguments(build)
+    build.add_argument(
+        "--trust",
+        action="store_true",
+        help="Run the Python a bundle brings (its plots): only for a bundle you trust.",
+    )
+
+    bundled = subcommands.add_parser(
+        "bundle",
+        help="Make one file (.flexo) of a deck or a figure and every file it names, to send.",
+    )
+    bundled.add_argument("source", type=Path, help="A deck or figure file (.yaml or .json).")
+    bundled.add_argument(
+        "--output", "-o", type=Path, help="The bundle to write (default: beside it, as .flexo)."
+    )
+    unbundled = subcommands.add_parser(
+        "unbundle", help="Write a bundle (.flexo) out as a plain folder."
+    )
+    unbundled.add_argument("source", type=Path, help="A bundle (.flexo).")
+    unbundled.add_argument(
+        "--output", "-o", type=Path, help="The folder to write (default: named as the bundle)."
+    )
 
     check = subcommands.add_parser("check", help="Validate a specification or generated SVG.")
     check.add_argument("source", type=Path)
@@ -162,6 +185,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _theme(arguments)
         if arguments.command == "import-svg":
             return _import_svg(arguments)
+        if arguments.command == "bundle":
+            return _bundle(arguments)
+        if arguments.command == "unbundle":
+            return _unbundle(arguments)
         parser().print_help()
         return 0
     except (FlexoError, OSError, ValueError) as error:
@@ -232,7 +259,86 @@ def _import_svg(arguments: argparse.Namespace) -> int:
 
 
 def _build(arguments: argparse.Namespace) -> int:
+    if arguments.source.suffix.lower() == ".flexo":
+        return _build_bundle(arguments)
     return _write(load_figure(arguments.source), arguments, stem=arguments.source.stem)
+
+
+def _build_bundle(arguments: argparse.Namespace) -> int:
+    """A figure's bundle, built as its folder would be: unpacked aside, read there and nowhere
+    else, its Python run only if ``--trust`` says so."""
+
+    import tempfile
+
+    from flexo.bundle import Bundle, BundleError, runs_python
+    from flexo.confine import folder_root
+    from flexo.studio import code_allowed
+    from flexo.studio.figure_kind import parse
+
+    source: Path = arguments.source
+    with tempfile.TemporaryDirectory(prefix="flexo-bundle-") as aside:
+        try:
+            with Bundle(source) as opened:
+                python = runs_python(opened)
+                if opened.kind and opened.kind != "figure":
+                    raise ValueError(
+                        f"{source.name} holds a {opened.kind}: build it with flexo-talk build."
+                    )
+                if python and not arguments.trust:
+                    raise ValueError(
+                        f"{source.name} runs Python ({', '.join(python[:3])}). Build it with "
+                        "--trust if you trust where it came from."
+                    )
+                opened.extract(aside)
+                document = Path(aside) / opened.document
+        except BundleError as error:
+            raise ValueError(str(error)) from None
+        root, allowed = folder_root.set(Path(aside).resolve()), code_allowed.set(arguments.trust)
+        try:
+            figure = parse(
+                document.read_text(encoding="utf-8"), document.parent, suffix=document.suffix
+            )
+            return _write(figure, arguments, stem=source.stem)
+        finally:
+            folder_root.reset(root)
+            code_allowed.reset(allowed)
+
+
+def _bundle(arguments: argparse.Namespace) -> int:
+    """``flexo bundle talk.yaml -o talk.flexo``: what it holds, and what it left out."""
+
+    from flexo.bundle import pack
+    from flexo.studio.bundles import said_left
+
+    made = pack(arguments.source, arguments.output)
+    count = len(made.gathered.files)
+    print(f"{made.path} ({count} file{'s' if count != 1 else ''}, {_size(made.size)})")
+    for note in said_left(made.gathered.left):
+        print(note, file=sys.stderr)
+    for item in made.gathered.left:
+        named = f" (named in {item.document})" if item.document else ""
+        print(f"  {item.why}: {item.name}, at {item.where}{named}", file=sys.stderr)
+    return 0
+
+
+def _unbundle(arguments: argparse.Namespace) -> int:
+    from flexo.bundle import unpack
+
+    source: Path = arguments.source
+    folder = arguments.output or Path.cwd() / source.stem
+    opened = unpack(source, folder)
+    print(folder / opened.document)
+    for item in opened.left:
+        print(f"{source.name} was made without {item['name']} ({item['why']}).", file=sys.stderr)
+    return 0
+
+
+def _size(count: int) -> str:
+    for unit in ("bytes", "kB", "MB", "GB"):
+        if count < 1000 or unit == "GB":
+            return f"{count:.0f} {unit}" if unit == "bytes" else f"{count:.1f} {unit}"
+        count /= 1000
+    return f"{count} bytes"
 
 
 def _check(arguments: argparse.Namespace) -> int:
