@@ -168,6 +168,7 @@ def _import_svg(arguments: argparse.Namespace) -> int:
         drawing = source.read_text(encoding="utf-8")
     output: Path | None = arguments.output
     folder = output.parent if output else Path.cwd()
+    folder.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
     def keep(data: bytes, suffix: str) -> str:

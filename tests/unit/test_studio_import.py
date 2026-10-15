@@ -203,7 +203,7 @@ def test_a_file_beside_the_document_is_read_where_it_is(served: tuple[str, Works
 
 def test_a_document_of_pasted_drawings_is_still_a_document() -> None:
     # A deck of a few drawings pasted as shapes runs to megabytes: still found, still opened.
-    assert CLAIM_LIMIT >= 20_000_000
+    assert CLAIM_LIMIT >= 10_000_000
 
 
 def test_the_pages_paste_of_a_drawing_asks_the_studio_and_adds_one_step() -> None:

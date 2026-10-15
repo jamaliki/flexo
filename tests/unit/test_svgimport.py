@@ -771,3 +771,28 @@ def test_every_shape_made_reads_as_written() -> None:
         if spec["kind"] == "path":
             assert pathdata.parsed(spec["d"]).plain
     assert math.isfinite(made.box[0])
+
+
+def test_the_cli_writes_a_drawings_shapes_and_its_pictures(tmp_path, capsys) -> None:
+    import yaml
+
+    from flexo.cli import main
+
+    source = tmp_path / "module.svg"
+    source.write_text(
+        svg(
+            '<defs><filter id="b"><feGaussianBlur stdDeviation="2"/></filter></defs>'
+            '<rect width="40" height="20" fill="#000000"/>'
+            '<rect x="50" width="40" height="20" fill="red" style="filter:url(#b)"/>'
+        )
+    )
+    assert (
+        main(["import-svg", str(source), "-o", str(tmp_path / "out" / "shapes.yaml"), "--exact"])
+        == 0
+    )
+    written = (tmp_path / "out" / "shapes.yaml").read_text()
+    assert "size: [30.0, 15.0]" in written
+    shapes = yaml.safe_load(written)["shapes"][0]["shapes"]
+    assert shapes[0]["fill"] == "#000000" and shapes[1]["source"] == "assets/module-part-1.svg"
+    assert (tmp_path / "out" / "assets" / "module-part-1.svg").is_file()
+    assert "kept as a picture" in capsys.readouterr().err

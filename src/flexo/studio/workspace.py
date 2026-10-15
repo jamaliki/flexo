@@ -78,10 +78,10 @@ _READS = frozenset(
 )
 """Edits a page asks of a kind that only read the document (``Workspace.acting``)."""
 DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
-CLAIM_LIMIT = 20_000_000
+CLAIM_LIMIT = 10_000_000
 """Bytes: a larger file is not read to find out what kind of document it is. (A deck holding
-drawings pasted as shapes, outlines of hundreds of paths, runs to megabytes; read with
-PyYAML's C loader, a file this large is read in about a second, once for each change.)"""
+drawings pasted as shapes runs to megabytes -- a drawing of 900 shapes is 120 kB of them;
+read with PyYAML's C loader, a file this large takes three seconds, once for each change.)"""
 WALK_LIMIT = 20_000
 """Files looked at, at most, when listing a folder's documents."""
 SIZE_LIMIT = 2_000_000
