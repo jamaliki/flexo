@@ -696,12 +696,30 @@ def _fresh(value: Any) -> Any:
             made[key] = _fresh(item)
         return made
     if isinstance(value, (list, tuple)):
-        return CommentedSeq(_fresh(item) for item in value)
+        made = CommentedSeq(_fresh(item) for item in value)
+        if _numbers(value):
+            # (A point, a size, a colour's stop: one line, as a person writes it.)
+            made.fa.set_flow_style()
+        return made
     if isinstance(value, PurePath):
         value = str(value)
     if isinstance(value, str) and "\n" in value:
         return LiteralScalarString(value)
     return value
+
+
+def _numbers(value: list | tuple) -> bool:
+    """Whether a list is a few numbers (and words): a point, a size, a gradient's stop."""
+
+    return (
+        0 < len(value) <= 4
+        and any(isinstance(item, int | float) and not isinstance(item, bool) for item in value)
+        and all(
+            (isinstance(item, int | float) and not isinstance(item, bool))
+            or (isinstance(item, str) and "\n" not in item and len(item) < 40)
+            for item in value
+        )
+    )
 
 
 def _same_scalar(old: Any, new: Any) -> bool:

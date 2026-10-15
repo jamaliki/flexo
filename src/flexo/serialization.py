@@ -54,6 +54,10 @@ def load_figure(source_file: str | Path) -> FigureSpec:
                 beside = (target_file.parent / value).resolve()
                 if not Path(value).is_absolute() and beside.is_file():
                     figure_data[key] = str(beside)
+    if isinstance(document, dict) and "shapes" in document:
+        from flexo.shape_pictures import anchored
+
+        document["shapes"] = anchored(document["shapes"], target_file.parent)
     return parse_figure(document)
 
 

@@ -23,6 +23,7 @@ import * as Styles from "/static/studio/styles.js";
 import * as P from "/static/studio/pathdata.js";
 import * as O from "/static/studio/pathops.js";
 import { pathTools } from "/static/studio/pathtools.js";
+import { gradientFields } from "/static/studio/gradients.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -1642,7 +1643,7 @@ export function shapeEditor(host) {
   // Shapes copied -- here, on another page, from a slide onto a figure or a figure onto a
   // slide -- pasted on the page shown: each saying only what a shape on it may say (a slide's
   // build, a figure's part it is on, go), an end glued to what is elsewhere where it was.
-  function paste(clipped) {
+  function paste(clipped, { label = null } = {}) {
     const same = (clipped.source ?? `slide:${clipped.slide}`) === (host.source?.() ?? `${noun}:${slideIndex()}`);
     const list = shapesOf();
     const made = clipped.shapes.map((_, n) => list.length + n);
@@ -1666,7 +1667,7 @@ export function shapeEditor(host) {
         return out;
       });
       return [...all, ...copies];
-    }, clipped.shapes.length === 1 ? `Paste ${shapeLabel(clipped.shapes[0])}` : `Paste ${clipped.shapes.length} Shapes`, { after: made });
+    }, label || (clipped.shapes.length === 1 ? `Paste ${shapeLabel(clipped.shapes[0])}` : `Paste ${clipped.shapes.length} Shapes`), { after: made });
     mark([], made);
     host.reportFocus();
   }
@@ -1848,6 +1849,9 @@ export function shapeEditor(host) {
     if (closedAll || flat.some((spec) => F.isClosed(spec))) {
       style.push(ui.field("Fill", ui.swatches({ value: shared("fill") === "none" ? null : shared("fill") ?? undefined, colours: fills, none: true, noneTitle: "No Fill", custom: true, key: "shape.fill",
         onChange: (value) => set({ fill: value ?? "none" }, "Change Fill", "fill") })));
+      // Or a gradient: its kind, its ends' colours and its way (gradients.js).
+      style.push(...gradientFields({ value: shared("fill"), ui, h, set: (fill, label) => set({ fill }, label, "fill"),
+        swatches: (value, onChange, key) => ui.swatches({ value, colours: fills, none: false, custom: true, key, onChange }) }));
       if (shared("fill") !== "none") style.push(ui.field("Fill Opacity", slider(shared("fill_opacity"), 0, 1, 0.05, (value) => set({ fill_opacity: value }, "Change Fill", "fill-opacity"), "shape.fill_opacity", true)));
     }
     style.push(ui.field(linesAll ? "Line" : "Outline", ui.swatches({ value: shared("line") === "none" ? null : shared("line") ?? undefined, colours: strokes, none: true, noneTitle: "No Line", custom: true, key: "shape.line",
@@ -2027,6 +2031,8 @@ export function shapeEditor(host) {
 
   return {
     press, hover, leave, dblclick, context, key, place, drawn, panel, commands, menuItems, clip, paste, touched,
+    // (Where a point on the screen is on the page, in the shapes' units: a paste's place.)
+    pointAt: (x, y) => screenToFrame(x, y),
     choose, clear, restore, arm, disarm, chooser, remove, duplicate, group, ungroup, align, distribute, order, flip, lock, copyStyle, pasteStyle,
     chosen: chosenNow,
     list: shapesOf,

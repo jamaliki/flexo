@@ -336,6 +336,11 @@ class Handler(BaseHTTPRequestHandler):
             from flexo.studio import copying
 
             self._json(copying.answer(workspace, data))
+        elif route == "/api/import-drawing":
+            # A drawing pasted or dropped, made the page's own shapes (flexo.svgimport).
+            from flexo.studio.importing import imported
+
+            self._json(imported(workspace, name, data))
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
             # connected, renamed): the kind answers with the document as it would be.

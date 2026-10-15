@@ -10,6 +10,7 @@ import { start } from "./shell.js";
 export { ownResources } from "./drawings.js";
 export { pastedDrawing, pastedOwn, svgOfWords } from "./clipboard.js";
 export { copyOut, copiedHere } from "./copyout.js";
+export { drawingPaster, clipboardDrawing, DRAWING_FILE } from "./drawingpaste.js";
 
 // Draw a form again without taking the field someone is typing in away from them. Words
 // another person added or took away before the caret move it along, so it stays where
