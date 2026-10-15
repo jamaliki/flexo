@@ -758,9 +758,9 @@ export function mount(studio, main) {
   // it, the whole figure.
   const copiedDrawing = (clip) => {
     const page = [...(studio.pages?.values?.() || [])][0];
-    const shapeId = (index) => { const spec = shapes.list()[index]; return spec?.id !== undefined && spec?.id !== null ? String(spec.id) : `shapes.${index}`; };
+    // (The shapes' as drawn: in a group entered, its own shapes' -- groups.js.)
     const keep = clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
-      : clip.what === "shapes" ? shapes.chosen().map(shapeId) : [];
+      : clip.what === "shapes" ? shapes.ids() : [];
     return { svg: page?.svg || "", keep, text: plainOf(clip), clip, title: clip.what === "block" ? studio.file.split("/").pop() : clip.label };
   };
   // Pasted: shapes drawn over the figure -- from it, another figure or a slide -- as shapes

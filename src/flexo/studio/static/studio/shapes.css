@@ -32,6 +32,21 @@
 .row.heads { gap: 8px; align-items: end; }
 .row.heads .field { flex: 1; }
 .arrange-row { gap: 2px; flex-wrap: wrap; }
+/* Align and Distribute (aligntools.js): what they are aligned to, the sides, beside, spread, a
+   gap, a grid; shown by ⇧⌘A with a moment's glow. */
+.align-section .align-label { font: var(--text-label); color: var(--ink-2); margin-bottom: -6px; }
+.align-section .align-gap { gap: 2px; align-items: end; }
+.align-section .align-gap .field { flex: 1; min-width: 0; margin-right: 6px; }
+.align-section.shown { animation: align-shown 0.9s ease-out; border-radius: 8px; }
+@keyframes align-shown { from { box-shadow: 0 0 0 3px var(--accent-soft, rgba(10, 132, 255, 0.25)); } to { box-shadow: 0 0 0 3px transparent; } }
+.grid-sheet { display: grid; gap: 12px; min-width: 300px; }
+.grid-sheet .row { gap: 12px; }
+.grid-sheet .row .field { flex: 1; }
+.grid-cell { display: grid; gap: 6px; }
+/* The equal spacing a drag catches at: each gap as wide, marked, its size beside it. */
+.shape-spacing line { stroke: #d6336c; }
+.shape-spacing-tag { fill: #d6336c; }
+.shape-spacing-words { fill: #ffffff; font-family: var(--font); font-weight: 600; }
 /* The size or turn a drag makes, by the pointer. */
 .shape-layer + .size-tip, .size-tip.shape-tip { position: absolute; z-index: 30; pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink, #fff); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 /* Words typed in a shape where the page has no editor of its own for them (a figure's): a
@@ -62,3 +77,16 @@
 .path-band { fill: color-mix(in srgb, var(--accent) 8%, transparent); stroke: var(--accent); stroke-dasharray: 3 2; }
 .path-ink { fill: none; stroke: var(--accent); }
 .path-close { fill: var(--accent); stroke: #ffffff; }
+/* A group entered (groups.js): a quiet dotted frame round its shapes, and a chip over it naming
+   where one is -- each level a way back out to it, ✕ out a level (Esc). */
+.shape-entered-frame { fill: none; stroke: var(--accent-line); stroke-dasharray: 1 3; stroke-linecap: round; }
+/* (Under the shapes' layer: a handle over it is still the handle's to drag.) */
+.group-chip { position: absolute; z-index: 5; display: flex; align-items: center; gap: 0; height: 22px; box-sizing: border-box; padding: 0 2px 0 2px; border-radius: 7px; background: var(--raised); border: 1px solid var(--line-strong); box-shadow: var(--shadow-1); font: 500 11px/1 var(--font); color: var(--ink-3); white-space: nowrap; pointer-events: auto; user-select: none; -webkit-user-select: none; cursor: default; }
+.group-chip[hidden] { display: none; }
+.group-chip > svg { width: 10px; height: 10px; flex: none; color: var(--ink-3); opacity: 0.7; }
+.group-crumb { border: 0; background: transparent; color: inherit; font: inherit; padding: 3px 5px; border-radius: 5px; cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+button.group-crumb:hover { background: var(--accent-soft); color: var(--accent); }
+.group-crumb.here { color: var(--ink); font-weight: 600; cursor: default; }
+.group-leave { display: grid; place-items: center; width: 18px; height: 18px; margin-left: 1px; border: 0; padding: 0; border-radius: 5px; background: transparent; color: var(--ink-3); cursor: pointer; }
+.group-leave:hover { background: var(--accent-soft); color: var(--accent); }
+.group-leave svg { width: 10px; height: 10px; }

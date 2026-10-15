@@ -7,6 +7,7 @@ import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 import { bundles, bundleName } from "./bundles.js";
 import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
+import { alignTo, asGroup, onAligning } from "./aligning.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -796,12 +797,15 @@ export async function start() {
         deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
         // View › Snap to Guides and Objects, ticked while it is on.
         snapping: snapping(),
+        // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
+        align_to: alignTo(), align_group: asGroup(),
       });
     }, 80);
   };
   // Snapping turned -- here, in another tab, in another window of the app -- is told at once;
   // and % turns it, and the app keeps it for every window (magnet.js).
   onSnapping(() => report());
+  onAligning(() => report());
   magnetKeys();
   snappingInApp();
   // A slide or part chosen changes what can be done; so does a field taking the keys
@@ -1456,7 +1460,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (Shapes Chosen)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],

@@ -377,6 +377,9 @@ PLACE_KEYS = {
     "path": ("d", "rotate", "flip"),
 }
 COMMON_KEYS = ("kind", "id", *STYLE_KEYS, *TEXT_KEYS)
+GROUPED_KEYS = ("locked",)
+"""What a page says of its shapes that a group's shapes may say too, where the page lets its
+own (``checked``'s ``extra``): ``locked``, one kept where it is while its group is entered."""
 INSET_KEYS = (
     "of",
     "region",
@@ -827,9 +830,16 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         if isinstance(value, str) or not isinstance(value, Sequence) or not value:
             raise ShapeError(key, "A group's shapes must be a list of shapes, one at least.")
         made = []
+        # (Locked where the page lets its shapes be, a group's shape may be too: kept where it
+        # is while the group is entered in the studio. The page's other keys are the group's.)
+        inner = tuple(name for name in extra if name in GROUPED_KEYS)
         for index, item in enumerate(value):
             try:
-                made.append(checked(item, extra=(), depth=depth + 1))
+                made.append(checked(item, extra=inner, depth=depth + 1))
+                if "locked" in made[-1] and not isinstance(made[-1]["locked"], bool):
+                    raise ShapeError(
+                        "locked", f"locked must be true or false, not {made[-1]['locked']!r}."
+                    )
             except ShapeError as error:
                 raise ShapeError(
                     f"shapes[{index}].{error.key}" if error.key else f"shapes[{index}]",
