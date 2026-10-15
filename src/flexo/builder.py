@@ -23,6 +23,7 @@ from flexo.ir.semantic import (
     EdgeShape,
     EdgeSpec,
     FigureSpec,
+    FreeShape,
     GroupSpec,
     JointStyle,
     LayoutKind,
@@ -311,12 +312,35 @@ class Figure:
         self._nodes: list[NodeSpec] = []
         self._edges: list[EdgeSpec] = []
         self._nets: list[NetSpec] = []
+        self._shapes: list[dict[str, Any]] = []
         self._edge_counter = 0
         self._net_counter = 0
         self._ids = {"root"}
         self.root = GroupBuilder(self, root)
 
     def __enter__(self) -> Self:
+        return self
+
+    def shape(self, kind: str, **options: object) -> Self:
+        """A shape drawn over the figure where it is put, taking no room in its layout
+        (``flexo.figure_shapes``): an arrow at a part, a ring round some, a brace and its
+        words, a highlight, a box of words -- ``figure.shape("arrow", from_=[10, 10],
+        to={"part": "encoder", "side": "left"})``, ``figure.shape("ring", around=["encoder"])``,
+        ``figure.shape("text", on="decoder", at=[0, -16], text="the bottleneck")``. Places
+        are the figure's points from its top left (from a part's, ``on`` one); every kind and
+        setting is ``flexo.freeform``'s."""
+
+        from flexo.diagnostics import Diagnostic, FlexoError
+        from flexo.figure_shapes import checked
+        from flexo.freeform import ShapeError
+
+        written = {"kind": kind, **{("from" if key == "from_" else key): value
+                                    for key, value in options.items()}}
+        try:
+            self._shapes.append(checked(written))
+        except ShapeError as error:
+            where = f"shapes[{len(self._shapes)}]" + (f".{error.key}" if error.key else "")
+            raise FlexoError(Diagnostic("shape.invalid", f"{where}: {error.message}")) from None
         return self
 
     def __exit__(self, exception_type: object, exception: object, traceback: object) -> None:
@@ -422,6 +446,7 @@ class Figure:
                     for net in self._nets
                 ),
                 groups=groups,
+                shapes=tuple(FreeShape.of(shape) for shape in self._shapes),
             )
         )
 

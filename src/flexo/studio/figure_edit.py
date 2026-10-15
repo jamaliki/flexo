@@ -38,7 +38,16 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``join``: ``ids`` of lines into one shape (or out of one) made one line that
   branches (a net), with one caption; ``add``, a shape more on its branching side;
 - ``separate``: the net ``id`` made lines again (with ``end``, that one branch);
+- ``shapes``: the shapes drawn over the figure (``flexo.figure_shapes``) made ``shapes``, a
+  list as the file writes them: those unchanged kept as written, comments and all, one
+  changed changed key by key -- and, with ``show`` (a ``show`` action's ``ids`` and ``as``),
+  some of them hidden, dimmed or shown in the same step;
 - ``read``: nothing; the page asks for the figure as it is.
+
+A part renamed is renamed in the shapes drawn over the figure too (the part one is on, those
+it goes round, what its ends are glued to); deleted, an end glued to it stays where it was
+(its ``at``), a shape on it stays where it was drawn (given the part's top left, ``origins``,
+by the page), and one round it goes round the rest -- or goes, round nothing.
 
 A figure file that leaves its root group out stacks its parts in a column; the
 first edit that needs the root written down (gathering, moving) writes it, as
@@ -74,6 +83,7 @@ SHOWN = {"hidden": "hide", "dimmed": "dim", "highlighted": "highlight"}
 
 STRUCTURAL = frozenset(
     {
+        "shapes",
         "add",
         "connect",
         "rename",
@@ -96,7 +106,7 @@ STRUCTURAL = frozenset(
 )
 """Actions that change what the figure is made of: checked before they are kept."""
 
-PLACING = STRUCTURAL - {"connect", "rename", "delete", "join", "separate"}
+PLACING = STRUCTURAL - {"connect", "rename", "delete", "join", "separate", "shapes"}
 """Actions that put a part somewhere among the others: each part is held by a group the
 file writes before one is made (``_Document.hold_all``)."""
 
@@ -380,6 +390,8 @@ def model(
         "groups": groups,
         "edges": edges,
         "nets": data.get("nets") or [],
+        # The shapes drawn over it (flexo.figure_shapes), as the file writes them.
+        "shapes": data.get("shapes") if isinstance(data.get("shapes"), list) else [],
         # The sides of the ports that keep to one (a vector's four, ports written in the
         # file): where a line to one of them meets its shape.
         "sides": {
@@ -557,7 +569,27 @@ class _Document:
     def taken(self) -> set[str]:
         ids = self.node_ids() | {str(item.get("id")) for item in self.groups}
         ids |= {str(item["id"]) for item in (*self.edges, *self.nets) if item.get("id")}
+        ids |= set(self.shape_names())
         return ids | {self.root}
+
+    @property
+    def shapes(self) -> list[Any]:
+        """The shapes drawn over the figure, as the file writes them."""
+
+        found = self.data.get("shapes")
+        return found if isinstance(found, list) else []
+
+    def shape_names(self) -> list[str]:
+        """The names of the shapes drawn over the figure: their own ids, else ``shapes.2``
+        (and a group's shapes' own)."""
+
+        from flexo.figure_shapes import name_of, shape_names
+
+        found: list[str] = []
+        for index, item in enumerate(self.shapes):
+            if isinstance(item, dict):
+                found += [name_of(item, index), *shape_names(item)[1:]]
+        return list(dict.fromkeys(found))
 
     def node_of(self, reference: str) -> str:
         """The node a reference names: itself, or ``node.port``'s node."""
@@ -1354,6 +1386,25 @@ class _Document:
             # (A frame goes on round it, by its new name.)
             if isinstance(part, dict) and old in _framed(part):
                 _frame_round(part, [new if item == old else item for item in _framed(part)])
+        # (Shapes drawn over it stay on it, round it and glued to it -- to its pieces too.)
+        def renamed(reference: object) -> object:
+            reference = str(reference)
+            if reference == old:
+                return new
+            if node is not None and reference.startswith(f"{old}."):
+                return new + reference[len(old) :]
+            return reference
+
+        for shape in _every_shape(self.shapes):
+            if shape.get("on") is not None and renamed(shape["on"]) != shape["on"]:
+                shape["on"] = renamed(shape["on"])
+            for index, item in enumerate(shape.get("around") or []):
+                if renamed(item) != item:
+                    shape["around"][index] = renamed(item)
+            for key in ("from", "to"):
+                end = shape.get(key)
+                if isinstance(end, dict) and renamed(end.get("part")) != str(end.get("part")):
+                    end["part"] = renamed(end["part"])
         # (And it stays hidden, dimmed or highlighted, by its new name.)
         settings = self.data.get("figure")
         for key in SHOWN.values():
@@ -1417,8 +1468,171 @@ class _Document:
                     self.edges.remove(edge)
             # Its nets lose it; one left with a single end each way becomes a line.
             mend(self.data)
+        self.unattach({*ids, *nodes}, action.get("origins") or {})
         self._tidy()
         return []
+
+    def unattach(self, gone: set[str], origins: Mapping[str, Any]) -> None:
+        """The shapes drawn over the figure, its parts ``gone``: an end glued to one stays
+        where it was (its ``at``); a shape on one stays where it was drawn, given the part's
+        top left (``origins``) -- else it says it is on what is gone; one round some goes round
+        the rest, and goes itself, round none."""
+
+        from flexo.freeform import moved
+
+        def lost(reference: object) -> bool:
+            reference = str(reference)
+            return reference in gone or any(reference.startswith(f"{part}.") for part in gone)
+
+        kept = []
+        for shape in self.shapes:
+            if not isinstance(shape, dict):
+                kept.append(shape)
+                continue
+            around = shape.get("around")
+            if isinstance(around, list) and any(lost(item) for item in around):
+                rest = [item for item in shape["around"] if not lost(item)]
+                if not rest:
+                    continue
+                shape["around"][:] = rest
+            on = shape.get("on")
+            if on is not None and lost(on):
+                origin = origins.get(str(on))
+                if isinstance(origin, list | tuple) and len(origin) == 2:
+                    places = moved(_plain(shape), float(origin[0]), float(origin[1]))
+                    for key in ("at", "tail", "from", "to", "points"):
+                        if key in shape and places.get(key) != _plain(shape.get(key)):
+                            shape[key] = self.written(key, places[key])
+                    del shape["on"]
+            for each in _every_shape([shape]):
+                for key in ("from", "to"):
+                    end = each.get(key)
+                    if (
+                        isinstance(end, dict)
+                        and end.get("part") is not None
+                        and lost(end["part"])
+                        and isinstance(end.get("at"), list)
+                    ):
+                        each[key] = self.written("at", _plain(end["at"]))
+            kept.append(shape)
+        if len(kept) != len(self.shapes):
+            self.shapes[:] = kept
+
+    def _shapes(self, action: Mapping[str, Any]) -> list[str]:
+        """The shapes drawn over the figure made ``shapes``: each the file has unchanged kept
+        as it is written, comments and all; one changed, changed key by key; the rest
+        written as a person writes them (points ``[x, y]``, an end ``{part: encoder}``)."""
+
+        from flexo.figure_shapes import checked
+        from flexo.freeform import ShapeError
+
+        wanted = action.get("shapes")
+        if not isinstance(wanted, list) or not all(isinstance(item, dict) for item in wanted):
+            raise EditError("The shapes must be a list of shapes.")
+        for index, item in enumerate(wanted):
+            try:
+                checked(item)
+            except ShapeError as error:
+                where = f"shapes[{index}]" + (f".{error.key}" if error.key else "")
+                raise EditError(f"{where}: {error.message}") from None
+        old = self.shapes
+        plain = [_plain(item) for item in old]
+        # (Shown apart in the same step -- a shape named to be hidden, dimmed: ``show``.)
+        if isinstance(action.get("show"), Mapping):
+            self._show(action["show"])
+        if plain == wanted:
+            self.unchanged = not isinstance(action.get("show"), Mapping)
+            return []
+        # Each wanted the same as one the file has is that one; one changed, the one at its
+        # place, if that is not the same as another.
+        places: list[int | None] = [None] * len(wanted)
+        used: set[int] = set()
+        for index, item in enumerate(wanted):
+            found = next(
+                (n for n, was in enumerate(plain) if n not in used and was == item), None
+            )
+            if found is not None:
+                places[index] = found
+                used.add(found)
+        for index, _ in enumerate(wanted):
+            if (
+                places[index] is None
+                and index < len(old)
+                and index not in used
+                and isinstance(old[index], dict)
+            ):
+                places[index] = index
+                used.add(index)
+        made = []
+        for index, item in enumerate(wanted):
+            at = places[index]
+            if at is None:
+                made.append(self.written_shape(item))
+            elif plain[at] == item:
+                made.append(old[at])
+            else:
+                made.append(self.rewritten(old[at], item))
+        if not made:
+            self.data.pop("shapes", None)
+            return []
+        if isinstance(self.data.get("shapes"), list):
+            self.data["shapes"][:] = made
+        else:
+            self.data["shapes"] = made if self.json else CommentedSeq(made)
+        return []
+
+    def written_shape(self, item: Mapping[str, Any]) -> Any:
+        """A shape as a person writes it: its kind, then its name, then the rest as given."""
+
+        first = ["kind", *(["id"] if "id" in item else [])]
+        keys = [*first, *(key for key in item if key not in first)]
+        made = {} if self.json else CommentedMap()
+        for key in keys:
+            if key in item:
+                made[self.key(key)] = self.written(key, item[key])
+        return made
+
+    def rewritten(self, old: dict[str, Any], item: Mapping[str, Any]) -> dict[str, Any]:
+        """``old``, a shape as the file writes it, made ``item``: its keys kept in their
+        places and as written where unchanged."""
+
+        for key in list(old):
+            if str(key) not in item:
+                del old[key]
+        for key, value in item.items():
+            if key in old and _plain(old[key]) == value:
+                continue
+            old[self.key(key)] = self.written(key, value)
+        return old
+
+    def key(self, key: str) -> str:
+        """A shape's key as written: ``on`` quoted in YAML, which reads a plain one as
+        true."""
+
+        return key if self.json or key != "on" else SingleQuotedScalarString(key)
+
+    def written(self, key: str, value: Any) -> Any:
+        """A shape's value as a person writes it: a point ``[x, y]`` on its line, a glued end
+        ``{part: encoder, side: top, at: [x, y]}``, a group's shapes each as a shape."""
+
+        if self.json:
+            return value
+        if key == "shapes" and isinstance(value, list):
+            return CommentedSeq(
+                [self.written_shape(child) for child in value if isinstance(child, dict)]
+            )
+        if isinstance(value, dict):
+            made = CommentedMap((name, self.written(name, part)) for name, part in value.items())
+            made.fa.set_flow_style()
+            return made
+        if isinstance(value, list) and key in FLOWED:
+            made = CommentedSeq(
+                self.written("at", part) if isinstance(part, list) else _number(part)
+                for part in value
+            )
+            made.fa.set_flow_style()
+            return made
+        return value
 
     def rejoin(self, gone: set[str]) -> None:
         """The lines through parts about to be taken out, joined up round them: a part with
@@ -1684,6 +1898,7 @@ class _Document:
         there |= {str(group.get("id")) for group in self.groups if isinstance(group, dict)}
         there |= {identifier for identifier, _ in self.edge_ids()}
         there |= {str(net.get("id")) for net in self.nets if isinstance(net, dict)}
+        there |= set(self.shape_names())
         for key in SHOWN.values():
             kept = [item for item in settings.get(key) or [] if item in there]
             if kept:
@@ -2536,6 +2751,37 @@ class _Document:
             raise EditError("This shape takes no line on that side.")
         edge.pop(key, None)
         edge[end] = node if there == usual else f"{node}.{there}"
+
+
+FLOWED = frozenset({"at", "size", "tail", "from", "to", "around", "points"})
+"""A shape's lists written on one line: its points, ``[x, y]``, and the parts it goes round."""
+
+
+def _number(value: Any) -> Any:
+    """A number as a person writes it: ``120``, not ``120.0``; to a thousandth."""
+
+    if isinstance(value, float) and math.isfinite(value):
+        value = round(value, 3)
+        return int(value) if value.is_integer() else value
+    return value
+
+
+def _plain(value: Any) -> Any:
+    """``value`` as plain data, as the page sends it: what the file's own types hold."""
+
+    return json.loads(json.dumps(value, default=str))
+
+
+def _every_shape(shapes: list[Any]) -> list[dict[str, Any]]:
+    """Each shape in ``shapes``, a group's own shapes too."""
+
+    found: list[dict[str, Any]] = []
+    for shape in shapes:
+        if isinstance(shape, dict):
+            found.append(shape)
+            if shape.get("kind") == "group" and isinstance(shape.get("shapes"), list):
+                found += _every_shape(shape["shapes"])
+    return found
 
 
 def _insert_after_id(item: dict[str, Any], key: str, value: object) -> None:

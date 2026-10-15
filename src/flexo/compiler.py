@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
+from flexo.figure_shapes import Overlay, part_boxes
 from flexo.frames import (
     PlacedFrame,
     ended,
@@ -21,7 +22,7 @@ from flexo.frames import (
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
-from flexo.ir.semantic import FigureSpec, GroupSpec
+from flexo.ir.semantic import FigureSpec, FreeShape, GroupSpec
 from flexo.layout import fit_figure, measure_figure
 from flexo.pages import lettered
 from flexo.routing import route_figure
@@ -41,6 +42,9 @@ class Compilation:
     document: SVGDocument
     frames: tuple[PlacedFrame, ...] = ()
     """The figure's frames (``flexo.frames``), round what they name: no part of the layout."""
+    shapes: Overlay | None = None
+    """The shapes drawn over it (``flexo.figure_shapes``), as they were placed on it: no part
+    of the layout either."""
 
 
 def compile_figure(
@@ -50,6 +54,10 @@ def compile_figure(
     palette: Palette | None = None,
 ) -> Compilation:
     give_up_if_newer()
+    # (Shapes drawn over the figure take no room: laid out without them, drawn on it after.)
+    shapes = figure.shapes
+    if shapes:
+        figure = replace(figure, shapes=())
     layout_style = style or figure_style(figure)
     paint_palette = palette or figure_palette(figure)
     # (A frame goes round shapes where the layout puts them: laid out without it, and
@@ -99,7 +107,9 @@ def compile_figure(
         )
         # (The next draft starts from this one's room, as its lines are this one's.)
         remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
-        return _framed(frames, measured, fitted, routed, layout_style, paint_palette, held)
+        return _framed(
+            frames, measured, fitted, routed, layout_style, paint_palette, held, shapes=shapes
+        )
     give_up_if_newer()
     fitted = fit_figure(measured, style=layout_style)
     give_up_if_newer()
@@ -114,7 +124,9 @@ def compile_figure(
     # (For a draft of it to start from.)
     remember("layout", _layout_key(figure, layout_style), (_room_of(current), slide))
     give_up_if_newer()
-    return _framed(frames, measured, fitted, routed, layout_style, paint_palette, held)
+    return _framed(
+        frames, measured, fitted, routed, layout_style, paint_palette, held, shapes=shapes
+    )
 
 
 FRAME_ROUNDS = 1
@@ -220,8 +232,10 @@ def _framed(
     style: LayoutStyle,
     palette: Palette,
     held: tuple | None = None,
+    *,
+    shapes: tuple[FreeShape, ...] = (),
 ) -> Compilation:
-    """The figure drawn, its frames round what they name."""
+    """The figure drawn, its frames round what they name and its shapes over it."""
 
     placed, said = place(frames, routed, style)
     if held is not None:
@@ -233,17 +247,38 @@ def _framed(
 
         said = (*said, *plots_said(fitted.nodes, style, palette))
     if said:
-        measured = replace(measured, diagnostics=measured.diagnostics + said)
-        fitted = replace(fitted, measured=measured)
-        if routed.fitted.nodes == fitted.nodes:
-            routed = replace(routed, fitted=fitted)
-        else:
-            # (Routed with frames standing in it for their lines: said of that figure too.)
-            among = routed.fitted.measured
-            among = replace(among, diagnostics=among.diagnostics + said)
-            routed = replace(routed, fitted=replace(routed.fitted, measured=among))
-    document = emit_svg(routed, style=style, palette=palette, frames=placed)
-    return Compilation(measured, fitted, routed, document, placed)
+        measured, fitted, routed = _with_said(said, measured, fitted, routed)
+    overlay = (
+        Overlay(
+            tuple(shape.spec for shape in shapes),
+            style,
+            palette,
+            boxes=part_boxes(routed.fitted, placed),
+        )
+        if shapes
+        else None
+    )
+    document = emit_svg(routed, style=style, palette=palette, frames=placed, shapes=overlay)
+    if overlay is not None and overlay.diagnostics:
+        # (What is said of the shapes -- a part one names that is gone -- is the figure's.)
+        said = tuple(overlay.diagnostics)
+        measured, fitted, routed = _with_said(said, measured, fitted, routed)
+    return Compilation(measured, fitted, routed, document, placed, overlay)
+
+
+def _with_said(
+    said: tuple, measured: MeasuredFigure, fitted: FittedFigure, routed: RoutedFigure
+) -> tuple[MeasuredFigure, FittedFigure, RoutedFigure]:
+    """The figure as laid out and routed, with more said of it."""
+
+    measured = replace(measured, diagnostics=measured.diagnostics + said)
+    fitted = replace(fitted, measured=measured)
+    if routed.fitted.nodes == fitted.nodes:
+        return measured, fitted, replace(routed, fitted=fitted)
+    # (Routed with frames standing in it for their lines: said of that figure too.)
+    among = routed.fitted.measured
+    among = replace(among, diagnostics=among.diagnostics + said)
+    return measured, fitted, replace(routed, fitted=replace(routed.fitted, measured=among))
 
 
 def _layout_key(figure: FigureSpec, style: LayoutStyle) -> tuple:

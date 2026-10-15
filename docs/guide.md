@@ -793,6 +793,31 @@ the label. An image without a label reserves no band and is exactly the size of
 its artwork. For a caption below the artwork, put the image and a `label` node
 in a column, as `vector` does.
 
+## Shapes over the figure
+
+Marks drawn on a finished figure -- an arrow at a part, a ring round some, a brace and its
+words, a highlight, a dimension, a label -- are the figure's own shapes (`flexo.figure_shapes`),
+drawn where they are put and taking no room in its layout. Attach each to the parts it marks
+and it follows them however the figure is laid out:
+
+```python
+figure = Figure("pipeline", layout="row")
+encoder = figure.block("encoder", label="Encoder")
+decoder = figure.block("decoder", label="Decoder")
+figure.connect(encoder, decoder)
+
+figure.shape("ring", around=["decoder"])                        # round it, a margin out
+figure.shape("arrow", from_=[0, 0], to={"part": "encoder", "side": "top"}, text="input")
+figure.shape("text", on="decoder", at=[0, -16], text="bottleneck")   # moves with it
+figure.shape("brace", around=["encoder", "decoder"], side="bottom", text="the model")
+```
+
+Places are the figure's points from its top left (a part's, for one `on` it). Every kind and
+setting -- fills and lines in the theme's colours, dashes, arrowheads, shadows, words -- is a
+slide's shape's (`flexo.freeform`); a file writes them under `shapes:`. They are drawn over
+everything (`behind=True`: under the parts), the page growing to hold them, in the SVG, the
+PDF, the PNG, on a slide and in a PowerPoint.
+
 ## Shadows
 
 `shadow=True` adds a drop shadow to a group or a node. Shadows are off by

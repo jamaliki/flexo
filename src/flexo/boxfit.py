@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 from flexo.compiler import Compilation, compile_figure
 from flexo.draft import drafting, give_up_if_newer
 from flexo.drawing import ink_bounds, read_drawing
+from flexo.figure_shapes import free
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation
 from flexo.orient import turned, wrapped
@@ -98,6 +99,10 @@ def fit_in_box(
     """
 
     spec = figure if isinstance(figure, FigureSpec) else figure.spec
+    if spec.shapes and any(free(shape.spec or {}) for shape in spec.shapes):
+        # Shapes drawn where they are put, attached to none of its parts, are where they are
+        # on the figure as written: turned or folded, another figure would be under them.
+        turn, fold = False, False
     style = figure_style(spec)
     base = style.typography.size.points
     least = (words or base) / base

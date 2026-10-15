@@ -144,7 +144,9 @@ looks wrong (crowded slides, words too small, parts overlapping). Use status to 
 doing. When asked about "this slide" or "this", list_documents says what the user is looking at. \
 To mark up a slide -- an arrow at part of a figure, a ring round a structure's pocket, a brace, a \
 label, a highlight, a dimension -- add shapes to the slide where they belong (its guide says how), \
-rather than change the figure or picture under them."""
+rather than change the figure or picture under them. To mark up a figure itself, wherever it is \
+shown, draw them in the figure's own shapes, attached to the parts they point at, ring or label \
+(on, around, an end's {part: id}), so they follow the parts as the figure is laid out again."""
 
 
 class Tools:

@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from typing import NamedTuple
 
 from flexo.components import TRANSPARENT_ROLES
+from flexo.figure_shapes import Overlay, grown
 from flexo.frames import PlacedFrame, around
 from flexo.frames import draw as draw_frame
 from flexo.geometry import Point, Segment, segments
@@ -96,7 +97,12 @@ def emit_svg(
     style: LayoutStyle | None = None,
     palette: Palette | None = None,
     frames: tuple[PlacedFrame, ...] = (),
+    shapes: Overlay | None = None,
 ) -> SVGDocument:
+    """``routed`` drawn, with its ``frames`` round what they name and its ``shapes`` over it
+    (``flexo.figure_shapes``: placed on its parts and drawn as it is drawn, the page grown to
+    hold them; what is placed is kept in ``shapes`` for whoever edits it)."""
+
     semantic_figure = routed.fitted.measured.semantic
     layout_style = style or figure_style(semantic_figure)
     paint_palette = palette or figure_palette(semantic_figure)
@@ -165,9 +171,16 @@ def emit_svg(
         holder = layer(root, "layer.frames", "Frames")
         for frame in ahead:
             draw_frame(holder, frame, layout_style, paint_palette)
-    # What the figure hides or dims, drawn so where it stands (``flexo.showing``).
+    # Shapes drawn where they are put, over everything (or behind it all, over the page).
     figure = routed.fitted.measured.semantic
+    if shapes is not None:
+        shapes.palette = paint_palette
+        shapes.draw(root, under=background)
+        grown(root, shapes.reach, root.find(".//*[@id='canvas.background']"))
+    # What the figure hides or dims, drawn so where it stands (``flexo.showing``).
     shown = branches(states(figure, [frame.spec for frame in frames]), routed.nets)
+    if shapes is not None:
+        shown = {**shown, **shapes.shown(shown, figure)}
     mark(root, shown, [group.id for group in figure.groups], paint_palette.get("canvas"))
     if layout_style.sketch is not None:
         sketch_svg(root, layout_style.sketch, canvas=paint_palette.get("canvas"))

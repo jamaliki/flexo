@@ -242,6 +242,24 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                 )
             )
 
+    # A shape drawn over the figure named as a part of it is (``flexo.figure_shapes``): which
+    # would ``hide`` name, which would an end glued to it be glued to?
+    if figure.shapes:
+        from flexo.figure_shapes import shape_names
+
+        taken = {*entity_ids, *connection_ids}
+        for index, shape in enumerate(figure.shapes):
+            for name in shape_names(shape.spec):
+                if name in taken:
+                    diagnostics.append(
+                        Diagnostic(
+                            "shape.id.taken",
+                            f"shapes[{index}].id: a shape is called {name}, as a part of the "
+                            "figure is: each needs a name of its own.",
+                            entity_id=name,
+                        )
+                    )
+
     nodes = {node.id: node for node in figure.nodes}
     groups = {group.id: group for group in figure.groups}
     valid_components = component_names()
