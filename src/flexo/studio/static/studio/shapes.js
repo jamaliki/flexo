@@ -162,7 +162,11 @@ export function shapeEditor(host) {
   const idOf = (index, at = slideIndex()) => host.idOf(index, at);
   const drawnOf = (index) => page()?.querySelector(`[id="${CSS.escape(idOf(index))}"]`) || null;
   const chosenNow = () => (chosenOn === slideIndex() ? chosen.filter((index) => index < shapesOf().length && shapesOf()[index]) : []);
-  const unit = () => layer.getScreenCTM?.()?.a || 1;
+  // (Read once a move while dragging -- `scaleNow`, and the page's place, `boxNow`: see step --
+  // not after each change it makes: each read lays the page out again, a few milliseconds a
+  // move with a full slide.)
+  let scaleNow = 0, boxNow = null;
+  const unit = () => scaleNow || layer.getScreenCTM?.()?.a || 1;
   const toFrame = (event) => {
     const matrix = layer.getScreenCTM?.();
     if (!matrix) return [0, 0];
@@ -695,6 +699,7 @@ export function shapeEditor(host) {
   function step(event) {
     const g = gesture;
     if (!g) return;
+    if (!scaleNow) { scaleNow = layer.getScreenCTM?.()?.a || 1; boxNow = page()?.getBoundingClientRect() || null; queueMicrotask(() => { scaleNow = 0; boxNow = null; }); }
     // (Free of guides and glue: snapping off, or ⌘ held while it is on -- snapping.js.)
     const point = toFrame(event), free = Snap.free(event);
     guides.replaceChildren();
@@ -751,7 +756,7 @@ export function shapeEditor(host) {
   function say(text, event) {
     const node = page();
     if (!node || !event) return;
-    const outer = node.getBoundingClientRect();
+    const outer = boxNow || node.getBoundingClientRect();
     tip.textContent = text;
     tip.hidden = false;
     tip.style.left = `${event.clientX - outer.left + 14}px`;
