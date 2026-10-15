@@ -1896,8 +1896,9 @@ console.log(JSON.stringify({ cases, many, words }));
 def test_a_drawing_copied_in_another_app_is_pasted_as_its_svg() -> None:
     """Inkscape copies a drawing as SVG and as a PNG of it, and the web view hands the page
     only the PNG: pasted, the drawing was a picture of it. The Mac app reads the SVG for the
-    page when a picture alone (or nothing it reads) came; words, files copied in the Finder
-    and a picture in a browser are pasted as they were, with nothing waited for."""
+    page whenever a picture of any kind came, or nothing it reads as words -- first, so the
+    PNG beside it never wins; words, formatted words and a picture in a browser are pasted as
+    they were, with nothing waited for."""
 
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/clipboard.js"
     code = (
@@ -1912,10 +1913,13 @@ def test_a_drawing_copied_in_another_app_is_pasted_as_its_svg() -> None:
     from_app = {**drawing, "words": DRAWING}
     # In a browser: only words that are a drawing.
     assert found["cases"][:3] == ["now", drawing, "now"]
-    # In the Mac app: the drawing beside a picture, or alone; never for words, a PDF, an SVG
-    # file, a picture with another file, or formatted words -- and the app asked only then.
-    assert found["cases"][3:11] == [from_app, from_app, from_app, "now", "now", "now", "now", "now"]
-    assert found["many"] == 3
+    # In the Mac app: the drawing beside a picture of any kind (an SVG file, a picture with
+    # another file), alone, or beside a file, or HTML, and no words (Inkscape's canvas) --
+    # asked first, so the picture never wins; never for words, and the app asked only then.
+    assert found["cases"][3:11] == [
+        from_app, from_app, from_app, "now", from_app, from_app, from_app, from_app
+    ]
+    assert found["many"] == 7
     # (None there, or the app not answering: the picture is pasted.)
     assert found["cases"][11:] == [None, None]
     assert found["words"] == [

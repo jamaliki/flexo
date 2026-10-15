@@ -5,6 +5,8 @@ import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables 
 import { Session } from "./session.js";
 import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 import { bundles, bundleName } from "./bundles.js";
+import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
+import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -698,6 +700,9 @@ export async function start() {
 
   // -- the Mac app: its menus do what the page does, and it is told what they may do --
   workspace.command = (name, arg) => {
+    // Snapping turned in another window of the app: this one's turned too, quietly, whatever
+    // it shows (magnet.js).
+    if (name === "snapping" && (arg === "on" || arg === "off")) { setSnapping(arg === "on", "app"); return; }
     const session = workspace.active;
     const field = typingIn(document.activeElement) ? document.activeElement : null;
     // A sheet open (a name asked for, the shortcuts): the menus wait, as a Mac's do while a
@@ -751,6 +756,8 @@ export async function start() {
         break;
       case "agents": connectDialog(workspace); break;
       case "shortcuts": shortcutsDialog(); break;
+      // View › Snap to Guides and Objects: turned, and said.
+      case "snapping": sayTurned(toggleSnapping()); break;
       default: break;
     }
     // What a command did may change what can be done (Show Speaker Notes is then Hide).
@@ -787,9 +794,16 @@ export async function start() {
         side: side.open || "",
         // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
         deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
+        // View › Snap to Guides and Objects, ticked while it is on.
+        snapping: snapping(),
       });
     }, 80);
   };
+  // Snapping turned -- here, in another tab, in another window of the app -- is told at once;
+  // and % turns it, and the app keeps it for every window (magnet.js).
+  onSnapping(() => report());
+  magnetKeys();
+  snappingInApp();
   // A slide or part chosen changes what can be done; so does a field taking the keys
   // (⌘D is then the field's), and a sheet opening or closing.
   for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
@@ -1442,7 +1456,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
@@ -1451,11 +1465,11 @@ const SHORTCUTS = [
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape; Crop a Picture"], ["⌘ A", "Select All Objects"], ["⇧ or ⌘ Click", "Select One More (or One Less)"], ["Drag", "Select the Objects It Touches (from an Empty Spot)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌘ B", "Bold (All Its Words)"], ["⌘ I", "Italic (All Its Words)"], ["Type", "Type Over a Chosen Text’s Words"], ["↑ ↓", "Previous or Next Object"], ["← →", "Object in the Column Beside It"],
     ["⌥ ↑ ↓", "Move Up or Down"], ["⌥ ← →", "Move to the Column Beside It"], ["Drag", "Size It by a Handle (Words: Their Width)"],
-    ["⌘ Drag", "Size It Without Snapping"], ["Double-Click", "On a Handle: Its Own Size Again; on a Picture: Crop It"], ["Esc", "Cancel a Drag (While Dragging)"]]],
+    ["⌘ Drag", "Size It Without Snapping (Snapping Off: With It)"], ["Double-Click", "On a Handle: Its Own Size Again; on a Picture: Crop It"], ["Esc", "Cancel a Drag (While Dragging)"]]],
   ["Cropping a Picture", [["Drag", "A Handle Crops a Side; Inside, Moves the Frame"], ["Drag", "Outside the Frame: Moves the Picture Under It"], ["⇧ Drag", "Keep the Crop’s Proportions"],
     ["← → ↑ ↓", "Move the Frame (⇧: 10 pt)"], ["↩ or Double-Click", "Keep the Crop"], ["Esc", "Leave the Picture as It Was"]]],
   ["Logos", [["← →", "The Logo Beside It"], ["⌥ ← →", "Move It Along the Row"], ["Drag", "Move a Logo Along the Row"], ["⌫", "Delete It"],
-    ["Drag", "A Corner Sizes Every Logo"], ["⌘ Drag", "A Corner, Without Snapping"], ["Double-Click", "On a Corner: Their Default Size"]]],
+    ["Drag", "A Corner Sizes Every Logo"], ["⌘ Drag", "A Corner, Without Snapping (Snapping Off: With It)"], ["Double-Click", "On a Corner: Their Default Size"]]],
   ["While Typing", [["↩", "New Line (in a List: New Item; in a Table: the Cell Below)"], ["⇧ ↩", "New Line in a List’s Item or a Cell (or ⌥↩)"],
     ["⇥", "In a List: Indent (⇧⇥: Outdent)"], ["⇥", "Elsewhere: Next Title, Text, Object, Caption or Cell (⇧⇥: Previous)"], ["⌥ ⌘ E", "Inline Equation"], ["Esc or ⌘ ↩", "Done"]]],
   // (A figure's labels are drawn as typed, but for maths: none of these is theirs.)
@@ -1463,7 +1477,7 @@ const SHORTCUTS = [
   ["Figures", [["Type", "Type Over a Chosen Shape’s Words"], ["⌘ G", "Group the Selected Shapes"], ["⇧ ⌘ G", "Ungroup"], ["⇥", "Next Shape (⇧⇥: Previous), Also While Typing a Label"], ["⇧ or ⌘ Click", "Select One More Shape (or One Less)"],
     ["Drag", "Select the Shapes It Touches (from an Empty Spot, in a Figure File)"], ["⌘ A", "Select All Shapes"], ["← → ↑ ↓", "Select the Shape That Way"],
     ["⌥ or ⇧ ← → ↑ ↓", "Move the Shape That Way, Among the Others"], ["↩", "Edit Label (Then ↩: New Line; Esc or ⌘↩: Done)"],
-    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go"], ["⌘ Drag", "Drag a Handle Without Snapping (a Curve’s Middle, a Shape’s Corners, a Text’s Sides)"],
+    ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go"], ["⌘ Drag", "Drag a Handle Without Snapping, or With It While Snapping Is Off (a Curve’s Middle, a Shape’s Corners, a Text’s Sides)"],
     ["⇧ Drag", "Keep a Shape’s Proportions (on a Corner Handle)"], ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle, or a Text’s Side)"], ["Esc", "Cancel a Drag (While Dragging)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
     ["⌘ D", "Duplicate Shape"], ["⌫", "Delete Shape"], ["Esc", "Deselect"], ["⌘ + −", "Zoom In or Out (a Figure File)"], ["⌘ 0", "Actual Size (a Figure File)"], ["⇧ ⌘ 0", "Zoom to Fit (a Figure File)"]]],
   ["Presenting", [["→ Space ↩", "Next Build or Slide"], ["PgDn", "Next (a Clicker’s Forward)"], ["← ⌫", "Previous"], ["PgUp", "Previous (a Clicker’s Back)"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],

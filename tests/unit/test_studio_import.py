@@ -87,6 +87,8 @@ const studio = {
   file: "talk.yaml", info: { roles: { ink: "#111111" } }, past: [], future: [],
   api: async (route, body) => {
     calls.push([route, body]);
+    if (body.svg?.includes("broken")) throw new Error("The drawing is not SVG");
+    if (body.svg?.includes("empty")) return { shapes: [], count: 0, whole: false };
     return body.svg?.includes("many") ? { whole: true, count: 9000 } : made;
   },
   upload: async (file) => `assets/${file.name}`, undo: () => {},
@@ -104,8 +106,16 @@ await paster.shapesOf(svg("<svg>many</svg>", "huge.svg"));
 await paster.add({ path: "figures/module.svg", name: "figures/module.svg" });
 // A PDF's page dropped: a picture, shapes offered.
 await paster.add({ path: "figures/plot.pdf", name: "figures/plot.pdf" });
+// Not made shapes -- the studio failed, or found nothing to make -- said as a failure, and logged.
+const errors = [];
+console.error = (...args) => errors.push(args.map(String).join(" "));
+await paster.shapesOf(svg("<svg>broken</svg>", "broken.svg"));
+await paster.shapesOf(svg("<svg>empty</svg>", "empty.svg"));
+const words = (node) => (typeof node === "string" ? node
+  : (node?.text ?? "") + (node?.children || []).map(words).join(""));
+const toasts = document.body.children.map(words);
 const commands = paster.commands().map((c) => [c.label, c.keys || ""]);
-console.log(JSON.stringify({ calls, pasted, pictures, commands }));
+console.log(JSON.stringify({ calls, pasted, pictures, commands, errors, toasts }));
 """
 
 
@@ -216,7 +226,7 @@ def test_the_pages_paste_of_a_drawing_asks_the_studio_and_adds_one_step() -> Non
         [node, "--input-type=module", "-e", script], capture_output=True, text=True, check=True
     )
     answered = json.loads(result.stdout.strip().splitlines()[-1])
-    first, _huge, chosen = (call[1] for call in answered["calls"])
+    first, _huge, chosen = (call[1] for call in answered["calls"][:3])
     assert (
         first["svg"] == "<svg></svg>"
         and first["markup"] == "slide"
@@ -231,10 +241,145 @@ def test_the_pages_paste_of_a_drawing_asks_the_studio_and_adds_one_step() -> Non
         and options["label"] == "Paste Drawing"
     )
     assert answered["pasted"][1][1]["label"] == "Add Drawing"
-    # Too many pieces to edit one by one: the picture it was.
-    assert answered["pictures"] == ["huge.svg", "figures/plot.pdf"]
-    assert len(answered["calls"]) == 3
+    # Too many pieces to edit one by one: the picture it was. Not made shapes at all: the
+    # picture too, but said as the failure it is -- and why -- and logged.
+    assert answered["pictures"] == ["huge.svg", "figures/plot.pdf", "broken.svg", "empty.svg"]
+    assert len(answered["calls"]) == 5
+    said = " ".join(answered["toasts"])
+    assert "9,000 pieces are more than are edited one by one" in said
+    assert (
+        "couldn\u2019t be made shapes (The drawing is not SVG): it is placed as a picture instead"
+        in said
+    )
+    assert "couldn\u2019t be made shapes (nothing in it is drawn as shapes)" in said
+    assert (
+        len(answered["errors"]) == 2
+        and "broken.svg could not be made shapes" in answered["errors"][0]
+    )
     assert answered["commands"] == [
         ["Paste as Picture", "⌥⇧⌘V"],
         ["Paste with Original Colours", ""],
     ]
+
+
+PASTED = """
+const { pastedDrawing, pastedOwn } = await import(%s);
+const SVG = '<?xml version="1.0"?>\\n<!-- Created with Inkscape -->\\n'
+  + '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><circle r="4"/></svg>\\n';
+// A paste's clipboardData, as a web view hands it over: its words, its HTML, other types, files.
+const transfer = ({ words = "", html = "", types = {}, files = [] } = {}) => ({
+  files,
+  types: [...(files.length ? ["Files"] : []), ...(words ? ["text/plain"] : []),
+          ...Object.keys(types)],
+  getData: (type) => (type === "text/plain" ? words : type === "text/html" ? html
+    : types[type] ?? ""),
+});
+const png = new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
+const tiff = new File([new Uint8Array([73, 73, 42, 0])], "image.tiff", { type: "image/tiff" });
+const jpeg = new File([new Uint8Array([255, 216, 255])], "image.jpeg", { type: "image/jpeg" });
+const pdf = new File(["%%PDF-1.4"], "paper.pdf", { type: "application/pdf" });
+const asked = [];
+// The Mac app, its clipboard holding `answer` (an SVG, "" for none, or an Error: unread).
+const app = (answer) => ({ api: {
+  clipboard_drawing: async () => {
+    asked.push("drawing");
+    if (answer instanceof Error) throw answer;
+    return answer;
+  },
+  clipboard_own: async () => { asked.push("own"); return ""; },
+} });
+async function outcome(data, mac = null) {
+  globalThis.pywebview = mac;
+  asked.length = 0;
+  const found = pastedDrawing(data);
+  if (found === null) return { at_once: true, drawing: null, asked: [...asked] };
+  const file = await found;
+  return { at_once: false, asked: [...asked],
+           drawing: file ? { name: file.name, type: file.type,
+                             svg: (await file.text()).trim() === SVG.trim() } : null };
+}
+const named = (name, type = "image/svg+xml", words = SVG) => new File([words], name, { type });
+const cases = {
+  inkscape_in_the_app: await outcome(transfer({ files: [png] }), app(SVG)),
+  inkscape_with_a_texts_words:
+    await outcome(transfer({ files: [png], words: "Encoder" }), app(SVG)),
+  inkscape_handed_nothing: await outcome(transfer(), app(SVG)),
+  a_browsers_copy_image: await outcome(transfer({ files: [tiff] }), app(SVG)),
+  svg_file_beside_png_app_first:
+    await outcome(transfer({ files: [png, named("image.svg")] }), app(SVG.replace("r=", "r ="))),
+  svg_file_in_the_app: await outcome(transfer({ files: [named("module.svg")] }), app("")),
+  svg_file_app_unread:
+    await outcome(transfer({ files: [png, named("module.svg")] }), app(new Error("gone"))),
+  svg_file_by_type: await outcome(transfer({ files: [named("image", "image/svg+xml")] })),
+  svg_file_by_name: await outcome(transfer({ files: [named("module.svg", "")] })),
+  svg_file_not_svg:
+    await outcome(transfer({ files: [named("module.svg", "image/svg+xml", "hello")] })),
+  svg_type: await outcome(transfer({ types: { "image/svg+xml": SVG } })),
+  inkscape_type: await outcome(transfer({ types: { "image/x-inkscape-svg": SVG } })),
+  svg_words: await outcome(transfer({ words: SVG })),
+  words: await outcome(transfer({ words: "Hello" }), app(SVG)),
+  formatted_words: await outcome(transfer({ words: "Hello", html: "<b>Hello</b>" }), app(SVG)),
+  // Inkscape 1.3's, as the web view hands it: a JPEG of it, its canvas HTML, no words.
+  inkscape_captured:
+    await outcome(transfer({ files: [jpeg], html: "<canvas></canvas>" }), app(SVG)),
+  inkscape_html_alone: await outcome(transfer({ html: "<canvas></canvas>" }), app(SVG)),
+  a_photo_in_a_browser: await outcome(transfer({ files: [png] })),
+  a_photo_in_the_app: await outcome(transfer({ files: [png] }), app("")),
+  a_pdf_in_the_app: await outcome(transfer({ files: [pdf] }), app("")),
+};
+globalThis.pywebview = app("");
+asked.length = 0;
+await pastedOwn(transfer({ files: [named("image.svg")] }));
+cases.own_asked_beside_an_svg = asked;
+console.log(JSON.stringify(cases));
+"""
+
+
+def test_a_paste_brings_the_drawing_however_the_clipboard_holds_it() -> None:
+    """A drawing on the clipboard pastes as the drawing, however the web view hands it over:
+    its markup as words or under an SVG type, an SVG file, or -- in the Mac app, with a
+    picture of any kind or nothing the page reads -- the SVG the app finds on the clipboard,
+    asked first, so the PNG of it Inkscape puts beside it never wins. Words, formatted words
+    and a photograph paste as they were, nothing waited for."""
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is not installed")
+    script = PASTED % json.dumps((STATIC / "clipboard.js").as_uri())
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script], capture_output=True, text=True, check=True
+    )
+    cases = json.loads(result.stdout.strip().splitlines()[-1])
+    pasted = {"name": "image.svg", "type": "image/svg+xml", "svg": True}
+    # Inkscape's, in the Mac app: the web view hands a PNG of it (or nothing, or a TIFF beside
+    # its words): the app's SVG, asked first.
+    for case in (
+        "inkscape_captured",
+        "inkscape_html_alone",
+        "inkscape_in_the_app",
+        "inkscape_with_a_texts_words",
+        "inkscape_handed_nothing",
+        "a_browsers_copy_image",
+    ):
+        assert cases[case] == {"at_once": False, "asked": ["drawing"], "drawing": pasted}, case
+    # An SVG file beside a picture: still the app's drawing first (the same one, as Inkscape
+    # wrote it); the file's when the app has none, or can't read its clipboard.
+    assert cases["svg_file_beside_png_app_first"]["drawing"] == {**pasted, "svg": False}
+    file = {"name": "module.svg", "type": "image/svg+xml", "svg": True}
+    assert cases["svg_file_in_the_app"] == {"at_once": False, "asked": ["drawing"], "drawing": file}
+    assert cases["svg_file_app_unread"]["drawing"] == file
+    # In a browser: an SVG file, by its type or its name, is read; one that holds no drawing is not.
+    assert cases["svg_file_by_type"] == {"at_once": False, "asked": [], "drawing": pasted}
+    assert cases["svg_file_by_name"]["drawing"] == file
+    assert cases["svg_file_not_svg"] == {"at_once": False, "asked": [], "drawing": None}
+    # Its SVG under a type of its own, or as words: the drawing, nothing asked.
+    for case in ("svg_type", "inkscape_type", "svg_words"):
+        assert cases[case] == {"at_once": False, "asked": [], "drawing": pasted}, case
+    # Words, formatted words, a photograph in a browser: pasted as they were, at once.
+    for case in ("words", "formatted_words", "a_photo_in_a_browser"):
+        assert cases[case] == {"at_once": True, "asked": [], "drawing": None}, case
+    # A photograph or a PDF in the Mac app: the app asked, and it holds no drawing.
+    for case in ("a_photo_in_the_app", "a_pdf_in_the_app"):
+        assert cases[case] == {"at_once": False, "asked": ["drawing"], "drawing": None}, case
+    # Flexo's own copy is looked for beside an SVG file too (it wins over the drawing).
+    assert cases["own_asked_beside_an_svg"] == ["own"]

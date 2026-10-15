@@ -25,6 +25,7 @@ import { mergeText, follows } from "/static/studio/merge.js";
 import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } from "/static/kinds/figure/drop.js";
 import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
+import * as Snap from "/static/studio/snapping.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -2480,7 +2481,7 @@ export function figureParts(host) {
     if (bending) {
       views.push(h("span.fig-bend", {
         style: { left: `${bending.at.x}px`, top: `${bending.at.y}px` },
-        title: "Drag to shape the curve (⌘: without snapping) · Double-click to reset",
+        title: `Drag to shape the curve (⌘: ${Snap.withCommand()}) · Double-click to reset`,
         onpointerdown: (event) => bendStart(event, ended, bending), onclick: stop, onmousemove: stop,
         ondblclick: (event) => { stop(event); bendTo(ended, null); },
       }));
@@ -2520,7 +2521,7 @@ export function figureParts(host) {
       if (text) for (const side of ["w", "e"]) {
         views.push(h(`span.fig-size.${side}`, {
           style: { left: `${side === "w" ? text.left : text.left + text.width}px`, top: `${text.top + text.height / 2}px` },
-          title: "Drag to set where its words wrap (⌘: without snapping) · Double-click to fit it to its words",
+          title: `Drag to set where its words wrap (⌘: ${Snap.withCommand()}) · Double-click to fit it to its words`,
           onpointerdown: (event) => shapeSizeStart(event, id, side, fits), onclick: stop, onmousemove: stop,
           ondblclick: (event) => { event.stopPropagation(); fitWords(id, fits); },
         }));
@@ -2533,13 +2534,13 @@ export function figureParts(host) {
         }
         views.push(h(`span.fig-size.${corner}`, fits ? {
           style: { left: `${left}px`, top: `${top}px` },
-          title: `Drag to resize (⇧: keep its proportions; ⌘: without snapping) · Double-click to ${plot ? "reset size" : "fit it to its words"}`,
+          title: `Drag to resize (⇧: keep its proportions; ⌘: ${Snap.withCommand()}) · Double-click to ${plot ? "reset size" : "fit it to its words"}`,
           onpointerdown: (event) => shapeSizeStart(event, id, corner, fits), onclick: stop, onmousemove: stop,
           // (A plot with no size of its own is the size a plot is: 60 mm wide, three to two.)
           ondblclick: (event) => { event.stopPropagation(); if (plot) act({ do: "update", target: { type: "node", id }, values: { width: null, height: null } }, { select: false }); else fitWords(id, fits); },
         } : {
           style: { left: `${left}px`, top: `${top}px` },
-          title: "Drag to resize (⌘: without snapping) · Double-click to reset size",
+          title: `Drag to resize (⌘: ${Snap.withCommand()}) · Double-click to reset size`,
           onpointerdown: (event) => partSizeStart(event, id, corner),
           ondblclick: (event) => { event.stopPropagation(); update({ type: "node", id }, { "properties.width": null, "properties.height": null }); },
         }));
@@ -2595,8 +2596,9 @@ export function figureParts(host) {
     const dx = handle.x - anchor.x, dy = handle.y - anchor.y;
     let scale = ((event.clientX - anchor.x) * dx + (event.clientY - anchor.y) * dy) / (dx * dx + dy * dy || 1);
     scale = Math.min(Math.max(scale, 24 / Math.min(box.width, box.height)), 6);
-    // (Back to its size within a few pixels of it -- unless ⌘ is held, without snapping.)
-    if (!event.metaKey && Math.abs(scale - 1) * box.width < 4) scale = 1;
+    // (Back to its size within a few pixels of it -- unless ⌘ is held, without snapping; with
+    // snapping off, only while ⌘ is held: snapping.js.)
+    if (!Snap.free(event.metaKey) && Math.abs(scale - 1) * box.width < 4) scale = 1;
     sizing.scale = scale;
     sizing.element.style.transform = `scale(${scale})`;
     const outer = host.overlay.getBoundingClientRect();
@@ -2781,7 +2783,7 @@ export function figureParts(host) {
       if (sizing.words) { host.overlay.append(sizing.words.node); sizing.words.label?.style.setProperty("visibility", "hidden"); }
       host.overlay.classList.add("fig-sizing");
     }
-    sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey, free: event.metaKey };
+    sizing.pointer = { x: event.clientX, y: event.clientY, keep: event.shiftKey, free: Snap.free(event.metaKey) };
     shapeSizeDraw(sizing);
   }
   // Its outline and its size said, where the pointer is.
@@ -2891,7 +2893,8 @@ export function figureParts(host) {
     if (event.key === "Meta" || event.key === "Shift") {
       const sizing = shapeSizing;
       if (sizing?.moved && sizing.pointer) {
-        sizing.pointer[event.key === "Meta" ? "free" : "keep"] = event.type === "keydown";
+        if (event.key === "Meta") sizing.pointer.free = Snap.free(event.type === "keydown");
+        else sizing.pointer.keep = event.type === "keydown";
         shapeSizeDraw(sizing);
       }
       return;
@@ -3295,7 +3298,7 @@ export function figureParts(host) {
   function bendMove(event) {
     if (!bendingNow) return;
     bendingNow.pointer = { x: event.clientX, y: event.clientY };
-    bendingNow.free = event.metaKey;
+    bendingNow.free = Snap.free(event.metaKey);
     if (!bendingNow.moved) {
       if (Math.hypot(event.clientX - bendingNow.start.x, event.clientY - bendingNow.start.y) < 3) return;
       bendingNow.moved = true;
@@ -3405,7 +3408,7 @@ export function figureParts(host) {
   function bendKey(event) {
     // ⌘ pressed or let go: snapping off or on again, where the pointer is.
     if (event.key === "Meta") {
-      if (bendingNow?.moved) { bendingNow.free = event.type === "keydown"; if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame); }
+      if (bendingNow?.moved) { bendingNow.free = Snap.free(event.type === "keydown"); if (!bendingNow.frame) bendingNow.frame = requestAnimationFrame(bendFrame); }
       return;
     }
     if (event.type !== "keydown" || event.key !== "Escape") return;

@@ -294,6 +294,7 @@ def shapes_of(
     at: Sequence[float] | None = None,
     fit: Sequence[float] | None = None,
     scale: float | None = None,
+    origin: Sequence[float] | None = None,
     picture: Callable[[bytes, str], str] | None = None,
     name: str = "drawing",
     taken: Sequence[str] = (),
@@ -306,7 +307,8 @@ def shapes_of(
     (``[bold]{bold}``). ``centre`` or ``at`` (its top left) place it, in points; ``fit`` is
     the most it may measure, ``[width, height]``, and it is made smaller to fit; ``scale``
     scales it by so much instead (placed by neither, it stays where its page has it, scaled
-    from the page's top left). ``picture``
+    from the page's top left -- or with its page's top left at ``origin``: the drawing put
+    back where a picture of its page was drawn). ``picture``
     keeps a picture's file -- its bytes and its suffix (``.svg``, ``.png``, ``.jpg``) -- and
     says the ``source`` its shape names it by; without it they are kept in
     ``Imported.pictures`` as ``{name}-1.svg``… ``taken``: names the page has already (a
@@ -343,6 +345,8 @@ def shapes_of(
         dy = float(centre[1]) - (top + height / 2.0) * scale
     elif at is not None:
         dx, dy = float(at[0]) - left * scale, float(at[1]) - top * scale
+    elif origin is not None:
+        dx, dy = float(origin[0]), float(origin[1])
     else:
         dx = dy = 0.0
     shapes = [_placed(item.spec, scale, dx, dy) for item in made]

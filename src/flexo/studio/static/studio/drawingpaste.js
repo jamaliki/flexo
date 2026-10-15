@@ -65,24 +65,33 @@ export function drawingPaster(host) {
     busy = true;
     const label = how === "paste" ? "Paste Drawing" : "Add Drawing";
     try {
-      const request = { file: studio.file, name: file.name, markup: host.markup || "slide", roles: host.roles?.() || studio.info?.roles || null, exact,
-        // (Names the page has already -- a figure's parts' -- that no shape may take.)
-        taken: host.taken?.() || [], ...host.place() };
-      // (A file in the folder already -- one chosen -- is read there; one dropped or pasted,
-      // an SVG's words sent, a PDF saved beside the document first.)
-      if (file.path) request.path = file.path;
-      else if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") request.svg = await file.text();
-      else request.path = await studio.upload(file);
-      let made;
+      let made, failed = "";
       try {
+        const request = { file: studio.file, name: file.name, markup: host.markup || "slide", roles: host.roles?.() || studio.info?.roles || null, exact,
+          // (Names the page has already -- a figure's parts' -- that no shape may take.)
+          taken: host.taken?.() || [], ...host.place() };
+        // (A file in the folder already -- one chosen -- is read there; one dropped or pasted,
+        // an SVG's words sent, a PDF saved beside the document first.)
+        if (file.path) request.path = file.path;
+        else if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") request.svg = await file.text();
+        else request.path = await studio.upload(file);
         made = await studio.api("/api/import-drawing", request);
       } catch (error) {
-        made = { whole: true, why: String(error?.message || error || "") };
+        made = { whole: true };
+        failed = String(error?.message || error || "") || "the studio didn’t answer";
+        console.error(`The drawing ${file.name || file.path || ""} could not be made shapes:`, error);
+      }
+      // Not made shapes for a reason of its own (one it can't read, nothing in it a shape) is
+      // a failure too, said as one -- never a picture placed as if that was what was asked.
+      // Only a drawing of more pieces than are edited one by one is a picture by design.
+      if (!failed && !made.count && (made.why || !made.shapes?.length)) {
+        failed = made.why || "nothing in it is drawn as shapes";
+        console.error(`The drawing ${file.name || file.path || ""} could not be made shapes: ${failed}`);
       }
       if (made.whole || !made.shapes?.length) {
         await host.asPicture(file);
-        const why = made.count ? `${made.count.toLocaleString()} pieces are more than are edited one by one: placed as a picture.` : made.why || "The drawing is placed as a picture.";
-        toast(why, { icon: "image", seconds: 5 });
+        if (failed) toast(`The drawing couldn’t be made shapes (${failed.replace(/[.\s]+$/, "")}): it is placed as a picture instead.`, { kind: "error", icon: "error", seconds: 10 });
+        else toast(`${made.count.toLocaleString()} pieces are more than are edited one by one: placed as a picture.`, { icon: "image", seconds: 5 });
         return true;
       }
       host.shapes.paste({ what: "shapes", shapes: made.shapes, source: "drawing" }, { label });

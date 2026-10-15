@@ -11,6 +11,7 @@ import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownReso
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
 import { figureShapes } from "/static/kinds/figure/overlay.js";
+import { magnetButton } from "/static/studio/magnet.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -39,7 +40,9 @@ export function mount(studio, main) {
     zoomValue,
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true, title: "Zoom to Fit (⇧⌘0)" }),
-    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }));
+    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }),
+    // Snapping, on or off (%), for the shapes drawn over it and its parts' handles alike.
+    h("span.zoom-sep"), magnetButton());
   // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
   // it would look pressed while the drawing is zoomed on from the keyboard.
   for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());

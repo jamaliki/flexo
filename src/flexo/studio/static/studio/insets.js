@@ -123,7 +123,8 @@ export function matched(spec, source) {
 
 // The handles of an inset's region, on what it magnifies: a corner each, dragged to size it
 // (in the box's proportions: ⌘, freely, the box following), and one in its middle to move it.
-// Each as shapes.js's own handles are: where it is, and what dragging it to a point sets.
+// Each as shapes.js's own handles are: where it is, and what dragging it to a point sets -- its
+// proportions freed by ⌘ itself (the drag's `event`), snapping on or off: they are no snap.
 export function handles(spec, source) {
   const shown = placed(spec, source), [rx, ry, rw, rh] = shown.region, [, , bw, bh] = shown.box;
   const corners = { nw: [rx, ry], ne: [rx + rw, ry], se: [rx + rw, ry + rh], sw: [rx, ry + rh] };
@@ -132,7 +133,8 @@ export function handles(spec, source) {
   const out = Object.entries(corners).map(([name, at]) => ({
     at, kind: "size", cursor: name === "nw" || name === "se" ? "nwse-resize" : "nesw-resize", label: "Resize Zoom Region",
     title: "Drag to choose the part shown (⌘: any proportions)",
-    set: (point, free) => {
+    set: (point, unsnapped, event) => {
+      const free = event ? Boolean(event.metaKey || event.ctrlKey) : unsnapped;
       const fixed = corners[across[name]];
       let w = Math.max(Math.abs(point[0] - fixed[0]), 2), h = Math.max(Math.abs(point[1] - fixed[1]), 2);
       if (!free) { const ratio = bh / Math.max(bw, 1e-9); if (w * ratio > h) h = w * ratio; else w = h / ratio; }

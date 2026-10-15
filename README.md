@@ -663,7 +663,8 @@ length, to the left of its travel (`0.3`) or the right (`-0.3`); `lean=` moves t
 middle along the line, toward its target (`0.25`) or its source (`-0.25`). In the
 studio, drag the handle on a curved or straight line's middle anywhere: the curve
 passes through it, and it snaps half way between the ends, to straight, to where
-the line bows of itself, and level with either end (hold ⌘ to place it freely;
+the line bows of itself, and level with either end (hold ⌘ to place it freely -- or, with
+snapping turned off by the magnet in the zoom bar, to snap it;
 double-click it to let the line bow of itself again). Where a curve bows out of its
 container, the container makes room for it, as it does for any line.
 
@@ -847,8 +848,11 @@ to={"part": "decoder"})`.
 In the studio, Draw in the figure's toolbar offers every kind: drag on the figure to draw
 one (a click makes it its usual size -- or, for a ring, a highlight, a box or a brace, a click
 on a part draws it round that part, a filled one behind it so that it hides nothing), and it
-is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide. A
-shape drawn on a part is put on it, and moves with it; its panel's **Moves With** chooses
+is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide,
+catching at the parts' edges and middles as it goes -- unless the magnet in the zoom bar (or
+%) has turned snapping off, when nothing catches, a line's end is glued only with ⌘ held,
+and a part's handles snap only with ⌘ too. A shape drawn on a part is put on it, and moves
+with it; its panel's **Moves With** chooses
 another part, or none, and **Drawn** puts it in front of the parts or behind them.
 
 ### A shape's words, and a picture's crop
