@@ -177,6 +177,28 @@ const ICONS = {
   "head-stimulation": "M1.5 8H8m0-3.5L14 8l-6 3.5z",
   "head-necessary": "M1.5 8H8m-2-3.5v7m2-7L14 8l-6 3.5z",
   "head-modulation": "M1.5 8H7m0 0l3.25-3 3.25 3-3.25 3z",
+  // A shape's own ends (flexo.freeform): none, an open circle, a bar.
+  "head-none": "M1.5 8H14",
+  "head-circle": "M1.5 8H9.5m0 0a2.25 2.25 0 104.5 0 2.25 2.25 0 10-4.5 0",
+  "head-bar": "M1.5 8h11.5M13 4.5v7",
+  // Shapes drawn where they are put: a box and a circle, overlapping.
+  shape: "M2.5 6.5h6.5v7H2.5zM10.75 9.25a3.25 3.25 0 100-6.5 3.25 3.25 0 000 6.5z",
+  // Arranging what is chosen: to the front and to the back, a side aligned, spaced evenly.
+  front: "M5.5 5.5h8v8h-8zM2.5 10.5v-8h8",
+  back: "M2.5 2.5h8v8h-8zM5.5 13.5h8v-8",
+  "align-left": "M2.5 2v12M4.5 4.5h8v3h-8zM4.5 9.5h5v3h-5z",
+  "align-centre": "M8 2v12M3.5 4.5h9v3h-9zM5.5 9.5h5v3h-5z",
+  "align-right": "M13.5 2v12M3.5 4.5h8v3h-8zM6.5 9.5h5v3h-5z",
+  "align-top": "M2 2.5h12M4.5 4.5v8h3v-8zM9.5 4.5v5h3v-5z",
+  "align-middle": "M2 8h12M4.5 3.5v9h3v-9zM9.5 5.5v5h3v-5z",
+  "align-bottom": "M2 13.5h12M4.5 3.5v8h3v-8zM9.5 6.5v5h3v-5z",
+  "distribute-across": "M2.5 2v12M13.5 2v12M6 5h4v6H6z",
+  "distribute-down": "M2 2.5h12M2 13.5h12M5 6h6v4H5z",
+  "flip-across": "M8 2v12M6 4L2.5 12H6zM10 4l3.5 8H10z",
+  "flip-down": "M2 8h12M4 6l8-3.5V6zM4 10l8 3.5V10z",
+  lock: "M4.5 7.5h7v6h-7zM6 7.5V5.5a2 2 0 014 0v2",
+  unlock: "M4.5 7.5h7v6h-7zM6 7.5V5.5a2 2 0 013.9-.6",
+  rotate: "M12.5 8a4.5 4.5 0 11-1.3-3.2M12.5 2.5v2.5H10",
 };
 // Parts of an icon filled rather than drawn: Appearance's circle, half dark as on a Mac.
 const FILLS = {
