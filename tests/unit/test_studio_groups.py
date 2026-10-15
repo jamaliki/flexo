@@ -1,0 +1,384 @@
+"""Groups entered as Inkscape's are, and taken apart at every level (``studio/static/studio/
+groups.js``): a group's shapes written back into it, the page's host seen from inside one, going
+in, out and back after an undo, Return, Esc and ⌘A, Ungroup All -- run in Node, the shapes'
+editor stood in for."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from flexo import freeform
+
+SCRIPT = Path(freeform.__file__).parent / "studio" / "static" / "studio" / "groups.js"
+
+pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+
+
+def run(body: str, page: list | None = None) -> object:
+    script = (
+        f"const G = await import({json.dumps(SCRIPT.as_uri())});\n"
+        f"const PAGE = {json.dumps(page or [])};\n"
+        f"console.log(JSON.stringify(await (async () => {{ {body} }})()));\n"
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", script], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def box(x: float, y: float, **more: object) -> dict:
+    return {"kind": "rectangle", "at": [x, y], "size": [10, 10], **more}
+
+
+def group(*shapes: dict, **more: object) -> dict:
+    return {"kind": "group", "shapes": list(shapes), **more}
+
+
+WRITTEN = [box(0, 0), group(box(10, 0), group(box(20, 0, id="deep"), box(30, 0)), build=True)]
+
+
+def test_a_group_s_shapes_are_written_back_into_it_and_nothing_else_is_changed() -> None:
+    made = run(
+        """
+      const kept = JSON.stringify(PAGE);
+      const moved = G.within(PAGE, [1, 1], (shapes) => {
+        shapes[0] = { ...shapes[0], at: [25, 5] };
+      });
+      // Put in from the page: what only the page says of a shape (a build, a part it is on)
+      // taken off, but locked; answered anew, as a list.
+      const strip = G.strippedKeys(["behind", "build", "hidden", "locked"]);
+      const put = { kind: "ellipse", at: [0, 0], size: [5, 5], build: true, on: "a", locked: true };
+      const pasted = G.within(PAGE, [1], (shapes) => [...shapes, put], { strip });
+      return {
+        moved, pasted: pasted[1].shapes[2], strip,
+        untouched: JSON.stringify(PAGE) === kept,
+        shared: moved[0] === PAGE[0] && moved[1].shapes[0] === PAGE[1].shapes[0],
+        found: G.groupAt(PAGE, [1, 1]).shapes.length, gone: G.groupAt(PAGE, [1, 0]),
+        reached: G.reached(PAGE, [1, 1, 0, 4]),
+        top: G.within(PAGE, [], (shapes) => shapes.slice(1)).length,
+      };
+    """,
+        WRITTEN,
+    )
+    inner = made["moved"][1]["shapes"][1]["shapes"]
+    assert inner == [{**box(25, 5), "id": "deep"}, box(30, 0)]
+    assert made["moved"][1]["build"] is True
+    # (The page as it was, untouched; what was not on the way to the change, the same objects.)
+    assert made["untouched"] and made["shared"]
+    assert made["pasted"] == {"kind": "ellipse", "at": [0, 0], "size": [5, 5], "locked": True}
+    assert made["found"] == 2 and made["gone"] is None
+    assert made["reached"] == 2 and made["top"] == 1
+    assert set(made["strip"]) == {"behind", "build", "hidden", "on", "around", "margin", "side"}
+
+
+def test_a_group_left_with_no_shapes_goes_and_so_does_one_left_empty_by_it() -> None:
+    page = [box(0, 0), group(group(box(10, 0))), group(box(5, 5), group(box(1, 1)))]
+    made = run(
+        """
+      return { both: G.within(PAGE, [1, 0], () => []), inner: G.within(PAGE, [2, 1], () => []) };
+    """,
+        page,
+    )
+    # (A group is one shape at least: emptied, it goes -- and the group it alone was in.)
+    assert made["both"] == [box(0, 0), group(box(5, 5), group(box(1, 1)))]
+    assert made["inner"][2] == group(box(5, 5))
+
+
+def test_ungroup_all_takes_every_level_apart_as_it_was_drawn() -> None:
+    made = run("""
+      const shape = (kind, more = {}) => ({ kind, at: [0, 0], size: [1, 1], ...more });
+      const drawing = { kind: "group", opacity: 0.5, shapes: [
+        shape("rectangle"),
+        { kind: "group", shapes: [shape("ellipse", { opacity: 0.5 }),
+          { kind: "group", opacity: 0.4, shapes: [shape("star")] }] },
+      ] };
+      const plain = { kind: "group", shapes: [{ kind: "text", at: [0, 0], text: "A" }] };
+      const empty = { kind: "group", shapes: [] };
+      return {
+        leaves: G.leaves(drawing), plain: G.leaves(plain),
+        nested: [G.nested(drawing), G.nested(plain), G.nested(null)],
+        enterable: [G.enterable(plain), G.enterable({ ...plain, locked: true }),
+          G.enterable(empty), G.enterable(plain.shapes[0])],
+      };
+    """)
+    # In order, each with the opacity the groups round it gave it.
+    assert [leaf["kind"] for leaf in made["leaves"]] == ["rectangle", "ellipse", "star"]
+    assert [leaf.get("opacity") for leaf in made["leaves"]] == [0.5, 0.25, 0.2]
+    assert made["plain"] == [{"kind": "text", "at": [0, 0], "text": "A"}]
+    assert made["nested"] == [True, False, False]
+    assert made["enterable"] == [True, False, False, False]
+
+
+# The page's host as a deck's slide gives it (editor.js): its list, its edits (kept), its ids,
+# its marks, its own commands and settings for its shapes.
+HOST = """
+const page = { shapes: PAGE };
+const marks = [], edits = [];
+const host = {
+  ownKeys: ["behind", "build", "hidden", "locked"], noun: "slide", crumb: () => "Slide 1",
+  page: () => 0, list: () => page.shapes, source: () => "slide:0",
+  edit: (mutate, options) => {
+    page.shapes = mutate(structuredClone(page.shapes));
+    edits.push(options.label);
+    return true;
+  },
+  idOf: (index, at = 0) => `slide${at + 1}.shapes.${index}`,
+  mark: (said) => marks.push(said),
+  commands: () => ["Build In on Click"], panel: () => ["Builds"], grouped: () => ({}),
+  ungrouped: (group) => (group.build ? { build: true } : {}),
+  attachNew: (spec) => spec, drawnAt: () => null,
+};
+"""
+
+
+def test_from_inside_a_group_the_page_is_the_group_s_shapes() -> None:
+    page = [box(0, 0, id="a"), group(box(10, 0), group(box(20, 0), box(30, 0)), build=True)]
+    made = run(
+        HOST
+        + """
+      let where = [];
+      const seen = G.scoped(host, () => where);
+      const outside = { list: seen.list().length, commands: seen.commands(),
+        id: seen.idOf(1), source: seen.source() };
+      where = [1, 1];
+      const own = ["commands", "panel", "grouped", "ungrouped", "attachNew", "drawnAt"];
+      const inside = {
+        list: seen.list(), ids: [seen.idOf(0), seen.idOf(1, 2)], source: seen.source(),
+        own: own.map((key) => seen[key] === undefined), crumb: seen.crumb(), noun: seen.noun,
+      };
+      const lock = (shapes) => { shapes[1].locked = true; shapes[1].build = true; return shapes; };
+      seen.edit(lock, { label: "Lock Shape" });
+      seen.mark({ slide: 0, before: [1], after: [1] });
+      // The group gone meanwhile (an undo, another's change): nothing written.
+      where = [0, 1];
+      const refused = seen.edit(() => [], { label: "Delete" });
+      return { outside, inside, page: page.shapes, marks, edits, refused };
+    """,
+        page,
+    )
+    assert made["outside"] == {
+        "list": 2,
+        "commands": ["Build In on Click"],
+        "id": "slide1.shapes.1",
+        "source": "slide:0",
+    }
+    inside = made["inside"]
+    assert inside["list"] == [box(20, 0), box(30, 0)]
+    assert inside["ids"] == ["slide1.shapes.1.1.0", "slide3.shapes.1.1.1"]
+    assert inside["source"] == "slide:0 \u203a 1.1"
+    assert all(inside["own"]) and inside["crumb"] == "Slide 1" and inside["noun"] == "slide"
+    # Written into the group, as one edit of the page's: locked kept, a build not (the group's).
+    assert made["page"][1]["shapes"][1]["shapes"][1] == {**box(30, 0), "locked": True}
+    assert made["page"][1]["build"] is True and made["edits"] == ["Lock Shape"]
+    assert made["marks"] == [{"slide": 0, "before": [1], "after": [1], "inside": [1, 1]}]
+    assert made["refused"] is False
+
+
+# The shapes' editor, stood in for: shapes are hit where their box is, what it chose kept.
+EDITOR = (
+    HOST
+    + """
+const node = () => ({
+  children: [], setAttribute() {}, append(...more) { this.children.push(...more); },
+  replaceChildren() { this.children = []; }, get firstChild() { return this.children[0] || null; },
+});
+const tools = G.groupTools(host);
+const seen = tools.host;
+let chosen = [];
+const hits = (spec, [x, y]) => (spec.kind === "group" ? spec.shapes.some((one) => hits(one, [x, y]))
+  : x >= spec.at[0] && x <= spec.at[0] + spec.size[0]
+    && y >= spec.at[1] && y <= spec.at[1] + spec.size[1]);
+const hit = (event) => {
+  const list = seen.list(), point = [event.clientX, event.clientY];
+  for (let n = list.length - 1; n >= 0; n -= 1) if (hits(list[n], point)) return n;
+  return null;
+};
+tools.bind({
+  S: node, h: node, icon: node, ui: { button: (label) => label }, layer: { insertBefore() {} },
+  before: null, pageNode: () => null, toScreen: (point) => point, unit: () => 1,
+  list: () => seen.list(), chosen: () => chosen.filter((n) => n < seen.list().length),
+  choose: (picks) => { chosen = [...picks]; }, hit, union: () => [0, 0, 1, 1], busy: () => false,
+  settle() {}, place() {}, renderInspector() {}, reportFocus() {},
+  edit: (mutate, label, options = {}) => {
+    chosen = options.after || chosen;
+    seen.edit((list) => mutate(list) || list, { label });
+  },
+  ungrouped: (...args) => seen.ungrouped?.(...args), crumb: () => "Slide 1",
+  label: (spec) => (spec?.kind === "group" ? "Group" : "Shape"),
+});
+const unmodified = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
+const key = (key, more = {}) => tools.key({ key, ...unmodified, ...more });
+const at = (x, y) => ({ clientX: x, clientY: y });
+"""
+)
+
+# A page: a box, then a drawing (a group: its frame, and a group of two boxes and a group).
+DRAWING = [
+    box(200, 200, id="alone"),
+    group(
+        box(0, 0, size=[100, 100]),
+        group(box(10, 10, id="b1"), box(40, 10), group(box(10, 60), box(40, 60, id="b4"))),
+    ),
+]
+
+
+def drawn(body: str) -> object:
+    return run(EDITOR + body, DRAWING)
+
+
+def test_a_group_is_entered_a_level_at_a_time_and_left_again() -> None:
+    made = drawn("""
+      const steps = {};
+      // Double-clicked: in it, what is under the pointer in it chosen (its group of boxes).
+      steps.entered = [tools.enter(1, { at: at(15, 15) }), tools.path(), chosen];
+      steps.deeper = [tools.enter(1, { at: at(45, 15) }), tools.path(), chosen];
+      steps.box = [tools.enter(2), tools.path(), chosen];
+      // Out a level, the group left chosen; Esc with nothing chosen does it too.
+      steps.out = [tools.out(), tools.path(), chosen];
+      chosen = [];
+      steps.esc = [key("Escape"), tools.path(), chosen];
+      // Return goes into the group chosen; ⌘A there chooses all its shapes.
+      chosen = [1];
+      steps.ret = [key("Enter"), tools.path(), chosen];
+      steps.all = [key("a", { metaKey: true }), chosen];
+      // Not a box, nor a locked group.
+      steps.notBox = tools.enter(0);
+      steps.leave = [tools.leave(), tools.path(), chosen, tools.depth()];
+      steps.esc0 = key("Escape");
+      return steps;
+    """)
+    assert made["entered"] == [True, [1], [1]]
+    assert made["deeper"] == [True, [1, 1], [1]]
+    assert made["box"] == [True, [1, 1, 2], []]
+    assert made["out"] == [True, [1, 1], [2]]
+    assert made["esc"] == [True, [1], [1]]
+    assert made["ret"] == [True, [1, 1], []]
+    assert made["all"] == [True, [0, 1, 2]]
+    assert made["notBox"] is False
+    assert made["leave"] == [True, [], [], 0]
+    assert made["esc0"] is False
+
+
+def test_a_drawing_made_editable_is_entered_as_deep_as_the_point_as_option_click_is() -> None:
+    made = drawn("""
+      const deep = [tools.enter(1, { at: at(45, 65), deep: true }), tools.path(), chosen];
+      tools.leave();
+      // ⌥-click from the page: the box under the pointer, the groups round it entered.
+      const option = [tools.deepPick(at(15, 15)), tools.path(), chosen];
+      tools.leave();
+      const none = tools.deepPick(at(500, 500));
+      return { deep, option, none };
+    """)
+    assert made["deep"] == [True, [1, 1, 2], [1]]
+    assert made["option"] == [True, [1, 1], [0]]
+    assert made["none"] is False
+
+
+def test_pressed_outside_the_group_one_is_taken_to_what_was_pressed() -> None:
+    made = drawn("""
+      tools.enter(1, { at: at(45, 65), deep: true });
+      // A box beside the group one is in, in the group round it: out to there, nothing chosen
+      // yet (the press chooses it).
+      const beside = [tools.outward(at(15, 15)), tools.path(), chosen];
+      // The drawing's frame, a level up: out to the drawing.
+      const frame = [tools.outward(at(80, 90)), tools.path()];
+      // A shape on the page: out of every group.
+      const onPage = [tools.outward(at(205, 205)), tools.path()];
+      tools.enter(1);
+      const empty = [tools.outward(at(500, 500)), tools.path(), chosen];
+      return { beside, frame, onPage, empty };
+    """)
+    assert made["beside"] == [0, [1, 1], []]
+    assert made["frame"] == [0, [1]]
+    assert made["onPage"] == [0, []]
+    assert made["empty"] == [None, [], []]
+
+
+def test_undone_inside_a_group_one_is_inside_again_once_it_is_there() -> None:
+    made = drawn("""
+      const now = [tools.restore({ slide: 0, inside: [1, 1] }, [0]), tools.path()];
+      const top = [tools.restore({ slide: 0 }, [0]), tools.path()];
+      // Not there yet (a figure drawn again only later): waited for, entered once it is.
+      const later = [tools.restore({ slide: 0, inside: [2] }, [0]), tools.path()];
+      const one = { kind: "rectangle", at: [0, 0], size: [1, 1] };
+      host.list().push({ kind: "group", shapes: [one] });
+      const there = [tools.check(), tools.path(), chosen];
+      // Gone (another's change): out to the level still there.
+      tools.leave();
+      tools.enter(1);
+      tools.enter(1);
+      host.list()[1].shapes.splice(1, 1);
+      const gone = [tools.check(), tools.path()];
+      return { now, top, later, there, gone };
+    """)
+    assert made["now"] == [True, [1, 1]]
+    assert made["top"] == [True, []]
+    assert made["later"] == [False, []]
+    assert made["there"] == [True, [2], [0]]
+    assert made["gone"] == [True, [1]]
+
+
+NESTED = [
+    box(0, 0),
+    group(box(1, 1), group(box(2, 2), group(box(3, 3))), build=True),
+    group(box(5, 5)),
+]
+
+
+def test_ungroup_all_and_the_commands_offered_for_groups() -> None:
+    made = run(
+        EDITOR
+        + """
+      const named = (list) => list.map((command) => command.label);
+      const command = (label) => tools.commands().find((one) => one.label === label);
+      chosen = [1];
+      const offered = named(tools.commands());
+      tools.ungroupAll();
+      const after = { list: host.list(), chosen, edits };
+      chosen = [0];
+      const box = named(tools.commands());
+      tools.enter(4);
+      const inside = named(tools.commands());
+      return { offered, after, box, inside, menu: named(tools.menuItems(command)) };
+    """,
+        NESTED,
+    )
+    assert made["offered"] == ["Enter Group", "Ungroup All"]
+    # Every level apart, one step, what the page says of the group (its build) each shape's.
+    taken = [{**box(n, n), "build": True} for n in (1, 2, 3)]
+    assert made["after"]["list"] == [box(0, 0), *taken, group(box(5, 5))]
+    assert made["after"]["chosen"] == [1, 2, 3] and made["after"]["edits"] == ["Ungroup All"]
+    assert made["box"] == []
+    assert made["inside"] == ["Leave Group"] and made["menu"] == ["Leave Group"]
+
+
+def test_inside_a_group_every_name_on_the_page_is_known() -> None:
+    made = drawn("""
+      const outside = tools.names();
+      tools.enter(1, { at: at(15, 15) });
+      const first = tools.names();
+      return { outside, inside: first, same: tools.names() === first };
+    """)
+    assert made["outside"] == [] and made["inside"] == ["alone", "b1", "b4"] and made["same"]
+
+
+def test_a_group_s_shape_may_be_locked_where_the_page_lets_its_shapes_be() -> None:
+    # (Locked while the group is entered in the studio, it stays where it is.)
+    locked = group(box(0, 0, locked=True), group(box(5, 5, locked=False)))
+    made = freeform.checked(locked, extra=("behind", "build", "hidden", "locked"))
+    assert made["shapes"][0]["locked"] is True
+    assert made["shapes"][1]["shapes"][0]["locked"] is False
+    # The page's other keys are the group's alone; a page that locks nothing, none.
+    with pytest.raises(freeform.ShapeError, match="Unknown key build") as error:
+        freeform.checked(group(box(0, 0, build=True)), extra=("build", "locked"))
+    assert error.value.key == "shapes[0].build"
+    with pytest.raises(freeform.ShapeError, match="Unknown key locked"):
+        freeform.checked(group(box(0, 0, locked=True)))
+    with pytest.raises(freeform.ShapeError, match="true or false"):
+        freeform.checked(group(box(0, 0, locked="yes")), extra=("locked",))
