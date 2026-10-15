@@ -41,9 +41,10 @@ A box turns (``rotate``, degrees clockwise about its middle) and mirrors (``flip
 shape is painted by the theme unless it says otherwise: ``fill`` and ``line`` are a theme's
 colour by name (``accent``, ``accent2``, ``accent-fill`` its light tint, ``muted``,
 ``ink``, ``paper``, ``grey``, or any palette role) -- so a change of theme repaints them
--- or ``#rrggbb``, kept as written, or ``none``. ``line_width``, ``dash`` (``solid``,
-``dashed``, ``dotted``), ``cap``, ``join``, the arrowheads at each end (``start``, ``end``:
-``none``, ``triangle``, ``open``, ``stealth``, ``dot``, ``circle``, ``bar``,
+-- or ``#rrggbb``, kept as written, or ``none``; a fill may be a gradient
+(``flexo.gradients``). ``line_width``, ``dash`` (``solid``, ``dashed``, ``dotted``, or its own
+lengths: ``[6, 3]``), ``line_opacity``, ``cap``, ``join``, the arrowheads at each end
+(``start``, ``end``: ``none``, ``triangle``, ``open``, ``stealth``, ``dot``, ``circle``, ``bar``,
 ``diamond``) and their ``head_size``, ``fill_opacity``, ``opacity`` and ``shadow`` say the
 rest. Words (``text``, in the slide's markup) are set in the shape -- a closed shape's
 inside its outline, a line's beside it -- by ``font_size``, ``bold``, ``italic``,
@@ -120,9 +121,11 @@ BOXED = (
     "ring",
 )
 """The closed shapes, each drawn in a box (``at``, ``size``)."""
-KINDS = (*LINES, *TRACED, *BOXED, "text", "path")
+KINDS = (*LINES, *TRACED, *BOXED, "text", "path", "picture")
 """Every kind of shape, but a group of them (``group``, its ``shapes``). (A path is drawn by a
-tool of its own, or written: no editor offers it among the others, ``SECTIONS``.)"""
+tool of its own, or written, and a picture -- a drawing's part no shape draws, kept as it was
+drawn (``flexo.shape_pictures``) -- is made by a drawing's import: no editor offers either
+among the others, ``SECTIONS``.)"""
 
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Lines", ("line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen")),
@@ -201,6 +204,7 @@ LABELS = {
     "ring": "Highlight Ring",
     "text": "Text Box",
     "path": "Path",
+    "picture": "Picture",
     "group": "Group",
 }
 """What a person calls each kind (never a slide's own objects' names: Text Box, Speech Bubble)."""
@@ -256,6 +260,7 @@ STYLES: dict[str, dict[str, object]] = {
     "scale-bar": {**_MEASURE, "line_width": 4.0},
     "text": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
     "path": _CLOSED,
+    "picture": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
 }
 """How each kind is painted when it says nothing: the theme's accent, its outlines a little
 lighter than its lines; measures in ink; words on nothing."""
@@ -310,6 +315,7 @@ SIZES: dict[str, tuple[float, float]] = {
     "brace": (0.0, 160.0),
     "bracket": (0.0, 160.0),
     **{kind: (160.0, 0.0) for kind in TRACED},
+    "picture": (160.0, 100.0),
 }
 """How large a shape is made by a click, without a drag: a box's width and height, a line's
 run across and down."""
@@ -318,6 +324,7 @@ STYLE_KEYS = (
     "fill",
     "fill_opacity",
     "line",
+    "line_opacity",
     "line_width",
     "dash",
     "cap",
@@ -373,6 +380,7 @@ def keys_of(kind: str) -> tuple[str, ...]:
         *PLACE_KEYS[family(kind)],
         *PARAMETERS.get(kind, {}),
         *(("tail",) if kind == "bubble" else ()),
+        *(("source",) if kind == "picture" else ()),
     )
 
 
@@ -384,6 +392,7 @@ def defaults(kind: str) -> dict[str, object]:
         "fill_opacity": 1.0,
         "line": "accent",
         "line_width": 2.0,
+        "line_opacity": 1.0,
         "dash": "solid",
         "cap": "butt",
         "join": "miter",
@@ -654,7 +663,7 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
         "text": ("at",),
         "path": ("d",),
         "group": ("shapes",),
-    }[form]
+    }[form] + (("source",) if kind == "picture" else ())
     for key in needed:
         if key not in made:
             example = {
@@ -665,6 +674,7 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
                 "size": "[160, 100]",
                 "shapes": "a list of shapes",
                 "d": pathdata.EXAMPLE,
+                "source": "assets/drawing-1.svg",
             }[key]
             raise ShapeError(key, f"A {kind} needs {key}, such as {key}: {example}.")
     return made
@@ -675,15 +685,24 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         if isinstance(value, bool) or not isinstance(value, str | int) or not str(value).strip():
             raise ShapeError(key, f"id must be a name, such as box1, not {value!r}.")
         return str(value)
+    if key == "fill" and isinstance(value, Mapping):
+        from flexo import gradients
+
+        try:
+            return gradients.checked(value, colour_of, key)
+        except ValueError as error:
+            raise ShapeError(key, str(error)) from None
     if key in ("fill", "line", "colour"):
         return None if key == "colour" and value is None else colour_of(value, key)
-    if key in ("fill_opacity", "opacity"):
+    if key in ("fill_opacity", "opacity", "line_opacity"):
         return _number(value, key, 0.0, 1.0, "0.5")
     if key == "line_width":
         return _number(value, key, 0.0, 200.0, "2 (points)")
     if key == "head_size":
         return _number(value, key, 0.25, 6.0, "1.5 (times the usual)")
     if key == "dash":
+        if not isinstance(value, str) and isinstance(value, Sequence):
+            return _dashes(value)
         return _choice(value, key, DASHES)
     if key == "cap":
         return _choice(value, key, CAPS)
@@ -793,6 +812,13 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         return _choice(value, key, BODIES)
     if key == "d":
         return _path_data(value)
+    if key == "source":
+        if not isinstance(value, str) or not value.strip():
+            raise ShapeError(
+                key,
+                f"source must be a picture's file, such as assets/drawing-1.svg, not {value!r}.",
+            )
+        return value.strip()
     if key == "fill_rule":
         named = {"even-odd": "evenodd", "non-zero": "nonzero"}
         return _choice(
@@ -801,6 +827,28 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
     raise ShapeError(
         key, f"Unknown key {key} for a {kind}."
     )  # pragma: no cover - keys_of lists them all
+
+
+def _dashes(value: Sequence[object]) -> list[float]:
+    """A dash pattern as its lengths, in points: dash, gap, dash, gap..."""
+
+    if (
+        not 2 <= len(value) <= 16
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, int | float)
+            or not math.isfinite(item)
+            or not 0.0 <= item <= 1000.0
+            for item in value
+        )
+        or not any(item > 0 for item in value)
+    ):
+        raise ShapeError(
+            "dash",
+            "dash must be solid, dashed, dotted, or its lengths in points (a dash, a gap, ...), "
+            f"such as [6, 3], not {list(value)!r}.",
+        )
+    return [float(item) for item in value]
 
 
 def _path_data(value: object) -> str:
@@ -1032,7 +1080,7 @@ def _closed_outline(
     kind = spec["kind"]
     ss = min(w, h)
     cx, cy = x + w / 2.0, y + h / 2.0
-    if kind in ("rectangle", "rounded-rectangle", "highlight"):
+    if kind in ("rectangle", "rounded-rectangle", "highlight", "picture"):
         return _rounded_box(x, y, w, h, float(spec.get("corner") or 0.0))
     if kind in ("ellipse", "ring"):
         return _ellipse(cx, cy, w / 2.0, h / 2.0)
@@ -2065,6 +2113,11 @@ def paint(value: object, palette: object) -> tuple[str | None, str | None]:
 
     if value is None or value == "none":
         return None, None
+    if isinstance(value, Mapping):
+        # A gradient: its colour half way along, where one colour is wanted.
+        from flexo import gradients
+
+        return gradients.middle(value, lambda colour: paint(colour, palette)), None
     text = str(value)
     if text.startswith("#"):
         return text, None
@@ -2077,6 +2130,8 @@ def dash_array(spec: Mapping[str, Any]) -> tuple[float, ...]:
     apart -- what shows, a round or square cap's reach included."""
 
     dash = spec.get("dash") or "solid"
+    if not isinstance(dash, str):
+        return tuple(float(value) for value in dash)
     if dash == "solid":
         return ()
     width = max(float(spec.get("line_width") or 0.0), 0.1)
@@ -2119,6 +2174,11 @@ def draw(
     if spec.get("kind") == "path" and spec.get("fill_rule") == "evenodd":
         # (On the group, so its shadow is filled as it is.)
         group.set("fill-rule", "evenodd")
+    if spec.get("kind") == "picture":
+        from flexo import shape_pictures
+
+        shape_pictures.draw(group, spec, made)
+        return group
     fill, fill_role = paint(spec.get("fill"), palette)
     stroke, stroke_role = paint(spec.get("line"), palette)
     width = float(spec.get("line_width") or 0.0)
@@ -2126,6 +2186,13 @@ def draw(
         stroke = None
     if not made.closed:
         fill = None
+    if fill and isinstance(spec.get("fill"), Mapping):
+        from flexo import gradients
+
+        fill = gradients.element(
+            group, ident, spec["fill"], made.box, lambda colour: paint(colour, palette)
+        )
+        fill_role = None
     if spec.get("shadow") and shadow is not None and (fill or stroke):
         _shadow(group, ident, made, fill is not None, width if stroke else 0.0, palette, shadow)
     attributes: dict[str, object] = {"fill": fill or "none"}
@@ -2142,6 +2209,8 @@ def draw(
         }
         if stroke_role:
             attributes["data__flexo__stroke"] = stroke_role
+        if float(spec.get("line_opacity", 1.0)) < 1.0:
+            attributes["stroke_opacity"] = float(spec["line_opacity"])
         dashes = dash_array(spec)
         if dashes:
             attributes["stroke_dasharray"] = " ".join(number(value) for value in dashes)
@@ -2166,6 +2235,10 @@ def draw(
             }
         if stroke_role:
             paint_of["data__flexo__" + ("fill" if head.filled else "stroke")] = stroke_role
+        if float(spec.get("line_opacity", 1.0)) < 1.0:
+            paint_of["fill_opacity" if head.filled else "stroke_opacity"] = float(
+                spec["line_opacity"]
+            )
         element(
             group, "path", id=f"{ident}.head-{head.end}", d=path_data(head.segments), **paint_of
         )

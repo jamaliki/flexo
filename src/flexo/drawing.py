@@ -49,6 +49,17 @@ class Segment:
 
 
 @dataclass(frozen=True, slots=True)
+class Gradient:
+    """A fill whose colour runs across a shape: ``linear``, along its own x from 0 to 1, or
+    ``radial``, out from its own origin to 1, carried onto the page by ``matrix``."""
+
+    kind: Literal["linear", "radial"]
+    stops: tuple[tuple[float, str, float], ...]
+    """Each colour where it is, from 0 to 1, with its opacity."""
+    matrix: tuple[float, float, float, float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
 class Paint:
     fill: str | None = None
     fill_opacity: float = 1.0
@@ -66,6 +77,9 @@ class Paint:
     fill_rule: str = "nonzero"
     """Which of a path's insides its fill fills: ``nonzero`` or ``evenodd`` (holes, by its
     pieces' nesting alone)."""
+    gradient: Gradient | None = None
+    """A fill whose colour runs across the shape (``fill`` is then its colour half way, for
+    a writer that draws one colour)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,6 +499,7 @@ def _transformed(item, matrix: Matrix):
             item.paint,
             stroke_width=item.paint.stroke_width * scale,
             dash=tuple(value * scale for value in item.paint.dash),
+            gradient=_carried(item.paint.gradient, matrix),
         )
         segments = tuple(
             Segment(s.kind, tuple(_map(matrix, p) for p in s.points)) for s in item.segments
@@ -581,6 +596,7 @@ def _turned(item, matrix: Matrix):
             item.paint,
             stroke_width=item.paint.stroke_width * scale,
             dash=tuple(value * scale for value in item.paint.dash),
+            gradient=_carried(item.paint.gradient, matrix),
         )
         return replace(
             item, kind="path", paint=paint, x=min(xs), y=min(ys), width=max(xs) - min(xs),
@@ -706,6 +722,8 @@ def _read_element(
             if _paint(context, alpha).stroke is None:
                 return
         shape = _shape(child, tag, context, alpha, environment.markers)
+        if shape is not None and context.get("fill", "").startswith("url("):
+            shape = _gradient_filled(shape, context["fill"], environment)
         if shape is not None:
             region = _region_of(context.get("-flexo-clip"))
             group.items.extend(_clipped(_transformed(shape, placed), region))
@@ -734,6 +752,101 @@ def _read_element(
 _UNDRAWN = frozenset(
     {"mask", "pattern", "linearGradient", "radialGradient", "filter", "foreignObject"}
 )
+
+
+def _carried(gradient: Gradient | None, matrix: Matrix) -> Gradient | None:
+    return None if gradient is None else replace(gradient, matrix=_compose(matrix, gradient.matrix))
+
+
+def _gradient_filled(shape: Shape, fill: str, environment: _Environment) -> Shape:
+    """A shape filled with a gradient (``url(#…)``): the gradient read -- the gradients it
+    names (``href``) for what it does not say, its stops, its units and transform -- and
+    its colour half way kept as the fill, for writers that draw one colour."""
+
+    found = re.match(r"url\(\s*['\"]?#([^)'\"]+)", fill)
+    gradient = environment.ids.get(found.group(1)) if found else None
+    if gradient is None or local_name(gradient.tag) not in ("linearGradient", "radialGradient"):
+        return shape
+    chain = [gradient]
+    while len(chain) < 16:
+        reference = chain[-1].get("href") or chain[-1].get("{http://www.w3.org/1999/xlink}href")
+        target = environment.ids.get((reference or "").lstrip("#")) if reference else None
+        if target is None or target in chain:
+            break
+        chain.append(target)
+
+    def said(name: str, default: str) -> str:
+        return next((item.get(name) for item in chain if item.get(name) is not None), default)
+
+    stops: list[tuple[float, str, float]] = []
+    for item in chain:
+        own = [child for child in item if local_name(child.tag) == "stop"]
+        if not own:
+            continue
+        last = 0.0
+        for stop in own:
+            style = {**stop.attrib, **_css(stop.get("style", ""))}
+            offset = style.get("offset", "0").strip()
+            try:
+                value = float(offset[:-1]) / 100.0 if offset.endswith("%") else float(offset)
+            except ValueError:
+                value = 0.0
+            last = max(last, min(1.0, max(0.0, value)))
+            colour = style.get("stop-color", "#000000")
+            stops.append((last, colour, _fraction(style.get("stop-opacity"))))
+        break
+    if len(stops) < 2:
+        return shape if not stops else replace(shape, paint=replace(shape.paint, fill=stops[0][1]))
+    units = said("gradientUnits", "objectBoundingBox")
+    box = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    if units == "objectBoundingBox":
+        points = [p for segment in shape.segments for p in segment.points]
+        if not points:
+            return shape
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        box = (max(xs) - min(xs), 0.0, 0.0, max(ys) - min(ys), min(xs), min(ys))
+
+    def length(name: str, default: str) -> float:
+        value = said(name, default).strip()
+        if value.endswith("%"):
+            return float(value[:-1]) / 100.0 if units == "objectBoundingBox" else _length(value)
+        return _number(value, 0.0)
+
+    frame = _compose(box, _parse_transform(said("gradientTransform", "")))
+    if local_name(gradient.tag) == "radialGradient":
+        cx, cy, r = length("cx", "50%"), length("cy", "50%"), length("r", "50%")
+        own = (r, 0.0, 0.0, r, cx, cy)
+        kind = "radial"
+    else:
+        x1, y1 = length("x1", "0%"), length("y1", "0%")
+        x2, y2 = length("x2", "100%"), length("y2", "0%")
+        own = (x2 - x1, y2 - y1, -(y2 - y1), x2 - x1, x1, y1)
+        kind = "linear"
+    made = Gradient(kind, tuple(stops), _compose(frame, own))  # type: ignore[arg-type]
+    half = _halfway(made.stops)
+    return replace(shape, paint=replace(shape.paint, fill=half, gradient=made))
+
+
+def _halfway(stops: tuple[tuple[float, str, float], ...]) -> str:
+    for (a, first, _), (b, second, _) in pairwise(stops):
+        if a <= 0.5 <= b:
+            share = 0.0 if b - a < 1e-12 else (0.5 - a) / (b - a)
+            one, other = _rgb_of(first), _rgb_of(second)
+            return "#" + "".join(
+                f"{max(0, min(255, round(x + (y - x) * share))):02x}"
+                for x, y in zip(one, other, strict=True)
+            )
+    return stops[-1][1]
+
+
+def _rgb_of(colour: str) -> tuple[int, int, int]:
+    text = colour.strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    try:
+        return (int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
 
 
 def _drawable(element: ET.Element) -> bool:

@@ -9,6 +9,7 @@
 // it (pathdata.js), once, however often it is drawn.
 
 import * as P from "./pathdata.js";
+import * as G from "./gradients.js";
 
 export const LINES = ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "brace", "bracket", "dimension", "scale-bar"];
 export const TRACED = ["polyline", "pen"];
@@ -17,7 +18,7 @@ export const BOXED = [
   "parallelogram", "trapezoid", "arrow-right", "arrow-left", "arrow-up", "arrow-down", "arrow-left-right",
   "chevron", "plus", "cross", "check", "cloud", "bubble", "highlight", "ring",
 ];
-export const KINDS = [...LINES, ...TRACED, ...BOXED, "text", "path"];
+export const KINDS = [...LINES, ...TRACED, ...BOXED, "text", "path", "picture"];
 
 export const SECTIONS = [
   ["Lines", ["line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen"]],
@@ -39,7 +40,7 @@ export const LABELS = {
   "arrow-left-right": "Left-Right Arrow", chevron: "Chevron", plus: "Plus", cross: "Cross",
   check: "Check Mark", cloud: "Cloud", bubble: "Speech Bubble", brace: "Brace", bracket: "Bracket",
   dimension: "Dimension Line", "scale-bar": "Scale Bar", highlight: "Highlight", ring: "Highlight Ring",
-  text: "Text Box", path: "Path", group: "Group",
+  text: "Text Box", path: "Path", picture: "Picture", group: "Group",
 };
 
 export const HEADS = ["none", "triangle", "open", "stealth", "dot", "circle", "bar", "diamond"];
@@ -70,6 +71,7 @@ export const STYLES = {
   "scale-bar": { ...MEASURE, line_width: 4 },
   text: { fill: "none", line: "none", line_width: 1.5, cap: "butt", join: "miter" },
   path: CLOSED,
+  picture: { fill: "none", line: "none", line_width: 1.5, cap: "butt", join: "miter" },
 };
 
 export const PARAMETERS = {
@@ -106,6 +108,7 @@ export const SIZES = {
   ...Object.fromEntries(LINES.map((kind) => [kind, [160, 0]])),
   brace: [0, 160], bracket: [0, 160],
   ...Object.fromEntries(TRACED.map((kind) => [kind, [160, 0]])),
+  picture: [160, 100],
 };
 
 // How a kind is placed: from one point to another, through points, in a box, words, an outline
@@ -123,7 +126,7 @@ export const isClosed = (spec) => BOXED.includes(spec?.kind) || spec?.kind === "
 export const pathOpen = (spec) => P.parsedOf(spec).opens.some(Boolean);
 
 export function defaults(kind) {
-  const style = { fill: "none", fill_opacity: 1, line: "accent", line_width: 2, dash: "solid", cap: "butt", join: "miter",
+  const style = { fill: "none", fill_opacity: 1, line: "accent", line_width: 2, line_opacity: 1, dash: "solid", cap: "butt", join: "miter",
     start: "none", end: "none", head_size: 1, shadow: false, opacity: 1, rotate: 0, flip: null, text: "", font_size: null,
     bold: false, italic: false, colour: null, font: null, padding: 5 };
   const boxed = BOXED.includes(kind) || kind === "text";
@@ -155,6 +158,8 @@ export function roleOf(name) {
 // A colour as written, painted from `roles` (palette role: colour); null for none.
 export function paintOf(value, roles = {}) {
   if (value === null || value === undefined || value === "none") return null;
+  // (A gradient: its colour half way along, where one colour is wanted.)
+  if (G.isGradient(value)) return G.middle(value, (colour) => paintOf(colour, roles));
   const text = String(value);
   if (text.startsWith("#")) return text;
   return roles[roleOf(text)] || roles[text] || "#888888";
@@ -277,7 +282,7 @@ function callout(spec, x, y, w, h) {
 
 function closedOutline(spec, x, y, w, h) {
   const kind = spec.kind, ss = Math.min(w, h), cx = x + w / 2, cy = y + h / 2;
-  if (["rectangle", "rounded-rectangle", "highlight"].includes(kind)) return roundedBox(x, y, w, h, Number(spec.corner || 0));
+  if (["rectangle", "rounded-rectangle", "highlight", "picture"].includes(kind)) return roundedBox(x, y, w, h, Number(spec.corner || 0));
   if (kind === "ellipse" || kind === "ring") return ellipse(cx, cy, w / 2, h / 2);
   if (kind === "triangle") return polygon([[x, y + h], [x + w * Number(spec.apex), y], [x + w, y + h]]);
   if (kind === "right-triangle") return polygon([[x, y], [x + w, y + h], [x, y + h]]);
@@ -848,6 +853,7 @@ export function glued(spec, find) {
 
 export function dashArray(spec) {
   const dash = spec.dash || "solid";
+  if (Array.isArray(dash)) return dash.map(Number);
   if (dash === "solid") return [];
   const width = Math.max(Number(spec.line_width || 0), 0.1);
   let [on, off] = dash === "dashed" ? [4, 3] : [1, 2];
@@ -865,22 +871,40 @@ export function svg(spec, made = null, roles = {}, { id = "" } = {}) {
   const fill = made.closed ? paintOf(spec.fill, roles) : null;
   const width = Number(spec.line_width || 0), stroke = width > 0 ? paintOf(spec.line, roles) : null;
   const [cx, cy] = centreOf(made);
-  const attributes = [`fill="${escape(fill || "none")}"`];
+  // (A gradient is drawn in the shape's own box, turned with it.)
+  const gradient = fill && G.isGradient(spec.fill) ? G.markup(spec.fill, made.box, (colour) => paintOf(colour, roles), id) : null;
+  const attributes = [`fill="${escape(gradient ? gradient.url : fill || "none")}"`];
   if (fill && Number(spec.fill_opacity ?? 1) < 1) attributes.push(`fill-opacity="${Number(spec.fill_opacity)}"`);
+  const faint = Number(spec.line_opacity ?? 1) < 1 ? Number(spec.line_opacity) : null;
   if (stroke) {
     attributes.push(`stroke="${escape(stroke)}"`, `stroke-width="${width}"`, `stroke-linecap="${spec.cap || "butt"}"`, `stroke-linejoin="${spec.join || "miter"}"`);
+    if (faint !== null) attributes.push(`stroke-opacity="${faint}"`);
     const dashes = dashArray(spec);
     if (dashes.length) attributes.push(`stroke-dasharray="${dashes.join(" ")}"`);
   }
-  const parts = [];
-  if (made.segments.length && (fill || stroke)) parts.push(`<path d="${made.data || pathData(made.segments)}" ${attributes.join(" ")}/>`);
+  const parts = gradient ? [`<defs>${gradient.defs}</defs>`] : [];
+  if (spec.kind === "picture") parts.push(pictureMarkup(spec, made));
+  else if (made.segments.length && (fill || stroke)) parts.push(`<path d="${made.data || pathData(made.segments)}" ${attributes.join(" ")}/>`);
   for (const one of stroke ? made.heads : []) {
-    parts.push(`<path d="${pathData(one.segments)}" fill="${one.filled ? escape(stroke) : "none"}"${one.stroked ? ` stroke="${escape(stroke)}" stroke-width="${width}" stroke-linecap="${one.kind === "open" ? "round" : "butt"}" stroke-linejoin="round"` : ""}/>`);
+    const alpha = faint === null ? "" : ` ${one.filled ? "fill" : "stroke"}-opacity="${faint}"`;
+    parts.push(`<path d="${pathData(one.segments)}" fill="${one.filled ? escape(stroke) : "none"}"${one.stroked ? ` stroke="${escape(stroke)}" stroke-width="${width}" stroke-linecap="${one.kind === "open" ? "round" : "butt"}" stroke-linejoin="round"` : ""}${alpha}/>`);
   }
   const turn = made.turn ? ` transform="rotate(${made.turn} ${cx} ${cy})"` : "";
   const fade = Number(spec.opacity ?? 1) < 1 ? ` opacity="${Number(spec.opacity)}"` : "";
   const rule = spec.kind === "path" && spec.fill_rule === "evenodd" ? ' fill-rule="evenodd"' : "";
   return `<g${id ? ` id="${escape(id)}"` : ""}${turn}${fade}${rule}>${parts.join("")}</g>`;
+}
+
+// A picture (a drawing's part kept as drawn) as the page draws it: its file as the page
+// already shows it (its <image>'s address, found by the source it names), else its box.
+export const pictureHref = { find: (source) => (typeof document === "undefined" ? null
+  : document.querySelector(`image[data-flexo-source="${String(source).replace(/["\\]/g, "\\$&")}"]`)?.getAttribute("href") || null) };
+function pictureMarkup(spec, made) {
+  const [x, y, w, h] = made.box, href = spec.source ? pictureHref.find(spec.source) : null;
+  if (!href) return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#999999" stroke-width="0.75" stroke-dasharray="3 2"/>`;
+  const flip = spec.flip, sx = flip === "horizontal" || flip === "both" ? -1 : 1, sy = flip === "vertical" || flip === "both" ? -1 : 1;
+  const mirror = flip ? ` transform="translate(${x + w / 2} ${y + h / 2}) scale(${sx} ${sy}) translate(${-(x + w / 2)} ${-(y + h / 2)})"` : "";
+  return `<image x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none" href="${escape(href)}"${mirror}/>`;
 }
 
 // -- moving, sizing, turning (as an editor does) ---------------------------------------------

@@ -522,6 +522,11 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
         # (The data a plot names is its figure's too: found from the figure's folder.)
         if isinstance(properties, dict) and node.get("kind") == PLOT_KIND and "data" in properties:
             properties["data"] = beside(base, properties["data"])
+    if "shapes" in document:
+        from flexo.shape_pictures import anchored
+
+        # (A picture among the shapes drawn over it is found as a part's picture is.)
+        document["shapes"] = anchored(document["shapes"], base)
     return parse_figure(document)
 
 
