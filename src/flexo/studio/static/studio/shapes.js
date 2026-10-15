@@ -292,8 +292,9 @@ export function shapeEditor(host) {
   }
 
   // An edit of the page's shapes, one step named `label`; `mutate(list)` changes the list in
-  // place (or returns another). `after`: what is chosen once it is made.
-  function edit(mutate, label, { after = undefined, merge = null, quiet = false } = {}) {
+  // place (or returns another). `after`: what is chosen once it is made. `panel: false`: the
+  // panel not drawn again (a slider being dragged in it: see slider).
+  function edit(mutate, label, { after = undefined, merge = null, quiet = false, panel = true } = {}) {
     if (host.awayFrom("change shapes")) return false;
     const before = chosenNow();
     // (Chosen as the change lands: the panel drawn by it shows what is chosen after it.)
@@ -305,7 +306,7 @@ export function shapeEditor(host) {
     if (!made) { chosen = before; return false; }
     mark(before, Array.isArray(after) ? after : before);
     objectsSeen = null;
-    host.renderInspector();
+    if (panel) host.renderInspector();
     place();
     return true;
   }
@@ -599,7 +600,9 @@ export function shapeEditor(host) {
     const picks = chosenNow();
     if (event.shiftKey || event.metaKey) {
       choose(picks.includes(index) ? picks.filter((one) => one !== index) : [...picks, index]);
-      host.swallowRelease();
+      // (Chosen as it is pressed: the click its release makes, however long the button is
+      // held, chooses nothing else -- not the page clicked, which would choose nothing.)
+      host.swallowRelease(true);
       return true;
     }
     if (!picks.includes(index)) choose([index]);
@@ -798,7 +801,7 @@ export function shapeEditor(host) {
 
   function startMove(event, indices, on) {
     const movable = indices.filter((index) => !shapesOf()[index]?.locked);
-    if (!movable.length) { host.swallowRelease(); return; }
+    if (!movable.length) { host.swallowRelease(true); return; }
     begin(event, { type: "move", indices: movable, on, originals: movable.map((index) => copyOf(shapesOf()[index])), box: unionOf(movable) });
   }
   function stepMove(g, point, event, free) {
@@ -1648,7 +1651,9 @@ export function shapeEditor(host) {
   }
 
   // Settings changed on every shape chosen, one step (a slider dragged, one run).
-  function set(changes, label, merge = null) {
+  // `live`: made as a slider is dragged -- quietly, the panel (and the slider in it, under the
+  // pointer) not drawn again until it is let go (slider).
+  function set(changes, label, merge = null, { live = false } = {}) {
     const picks = chosenNow();
     if (!picks.length) return;
     const apply = (spec) => {
@@ -1663,7 +1668,8 @@ export function shapeEditor(host) {
       }
       return out;
     };
-    edit((list) => { for (const index of picks) list[index] = apply(list[index]); }, label, { merge: merge ? `shape-set-${merge}-${picks.join(",")}` : null });
+    edit((list) => { for (const index of picks) list[index] = apply(list[index]); }, label,
+      { merge: merge ? `shape-set-${merge}-${picks.join(",")}` : null, ...(live ? { quiet: true, panel: false } : {}) });
   }
 
   // -- clipboard --
@@ -1900,7 +1906,7 @@ export function shapeEditor(host) {
       // Or a gradient: its kind, its ends' colours and its way (gradients.js).
       style.push(...gradientFields({ value: shared("fill"), ui, h, set: (fill, label) => set({ fill }, label, "fill"),
         swatches: (value, onChange, key) => ui.swatches({ value, colours: fills, none: false, custom: true, key, onChange }) }));
-      if (shared("fill") !== "none") style.push(ui.field("Fill Opacity", slider(shared("fill_opacity"), 0, 1, 0.05, (value) => set({ fill_opacity: value }, "Change Fill", "fill-opacity"), "shape.fill_opacity", true)));
+      if (shared("fill") !== "none") style.push(ui.field("Fill Opacity", slider(shared("fill_opacity"), 0, 1, 0.01, (value, how) => set({ fill_opacity: value }, "Change Fill", "fill-opacity", how), "shape.fill_opacity", true)));
     }
     style.push(ui.field(linesAll ? "Line" : "Outline", ui.swatches({ value: shared("line") === "none" ? null : shared("line") ?? undefined, colours: strokes, none: true, noneTitle: "No Line", custom: true, key: "shape.line",
       onChange: (value) => set({ line: value ?? "none" }, linesAll ? "Change Line" : "Change Outline", "line") })));
@@ -1923,7 +1929,7 @@ export function shapeEditor(host) {
         onChange: (value) => set({ head_size: value ?? 1 }, "Change Arrowheads") })));
     }
     style.push(ui.field("Shadow", ui.toggle({ value: Boolean(shared("shadow")), key: "shape.shadow", onChange: (on) => set({ shadow: on }, on ? "Add Shadow" : "Remove Shadow") })));
-    style.push(ui.field("Opacity", slider(count === 1 ? specs[0].opacity : shared("opacity"), 0, 1, 0.05, (value) => set({ opacity: value }, "Change Opacity", "opacity"), "shape.opacity", true)));
+    style.push(ui.field("Opacity", slider(count === 1 ? specs[0].opacity : shared("opacity"), 0, 1, 0.01, (value, how) => set({ opacity: value }, "Change Opacity", "opacity", how), "shape.opacity", true)));
     sections.push(h("div.section", {}, h("div.section-title", {}, "Style"), style));
     // The kind's own settings, where every shape chosen is of one kind.
     const own = kinds.size === 1 ? ownFields([...kinds][0], shared, strokes) : [];
@@ -1957,18 +1963,23 @@ export function shapeEditor(host) {
     if (host.panel) sections.push(...host.panel(picks, specs, { set, edit, choose, slider }));
     return sections;
   }
+  // A slider: each step of a drag made as it is dragged, `onChange(value, { live: true })` --
+  // quietly, the panel not drawn again under the pointer (drawn again, the slider would be
+  // another, and the drag would end after its first step) -- and the panel drawn again once it
+  // is let go, or stepped by a key.
   function slider(value, min, max, step, onChange, key, percent = false) {
     const input = h("input.range", { type: "range", min, max, step });
     input.value = String(value ?? max);
     input.dataset.key = key;
     const said = h("span.range-value", {}, percent ? `${Math.round((value ?? max) * 100)}%` : String(value ?? ""));
-    input.addEventListener("input", () => { said.textContent = percent ? `${Math.round(Number(input.value) * 100)}%` : input.value; onChange(Number(input.value)); });
+    input.addEventListener("input", () => { said.textContent = percent ? `${Math.round(Number(input.value) * 100)}%` : input.value; onChange(Number(input.value), { live: true }); });
+    input.addEventListener("change", () => host.renderInspector());
     return h("div.row.range-row", {}, input, said);
   }
   function ownFields(kind, shared, strokes = []) {
     const number = (key, label, options) => ui.field(label, ui.number({ value: shared(key) ?? null, placeholder: "Mixed", key: `shape.${key}`, ...options,
       onChange: (value) => set({ [key]: value }, `Change ${label}`) }));
-    const share = (key, label, min = 0, max = 1) => ui.field(label, slider(shared(key), min, max, 0.01, (value) => set({ [key]: value }, `Change ${label}`, key), `shape.${key}`));
+    const share = (key, label, min = 0, max = 1) => ui.field(label, slider(shared(key), min, max, 0.01, (value, how) => set({ [key]: value }, `Change ${label}`, key, how), `shape.${key}`));
     switch (kind) {
       case "rectangle": case "rounded-rectangle": case "highlight": return [number("corner", "Corner", { min: 0, max: 500, step: 1, unit: "pt" })];
       case "polygon": return [number("sides", "Sides", { min: 3, max: 24, step: 1 })];
