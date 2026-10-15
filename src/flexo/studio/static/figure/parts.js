@@ -6549,9 +6549,10 @@ export function figureParts(host) {
         return ui.field(field.label, control, options);
       }
       case "text": {
-        if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, onInput: type }), options);
+        if (item?.kind !== "structure") return ui.field(field.label, ui.input({ value: typing(key) ?? value ?? "", key, mono: Boolean(field.mono), onInput: type }), options);
         // A structure's selection is sent once typed, and said when it selects nothing.
-        const control = typedField({ value, key, onCommit: set });
+        // (A selection, a map's ID: typed as code, in the monospace.)
+        const control = typedField({ value, key, mono: true, onCommit: set });
         const note = h("div.field-problem.warning", { hidden: true });
         // What is drawn as a cartoon (sticks, a surface): those most reached for a click
         // away, the look's (or the scene's) by default -- what that is, faintly in the field.
@@ -7157,7 +7158,7 @@ export function figureParts(host) {
         return titled(h("div.mol-colour", {}, control, h("span", {}, field.label)));
       }
       default: {
-        const input = typedField({ value, key, onCommit: set });
+        const input = typedField({ value, key, mono: Boolean(field.mono), onCommit: set });
         fills.push((drawn, inherited) => { input.placeholder = said(inherited[field.key]) || field.placeholder || ""; });
         return titled(ui.field(field.label, input, options));
       }
