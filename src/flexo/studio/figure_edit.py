@@ -38,6 +38,9 @@ choose next (the part just added). An action is a mapping with a ``do``:
 - ``join``: ``ids`` of lines into one shape (or out of one) made one line that
   branches (a net), with one caption; ``add``, a shape more on its branching side;
 - ``separate``: the net ``id`` made lines again (with ``end``, that one branch);
+- ``convert``: the shapes drawn over the figure at the places ``shapes`` made its parts --
+  shapes, lines and groups, laid out as drawn (``flexo.studio.figure_convert``); ``placed``
+  and ``boxes``, where the page has them drawn, spare drawing the figure to find them;
 - ``shapes``: the shapes drawn over the figure (``flexo.figure_shapes``) made ``shapes``, a
   list as the file writes them: those unchanged kept as written, comments and all, one
   changed changed key by key -- and, with ``show`` (a ``show`` action's ``ids`` and ``as``),
@@ -102,6 +105,7 @@ STRUCTURAL = frozenset(
         "align",
         "join",
         "separate",
+        "convert",
     }
 )
 """Actions that change what the figure is made of: checked before they are kept."""
@@ -169,7 +173,9 @@ def apply(
             return apply(text, {**action, "splice": False}, suffix=suffix, base=base)
         if problem:
             raise EditError(f"This change would break the figure: {problem}")
-    return {"text": result, "select": list(select)}
+    # (What an edit made, in words, where it says: Convert to Figure Parts's.)
+    said = {"said": document.summary} if document.summary else {}
+    return {"text": result, "select": list(select), **said}
 
 
 def astray(data: Any, ids: list[str] | None = None) -> list[str]:
@@ -526,6 +532,8 @@ class _Document:
         self.data.setdefault("nodes", [])
         self.spliced = False
         self.unchanged = False
+        self.summary = ""
+        """What the edit made, in words, where it says (Convert to Figure Parts)."""
 
     def dump(self) -> str:
         if self.json:
@@ -783,6 +791,14 @@ class _Document:
 
     def _read(self, action: Mapping[str, Any]) -> list[str]:
         return []  # nothing changes: the page asked for the figure's model
+
+    def _convert(self, action: Mapping[str, Any]) -> list[str]:
+        """Shapes drawn over the figure (``shapes``, their places) made its parts: see
+        ``flexo.studio.figure_convert``."""
+
+        from flexo.studio.figure_convert import convert
+
+        return convert(self, action)
 
     def _add(self, action: Mapping[str, Any]) -> list[str]:
         kind = str(action.get("kind", "block"))

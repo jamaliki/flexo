@@ -1667,7 +1667,9 @@ export function shapeEditor(host) {
     items.push({ icon: "front", label: "Arrange", items: ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"].map(named) },
       { icon: "align-left", label: "Align", items: ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map(named) });
     const rest = ["Group", "Ungroup", "Lock", "Unlock", "Flip Horizontally", "Flip Vertically"].map(named).filter(Boolean);
-    items.push(...rest, "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
+    // (And the page's own that it says belong here: Convert to Figure Parts.)
+    const own = commands().filter((command) => command.menu);
+    items.push(...rest, ...(own.length ? ["-", ...own] : []), "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
     // (A menu of the studio's has no submenus: Arrange and Align are their items, in place.)
     return items.flatMap((item) => (item?.items ? item.items.filter(Boolean).map((sub) => ({ ...sub })) : [item])).filter(Boolean)
       .map((item) => (item === "-" ? item : { ...item, danger: item.label?.startsWith("Delete") || undefined }));

@@ -818,6 +818,29 @@ slide's shape's (`flexo.freeform`); a file writes them under `shapes:`. They are
 everything (`behind=True`: under the parts), the page growing to hold them, in the SVG, the
 PDF, the PNG, on a slide and in a PowerPoint.
 
+### A diagram drawn as shapes, made the figure's parts
+
+A diagram drawn in Inkscape and pasted in -- boxes with words, arrows between them, words
+alone, a box round some with a title -- arrives as shapes. *Convert to Figure Parts* (in the
+studio: the shapes' right-click menu, the command palette, Format in the Mac app; on a slide it
+makes a figure on the slide) reads them as the figure they draw (`flexo.recognise`): each box
+with words a shape of the nearest kind (a pill a start/end, a diamond a decision, a
+parallelogram an input/output, a circle with a short name a circle, with one symbol an
+operator), its fill the theme's nearest tone; each arrow ending at two of them a line, its heads,
+dashes and the words beside it kept; a box round some with a title a module; what each holds a
+row, a column or a grid as drawn. What is no part of a diagram -- a highlight, a brace, a free
+curve -- stays a shape, attached to the parts it was drawn at.
+
+```python
+from flexo.recognise import figure_document, recognise
+
+document = figure_document(shapes, id="pipeline")   # a figure file's document
+found = recognise(shapes)                            # its nodes, edges, groups, kept shapes
+```
+
+From the command line, `flexo to-parts figure.yaml -o made.yaml` does it to a figure file's
+shapes (`--shapes 0,arrow1` for some of them), or to a file that is a list of shapes.
+
 ## Shadows
 
 `shadow=True` adds a drop shadow to a group or a node. Shadows are off by

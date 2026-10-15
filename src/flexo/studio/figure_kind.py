@@ -149,6 +149,8 @@ shapes: drawn over the figure where they are put, taking no room -- what you wou
   under the parts; hide, dim and highlight name a shape by its id. E.g.
   shapes: [{kind: ring, around: [encoder]}, {kind: arrow, from: [20, 10], to: {part: decoder,
   side: top}, text: "here"}, {kind: text, on: decoder, at: [0, -16], text: bottleneck}].
+  A diagram pasted as shapes (boxes with words, arrows, a titled box round some) becomes the
+  figure's own parts with the convert_to_figure_parts tool: laid out and themed as drawn.
 A figure of several panels, as a journal prints one: each panel a group with role: panel (no
   frame; lettered a, b, c in the order the root holds them, so write no letter -- a label is
   a title after it), the root laying them out ({id: root, role: canvas, layout: {kind: grid,
@@ -273,6 +275,7 @@ class FigureKind:
             "document": {**document, "text": result["text"]},
             "select": result["select"],
             "model": model(result["text"], suffix=suffix, base=base),
+            **({"said": result["said"]} if result.get("said") else {}),
         }
 
     def check(self, document: dict[str, Any], base: Path) -> list[str]:

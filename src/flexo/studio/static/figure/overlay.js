@@ -9,10 +9,11 @@
 // drawn with a click on a part goes round it. An end let go on a part, or on a piece of one (a
 // protein's feature, a tree's tip), is glued to it.
 
-import { h, ui, menu } from "/static/studio/studio.js";
+import { h, ui, menu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
 import { shapeEditor, shapeLabel, shapeIcon } from "/static/studio/shapes.js";
 import { aroundBox, placedRound as placeRound, sideOf } from "/static/kinds/figure/around.js";
+import { CONVERT, convertible, convertCommand } from "/static/studio/toparts.js";
 
 // The kinds a click on a part draws round it.
 const ROUNDABLE = new Set(["ring", "ellipse", "highlight", "rectangle", "rounded-rectangle", "cloud", "brace", "bracket", "dimension"]);
@@ -267,10 +268,28 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   function showCommands(picks, name) {
     const ways = picks.map((index) => shownAs(list()[index], index));
     return [
+      // Those that draw a diagram made the figure's own parts (figure_convert.py).
+      ...(convertible(picks.map((index) => list()[index])) ? [convertCommand(() => toParts(picks), name)] : []),
       ...(ways.every((way) => way === "hidden") ? [] : [{ icon: "eye", label: "Hide", hint: `${name}: not drawn, its place kept`, run: () => showAs(picks, "hidden") }]),
       ...(ways.every((way) => way === "dimmed") ? [] : [{ icon: "eye", label: "Dim", hint: `${name}: drawn faint`, run: () => showAs(picks, "dimmed") }]),
       ...(ways.every((way) => way === "shown") ? [] : [{ icon: "eye", label: "Show", hint: `${name}: drawn plainly again`, run: () => showAs(picks, "shown") }]),
     ];
+  }
+
+  // -- Convert to Figure Parts --
+  // The shapes chosen made the figure's parts, in one step: sent with where each is drawn and
+  // each part's box, as drawn here (the figure is not drawn again to find them); what was
+  // made chosen, and said.
+  async function toParts(picks) {
+    if (!figure.model) return;
+    await figure.idle?.();
+    const shapes = list(), placed = picks.map((index) => shapes[index]);
+    const drawnHere = !waiting && placed.every(Boolean);
+    editor.clear({ quiet: true });
+    figure.act({ do: "convert", shapes: picks, ...(drawnHere ? { placed: copyOf(placed), boxes: copyOf(boxes()) } : {}) }, {
+      label: CONVERT,
+      then: (result) => { if (result?.said) toast(`${result.said}.`, { icon: "figure", seconds: 4 }); },
+    });
   }
 
   // -- what it moves with: the inspector's own section --

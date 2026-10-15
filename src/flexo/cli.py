@@ -63,6 +63,21 @@ def parser() -> argparse.ArgumentParser:
     )
     retheme.add_argument("--output", "-o", type=Path, required=True)
 
+    parts = subcommands.add_parser(
+        "to-parts",
+        help="Make a diagram drawn as shapes (a figure's, or a file listing them) the figure's "
+        "own parts: shapes, lines and groups, laid out as drawn.",
+    )
+    parts.add_argument(
+        "source", type=Path, help="A figure file with shapes drawn over it, or a list of shapes."
+    )
+    parts.add_argument(
+        "--shapes",
+        help="Which of its shapes, by id or by place (0 is the first), comma-separated: all if "
+        "not given.",
+    )
+    parts.add_argument("--output", "-o", type=Path, help="Write the figure here, not to stdout.")
+
     subcommands.add_parser(
         "studio",
         help="Edit figures, themes (and decks, with flexo-talk) in the browser; "
@@ -112,6 +127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _schema(arguments)
         if arguments.command == "retheme":
             return _retheme(arguments)
+        if arguments.command == "to-parts":
+            return _to_parts(arguments)
         if arguments.command == "themes":
             return _themes()
         if arguments.command == "theme":
@@ -208,6 +225,44 @@ def _retheme(arguments: argparse.Namespace) -> int:
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(themed, encoding="utf-8")
     print(arguments.output)
+    return 0
+
+
+def _to_parts(arguments: argparse.Namespace) -> int:
+    """Convert to Figure Parts: a figure file's shapes (or a list of shapes, a figure of their
+    own) made its parts, written as the studio writes them (``flexo.studio.figure_edit``)."""
+
+    import yaml
+
+    from flexo.recognise import slug
+    from flexo.studio.figure_edit import EditError, apply
+
+    source: Path = arguments.source
+    suffix = ".json" if source.suffix.lower() == ".json" else ".yaml"
+    text = source.read_text(encoding="utf-8")
+    data = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
+    if isinstance(data, list):
+        # Shapes alone: a figure of their own, named for the file.
+        data = {"figure": {"id": slug(source.stem)}, "nodes": [], "shapes": data}
+        suffix = ".yaml"
+        text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    if not isinstance(data, dict) or not isinstance(data.get("shapes"), list):
+        raise ValueError(f"{source} has no shapes: a figure file's shapes, or a list of shapes")
+    drawn = data["shapes"]
+    ids = {str(item.get("id")): at for at, item in enumerate(drawn) if isinstance(item, dict)}
+    named = [item.strip() for item in (arguments.shapes or "").split(",") if item.strip()]
+    places = [ids[item] if item in ids else int(item) for item in named] or list(range(len(drawn)))
+    try:
+        result = apply(text, {"do": "convert", "shapes": places}, suffix=suffix, base=source.parent)
+    except EditError as error:
+        raise ValueError(str(error)) from None
+    if arguments.output is None:
+        print(result["text"], end="")
+    else:
+        arguments.output.write_text(result["text"], encoding="utf-8")
+        print(arguments.output)
+    if result.get("said"):
+        print(f"{result['said']}.", file=sys.stderr)
     return 0
 
 
