@@ -135,7 +135,8 @@ shapes: drawn over the figure where they are put, taking no room -- what you wou
   (bend, lean), elbow, arc, polyline and pen (points), rectangle, rounded-rectangle, ellipse,
   triangle, diamond, polygon, star, block arrows (arrow-right...), chevron, plus, cross, check,
   cloud, bubble (tail), brace and bracket (depth, tip), dimension, scale-bar, highlight, ring,
-  text (at, width), group (shapes). Lines take from and to, boxes at and size (rotate, flip).
+  text (at, width), path (d: SVG path data, fill_rule: nonzero|evenodd; any outline, holes
+  too; no at or size), group (shapes). Lines take from and to, boxes at and size (rotate, flip).
   Places are the figure's points, y down, from its top left as laid out -- so attach them to
   its parts, which the layout moves: an end glued to a part, to: {part: encoder, side:
   top|right|bottom|left|centre} (any node, group or frame by id, or a piece of one its drawing

@@ -172,6 +172,30 @@ def test_attached_shapes_follow_their_parts_as_the_figure_is_laid_out_again() ->
         assert placed[2].spec["size"] == pytest.approx(list(box[2:]))
 
 
+def test_a_path_is_drawn_on_a_part_round_parts_and_glued_to() -> None:
+    wedge = "M 0 0 L 40 20 L 0 40 Z"
+    shapes = [
+        {"kind": "path", "id": "wedge", "on": "encoder", "d": wedge, "fill": "accent"},
+        {"kind": "path", "around": ["decoder"], "d": "M 0 0 C 10 -10 20 10 30 0 L 30 30 L 0 30 Z"},
+        {"kind": "arrow", "from": [0, 200], "to": {"shape": "wedge", "side": "right"}},
+    ]
+    compilation = drawn(figure(shapes=shapes))
+    svg = compilation.document.text
+    x, y, _, _ = node_box(compilation, "encoder")
+    # On its part: its outline from the part's top left.
+    placed = compilation.shapes.placed
+    assert placed[0].spec["d"] == freeform.moved({"kind": "path", "d": wedge}, x, y)["d"]
+    assert numbers(element(svg, "wedge").get("data-flexo-box")) == pytest.approx([x, y, 40, 20 * 2])
+    # Round its parts: its outline stretched over their box, a margin out.
+    box = around_box([node_box(compilation, "decoder")], margin_of({"kind": "path"}), "path")
+    assert numbers(element(svg, "shapes.1").get("data-flexo-box")) == pytest.approx(
+        list(box), abs=0.01
+    )
+    # Glued to the wedge's right: its point, on its outline.
+    ends = numbers(element(svg, "shapes.2").get("data-flexo-ends"))
+    assert ends[2:] == pytest.approx([x + 40, y + 20])
+
+
 def test_a_brace_round_parts_runs_down_their_right_pointing_away() -> None:
     compilation = drawn(figure(shapes=[{"kind": "brace", "around": ["encoder"]}]))
     x, y, w, h = node_box(compilation, "encoder")
@@ -360,11 +384,13 @@ def test_the_studios_placing_round_parts_is_the_figures() -> None:
         "dimension",
         "arrow",
         "polyline",
+        "path",
     ]
     cases = [
         {
             "kind": kind,
             **({"points": [[0, 0], [5, 9], [10, 2]]} if kind == "polyline" else {}),
+            **({"d": "M 0 0 C 10 -10 20 10 30 0 L 30 30 Z"} if kind == "path" else {}),
             **({"side": side} if side else {}),
         }
         for kind in kinds
@@ -375,7 +401,7 @@ def test_the_studios_placing_round_parts_is_the_figures() -> None:
         f"import * as a from {json.dumps(AROUND.as_uri())};\n"
         f"const cases = {json.dumps(cases)}, boxes = {json.dumps(boxes)};\n"
         "console.log(JSON.stringify(cases.map((spec) =>\n"
-        "  a.placedRound(spec, a.aroundBox(boxes, 3, spec.kind), f.family))));\n"
+        "  a.placedRound(spec, a.aroundBox(boxes, 3, spec.kind), f.family, f.fittedPath))));\n"
     )
     result = subprocess.run(
         [node, "--input-type=module", "-e", script], capture_output=True, text=True, check=True
@@ -383,13 +409,16 @@ def test_the_studios_placing_round_parts_is_the_figures() -> None:
     theirs = json.loads(result.stdout)
     for spec, other in zip(cases, theirs, strict=True):
         ours = placed_round(spec, around_box([tuple(box) for box in boxes], 3, spec["kind"]))
-        for key in ("at", "size", "width", "from", "to", "points"):
+        for key in ("at", "size", "width", "from", "to", "points", "d"):
             assert (key in ours) == (key in other), (spec, key)
             if key in ours:
                 flat = json.loads(json.dumps(ours[key]))
                 if key == "points":
                     flat = [value for point in flat for value in point]
                     other[key] = [value for point in other[key] for value in point]
+                if key == "d":
+                    assert flat == other[key], spec
+                    continue
                 assert flat == pytest.approx(other[key]), (spec, key)
 
 

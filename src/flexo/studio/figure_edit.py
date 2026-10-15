@@ -1500,7 +1500,7 @@ class _Document:
                 origin = origins.get(str(on))
                 if isinstance(origin, list | tuple) and len(origin) == 2:
                     places = moved(_plain(shape), float(origin[0]), float(origin[1]))
-                    for key in ("at", "tail", "from", "to", "points"):
+                    for key in ("at", "tail", "from", "to", "points", "d"):
                         if key in shape and places.get(key) != _plain(shape.get(key)):
                             shape[key] = self.written(key, places[key])
                     del shape["on"]

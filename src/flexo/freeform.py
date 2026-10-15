@@ -31,7 +31,11 @@ Kinds by their family:
   ``cross`` (``arm``), ``check``, ``cloud``, ``bubble`` (a speech bubble whose ``tail``
   points anywhere; its ``body`` rounded, a rectangle or an oval), and the highlights:
   ``highlight`` (a translucent box) and ``ring`` (an ellipse drawn round something);
-- **text**: a box of words (``at``, and ``width`` to wrap them in).
+- **text**: a box of words (``at``, and ``width`` to wrap them in);
+- **path**: any outline, as SVG path data (``d``, ``flexo.pathdata``: every command, its
+  pieces as many as it has -- holes too -- open or closed), filled by its ``fill_rule``
+  (``nonzero`` or ``evenodd``); its box is what it draws, so it has no ``at`` or ``size``,
+  turns and mirrors about that box's middle as a box does, and its words are set in it.
 
 A box turns (``rotate``, degrees clockwise about its middle) and mirrors (``flip``). Every
 shape is painted by the theme unless it says otherwise: ``fill`` and ``line`` are a theme's
@@ -67,6 +71,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import Any
 
+from flexo import pathdata
 from flexo.svg import element, number
 
 # -- the vocabulary -----------------------------------------------------------------------
@@ -115,8 +120,9 @@ BOXED = (
     "ring",
 )
 """The closed shapes, each drawn in a box (``at``, ``size``)."""
-KINDS = (*LINES, *TRACED, *BOXED, "text")
-"""Every kind of shape, but a group of them (``group``, its ``shapes``)."""
+KINDS = (*LINES, *TRACED, *BOXED, "text", "path")
+"""Every kind of shape, but a group of them (``group``, its ``shapes``). (A path is drawn by a
+tool of its own, or written: no editor offers it among the others, ``SECTIONS``.)"""
 
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Lines", ("line", "arrow", "double-arrow", "curved-arrow", "elbow", "arc", "polyline", "pen")),
@@ -194,6 +200,7 @@ LABELS = {
     "highlight": "Highlight",
     "ring": "Highlight Ring",
     "text": "Text Box",
+    "path": "Path",
     "group": "Group",
 }
 """What a person calls each kind (never a slide's own objects' names: Text Box, Speech Bubble)."""
@@ -209,6 +216,7 @@ SIDES = ("top", "right", "bottom", "left", "centre")
 FLIPS = ("horizontal", "vertical", "both")
 BODIES = ("rounded", "rectangle", "oval")
 ROUTES = ("across", "down")
+FILL_RULES = ("nonzero", "evenodd")
 
 _LINE = {"fill": "none", "line": "accent", "line_width": 2.0, "cap": "round", "join": "round"}
 _CLOSED = {
@@ -247,6 +255,7 @@ STYLES: dict[str, dict[str, object]] = {
     "dimension": {**_MEASURE, "line_width": 1.25, "start": "bar", "end": "bar"},
     "scale-bar": {**_MEASURE, "line_width": 4.0},
     "text": {"fill": "none", "line": "none", "line_width": 1.5, "cap": "butt", "join": "miter"},
+    "path": _CLOSED,
 }
 """How each kind is painted when it says nothing: the theme's accent, its outlines a little
 lighter than its lines; measures in ink; words on nothing."""
@@ -275,6 +284,7 @@ PARAMETERS: dict[str, dict[str, object]] = {
     "bubble": {"body": "rounded", "corner": 10.0},
     "polyline": {"closed": False},
     "pen": {"closed": False},
+    "path": {"fill_rule": "nonzero"},
 }
 """Each kind's own settings, as they are when it says nothing of them."""
 
@@ -324,13 +334,16 @@ PLACE_KEYS = {
     "points": ("points",),
     "box": ("at", "size", "rotate", "flip"),
     "text": ("at", "width", "rotate"),
+    "path": ("d", "rotate", "flip"),
 }
 COMMON_KEYS = ("kind", "id", *STYLE_KEYS, *TEXT_KEYS)
 
 
 def family(kind: str) -> str:
-    """``line``, ``points``, ``box``, ``text`` or ``group``: how a kind is placed."""
+    """``line``, ``points``, ``box``, ``text``, ``path`` or ``group``: how a kind is placed."""
 
+    if kind == "path":
+        return "path"
     if kind in LINES:
         return "line"
     if kind in TRACED:
@@ -343,10 +356,11 @@ def family(kind: str) -> str:
 
 
 def closed(spec: Mapping[str, Any]) -> bool:
-    """Whether a shape is closed, its words set inside it."""
+    """Whether a shape is closed, its words set inside it. (A path is, open or not: it is
+    filled as SVG fills one, and its words are set in its box.)"""
 
     kind = spec.get("kind")
-    return kind in BOXED or (kind in TRACED and bool(spec.get("closed")))
+    return kind in BOXED or kind == "path" or (kind in TRACED and bool(spec.get("closed")))
 
 
 def keys_of(kind: str) -> tuple[str, ...]:
@@ -638,6 +652,7 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
         "points": ("points",),
         "box": ("at", "size"),
         "text": ("at",),
+        "path": ("d",),
         "group": ("shapes",),
     }[form]
     for key in needed:
@@ -649,6 +664,7 @@ def checked(data: object, *, extra: Sequence[str] = (), depth: int = 0) -> dict[
                 "at": "[100, 100]",
                 "size": "[160, 100]",
                 "shapes": "a list of shapes",
+                "d": pathdata.EXAMPLE,
             }[key]
             raise ShapeError(key, f"A {kind} needs {key}, such as {key}: {example}.")
     return made
@@ -775,9 +791,31 @@ def _checked_value(kind: str, key: str, value: object, extra: Sequence[str], dep
         return _choice(value, key, ROUTES)
     if key == "body":
         return _choice(value, key, BODIES)
+    if key == "d":
+        return _path_data(value)
+    if key == "fill_rule":
+        named = {"even-odd": "evenodd", "non-zero": "nonzero"}
+        return _choice(
+            named.get(value, value) if isinstance(value, str) else value, key, FILL_RULES
+        )
     raise ShapeError(
         key, f"Unknown key {key} for a {kind}."
     )  # pragma: no cover - keys_of lists them all
+
+
+def _path_data(value: object) -> str:
+    """A path's outline as written (``d``), checked: SVG path data, read as ``flexo.pathdata``
+    reads it, what is wrong said in words."""
+
+    if not isinstance(value, str):
+        raise ShapeError(
+            "d", f"d must be SVG path data, such as {pathdata.EXAMPLE}, not {value!r}."
+        )
+    try:
+        pathdata.parsed(value)
+    except pathdata.PathError as error:
+        raise ShapeError("d", str(error)) from None
+    return value
 
 
 # -- geometry ------------------------------------------------------------------------------
@@ -852,6 +890,9 @@ class Geometry:
     """A line's ends, as drawn (glued ends where they are glued)."""
     extra: list[list[Segment]] = field(default_factory=list)
     """Strokes drawn besides the outline, unfilled: none, for now."""
+    data: str | None = None
+    """Its outline as SVG path data, where that is kept with what was read (a path's, written
+    once however often it is drawn); else it is written from ``segments``."""
 
     @property
     def centre(self) -> Point:
@@ -1692,6 +1733,8 @@ def geometry(
         left, top = min(b[0] for b in boxes), min(b[1] for b in boxes)
         right, bottom = max(b[2] for b in boxes), max(b[3] for b in boxes)
         return Geometry([], False, (left, top, right - left, bottom - top))
+    if form == "path":
+        return _path_geometry(spec)
     if form in ("box", "text"):
         x, y = (float(value) for value in spec["at"])
         if form == "text":
@@ -1754,6 +1797,38 @@ def geometry(
     return Geometry(segments, False, box, 0.0, heads, None, label, (a, b))
 
 
+def _path_geometry(spec: Mapping[str, Any]) -> Geometry:
+    """A path as drawn: its outline as read, in its box (what it draws), mirrored about that
+    box's middle as it says, turned about it; its words in the box; an arrowhead at the start
+    of its first piece and the end of its last, where those are open."""
+
+    read = pathdata.parsed(str(spec["d"]))
+    x, y, w, h = read.box
+    flip = spec.get("flip") or None
+    segments = _flipped(list(read.segments), flip, x + w / 2.0, y + h / 2.0)
+    made = Geometry(segments, True, read.box, float(spec.get("rotate") or 0.0), [], read.box)
+    first_open, last_open = read.opens
+    ends = {
+        **spec,
+        "start": spec.get("start") if first_open else "none",
+        "end": spec.get("end") if last_open else "none",
+    }
+    if (ends["start"] or "none") != "none" or (ends["end"] or "none") != "none":
+        made.heads, made.segments = _headed(ends, segments)
+    elif read.plain and not flip:
+        # (Written plainly, it is drawn as written: a long path is not written out again.)
+        made.data = str(spec["d"])
+    else:
+        made.data = read.kept(("data", flip), lambda: path_data(segments))
+    return made
+
+
+def path_open(spec: Mapping[str, Any]) -> bool:
+    """Whether a path's first piece or its last is open: arrowheads go there."""
+
+    return any(pathdata.parsed(str(spec["d"])).opens)
+
+
 def _half_way(points: Sequence[Point]) -> tuple[Point, Point]:
     """The point half way along a polyline, and the normal on its left there."""
 
@@ -1798,6 +1873,8 @@ def bounds(
     """``left, top, right, bottom`` of what a shape draws, turned as it is (its heads too)."""
 
     made = made or geometry(spec)
+    if spec.get("kind") == "path" and made.segments:
+        return _path_bounds(made)
     points: list[Point] = []
     for segments in [made.segments, *(head.segments for head in made.heads)]:
         for segment in segments:
@@ -1814,6 +1891,21 @@ def bounds(
         max(p[0] for p in points),
         max(p[1] for p in points),
     )
+
+
+def _path_bounds(made: Geometry) -> tuple[float, float, float, float]:
+    """What a path draws: its curves' own reach, not their controls', turned as it is."""
+
+    x, y, w, h = made.box
+    if not made.turn and not made.heads:
+        return (x, y, x + w, y + h)
+    left, top, right, bottom = pathdata.extent(made.segments, made.turn, made.centre)
+    for head in made.heads:
+        for point in flattened(head.segments, 1):
+            px, py = _turned(point, made.centre, made.turn)
+            left, top = min(left, px), min(top, py)
+            right, bottom = max(right, px), max(bottom, py)
+    return (left, top, right, bottom)
 
 
 def flattened(segments: Sequence[Segment], steps: int = 8) -> list[Point]:
@@ -1847,12 +1939,20 @@ class Target:
     box: tuple[float, float, float, float]
     turn: float = 0.0
     outline: list[Point] | None = None
+    traced: pathdata.Outline | None = None
+    """A path's outline -- its rings, holes and all, and where a line meets it on each side --
+    found from it when first asked."""
 
 
 def target_of(spec: Mapping[str, Any], made: Geometry | None = None) -> Target:
     """A shape as something a line is glued to."""
 
     made = made or geometry(spec)
+    if spec.get("kind") == "path":
+        read = pathdata.parsed(str(spec["d"]))
+        return Target(
+            made.box, made.turn, None, pathdata.Outline(read, spec.get("flip"), made.turn)
+        )
     outline = None
     if made.closed:
         outline = [_turned(point, made.centre, made.turn) for point in flattened(made.segments)]
@@ -1860,8 +1960,11 @@ def target_of(spec: Mapping[str, Any], made: Geometry | None = None) -> Target:
 
 
 def sites(target: Target) -> dict[str, Point]:
-    """Where a line glued to ``target`` meets it, by side: its sides' middles and its centre."""
+    """Where a line glued to ``target`` meets it, by side: its sides' middles and its centre
+    (a path's on its outline, level with its middle)."""
 
+    if target.traced is not None:
+        return target.traced.sites()
     x, y, w, h = target.box
     centre = (x + w / 2.0, y + h / 2.0)
     places = {
@@ -1932,7 +2035,11 @@ def glued(
                 continue
             other = points[1 - index]
             side = end.get("side") or facing(target, other)  # type: ignore[union-attr]
-            if side == "centre":
+            if side == "centre" and target.traced is not None:
+                centre = sites(target)["centre"]
+                met = pathdata.crossing(target.traced.rings(), centre, other)
+                points[index] = met or centre
+            elif side == "centre":
                 centre = sites(target)["centre"]
                 outline = target.outline or [
                     _turned(p, centre, target.turn)
@@ -2009,6 +2116,9 @@ def draw(
         group.set("transform", f"rotate({number(made.turn)} {number(cx)} {number(cy)})")
     if float(spec.get("opacity", 1.0)) < 1.0:
         group.set("opacity", number(float(spec["opacity"])))
+    if spec.get("kind") == "path" and spec.get("fill_rule") == "evenodd":
+        # (On the group, so its shadow is filled as it is.)
+        group.set("fill-rule", "evenodd")
     fill, fill_role = paint(spec.get("fill"), palette)
     stroke, stroke_role = paint(spec.get("line"), palette)
     width = float(spec.get("line_width") or 0.0)
@@ -2036,7 +2146,13 @@ def draw(
         if dashes:
             attributes["stroke_dasharray"] = " ".join(number(value) for value in dashes)
     if made.segments and (fill or stroke):
-        element(group, "path", id=f"{ident}.outline", d=path_data(made.segments), **attributes)
+        element(
+            group,
+            "path",
+            id=f"{ident}.outline",
+            d=made.data or path_data(made.segments),
+            **attributes,
+        )
     for head in made.heads:
         if not stroke:
             continue
@@ -2071,7 +2187,7 @@ def _shadow(
 
     colour = palette.get("shadow")  # type: ignore[attr-defined]
     held = element(group, "g", id=f"{ident}.shadow")
-    data = path_data(made.segments)
+    data = made.data or path_data(made.segments)
     if shadow.style == "hard" or shadow.spread <= 0.0:
         element(
             held,
@@ -2110,7 +2226,8 @@ def _shadow(
 
 
 def moved(spec: Mapping[str, Any], dx: float, dy: float) -> dict[str, Any]:
-    """A shape moved by ``dx``, ``dy``: its box, its points, its tail; glued ends stay glued."""
+    """A shape moved by ``dx``, ``dy``: its box, its points, its tail, a path's outline
+    (written again, ``flexo.pathdata``); glued ends stay glued."""
 
     made = dict(spec)
     if made.get("kind") == "group":
@@ -2128,6 +2245,8 @@ def moved(spec: Mapping[str, Any], dx: float, dy: float) -> dict[str, Any]:
             made[key] = [end[0] + dx, end[1] + dy]
     if made.get("points") is not None:
         made["points"] = [[x + dx, y + dy] for x, y in made["points"]]
+    if made.get("kind") == "path" and isinstance(made.get("d"), str) and (dx or dy):
+        made["d"] = pathdata.moved(made["d"], dx, dy)
     return made
 
 
@@ -2166,6 +2285,7 @@ __all__ = [
     "normalised",
     "paint",
     "path_data",
+    "path_open",
     "role_of",
     "sites",
     "target_of",

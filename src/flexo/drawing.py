@@ -63,6 +63,9 @@ class Paint:
     stroke_role: str | None = None
     blend: str = "normal"
     """How the paint mixes with what is under it: ``normal`` or ``multiply``."""
+    fill_rule: str = "nonzero"
+    """Which of a path's insides its fill fills: ``nonzero`` or ``evenodd`` (holes, by its
+    pieces' nesting alone)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +258,7 @@ _INHERITED = (
     "font-weight",
     "font-style",
     "text-anchor",
+    "fill-rule",
     "data-flexo-fill",
     "data-flexo-stroke",
 )
@@ -370,7 +374,7 @@ _CSS_NAMES = frozenset(
         "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
         "stroke-linecap", "stroke-linejoin", "font-family", "font-size", "font-weight",
         "font-style", "text-anchor", "opacity", "mix-blend-mode", "clip-path", "display",
-        "visibility",
+        "visibility", "fill-rule",
     }
 )
 
@@ -1378,6 +1382,7 @@ def _paint(context: dict[str, str], opacity: float) -> Paint:
         fill_role=context.get("data-flexo-fill") if fill else None,
         stroke_role=context.get("data-flexo-stroke") if colour("stroke") else None,
         blend="multiply" if "mix-blend-mode:multiply" in own_style else "normal",
+        fill_rule="evenodd" if context.get("fill-rule") == "evenodd" else "nonzero",
     )
 
 

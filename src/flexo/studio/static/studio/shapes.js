@@ -768,7 +768,8 @@ export function shapeEditor(host) {
     const box = one !== null && F.family(specAt(one).kind) !== "line" && specAt(one).kind !== "group" && specAt(one).kind !== "pen"
       ? made.box : (() => { const b = unionOf(indices); return [b[0], b[1], b[2] - b[0], b[3] - b[1]]; })();
     const turn = one !== null && made && specAt(one).kind !== "group" ? made.turn : 0;
-    begin(event, { type: "size", indices, name, box, turn, centre: [box[0] + box[2] / 2, box[1] + box[3] / 2], originals: indices.map((index) => copyOf(shapesOf()[index])), single: one !== null && ["box", "text"].includes(F.family(specAt(one).kind)) });
+    begin(event, { type: "size", indices, name, box, turn, centre: [box[0] + box[2] / 2, box[1] + box[3] / 2], originals: indices.map((index) => copyOf(shapesOf()[index])), single: one !== null && ["box", "text"].includes(F.family(specAt(one).kind)),
+      path: one !== null && F.family(specAt(one).kind) === "path" });
     gesture.started = true;
     gesture.targets = snapTargets(indices);
     page()?.classList.add("shape-dragging");
@@ -811,6 +812,15 @@ export function shapeEditor(host) {
       if (spec.kind === "text") setAside(index, { transform: `translate(${resized.at[0] - spec.at[0]} 0)` });
       else preview(index, resized);
       say(`${Math.round(width)} × ${Math.round(spec.kind === "text" ? measured(index)?.[1] || h : height)}`, event);
+    } else if (g.path) {
+      // A path's points stretched in its own frame, its middle where the new box's is (it
+      // turns about its own middle).
+      const index = g.indices[0], middle = turned([left + width / 2, top + height / 2], g.centre, g.turn);
+      const sx = w ? width / w : 1, sy = h ? height / h : 1, ox = middle[0] - (left + width / 2), oy = middle[1] - (top + height / 2);
+      const resized = F.mapped(g.originals[0], ([px2, py2]) => [left + (px2 - x) * sx + ox, top + (py2 - y) * sy + oy]);
+      live.set(index, resized);
+      preview(index, resized);
+      say(`${Math.round(width)} × ${Math.round(height)}`, event);
     } else {
       const sx = w ? width / w : 1, sy = h ? height / h : 1;
       const map = ([px2, py2]) => [round(left + (px2 - x) * sx), round(top + (py2 - y) * sy)];
@@ -829,7 +839,7 @@ export function shapeEditor(host) {
   function startTurn(event, indices) {
     const box = unionOf(indices);
     const one = indices.length === 1 ? indices[0] : null;
-    const centre = one !== null && ["box", "text"].includes(F.family(specAt(one).kind)) ? F.centreOf(geometryOf(one)) : [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+    const centre = one !== null && ["box", "text", "path"].includes(F.family(specAt(one).kind)) ? F.centreOf(geometryOf(one)) : [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
     begin(event, { type: "turn", indices, centre, originals: indices.map((index) => copyOf(shapesOf()[index])) });
     gesture.started = true;
     gesture.angle = Math.atan2(gesture.from[1] - centre[1], gesture.from[0] - centre[0]);
@@ -843,13 +853,13 @@ export function shapeEditor(host) {
     putBack();
     g.indices.forEach((index, n) => {
       const spec = g.originals[n];
-      if (["box", "text"].includes(F.family(spec.kind)) && g.indices.length === 1) {
+      if (["box", "text", "path"].includes(F.family(spec.kind)) && g.indices.length === 1) {
         live.set(index, F.turnedAbout(spec, turn, g.centre));
         setAside(index, { transform: `rotate(${turn} ${g.centre[0]} ${g.centre[1]})` });
       } else {
         const made = F.turnedAbout(spec, turn, g.centre);
         live.set(index, made);
-        if (spec.kind === "group" || F.family(spec.kind) !== "box") preview(index, made); else setAside(index, { transform: `rotate(${turn} ${g.centre[0]} ${g.centre[1]})` });
+        if (spec.kind === "group" || !["box", "path"].includes(F.family(spec.kind))) preview(index, made); else setAside(index, { transform: `rotate(${turn} ${g.centre[0]} ${g.centre[1]})` });
       }
     });
     followGlued(g.indices);
@@ -875,7 +885,7 @@ export function shapeEditor(host) {
     const reach = 10 / unit();
     let best = null;
     const consider = (target, glue) => {
-      const sites = F.sites(target), inside = target.outline ? F.inside(target.outline, point) : within(target.box, target.turn, point);
+      const sites = F.sites(target), inside = target.traced ? F.over(target, point) : target.outline ? F.inside(target.outline, point) : within(target.box, target.turn, point);
       const area = Math.max(target.box[2] * target.box[3], 0);
       for (const [side, at] of Object.entries(sites)) {
         const far = distance(at, point);
@@ -1514,7 +1524,7 @@ export function shapeEditor(host) {
     const mirror = (spec) => {
       if (spec.kind === "group") return { ...spec, shapes: (spec.shapes || []).map(mirror) };
       const form = F.family(spec.kind);
-      if (form === "box" && spec.kind !== "bubble") {
+      if ((form === "box" && spec.kind !== "bubble") || form === "path") {
         const made = F.geometry(spec), centre = F.centreOf(made);
         const now = across ? [2 * cx - centre[0], centre[1]] : [centre[0], 2 * cy - centre[1]];
         const moved = F.moved(spec, round(now[0] - centre[0]), round(now[1] - centre[1]));
@@ -1624,7 +1634,8 @@ export function shapeEditor(host) {
     if (host.canDraw()) {
       out.push({ icon: "shape", label: host.chooserLabel || "Add Shape…", hint: "Lines, arrows, shapes, callouts, braces, measures and text boxes", run: () => chooser(host.shapeButton()) });
       // (Each also by the name the Mac app's Insert › Shapes runs it by, whatever the page.)
-      for (const kind of F.KINDS) out.push({ icon: "shape", label: `${verb} ${F.LABELS[kind]}`, also: verb === "Draw" ? [] : [`Draw ${F.LABELS[kind]}`], hint: `Drag on the ${noun} to draw it`, run: () => arm(kind) });
+      // (A path is drawn by a tool of its own, not a drag.)
+      for (const kind of F.KINDS.filter((one) => one !== "path")) out.push({ icon: "shape", label: `${verb} ${F.LABELS[kind]}`, also: verb === "Draw" ? [] : [`Draw ${F.LABELS[kind]}`], hint: `Drag on the ${noun} to draw it`, run: () => arm(kind) });
     }
     const picks = chosenNow();
     if (!picks.length || words) return out;
@@ -1684,7 +1695,8 @@ export function shapeEditor(host) {
     const kinds = new Set(flat.map((spec) => spec.kind));
     const closedAll = flat.every((spec) => F.isClosed(spec) || spec.kind === "text");
     const linesAll = flat.every((spec) => F.family(spec.kind) === "line" || (F.family(spec.kind) === "points" && !spec.closed));
-    const anyLines = flat.some((spec) => !F.isClosed(spec) && spec.kind !== "text");
+    // (A path open at an end takes arrowheads, and its line's ends, as a line does.)
+    const anyLines = flat.some((spec) => (!F.isClosed(spec) && spec.kind !== "text") || (spec.kind === "path" && F.pathOpen(spec)));
     const palette = studio.info?.palette || {}, all = roles();
     const tone = (n) => (n === 1 ? "accent" : `accent${n}`);
     const tones = [1, 2, 3, 4, 5, 6].filter((n) => all[`tone-${n}-stroke`]);
@@ -1811,7 +1823,9 @@ export function shapeEditor(host) {
     // Where it is: a box's own top left (turned or not, as Keynote says it); else where what
     // is chosen reaches.
     const own = one && ["box", "text"].includes(F.family(one.kind));
-    const where = () => { if (own) return shapesOf()[picks[0]].at; const box = unionOf(picks); return box ? [box[0], box[1]] : null; };
+    // (A path's own top left is its box's, as it is drawn: it writes none.)
+    const traced = one && F.family(one.kind) === "path";
+    const where = () => { if (own) return shapesOf()[picks[0]].at; if (traced) return geometryOf(picks[0]).box.slice(0, 2); const box = unionOf(picks); return box ? [box[0], box[1]] : null; };
     if (where()) {
       const moveTo = (axis) => (value) => {
         if (value === null) return;
@@ -1829,7 +1843,19 @@ export function shapeEditor(host) {
         ui.field("Width", ui.number({ value: one.size[0], min: 1, step: 1, unit: "pt", key: "shape.w", onChange: resize(0) })),
         ui.field("Height", ui.number({ value: one.size[1], min: 1, step: 1, unit: "pt", key: "shape.h", onChange: resize(1) }))));
     }
-    if (one && ["box", "text"].includes(F.family(one.kind))) {
+    if (traced) {
+      // A path sized from its box's top left, its points stretched.
+      const [bx, by, bw, bh] = geometryOf(picks[0]).box;
+      const resize = (axis) => (value) => {
+        if (!value) return;
+        const k = axis === 0 ? value / (bw || 1) : value / (bh || 1);
+        edit((list) => { list[picks[0]] = F.mapped(list[picks[0]], ([px, py]) => (axis === 0 ? [bx + (px - bx) * k, py] : [px, by + (py - by) * k])); }, "Resize Shape");
+      };
+      out.push(h("div.row", {},
+        ui.field("Width", ui.number({ value: round(bw), min: 1, step: 1, unit: "pt", key: "shape.w", onChange: resize(0) })),
+        ui.field("Height", ui.number({ value: round(bh), min: 1, step: 1, unit: "pt", key: "shape.h", onChange: resize(1) }))));
+    }
+    if (one && ["box", "text", "path"].includes(F.family(one.kind))) {
       out.push(ui.field("Rotate", ui.number({ value: Number(one.rotate || 0), min: -360, max: 360, step: 1, unit: "°", key: "shape.rotate",
         onChange: (value) => edit((list) => { const turned = ((Number(value || 0) % 360) + 360) % 360; if (turned) list[picks[0]].rotate = turned; else delete list[picks[0]].rotate; }, "Rotate Shape") })));
     }
