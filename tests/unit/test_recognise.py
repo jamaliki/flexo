@@ -342,6 +342,26 @@ def test_a_circle_with_a_symbol_is_an_operator_and_a_dashed_line_stays_dashed() 
     assert (second["from"], second["to"], second["head"]) == ("z", "done", "inhibition")
 
 
+def test_a_dark_grey_box_stays_dark_its_words_light_and_dashes_as_lengths_are_dashed() -> None:
+    """As an Inkscape drawing imports: a box filled dark grey (a loss, a heading's band) keeps
+    its colour, its words drawn light; outlines and lines dashed by their lengths (an SVG's
+    dash array) are dashed, or dotted where the dashes are no longer than the line is wide."""
+
+    shapes = [
+        box(0, 0, text="Loss", fill="#595959"),
+        box(200, 0, text="Light", fill="#f2f2f2", dash=[6.8, 3.4]),
+        box(400, 0, text="Dotted", fill="#cfe2f3", dash=[1.5, 3.0]),
+        arrow([100, 25], [200, 25], dash=[4.25, 2.83]),
+        arrow([300, 25], [400, 25], dash=[1.0, 2.0]),
+    ]
+    found = recognise(shapes, palette=PAPER)
+    nodes = {node["label"]: node for node in found.nodes}
+    assert nodes["Loss"]["properties"] == {"paint-fill": "#595959", "paint-label": "#ffffff"}
+    assert nodes["Light"].get("properties") is None and nodes["Light"]["line"] == "dashed"
+    assert nodes["Dotted"]["line"] == "dotted"
+    assert [edge.get("line") for edge in found.edges] == ["dashed", "dotted"]
+
+
 def test_a_line_whose_head_is_at_its_start_runs_the_other_way() -> None:
     shapes = [
         box(0, 0, text="A"),

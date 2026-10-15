@@ -118,6 +118,9 @@ SAME_HUE = 15.0
 GREY = 5.0
 """How little colour (CIELAB chroma) a fill has that is grey, white or black: no tone. (A
 tone's own light tint has little more: 9 or 10.)"""
+DARK = 45.0
+"""How dark (CIELAB lightness) a grey is that is kept as drawn: a dark box (a loss, a
+heading's band) is drawn dark, where a light grey or white one takes the theme's own."""
 
 
 @dataclass(slots=True)
@@ -559,6 +562,20 @@ def _hue(lab: tuple[float, float, float]) -> float:
     return math.degrees(math.atan2(lab[2], lab[1])) % 360.0
 
 
+def _dashed(drawn: Mapping[str, Any]) -> str | None:
+    """How a drawn outline is dashed, as a figure says it: ``dashed`` or ``dotted`` -- a pattern
+    of lengths (an SVG's own, as imported) dotted where its dashes are no longer than about
+    the line is wide -- or None, solid."""
+
+    dash = drawn.get("dash")
+    if dash in ("dashed", "dotted"):
+        return str(dash)
+    if isinstance(dash, list | tuple) and dash:
+        width = float(drawn.get("line_width") or 1.0)
+        return "dotted" if float(dash[0]) <= max(1.5 * width, 1.0) else "dashed"
+    return None
+
+
 def _chroma(lab: tuple[float, float, float]) -> float:
     return math.hypot(lab[1], lab[2])
 
@@ -619,7 +636,7 @@ class _Colours:
         for colour, _ in counts.most_common():
             lab = _lab(colour)
             if _chroma(lab) <= GREY:
-                self.chosen[colour] = None
+                self.chosen[colour] = colour if lab[0] < DARK else None
                 continue
             hue = _hue(lab)
             near = sorted(
@@ -1146,8 +1163,15 @@ def _node(leaf: _Leaf, names: _Names, colours: _Colours, notes: list[str]) -> di
             notes.append(
                 f"{_said(words, kind)} keeps its own colour, {own_colour}: no tone is near it."
             )
-        if drawn.get("dash") in ("dashed", "dotted"):
-            node["line"] = drawn["dash"]
+            # (Words on a dark box kept dark are drawn as they were, light -- white if they
+            # said no colour -- not in the theme's ink, which they could not be read in.)
+            if _lab(own_colour)[0] < DARK:
+                drawn_words = [str(text.drawn.get("colour") or "") for text in leaf.texts]
+                properties["paint-label"] = next(
+                    (colour for colour in drawn_words if colour.startswith("#")), "#ffffff"
+                )
+        if _dashed(drawn):
+            node["line"] = _dashed(drawn)
         if drawn.get("shadow"):
             node["shadow"] = True
     if drawn.get("bold") or any(text.drawn.get("bold") for text in leaf.texts):
@@ -1192,8 +1216,8 @@ def _frame(item: _Placed, leaf: _Leaf, names: _Names, groups: list[dict[str, Any
     group["children"] = children
     group["layout"] = layout
     group["role"] = "module" if title else "container"
-    if leaf.drawn.get("dash") in ("dashed", "dotted"):
-        group["line"] = leaf.drawn["dash"]
+    if _dashed(leaf.drawn):
+        group["line"] = _dashed(leaf.drawn)
     if leaf.drawn.get("shadow"):
         group["shadow"] = True
     return identifier
@@ -1259,8 +1283,8 @@ def _edge(
         edge["head"] = head
     if start != "none" and HEADS.get(start, "arrow") != head:
         edge["tail"] = HEADS.get(start, "arrow")
-    if drawn.get("dash") in ("dashed", "dotted"):
-        edge["line"] = drawn["dash"]
+    if _dashed(drawn):
+        edge["line"] = _dashed(drawn)
     kind = drawn["kind"]
     if kind in ("curved-arrow", "arc", "pen"):
         edge["shape"] = "curved"
