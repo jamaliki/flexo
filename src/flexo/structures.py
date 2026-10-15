@@ -47,6 +47,7 @@ from __future__ import annotations
 import atexit
 import difflib
 import functools
+import math
 import re
 import struct
 import threading
@@ -1324,70 +1325,152 @@ def _lightness(colour: str) -> float:
 
 
 def structure_view(node: NodeSpec, style: LayoutStyle, palette: Palette) -> dict[str, object]:
-    """What the studio turns while a structure is dragged round: each chain's trace (its
-    alpha carbons, or P for nucleic acids) in mol-sketch's own frame -- its scene's, where
-    the structure already lies in its base orientation -- centred, and the turn it is drawn
-    at now (``yaw``, ``pitch``, ``roll``). Turned as mol-sketch turns it (about y by yaw,
-    then x by pitch, then z by roll; y up), the trace lies as the molecule will be drawn."""
+    """What the studio draws while a structure is dragged round, as it will be drawn: the
+    turn it is at now (``yaw``, ``pitch``, ``roll``) and how mol-sketch frames it (``zoom``,
+    ``pan_x``, ``pan_y``, its field of view), the points that framing is fitted to
+    (``fit``, the outermost of what it draws, round their ``centre``), each chain's trace
+    where its ribbon is drawn (its alpha carbons, or P for nucleic acids), and its atoms
+    drawn as sticks -- an active site's flagged, drawn thicker -- with the bonds between
+    them. All in mol-sketch's own frame, its scene's, where the structure already lies in
+    its base orientation: turned as mol-sketch turns it (about the centre, y by yaw, then x
+    by pitch, then z by roll; y up) and framed as it frames it, they lie where the molecule
+    will be drawn -- a site zoomed into stays where it is in the box, not the whole
+    protein fitted to it."""
 
-    source = node.property("source")
-    if not isinstance(source, str) or not source.strip():
-        raise _fail(node, "source", "A structure needs a file or a PDB ID (source:).")
-    look = str(node.property("look") or _theme_look(style, palette)).strip().lower()
-    if look not in LOOKS:
-        raise _fail(node, "look", f'look "{look}" is not a mol-sketch look.', hint=", ".join(LOOKS))
-    path = Path(source).expanduser()
-    if path.exists() and outside(path):
-        raise _fail(node, "source", "The structure file is outside the folder.")
-    view = tuple(
-        (name, float(value))  # type: ignore[arg-type]
-        for name in ("yaw", "pitch", "roll")
-        if (value := node.property(name)) is not None
-    )
-    stamp = path.stat().st_mtime if path.exists() else 0.0
-    return _one_at_a_time(_view, str(path) if path.exists() else source.strip(), stamp, look, view)
+    return _one_at_a_time(_view, _ask(node, style, palette))
+
+
+_SIDES = 160
+"""How many ways the outermost points of a framing are looked for: the box mol-sketch fits
+round them, turned any way, is then within a hundredth of their reach of its own."""
 
 
 @functools.lru_cache(maxsize=16)
-def _view(
-    source: str, stamp: float, look: str, view: tuple[tuple[str, float], ...]
-) -> dict[str, object]:
-    import molsketch as ms
+def _view(ask: _Ask) -> dict[str, object]:
+    import numpy as np
     from molsketch._engine import engine
 
-    del stamp  # part of the cache key: an edited file is read again
-    figure = ms.load(source) if Path(source).exists() else ms.fetch(source)
-    figure = figure.look(look)
-    if view:
-        figure.view(**dict(view))
+    figure = _drawn(ask)
     spec = figure._spec()
-    camera = engine().call("engineConfig", spec)["camera"]
+    config = engine().call("engineConfig", spec)
+    cfg, reps, camera = config["cfg"], config["reps"] or {}, config["camera"]
+    rep, shown = cfg.get("rep") or {}, cfg.get("show") or {}
+    keyframes = engine().call("sceneJson", spec)["keyframes"]
     # The scene's atoms are where the camera's base orientation has put them already.
-    atoms = engine().call("sceneJson", spec)["keyframes"][0]["atoms"]
-    chains: dict[str, list[tuple[int, list[float]]]] = {}
-    for atom in atoms.values():
-        if atom.get("het") or atom.get("name") not in {"CA", "P"}:
-            continue
-        chains.setdefault(str(atom.get("chain")), []).append(
-            (int(atom.get("resi", 0)), atom["pos"])
+    keyframe = keyframes[min(ask.step, len(keyframes)) - 1]
+    atoms = [
+        (
+            key,
+            _Atom(
+                str(atom.get("el") or ""), str(atom.get("resn") or ""),
+                int(atom.get("resi") or 0), str(atom.get("chain") or ""),
+                str(atom.get("name") or ""), bool(atom.get("het")), str(atom.get("ss") or ""),
+                str(atom.get("entity") or ""), str(atom.get("subunit") or ""),
+            ),
+            atom["pos"],
         )
-    points = [pos for trace in chains.values() for _, pos in trace]
-    if not points:
-        return {"chains": [], "camera": {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}}
-    low = [min(p[k] for p in points) for k in range(3)]
-    high = [max(p[k] for p in points) for k in range(3)]
-    centre = [(low[k] + high[k]) / 2.0 for k in range(3)]
-    step = max(1, len(points) // 900)
-    traces = [
-        [
-            [round(pos[k] - centre[k], 2) for k in range(3)]
-            for _, pos in sorted(trace, key=lambda item: item[0])[::step]
-        ]
-        for trace in chains.values()
+        for key, atom in keyframe["atoms"].items()
+    ]
+
+    def test(text: object):
+        text = str(text or "").strip()
+        if not text:
+            return None
+        try:
+            return _selection(text)
+        except _BadSelection:
+            return None
+
+    sticks, cartoon, surface, site = (
+        test(reps.get("sticks")), test(reps.get("cartoon")), test(reps.get("surface")),
+        test(rep.get("siteSel")),
+    )
+    drawn = [test for test in (sticks, cartoon, surface, site) if test is not None]
+    # What it is framed on: everything it draws (all of it, drawing nothing), as mol-sketch
+    # fits its view.
+    framed = [pos for _, atom, pos in atoms if any(each(atom) for each in drawn)] or [
+        pos for *_, pos in atoms
+    ]
+    points = np.asarray(framed, dtype=float).reshape(-1, 3)
+    centre = (points.min(axis=0) + points.max(axis=0)) / 2 if len(points) else np.zeros(3)
+    turn = np.arange(_SIDES) + 0.5
+    rise = 1 - 2 * turn / _SIDES
+    around = np.pi * (1 + 5**0.5) * turn
+    sides = np.concatenate([
+        np.eye(3), -np.eye(3),
+        np.stack([np.sqrt(1 - rise**2) * np.cos(around), np.sqrt(1 - rise**2) * np.sin(around),
+                  rise], axis=1),
+    ])
+    outermost = sorted(set(np.argmax(points @ sides.T, axis=0).tolist())) if len(points) else []
+    # A residue drawn as ribbon: its trace, and -- the side chain helper on -- its backbone
+    # left out of the sticks (but its alpha carbon).
+    ribbon = {
+        (atom.chain, atom.resi) for _, atom, _ in atoms
+        if cartoon is not None and cartoon(atom) and atom.name == "CA" and not atom.het
+    }
+    traces: dict[str, list[tuple[int, list[float]]]] = {}
+    for _, atom, pos in atoms:
+        if atom.name in {"CA", "P"} and not atom.het and cartoon is not None and cartoon(atom):
+            traces.setdefault(atom.chain, []).append((atom.resi, pos))
+    chains: list[list[list[float]]] = []
+    for trace in traces.values():
+        piece: list[list[float]] = []
+        last: tuple[int, list[float]] | None = None
+        for resi, pos in sorted(trace, key=lambda item: item[0]):
+            # A gap in the chain (residues not in the file) is not drawn across.
+            if last is not None and (resi - last[0] > 1 or math.dist(pos, last[1]) > 7.5):
+                if len(piece) > 1:
+                    chains.append(piece)
+                piece = []
+            piece.append([round(value, 2) for value in pos])
+            last = (resi, pos)
+        if len(piece) > 1:
+            chains.append(piece)
+    helper = bool(rep.get("sideChainHelper"))
+    hydrogens = bool(shown.get("H"))
+    held: dict[str, int] = {}
+    stuck: list[list[object]] = []
+    for key, atom, pos in atoms:
+        in_site = site is not None and site(atom)
+        if not (in_site or (sticks is not None and sticks(atom))):
+            continue
+        if atom.element.upper() == "H" and not hydrogens:
+            continue
+        if helper and (atom.chain, atom.resi) in ribbon and atom.name in {"N", "C", "O", "OXT"}:
+            continue
+        held[key] = len(stuck)
+        stuck.append([*(round(value, 2) for value in pos), atom.element, int(in_site)])
+    bonds = [
+        [held[a], held[b]]
+        for a, b, *order in keyframe.get("bonds") or ()
+        if a in held and b in held and (not order or order[0] != 0)
     ]
     return {
-        "chains": traces,
-        "camera": {name: float(camera.get(name) or 0.0) for name in ("yaw", "pitch", "roll")},
+        "camera": {
+            "yaw": float(camera.get("yaw") or 0.0),
+            "pitch": float(camera.get("pitch") or 0.0),
+            "roll": float(camera.get("roll") or 0.0),
+            "zoom": float(camera.get("zoom") or 1.0),
+            "pan_x": float(camera.get("panX") or 0.0),
+            "pan_y": float(camera.get("panY") or 0.0),
+            "fov": float(camera.get("fov") or 0.0),
+        },
+        # As _render draws it: its long side 1200 pixels, a caption's band at the foot and a
+        # step's at the head where it has them -- mol-sketch's framing keeps clear of them.
+        "frame": {
+            "long_side": 1200,
+            "foot": 0.13 if shown.get("caption") else 0.0,
+            "head": 0.05 if shown.get("stepLabel") else 0.0,
+        },
+        "centre": [round(float(value), 3) for value in centre],
+        "fit": [[round(float(value), 2) for value in points[index]] for index in outermost],
+        "chains": chains,
+        "atoms": stuck,
+        "bonds": bonds,
+        "sticks": {
+            "radius": float(rep.get("stickRadius") or 0.2),
+            "site": float(rep.get("siteScale") or 1.9),
+        },
     }
 
 
