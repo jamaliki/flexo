@@ -86,8 +86,11 @@ def _colour(key: str, label: str, hint: str = "", *, group: str = "") -> dict[st
     return field | {"group": group} if group else field
 
 
-def _words(key: str, label: str, hint: str = "") -> dict[str, Any]:
-    return {"key": key, "label": label, "type": "text", "hint": hint}
+def _words(key: str, label: str, hint: str = "", *, mono: bool = False) -> dict[str, Any]:
+    """Words typed in; ``mono``, as code (a selection), in the studio's monospace."""
+
+    field = {"key": key, "label": label, "type": "text", "hint": hint}
+    return {**field, "mono": True} if mono else field
 
 
 def _numbers(key: str, label: str, hint: str = "") -> dict[str, Any]:
@@ -620,7 +623,7 @@ _MAP = _pane(
         _section(
             "Close-Up",
             (
-                _words("map.zone", "Close-Up", "A selection, such as resi 57+102")
+                _words("map.zone", "Close-Up", "A selection, such as resi 57+102", mono=True)
                 | {"placeholder": "The whole map"},
                 _number(
                     "map.carve",

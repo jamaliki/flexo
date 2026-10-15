@@ -1,9 +1,20 @@
 /* Flexo studio: the shell every kind of document shares. */
 
+/* The studio's monospaced face, Paper Mono (SIL Open Font License: fonts/PaperMono-OFL.txt),
+   every weight in one variable font: what is typed as code is set in it -- a file's source,
+   code, ids, selections, colours by their hex -- the rest in the Mac's own face. */
+@font-face {
+  font-family: "Paper Mono";
+  src: url("fonts/PaperMono-Variable.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   /* The Mac's own face (SF Pro) wherever the studio runs on a Mac, as Keynote's is. */
   --font: -apple-system, BlinkMacSystemFont, ui-sans-serif, "Helvetica Neue", "Inter", "Segoe UI", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+  --mono: "Paper Mono", ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
 
   /* Keynote's greys: the toolbar and side panels one light grey, controls and popovers white
      on it, the slide on a plain grey stage -- nothing tinted, so the slide's own colours are

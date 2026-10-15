@@ -1326,7 +1326,13 @@ def figure_fields(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         # The figure's name is its file's; what the file calls it is kept under More.
         _field(
-            "figure.id", "Name in File", "text", hint="What the file calls the figure", more=True
+            "figure.id",
+            "Name in File",
+            "text",
+            hint="What the file calls the figure",
+            more=True,
+            # (An id, typed as code: in the monospace.)
+            mono=True,
         ),
         _field(
             "figure.style", "Theme", "theme", options=catalog.get("themes", []), default="paper"
