@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing, pastedOwn, copyOut, copiedHere } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
 import { figureShapes } from "/static/kinds/figure/overlay.js";
@@ -394,6 +394,7 @@ export function mount(studio, main) {
     if (!figure.model) return;
     menu(point, [{ icon: "plus", label: "Add Shape…", run: () => figure.addPalette(point) },
       { icon: "shape", label: "Draw Shape…", run: () => shapes.chooser(point) },
+      { icon: "copy", label: "Copy Figure", keys: "⌘C", run: () => clipChosen(false) },
       { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
       { icon: "target", label: "Select All", keys: "⌘A", run: () => figure.chooseAll() }]);
   }
@@ -716,7 +717,25 @@ export function mount(studio, main) {
     return parts ? { what: "parts", parts, label: parts.top.length > 1 ? `${parts.top.length} shapes` : "shape" } : null;
   };
   const plainOf = (clip) => (clip.what === "shapes" ? clip.shapes.map((shape) => plain(String(shape?.text ?? ""))).filter(Boolean).join("\n") || clip.label
-    : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
+    : clip.what === "block" ? clip.words || clip.label
+      : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
+  // Nothing chosen, the whole figure is copied: for other apps, its drawing; for a slide, the
+  // figure (its file) as an object on it, as a slide's figure is copied.
+  const wholeFigure = () => {
+    if (!figure.model || figure.selected.length || shapes.any()) return null;
+    const words = (figure.model.nodes || []).map((node) => plain(node.label)).filter(Boolean).join("\n");
+    return { what: "block", block: { figure: studio.file }, label: "figure", words: words || studio.file.split("/").pop().replace(/\.(ya?ml|json)$/i, "") };
+  };
+  // What is copied, drawn (copyout.js): the figure's drawing, and the ids in it of what is copied
+  // -- the parts chosen with the lines between them, or the shapes drawn over it chosen; all of
+  // it, the whole figure.
+  const drawingOf = (clip) => {
+    const page = [...(studio.pages?.values?.() || [])][0];
+    const shapeId = (index) => { const spec = shapes.list()[index]; return spec?.id !== undefined && spec?.id !== null ? String(spec.id) : `shapes.${index}`; };
+    const keep = clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
+      : clip.what === "shapes" ? shapes.chosen().map(shapeId) : [];
+    return { svg: page?.svg || "", keep, text: plainOf(clip), clip, title: clip.what === "block" ? studio.file.split("/").pop() : clip.label };
+  };
   // Pasted: shapes drawn over the figure -- from it, another figure or a slide -- as shapes
   // drawn over it; parts of a figure as parts.
   const pasteClip = (clip) => (clip?.what === "shapes" ? shapes.paste(clip) : clip?.parts ? figure.paste(clip.parts) : null);
@@ -726,10 +745,12 @@ export function mount(studio, main) {
   const uncopied = (cut = false) => { const why = figure.uncopied(cut); if (why) toast(why, { icon: "info", seconds: 3 }); };
   const ownsClip = () => studio.active && !typingNow() && !wordsChosen() && Boolean(figure.model);
   function clipChosen(cut) {
-    const clip = clipOf();
+    const clip = clipOf() || (cut ? null : wholeFigure());
     if (!clip) { uncopied(cut); return; }
-    clipboard = clip;
-    navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
+    // (The whole figure is pasted onto a slide, not into a figure: none to paste here.)
+    clipboard = clip.what === "block" ? null : clip;
+    const wrote = navigator.clipboard?.writeText(plainOf(clip)).catch(() => {});
+    copyOut(studio, drawingOf(clip), wrote);
     if (cut) cutAway(clip); else copied(clip);
   }
   const cutAway = (clip) => (clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
@@ -739,13 +760,14 @@ export function mount(studio, main) {
     { icon: "copy", label: "Copy", keys: "⌘C", disabled: !clipOf(), run: () => clipChosen(false) },
     { icon: "paste", label: "Paste", keys: "⌘V", disabled: !clipboard, run: () => clipboard && pasteClip(clipboard) },
   ];
-  function copyNow(event) {
-    const clip = ownsClip() ? clipOf() : null;
+  function copyNow(event, cut = false) {
+    const clip = ownsClip() ? clipOf() || (cut ? null : wholeFigure()) : null;
     if (!clip) return null;
     event.preventDefault();
-    clipboard = clip;
+    clipboard = clip.what === "block" ? null : clip;
     event.clipboardData?.setData(CLIP, JSON.stringify(clip));
     event.clipboardData?.setData("text/plain", plainOf(clip));
+    copyOut(studio, drawingOf(clip));
     return clip;
   }
   document.addEventListener("copy", (event) => {
@@ -755,7 +777,7 @@ export function mount(studio, main) {
   });
   document.addEventListener("cut", (event) => {
     keyed = null;
-    const clip = copyNow(event);
+    const clip = copyNow(event, true);
     if (clip) cutAway(clip); else if (ownsClip()) uncopied(true);
   });
   document.addEventListener("paste", async (event) => {
@@ -766,13 +788,25 @@ export function mount(studio, main) {
     try { clip = JSON.parse(data?.getData(CLIP) || "null"); } catch { clip = null; }
     // A clipboard that keeps only words: what was copied here, if they are its words.
     if (!clip && clipboard && data?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
+    // (Copied in another of the studio's documents, where the clipboard keeps its words alone.)
+    if (!clip) clip = copiedHere(data);
     if (clip?.what === "parts" && clip.parts?.top?.length) { event.preventDefault(); figure.paste(clip.parts); return; }
     if (clip?.what === "shapes" && Array.isArray(clip.shapes) && clip.shapes.length) { event.preventDefault(); shapes.paste(clip); return; }
+    // Flexo's own copy of what a figure does not take (an object, a slide): nothing pasted --
+    // never the picture of it the clipboard has for other apps.
+    if (clip) return;
     // Pictures and structure files copied elsewhere are added after what is chosen -- and a
     // drawing (Inkscape's) as its SVG, not as the picture of it the web view hands over.
-    const files = [...(data?.files || [])], drawing = pastedDrawing(data);
+    const files = [...(data?.files || [])], drawing = pastedDrawing(data), own = pastedOwn(data);
     if (!drawing && !files.length) return;
     event.preventDefault();
+    // Copied in a window of another folder: what it is, not the picture beside it.
+    const theirs = await own;
+    if (theirs) {
+      if (theirs.what === "parts" && theirs.parts?.top?.length) figure.paste(theirs.parts);
+      else if (theirs.what === "shapes" && Array.isArray(theirs.shapes) && theirs.shapes.length) shapes.paste(theirs);
+      return;
+    }
     const drawn = await drawing;
     if (drawn || files.length) await addFiles(drawn ? [drawn] : files);
   });
@@ -969,6 +1003,8 @@ export function mount(studio, main) {
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
     ...(!typingNow() && clipOf() ? [{ icon: "cut", label: `Cut ${clipName(clipOf())}`, keys: "⌘X", run: () => clipChosen(true) },
       { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),
+    // Nothing chosen: the whole figure, for a slide or another app.
+    ...(!typingNow() && !clipOf() && wholeFigure() ? [{ icon: "copy", label: "Copy Figure", keys: "⌘C", run: () => clipChosen(false) }] : []),
     ...(!typingNow() && clipboard ? [{ icon: "paste", label: `Paste ${clipName(clipboard)}`, keys: "⌘V", run: () => pasteClip(clipboard) }] : []),
     // What is drawn over the figure: every kind to draw, and what those chosen can do
     // (overlay.js) -- the Mac app's Insert › Shapes and Arrange run them by these names.

@@ -331,6 +331,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"file": workspace.duplicate(name, str(data.get("to") or ""), who).name})
         elif route == "/api/export":
             self._export(workspace.open(name), data)
+        elif route == "/api/copy":
+            # What the page copies, drawn for other apps: its picture and its SVG.
+            from flexo.studio import copying
+
+            self._json(copying.answer(workspace, data))
         elif route == "/api/act":
             # An edit the page asks the document's kind to make (a figure's parts added,
             # connected, renamed): the kind answers with the document as it would be.

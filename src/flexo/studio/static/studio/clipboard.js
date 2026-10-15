@@ -30,3 +30,17 @@ export function pastedDrawing(data) {
   return Promise.resolve(app.clipboard_drawing()).then((svg) => (svg ? svgFile(svg) : null), () => null);
 }
 const svgFile = (svg) => new File([svg], "image.svg", { type: "image/svg+xml" });
+
+// Flexo's own copy a paste brings from a studio window of another folder (another page,
+// which the web view does not give what that one copied, only its words and the picture the
+// Mac app put beside them): in the Mac app, a promise of that copy (null if the clipboard's
+// drawing is not Flexo's) -- or null at once, where the paste brings no picture alone.
+// Pasted, it is what it is, never that picture.
+export function pastedOwn(data) {
+  const app = globalThis.pywebview?.api;
+  const files = [...(data?.files || [])];
+  if (!app?.clipboard_own || !files.length || !files.every((file) => PICTURE.test(file.name))) return null;
+  return Promise.resolve(app.clipboard_own()).then((words) => {
+    try { return words ? JSON.parse(words) : null; } catch { return null; }
+  }, () => null);
+}
