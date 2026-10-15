@@ -6282,6 +6282,8 @@ export function figureParts(host) {
   // and its arrowheads, each a share of its theme's: for one figure drawn tighter than the
   // rest. In its panel, and in the panel of the slide it is on (the deck asks for them).
   function sizes() {
+    // (None till the figure is read: a figure just put on a slide is chosen before it is.)
+    if (!model()) return null;
     return h("div.section", {}, h("div.section-title", {}, "Sizes"),
       fields(catalog.figure_fields.filter((field) => field.sized), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure-sizes"));
   }

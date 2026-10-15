@@ -54,7 +54,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   const list = () => waiting?.list || drawn();
   const writtenNow = () => waiting?.written || (Array.isArray(figure.model?.shapes) ? figure.model.shapes : []);
   const boxes = () => info.boxes || {};
-  const svg = () => page.querySelector(":scope > svg");
+  const svg = () => page.querySelector(":scope > svg:not(.shape-layer)");
   const nameOf = (id) => (figure.typeOf(id) ? figure.nameOf(id) : id);
 
   // -- what the figure holds, a shape may be glued to, put on or drawn round --

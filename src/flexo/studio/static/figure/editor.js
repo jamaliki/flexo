@@ -109,8 +109,12 @@ export function mount(studio, main) {
   let kept = null, putKept = () => {};
 
   // -- the drawing's parts, edited --
+  // The figure's drawing: the page's own <svg>, never the layer the shapes drawn over it are
+  // edited on (shapes.js), which may be in the page before the drawing is -- sized as the
+  // drawing, it would stay that size, too small to press a shape on.
+  const drawingOf = () => page.querySelector(":scope > svg:not(.shape-layer)");
   const elementOf = (id) => {
-    const svg = page.querySelector("svg");
+    const svg = drawingOf();
     // (Asked for by its id, not by going through every element that has one: a molecule
     // drawn as shapes has thousands.)
     return (svg && id != null && svg.querySelector(`[id="${CSS.escape(String(id))}"]`)) || null;
@@ -259,7 +263,7 @@ export function mount(studio, main) {
   }
   const zoomBy = (factor, at = null) => setZoom((state.zoom ?? fitScale()) * factor, at);
   function fitPage() {
-    const svg = page.querySelector("svg");
+    const svg = drawingOf();
     if (!svg) return;
     const scale = state.zoom ?? fitScale();
     svg.style.width = `${natural.width * scale}px`;
@@ -338,7 +342,7 @@ export function mount(studio, main) {
     try {
       const picture = new Image();
       await new Promise((loaded, failed) => { picture.onload = loaded; picture.onerror = failed; picture.src = address; });
-      const most = (page.querySelector("svg")?.viewBox?.baseVal?.width || 0) / 2;
+      const most = (drawingOf()?.viewBox?.baseVal?.width || 0) / 2;
       return most && picture.naturalWidth * 0.75 > most ? `${Math.round(most)}pt` : null;
     } catch { return null; } finally { URL.revokeObjectURL(address); }
   }
@@ -881,14 +885,14 @@ export function mount(studio, main) {
     showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
-      if (!page.querySelector("svg")) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
+      if (!drawingOf()) clear(stage, h("div.fig-empty", {}, icon("warning"), "Nothing to show yet"));
       page.style.opacity = "0.45";
       return;
     }
     page.style.opacity = "";
     const before = figure.landing();
     page.innerHTML = drawn.svg.replace(/^<\?xml[^>]*>\s*/, "");
-    const svg = ownResources(page.querySelector("svg"));
+    const svg = ownResources(drawingOf());
     widenLines(svg);
     page.append(hover, marks);
     const view = svg.viewBox.baseVal;
