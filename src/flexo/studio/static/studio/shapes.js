@@ -15,7 +15,9 @@
 // Everything moves on the page at once, drawn here (freeform.js) as the page will draw it;
 // the page's own drawing takes its place as it comes. The pen draws a path point by point, a
 // path's points are edited where it is (a double-click, Edit Points), any shape is made a path
-// (Make Editable) and shapes are combined into one (pathtools.js, pathops.js).
+// (Make Editable) and shapes are combined into one (pathtools.js, pathops.js). A group
+// double-clicked is entered, as Inkscape's is: its shapes are then chosen and edited one by one,
+// written back into it; Ungroup All takes groups apart at every level (groups.js).
 
 import { h, icon, ui, menu, popover, closeMenu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
@@ -26,6 +28,7 @@ import * as O from "/static/studio/pathops.js";
 import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
 import * as Snap from "/static/studio/snapping.js";
+import { groupTools } from "/static/studio/groups.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -122,6 +125,10 @@ export function plainWords({ value = "", placeholder = "" } = {}) {
 //   a group taken apart, says of those), commands(picks, name) and panel(picks, specs, set)
 //   (the page's own commands and settings for the shapes chosen).
 export function shapeEditor(host) {
+  // A group entered, as Inkscape's (groups.js): the page's host seen from inside it -- its list
+  // the group's shapes, its edits written back into the group.
+  const groups = groupTools(host);
+  host = groups.host;
   const studio = host.studio;
   const catalog = host.catalog || studio.catalog?.shapes || {};
   const verb = host.verb || "Add";
@@ -142,6 +149,12 @@ export function shapeEditor(host) {
   const handles = S("g", { class: "shape-handles" });
   layer.append(previews, marks, guides, handles);
   const tip = h("div.size-tip.shape-tip", { hidden: true });
+  groups.bind({ S, h, icon, ui, layer, before: marks, pageNode: () => page(), stage: () => host.stage, toScreen: (point) => toScreen(point), unit: () => unit(),
+    list: () => shapesOf(), chosen: () => chosenNow(), choose: (indices, options) => choose(indices, options), union: (indices) => unionOf(indices),
+    hit: (event) => shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }), busy: () => Boolean(gesture?.started),
+    settle: () => { closeWords(); if (tools?.points.active()) tools.points.leave({ quiet: true }); hovered = null; nudged = null; },
+    place: () => place(), renderInspector: () => host.renderInspector(), reportFocus: () => host.reportFocus(), edit: (mutate, label, options) => edit(mutate, label, options),
+    ungrouped: (group, child) => host.ungrouped?.(group, child), label: (spec) => shapeLabel(spec), crumb: () => (host.crumb ? host.crumb() : `Slide ${slideIndex() + 1}`) });
 
   // -- the page, its shapes, and where they are --
 
@@ -186,6 +199,8 @@ export function shapeEditor(host) {
       if (item.kind === "group") walk(item.shapes || [], [...path, n]);
     });
     walk(list, []);
+    // (Inside a group, the page's other names are taken too: groups.js.)
+    for (const name of groups.names()) if (!found.has(name)) found.set(name, null);
     return found;
   };
   const measured = (index, path = []) => {
@@ -257,6 +272,8 @@ export function shapeEditor(host) {
     const said = entry.shapes;
     const picks = (undone ? said.before : said.after) || [];
     if (said.slide !== slideIndex()) host.goTo?.(said.slide);
+    // (Inside the group it was made in, while that is there: groups.js.)
+    if (!groups.restore(said, picks)) { chosen = []; chosenOn = slideIndex(); return; }
     chosen = picks.filter((index) => index < shapesOf().length);
     chosenOn = slideIndex();
     if (chosen.length) host.leaveOthers();
@@ -337,6 +354,8 @@ export function shapeEditor(host) {
     marks.replaceChildren();
     handles.replaceChildren();
     if (!page()) return;
+    // (A group entered: framed and named, or left once it is gone -- groups.js.)
+    if (groups.update()) return;
     if (words) placeWords();
     // (A path's points being edited: they are what is shown.)
     if (tools?.points.active()) { tools.points.place(); return; }
@@ -561,7 +580,8 @@ export function shapeEditor(host) {
     if (tool?.kind === "path") { paths().pen.press(event); event.shapes = true; return true; }
     if (tool) { startDraw(event); event.shapes = true; return true; }
     if (event.target.closest?.(".shape-handle")) return true;
-    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
+    // (Inside a group, a shape outside it is chosen at its own level; nothing, every group left.)
+    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }) ?? groups.outward(event);
     if (index === null) return false;
     event.shapes = true;
     const picks = chosenNow();
@@ -585,9 +605,11 @@ export function shapeEditor(host) {
   function leave() { if (hovered !== null) { hovered = null; place(); } }
   function dblclick(event) {
     if (tools?.points.active()) return tools.points.dblclick(event);
-    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
+    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }) ?? groups.outward(event);
     if (index === null) return false;
     const spec = shapesOf()[index];
+    // A group double-clicked is entered, what is under the pointer in it chosen (groups.js).
+    if (spec?.kind === "group" && groups.enter(index, { at: event })) return true;
     if (!spec || spec.kind === "group" || spec.locked) return true;
     // A path double-clicked: its points, to edit (its words by Return, or Edit Text).
     if (spec.kind === "path") { choose([index]); paths().points.start(index); return true; }
@@ -596,7 +618,7 @@ export function shapeEditor(host) {
     return true;
   }
   function context(event) {
-    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) });
+    const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }) ?? groups.outward(event);
     if (index === null) return false;
     if (!chosenNow().includes(index)) choose([index]);
     menu({ x: event.clientX, y: event.clientY }, menuItems());
@@ -681,6 +703,8 @@ export function shapeEditor(host) {
     const was = finish();
     if (was.type === "draw") { commitDraw(was, event); return; }
     if (!was.started) {
+      // ⌥-click: the shape under the pointer however deep in groups (groups.js).
+      if (was.type === "move" && event.altKey && groups.deepPick(event)) { host.swallowRelease(); return; }
       // A press let go where it was: what it was on is chosen alone.
       if (was.type === "move" && was.on !== undefined && chosenNow().length > 1) choose([was.on]);
       host.swallowRelease();
@@ -1408,6 +1432,8 @@ export function shapeEditor(host) {
   function key(event) {
     const mod = event.metaKey || event.ctrlKey, k = event.key;
     if (tool && k === "Escape") { disarm(); return true; }
+    // (Return into a group chosen; inside one, Esc out of it and ⌘A all of it: groups.js.)
+    if (groups.key(event)) return true;
     const picks = chosenNow();
     if (!picks.length) return false;
     if (mod && !event.altKey && k.toLowerCase() === "g" && !event.shiftKey) { group(); return true; }
@@ -1762,6 +1788,8 @@ export function shapeEditor(host) {
       // tool's name: the pen.)
       for (const kind of F.KINDS.filter((each) => each !== "inset")) out.push({ icon: kind === "path" ? "pen" : "shape", label: `${verb} ${toolName(kind)}`, also: verb === "Draw" ? [] : [`Draw ${toolName(kind)}`], hint: kind === "path" ? `Click and drag on the ${noun}, point by point` : `Drag on the ${noun} to draw it`, run: () => arm(kind) });
     }
+    // (Enter Group, Ungroup All, Leave Group: groups.js.)
+    out.push(...groups.commands());
     const picks = chosenNow();
     if (!picks.length || words) return out;
     const name = picks.length === 1 ? shapeLabel(shapesOf()[picks[0]]) : plural(picks.length);
@@ -1792,7 +1820,8 @@ export function shapeEditor(host) {
       ...(one && one.kind !== "group" && !locked ? [{ icon: "pencil", label: one.text ? "Edit Text" : "Add Text", hint: name, run: () => editWords(picks[0], { selectAll: true }) }] : []),
       ...pathCommands(picks, name, locked),
     );
-    return out;
+    // (A group's shapes are never behind what the page holds: the group is, or not.)
+    return groups.depth() ? out.filter((command) => !behindNames.includes(command.label)) : out;
   }
   // What being behind what the page holds is called: Keynote's "slide content", a figure.
   const behindNames = host.behindNames || ["Send Behind Slide Content", "Bring Above Slide Content"];
@@ -1807,6 +1836,7 @@ export function shapeEditor(host) {
     items.push({ icon: "front", label: "Arrange", items: ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"].map(named) },
       { icon: "align-left", label: "Align", items: ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map(named) });
     const rest = ["Group", "Ungroup", "Lock", "Unlock", "Flip Horizontally", "Flip Vertically"].map(named).filter(Boolean);
+    rest.splice(rest.findIndex((item) => item.label === "Lock" || item.label === "Unlock"), 0, ...groups.menuItems(named));
     // (A path's points, any shape as a path, shapes combined into one.)
     const outlined = ["Edit Points", "Make Editable", ...COMBINED.map(([, label]) => label)].map(named).filter(Boolean);
     if (outlined.length) rest.push("-", ...outlined);
@@ -1851,9 +1881,9 @@ export function shapeEditor(host) {
     const glyph = (head, start) => { const node = icon(`head-${head === "open" ? "open" : head}`); if (start) node.style.transform = "scaleX(-1)"; return node; };
     const headOptions = (start) => F.HEADS.map((head) => ({ value: head, label: { none: "None", triangle: "Triangle", open: "Open", stealth: "Stealth", dot: "Dot", circle: "Circle", bar: "Bar", diamond: "Diamond" }[head], icon: `head-${head}` }));
     const sections = [];
-    const leave = () => { clear(); };
+    const leave = () => { if (!groups.leave()) clear(); };
     sections.push(h("div.section.block-top", {},
-      h("div.crumbs", {}, h("button.crumb", { type: "button", onclick: leave }, host.crumb ? host.crumb() : `Slide ${slideIndex() + 1}`), icon("chevron"), h("span.crumb.here", {}, icon("shape"), name)),
+      h("div.crumbs", {}, h("button.crumb", { type: "button", onclick: leave }, host.crumb ? host.crumb() : `Slide ${slideIndex() + 1}`), ...groups.crumbs(), icon("chevron"), h("span.crumb.here", {}, icon("shape"), name)),
       h("div.block-actions", { dataset: { head: "" } },
         ui.button("", () => order("front"), { kind: "ghost", small: true, icon: "front", title: "Bring to Front (⇧⌘F)" }),
         ui.button("", () => order("back"), { kind: "ghost", small: true, icon: "back", title: "Send to Back (⇧⌘B)" }),
@@ -2027,8 +2057,9 @@ export function shapeEditor(host) {
       out.push(h("div.row", {}, ui.button("Group", () => group(), { small: true, icon: "layout", title: "Group (⌘G)" })));
     }
     if (picks.some((index) => shapesOf()[index]?.kind === "group")) out.push(h("div.row", {}, ui.button("Ungroup", () => ungroup(), { small: true, icon: "layout", title: "Ungroup (⇧⌘G)" })));
+    out.push(...groups.panelRows(picks));
     // (Where the page's own settings have it -- a figure's, In Front or Behind -- not here.)
-    if (!host.behindInPanel) out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.behind), label: host.behindLabel || "Behind Slide Content", key: "shape.behind",
+    if (!host.behindInPanel && !groups.depth()) out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.behind), label: host.behindLabel || "Behind Slide Content", key: "shape.behind",
       onChange: (on) => set({ behind: on }, on ? behindNames[0] : behindNames[1]) }));
     out.push(ui.toggle({ value: picks.every((index) => shapesOf()[index]?.locked), label: "Locked", key: "shape.locked", onChange: (on) => lock(on) }));
     return out;
@@ -2044,12 +2075,23 @@ export function shapeEditor(host) {
   }
 
   return {
-    press, hover, leave, dblclick, context, key, place, drawn, panel, commands, menuItems, clip, paste, touched,
+    press, hover, leave, dblclick, context, key, place, drawn, panel, commands, menuItems, clip, paste,
     // (Where a point on the screen is on the page, in the shapes' units: a paste's place.)
     pointAt: (x, y) => screenToFrame(x, y),
-    choose, clear, restore, arm, disarm, chooser, remove, duplicate, group, ungroup, align, distribute, order, flip, lock, copyStyle, pasteStyle,
-    chosen: chosenNow,
-    list: shapesOf,
+    restore, arm, disarm, chooser, remove, duplicate, group, ungroup, align, distribute, order, flip, lock, copyStyle, pasteStyle,
+    // The page's own calls are of its own shapes: those it chooses, a band across it, none
+    // chosen -- out of any group entered -- and what is chosen as it holds them (inside a
+    // group, that group); the ids of those chosen where they are, as drawn (groups.js).
+    choose: (indices, options) => { groups.leave({ quiet: true }); choose(indices, options); },
+    clear: (options = {}) => { if (!groups.leave(options)) clear(options); },
+    touched: (...box) => { groups.leave({ quiet: true }); return touched(...box); },
+    chosen: () => (groups.depth() ? [groups.path()[0]] : chosenNow()),
+    list: () => groups.top(),
+    ids: () => chosenNow().map((index) => idOf(index)),
+    enter: (index, options) => { groups.leave({ quiet: true }); return groups.enter(index, options); },
+    entered: () => groups.path(),
+    leaveGroup: () => groups.out(),
+    ungroupAll: () => groups.ungroupAll(),
     set,
     any: () => chosenNow().length > 0,
     busy: () => Boolean(gesture?.started || drawingNow || tools?.pen.drawing() || tools?.points.busy()),

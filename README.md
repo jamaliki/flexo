@@ -855,6 +855,20 @@ and a part's handles snap only with ⌘ too. A shape drawn on a part is put on i
 with it; its panel's **Moves With** chooses
 another part, or none, and **Drawn** puts it in front of the parts or behind them.
 
+A group of shapes -- one made with ⌘G, or a drawing pasted from Inkscape, with its groups
+inside it -- is entered as Inkscape enters one: double-click it (or choose it and press
+Return, or Enter Group in its right-click menu and the palette). Its shapes are then the
+figure's to click, drag, size, turn, restyle, retype, copy, nudge, lock and delete one by
+one, each change written back into the group as one step; a group in it is entered by another
+double-click, and ⌥-click chooses the shape under the pointer however deep in groups it is. A
+dotted frame shows the group, and a chip over the page names where one is (Figure › Group
+› Group): each level a way back to it, ✕ out a level. Esc steps out a level once nothing in
+it is chosen, the group then chosen; a click on empty space, or a double-click, leaves it,
+and a click on a shape outside it chooses that one instead. Undo and redo stay inside.
+**Ungroup All** (the right-click menu, the palette, the Mac app's Arrange menu) takes the
+groups chosen apart at every level at once; a shape in a group may be written
+`locked: true`, as one on the figure may.
+
 ### A shape's words, and a picture's crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,
