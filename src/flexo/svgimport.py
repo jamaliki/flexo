@@ -545,9 +545,9 @@ def _declarations(text: str) -> dict[str, str]:
 
 @dataclass(slots=True)
 class _Rule:
-    selector: list[tuple[str, str | None, tuple[str, ...]]]
-    """Compound selectors, outermost first: (tag or ``*``, id, classes), each a descendant
-    of the one before."""
+    selector: list[tuple[str, str | None, tuple[str, ...], bool]]
+    """Compound selectors, outermost first: (tag or ``*``, id, classes, whether it is a child
+    of the one before rather than anywhere in it)."""
     specificity: tuple[int, int, int]
     order: int
     declarations: dict[str, str]
@@ -601,7 +601,13 @@ def _rules(text: str, start: int = 0) -> list[_Rule]:
 def _selector(text: str) -> tuple[list, tuple[int, int, int]] | None:
     parts = []
     ids = classes = tags = 0
-    for word in text.replace(">", " ").split():
+    # (Each compound after the first says how it stands to the one before: ">" its child,
+    # else anywhere in it.)
+    child = False
+    for word in text.replace(">", " > ").split():
+        if word == ">":
+            child = True
+            continue
         found = _COMPOUND.match(word)
         if not found:
             return None
@@ -618,12 +624,13 @@ def _selector(text: str) -> tuple[list, tuple[int, int, int]] | None:
                 classes += 1
         if tag != "*":
             tags += 1
-        parts.append((tag.split(":")[-1], ident, tuple(names)))
+        parts.append((tag.split(":")[-1], ident, tuple(names), child))
+        child = False
     return (parts, (ids, classes, tags)) if parts else None
 
 
-def _matches_one(part: tuple[str, str | None, tuple[str, ...]], element: ET.Element) -> bool:
-    tag, ident, names = part
+def _matches_one(part: tuple, element: ET.Element) -> bool:
+    tag, ident, names = part[:3]
     if tag != "*" and _local(element.tag) != tag:
         return False
     if ident is not None and element.get("id") != ident:
@@ -1031,11 +1038,16 @@ class _Reader:
         if not _matches_one(parts[-1], element):
             return False
         at = self.parents.get(element)
-        for part in reversed(parts[:-1]):
-            while at is not None and not _matches_one(part, at):
-                at = self.parents.get(at)
-            if at is None:
-                return False
+        for index in range(len(parts) - 2, -1, -1):
+            part, child = parts[index], parts[index + 1][3]
+            if child:
+                if at is None or not _matches_one(part, at):
+                    return False
+            else:
+                while at is not None and not _matches_one(part, at):
+                    at = self.parents.get(at)
+                if at is None:
+                    return False
             at = self.parents.get(at)
         return True
 

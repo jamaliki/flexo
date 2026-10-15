@@ -378,6 +378,17 @@ def test_style_sheet_attributes_and_inheritance() -> None:
     assert fills == ["#0000ff", "#00ff00", "#ff00ff", "#0000ff", "#abcdef", "#333333"]
     inherited = leaves(made)[4]
     assert inherited["line"] == "ink" and inherited["line_width"] == 5.0
+    # A child, not anywhere in it: ">".
+    nested = shapes_of(
+        svg(
+            '<g id="a"><rect width="5" height="5" fill="red"/><g><rect x="9" width="5" height="5" '
+            'fill="red"/></g></g>',
+            head="<style>#a > rect{stroke:#000000;stroke-dasharray:3,2}</style>",
+        ),
+        scale=4 / 3,
+    ).shapes
+    first, second = leaves(nested)
+    assert first["dash"] == [3.0, 2.0] and second["line"] == "none"
 
 
 def test_opacities_dashes_caps_joins_and_fill_rules() -> None:
