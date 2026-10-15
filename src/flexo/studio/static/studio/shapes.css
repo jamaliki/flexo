@@ -32,6 +32,21 @@
 .row.heads { gap: 8px; align-items: end; }
 .row.heads .field { flex: 1; }
 .arrange-row { gap: 2px; flex-wrap: wrap; }
+/* Align and Distribute (aligntools.js): what they are aligned to, the sides, beside, spread, a
+   gap, a grid; shown by ⇧⌘A with a moment's glow. */
+.align-section .align-label { font: var(--text-label); color: var(--ink-2); margin-bottom: -6px; }
+.align-section .align-gap { gap: 2px; align-items: end; }
+.align-section .align-gap .field { flex: 1; min-width: 0; margin-right: 6px; }
+.align-section.shown { animation: align-shown 0.9s ease-out; border-radius: 8px; }
+@keyframes align-shown { from { box-shadow: 0 0 0 3px var(--accent-soft, rgba(10, 132, 255, 0.25)); } to { box-shadow: 0 0 0 3px transparent; } }
+.grid-sheet { display: grid; gap: 12px; min-width: 300px; }
+.grid-sheet .row { gap: 12px; }
+.grid-sheet .row .field { flex: 1; }
+.grid-cell { display: grid; gap: 6px; }
+/* The equal spacing a drag catches at: each gap as wide, marked, its size beside it. */
+.shape-spacing line { stroke: #d6336c; }
+.shape-spacing-tag { fill: #d6336c; }
+.shape-spacing-words { fill: #ffffff; font-family: var(--font); font-weight: 600; }
 /* The size or turn a drag makes, by the pointer. */
 .shape-layer + .size-tip, .size-tip.shape-tip { position: absolute; z-index: 30; pointer-events: none; white-space: nowrap; font: 600 11px/18px var(--font); color: var(--accent-ink, #fff); background: var(--accent); padding: 0 8px; border-radius: 99px; box-shadow: var(--shadow-2); }
 /* Words typed in a shape where the page has no editor of its own for them (a figure's): a

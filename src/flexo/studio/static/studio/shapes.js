@@ -15,7 +15,10 @@
 // Everything moves on the page at once, drawn here (freeform.js) as the page will draw it;
 // the page's own drawing takes its place as it comes. The pen draws a path point by point, a
 // path's points are edited where it is (a double-click, Edit Points), any shape is made a path
-// (Make Editable) and shapes are combined into one (pathtools.js, pathops.js).
+// (Make Editable) and shapes are combined into one (pathtools.js, pathops.js). Moved, a shape
+// also catches where it is as far from its neighbours as they are apart, each gap as wide
+// marked; and those chosen are aligned and spaced as Inkscape's Align and Distribute does it
+// (aligntools.js, aligning.js).
 
 import { h, icon, ui, menu, popover, closeMenu, toast } from "/static/studio/studio.js";
 import * as F from "/static/studio/freeform.js";
@@ -26,6 +29,8 @@ import * as O from "/static/studio/pathops.js";
 import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
 import * as Snap from "/static/studio/snapping.js";
+import * as Align from "/static/studio/aligning.js";
+import { alignTools, nearer, drawSpacing } from "/static/studio/aligntools.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -120,7 +125,8 @@ export function plainWords({ value = "", placeholder = "" } = {}) {
 //   the inspector's way back up names it), ownKeys (what a shape on it says besides how it is
 //   drawn), grouped(specs) and ungrouped(group) (what a group made of shapes, and each shape of
 //   a group taken apart, says of those), commands(picks, name) and panel(picks, specs, set)
-//   (the page's own commands and settings for the shapes chosen).
+//   (the page's own commands and settings for the shapes chosen);
+// - showPanel() (its inspector shown, if it was hidden: Align and Distribute's ⇧⌘A).
 export function shapeEditor(host) {
   const studio = host.studio;
   const catalog = host.catalog || studio.catalog?.shapes || {};
@@ -129,6 +135,7 @@ export function shapeEditor(host) {
   const glueKey = host.glueKey || "object";
   const ownKeys = host.ownKeys || [];
   let chosen = [];
+  let picked = [];
   let chosenOn = -1;
   let tool = null;
   let gesture = null;
@@ -233,6 +240,8 @@ export function shapeEditor(host) {
   function choose(indices, { quiet = false } = {}) {
     closeWords();
     chosen = [...new Set(indices)].filter((index) => Number.isInteger(index)).sort((a, b) => a - b);
+    // (And the order they were chosen in, for Align's first and last chosen: aligntools.js.)
+    picked = [...picked.filter((index) => chosen.includes(index)), ...indices.filter((index, n) => chosen.includes(index) && !picked.includes(index) && indices.indexOf(index) === n)];
     chosenOn = slideIndex();
     if (tools?.points.active() && !chosen.includes(tools.points.index())) tools.points.leave({ quiet: true });
     if (chosen.length) host.leaveOthers();
@@ -703,7 +712,7 @@ export function shapeEditor(host) {
   // shapes and objects not being dragged.
   function snapTargets(moving) {
     const [x0, y0, width, height] = frameOf();
-    const xs = [x0, x0 + width / 2, x0 + width], ys = [y0, y0 + height / 2, y0 + height];
+    const xs = [x0, x0 + width / 2, x0 + width], ys = [y0, y0 + height / 2, y0 + height], boxes = [];
     // (Nor a line glued to what moves: it moves with it.)
     const names = new Set(moving.flatMap((index) => namesIn(shapesOf()[index])));
     const glued = (spec) => F.family(spec.kind) === "line" && [spec.from, spec.to].some((end) => isEnd(end) && names.has(String(end.shape)));
@@ -713,13 +722,16 @@ export function shapeEditor(host) {
       if (!box) return;
       xs.push(box[0], (box[0] + box[2]) / 2, box[2]);
       ys.push(box[1], (box[1] + box[3]) / 2, box[3]);
+      // (Spaced among, all but lines: aligning.js.)
+      if (F.family(spec.kind) !== "line") boxes.push(box);
     });
     for (const object of objectsNow().values()) {
       const [x, y, w, h] = object.box;
       xs.push(x, x + w / 2, x + w);
       ys.push(y, y + h / 2, y + h);
+      boxes.push([x, y, x + w, y + h]);
     }
-    return { xs, ys };
+    return { xs, ys, boxes };
   }
   // The nearest of `values` to any of `mine` within reach: how far to move to it, and where.
   function catchAt(mine, values) {
@@ -758,10 +770,17 @@ export function shapeEditor(host) {
     if (event.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
     if (!free && g.box) {
       const [x0, y0, x1, y1] = g.box;
-      const across = event.shiftKey && dx === 0 ? null : catchAt([x0 + dx, (x0 + x1) / 2 + dx, x1 + dx], g.targets.xs);
-      const down = event.shiftKey && dy === 0 ? null : catchAt([y0 + dy, (y0 + y1) / 2 + dy, y1 + dy], g.targets.ys);
-      if (across) { dx += across.gap; guide("x", across.at); }
-      if (down) { dy += down.gap; guide("y", down.at); }
+      let across = event.shiftKey && dx === 0 ? null : catchAt([x0 + dx, (x0 + x1) / 2 + dx, x1 + dx], g.targets.xs);
+      let down = event.shiftKey && dy === 0 ? null : catchAt([y0 + dy, (y0 + y1) / 2 + dy, y1 + dy], g.targets.ys);
+      // Or, the nearer, where it sits as far from its neighbours as they are apart (aligning.js:
+      // what does not move looked at once, as the drag starts).
+      const even = (g.spacing ||= Align.spacing(g.targets.boxes || [])).caught([x0 + dx, y0 + dy, x1 + dx, y1 + dy], NEAR / unit(), { x: !(event.shiftKey && dx === 0), y: !(event.shiftKey && dy === 0) });
+      [across, even.x] = nearer(across, even.x);
+      [down, even.y] = nearer(down, even.y);
+      if (across) { dx += across.gap; guide("x", across.at); } else if (even.x) dx += even.x.shift;
+      if (down) { dy += down.gap; guide("y", down.at); } else if (even.y) dy += even.y.shift;
+      const now = [x0 + dx, y0 + dy, x1 + dx, y1 + dy];
+      drawSpacing(guides, [...g.spacing.marks(even.x, now), ...g.spacing.marks(even.y, now)], 1 / unit(), S);
     }
     g.dx = dx; g.dy = dy;
     g.copy = event.altKey;
@@ -1404,6 +1423,8 @@ export function shapeEditor(host) {
     if (mod && !event.altKey && k.toLowerCase() === "g" && !event.shiftKey) { group(); return true; }
     if (mod && k.toLowerCase() === "g" && event.shiftKey) { ungroup(); return true; }
     if (mod && k.toLowerCase() === "d") { duplicate(); return true; }
+    // ⇧⌘A, Inkscape's: Align and Distribute, in the inspector (aligntools.js).
+    if (mod && event.shiftKey && !event.altKey && k.toLowerCase() === "a") { arranging.reveal(); return true; }
     if (mod && k.toLowerCase() === "a") { choose(shapesOf().map((_, n) => n).filter((n) => shapesOf()[n])); return true; }
     if (mod && k.toLowerCase() === "l") { lock(!event.altKey); return true; }
     // ⌥⌘C and ⌥⌘V (by the key's place: ⌥ makes another letter of it): Copy and Paste Style.
@@ -1529,39 +1550,19 @@ export function shapeEditor(host) {
     if (!picks.length) return;
     edit((list) => { for (const index of picks) { if (on) list[index].locked = true; else delete list[index].locked; } }, on ? `Lock ${plural(picks.length)}` : `Unlock ${plural(picks.length)}`);
   }
-  // Each chosen shape moved so its side (or middle) is where the others' is: lined up with
-  // them, or -- one alone -- with the slide.
-  function align(side) {
-    const picks = chosenNow().filter((index) => !shapesOf()[index]?.locked);
-    if (!picks.length) return;
-    const [x0, y0, width, height] = frameOf();
-    const all = picks.length > 1 ? unionOf(picks) : [x0, y0, x0 + width, y0 + height];
-    const label = { left: "Align Left", centre: "Align Centre", right: "Align Right", top: "Align Top", middle: "Align Middle", bottom: "Align Bottom" }[side];
-    edit((list) => {
-      for (const index of picks) {
-        const box = boundsOf(index);
-        if (!box) continue;
-        const dx = side === "left" ? all[0] - box[0] : side === "right" ? all[2] - box[2] : side === "centre" ? (all[0] + all[2]) / 2 - (box[0] + box[2]) / 2 : 0;
-        const dy = side === "top" ? all[1] - box[1] : side === "bottom" ? all[3] - box[3] : side === "middle" ? (all[1] + all[3]) / 2 - (box[1] + box[3]) / 2 : 0;
-        list[index] = withPlaces(F.moved(list[index], round(dx), round(dy)));
-      }
-    }, label);
-  }
-  // Three or more chosen spaced evenly, across or down, the outermost staying where they are.
-  function distribute(way) {
-    const picks = chosenNow().filter((index) => !shapesOf()[index]?.locked);
-    if (picks.length < 3) return;
-    const across = way === "across";
-    const items = picks.map((index) => ({ index, box: boundsOf(index) })).filter((item) => item.box)
-      .sort((a, b) => (across ? a.box[0] - b.box[0] : a.box[1] - b.box[1]));
-    const start = across ? items[0].box[0] : items[0].box[1], end = across ? items.at(-1).box[2] : items.at(-1).box[3];
-    const sizes = items.map((item) => (across ? item.box[2] - item.box[0] : item.box[3] - item.box[1]));
-    const gap = (end - start - sizes.reduce((sum, size) => sum + size, 0)) / (items.length - 1);
-    let at = start;
-    const moves = items.map((item, n) => { const move = at - (across ? item.box[0] : item.box[1]); at += sizes[n] + gap; return { index: item.index, move }; });
-    edit((list) => { for (const { index, move } of moves) list[index] = withPlaces(F.moved(list[index], across ? round(move) : 0, across ? 0 : round(move))); },
-      across ? "Distribute Horizontally" : "Distribute Vertically");
-  }
+  // Align and Distribute (aligntools.js, its sums aligning.js's): those chosen lined up with
+  // what Relative to says -- their bounds, the first or last chosen, the biggest, the smallest,
+  // the page; one alone, the page -- or beside it; three or more spaced evenly (`way`: across,
+  // down, or by their edges or middles), a gap apart, or in a grid. Locked ones stay.
+  const arranging = alignTools({
+    picks: () => { const now = chosenNow(); return [...picked.filter((index) => now.includes(index)), ...now.filter((index) => !picked.includes(index))]; },
+    box: (index) => boundsOf(index), locked: (index) => shapesOf()[index]?.locked, name: (index) => shapeLabel(shapesOf()[index]),
+    frame: () => frameOf(), noun,
+    move: (list, index, dx, dy) => { list[index] = withPlaces(F.moved(list[index], round(dx), round(dy))); },
+    edit: (mutate, label) => edit(mutate, label), renderInspector: () => host.renderInspector(), showPanel: () => host.showPanel?.(),
+  });
+  function align(side) { return arranging.align(side); }
+  function distribute(way) { return arranging.distribute(way); }
   function flip(way) {
     const picks = chosenNow().filter((index) => !shapesOf()[index]?.locked);
     if (!picks.length) return;
@@ -1770,10 +1771,8 @@ export function shapeEditor(host) {
       ...(picks.length > 1 ? [{ icon: "layout", label: "Group", also: ["Group…"], keys: "⌘G", run: () => group() }] : []),
       ...(picks.some((index) => shapesOf()[index]?.kind === "group") ? [{ icon: "layout", label: "Ungroup", keys: "⇧⌘G", run: () => ungroup() }] : []),
       locked ? { icon: "unlock", label: "Unlock", keys: "⌥⌘L", hint: name, run: () => lock(false) } : { icon: "lock", label: "Lock", keys: "⌘L", hint: name, run: () => lock(true) },
-      ...[["left", "Align Left", "align-left"], ["centre", "Align Centre", "align-centre"], ["right", "Align Right", "align-right"], ["top", "Align Top", "align-top"],
-        ["middle", "Align Middle", "align-middle"], ["bottom", "Align Bottom", "align-bottom"]].map(([side, label, glyph]) => ({ icon: glyph, label, hint: picks.length > 1 ? name : `To the ${noun}`, run: () => align(side) })),
-      ...(picks.length > 2 ? [{ icon: "distribute-across", label: "Distribute Horizontally", hint: name, run: () => distribute("across") },
-        { icon: "distribute-down", label: "Distribute Vertically", hint: name, run: () => distribute("down") }] : []),
+      // Align and Distribute: the sides, beside, spread, a gap, a grid, Relative to (aligntools.js).
+      ...arranging.commands(name),
       { icon: "flip-across", label: "Flip Horizontally", hint: name, run: () => flip("horizontal") },
       { icon: "flip-down", label: "Flip Vertically", hint: name, run: () => flip("vertical") },
       // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V): how one is drawn, put on others.
@@ -1796,7 +1795,9 @@ export function shapeEditor(host) {
     if (one && one.kind !== "group" && !locked) items.push(named(one.text ? "Edit Text" : "Add Text"), "-");
     items.push(...host.clipItems(), named(`Duplicate ${picks.length === 1 ? shapeLabel(one) : plural(picks.length)}`), "-");
     items.push({ icon: "front", label: "Arrange", items: ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"].map(named) },
-      { icon: "align-left", label: "Align", items: ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map(named) });
+      { icon: "align-left", label: "Align", items: ["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map(named) },
+      // (And the rest of Align and Distribute, a menu of their own: aligntools.js.)
+      arranging.menuItem(plural(picks.length)));
     const rest = ["Group", "Ungroup", "Lock", "Unlock", "Flip Horizontally", "Flip Vertically"].map(named).filter(Boolean);
     // (A path's points, any shape as a path, shapes combined into one.)
     const outlined = ["Edit Points", "Make Editable", ...COMBINED.map(([, label]) => label)].map(named).filter(Boolean);
@@ -1908,6 +1909,8 @@ export function shapeEditor(host) {
         count === 1 && !specs[0].locked ? ui.button(specs[0].text ? "Edit Text" : "Add Text", () => editWords(picks[0], { selectAll: true }), { small: true, kind: "ghost", icon: "pencil" }) : null));
     }
     sections.push(h("div.section", {}, h("div.section-title", {}, "Arrange"), arrangeFields(picks, specs)));
+    // Align and Distribute, with what they are aligned to (aligntools.js).
+    sections.push(arranging.section());
     // The page's own settings for them: a slide's builds, a figure's part they move with.
     if (host.panel) sections.push(...host.panel(picks, specs, { set, edit, choose, slider }));
     return sections;
@@ -2008,13 +2011,8 @@ export function shapeEditor(host) {
       ui.button("", () => order("forward"), { kind: "ghost", small: true, icon: "up", title: "Bring Forward (⌥⇧⌘F)" }),
       ui.button("", () => order("backward"), { kind: "ghost", small: true, icon: "down", title: "Send Backward (⌥⇧⌘B)" }),
       ui.button("", () => order("back"), { kind: "ghost", small: true, icon: "back", title: "Send to Back (⇧⌘B)" })));
+    // (Aligned and spaced in a section of their own: Align and Distribute.)
     if (picks.length > 1) {
-      out.push(h("div.row.arrange-row", {}, [["left", "align-left", "Align Left"], ["centre", "align-centre", "Align Centre"], ["right", "align-right", "Align Right"],
-        ["top", "align-top", "Align Top"], ["middle", "align-middle", "Align Middle"], ["bottom", "align-bottom", "Align Bottom"]]
-        .map(([side, glyph, title]) => ui.button("", () => align(side), { kind: "ghost", small: true, icon: glyph, title }))));
-      if (picks.length > 2) out.push(h("div.row.arrange-row", {},
-        ui.button("Distribute Across", () => distribute("across"), { kind: "ghost", small: true, icon: "distribute-across" }),
-        ui.button("Down", () => distribute("down"), { kind: "ghost", small: true, icon: "distribute-down", title: "Distribute Vertically" })));
       out.push(h("div.row", {}, ui.button("Group", () => group(), { small: true, icon: "layout", title: "Group (⌘G)" })));
     }
     if (picks.some((index) => shapesOf()[index]?.kind === "group")) out.push(h("div.row", {}, ui.button("Ungroup", () => ungroup(), { small: true, icon: "layout", title: "Ungroup (⇧⌘G)" })));
