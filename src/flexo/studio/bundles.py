@@ -667,6 +667,52 @@ def _listed(names: list[str], most: int = 4) -> str:
     return shown + (f" and {len(names) - most} more" if len(names) > most else "")
 
 
+def new_bundle(target: Path, kind: str = "deck") -> Path:
+    """A new bundle at ``target`` (``.flexo`` added if it has no ending of a bundle's) holding a
+    new document of ``kind`` named as it is ("Untitled.flexo" holds "Untitled.yaml"), as a new
+    deck is made by default: one file, to keep and to send. Never over a file there."""
+
+    import tempfile
+
+    from flexo.studio import kinds
+
+    target = Path(target).expanduser()
+    if target.suffix.lower() != bundles.SUFFIX:
+        target = target.with_name(target.name + bundles.SUFFIX)
+    if target.exists():
+        raise FileExistsError(f"\u201c{target.name}\u201d already exists. Choose a different name.")
+    found = kinds()
+    made = found.get(kind)
+    if made is None:
+        raise ValueError(f"No kind of document called {kind}: kinds are {', '.join(found)}.")
+    with tempfile.TemporaryDirectory(prefix="flexo-new-") as aside:
+        document = Path(aside) / f"{_stem(target)}.yaml"
+        made.save(document, made.new(document))
+        return bundles.pack(document, target).path
+
+
+def open_beside(workspace: Any, target: Path) -> str:
+    """A bundle opened in a studio of its own, served by this process beside ``workspace``'s (a
+    browser's page opens it in a tab of its own), until ``workspace`` closes: its address."""
+
+    from flexo.studio import sessions
+    from flexo.studio.server import start
+
+    server, opened = start(target, browser=False, trusted=True)
+    threading.Thread(target=server.serve_forever, name=f"studio {target.name}", daemon=True).start()
+
+    def close() -> None:
+        try:
+            opened.close()
+        finally:
+            server.shutdown()
+            sessions.unregister(opened.root, server.server_address[1])
+            server.server_close()
+
+    workspace.on_close.append(close)
+    return str(opened.address)
+
+
 def unpack_beside(workspace: Any, folder: Path | None = None) -> Path:
     """The bundle the studio edits, written out as a plain folder: ``folder``, else one named
     as the bundle beside it (``talk``, ``talk 2``...). The folder."""

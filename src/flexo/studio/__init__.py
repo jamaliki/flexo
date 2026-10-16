@@ -161,6 +161,13 @@ class Kind(Protocol):
     #       by name (a figure's part added or connected), made by the kind.
     #   export_part(document, base, stem, part, formats) -> [Path]: one part of the
     #       document written out by itself (a figure on a slide), as export does.
+    #   bundled(document, base) -> document: the document as a bundle of it keeps it,
+    #       what it names beside it that belongs inside it written in (a deck's figure
+    #       files), as it is packed (flexo.bundle.pack).
+    #   figure_in(document, key) -> figure document | None and with_figure(document, key,
+    #       figure) -> document: a figure the document holds (a deck's, on a slide), read
+    #       and put back, for the figure editor to edit it in a tab of its own
+    #       (flexo.studio.embedded).
     #   theme_of(document) -> str | None and with_theme(document, theme, base) ->
     #       document: the theme a document is drawn in (a name, or a theme file named
     #       from its folder), read and set, so one theme can be put to use in many.

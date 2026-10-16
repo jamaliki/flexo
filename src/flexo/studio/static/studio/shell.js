@@ -85,7 +85,13 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 // A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
 // (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
 // (A bundle's document is named as the bundle is: bundles.js.)
-const docName = (file) => bundleName(file) ?? String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+const plainName = (file) => bundleName(file) ?? String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+// A figure a deck holds, in a tab of its own (talk.yaml#pipeline: flexo.studio.embedded), is
+// named for the figure and its deck: "pipeline — talk".
+const docName = (file) => {
+  const [held, key] = String(file).split(/#(.*)/s);
+  return key && /\.(ya?ml|json)$/i.test(held) ? `${key} — ${plainName(held)}` : plainName(file);
+};
 
 // A file renamed: what is said of it, with the file it is now to open.
 function movedNote(workspace, text, moved) {
@@ -735,7 +741,13 @@ export async function start() {
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
-      case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
+      case "export": {
+        // (An export of the kind's own -- a figure on a slide as a file -- runs as it says.)
+        const entry = session?.exports.find((item) => item.format === arg);
+        if (entry?.run) entry.run();
+        else if (entry) session.exportFiles([arg]);
+        break;
+      }
       case "present": session?.present?.(); break;
       // One of the document's own commands, by the label reported below (the app's Insert
       // and Slide menus): "Add Picture" runs "Add Picture…".
@@ -749,7 +761,8 @@ export async function start() {
       case "find": palette(workspace, { find: true }); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
-      case "new": askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
+      case "new": if (arg === "deck") newDeck(workspace); else askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
+      case "new-in-folder": askName(workspace, arg || "deck", UNTITLED[arg || "deck"] || "Untitled.yaml"); break;
       case "close-tab": if (session) workspace.close(session.file); break;
       case "rename": if (session) nameDocument(workspace, session.file); break;
       case "duplicate-document": if (session) nameDocument(workspace, session.file, { copy: true }); break;
@@ -1124,7 +1137,7 @@ export async function start() {
     // Each kind offered, said as the New menu says it, side by side however many there are.
     const offered = [["deck", "Deck", "Slides for a talk"], ["figure", "Figure", "A diagram laid out automatically"], ["theme", "Theme", "Fonts, colours and lines"]]
       .filter(([kind]) => offers(workspace, kind));
-    const card = ([kind, title, hint]) => h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, UNTITLED[kind]) },
+    const card = ([kind, title, hint]) => h("button.start-card", { type: "button", onclick: () => (kind === "deck" ? newDeck(workspace) : askName(workspace, kind, UNTITLED[kind])) },
       h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title), h("span.start-hint", {}, hint)));
     // The folder's documents by name, as the Finder lists them, each with when it was changed.
     const listed = [...workspace.documents].sort((a, b) => docName(a.file).localeCompare(docName(b.file), undefined, { numeric: true, sensitivity: "base" }) || a.file.localeCompare(b.file));
@@ -1366,12 +1379,56 @@ function newMenu(anchor, workspace) {
   menu(anchor, [
     { title: "New" },
     ...[
-      { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      // A deck is one file of its own, a bundle (newDeck) -- or, asked for, a file among this
+      // folder's (not inside a bundle's, which holds one deck).
+      { icon: "deck", label: "Deck", hint: "Slides for a talk, as one file (.flexo)", run: () => newDeck(workspace), kind: "deck" },
+      ...(workspace.info.bundle ? [] : [{ icon: "deck", label: "Deck in This Folder", hint: "Slides as a YAML file beside this folder’s others", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" }]),
       { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), note: item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : "", hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
+}
+
+// New Deck, as Keynote's File › New: a deck of its own, one file -- a bundle (.flexo), which
+// keeps its pictures and figures inside it, to keep and to send. In the Mac app it is made where
+// its person says, in a save panel, and opened in a window of its own; in a browser, beside this
+// folder's documents (beside the bundle edited here), named in a sheet, and opened in a tab of
+// its own. (A deck among the folder's files is New › Deck in This Folder.)
+export function newDeck(workspace) {
+  const app = window.pywebview?.api;
+  if (app?.new_deck) { app.new_deck(); return; }
+  const bundle = workspace.info.bundle;
+  const taken = new Set(workspace.documents.map((item) => item.file.toLowerCase()));
+  let name = "Untitled";
+  for (let n = 2; taken.has(`${name}.flexo`.toLowerCase()); n++) name = `Untitled ${n}`;
+  const input = ui.input({ value: name });
+  const problem = h("div.field-problem", { hidden: true });
+  const say = (text) => { problem.textContent = text || ""; problem.hidden = !text; };
+  let busy = false;
+  const go = () => {
+    const stem = input.value.trim().replace(/\.flexo$/i, "");
+    if (!stem || /[/\\:]/.test(stem)) { say(!stem ? "Enter a name." : "A name can’t contain / \\ or :."); input.focus(); return false; }
+    if (busy) return false;
+    busy = true;
+    // (Its tab opened in the click that asked, as a browser opens one only then.)
+    const tab = window.open("", "_blank");
+    workspace.api("/api/bundle/new", { name: stem, kind: "deck", client: workspace.client, who: workspace.me })
+      .then((made) => {
+        box.close();
+        if (tab) tab.location = made.address;
+        toast(tab ? `Made “${made.name}”, open in a new tab.` : h("span", {}, `Made “${made.name}”. `, h("a", { href: made.address, target: "_blank" }, "Open it")), { icon: "check", seconds: 8 });
+      })
+      .catch((error) => { tab?.close(); say(error.message); input.focus(); })
+      .finally(() => { busy = false; });
+    return false;
+  };
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go(); } });
+  const where = bundle ? `beside “${bundle.name}”` : "in this folder";
+  const box = dialog({ title: "New Deck", body: [ui.field("Name", input, { hint: `One file, ${where}, holding its pictures and figures` }), problem],
+    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: go }] });
+  input.focus();
+  input.select();
 }
 
 export function askName(workspace, kind, suggestion) {
@@ -1675,7 +1732,8 @@ export function palette(workspace, { find = false } = {}) {
       label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),
     ...[
       // Each said as the New menu says it.
-      { icon: "deck", label: "New Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      { icon: "deck", label: "New Deck", hint: "Slides for a talk, as one file (.flexo)", run: () => newDeck(workspace), kind: "deck" },
+      ...(workspace.info.bundle ? [] : [{ icon: "deck", label: "New Deck in This Folder", hint: "Slides as a YAML file beside this folder’s others", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" }]),
       { icon: "figure", label: "New Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "New Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),

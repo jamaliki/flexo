@@ -576,6 +576,9 @@ class Workspace:
         from another takes the document in again."""
         self.lock = threading.RLock()
         self.docs: dict[str, Doc] = {}
+        self.views: dict[str, Doc] = {}
+        """The figures documents hold, each open in a tab of its own (``talk.yaml#pipeline``:
+        flexo.studio.embedded), by name."""
         self.followed: dict[str, Doc] = {}
         """The documents followed from each name they had (their files moved, renamed)."""
         self.listeners: dict[str, Listener] = {}
@@ -657,12 +660,14 @@ class Workspace:
                 with contextlib.suppress(Exception):
                     then()
 
-    def follow_uploads(self) -> None:
+    def follow_uploads(self, also: list[tuple[Path, Any]] | None = None) -> None:
         """Keep the copies this studio made in step with its documents, as a document
         changes: a copy no document uses any more (its picture's adding undone, or the
         picture deleted) is taken out of the folder at once, and put back if one uses it
         again (redone). A copy no document has used yet is left be -- its document is about
-        to -- and so is one any other file in the folder names (a document not open here)."""
+        to -- and so is one any other file in the folder names (a document not open here).
+        ``also``: documents as a page has them, not yet sent (``(folder, document)``), that
+        name what they name too: an edit asked of one is made with its files there."""
 
         with self.lock:
             if not self.uploads:
@@ -671,7 +676,7 @@ class Workspace:
             uploads = set(self.uploads)
         written = [
             (doc.path.parent, json.dumps(doc.document, ensure_ascii=False)) for doc in docs
-        ]
+        ] + [(folder, json.dumps(document, ensure_ascii=False)) for folder, document in also or []]
         for upload in sorted(uploads):
             if any(_names(upload, folder, text) for folder, text in written):
                 self.used_uploads.add(upload)
@@ -688,6 +693,22 @@ class Workspace:
                     upload.unlink()
                     if upload.parent.name == "assets" and not any(upload.parent.iterdir()):
                         upload.parent.rmdir()
+
+    def release(self, files: list[Path]) -> None:
+        """Files a document no longer needs since an edit (a figure file whose figure was
+        embedded in its deck): in a bundle, files of the bundle's own -- taken out of its folder
+        once no document names them, as a picture undone is, and put back should one name them
+        again (the edit undone). In a folder of its person's, they are theirs, and stay."""
+
+        if getattr(self, "bundle", None) is None:
+            return
+        with self.lock:
+            for file in files:
+                with contextlib.suppress(PermissionError, OSError):
+                    target = self.path(self.relative(file))
+                    if target.is_file():
+                        self.uploads.add(target)
+                        self.used_uploads.add(target)
 
     def _named_elsewhere(self, upload: Path, open_files: set[Path]) -> bool:
         """Whether a file in the folder other than an open document's names ``upload``."""
@@ -849,6 +870,13 @@ class Workspace:
         gone meanwhile is not made anew from its kind: it is moved or deleted, and the page's
         document is held, written there again by a save."""
 
+        if "#" in name and not self.path(name).exists():
+            # A figure a document holds, in a tab of its own (talk.yaml#pipeline).
+            from flexo.studio.embedded import view
+
+            found = view(self, name)
+            if found is not None:
+                return found
         path = self.path(name)
         relative = unicodedata.normalize("NFC", self.relative(path))
         with self.lock:
@@ -1078,6 +1106,10 @@ class Workspace:
             return
         if wrote:
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            if self.views:
+                from flexo.studio.embedded import saved as views_saved
+
+                views_saved(self, doc)
         if doc.foreign:
             # Another kind's file now: the pages are told, and it opens again as that kind.
             if doc.problem != said or wrote:
@@ -1103,6 +1135,11 @@ class Workspace:
                 "client": client,
             }
         )
+        if self.views:
+            # Its figures open in tabs of their own take in the change.
+            from flexo.studio.embedded import follow as follow_views
+
+            follow_views(self, doc, after, who, client)
         # What the activity list says was done keeps its place: clicked, it goes to the slide
         # or object where it is now (moved, dragged to another slide), or says it is gone.
         follow = getattr(doc.kind, "follow", None)

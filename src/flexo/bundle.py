@@ -1036,11 +1036,20 @@ class Packed:
 
 
 def pack(
-    document: str | Path, target: str | Path | None = None, *, text: str | None = None
+    document: str | Path,
+    target: str | Path | None = None,
+    *,
+    text: str | None = None,
+    embed: bool = True,
 ) -> Packed:
     """A bundle of ``document`` and everything it names (``gather``), written to ``target``
     (beside it, named as it is, by default). What it names that is missing, or outside its
-    folder, is left out and said in the manifest (and in what this answers): never an error."""
+    folder, is left out and said in the manifest (and in what this answers): never an error.
+
+    ``embed``: what its kind keeps inside a bundled document rather than beside it is put
+    there as it is packed -- a deck's figures, shown from figure files of their own, written
+    into the deck (its kind's ``bundled``), those files left out unless something else names
+    them. The document's own file is left as it is."""
 
     source = Path(document).expanduser()
     if not source.is_file():
@@ -1049,6 +1058,8 @@ def pack(
         raise BundleError(
             f"{source.name} isn\u2019t a document: a deck or a figure is a .yaml or .json file."
         )
+    if embed:
+        text = _embedded(source, text)
     gathered = gather(source, text=text)
     target = Path(target).expanduser() if target else source.with_suffix(SUFFIX)
     if target.suffix.lower() != SUFFIX:
@@ -1069,6 +1080,35 @@ def pack(
             with contextlib.suppress(OSError):
                 staged.unlink()
     return Packed(target, gathered, target.stat().st_size, about)
+
+
+def _embedded(source: Path, text: str | None) -> str | None:
+    """A document's words as a bundle keeps them: with what its kind keeps inside it rather
+    than beside it written in (``bundled``: a deck's figure files) -- else as given. Its
+    comments and quoting are kept, as the studio keeps them."""
+
+    import tempfile
+
+    try:
+        words = text if text is not None else source.read_text(encoding="utf-8")
+        data = _parsed(words, source.suffix)
+    except Exception:
+        return text  # (said as it is gathered: a document that does not read)
+    walker = _Walker(Gathered(root=source.parent, document=source.name), source.parent)
+    kind = walker.kinds.get(walker.kind_of(data) or "")
+    bundled = getattr(kind, "bundled", None)
+    if bundled is None:
+        return text
+    made = bundled(data, source.parent.resolve())
+    if made is None or made == data:
+        return text
+    with tempfile.TemporaryDirectory(prefix="flexo-bundling-") as aside:
+        scratch = Path(aside) / source.name
+        try:
+            kind.save(scratch, made, previous=words)
+        except TypeError:
+            kind.save(scratch, made)
+        return scratch.read_text(encoding="utf-8")
 
 
 # -- reading -----------------------------------------------------------------------------
