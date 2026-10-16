@@ -217,7 +217,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     others: () => Boolean(withParts()?.on()),
     renderInspector: () => changed(),
     reportFocus: () => {},
-    swallowRelease: () => { swallowed = Date.now(); },
+    swallowRelease: (held) => swallowRelease(held),
     undoNote: () => {},
     awayFrom: () => false,
     clipItems: () => clipItems(),
@@ -420,8 +420,24 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   // Another's change, or an undo: what is drawn is what is.
   function afresh() { waiting = null; }
 
-  // A click let go after a press the shapes took: not the figure's.
-  const swallow = () => Date.now() - swallowed < 400;
+  // A click let go after a press the shapes took: not the figure's. `held`: the press goes on
+  // (a ⇧-click choosing as it is pressed, a drag taken back by Esc with the button still down)
+  // -- the click its release makes, however long the button is held, is none either, as a
+  // slide's is. (A release the window never saw, let go outside it: the next press is a click
+  // again.)
+  let presses = 0, holding = 0;
+  function swallowRelease(held = false) {
+    swallowed = Date.now();
+    if (!held) return;
+    const mine = ++presses;
+    holding = mine;
+    const off = () => { window.removeEventListener("pointerup", up, true); window.removeEventListener("pointerdown", down, true); };
+    const up = () => { off(); swallowed = Date.now(); setTimeout(() => { if (holding === mine) holding = 0; }, 0); };
+    const down = () => { off(); if (holding === mine) { holding = 0; swallowed = 0; } };
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointerdown", down, true);
+  }
+  const swallow = () => holding > 0 || Date.now() - swallowed < 400;
 
   // Those drawn over the figure, listed beside its shapes (the editor's list): each by its kind
   // and its words.
