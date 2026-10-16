@@ -203,6 +203,17 @@ def test_new_words_are_plain_unless_yaml_or_their_person_quotes_them() -> None:
     assert labels == "edges:\n- from: a  # first\n  label: 'yes'\n"
 
 
+def test_a_point_or_size_added_to_what_was_there_is_one_line() -> None:
+    # (An object placed on its slide where it is put: its top left, as a person writes it.)
+    text = "body:\n- text: Words  # kept\n"
+    document = {"body": [{"text": "Words", "at": [80, 440], "width": 300, "lines": ["a", "b"]}]}
+    written = rewrite(text, document, fresh)
+    assert written == (
+        "body:\n- text: Words  # kept\n  at: [80, 440]\n  width: 300\n  lines:\n  - a\n  - b\n"
+    )
+    assert yaml.safe_load(written) == document
+
+
 def test_a_comment_after_words_keeps_its_room_as_they_change() -> None:
     text = "slides:\n- body:\n  - text: First   # Alice wrote this\n"
     longer = {"slides": [{"body": [{"text": "First paragraph, longer"}]}]}
