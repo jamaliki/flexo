@@ -8,9 +8,14 @@ import { bundles, bundleName } from "./bundles.js";
 import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
 import { alignTo, asGroup, onAligning } from "./aligning.js";
+import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
+// Align and Distribute's Relative To and Move as a Group, the person's: offered whatever is
+// chosen, for a document that has shapes -- its page named as it names it (aligntools.js).
+const PAGE_NAMES = { deck: "Slide", figure: "Figure" };
+const alignSettings = (session) => (session && PAGE_NAMES[session.kind] ? settingCommands(PAGE_NAMES[session.kind]) : []);
 // A new document's name, as a Mac app's: Untitled (Untitled 2, if that is taken).
 const UNTITLED = { deck: "Untitled.yaml", figure: "Untitled Figure.yaml", theme: "Untitled Theme.yaml" };
 // Each far from the others in hue, the first few most of all (they are given in the order
@@ -704,6 +709,8 @@ export async function start() {
     // Snapping turned in another window of the app: this one's turned too, quietly, whatever
     // it shows (magnet.js).
     if (name === "snapping" && (arg === "on" || arg === "off")) { setSnapping(arg === "on", "app"); return; }
+    // So too Relative To, Move as a Group and the gap (aligntools.js's aligningInApp).
+    if (name === "aligning") { try { aligningFromApp(JSON.parse(arg || "{}")); } catch { /* not one */ } return; }
     const session = workspace.active;
     const field = typingIn(document.activeElement) ? document.activeElement : null;
     // A sheet open (a name asked for, the shortcuts): the menus wait, as a Mac's do while a
@@ -734,7 +741,8 @@ export async function start() {
       // and Slide menus): "Add Picture" runs "Add Picture…".
       case "run": {
         const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
-        session?.commands().find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
+        // (Relative To and Move as a Group too, whatever is chosen: the studio's own.)
+        [...(session?.commands() || []), ...alignSettings(session || { kind: "deck" })].find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
         break;
       }
       case "palette": palette(workspace); break;
@@ -770,6 +778,10 @@ export async function start() {
   const doable = (session) => {
     try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
   };
+  // What each command greyed says of why, by label.
+  const whyNot = (session) => {
+    try { return session ? Object.fromEntries(session.commands().filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint])) : {}; } catch { return {}; }
+  };
   // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
   const doesKey = (session, keys) => {
     try { return Boolean(session?.commands().some((command) => !command.disabled && command.keys === keys)); } catch { return false; }
@@ -799,6 +811,8 @@ export async function start() {
         snapping: snapping(),
         // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
         align_to: alignTo(), align_group: asGroup(),
+        // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
+        why: whyNot(session),
       });
     }, 80);
   };
@@ -808,6 +822,7 @@ export async function start() {
   onAligning(() => report());
   magnetKeys();
   snappingInApp();
+  aligningInApp();
   // A slide or part chosen changes what can be done; so does a field taking the keys
   // (⌘D is then the field's), and a sheet opening or closing.
   for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
@@ -1460,7 +1475,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (Shapes Chosen)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
@@ -1653,6 +1668,8 @@ export function palette(workspace, { find = false } = {}) {
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "⌘/", run: () => shortcutsDialog() },
+    // What Align lines shapes up with, and Move as a Group: a setting, whatever is chosen.
+    ...alignSettings(session),
     // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
     ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, name]) => ({ icon: value === "dark" ? "moon" : value === "light" ? "sun" : "appearance",
       label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),

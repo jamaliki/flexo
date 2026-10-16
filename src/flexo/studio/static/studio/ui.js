@@ -112,6 +112,8 @@ const ICONS = {
   // Four panels: a figure of several parts.
   grid: "M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5h-4.5zM9 9h4.5v4.5H9z",
   slide: "M2 3.5h12v9H2z",
+  // Arrange (the inspector's tab): two shapes lined up on an edge, a third spaced beside them.
+  arrange: "M2.5 2v12M4.5 3.5h5v3.5h-5zM4.5 9h8v3.5h-8zM12 3.5h1.5v3.5H12",
   section: "M2 3.5h12v9H2zM5 8h6",
   folder: "M2 4.5h4l1.5 1.5H14v7H2z",
   upload: "M8 10.5V3M5 6l3-3 3 3M3 11v2.5h10V11",
