@@ -1,11 +1,12 @@
-// The figure editor's Design bar, as a deck's (flexo-talk's designbar.js) and PowerPoint's
-// Design tab: across the window under the toolbar, the figure drawn in each theme, and beside
-// it its colours, font, page, panel letters and sizes. A theme, a palette or a font pointed at
-// is shown on the figure as it would be; chosen, it is one step. The figure's inspector keeps
-// what is its parts' own (parts.js: `designBar`, the settings it leaves to the bar).
+// The figure editor's Design bar, as a deck's (flexo-talk's designbar.js): one low row under
+// the toolbar of pop-up buttons, each naming what is in use -- Theme (a grid of the figure
+// drawn in each theme), Colours, Font, Page Size, Sizes -- and More (panel letters,
+// Customise…). Only in an open menu, and only a theme or a palette, is what the pointer is over
+// shown on the figure as it would be; chosen, it is one step. The figure's inspector keeps what
+// is its parts' own (parts.js: `designBar`, the settings it leaves to the bar).
 
 import { h, clear, icon, themesFor, themeName, suggestedFonts } from "/static/studio/studio.js";
-import { ribbonBar, ribbonSep, ribbonStack, pull, closeDrop, dropOpen, redrawDrop, previewer, gallery } from "/static/studio/ribbon.js";
+import { ribbonBar, ribbonSep, pull, drop, closeDrop, dropOpen, redrawDrop, previewer, gallery } from "/static/studio/ribbon.js";
 import { painted } from "/static/kinds/figure/parts.js";
 
 // The figure's settings the bar holds: the inspector leaves them to it.
@@ -23,8 +24,10 @@ export function figureBar(host) {
   const node = ribbonBar("Design");
   let built = false, open = false;
   const keyOf = (...parts) => JSON.stringify(parts);
-  // A design chosen: one step, as the inspector's field would make it.
-  const choose = (values) => {
+  // A design chosen: one step, as the inspector's field would make it. A choice from a menu of
+  // them closes the menu.
+  const choose = (values, { close = true } = {}) => {
+    if (close) closeDrop(true);
     if (!figure.model || Object.entries(values).every(([key, value]) => (settings()[key.replace(/^figure\./, "")] ?? null) === value)) return;
     previews.hold();
     figure.update({ type: "figure" }, values);
@@ -65,20 +68,20 @@ export function figureBar(host) {
     pick: (item) => { if (!item.card.problem) choose({ "figure.style": item.value === "paper" ? null : item.value }); },
     preview: (item) => previews.show(item && !item.card.problem ? { "figure.style": item.value === "paper" ? null : item.value } : null),
   });
+  let cards = [];
   const loadThemes = async () => {
-    let cards = [];
     try { cards = await themesFor(studio, { fresh: true }); } catch { return; }
     const named = cards.some((card) => card.value === themeOf()) ? [] : [{ value: themeOf(), title: themeOf(), source: "folder" }];
     themes.set([...named, ...cards].map((card) => ({ value: card.value, card })));
     themes.reveal();
+    faces();
   };
-  const themeButton = h("button.btn.ghost.small.ribbon-button", { type: "button" });
-  const renderThemeButton = () => {
-    const file = /\.(ya?ml|json)$/i.test(themeOf());
-    clear(themeButton, icon(file ? "external" : "pencil"), h("span.btn-label", {}, file ? "Edit Theme" : "Customise…"));
-    themeButton.title = file ? "Edit Theme" : "Customise Theme…";
-    themeButton.onclick = () => { closeDrop(); host.customise(themeOf(), (value) => figure.update({ type: "figure" }, { "figure.style": value })); };
-  };
+  const unpreview = () => previews.show(null);
+  const themePull = pull({ label: "Theme", title: "Theme", panel: () => [themes.node], className: "theme-pull",
+    onOpen: () => { loadThemes(); requestAnimationFrame(() => themes.reveal()); }, onClose: unpreview });
+  const cardOf = () => cards.find((card) => card.value === themeOf());
+  const chip = (card) => h("span.ribbon-chip", { style: { background: card?.canvas || "#fff" } },
+    [...new Set((card?.colours || []).map((colour) => String(colour).toLowerCase()))].slice(0, 3).map((colour) => h("i", { style: { background: colour } })));
 
   // -- the pull-downs --
   const strip = (colours) => h("span.palette-strip", {}, (colours || []).slice(0, 5).map((colour) => h("span", { style: { background: colour } })));
@@ -86,7 +89,7 @@ export function figureBar(host) {
   const paletteNow = () => settings().palette ?? paletteField?.default ?? "default";
   // (The theme's own: each tone's colour, as its chips are painted -- parts.js.)
   const coloursOf = (name) => (name === paletteField?.default ? (studio.info?.tones?.colours || []).map(painted) : paletteField?.colours?.[name] || []);
-  const colours = pull({ label: "Colours", title: "Colours", panel: () => {
+  const colours = pull({ label: "Colours", title: "Colours", onClose: unpreview, panel: () => {
     const now = paletteNow();
     return [h("div.drop-title", {}, "Palette"), unshown(h("div.palette-choices", { role: "group", "aria-label": "Palette" }, (paletteField?.options || []).map((name) => {
       const variant = { "figure.palette": name === paletteField.default ? null : name };
@@ -99,45 +102,58 @@ export function figureBar(host) {
     const now = fontNow();
     const offered = ["", ...suggestedFonts(catalog.fonts || studio.catalog.fonts || []).filter((name) => name !== "Helvetica Neue")];
     if (now && !offered.includes(now)) offered.push(now);
-    return [h("div.drop-title", {}, "Font"), unshown(h("div.drop-choices", { role: "group", "aria-label": "Font" }, offered.map((name) => {
-      const variant = { "figure.font": name || null };
-      return shows(h(`button.drop-choice${name === now ? ".on" : ""}`, { type: "button", "aria-pressed": String(name === now), onclick: () => choose(variant) },
-        h("span.drop-sample", { style: { fontFamily: name ? `"${name}", var(--font)` : "inherit" } }, "Aa"), h("span.drop-name", { style: { fontFamily: name ? `"${name}", var(--font)` : "inherit" } }, name || "Theme’s")), variant);
-    }))), h("div.drop-title", {}, "Custom"), h("div.drop-body", {}, figure.figureField("figure.font"))];
+    return [h("div.drop-title", {}, "Font"), h("div.drop-choices", { role: "group", "aria-label": "Font" }, offered.map((name) =>
+      h(`button.drop-choice${name === now ? ".on" : ""}`, { type: "button", "aria-pressed": String(name === now), onclick: () => choose({ "figure.font": name || null }) },
+        h("span.drop-sample", { style: { fontFamily: name ? `"${name}", var(--font)` : "inherit" } }, "Aa"), h("span.drop-name", { style: { fontFamily: name ? `"${name}", var(--font)` : "inherit" } }, name || "Theme’s")))),
+    h("div.drop-title", {}, "Custom"), h("div.drop-body", {}, figure.figureField("figure.font"))];
   } });
-  const page = pull({ label: "Page Size", title: "Page Size", face: icon("slide"), panel: () =>
+  const page = pull({ label: "Page Size", title: "Page Size", panel: () =>
     [h("div.drop-body.drop-page", {}, ["figure.page", "figure.width", "figure.height"].map((key) => figure.figureField(key)))] });
   const lettersField = fieldOf("figure.panel_labels");
-  const letters = pull({ label: "Panel Letters", title: "Panel Letters", panel: () => {
+  const lettersPanel = () => {
     const now = settings().panel_labels ?? lettersField?.default;
     return [h("div.drop-title", {}, "Panel Letters"), h("div.drop-choices", { role: "group", "aria-label": "Panel Letters" }, (lettersField?.options || []).map((option) =>
       h(`button.drop-choice${option === now ? ".on" : ""}`, { type: "button", "aria-pressed": String(option === now), onclick: () => choose({ "figure.panel_labels": option === lettersField.default ? null : option }) },
         h("span.drop-sample.letters", {}, String(lettersField.labels?.[option] ?? option).split(",")[0]), h("span.drop-name", {}, lettersField.labels?.[option] ?? option))))];
+  };
+  const sizes = pull({ label: "Sizes", title: "Sizes", panel: () => [h("div.drop-title", {}, "Sizes"), h("div.drop-body", {}, SIZED.map((key) => figure.figureField(key)))] });
+  // More: the panels' letters, a panel of its own from here, and the theme's file -- made from
+  // it (Customise…), or opened (Edit Theme).
+  const more = pull({ label: "More", title: "More", panel: () => {
+    const file = /\.(ya?ml|json)$/i.test(themeOf());
+    const row = (glyph, label, run) => h("button.drop-choice.drop-command", { type: "button", onclick: run }, icon(glyph), h("span.drop-name", {}, label));
+    return [h("div.drop-choices", { role: "group", "aria-label": "More" },
+      row("panel", "Panel Letters", () => drop(more, lettersPanel)),
+      h("div.drop-sep"),
+      row(file ? "external" : "pencil", file ? "Edit Theme" : "Customise Theme…", () => {
+        closeDrop();
+        host.customise(themeOf(), (value) => figure.update({ type: "figure" }, { "figure.style": value }));
+      }))];
   } });
-  const sizes = pull({ label: "Sizes", title: "Sizes", face: icon("type"), panel: () => [h("div.drop-title", {}, "Sizes"), h("div.drop-body", {}, SIZED.map((key) => figure.figureField(key)))] });
 
   // -- drawn --
+  // What each button shows: what is in use, named where it fits.
   const faces = () => {
-    colours.setFace(strip(coloursOf(paletteNow())));
-    font.setFace(h("span.ribbon-aa", { style: { fontFamily: fontNow() ? `"${fontNow()}", var(--font)` : "" } }, "Aa"));
-    font.title = `Font: ${fontNow() || "Theme’s"}`;
-    const now = settings().panel_labels ?? lettersField?.default;
-    letters.setFace(h("span.ribbon-aa", {}, String(lettersField?.labels?.[now] ?? now ?? "a").split(",")[0]));
+    if (!built) return;
+    const card = cardOf(), named = card ? themeName(card) : themeOf();
+    themePull.show({ face: chip(card), text: named, title: `Theme: ${named}` });
+    const palette = paletteNow();
+    colours.show({ face: strip(coloursOf(palette)), text: "", title: `Colours: ${palette === paletteField?.default ? "Theme’s Own" : palette}` });
+    font.show({ text: h("span.ribbon-font", { style: { fontFamily: fontNow() ? `"${fontNow()}", var(--font)` : "" } }, fontNow() || "Theme’s"), title: `Font: ${fontNow() || "Theme’s"}` });
     const width = settings().width ?? fieldOf("figure.width")?.default;
-    page.title = `Page Size: ${fieldOf("figure.width")?.labels?.[width] ?? width}${settings().height ? ` × ${settings().height}` : ""}`;
+    const sized = `${fieldOf("figure.width")?.labels?.[width] ?? width}${settings().height ? ` × ${settings().height}` : ""}`;
+    page.show({ text: sized, title: `Page Size: ${sized}` });
   };
   function build() {
     if (built) return;
     built = true;
-    clear(node, themes.node, h("div.ribbon-stack.ribbon-themes", {}, themeButton), ribbonSep(),
-      ribbonStack(colours, font), ribbonStack(page, letters), ribbonSep(), ribbonStack(sizes));
+    clear(node, themePull, colours, font, ribbonSep(), page, sizes, ribbonSep(), more);
     loadThemes();
   }
   let later = 0;
   function refresh() {
     if (!open || !figure.model) return;
     faces();
-    renderThemeButton();
     themes.mark();
     clearTimeout(later);
     later = setTimeout(() => themes.refresh(), 800);
