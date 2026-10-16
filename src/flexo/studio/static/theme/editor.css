@@ -43,6 +43,12 @@
 .palette-add { width: 40px; height: 40px; border-radius: 10px; border: 1.5px dashed var(--line-strong); background: transparent; color: var(--ink-3); cursor: pointer; display: grid; place-items: center; }
 .palette-add:hover { border-color: var(--accent); color: var(--accent); }
 .palette-add svg { width: 16px; height: 16px; }
+/* The palette's colour chosen, ringed as a chosen swatch is; its code under the chips. */
+.palette-chip.chosen { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+.palette-chip:focus-visible { outline: none; box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 4px var(--focus-ring); }
+.palette-code { display: flex; align-items: center; gap: 8px; }
+.palette-code-name { font: var(--text-small); color: var(--ink-2); min-width: 58px; }
+.palette-code .hex-field, .colour-field .hex-field { flex: 1; width: auto; max-width: 140px; height: 28px; line-height: 26px; font-size: 12px; }
 .tones { display: grid; gap: 5px; }
 .tone { min-width: 0; height: 26px; border-radius: 6px; border: 1.5px solid; display: grid; place-items: center; font: 600 11px var(--font); }
 .arrow-choices { display: flex; gap: 4px; }

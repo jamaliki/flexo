@@ -927,6 +927,43 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .own-colour .colour-control { position: relative; }
 .own-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
 
+/* -- a colour by its code (hexcolour.js), in the studio's monospaced face: on a colour's
+   label's line, after the colours applied last; beside a well; in ⇧⌘C's popover -- */
+.hex-field { flex: none; width: 72px; height: 22px; min-width: 0; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--raised); color: var(--ink);
+  font: 500 11px/20px var(--mono); letter-spacing: 0.02em; outline: none; transition: border-color 0.12s, box-shadow 0.12s; }
+.hex-field::placeholder { color: var(--ink-3); font: 400 11px/20px var(--font); letter-spacing: 0; }
+.hex-field:hover { border-color: var(--ink-3); }
+.hex-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.hex-field.invalid, .hex-field.invalid:focus { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-soft); }
+.hex-side { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
+.field.has-side { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.field.has-side > :not(.label):not(.hex-side) { grid-column: 1 / -1; }
+/* (On the label's line, taking no more of it than the label does.) */
+.field.has-side > .hex-side { grid-row: 1; grid-column: 2; margin: -4px 0; }
+.swatches > .hex-side { margin-left: 2px; }
+.recent-dots { display: flex; gap: 4px; }
+.recent-dot { width: 14px; height: 14px; flex: none; border: 0; padding: 0; border-radius: 50%; box-shadow: var(--chip-ring); cursor: pointer; }
+.recent-dot:hover { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 3.5px var(--ink-3); }
+.colour-control > .hex-field { margin: 0 2px 0 6px; }
+/* A thing's own colours side by side: each code under its well. */
+.own-colours { gap: 18px; }
+.own-colour .colour-control { display: grid; justify-items: center; gap: 4px; }
+.own-colour .colour-control > .hex-field { width: 66px; margin: 0; }
+.own-colour .colour-control .btn { left: calc(50% + 17px); }
+
+/* ⇧⌘C's popover: what it colours, its code (the keys in it), which of the thing's colours,
+   and the colours applied last. */
+.menu.colour-pop { width: 248px; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.colour-pop-what { font: var(--text-label); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.colour-pop-row { display: flex; align-items: center; gap: 8px; }
+.colour-pop-row > .hex-field { flex: 1 1 0; width: 0; height: 30px; font-size: 13px; line-height: 28px; padding: 0 8px; }
+.colour-pop-row > .hex-field::placeholder { font-size: 12px; line-height: 28px; }
+.colour-pop-chip { flex: none; width: 30px; height: 30px; border-radius: 6px; box-shadow: var(--chip-ring); background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
+.colour-pop .segmented > button { min-width: 0; }
+.colour-pop-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.colour-pop-recent .recent-dot { width: 20px; height: 20px; }
+.colour-pop-hint { font: var(--text-hint); color: var(--ink-3); }
+
 /* -- palettes, chosen by sight -- */
 .palette-strip { display: inline-flex; gap: 2px; }
 .palette-strip span { width: 12px; height: 14px; border-radius: 3px; box-shadow: var(--chip-ring); }

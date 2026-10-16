@@ -26,6 +26,7 @@ import { dropPlace, stays, lineAt, groupAt, endAt, endOff, endsOf, seenOrder } f
 import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
+import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -7290,6 +7291,18 @@ export function figureParts(host) {
         const well = h("input.cell-well", { type: "color", value: hex || "#888888", title: "Choose a colour", tabIndex: -1 });
         if (!hex) well.classList.add("unset");
         well.addEventListener("input", () => { well.classList.remove("unset"); input.value = well.value; paced(cellKey, () => change(well.value)); });
+        // A colour's code pasted (rgb(31, 119, 180), #17b): written as #rrggbb; a tone's name
+        // as it is (hexcolour.js).
+        input.addEventListener("paste", (event) => {
+          const text = event.clipboardData?.getData("text/plain") ?? "", read = /^\s*[a-z]+\s*$/i.test(text) ? null : parseColour(text);
+          if (!read) return;
+          event.preventDefault();
+          input.value = read.hex;
+          well.value = read.hex;
+          well.classList.remove("unset");
+          rememberColour(read.hex);
+          change(read.hex);
+        });
         const id = `opts-${Math.random().toString(36).slice(2)}`;
         input.setAttribute("list", id);
         return h("div.cell.with-well", {}, well, input, h("datalist", { id }, (column.options || []).map((option) => h("option", { value: option }))));

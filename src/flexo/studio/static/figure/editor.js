@@ -14,6 +14,9 @@ import { figureShapes } from "/static/kinds/figure/overlay.js";
 import { figureMixed } from "/static/kinds/figure/mixed.js";
 import { clipsOf } from "/static/studio/mixing.js";
 import { magnetButton } from "/static/studio/magnet.js";
+import { colourKey, boxAround } from "/static/studio/colourkey.js";
+import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
+import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -229,6 +232,11 @@ export function mount(studio, main) {
     render: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); },
     frame: () => { const view = drawingOf()?.viewBox?.baseVal; return view && view.width ? [view.x, view.y, view.width, view.height] : [0, 0, 600, 400]; },
     clipChosen: (cut) => clipChosen(cut), clipItems: () => clipItems() });
+  // Set Colour… (⇧⌘C): the shapes chosen, those drawn over the figure, or both, given a
+  // colour's code pasted (partcolours.js, shapecolours.js).
+  const colours = colourKey({ studio, fallback: () => inspector, settled: () => figure.idle(),
+    kinds: () => (typingNow() ? [] : [partColours(figure), shapes.any() ? shapeColours(shapes) : null].filter(Boolean)),
+    anchor: () => boxAround([partsBox(figure, elementOf), shapes.any() ? shapesBox(shapes, page) : null].filter(Boolean).map((box) => ({ getBoundingClientRect: () => box }))) });
   // A drawing pasted or dropped (Inkscape's): shapes over the figure, centred where the
   // pointer is on it (else on its middle), on no part -- or, as asked or too large, the
   // picture part it was (drawingpaste.js).
@@ -922,6 +930,8 @@ export function mount(studio, main) {
     }
     if (typing(event.target)) return;
     const mod = event.metaKey || event.ctrlKey;
+    // ⇧⌘C: Set Colour…, of what is chosen.
+    if (colours.key(event)) { event.preventDefault(); return; }
     // Its parts and shapes drawn over it chosen together: ⌫, ⌘D, ⌘A, Esc theirs (mixed.js).
     if (mixed.key(event)) { event.preventDefault(); return; }
     // Shapes drawn over the figure chosen (or one being drawn): their keys -- the arrows nudge,
@@ -1111,6 +1121,8 @@ export function mount(studio, main) {
     // (Its parts chosen with them: what is done to both, mixed.js -- not to either alone.)
     ...(typingNow() ? [] : mixed.commands()),
     ...(typingNow() ? [] : mixed.shapeCommands(shapes.commands())),
+    // Format › Set Colour… (⇧⌘C), of what is chosen.
+    ...(typingNow() ? [] : colours.commands()),
     ...(!typingNow() && chosenName() && !mixed.on() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
     ...(!typingNow() && deleteName() && !mixed.on() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
