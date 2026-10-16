@@ -957,13 +957,21 @@ export function mount(studio, main) {
     kept = null;
     drawn(result);
   };
+  const hasPart = (model, id) => ["nodes", "groups", "edges", "nets"].some((key) => (model?.[key] || []).some((item) => item?.id === id));
   function drawn(result) {
     messages = result.messages || [];
     // What it says of the shapes drawn over it, before its parts are taken (overlay.js).
     shapes.took(result.info, result.info?.model);
-    if (result.info?.model) figure.setModel(result.info.model, { afresh, back: travelled });
-    afresh = false;
-    travelled = false;
+    // (A drawing begun before an edit that has come back since -- another drawing on its way
+    // with it -- brings the figure as it was before it: the parts that edit made, chosen as it
+    // came back (⌘D's copies), are not taken from the choice meanwhile, nor the shapes chosen
+    // with them taken away as they come back. The next drawing brings the figure as it is.)
+    const behind = result.latest === false && result.info?.model && figure.selected.some((id) => figure.typeOf(id) && !hasPart(result.info.model, id));
+    if (!behind) {
+      if (result.info?.model) figure.setModel(result.info.model, { afresh, back: travelled });
+      afresh = false;
+      travelled = false;
+    }
     showMessages();
     const drawn = result.pages[0];
     if (!drawn) {
