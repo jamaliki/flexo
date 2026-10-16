@@ -767,7 +767,8 @@ export function shapeEditor(host) {
       // ⌥-click: the shape under the pointer however deep in groups (groups.js).
       if (was.type === "move" && event.altKey && groups.deepPick(event)) { host.swallowRelease(); return; }
       // A press let go where it was: what it was on is chosen alone.
-      if (was.type === "move" && was.on !== undefined && chosenNow().length > 1) choose([was.on]);
+      // (So too one of the shapes chosen with what the page holds: mixed.js.)
+      if (was.type === "move" && was.on !== undefined && (chosenNow().length > 1 || host.others?.())) choose([was.on]);
       host.swallowRelease();
       return;
     }
@@ -2221,5 +2222,15 @@ export function shapeEditor(host) {
     closeWords,
     count: shapeCount,
     label: () => { const picks = chosenNow(); return picks.length === 1 ? shapeLabel(shapesOf()[picks[0]]) : picks.length ? `${picks.length} Shapes` : ""; },
+    // Chosen with what the page holds (mixed.js): the shape under the pointer, those chosen in
+    // the order they were, each one's box, name and lock, one moved in a change of the list,
+    // and the change itself.
+    at: (event) => shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }),
+    order: () => { const now = chosenNow(); return [...picked.filter((index) => now.includes(index)), ...now.filter((index) => !picked.includes(index))]; },
+    boxOf: (index) => boundsOf(index),
+    nameOf: (index) => shapeLabel(shapesOf()[index]),
+    lockedAt: (index) => Boolean(shapesOf()[index]?.locked),
+    moveIn: (list, index, dx, dy) => { list[index] = withPlaces(F.moved(list[index], round(dx), round(dy))); },
+    change: (mutate, label, options) => edit(mutate, label, options),
   };
 }

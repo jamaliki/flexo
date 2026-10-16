@@ -42,8 +42,9 @@ const placedRound = (spec, box) => placeRound(spec, box, F.family, F.fittedPath)
 // The figure editor's shapes: `studio`, the figure's parts (`figure`, parts.js), its page (the
 // element its <svg> is in), the stage and the middle (`center`), the toolbar's Draw button;
 // what the editor does when they are chosen (`changed`: its inspector, its list, its bar), and
-// its Cut, Copy and Paste for their menu (`clipItems`).
-export function figureShapes({ studio, figure, page, stage, center, button, changed, clipItems = () => [] }) {
+// its Cut, Copy and Paste for their menu (`clipItems`); and its parts chosen with them, when
+// they are (`withParts`: mixed.js's choice of both).
+export function figureShapes({ studio, figure, page, stage, center, button, changed, clipItems = () => [], withParts = () => null }) {
   const catalog = studio.catalog?.shapes || {};
   const margins = catalog.margins || { highlight: 2, ring: 3, ellipse: 3, brace: 4, bracket: 4 };
   const marginOf = (spec) => (spec.margin ?? margins[spec.kind] ?? catalog.margin ?? 6);
@@ -212,7 +213,8 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     piece, pieceAt,
     pieceLabel: (name) => name,
     partAt: (event) => { const id = figure.idAt(event); return Boolean(id && id !== figure.model?.root); },
-    leaveOthers: () => { if (figure.selected.length) figure.select([]); },
+    leaveOthers: () => { if (figure.selected.length && !withParts()?.joining()) figure.select([]); },
+    others: () => Boolean(withParts()?.on()),
     renderInspector: () => changed(),
     reportFocus: () => {},
     swallowRelease: () => { swallowed = Date.now(); },

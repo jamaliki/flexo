@@ -11,6 +11,8 @@ import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownReso
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
 import { figureShapes } from "/static/kinds/figure/overlay.js";
+import { figureMixed } from "/static/kinds/figure/mixed.js";
+import { clipsOf } from "/static/studio/mixing.js";
 import { magnetButton } from "/static/studio/magnet.js";
 
 const LINE = 12.5 * 1.6;
@@ -87,7 +89,7 @@ export function mount(studio, main) {
   const gatherButton = ui.button("Group", (event) => figure.groupMenu(event.currentTarget), { kind: "ghost", icon: "layout", title: "Group the Selected Shapes (⌘G)" });
   // A figure of several parts, as a journal prints one: a panel more, or so many laid out.
   const panelButton = ui.button("Panel", (event) => figure.panelMenu(event.currentTarget), { kind: "ghost", icon: "grid", title: "Add a Panel, or Lay the Figure Out as Panels (a, b, c)" });
-  const deleteButton = ui.button("Delete", () => (shapes.any() ? shapes.remove() : figure.remove()), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
+  const deleteButton = ui.button("Delete", () => (mixed?.on() ? mixed.remove() : shapes.any() ? shapes.remove() : figure.remove()), { kind: "ghost", icon: "trash", title: "Delete (⌫)" });
   // As Keynote's toolbar: what adds and joins shapes in the middle (the tab names the figure).
   studio.tools.append(listButton);
   studio.inserts.append(addButton, drawButton, connectButton, gatherButton, panelButton, deleteButton);
@@ -132,8 +134,9 @@ export function mount(studio, main) {
     if (!inner.width && !inner.height) return null;
     return { left: inner.left - outer.left - 3, top: inner.top - outer.top - 3, width: inner.width + 6, height: inner.height + 6 };
   }
-  // What is drawn over the figure (overlay.js), made once the figure's parts are.
-  let shapes = null;
+  // What is drawn over the figure (overlay.js), made once the figure's parts are; and the two
+  // chosen together (mixed.js).
+  let shapes = null, mixed = null;
   const figure = figureParts({
     catalog,
     overlay: page,
@@ -148,8 +151,8 @@ export function mount(studio, main) {
     // What an SVG picture's file has of words and colours, for its panel to restyle.
     drawing: (source) => describeDrawing(studio, source),
     changed: () => {
-      // (A part chosen, no shape drawn over the figure is.)
-      if (figure.selected.length && shapes?.any()) shapes.clear({ quiet: true });
+      // (A part chosen, no shape drawn over the figure is -- but with ⇧, both: mixed.js.)
+      if (figure.selected.length && shapes?.any() && !mixed?.holds()) shapes.clear({ quiet: true });
       placeMarks(); renderOutline(); renderInspector(); renderBar(); showHint();
     },
     // A band across the figure chooses the shapes drawn over it that it touches, where it
@@ -157,6 +160,8 @@ export function mount(studio, main) {
     band: (left, top, right, bottom) => {
       if (!shapes) return false;
       const touched = shapes.touched(left, top, right, bottom);
+      // (And its parts too, where it touches both: mixed.js.)
+      if (touched.length && mixed?.band(left, top, right, bottom, touched)) { renderInspector(); placeMarks(); return true; }
       if (touched.length) { if (figure.selected.length) figure.select([], { reveal: false }); shapes.choose(touched); return true; }
       if (shapes.any()) shapes.clear();
       return false;
@@ -206,8 +211,12 @@ export function mount(studio, main) {
   });
   // What is drawn over the figure (overlay.js): chosen, moved, sized and typed in on it.
   shapes = figureShapes({ studio, figure, page, stage, center, button: drawButton,
-    changed: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); studio.focus(shapes.any() ? { label: `Figure · ${shapes.label()}` } : null); },
-    clipItems: () => clipItems() });
+    changed: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); studio.focus(shapes.any() ? { label: `Figure · ${mixed?.on() ? mixed.name() : shapes.label()}` } : null); },
+    clipItems: () => clipItems(), withParts: () => mixed });
+  mixed = figureMixed({ studio, figure, shapes, page, box: (id) => boxOf(id),
+    render: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); },
+    frame: () => { const view = drawingOf()?.viewBox?.baseVal; return view && view.width ? [view.x, view.y, view.width, view.height] : [0, 0, 600, 400]; },
+    clipChosen: (cut) => clipChosen(cut), clipItems: () => clipItems() });
   // A drawing pasted or dropped (Inkscape's): shapes over the figure, centred where the
   // pointer is on it (else on its middle), on no part -- or, as asked or too large, the
   // picture part it was (drawingpaste.js).
@@ -315,11 +324,14 @@ export function mount(studio, main) {
   page.addEventListener("click", (event) => {
     if (event.target.closest(".fig-inline, .shape-words")) return;
     if (shapes.swallow() || shapes.armed()) return;
+    // ⇧ or ⌘ on a part, shapes drawn over the figure chosen: both (mixed.js).
+    if (mixed.click(event)) return;
     if (shapes.any() && !event.shiftKey && !event.metaKey) shapes.clear();
     figure.click(event);
   });
   page.addEventListener("pointerdown", (event) => {
     if (event.target.closest(".fig-inline, .shape-words")) return;
+    if (!figure.connecting && mixed.press(event)) return;
     if (!figure.connecting && shapes.press(event)) return;
     figure.pointerdown(event);
   });
@@ -605,7 +617,7 @@ export function mount(studio, main) {
     root.classList.toggle("wide", figure.wantsRoom());
     keepFocus(inspectorBody, () => {
       // (A shape drawn over the figure chosen: its panel, as a slide's shape's.)
-      clear(inspectorBody, figure.model && shapes?.any() ? shapes.panel() : figure.model ? figure.panel()
+      clear(inspectorBody, figure.model && mixed?.on() ? mixed.panel() : figure.model && shapes?.any() ? shapes.panel() : figure.model ? figure.panel()
         : h("div.empty", {}, "This file can’t be read as a figure. Fix it in Source; the messages below the drawing show where."));
     });
   }
@@ -738,13 +750,16 @@ export function mount(studio, main) {
   // Words chosen to copy in the panel or a message -- not on the drawing.
   const wordsChosen = () => { const chosenWords = window.getSelection(); return Boolean(chosenWords?.toString()) && !page.contains(chosenWords.anchorNode); };
   const clipOf = () => {
+    // Its parts and shapes drawn over it chosen together: each kind's copy, in one (mixed.js).
+    const both = figure.model ? mixed.clip() : null;
+    if (both) return both;
     // Shapes drawn over the figure chosen (overlay.js): those, as a slide's are copied.
     const drawn = figure.model && shapes ? shapes.clip() : null;
     if (drawn) return drawn;
     const parts = figure.model ? figure.clip() : null;
     return parts ? { what: "parts", parts, label: parts.top.length > 1 ? `${parts.top.length} shapes` : "shape" } : null;
   };
-  const plainOf = (clip) => (clip.what === "shapes" ? clip.shapes.map((shape) => plain(String(shape?.text ?? ""))).filter(Boolean).join("\n") || clip.label
+  const plainOf = (clip) => (clip.what === "mixed" ? clipsOf(clip).map((one) => plainOf(one)).filter(Boolean).join("\n") : clip.what === "shapes" ? clip.shapes.map((shape) => plain(String(shape?.text ?? ""))).filter(Boolean).join("\n") || clip.label
     : clip.what === "block" ? clip.words || clip.label
       : clip.parts.nodes.map((node) => plain(node.label) || node.id).join("\n"));
   // Nothing chosen, the whole figure is copied: for other apps, its drawing; for a slide, the
@@ -760,13 +775,13 @@ export function mount(studio, main) {
   const copiedDrawing = (clip) => {
     const page = [...(studio.pages?.values?.() || [])][0];
     // (The shapes' as drawn: in a group entered, its own shapes' -- groups.js.)
-    const keep = clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
+    const keep = clip.what === "mixed" ? clipsOf(clip).flatMap((one) => copiedDrawing(one).keep) : clip.what === "parts" ? [...clip.parts.top, ...(clip.parts.edges || []).map((edge) => edge.id), ...(clip.parts.nets || []).map((net) => net.id)].filter(Boolean)
       : clip.what === "shapes" ? shapes.ids() : [];
     return { svg: page?.svg || "", keep, text: plainOf(clip), clip, title: clip.what === "block" ? studio.file.split("/").pop() : clip.label };
   };
   // Pasted: shapes drawn over the figure -- from it, another figure or a slide -- as shapes
   // drawn over it; parts of a figure as parts.
-  const pasteClip = (clip) => (clip?.what === "shapes" ? shapes.paste(clip) : clip?.parts ? figure.paste(clip.parts) : null);
+  const pasteClip = (clip) => (clip?.what === "mixed" ? mixed.paste(clip) : clip?.what === "shapes" ? shapes.paste(clip) : clip?.parts ? figure.paste(clip.parts) : null);
   const clipName = (clip) => clip.label.replace(/(^|\s)\p{L}/gu, (first) => first.toUpperCase());
   const copied = (clip) => toast(`${clip.label.charAt(0).toUpperCase()}${clip.label.slice(1)} copied`, { icon: "copy", seconds: 1.5 });
   // (Lines chosen alone: why nothing was copied is said, not left to look done.)
@@ -781,7 +796,7 @@ export function mount(studio, main) {
     copyOut(studio, copiedDrawing(clip), wrote);
     if (cut) cutAway(clip); else copied(clip);
   }
-  const cutAway = (clip) => (clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
+  const cutAway = (clip) => (clip.what === "mixed" ? mixed.remove(true) : clip.what === "shapes" ? shapes.remove("cut") : figure.remove(undefined, [], { cut: true }));
   // Greyed out, as a Mac menu's are, when there is nothing to cut, copy or paste.
   const clipItems = () => [
     { icon: "cut", label: "Cut", keys: "⌘X", disabled: !clipOf(), run: () => clipChosen(true) },
@@ -818,6 +833,7 @@ export function mount(studio, main) {
     if (!clip && clipboard && data?.getData("text/plain") === plainOf(clipboard)) clip = clipboard;
     // (Copied in another of the studio's documents, where the clipboard keeps its words alone.)
     if (!clip) clip = copiedHere(data);
+    if (clip?.what === "mixed" && clipsOf(clip).some((one) => one.what === "parts" || one.what === "shapes")) { event.preventDefault(); mixed.paste(clip); return; }
     if (clip?.what === "parts" && clip.parts?.top?.length) { event.preventDefault(); figure.paste(clip.parts); return; }
     if (clip?.what === "shapes" && Array.isArray(clip.shapes) && clip.shapes.length) { event.preventDefault(); shapes.paste(clip); return; }
     // Flexo's own copy of what a figure does not take (an object, a slide): nothing pasted --
@@ -831,7 +847,8 @@ export function mount(studio, main) {
     // Copied in a window of another folder: what it is, not the picture beside it.
     const theirs = await own;
     if (theirs) {
-      if (theirs.what === "parts" && theirs.parts?.top?.length) figure.paste(theirs.parts);
+      if (theirs.what === "mixed") mixed.paste(theirs);
+      else if (theirs.what === "parts" && theirs.parts?.top?.length) figure.paste(theirs.parts);
       else if (theirs.what === "shapes" && Array.isArray(theirs.shapes) && theirs.shapes.length) shapes.paste(theirs);
       return;
     }
@@ -872,6 +889,8 @@ export function mount(studio, main) {
     }
     if (typing(event.target)) return;
     const mod = event.metaKey || event.ctrlKey;
+    // Its parts and shapes drawn over it chosen together: ⌫, ⌘D, ⌘A, Esc theirs (mixed.js).
+    if (mixed.key(event)) { event.preventDefault(); return; }
     // Shapes drawn over the figure chosen (or one being drawn): their keys -- the arrows nudge,
     // ⌫ deletes, ⌘G groups, Esc puts the tool down (overlay.js).
     if (shapes.key(event)) { event.preventDefault(); return; }
@@ -981,7 +1000,11 @@ export function mount(studio, main) {
     if (source === "history") travelled = true;
     // Undone or redone, a change of the shapes drawn over the figure chooses them again (not
     // the parts its drawing brings back).
-    if (source === "history" && entry?.shapes) {
+    // (Its parts and shapes changed together: both, mixed.js.)
+    if (source === "history" && entry?.mixed) {
+      travelled = false;
+      mixed.restore(entry.mixed, studio.future[studio.future.length - 1]?.said === entry);
+    } else if (source === "history" && entry?.shapes) {
       travelled = false;
       figure.select([], { reveal: false });
       shapes.restore(entry, studio.future[studio.future.length - 1]?.said === entry);
@@ -1039,9 +1062,11 @@ export function mount(studio, main) {
     ...(typingNow() ? [] : drawings.commands()),
     // What is drawn over the figure: every kind to draw, and what those chosen can do
     // (overlay.js) -- the Mac app's Insert › Shapes and Arrange run them by these names.
-    ...(typingNow() ? [] : shapes.commands()),
-    ...(!typingNow() && chosenName() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
-    ...(!typingNow() && deleteName() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
+    // (Its parts chosen with them: what is done to both, mixed.js -- not to either alone.)
+    ...(typingNow() ? [] : mixed.commands()),
+    ...(typingNow() ? [] : mixed.shapeCommands(shapes.commands())),
+    ...(!typingNow() && chosenName() && !mixed.on() ? [{ icon: "duplicate", label: `Duplicate ${chosenName()}`, also: ["Duplicate"], keys: "⌘D", run: () => figure.duplicate() }] : []),
+    ...(!typingNow() && deleteName() && !mixed.on() ? [{ icon: "trash", label: `Delete ${deleteName()}`, keys: "⌫", run: () => figure.remove() }] : []),
     ...(figure.model?.nodes.length ? [{ icon: "target", label: "Select All Shapes", keys: "⌘A", run: () => figure.chooseAll() }] : []),
     // Format › Copy Style and Paste Style (⌥⌘C, ⌥⌘V) of the shapes chosen.
     ...(!typingNow() && figure.canCopyStyle() ? [{ icon: "copy", label: "Copy Style", keys: "⌥⌘C", hint: chosenName() || "", run: () => figure.copyStyle() }] : []),
