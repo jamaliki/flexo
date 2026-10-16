@@ -16,6 +16,9 @@
 .shape-handle.bend { fill: var(--accent); stroke: #ffffff; }
 .shape-stalk { stroke: var(--accent); }
 .shape-guide { stroke: #e8590c; }
+/* A guide caught at beside the page (a deck's slide before or after: beside.js), and its box. */
+.shape-guide.beside { stroke: #7048e8; }
+.shape-beside { fill: color-mix(in srgb, #7048e8 6%, transparent); stroke: #7048e8; stroke-dasharray: 4 3; stroke-opacity: 0.7; }
 .shape-target { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--accent); }
 .shape-site { fill: #ffffff; stroke: var(--accent); }
 .shape-site.on { fill: var(--accent); }

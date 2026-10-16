@@ -31,6 +31,7 @@ import * as O from "/static/studio/pathops.js";
 import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
 import * as Snap from "/static/studio/snapping.js";
+import * as Beside from "/static/studio/beside.js";
 import * as Align from "/static/studio/aligning.js";
 import { alignTools, nearer, drawSpacing, sizeCatch } from "/static/studio/aligntools.js";
 import { groupTools } from "/static/studio/groups.js";
@@ -124,6 +125,8 @@ export function plainWords({ value = "", placeholder = "" } = {}) {
 //   { box, turn, outline, label }), glueKey ("object" for a slide's, "part" for a figure's),
 //   pieceAt(event) (a piece of one under the pointer, smaller than any of them, if any);
 // - partAt(event) (whether one is under the pointer: a shape behind them is not pressed there);
+// - beside() (what is beside the page, caught at too, its guides told apart: { boxes } -- a
+//   deck's slides either side; beside.js);
 // - leaveOthers, renderInspector, reportFocus, swallowRelease, undoNote, awayFrom, clipItems,
 //   canDraw, shapeButton; words(options) (an editor for a shape's words), wordSize(spec);
 // - verb ("Add", "Draw": its commands' names), noun ("slide", "figure"), crumb() (the page, as
@@ -891,7 +894,8 @@ export function shapeEditor(host) {
       ys.push(y, y + h / 2, y + h);
       boxes.push([x, y, x + w, y + h]);
     }
-    return { xs, ys, boxes };
+    // And what the host has beside the page (a deck's slides either side: beside.js).
+    return Beside.withBeside({ xs, ys, boxes }, host.beside?.());
   }
   // The nearest of `values` to any of `mine` within reach: how far to move to it, and where.
   function catchAt(mine, values) {
@@ -903,10 +907,13 @@ export function shapeEditor(host) {
     }
     return best;
   }
-  function guide(axis, at) {
+  function guide(axis, at, from = Beside.besideAt(gesture?.targets, axis, at)) {
     const [x0, y0, width, height] = frameOf(), px = 1 / unit();
-    guides.append(axis === "x" ? S("line", { x1: at, y1: y0, x2: at, y2: y0 + height, class: "shape-guide", "stroke-width": px })
-      : S("line", { x1: x0, y1: at, x2: x0 + width, y2: at, class: "shape-guide", "stroke-width": px }));
+    // (One beside the page -- on the slide before or after -- in a colour of its own, with its box.)
+    const kind = from ? "shape-guide beside" : "shape-guide";
+    guides.append(axis === "x" ? S("line", { x1: at, y1: y0, x2: at, y2: y0 + height, class: kind, "stroke-width": px })
+      : S("line", { x1: x0, y1: at, x2: x0 + width, y2: at, class: kind, "stroke-width": px }));
+    if (from) guides.append(S("rect", { x: from[0], y: from[1], width: from[2] - from[0], height: from[3] - from[1], class: "shape-beside", "stroke-width": px }));
   }
   function say(text, event) {
     const node = page();
@@ -1673,7 +1680,11 @@ export function shapeEditor(host) {
     const run = nudged && nudged.slide === slideIndex() && nudged.key === picks.join(",") && Date.now() - nudged.at < 1500 ? nudged : { slide: slideIndex(), key: picks.join(","), id: Date.now() };
     run.at = Date.now();
     nudged = run;
+    // (Stopped where it would pass a guide beside the page, snapping on: beside.js.)
+    const caught = Snap.snapping() && host.beside ? Beside.nudgeCaught(unionOf(picks), dx, dy, host.beside()) : null;
+    if (caught) ({ dx, dy } = caught);
     edit((list) => { for (const index of picks) list[index] = withPlaces(F.moved(list[index], dx, dy)); }, `Move ${plural(picks.length)}`, { merge: `shape-nudge-${run.id}` });
+    if (caught?.guides.length) { guides.replaceChildren(); for (const line of caught.guides) guide(line.axis, line.at, line.box); clearTimeout(nudge.shown); nudge.shown = setTimeout(() => { if (!gesture) guides.replaceChildren(); }, 900); }
   }
 
   // -- the arrangement --
