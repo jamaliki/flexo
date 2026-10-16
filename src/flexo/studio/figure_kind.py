@@ -279,6 +279,11 @@ class FigureKind:
                 return {"document": document, "id": fetched(str(action.get("id") or ""))}
             except EditError as error:
                 return {"document": document, "failed": explain(error)}
+        if action.get("do") == "previews":
+            # The figure drawn in a design before it is chosen: the Design bar's (previews.py).
+            from flexo.studio.previews import previews
+
+            return previews(self, document, action, base)
         result = apply(document["text"], action, suffix=document.get("suffix", ".yaml"), base=base)
         from flexo.studio.figure_edit import model
 

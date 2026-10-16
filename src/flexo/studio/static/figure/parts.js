@@ -6278,11 +6278,14 @@ export function figureParts(host) {
   function figurePanel() {
     const figure = model();
     const counts = `${counted(figure.nodes.length, "shape")} · ${counted(figure.edges.length + figure.nets.length, "line")}`;
+    // (Those a host's Design bar holds -- the figure editor's theme, page and the rest -- are
+    // its, not the panel's: the panel keeps the rest.)
+    const barred = (field) => Boolean(host.designBar?.includes(field.key));
     return [
       // Named as its file is, where it has one of its own.
       h("div.section.insp-top", {}, titleBlock(icon("figure"), host.name?.() || "Figure", counts)),
-      h("div.section", {}, fields(catalog.figure_fields.filter((field) => !field.sized), { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
-      sizes(),
+      h("div.section", {}, fields(catalog.figure_fields.filter((field) => !field.sized && !barred(field)), { figure: figure.figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure")),
+      catalog.figure_fields.some((field) => field.sized && barred(field)) ? null : sizes(),
       // What is hidden or dimmed, brought back from here too: with it chosen it can't be
       // seen to choose.
       anyShownApart() ? h("div.section", {}, h("div.section-title", {}, "Show"),
@@ -6299,6 +6302,12 @@ export function figureParts(host) {
     if (!model()) return null;
     return h("div.section", {}, h("div.section-title", {}, "Sizes"),
       fields(catalog.figure_fields.filter((field) => field.sized), { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure-sizes"));
+  }
+
+  // One of the figure's own settings drawn as its panel draws it, for a host's Design bar.
+  function figureField(key) {
+    const field = catalog.figure_fields.find((each) => each.key === key);
+    return field && model() ? fieldControl(field, { figure: model().figure }, (values, merge, hold) => update({ type: "figure" }, values, merge, hold), "figure-bar") : null;
   }
 
   // -- a shape's words --
@@ -7444,7 +7453,7 @@ export function figureParts(host) {
     // (A part on its way, till it lands: a slide's frame round the figure waits for it.)
     busy: () => Boolean(adding) && Date.now() - adding < 6000,
     typeOf, nameOf, nodeOf, groupOf, edgeOf, netOf, parentOf, nodeOfRef, partOf,
-    idAt, click, dblclick, marks, markViews, hint, key, panel, sizes, wantsRoom,
+    idAt, click, dblclick, marks, markViews, hint, key, panel, sizes, figureField, wantsRoom,
     addPalette, addPart, gather, groupMenu, canGroup, alignChosen, canAlign, band, lone, remove, duplicate, chooseAll, toggleConnect, clip, uncopied, paste, menuOf, revealProblem,
     showAs, showAll, shownAs, anyShownApart, panelMenu, addPanel, layOutPanels, moveChosen, canMove,
     toggleWords, canStyle, copyStyle, pasteStyle, canCopyStyle, canPasteStyle,

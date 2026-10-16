@@ -359,8 +359,12 @@ class Handler(BaseHTTPRequestHandler):
                 # page's document (an embedding undone, not yet sent): back before it is read.
                 with contextlib.suppress(Exception):
                     workspace.follow_uploads([(doc.path.parent, data["document"])])
-            answer = act(data.get("document", doc.document), data.get("action") or {},
-                         doc.path.parent)
+            # (A design's previews are drawings: drawn as the document's are, its own Python
+            # run only once the folder is trusted.)
+            drawing = (data.get("action") or {}).get("do") == "previews"
+            with workspace.running() if drawing else contextlib.nullcontext():
+                answer = act(data.get("document", doc.document), data.get("action") or {},
+                             doc.path.parent)
             if isinstance(answer, dict) and "released" in answer:
                 # Files the edit leaves the document no longer needing (a figure file whose
                 # figure went into the deck): a bundle's own, taken out of it once no document

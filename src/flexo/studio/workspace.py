@@ -74,9 +74,11 @@ IGNORED = {
 }
 """Folders no document is looked for in: tools' output, caches, and a home's own folders."""
 _READS = frozenset(
-    {"read", "structure-view", "structure-settings", "structure-fetch", "structure-name"}
+    {"read", "structure-view", "structure-settings", "structure-fetch", "structure-name",
+     "previews"}
 )
-"""Edits a page asks of a kind that only read the document (``Workspace.acting``)."""
+"""Edits a page asks of a kind that only read the document (``Workspace.acting``): a design's
+previews among them, the document drawn as it would be in it (the Design bar's)."""
 DOCUMENT_SUFFIXES = (".yaml", ".yml", ".json")
 CLAIM_LIMIT = 10_000_000
 """Bytes: a larger file is not read to find out what kind of document it is. (A deck holding

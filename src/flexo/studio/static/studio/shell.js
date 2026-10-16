@@ -1547,7 +1547,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],

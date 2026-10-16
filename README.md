@@ -1338,6 +1338,12 @@ slide 4") show where it works, the activity list says who changed what, and
 own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
 changes in words, to go back or forward to any of them.
 
+- **Design** in a figure's toolbar (⇧⌘D, View › Show Design in the Mac app) shows its
+  Design bar across the window, as a deck's: the figure drawn in each theme, and beside it
+  its **Colours**, **Font**, **Page Size** (with its width and height), **Panel Letters**
+  and **Sizes** (spacing, shapes' padding, lines' width, arrowheads' size). A theme,
+  palette or font pointed at shows on the figure as it would be; chosen, it is one step to
+  undo. The inspector keeps what is the figure's parts' own.
 - **Figures**, made without writing YAML: **Add** offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
@@ -1355,7 +1361,7 @@ changes in words, to go back or forward to any of them.
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (⌘G) gathers them
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
-  journal prints a figure of several; **Panel Letters**, with nothing chosen,
+  journal prints a figure of several; **Panel Letters**, in the Design bar,
   letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
