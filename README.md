@@ -851,7 +851,10 @@ on a part draws it round that part, a filled one behind it so that it hides noth
 is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide,
 catching at the parts' edges and middles as it goes -- unless the magnet in the zoom bar (or
 %) has turned snapping off, when nothing catches, a line's end is glued only with ⌘ held,
-and a part's handles snap only with ⌘ too. A shape drawn on a part is put on it, and moves
+and a part's handles snap only with ⌘ too. **#** (or the toggle beside the magnet, or View ›
+Show Grid) draws graph paper over the figure, its squares sized to it; snapping to the grid
+(the magnet's next turn after guides, or View › Snap to Grid), a shape catches at its lines
+instead. A shape drawn on a part is put on it, and moves
 with it; its panel's **Moves With** chooses
 another part, or none, and **Drawn** puts it in front of the parts or behind them.
 

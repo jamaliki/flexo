@@ -10,7 +10,9 @@
 // on it, following it after -- and a curve by its middle; its own handles (a corner, a tail, a
 // star's points) shape it. Each catches at the page's edges and middle, and the edges and
 // middles of the other shapes and of what the page holds, a guide drawn where it does (⌘:
-// none; with snapping off, none and no glue, ⌘ catching and gluing: snapping.js). The arrows
+// none; with snapping off, none and no glue, ⌘ catching and gluing: snapping.js) -- or,
+// snapping to the grid, at the grid's lines instead, its edges at each square's, its middle
+// too at the layout's (grid.js), the grid drawn over the page while it is shown. The arrows
 // nudge it (⇧: ten points); double-clicked, its words are typed in it.
 // Everything moves on the page at once, drawn here (freeform.js) as the page will draw it;
 // the page's own drawing takes its place as it comes. The pen draws a path point by point, a
@@ -32,6 +34,8 @@ import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
 import * as Snap from "/static/studio/snapping.js";
 import * as Beside from "/static/studio/beside.js";
+import * as Grid from "/static/studio/grid.js";
+import { gridPaper } from "/static/studio/gridpaper.js";
 import * as Align from "/static/studio/aligning.js";
 import { alignTools, nearer, drawSpacing, sizeCatch } from "/static/studio/aligntools.js";
 import { groupTools } from "/static/studio/groups.js";
@@ -127,6 +131,8 @@ export function plainWords({ value = "", placeholder = "" } = {}) {
 // - partAt(event) (whether one is under the pointer: a shape behind them is not pressed there);
 // - beside() (what is beside the page, caught at too, its guides told apart: { boxes } -- a
 //   deck's slides either side; beside.js);
+// - grid() (the page's grid, in the shapes' units: { step, major, layout: { xs, ys, boxes } } --
+//   a deck's squares and its slide's margins and places; grid.js);
 // - leaveOthers, renderInspector, reportFocus, swallowRelease, undoNote, awayFrom, clipItems,
 //   canDraw, shapeButton; words(options) (an editor for a shape's words), wordSize(spec);
 // - verb ("Add", "Draw": its commands' names), noun ("slide", "figure"), crumb() (the page, as
@@ -164,6 +170,8 @@ export function shapeEditor(host) {
   const guides = S("g", { class: "shape-guides" });
   const handles = S("g", { class: "shape-handles" });
   layer.append(previews, marks, guides, handles);
+  // The grid, over the page's drawing and under the layer, while it is shown (grid.js).
+  const paper = gridPaper();
   const tip = h("div.size-tip.shape-tip", { hidden: true });
   // (A press: a band dragged from it chooses in reading order, ⇧ or ⌘ keeping what is chosen.)
   window.addEventListener("pointerdown", (event) => { picked.pressed(event.shiftKey || event.metaKey); touchedNow = false; }, true);
@@ -379,7 +387,10 @@ export function shapeEditor(host) {
     layer.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
     if (layer.parentNode !== node) node.append(layer);
     if (tip.parentNode !== node) node.append(tip);
+    paper.lay(node, frameOf(), () => host.grid?.());
   }
+  // Shown or hidden (here, or in another tab): laid on the page shown, or taken off.
+  Grid.onGrid(() => { if (page()?.isConnected) paper.lay(page(), frameOf(), () => host.grid?.()); else paper.node.remove(); });
 
   // The page drawn again: what was moved here is where it is drawn now.
   function drawn() {
@@ -862,8 +873,9 @@ export function shapeEditor(host) {
   }
 
   // What a drag catches at: the slide's edges and middles, and the edges and middles of the
-  // shapes and objects not being dragged.
+  // shapes and objects not being dragged -- or, snapping to the grid, its lines (grid.js).
   function snapTargets(moving) {
+    if (Snap.toGrid()) return Grid.targetsOf(frameOf(), host.grid?.());
     const [x0, y0, width, height] = frameOf();
     const xs = [x0, x0 + width / 2, x0 + width], ys = [y0, y0 + height / 2, y0 + height], boxes = [];
     // (Nor a line glued to what moves: it moves with it.)
@@ -898,15 +910,7 @@ export function shapeEditor(host) {
     return Beside.withBeside({ xs, ys, boxes }, host.beside?.());
   }
   // The nearest of `values` to any of `mine` within reach: how far to move to it, and where.
-  function catchAt(mine, values) {
-    let best = null;
-    const reach = NEAR / unit();
-    for (const own of mine) for (const value of values) {
-      const gap = value - own;
-      if (Math.abs(gap) <= reach && (!best || Math.abs(gap) < Math.abs(best.gap))) best = { gap, at: value };
-    }
-    return best;
-  }
+  const catchAt = (mine, values) => Snap.nearest(mine, values, NEAR / unit());
   function guide(axis, at, from = Beside.besideAt(gesture?.targets, axis, at)) {
     const [x0, y0, width, height] = frameOf(), px = 1 / unit();
     // (One beside the page -- on the slide before or after -- in a colour of its own, with its box.)
@@ -1681,7 +1685,7 @@ export function shapeEditor(host) {
     run.at = Date.now();
     nudged = run;
     // (Stopped where it would pass a guide beside the page, snapping on: beside.js.)
-    const caught = Snap.snapping() && host.beside ? Beside.nudgeCaught(unionOf(picks), dx, dy, host.beside()) : null;
+    const caught = Snap.toGuides() && host.beside ? Beside.nudgeCaught(unionOf(picks), dx, dy, host.beside()) : null;
     if (caught) ({ dx, dy } = caught);
     edit((list) => { for (const index of picks) list[index] = withPlaces(F.moved(list[index], dx, dy)); }, `Move ${plural(picks.length)}`, { merge: `shape-nudge-${run.id}` });
     if (caught?.guides.length) { guides.replaceChildren(); for (const line of caught.guides) guide(line.axis, line.at, line.box); clearTimeout(nudge.shown); nudge.shown = setTimeout(() => { if (!gesture) guides.replaceChildren(); }, 900); }

@@ -14,6 +14,7 @@ import { figureShapes } from "/static/kinds/figure/overlay.js";
 import { figureMixed } from "/static/kinds/figure/mixed.js";
 import { clipsOf } from "/static/studio/mixing.js";
 import { magnetButton } from "/static/studio/magnet.js";
+import { gridButton, gridCommand } from "/static/studio/gridpaper.js";
 import { colourKey, boxAround } from "/static/studio/colourkey.js";
 import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
@@ -49,8 +50,8 @@ export function mount(studio, main) {
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true, title: "Zoom to Fit (⇧⌘0)" }),
     ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }),
-    // Snapping, on or off (%), for the shapes drawn over it and its parts' handles alike.
-    h("span.zoom-sep"), magnetButton());
+    // Snapping (%), for the shapes drawn over it and its parts' handles alike; the grid (#).
+    h("span.zoom-sep"), magnetButton(), gridButton());
   // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
   // it would look pressed while the drawing is zoomed on from the keyboard.
   for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -1190,6 +1191,8 @@ export function mount(studio, main) {
     { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
     design.command(),
+    // The grid over the figure (gridpaper.js).
+    gridCommand(),
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select ${inQuotes(figure.nameOf(node.id))}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];

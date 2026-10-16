@@ -5,8 +5,10 @@ import { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, tabbables 
 import { Session } from "./session.js";
 import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 import { bundles, bundleName } from "./bundles.js";
-import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
+import { snapping, toGrid, toGuides, setSnapMode, fromWord, onSnapping } from "./snapping.js";
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
+import { gridKeys } from "./gridpaper.js";
+import { onGrid } from "./grid.js";
 import { alignTo, asGroup, onAligning } from "./aligning.js";
 import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
 import { findKeys, chosenWords } from "./findbar.js";
@@ -717,7 +719,7 @@ export async function start() {
   workspace.command = (name, arg) => {
     // Snapping turned in another window of the app: this one's turned too, quietly, whatever
     // it shows (magnet.js).
-    if (name === "snapping" && (arg === "on" || arg === "off")) { setSnapping(arg === "on", "app"); return; }
+    if (name === "snapping" && fromWord(arg)) { setSnapMode(fromWord(arg), "app"); return; }
     // So too Relative To, Move as a Group and the gap (aligntools.js's aligningInApp).
     if (name === "aligning") { try { aligningFromApp(JSON.parse(arg || "{}")); } catch { /* not one */ } return; }
     const session = workspace.active;
@@ -785,8 +787,10 @@ export async function start() {
         break;
       case "agents": connectDialog(workspace); break;
       case "shortcuts": shortcutsDialog(); break;
-      // View › Snap to Guides and Objects: turned, and said.
-      case "snapping": sayTurned(toggleSnapping()); break;
+      // View › Snap to Guides and Objects, and Snap to Grid: turned to theirs (or, theirs
+      // already, off), and said.
+      case "snapping": sayTurned(setSnapMode(toGuides() ? "off" : "guides")); break;
+      case "snap-grid": sayTurned(setSnapMode(toGrid() ? "off" : "grid")); break;
       default: break;
     }
     // What a command did may change what can be done (Show Speaker Notes is then Hide).
@@ -827,8 +831,9 @@ export async function start() {
         side: side.open || "",
         // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
         deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
-        // View › Snap to Guides and Objects, ticked while it is on.
-        snapping: snapping(),
+        // View › Snap to Guides and Objects, ticked while it is on -- and Snap to Grid instead
+        // while it is the grid's.
+        snapping: snapping(), snapping_grid: toGrid(),
         // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
         align_to: alignTo(), align_group: asGroup(),
         // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
@@ -841,10 +846,13 @@ export async function start() {
     }, 80);
   };
   // Snapping turned -- here, in another tab, in another window of the app -- is told at once;
-  // and % turns it, and the app keeps it for every window (magnet.js).
+  // and % turns it, and the app keeps it for every window (magnet.js). # shows the grid or
+  // hides it (gridpaper.js).
   onSnapping(() => report());
+  onGrid(() => report());
   onAligning(() => report());
   magnetKeys();
+  gridKeys();
   findKeys(workspace);
   snappingInApp();
   aligningInApp();
@@ -1559,7 +1567,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping: to Guides and Objects, to the Grid, or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["#", "Show or Hide the Grid"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Finding", [["⌘ F", "Find in the Document (a Deck, a Figure)"], ["⌥ ⌘ F", "Find and Replace"], ["↩ ⇧ ↩", "Next or Previous Match (in the Find Field)"],
     ["N ⇧ N", "Next or Previous Match, While the Find Bar Is Open and No Words Are Typed (as Vim’s)"], ["⌘ E", "Find the Words Chosen (While Typing on a Slide: Code)"], ["Esc", "Close the Find Bar, the Last Match Chosen"],
     ["⌘ ' ⇧ ⌘ '", "Next or Previous TODO"]]],
