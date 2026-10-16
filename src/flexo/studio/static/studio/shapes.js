@@ -2337,6 +2337,17 @@ export function shapeEditor(host) {
     editingPoints: () => Boolean(tools?.points.active()),
     armed: () => Boolean(tool),
     typing: () => Boolean(words),
+    // What is being done to them now, for the keys the help bar along the window's foot says
+    // (helpkeys.js's fromShapes): a drag under way by its kind -- a size by a corner or a side,
+    // a line drawn or another shape -- a tool armed, a path drawn or its points edited, a group
+    // entered, and what is chosen.
+    doing: () => {
+      const picks = chosenNow(), one = picks.length === 1 ? shapesOf()[picks[0]] : null, kind = gesture?.kind || tool?.kind;
+      return { drag: gesture?.started ? gesture.type : null, corner: gesture?.type === "size" && String(gesture.name || "").length === 2,
+        line: Boolean(kind) && F.family(kind) === "line", tool: tool?.kind ?? null, points: Boolean(tools?.points.active()),
+        pointDrag: Boolean(tools?.pen.drawing() || tools?.points.busy()), group: groups.depth(), chosen: picks.length, kind: one?.kind ?? null,
+        locked: picks.length > 0 && picks.every((index) => shapesOf()[index]?.locked) };
+    },
     closeWords,
     count: shapeCount,
     label: () => { const picks = chosenNow(); return picks.length === 1 ? shapeLabel(shapesOf()[picks[0]]) : picks.length ? `${picks.length} Shapes` : ""; },

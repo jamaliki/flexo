@@ -1445,6 +1445,13 @@ changes in words, to go back or forward to any of them.
   saved after 1.5 s without typing (at most every 8 s), not 0.35 s, so the
   service carries fewer versions and two computers save at once less often.
 - ⌘K searches every command, slide, and file; `?` lists the keys.
+- The **help bar**, one row along the window's foot, names the keys for what is being done
+  now, a keycap and a word or two each: while a shape is dragged, what ⇧, ⌥ and ⌘ do to the
+  drag (each lit while it is held) and Esc; while the find bar is open, ↩ and ⇧↩ in its field
+  and N and ⇧N once the keys are elsewhere; while words are typed, theirs; else those of what
+  is chosen, or of the page. **View › Hide Help Bar** (the palette, the Mac app, its own
+  right-click) hides it, kept in the browser; it says the keys as the Keyboard Shortcuts
+  sheet does (`studio/helpkeys.js`).
 
 Other packages add kinds of document through the `flexo.studio` entry-point
 group (`flexo.studio.Kind` says what one provides) and samples for the theme

@@ -1,0 +1,21 @@
+/* The help bar (helpbar.js): one quiet row along the foot of the window, under the documents
+   and their panels -- the stage a little shorter for it, nothing of a document covered. Its
+   keycaps outlined as the shortcuts sheet's are, their words muted; a modifier's lit while it
+   is held. Too narrow for them all, those last go whole (they wrap out of sight). */
+.studio { grid-template-rows: var(--bar) minmax(0, 1fr) auto; }
+.help-bar {
+  height: 26px; display: flex; flex-wrap: wrap; align-content: flex-start; column-gap: 18px;
+  padding: 0 14px; overflow: hidden; background: var(--panel); border-top: 1px solid var(--line);
+  color: var(--ink-3); font: 400 11.5px/26px var(--font); letter-spacing: 0.01em;
+  cursor: default; user-select: none; -webkit-user-select: none; contain: layout paint;
+}
+.help-item { display: inline-flex; align-items: center; gap: 6px; height: 26px; white-space: nowrap; }
+.help-keys { display: inline-flex; align-items: center; gap: 3px; }
+.help-key {
+  display: inline-grid; place-items: center; box-sizing: border-box; min-width: 19px; height: 17px; padding: 0 4px;
+  border: 1px solid var(--line-strong); border-radius: 4px; font: 500 10.5px/1 var(--font); color: var(--ink-2);
+  transition: color 0.1s, background-color 0.1s, border-color 0.1s;
+}
+.help-word { color: var(--ink-3); }
+.help-item.held .help-key { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.help-item.held .help-what { color: var(--ink-2); }

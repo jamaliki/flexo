@@ -15,6 +15,7 @@ import { figureMixed } from "/static/kinds/figure/mixed.js";
 import { clipsOf } from "/static/studio/mixing.js";
 import { magnetButton } from "/static/studio/magnet.js";
 import { gridButton, gridCommand } from "/static/studio/gridpaper.js";
+import { fromShapes, fromParts, together } from "/static/studio/helpkeys.js";
 import { colourKey, boxAround } from "/static/studio/colourkey.js";
 import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
@@ -1126,6 +1127,11 @@ export function mount(studio, main) {
     return chosenName() || (chosen.length > 1 ? `${chosen.length} Lines` : "Line");
   };
   const shapesChosen = () => figure.selected.some((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root));
+  // What is being done to the figure now, for the keys the help bar along the window's foot
+  // says (helpbar.js): a drag of the shapes drawn over it or of its own -- one sized, a line
+  // bent (their marks on the page) -- its lines drawn, and what is chosen, both kinds together.
+  studio.help = () => together({ chosen: mixed?.on() ? "mixed" : "" }, fromShapes(shapes?.doing?.()),
+    fromParts(figure, { sizing: page.classList.contains("fig-sizing"), bending: document.body.classList.contains("fig-grabbing") }));
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     // Align and Distribute… (⇧⌘A), Arrange shown, with nothing to align chosen too (the shapes'
