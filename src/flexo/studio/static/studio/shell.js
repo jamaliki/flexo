@@ -9,6 +9,7 @@ import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
 import { alignTo, asGroup, onAligning } from "./aligning.js";
 import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
+import { findKeys, chosenWords } from "./findbar.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -546,7 +547,9 @@ export async function start() {
   const assistantButton = h("button.btn.assistant-button", { type: "button", title: "Show Assistant (⌘J)", onclick: () => side.toggle("assistant") }, icon("sparkle"), h("span.btn-label", {}, "Assistant"));
   // Pressed, it leaves the keys where they were (words being typed, the slide list) until
   // the palette has seen what they are on: its commands are for that.
-  const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Command Palette (⌘K)" }, icon("search"), h("span", {}, "Search or run a command"), h("span.kbd", {}, "⌘K"));
+  // It searches the document in front -- its words, as the find bar does -- as well as the
+  // commands and the folder's documents: the palette drops down from it.
+  const paletteButton = h("button.search-button", { type: "button", "data-keeps-typing": true, onmousedown: (event) => event.preventDefault(), onclick: () => palette(workspace), title: "Search (⌘K)" }, icon("search"), h("span", {}, "Search"), h("span.kbd", {}, "⌘K"));
   // Appearance as a Mac's: Automatic, Light or Dark, the one in use ticked.
   const themeButton = ui.button("", (event) => {
     const now = remembered("theme", "auto");
@@ -726,11 +729,11 @@ export async function start() {
       report();
       return;
     }
-    // The palette open: closed first (⌘K, Find… again: only that), the command then run on
+    // The palette open: closed first (⌘K again: only that), the command then run on
     // the document under it.
     if (document.querySelector(".palette")) {
       closePalette();
-      if (name === "palette" || name === "find") { report(); return; }
+      if (name === "palette") { report(); return; }
     }
     switch (name) {
       case "undo": travel("undo"); break;
@@ -758,7 +761,11 @@ export async function start() {
         break;
       }
       case "palette": palette(workspace); break;
-      case "find": palette(workspace, { find: true }); break;
+      // Edit › Find: the document's find bar (finding.js) -- a kind without one, the palette.
+      case "find": if (session?.finder) session.finder.open({ replace: arg === "replace" }); else palette(workspace); break;
+      case "find-next": session?.finder?.next(); break;
+      case "find-previous": session?.finder?.previous(); break;
+      case "find-selection": session?.finder?.useSelection(field ? chosenWords() : String(getSelection())); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
       case "new": if (arg === "deck") newDeck(workspace); else askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
@@ -826,6 +833,10 @@ export async function start() {
         align_to: alignTo(), align_group: asGroup(),
         // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
         why: whyNot(session),
+        // Edit › Find: whether the document finds its words (Find…), whether its find bar is
+        // open (Find Next, Find Previous), and words chosen to find (Use Selection for Find).
+        finds: Boolean(session?.finder), finding: Boolean(session?.finder?.isOpen),
+        find_selection: Boolean(session?.finder) && Boolean((field ? chosenWords() : String(getSelection())).trim()),
       });
     }, 80);
   };
@@ -834,6 +845,7 @@ export async function start() {
   onSnapping(() => report());
   onAligning(() => report());
   magnetKeys();
+  findKeys(workspace);
   snappingInApp();
   aligningInApp();
   // A slide or part chosen changes what can be done; so does a field taking the keys
@@ -1543,11 +1555,13 @@ export function connectDialog(workspace) {
 // Every key the studio answers to, by what it works on, as a Mac app's Help lists them. A
 // row marked `app` is the Mac app's menus' own (a browser keeps those keys for itself).
 const SHORTCUTS = [
-  ["General", [["⌘ K", "Show or Hide the Command Palette (Except While Typing)"], ["⌘ F", "Find", "app"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
+  ["General", [["⌘ K", "Search, or Hide the Search (Except While Typing)"], ["⌘ J", "Show or Hide the Assistant"], ["⌥ ⌘ A", "Show or Hide Activity"],
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
     ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+  ["Finding", [["⌘ F", "Find in the Document (a Deck, a Figure)"], ["⌥ ⌘ F", "Find and Replace"], ["↩ ⇧ ↩", "Next or Previous Match"],
+    ["⌘ G ⇧ ⌘ G", "Next or Previous Match, While the Find Bar Is Open (Else Group and Ungroup)"], ["⌘ E", "Find the Words Chosen (While Typing on a Slide: Code)"], ["Esc", "Close the Find Bar, the Last Match Chosen"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
@@ -1685,25 +1699,7 @@ class SidePanel {
 // The palette open now, closed (⌘K again, or a menu command run while it is open).
 let closePalette = () => {};
 
-// A deck's slides by their words, for Find: each slide's words as one line -- what was typed
-// in it (titles, text, lists, labels, captions, cells, notes), not its settings -- markup aside.
-const WORDS = new Set(["title", "subtitle", "words", "text", "label", "caption", "callout", "quote", "by", "author", "date", "notes", "footnotes",
-  "bullets", "numbered", "items", "rows", "header", "cells", "value", "code", "equation", "footer", "name"]);
-// (`named`: but for the words the slide is named by in the palette -- its title, or a
-// statement's words -- which its row says already.)
-function slideWords(slide, { named = false } = {}) {
-  const words = [];
-  const walk = (value, key) => {
-    if (typeof value === "string") { if (WORDS.has(key) && /\p{L}/u.test(value)) words.push(value); }
-    else if (Array.isArray(value)) value.forEach((item) => walk(item, key));
-    else if (value && typeof value === "object") for (const [name, item] of Object.entries(value)) walk(item, name);
-  };
-  const name = slide?.words ? "words" : "title";
-  walk(named && slide && typeof slide === "object" ? Object.fromEntries(Object.entries(slide).filter(([key]) => key !== name)) : slide, "");
-  return words.join(" · ").replace(/\[([^\]]*)\]\{[^}]*\}/g, "$1").replace(/\*\*|[*`]/g, "").replace(/\s+/g, " ");
-}
-
-export function palette(workspace, { find = false } = {}) {
+export function palette(workspace) {
   if (document.querySelector(".palette")) return;
   const session = workspace.active;
   const own = session ? session.commands() : [];
@@ -1756,24 +1752,10 @@ export function palette(workspace, { find = false } = {}) {
     ...workspace.documents.filter((item) => !workspace.sessions.has(item.file)).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: `Open ${docName(item.file)}`, hint: item.title, run: () => workspace.open(item.file) })),
     ...own.filter((command) => command.later),
   ];
-  // Slides found by their words as well as their titles (Edit › Find… opens the palette to
-  // find words): each with the words around what was found, the title its row names aside.
-  const slides = Array.isArray(session?.doc?.slides) ? session.doc.slides.map((slide) => [slideWords(slide), slideWords(slide, { named: true })]) : [];
-  const foundOn = (query) => {
-    if (query.length < 2) return [];
-    return slides.flatMap(([all, rest], index) => {
-      if (!all.toLowerCase().includes(query)) return [];
-      const named = own.find((command) => command.later && command.label.startsWith(`Slide ${index + 1}:`))?.label;
-      const words = named ? rest : all, at = words.toLowerCase().indexOf(query);
-      // (Whole words, not a word's last letters.)
-      let from = Math.max(0, at - 24), to = Math.min(words.length, at + query.length + 40);
-      if (from && words.indexOf(" ", from) >= 0 && words.indexOf(" ", from) < at) from = words.indexOf(" ", from) + 1;
-      if (to < words.length && words.lastIndexOf(" ", to) > at + query.length) to = words.lastIndexOf(" ", to);
-      const note = at < 0 ? "" : `${from ? "…" : ""}${words.slice(from, to).trim()}${to < words.length ? "…" : ""}`;
-      return [{ icon: "slide", label: named || `Slide ${index + 1}`, note, later: true, run: () => session.reveal?.({ page: index + 1 }) }];
-    }).slice(0, 12);
-  };
-  const input = h("input.palette-input", { placeholder: find && slides.length ? "Find words on the slides, or a command…" : session ? "Search commands, slides, files…" : "Search commands and files…" });
+  // The document's words, found as its find bar finds them (findbar.js): the matches listed
+  // by where each is (a deck's slide), above the commands, as PowerPoint's search lists them.
+  const finding = session?.finder || null;
+  const input = h("input.palette-input", { placeholder: "Search" });
   input.spellcheck = false;
   const list = h("div.command-list.scroll-thin");
   let shown = [];
@@ -1810,16 +1792,37 @@ export function palette(workspace, { find = false } = {}) {
     return 20 + total * 0.1;
   };
   const render = () => {
-    const query = input.value.trim().toLowerCase();
+    const typed = input.value.trim(), query = typed.toLowerCase();
     // A place to go (a slide) found as well as a command, after it: "slide" is New Slide first.
     const ranked = (command) => { const found = score(command, query); return found === null ? null : found + (command.later ? 15 : 0); };
-    shown = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
-    // (A slide found by its title already is not listed again for its words.)
-    if (query) shown = [...shown, ...foundOn(query).filter((slide) => !shown.some((command) => command.label === slide.label))];
+    const found = query ? commands.map((command) => [ranked(command), command]).filter(([s]) => s !== null).sort((a, b) => a[0] - b[0]).map(([, c]) => c) : commands;
+    // The document's matches, by where each is; the one command named by what is typed (its
+    // name starting so, "new slide") first of all, as a best match.
+    const words = finding && typed.length >= 2 ? finding.results(typed) : null;
+    const best = words?.total && found[0] && !found[0].later && score(found[0], query) === -30 ? found[0] : null;
+    const matches = (words?.groups || []).flatMap((group) => group.rows.map((row, k) => ({ found: row, head: k === 0 ? group : null,
+      icon: row.name === "Notes" ? "notes" : "slide", label: "", run: () => finding.choose(typed, row.match) })));
+    const more = words && words.total > matches.length
+      ? [{ icon: "search", label: `Show All ${words.total} Matches`, keys: "⌘F", run: () => finding.open({ query: typed }) }] : [];
+    const rest = found.filter((command) => command !== best);
+    shown = [...(best ? [best] : []), ...matches, ...more, ...rest];
     index = Math.min(index, Math.max(0, shown.length - 1));
-    clear(list, shown.length ? shown.map((command, i) => h(`button.menu-item${i === index ? ".active" : ""}`, { type: "button", title: command.hint || "", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
-      command.icon ? icon(command.icon) : null, h("span.menu-text", {}, h("span", {}, command.label), command.note ? h("span.menu-hint", {}, command.note) : null),
-      command.keys ? h("span.kbd", {}, command.keys) : null)) : h("div.empty", {}, "No results"));
+    const row = (command, i) => {
+      const words = command.found;
+      const text = words ? h("span.menu-text", {}, h("span.found-words", {}, words.before, h("mark", {}, words.found), words.after))
+        : h("span.menu-text", {}, h("span", {}, command.label), command.note ? h("span.menu-hint", {}, command.note) : null);
+      return h(`button.menu-item${words ? ".found-item" : ""}${i === index ? ".active" : ""}`, { type: "button", title: command.hint || "", "aria-disabled": command.disabled ? "true" : undefined, onmouseenter: () => { index = i; mark(); }, onclick: () => run(command) },
+        command.icon ? icon(command.icon) : null, text,
+        words ? h("span.found-where", {}, words.name) : command.keys ? h("span.kbd", {}, command.keys) : null);
+    };
+    const rows = [];
+    shown.forEach((command, i) => {
+      if (command.head) rows.push(h("div.found-head", {}, h("span", {}, command.head.label), command.head.title ? h("span.found-title", {}, command.head.title) : null));
+      // (The commands under the matches, said so.)
+      if (matches.length && command === rest[0]) rows.push(h("div.found-head.commands", {}, "Commands"));
+      rows.push(row(command, i));
+    });
+    clear(list, rows.length ? rows : h("div.empty", {}, "No results"));
   };
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
   // Closed, it gives the keys back where they were, as Spotlight does; a command run then
@@ -1848,8 +1851,16 @@ export function palette(workspace, { find = false } = {}) {
     // Its one field holds the keys: Tab goes nowhere behind it.
     else if (event.key === "Tab") event.preventDefault();
   });
-  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } },
-    h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list));
+  const panel = h("div.palette", {}, h("div.palette-head", {}, icon("search"), input), list);
+  const scrim = h("div.scrim.palette-scrim", { onmousedown: (event) => { if (event.target === scrim) close(); } }, panel);
+  // Opened over the top bar's field, the search drops down from it, its field over the bar's.
+  const barField = document.querySelector(".bar .search-button")?.getBoundingClientRect();
+  if (barField?.width) {
+    scrim.classList.add("anchored");
+    const width = Math.min(620, innerWidth - 16);
+    Object.assign(panel.style, { width: `${width}px`, top: `${Math.max(4, barField.top + barField.height / 2 - 24)}px`,
+      left: `${Math.max(8, Math.min(barField.right + 8 - width, innerWidth - width - 8))}px` });
+  }
   document.body.append(scrim);
   closePalette = close;
   render();

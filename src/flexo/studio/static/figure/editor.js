@@ -18,6 +18,7 @@ import { colourKey, boxAround } from "/static/studio/colourkey.js";
 import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
 import { figureBar, BAR_FIELDS } from "/static/kinds/figure/designbar.js";
+import { figureFinder } from "/static/kinds/figure/findfigure.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -1093,6 +1094,9 @@ export function mount(studio, main) {
     if (state.tab === "source") numbers();
   });
   studio.on("remote", () => { page.classList.remove("flash"); void page.offsetWidth; page.classList.add("flash"); });
+  // ⌘F: the figure's words found, marked where they are drawn, and replaced (findfigure.js).
+  figureFinder(studio, { figure, center, drawing: drawingOf,
+    name: () => (String(studio.file || "").includes("#") ? String(studio.file).split("#").pop() : String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, "")) });
   studio.reveal = (where) => {
     if (where?.id) figure.select([where.id]);
     else if (where?.line) {
