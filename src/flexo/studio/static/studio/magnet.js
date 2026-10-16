@@ -1,7 +1,7 @@
-// Snapping (snapping.js) where a person sees and turns it: the magnet, a button in the zoom bar of
-// a deck and of a figure, pressed while it is on -- a grid beside it while it is the grid's --
-// each click the next of guides, the grid and off; % (Inkscape's key) the same while nothing is
-// typed; and, in the Mac app, the app told when it is turned here and asked as a window opens or
+// Snapping (snapping.js) where a person sees and turns it: the magnet, Snap in the toolbar of a
+// deck and of a figure (beside Arrange, with Grid), pressed while it is on -- a # beside it while
+// it is the grid's -- each click the next of guides, the grid and off, said as it turns; %
+// (Inkscape's key) the same while nothing is typed; and, in the Mac app, the app told when it is turned here and asked as a window opens or
 // comes to the front -- its View › Snap to Guides and Objects and Snap to Grid turn it too (the
 // shell's "snapping" and "snap-grid" commands), ticked as the page reports it.
 
@@ -21,12 +21,15 @@ function shown(button, mode) {
   button.setAttribute("aria-pressed", String(on));
   button.title = magnetTitle(mode);
   const drawn = mode === "grid" ? "magnetGrid" : "magnet";
-  if (button.dataset.icon !== drawn) { button.dataset.icon = drawn; button.replaceChildren(icon(drawn)); }
+  if (button.dataset.icon !== drawn) { button.dataset.icon = drawn; (button.querySelector("svg") || button.appendChild(icon(drawn))).replaceWith(icon(drawn)); }
 }
 
-// The magnet, for a zoom bar: drawn as its other small ghost buttons are, pressed while on.
-export function magnetButton() {
-  const button = h("button.btn.ghost.small.icon.magnet", { type: "button", "aria-label": "Snapping", onclick: () => cycleSnapping() });
+// The magnet: Snap, for a toolbar, drawn as its other buttons are (its icon, then its name);
+// pressed while on.
+export function magnetButton({ label = "Snap" } = {}) {
+  const button = h("button.btn.ghost.magnet", { type: "button", "aria-label": "Snapping", onclick: () => sayTurned(cycleSnapping()) },
+    icon("magnet"), h("span.btn-label", {}, label));
+  button.dataset.icon = "magnet";
   // Clicked, it leaves the keys where they were, as the zoom bar's other buttons do.
   button.addEventListener("mousedown", (event) => event.preventDefault());
   shown(button, snapMode());

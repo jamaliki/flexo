@@ -9,9 +9,9 @@
 // this browser (localStorage, read with care) from one launch to the next. Turned in another
 // window or tab of the studio, it is turned so here too (a storage event); in the Mac app,
 // whose windows are each a folder's own, the app keeps it and tells the others (magnet.js).
-// The magnet in the zoom bar shows it; it and % (Inkscape's key) go from guides to the grid to
-// off and round again; the Mac app's View › Snap to Guides and Objects and Snap to Grid each
-// turn it to theirs, or off.
+// The magnet (Snap, in the toolbar) shows it; it and % (Inkscape's key) go from guides to the
+// grid to off and round again; the Mac app's View › Snap to Guides and Objects and Snap to Grid
+// each turn it to theirs, or off.
 //
 // No page is needed: it is read in Node as it is in the studio.
 

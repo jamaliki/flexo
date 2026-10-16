@@ -3,7 +3,7 @@
 // the studio alone: never presented, printed or exported.
 //
 // - Shown or hidden by # (Inkscape's key) while nothing is typed, View › Show Grid (the palette,
-//   the Mac app's View menu) and the toggle beside the magnet in the zoom bar. One setting for
+//   the Mac app's View menu) and Grid in the toolbar, beside Snap. One setting for
 //   the person, kept in this browser, as the slides either side are (flexo-talk's across.js).
 // - Drawn in non-photo blue: squares of `step` of the page's units (a slide's: 12 of the 960
 //   across it, 80 by 45 on a wide slide), every `major`-th line darker (16 by 9), the page's

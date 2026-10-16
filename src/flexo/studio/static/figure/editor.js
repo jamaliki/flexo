@@ -49,9 +49,7 @@ export function mount(studio, main) {
     zoomValue,
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true, title: "Zoom to Fit (⇧⌘0)" }),
-    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }),
-    // Snapping (%), for the shapes drawn over it and its parts' handles alike; the grid (#).
-    h("span.zoom-sep"), magnetButton(), gridButton());
+    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }));
   // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
   // it would look pressed while the drawing is zoomed on from the keyboard.
   for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -128,7 +126,9 @@ export function mount(studio, main) {
   // Design: the Design bar across the window, as a deck's -- the figure's theme, colours, font,
   // page, panel letters and sizes (designbar.js).
   const designButton = ui.button("Design", () => design.toggle(), { kind: "ghost", icon: "palette", title: "Show Design (⇧⌘D)" });
-  studio.actions.append(h("span.sep"), formatButton, arrangeButton, designButton);
+  // Snap (%), for the shapes drawn over it and its parts' handles alike, and Grid (#), beside
+  // Arrange.
+  studio.actions.append(h("span.sep"), magnetButton(), gridButton(), h("span.sep"), formatButton, arrangeButton, designButton);
   const showTabs = () => {
     for (const [button, on] of [[formatButton, !arranging], [arrangeButton, arranging]]) { button.classList.toggle("on", on); button.setAttribute("aria-pressed", String(on)); }
     designButton.classList.toggle("on", Boolean(design?.open));

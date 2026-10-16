@@ -1,5 +1,5 @@
-// The grid (grid.js) drawn on a page, and where a person shows or hides it: the toggle beside
-// the magnet in a zoom bar, View › Show Grid (the palette, the Mac app) and #.
+// The grid (grid.js) drawn on a page, and where a person shows or hides it: Grid in the toolbar,
+// beside Snap, View › Show Grid (the palette, the Mac app) and #.
 
 import { h, icon } from "./ui.js";
 import { pagesKey } from "./magnet.js";
@@ -67,9 +67,9 @@ export function gridPaper() {
 
 // -- shown, or not --
 
-// The zoom bar's toggle, beside the magnet: pressed while the grid is shown.
-export function gridButton() {
-  const button = h("button.btn.ghost.small.icon.grid-toggle", { type: "button", onclick: () => toggleGrid() }, icon("graph"));
+// Grid, for a toolbar, beside Snap (the magnet): pressed while the grid is shown.
+export function gridButton({ label = "Grid" } = {}) {
+  const button = h("button.btn.ghost.grid-toggle", { type: "button", onclick: () => toggleGrid() }, icon("graph"), h("span.btn-label", {}, label));
   // Clicked, it leaves the keys where they were, as the zoom bar's other buttons do.
   button.addEventListener("mousedown", (event) => event.preventDefault());
   const show = (on) => {
