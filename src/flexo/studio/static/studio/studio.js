@@ -12,11 +12,33 @@ export { pastedDrawing, pastedOwn, svgOfWords } from "./clipboard.js";
 export { copyOut, copiedHere } from "./copyout.js";
 export { drawingPaster, clipboardDrawing, DRAWING_FILE } from "./drawingpaste.js";
 
+// A slider being dragged (pressed, not yet let go), and the forms with it to be drawn again
+// once it is: drawn again under the pointer, the slider would be another, and the drag would
+// end after its first step.
+let sliding = null;
+const held = new Map();
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("pointerdown", (event) => { sliding = event.target?.matches?.("input[type=range]") ? event.target : null; }, true);
+  const letGo = () => {
+    sliding = null;
+    const waiting = [...held];
+    held.clear();
+    for (const [container, { render, undone }] of waiting) keepFocus(container, render, { undone });
+  };
+  for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, letGo, true);
+  window.addEventListener?.("blur", () => { if (sliding) letGo(); });
+}
+
 // Draw a form again without taking the field someone is typing in away from them. Words
 // another person added or took away before the caret move it along, so it stays where
 // its person was typing. Drawn again for an undo or a redo (`undone`), words put back are
-// chosen, as in TextEdit (else the caret is where words were taken away).
+// chosen, as in TextEdit (else the caret is where words were taken away). With a slider in it
+// being dragged, it is drawn once the slider is let go.
 export function keepFocus(container, render, { undone = false } = {}) {
+  if (sliding?.isConnected && container.contains(sliding)) {
+    held.set(container, { render, undone: undone || Boolean(held.get(container)?.undone) });
+    return;
+  }
   const active = document.activeElement;
   const key = active && container.contains(active) ? active.dataset?.key : null;
   const selection = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
