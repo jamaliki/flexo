@@ -1547,7 +1547,8 @@ changes in words, to go back or forward to any of them.
   now, a keycap and a word or two each: while a shape is dragged, what ⇧, ⌥ and ⌘ do to the
   drag (each lit while it is held) and Esc; while the find bar is open, ↩ and ⇧↩ in its field
   and N and ⇧N once the keys are elsewhere; while words are typed, theirs; else those of what
-  is chosen, or of the page. **View › Hide Help Bar** (the palette, the Mac app, its own
+  is chosen, or of the page (a deck's slides overlaid: O to stop, ⇞⇟ among them, a click on
+  one's object, and snapping's). **View › Hide Help Bar** (the palette, the Mac app, its own
   right-click) hides it, kept in the browser; it says the keys as the Keyboard Shortcuts
   sheet does (`studio/helpkeys.js`).
 

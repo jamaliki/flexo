@@ -913,11 +913,12 @@ export function shapeEditor(host) {
   const catchAt = (mine, values) => Snap.nearest(mine, values, NEAR / unit());
   function guide(axis, at, from = Beside.besideAt(gesture?.targets, axis, at)) {
     const [x0, y0, width, height] = frameOf(), px = 1 / unit();
-    // (One beside the page -- on the slide before or after -- in a colour of its own, with its box.)
-    const kind = from ? "shape-guide beside" : "shape-guide";
-    guides.append(axis === "x" ? S("line", { x1: at, y1: y0, x2: at, y2: y0 + height, class: kind, "stroke-width": px })
-      : S("line", { x1: x0, y1: at, x2: x0 + width, y2: at, class: kind, "stroke-width": px }));
-    if (from) guides.append(S("rect", { x: from[0], y: from[1], width: from[2] - from[0], height: from[3] - from[1], class: "shape-beside", "stroke-width": px }));
+    // (One beside the page -- on a slide overlaid -- in a colour of its own, with its box: the
+    // tint the box is said in, if it is.)
+    const kind = from ? "shape-guide beside" : "shape-guide", style = from?.tint ? `--beside:${from.tint}` : null;
+    guides.append(axis === "x" ? S("line", { x1: at, y1: y0, x2: at, y2: y0 + height, class: kind, "stroke-width": px, style })
+      : S("line", { x1: x0, y1: at, x2: x0 + width, y2: at, class: kind, "stroke-width": px, style }));
+    if (from) guides.append(S("rect", { x: from[0], y: from[1], width: from[2] - from[0], height: from[3] - from[1], class: "shape-beside", "stroke-width": px, style }));
   }
   function say(text, event) {
     const node = page();
@@ -2056,8 +2057,11 @@ export function shapeEditor(host) {
     // (A path's points, any shape as a path, shapes combined into one.)
     const outlined = ["Edit Points", "Make Editable", ...COMBINED.map(([, label]) => label)].map(named).filter(Boolean);
     if (outlined.length) rest.push("-", ...outlined);
-    // (And the page's own that it says belong here: Convert to Figure Parts.)
-    const own = commands().filter((command) => command.menu);
+    // (And the page's own that it says belong here: Convert to Figure Parts -- and, first of all,
+    // what it says goes first: a deck's Match on Overlaid Slides.)
+    const own = commands().filter((command) => command.menu && command.menu !== "first");
+    const first = commands().filter((command) => command.menu === "first");
+    if (first.length) items.unshift(...first, "-");
     items.push(...rest, ...(own.length ? ["-", ...own] : []), "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
     // (A menu of the studio's has no submenus: Arrange and Align are their items, in place.)
     return items.flatMap((item) => (item?.items ? item.items.filter(Boolean).map((sub) => ({ ...sub })) : [item])).filter(Boolean)
