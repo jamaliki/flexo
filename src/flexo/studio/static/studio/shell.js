@@ -12,6 +12,8 @@ import { onGrid } from "./grid.js";
 import { alignTo, asGroup, onAligning } from "./aligning.js";
 import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
 import { findKeys, chosenWords } from "./findbar.js";
+import { helpBar, helpCommand, onHelp } from "./helpbar.js";
+import { chords } from "./helpkeys.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -715,6 +717,9 @@ export async function start() {
   workspace.on("opened", (session) => session.on("drawn", untrusted));
   workspace.on("trusted", () => { trustBar.hidden = true; });
 
+  // The keys for what is being done, along the window's foot (helpbar.js).
+  const help = helpBar(workspace);
+
   // -- the Mac app: its menus do what the page does, and it is told what they may do --
   workspace.command = (name, arg) => {
     // Snapping turned in another window of the app: this one's turned too, quietly, whatever
@@ -759,7 +764,7 @@ export async function start() {
       case "run": {
         const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
         // (Relative To and Move as a Group too, whatever is chosen: the studio's own.)
-        [...(session?.commands() || []), ...alignSettings(session || { kind: "deck" })].find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
+        [...(session?.commands() || []), ...alignSettings(session || { kind: "deck" }), helpCommand()].find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
         break;
       }
       case "palette": palette(workspace); break;
@@ -793,8 +798,10 @@ export async function start() {
       case "snap-grid": sayTurned(setSnapMode(toGrid() ? "off" : "grid")); break;
       default: break;
     }
-    // What a command did may change what can be done (Show Speaker Notes is then Hide).
+    // What a command did may change what can be done (Show Speaker Notes is then Hide), and
+    // what the keys do (a shape to draw armed: the help bar's).
     report();
+    help.update();
   };
   // What the document can do now, by label: the app enables its Insert and Slide items by it.
   // A command named for what it acts on ("Duplicate Table") is also the menu's plain one
@@ -823,7 +830,8 @@ export async function start() {
         undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
-        commands: doable(session),
+        // (And the help bar's, whatever is open: View › Show Help Bar.)
+        commands: [...doable(session), helpCommand().label],
         // The open documents, for the Window menu (their names as their tabs have them); a
         // sheet up, which the menus wait for; and the side panel shown (Show or Hide Assistant).
         tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
@@ -850,6 +858,7 @@ export async function start() {
   // hides it (gridpaper.js).
   onSnapping(() => report());
   onGrid(() => report());
+  onHelp(() => report());
   onAligning(() => report());
   magnetKeys();
   gridKeys();
@@ -900,7 +909,7 @@ export async function start() {
   // The spinner the page opened with stays over the frame until the first document is
   // ready to show (below): then the window goes from it to the document in one step.
   const loading = root.querySelector(".loading");
-  clear(root, h("div.studio", {}, bar, body), loading);
+  clear(root, h("div.studio", {}, bar, body, help.node), loading);
 
   // -- keeping the frame current --
   // A tab is named for its document -- with its kind (Theme, Figure) when another open
@@ -1570,6 +1579,7 @@ const SHORTCUTS = [
     ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping: to Guides and Objects, to the Grid, or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["#", "Show or Hide the Grid"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ D", "Show or Hide Design (Themes, Colours, Fonts)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Finding", [["⌘ F", "Find in the Document (a Deck, a Figure)"], ["⌥ ⌘ F", "Find and Replace"], ["↩ ⇧ ↩", "Next or Previous Match (in the Find Field)"],
     ["N ⇧ N", "Next or Previous Match, While the Find Bar Is Open and No Words Are Typed (as Vim’s)"], ["⌘ E", "Find the Words Chosen (While Typing on a Slide: Code)"], ["Esc", "Close the Find Bar, the Last Match Chosen"],
+    ["↩ ⌥ ↩", "Replace, or Replace All (in the Replace Field)"],
     ["⌘ ' ⇧ ⌘ '", "Next or Previous TODO"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
@@ -1594,6 +1604,16 @@ const SHORTCUTS = [
     ["+ Drag", "Draw a Line from a Shape’s + to Another Shape"], ["⌥ Drag", "Copy a Shape to Where It Is Let Go"], ["⌘ Drag", "Drag a Handle Without Snapping, or With It While Snapping Is Off (a Curve’s Middle, a Shape’s Corners, a Text’s Sides)"],
     ["⇧ Drag", "Keep a Shape’s Proportions (on a Corner Handle)"], ["Double-Click", "Fit a Shape to Its Words (on a Corner Handle, or a Text’s Side)"], ["Esc", "Cancel a Drag (While Dragging)"], ["⌘ X", "Cut Shapes"], ["⌘ C", "Copy Shapes"], ["⌘ V", "Paste Shapes"],
     ["⌘ D", "Duplicate Shape"], ["⌫", "Delete Shape"], ["Esc", "Deselect"], ["⌘ + −", "Zoom In or Out (a Figure File)"], ["⌘ 0", "Actual Size (a Figure File)"], ["⇧ ⌘ 0", "Zoom to Fit (a Figure File)"]]],
+  // Shapes drawn where they are put, on a slide or over a figure (shapes.js); a path drawn
+  // with the pen, and its points edited (pathtools.js).
+  ["Shapes", [["← → ↑ ↓", "Nudge (⇧: Ten Points)"], ["↩", "Edit Its Words (a Group: Enter It)"], ["Double-Click", "Edit Its Words (a Path: Its Points; a Group: Enter It)"],
+    ["⌘ G", "Group"], ["⇧ ⌘ G", "Ungroup"], ["⌘ L", "Lock"], ["⌥ ⌘ L", "Unlock"], ["⌘ D", "Duplicate"], ["⌫", "Delete"], ["⇧ ⌘ C", "Set Colour"], ["Esc", "Deselect (in a Group: Leave It)"],
+    ["⇧ Drag", "Move Along One Way; by a Corner, Keep Its Proportions; Turn by 15°"], ["⇧ Drag", "A Line’s End, or a Line Drawn: by 45°; a Shape Drawn: a Square"],
+    ["⌥ Drag", "Move: a Copy; Size or Draw: From Its Centre"], ["⌘ Drag", "Without Snapping (Snapping Off: With It)"], ["Esc", "Cancel a Drag, or Stop Drawing"]]],
+  ["Drawing a Path", [["Click", "A Corner (Drag: a Smooth Point)"], ["↩", "Finish (or Double-Click)"], ["⌫", "Remove the Last Point"], ["⇧ Drag", "A Handle Along One of Eight Ways"],
+    ["Esc", "Take Back the Last Segment, Then the Path"]]],
+  ["A Path’s Points", [["← → ↑ ↓", "Nudge the Points Chosen (⇧: Ten Points)"], ["⌫", "Delete the Points Chosen"], ["⌘ A", "Select All Points"], ["⌥ Drag", "A Smooth Point’s Handle on Its Own"],
+    ["Double-Click", "A Point: Smooth or Corner"], ["↩ or Esc", "Done"]]],
   ["Presenting", [["→ Space ↩", "Next Build or Slide"], ["PgDn", "Next (a Clicker’s Forward)"], ["← ⌫", "Previous"], ["PgUp", "Previous (a Clicker’s Back)"], ["Home End", "First or Last Slide"], ["0–9 ↩", "Go to a Slide"],
     ["X", "Show or Hide the Presenter View"], ["B W", "Black or White Screen"], ["Esc", "End the Show"]]],
 ];
@@ -1626,25 +1646,7 @@ function toInspector() {
 }
 
 function shortcutsDialog() {
-  // One keycap a chord, as a Mac menu shows it (⇧⌘N): modifiers go with the keys after
-  // them, and keys given side by side ("↑ ↓", "Home End") are each a keycap of their own.
-  // "or" is a word between keycaps: between two chords ("Esc or ⌘ ↩") each is as it would
-  // be alone; between modifiers ("⌥ or ⇧ ← →") the modifiers are each a keycap of their own
-  // and the keys after them too. "Click" (and "Drag", "Double-Click", "Type") is a word,
-  // after its modifier's keycap ("⇧ Click").
-  const chords = (keys) => {
-    const out = [];
-    const words = keys.split(" ").filter(Boolean);
-    const modifier = (key) => /^[⌘⇧⌥⌃]$/.test(key || "");
-    const alone = words.some((key, at) => key === "or" && modifier(words[at - 1]) && modifier(words[at + 1]));
-    let held = "";
-    for (const key of words) {
-      if (modifier(key)) { if (alone) out.push({ key }); else held += key; }
-      else if (["or", "Click", "Drag", "Double-Click", "Type"].includes(key)) { if (held) out.push({ key: held }); held = ""; out.push({ word: key === "or" ? "or" : key.toLowerCase() }); }
-      else out.push({ key: held + key });
-    }
-    return out;
-  };
+  // One keycap a chord, as a Mac menu shows it (⇧⌘N), and as the help bar's are (helpkeys.js).
   const row = (keys, what) => h("div.shortcut", {}, h("span", {}, what), h("span.shortcut-keys", {}, chords(keys).map((part) => (part.word ? h("span.shortcut-word", {}, part.word) : h("span.kbd", {}, part.key)))));
   const app = Boolean(window.pywebview);
   dialog({ title: "Keyboard Shortcuts", wide: true, body: [h("div.shortcut-groups", {}, SHORTCUTS.map(([title, rows]) =>
@@ -1745,6 +1747,7 @@ export function palette(workspace) {
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "⌘/", run: () => shortcutsDialog() },
+    helpCommand(),
     // What Align lines shapes up with, and Move as a Group: a setting, whatever is chosen.
     ...alignSettings(session),
     // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
