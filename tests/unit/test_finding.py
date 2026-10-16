@@ -244,3 +244,42 @@ def test_words_about_a_match_are_cut_at_words() -> None:
         "found": "motif",
         "after": ", and then we need that motif to be…",
     }
+
+
+def test_n_and_shift_n_go_from_match_to_match_only_where_nothing_is_typed() -> None:
+    steps = run("""
+      const body = { tagName: "BODY" }, field = { tagName: "INPUT" };
+      const notes = { tagName: "TEXTAREA" }, popup = { tagName: "SELECT" };
+      const words = { tagName: "DIV", isContentEditable: true };
+      // An object or a shape chosen on the slide: the keys are the page's, no words typed yet.
+      const chosen = { tagName: "DIV", tabIndex: 0 };
+      const key = (key, more = {}) => ({ key, target: more.target ?? body, ...more });
+      const open = (event, at) => F.findStep(event, { open: true, at });
+      return {
+        // The bar open and nothing typed: n the next match, N the one before.
+        open: [open(key("n"), body), open(key("N", { shiftKey: true }), body)],
+        // An object chosen, the bar open: the find has the key, before it types over its words.
+        chosen: [open(key("n", { target: chosen }), chosen),
+          open(key("N", { target: chosen }), chosen)],
+        // Typed: in the find field, another field, the notes, a pop-up, words edited in place.
+        typed: [open(key("n", { target: field }), field), open(key("n"), notes),
+          open(key("N"), popup), open(key("n", { target: words }), words),
+          open(key("n", { isComposing: true }), body)],
+        // With ⌘, ⌃ or ⌥ it is another key (⌘N is New Deck); other letters are letters.
+        others: [open(key("n", { metaKey: true }), body), open(key("n", { ctrlKey: true }), body),
+          open(key("n", { altKey: true }), body), open(key("m"), body), open(key("Enter"), body)],
+        // The bar closed: n is what it always was (an object chosen typed over, a letter).
+        closed: [F.findStep(key("n"), { open: false, at: body }),
+          F.findStep(key("N"), { at: chosen })],
+        fields: [F.typingIn(field), F.typingIn(words), F.typingIn(popup), F.typingIn(body),
+          F.typingIn(null)],
+      };
+    """)
+    assert steps == {
+        "open": [1, -1],
+        "chosen": [1, -1],
+        "typed": [0, 0, 0, 0, 0],
+        "others": [0, 0, 0, 0, 0],
+        "closed": [0, 0],
+        "fields": [True, True, True, False, False],
+    }

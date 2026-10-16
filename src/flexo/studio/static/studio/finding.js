@@ -15,6 +15,24 @@
 // the words that replace those found take the look of the first letter found, and every mark
 // about them is kept.
 
+// -- the keys that go from match to match --------------------------------------------------
+
+// Where words are typed: a field (a text field, a text area, a pop-up's letters) or words
+// edited in place (a slide's, a figure's label, a shape's) -- where a key is a letter.
+export const typingIn = (node) => Boolean(node && (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName || "")));
+
+// What a key does to the find, as vim's n and N: with the find bar open (`open`) and no
+// words being typed where the keys are (`at`, the element that has them, and the key's own
+// target), n goes to the next match (1) and N to the one before (-1) -- before anything else
+// sees the key, so a shape or an object chosen is never typed over by it. Anywhere words are
+// typed, and with the bar closed, it is a letter as any other (0).
+export function findStep(event, { open = false, at = null } = {}) {
+  if (!open || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return 0;
+  if (event.key !== "n" && event.key !== "N") return 0;
+  if (typingIn(at) || typingIn(event.target)) return 0;
+  return event.key === "N" ? -1 : 1;
+}
+
 // -- a field's words as they read --------------------------------------------------------
 
 const SPACE = /\s/;
