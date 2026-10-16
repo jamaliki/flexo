@@ -19,6 +19,8 @@ edited:
   ``structure``);
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
   at a time by buttons, as one turns a molecule in a viewer;
+- ``structframe``: the frame a structure shares with others (``flexo.structure_frames``):
+  none, one of the figure's, or a new one;
 - ``step``: which of a mol-sketch scene's steps is drawn, chosen by the names it gives them;
 - ``molsketch``: a structure's mol-sketch settings, laid out in ``panes``
   (``flexo.structure_style``), which hold the structure's other fields too.
@@ -510,6 +512,7 @@ def _bench() -> list[dict[str, Any]]:
 def _structure() -> dict[str, Any]:
     from flexo.structure_style import PANES, SECTIONS
     from flexo.structures import LOOKS, SCHEMES
+    from flexo.structures import TITLE_SIDES as STRUCTURE_TITLE_SIDES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
 
@@ -634,6 +637,14 @@ def _structure() -> dict[str, Any]:
                 "text",
                 hint="auto for the entry's own map, an EMDB ID, or a map file",
             ),
+            # (Structures that share a frame are turned, zoomed and moved as one: its first's
+            # view is theirs, flexo.structure_frames.)
+            _field(
+                "properties.frame",
+                "Frame",
+                "structframe",
+                hint="Structures in one frame are turned, scaled and centred as one",
+            ),
             _field("properties", "View", "view", hint="Or drag its rotate handle"),
             _field("properties.yaw", "Yaw", "number", unit="°"),
             _field("properties.pitch", "Pitch", "number", unit="°"),
@@ -654,8 +665,18 @@ def _structure() -> dict[str, Any]:
             ),
         ],
         # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
-        # and nothing round it.)
-        common=[LABEL],
+        # and nothing round it. Its name over the molecule, or under it.)
+        common=[
+            LABEL,
+            _field(
+                "properties.title_side",
+                "Title Position",
+                "choice",
+                options=list(STRUCTURE_TITLE_SIDES),
+                labels={"top": "Top", "bottom": "Bottom"},
+                default="top",
+            ),
+        ],
         needs_file=True,
         unavailable="" if ready else "Requires flexo[structures,molecules]",
     )
