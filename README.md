@@ -1406,6 +1406,12 @@ changes in words, to go back or forward to any of them.
   All** (each one step in the history), and Esc closes it, the last match's shape
   chosen. The top bar's **Search** (⌘K) finds the same words, listed above the
   commands and documents it finds. One engine does both (`static/studio/finding.js`).
+- **TODOs**: the word `TODO` in capitals, as a word of its own, in a figure's words is
+  work left: marked amber where it is drawn, counted in the zoom bar ("2 TODOs", which
+  goes to the next), and gone through by Next TODO (⌘') and Previous TODO (⇧⌘'), its
+  shape chosen. Only in the studio: nothing exported has the marks. Found by the same
+  engine with Match Case and Whole Words (`static/studio/todos.js`; a deck's, with
+  flexo-talk).
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.

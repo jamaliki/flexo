@@ -297,12 +297,15 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 // nearest id above it that the drawing has (a line's own words under its line) -- at the same
 // count among the words of the fields there, spaces aside, as the drawing breaks its lines
 // where they wrap. Words drawn otherwise (an equation) have their object framed instead.
-// The current mark, if any, is answered.
-export function markDrawing(svg, fields, matches, current, query, options = {}, { dark = false } = {}) {
-  unmarkDrawing(svg);
+// The current mark, if any, is answered. `layer` names the marks' own layer, so that other
+// marks (a document's TODOs, todomarks.js) lie beside these and are taken away apart from
+// them; with `lettered`, words not found among letters that are drawn (a drawing of the
+// words before the latest change) are not framed: only those drawn with no letters at all.
+export function markDrawing(svg, fields, matches, current, query, options = {}, { dark = false, layer: kind = "find-marks", lettered = false } = {}) {
+  unmarkDrawing(svg, kind);
   if (!svg || !matches.length) return null;
   const layer = document.createElementNS(SVG_NS, "g");
-  layer.setAttribute("class", `find-marks${dark ? " dark" : ""}`);
+  layer.setAttribute("class", `${kind}${dark ? " dark" : ""}`);
   layer.setAttribute("aria-hidden", "true");
   const elements = new Map();
   const elementOf = (field) => {
@@ -361,6 +364,7 @@ export function markDrawing(svg, fields, matches, current, query, options = {}, 
       const strong = match === current;
       const place = places[counted.get(match)];
       if (!place) {
+        if (lettered && letters.length) continue;
         try { rect(inRoot(element, element.getBBox()), strong, true); } catch { /* not drawn */ }
         continue;
       }
@@ -384,6 +388,6 @@ export function markDrawing(svg, fields, matches, current, query, options = {}, 
   svg.append(layer);
   return mine;
 }
-export function unmarkDrawing(svg) {
-  for (const layer of svg?.querySelectorAll(":scope > g.find-marks") || []) layer.remove();
+export function unmarkDrawing(svg, kind = "find-marks") {
+  for (const layer of svg?.querySelectorAll(`:scope > g.${kind}`) || []) layer.remove();
 }

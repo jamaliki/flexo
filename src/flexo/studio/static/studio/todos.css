@@ -1,0 +1,64 @@
+/* A document's TODOs (todos.js, todomarks.js), in the studio only: amber -- warmer than the
+   find bar's yellow, never the blue of what is chosen -- marked behind the words where they are
+   drawn, pointed to from the stage's edges, and counted. */
+
+:root {
+  --todo: #f08c00;
+  --todo-ink: #ffffff;
+  --todo-text: #9c5800;
+  --todo-soft: rgba(245, 159, 0, 0.16);
+  --todo-line: rgba(240, 140, 0, 0.8);
+  --todo-glow: rgba(255, 160, 0, 0.7);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --todo: #f5a524;
+    --todo-ink: #1d1d1f;
+    --todo-text: #ffc266;
+    --todo-soft: rgba(255, 176, 46, 0.17);
+    --todo-line: rgba(255, 176, 46, 0.85);
+    --todo-glow: rgba(255, 170, 30, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  --todo: #f5a524;
+  --todo-ink: #1d1d1f;
+  --todo-text: #ffc266;
+  --todo-soft: rgba(255, 176, 46, 0.17);
+  --todo-line: rgba(255, 176, 46, 0.85);
+  --todo-glow: rgba(255, 170, 30, 0.5);
+}
+
+/* Behind the words on a drawing: amber laid over them, their ink kept (multiplied; on a dark
+   page, screened). The one gone to (Next TODO) strong, ringed a moment as it is gone to. */
+.todo-marks { pointer-events: none; mix-blend-mode: multiply; }
+.todo-marks rect { fill: #ffb547; fill-opacity: 0.62; }
+.todo-marks rect.current { fill: #ff9f1a; fill-opacity: 0.92; stroke: #d97800; stroke-width: 1.4; vector-effect: non-scaling-stroke; animation: todo-gone-to 0.9s ease-out 1; }
+.todo-marks.dark { mix-blend-mode: screen; }
+.todo-marks.dark rect { fill: #a35f00; fill-opacity: 0.85; }
+.todo-marks.dark rect.current { fill: #cc7a00; fill-opacity: 1; stroke: #ffc266; }
+/* In words drawn without letters (an equation): their object framed. */
+.todo-marks rect.whole { fill: none; stroke: #f08c00; stroke-width: 1.6; stroke-dasharray: 4 3; }
+.todo-marks rect.whole.current { stroke-dasharray: none; stroke-width: 2.2; }
+@keyframes todo-gone-to { from { stroke-width: 9px; stroke-opacity: 0.25; } to { stroke-width: 1.4px; stroke-opacity: 1; } }
+
+/* At the stage's edges, zoomed in: a marker towards each TODO out of sight. */
+.todo-edges { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+.todo-edge { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; gap: 1px;
+  height: 22px; min-width: 22px; padding: 0 5px; border: 0; border-radius: 11px; background: var(--todo); color: var(--todo-ink); cursor: pointer;
+  font: 700 10.5px/1 var(--font); font-variant-numeric: tabular-nums; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28), 0 0 10px 1px var(--todo-glow); }
+.todo-edge:hover { filter: brightness(1.08); }
+.todo-edge-arrow { display: grid; place-items: center; width: 12px; height: 12px; }
+.todo-edge-arrow svg { width: 12px; height: 12px; }
+
+/* How many: a button that goes to the next. */
+.todo-count { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border: 0; border-radius: 12px; background: var(--todo-soft);
+  color: var(--todo-text); font: 600 12px/1 var(--font); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.todo-count[hidden] { display: none; }
+.todo-count:hover { background: color-mix(in srgb, var(--todo) 26%, transparent); }
+.todo-count:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.todo-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--todo); box-shadow: 0 0 6px 1px var(--todo-glow); }
+
+/* A figure's: in its zoom bar, before the zoom. */
+.fig-zoom .todo-count { height: 22px; margin-right: 2px; }
+.fig-zoom .todo-count + .zoom-sep[hidden] { display: none; }

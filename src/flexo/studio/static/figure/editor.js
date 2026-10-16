@@ -19,6 +19,7 @@ import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
 import { figureBar, BAR_FIELDS } from "/static/kinds/figure/designbar.js";
 import { figureFinder } from "/static/kinds/figure/findfigure.js";
+import { figureTodos } from "/static/kinds/figure/todofigure.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -1193,6 +1194,8 @@ export function mount(studio, main) {
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select ${inQuotes(figure.nameOf(node.id))}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];
 
+  // Its TODOs marked, counted in the zoom bar and gone to (todofigure.js).
+  figureTodos(studio, { figure, center, stage, zoomBar, drawing: drawingOf });
   renderBar();
   renderInspector();
   // (Shown again if it was left shown.)
