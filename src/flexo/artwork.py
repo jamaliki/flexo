@@ -39,6 +39,12 @@ PNG_SUFFIXES = frozenset({".png"})
 JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
 GIF_SUFFIXES = frozenset({".gif"})
 """A GIF: a photograph that plays (``flexo.animated``), placed as a PNG is."""
+CONVERTED_SUFFIXES = frozenset({".webp", ".tif", ".tiff", ".bmp", ".heic", ".heif", ".avif"})
+"""Photographs no drawing's viewers all show (WebP, TIFF, BMP, a phone's HEIC, AVIF): placed as
+the PNG they are made once, kept in the cache (``_converted``)."""
+RASTER_SUFFIXES = PNG_SUFFIXES | JPEG_SUFFIXES | GIF_SUFFIXES | CONVERTED_SUFFIXES
+"""What is read as a photograph -- by what its bytes are, not by its name: a PNG saved from a
+web page as ``.jpg``, as one so often is, is the PNG it is (``_sniffed``)."""
 PAGE_SUFFIXES = frozenset({".pdf", ".ai"})
 """A PDF's page, and an Illustrator file's artboard (an Illustrator file is a PDF with
 Illustrator's own data beside it): read as the vectors they are (``flexo.pdfart``)."""
@@ -214,14 +220,15 @@ def load_artwork(node_id: str, source: str) -> Artwork:
 
     path, page = _page_of(Path(source).expanduser())
     suffix = path.suffix.lower()
-    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES | GIF_SUFFIXES | PAGE_SUFFIXES:
+    if suffix not in SVG_SUFFIXES | RASTER_SUFFIXES | PAGE_SUFFIXES:
         raise _error(
             "image.source.unsupported",
             node_id,
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
             hint="Embed an .svg, .pdf or Illustrator (.ai) file for vector artwork, "
-            "a .png or .jpg file for a render, or a .gif for one that plays.",
+            "a .png, .jpg, .webp, .tiff or .heic file for a photograph, or a .gif for one "
+            "that plays.",
         )
     if outside(path):
         raise _error(
@@ -304,8 +311,9 @@ camera writes before a JPEG's frame."""
 @lru_cache(maxsize=128)
 def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
     path = Path(resolved)
+    raster = path.suffix.lower() in RASTER_SUFFIXES
     try:
-        if path.suffix.lower() in PNG_SUFFIXES | JPEG_SUFFIXES | GIF_SUFFIXES:
+        if raster:
             with path.open("rb") as handle:
                 data = handle.read(HEADER)
         else:
@@ -317,13 +325,104 @@ def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
             path,
             f"Cannot read the artwork file ({exc.strerror or exc}).",
         ) from exc
-    if path.suffix.lower() in PNG_SUFFIXES:
+    if not raster:
+        return _svg_artwork(node_id, path, data)
+    # What the bytes are, whatever the name says: a browser shows a PNG named .jpg, and so
+    # does the slide.
+    kind = _sniffed(data)
+    if kind == "png":
         return _png_artwork(node_id, path, data, mtime_ns)
-    if path.suffix.lower() in JPEG_SUFFIXES:
+    if kind == "jpeg":
         return _jpeg_artwork(node_id, path, data, mtime_ns)
-    if path.suffix.lower() in GIF_SUFFIXES:
+    if kind == "gif":
         return _gif_artwork(node_id, path, data, mtime_ns)
-    return _svg_artwork(node_id, path, data)
+    if kind is not None:
+        made = _converted(node_id, path, kind, mtime_ns, size)
+        with made.open("rb") as handle:
+            return _png_artwork(node_id, made, handle.read(HEADER), mtime_ns)
+    raise _error(
+        "image.source.unknown",
+        node_id,
+        path,
+        "The file is not a picture: its bytes are none of PNG, JPEG, GIF, WebP, TIFF, BMP, "
+        "HEIC or AVIF.",
+        hint="Open it in Preview and choose File > Export as PNG or JPEG.",
+    )
+
+
+def _sniffed(data: bytes) -> str | None:
+    """What a photograph's bytes are: ``png``, ``jpeg``, ``gif``, ``webp``, ``tiff``,
+    ``bmp``, ``heic`` or ``avif`` -- or None, if none of them."""
+
+    if data.startswith(_PNG_SIGNATURE):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return "tiff"
+    if data[:2] == b"BM":
+        return "bmp"
+    if data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand in (b"avif", b"avis"):
+            return "avif"
+        if brand in (b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis"):
+            return "heic"
+    return None
+
+
+def _converted(node_id: str, path: Path, kind: str, mtime_ns: int, size: int) -> Path:
+    """A WebP, TIFF, BMP, HEIC or AVIF made the PNG it is placed as, once for each version of
+    the file, in the cache (``pdfart``'s, beside its pages): with Pillow, and, for a phone's
+    HEIC that Pillow cannot read, with the Mac's own ``sips``."""
+
+    import hashlib
+    import shutil
+    import subprocess
+
+    from flexo.pdfart import _cache_folder
+
+    key = hashlib.sha256(f"{path}|{mtime_ns}|{size}".encode()).hexdigest()[:32]
+    folder = _cache_folder() / "pictures"
+    made = folder / f"{key}.png"
+    if made.is_file():
+        return made
+    folder.mkdir(parents=True, exist_ok=True)
+    partial = made.with_suffix(".partial.png")
+    problem = ""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as picture:
+            picture.seek(0)
+            clear = picture.mode in ("RGBA", "LA", "PA") or "transparency" in picture.info
+            picture.convert("RGBA" if clear else "RGB").save(partial, "PNG")
+        partial.replace(made)
+        return made
+    except Exception as exc:  # Pillow missing, or not reading this kind
+        problem = str(exc)
+    sips = shutil.which("sips")
+    if sips is not None:
+        done = subprocess.run(
+            [sips, "-s", "format", "png", str(path), "--out", str(partial)],
+            capture_output=True,
+            check=False,
+        )
+        if done.returncode == 0 and partial.is_file():
+            partial.replace(made)
+            return made
+        problem = done.stderr.decode(errors="replace").strip() or problem
+    raise _error(
+        "image.source.unconverted",
+        node_id,
+        path,
+        f"The {kind.upper()} picture could not be read{f' ({problem})' if problem else ''}.",
+        hint="Open it in Preview and choose File > Export as PNG or JPEG.",
+    )
 
 
 def _png_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artwork:

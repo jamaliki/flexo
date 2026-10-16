@@ -17,6 +17,9 @@ import { magnetButton } from "/static/studio/magnet.js";
 import { colourKey, boxAround } from "/static/studio/colourkey.js";
 import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
+import { figureBar, BAR_FIELDS } from "/static/kinds/figure/designbar.js";
+import { figureFinder } from "/static/kinds/figure/findfigure.js";
+import { figureTodos } from "/static/kinds/figure/todofigure.js";
 
 const LINE = 12.5 * 1.6;
 // Narrower than this (pixels), the editor folds its shapes' list away.
@@ -117,12 +120,19 @@ export function mount(studio, main) {
   // Format and Arrange, as a deck's toolbar has them: the inspector as one or the other --
   // Arrange what is chosen arranged, lined up and spaced (arrangeForm), whatever is chosen.
   let arranging = false;
-  const tabButton = (on, label, glyph, title) => ui.button(label, () => { arranging = on; renderInspector(); }, { kind: "ghost", icon: glyph, title });
+  // (Pressed by the person with the Design bar open, it puts the bar away for its tab.)
+  const tabButton = (on, label, glyph, title) => ui.button(label, (event) => { if (event?.isTrusted && design.open) design.toggle(false); arranging = on; renderInspector(); }, { kind: "ghost", icon: glyph, title });
   const formatButton = tabButton(false, "Format", "slide", "Format what is chosen, or the figure");
   const arrangeButton = tabButton(true, "Arrange", "arrange", "Arrange the shapes drawn over the figure: align, distribute, order, flip, lock, group (⇧⌘A)");
-  studio.actions.append(h("span.sep"), formatButton, arrangeButton);
+  // Design: the Design bar across the window, as a deck's -- the figure's theme, colours, font,
+  // page, panel letters and sizes (designbar.js).
+  const designButton = ui.button("Design", () => design.toggle(), { kind: "ghost", icon: "palette", title: "Show Design (⇧⌘D)" });
+  studio.actions.append(h("span.sep"), formatButton, arrangeButton, designButton);
   const showTabs = () => {
     for (const [button, on] of [[formatButton, !arranging], [arrangeButton, arranging]]) { button.classList.toggle("on", on); button.setAttribute("aria-pressed", String(on)); }
+    designButton.classList.toggle("on", Boolean(design?.open));
+    designButton.setAttribute("aria-pressed", String(Boolean(design?.open)));
+    designButton.title = `${design?.open ? "Hide" : "Show"} Design (⇧⌘D)`;
   };
 
   // A drawing kept back while a part is carried, and how long after it is let go the one
@@ -195,6 +205,8 @@ export function mount(studio, main) {
     focus: (where) => studio.focus(where),
     chooseFile,
     themeField: (value, set) => themeField(studio, { value, onPick: set, onCustomise: (current) => customiseTheme(current, set) }),
+    // (The figure's theme, page and the rest: the Design bar's, not its panel's -- designbar.js.)
+    designBar: BAR_FIELDS,
     tones: () => studio.info?.tones,
     // The figure is named as its file is (one a deck holds, by its key: talk.yaml#pipeline).
     name: () => (String(studio.file || "").includes("#") ? String(studio.file).split("#").pop() : String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, "")),
@@ -235,6 +247,10 @@ export function mount(studio, main) {
     clipChosen: (cut) => clipChosen(cut), clipItems: () => clipItems() });
   // Set Colour… (⇧⌘C): the shapes chosen, those drawn over the figure, or both, given a
   // colour's code pasted (partcolours.js, shapecolours.js).
+  // The Design bar (designbar.js): the figure drawn in each theme, its own proportions.
+  const design = figureBar({ studio, figure, root: () => root, page: () => (drawingOf() ? page : null),
+    aspect: () => Math.min(2.4, Math.max(0.75, natural.width / natural.height || 1.5)),
+    customise: (current, set) => customiseTheme(current, set), shown: () => showTabs() });
   const colours = colourKey({ studio, fallback: () => inspector, settled: () => figure.idle(),
     kinds: () => (typingNow() ? [] : [partColours(figure), shapes.any() ? shapeColours(shapes) : null].filter(Boolean)),
     anchor: () => boxAround([partsBox(figure, elementOf), shapes.any() ? shapesBox(shapes, page) : null].filter(Boolean).map((box) => ({ getBoundingClientRect: () => box }))) });
@@ -1079,6 +1095,9 @@ export function mount(studio, main) {
     if (state.tab === "source") numbers();
   });
   studio.on("remote", () => { page.classList.remove("flash"); void page.offsetWidth; page.classList.add("flash"); });
+  // ⌘F: the figure's words found, marked where they are drawn, and replaced (findfigure.js).
+  figureFinder(studio, { figure, center, drawing: drawingOf,
+    name: () => (String(studio.file || "").includes("#") ? String(studio.file).split("#").pop() : String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, "")) });
   studio.reveal = (where) => {
     if (where?.id) figure.select([where.id]);
     else if (where?.line) {
@@ -1170,12 +1189,17 @@ export function mount(studio, main) {
     { icon: "export", label: "Export as PDF…", run: () => studio.exportFiles(["pdf"]) },
     { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
+    design.command(),
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select ${inQuotes(figure.nameOf(node.id))}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];
 
+  // Its TODOs marked, counted in the zoom bar and gone to (todofigure.js).
+  figureTodos(studio, { figure, center, stage, zoomBar, drawing: drawingOf });
   renderBar();
   renderInspector();
+  // (Shown again if it was left shown.)
+  design.start();
   // A new figure -- one shape, with no words yet -- takes its words from the first key, the
   // keys typed before it is drawn among them, as a new table's first cell does.
   const text = String(studio.doc?.text || "");

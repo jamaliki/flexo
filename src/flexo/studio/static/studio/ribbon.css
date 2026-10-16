@@ -1,0 +1,115 @@
+/* The Design bar (ribbon.js): a document's design in one low row under the toolbar, in the
+   toolbar's grey -- pop-up buttons, each naming what is in use. */
+
+.ribbon {
+  display: flex; align-items: center; gap: 2px; min-width: 0; height: 38px; box-sizing: border-box;
+  padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden;
+}
+.ribbon[hidden] { display: none; }
+.ribbon-sep { flex: none; width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
+
+/* A pop-up button: what is in use (its face, its name), a chevron. */
+.ribbon-pull {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; max-width: 220px; padding: 0 6px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  font: 400 12px/1 var(--font); white-space: nowrap;
+}
+.ribbon-pull:hover, .ribbon-pull.menu-open { background: var(--line); color: var(--ink); }
+.ribbon-pull:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.ribbon-pull .ribbon-label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ribbon-pull .ribbon-chevron { width: 11px; height: 11px; flex: none; color: var(--ink-3); }
+.ribbon-face { display: inline-flex; align-items: center; flex: none; gap: 2px; justify-content: center; }
+.ribbon-face[hidden] { display: none; }
+.ribbon-face > svg { width: 15px; height: 15px; color: var(--ink-2); }
+.ribbon-face .palette-strip span { width: 7px; height: 13px; border-radius: 2px; }
+.ribbon-chip { display: inline-flex; align-items: center; justify-content: flex-end; gap: 1px; width: 18px; height: 13px; padding: 0 2px; box-sizing: border-box; border-radius: 3px; box-shadow: var(--chip-ring-strong); }
+.ribbon-chip i { width: 3px; height: 7px; border-radius: 1px; }
+.ribbon-chip.none { background: repeating-conic-gradient(var(--sunken) 0 25%, var(--raised) 0 50%) 0 0 / 6px 6px; }
+.ribbon-chip.picture { justify-content: center; background: var(--sunken); }
+.ribbon-chip.picture svg { width: 10px; height: 10px; color: var(--ink-3); }
+.ribbon-ratio { display: inline-block; height: 11px; border: 1.5px solid var(--ink-3); border-radius: 2px; box-sizing: border-box; }
+/* A font's name, in itself: as large as the bar's words, the face's own shape. */
+.ribbon-font { font-size: 13px; color: var(--ink); }
+.ribbon-font b { font-weight: 600; }
+
+/* Narrower, the names the buttons show are shorter (a class the bar's width gives it,
+   ribbon.js: WebKit scrolls a size container back to its start whenever it is drawn again). */
+.ribbon.narrow .ribbon-pull { max-width: 150px; }
+.ribbon.tight .ribbon-pull { max-width: 96px; padding: 0 4px; }
+.ribbon.tight .ribbon-sep { margin: 0 3px; }
+
+/* -- the gallery, in a panel: thumbnails in a grid that scrolls, each named, the one in use ringed -- */
+.ribbon-gallery {
+  --thumb-w: 92px; display: grid; grid-template-columns: repeat(3, var(--thumb-w)); gap: 8px 8px; align-content: start;
+  max-height: min(60vh, 440px); overflow-y: auto; padding: 4px 4px 6px;
+}
+.ribbon-thumb { display: grid; gap: 4px; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--ink-2); font: var(--text-hint); text-align: center; min-width: 0; }
+.ribbon-frame {
+  position: relative; display: block; width: var(--thumb-w); aspect-ratio: var(--thumb-ratio, 1.7778); border-radius: 4px;
+  background: var(--raised); overflow: hidden; box-shadow: 0 0 0 1px var(--line-strong); transition: box-shadow 0.1s;
+}
+.ribbon-thumb:hover .ribbon-frame { box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 3px var(--line); }
+.ribbon-thumb.on .ribbon-frame { box-shadow: 0 0 0 2px var(--accent); }
+.ribbon-thumb.on .ribbon-name { color: var(--ink); }
+.ribbon-thumb:focus-visible { outline: none; }
+.ribbon-thumb:focus-visible .ribbon-frame { box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 5px var(--focus-halo); }
+.ribbon-thumb.problem { opacity: 0.55; }
+.ribbon-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ribbon-pic { position: absolute; inset: 0; display: block; line-height: 0; }
+.ribbon-pic > .picture { width: 100%; height: 100%; }
+/* Drawn on a page as the stage's is (white), in a dark studio too: a figure has no page of its own. */
+.ribbon-pic:has(> .picture) { background: #fff; }
+/* What stands in while a thumbnail is drawn: the theme's page, its type, its colours. */
+.ribbon-card { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 7px; }
+.ribbon-card .theme-aa { font-size: 15px; }
+.ribbon-card .theme-tones span { width: 5px; height: 12px; border-radius: 2px; }
+.ribbon-thumb.waiting .ribbon-card { animation: ribbon-wait 1.2s ease-in-out infinite alternate; }
+@keyframes ribbon-wait { to { opacity: 0.6; } }
+
+/* -- a pull-down's panel -- */
+.ribbon-drop {
+  position: fixed; z-index: 49; min-width: 220px; max-width: 380px; overflow: auto; box-sizing: border-box;
+  padding: 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: var(--shadow-2); animation: pop 0.12s ease-out; color: var(--ink);
+}
+.ribbon-drop:focus { outline: none; }
+.ribbon-drop .drop-title { font: var(--text-label); color: var(--ink-3); padding: 6px 6px 4px; }
+.ribbon-drop .drop-title:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 10px; }
+.ribbon-drop .drop-body { display: grid; gap: 8px; padding: 2px 6px 6px; }
+.ribbon-drop .drop-body.drop-page { padding-top: 6px; }
+.ribbon-drop .drop-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+.ribbon-drop .field { margin: 0; }
+.ribbon-drop .palette-choices { padding: 0; }
+/* A choice in a panel shown in its own look: a font in its face, a background as its colour. */
+.drop-choices { display: grid; gap: 1px; }
+.drop-choice {
+  display: grid; grid-template-columns: 14px auto minmax(0, 1fr); align-items: center; column-gap: 8px; padding: 5px 8px 5px 4px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: var(--text-body); min-width: 0;
+}
+.drop-choice::before { content: ""; width: 14px; height: 14px; }
+.drop-choice.on::before { background: currentColor; -webkit-mask: var(--tick) center / 14px no-repeat; mask: var(--tick) center / 14px no-repeat; }
+.drop-choice:hover, .drop-choice:focus { outline: none; background: var(--accent-soft); }
+.drop-choice .drop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-choice > svg { width: 15px; height: 15px; color: var(--ink-2); }
+.drop-choice .drop-sample { font-size: 19px; line-height: 1.1; min-width: 34px; }
+.drop-choice .drop-pair { display: grid; gap: 1px; min-width: 0; }
+.drop-choice .drop-pair b { font-size: 15px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-choice .drop-pair span { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 2px 4px 6px; }
+.drop-tile {
+  display: grid; gap: 4px; justify-items: stretch; padding: 4px; border: 1px solid var(--line-strong); border-radius: 7px;
+  background: var(--raised); color: var(--ink); cursor: pointer; font: var(--text-small); text-align: center; min-width: 0;
+}
+.drop-tile:hover { border-color: var(--ink-3); }
+.drop-tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.drop-tile:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-halo); border-color: var(--accent); }
+.drop-swatch { display: block; aspect-ratio: 16 / 9; border-radius: 4px; box-shadow: var(--chip-ring); }
+.drop-swatch.none { background: repeating-conic-gradient(var(--sunken) 0 25%, var(--raised) 0 50%) 0 0 / 10px 10px; }
+.drop-swatch.picture { display: grid; place-items: center; background: var(--sunken) center / cover no-repeat; }
+.drop-swatch.picture svg { width: 18px; height: 18px; color: var(--ink-3); }
+.drop-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.drop-row .input { flex: 1; min-width: 0; }
+
+/* -- the live preview: the document as it would be, over it -- */
+.design-preview { position: absolute; inset: 0; z-index: 30; pointer-events: none; line-height: 0; background: inherit; border-radius: inherit; overflow: hidden; }
+.design-preview > .picture { width: 100%; height: 100%; }

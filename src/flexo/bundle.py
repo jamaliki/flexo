@@ -90,6 +90,8 @@ PACKED = frozenset(
         ".gif",
         ".webp",
         ".heic",
+        ".heif",
+        ".avif",
         ".gz",
         ".tgz",
         ".zip",

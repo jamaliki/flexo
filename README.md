@@ -1338,6 +1338,13 @@ slide 4") show where it works, the activity list says who changed what, and
 own last change and leaves others' alone; the history beside it (⌥⌘Z) lists your
 changes in words, to go back or forward to any of them.
 
+- **Design** in a figure's toolbar (⇧⌘D, View › Show Design in the Mac app) shows its
+  Design bar, as a deck's: one low row of pop-up buttons naming what is in use -- **Theme** (a
+  grid of the figure drawn in each theme), **Colours**, **Font**, **Page Size** (with its width
+  and height), **Sizes** (spacing, shapes' padding, lines' width, arrowheads' size) and
+  **More** (panel letters, Customise…). While the Theme or Colours menu is open, the theme or
+  palette the pointer is over shows on the figure; chosen, it is one step to undo. The
+  inspector keeps what is the figure's parts' own.
 - **Figures**, made without writing YAML: **Add** offers every kind of part --
   blocks and operators, the machine-learning components, constructs, plasmids,
   proteins, trees, plates, timelines, structures -- and a part added while another
@@ -1355,7 +1362,7 @@ changes in words, to go back or forward to any of them.
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
   type its words on the drawing; ⇧-click several and **Group** (⌘G) gathers them
   into a row, column, grid, titled module, or lettered **panel** (a, b, c, as a
-  journal prints a figure of several; **Panel Letters**, with nothing chosen,
+  journal prints a figure of several; **Panel Letters**, in the Design bar's More,
   letters them A, B, C or in brackets; **Panel** in the toolbar adds one, or lays the
   whole figure out as panels -- 2 across, 2 × 2, 3 × 2, one over two, one beside two --
   in one step; several shapes of one row move a place together with ⌥ and an arrow) -- or puts a **frame** round them where they
@@ -1390,6 +1397,21 @@ changes in words, to go back or forward to any of them.
   what the page has no control for can be written there. Lint messages sit under
   the drawing; clicking one chooses the part it is about. flexo-talk edits the
   figures on a deck's slides the same way, where they are drawn.
+- **Find and replace**: ⌘F opens a bar over the document (a figure, or with flexo-talk
+  a deck) that finds a word in all of it as it is typed -- a figure's labels, its lines'
+  and modules' words, the words of the shapes drawn over it -- marking each where it is
+  drawn and saying "2 of 5". Return and ⇧Return in its field go from one to the next, and
+  so do n and ⇧N, as vim's, while it is open and no words are typed (a shape chosen is not
+  typed over); **Match Case** and **Whole Words** narrow it, ⌥⌘F shows **Replace** and **Replace
+  All** (each one step in the history), and Esc closes it, the last match's shape
+  chosen. The top bar's **Search** (⌘K) finds the same words, listed above the
+  commands and documents it finds. One engine does both (`static/studio/finding.js`).
+- **TODOs**: the word `TODO` in capitals, as a word of its own, in a figure's words is
+  work left: marked amber where it is drawn, counted in the zoom bar ("2 TODOs", which
+  goes to the next), and gone through by Next TODO (⌘') and Previous TODO (⇧⌘'), its
+  shape chosen. Only in the studio: nothing exported has the marks. Found by the same
+  engine with Match Case and Whole Words (`static/studio/todos.js`; a deck's, with
+  flexo-talk).
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.

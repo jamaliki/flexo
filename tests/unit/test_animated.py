@@ -100,7 +100,8 @@ def test_a_gif_is_artwork_sized_by_its_pixels_and_carried_whole(tmp_path: Path) 
     assert colour_of(base64.b64decode(still_href(art, 3).split(",", 1)[1])) == COLOURS[2]
     broken = tmp_path / "broken.gif"
     broken.write_bytes(b"not a GIF at all")
-    with pytest.raises(Exception, match=r"image\.gif\.invalid"):
+    # (Read as what its bytes are, whatever its name: these are no picture's.)
+    with pytest.raises(Exception, match=r"image\.source\.unknown"):
         load_artwork("figure.broken", str(broken))
 
 

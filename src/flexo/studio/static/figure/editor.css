@@ -88,3 +88,10 @@
 
 /* -- the inspector -- */
 
+/* The Design bar (designbar.js) across the figure editor's frame, over its list, the figure
+   and the inspector. */
+.fig.designing { grid-template-rows: auto minmax(0, 1fr); }
+.fig.designing > .ribbon { grid-column: 1 / -1; grid-row: 1; }
+.fig.designing > .fig-left, .fig.designing > .fig-split, .fig.designing > .fig-center, .fig.designing > .fig-inspector { grid-row: 2; }
+.fig.designing.narrow > .fig-left { top: 38px; }
+.ribbon-drop .drop-sample.letters { font-size: 15px; font-weight: 600; }
