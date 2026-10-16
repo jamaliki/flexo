@@ -1,12 +1,12 @@
-// The Design bar, as PowerPoint's ribbon: a document's design -- its theme, colours, fonts and
-// the rest -- across the window under the toolbar, shared by the deck and figure editors
-// (flexo-talk's designbar.js, figure/designbar.js). What is here is the bar's own:
-//   - a gallery of thumbnails (a deck's slide, a figure, in each theme), drawn as they come
-//     into sight, kept, and drawn again only once what they show has changed;
-//   - its pull-downs, each opening a panel under it that stays open while a pop-up in it
-//     (a font's list, a choice) is open, as a ribbon's drop-down galleries do;
-//   - the live preview: what the pointer is over in the gallery or a panel shown on the
-//     document as it would be, the document itself unchanged until it is chosen.
+// The Design bar: a document's design -- its theme, colours, fonts and the rest -- in one low
+// row of pop-up buttons under the toolbar, each naming what is in use, shared by the deck and
+// figure editors (flexo-talk's designbar.js, figure/designbar.js). What is here is the bar's own:
+//   - its pop-up buttons, each opening a panel under the bar that stays open while a pop-up in
+//     it (a font's list, a choice) is open, as a ribbon's drop-down galleries do;
+//   - a gallery of thumbnails for a panel (a deck's slide, a figure, in each theme), in a grid,
+//     drawn as they come into sight, kept, and drawn again only once what they show has changed;
+//   - the live preview: what the pointer is over in an open panel shown on the document as it
+//     would be, the document itself unchanged until it is chosen. Nothing in the bar itself is.
 
 import { h, clear, icon, closeMenu, roving } from "./ui.js";
 import { keepFocus, picture } from "./studio.js";
@@ -15,8 +15,8 @@ if (typeof document !== "undefined" && !document.querySelector('link[href="/stat
   document.head.append(h("link", { rel: "stylesheet", href: "/static/studio/ribbon.css" }));
 }
 
-// The bar: its groups side by side, the gallery taking the room left. Its buttons don't take
-// the keys from the document when clicked, as a Mac toolbar's don't.
+// The bar: its pop-up buttons side by side. They don't take the keys from the document when
+// clicked, as a Mac toolbar's don't.
 export function ribbonBar(label = "Design") {
   const node = h("div.ribbon", { role: "toolbar", "aria-label": label, hidden: true });
   node.addEventListener("mousedown", (event) => {
@@ -33,18 +33,26 @@ export function ribbonBar(label = "Design") {
 }
 
 export const ribbonSep = () => h("div.ribbon-sep", { role: "separator" });
-// Two small buttons, one over the other, as a ribbon stacks them.
-export const ribbonStack = (...buttons) => h("div.ribbon-stack", {}, buttons.filter(Boolean));
 
-// A pull-down: its face (what is in use: a palette's colours, a font), its name, a chevron;
-// pressed, its panel (`panel()`, drawn again as the document changes) under it, or away again.
-export function pull({ label, face = null, title = "", panel, className = "", onOpen }) {
+// A pop-up button: what is in use -- its face (a palette's colours, a theme's page) and its name
+// ("Paper", "16:9", a font's name in itself), else the button's own -- and a chevron; pressed,
+// its panel (`panel()`, drawn again as the document changes) under the bar, or away again.
+export function pull({ label, face = null, title = "", panel, className = "", onOpen, onClose }) {
   const faced = h("span.ribbon-face", {}, face);
+  const said = h("span.ribbon-label", {}, label);
   const button = h(`button.ribbon-pull${className ? `.${className}` : ""}`, {
-    type: "button", title: title || label, "aria-haspopup": "dialog", "aria-expanded": "false",
-    onclick: () => { if (openDrop?.anchor === button) closeDrop(); else { onOpen?.(); drop(button, panel); } },
-  }, faced, h("span.ribbon-label", {}, label), icon("chevron-down", { class: "ribbon-chevron" }));
-  button.setFace = (node) => clear(faced, node);
+    type: "button", title: title || label, "aria-label": title || label, "aria-haspopup": "dialog", "aria-expanded": "false",
+    onclick: () => { if (openDrop?.anchor === button) closeDrop(); else { onOpen?.(); drop(button, panel, { onClose }); } },
+  }, faced, said, icon("chevron-down", { class: "ribbon-chevron" }));
+  faced.hidden = !face;
+  // What it shows now: `face` beside `text` (words, or a node), its tooltip naming both.
+  button.show = ({ face: shown = null, text = label, title: named = label } = {}) => {
+    clear(faced, shown);
+    faced.hidden = !shown;
+    clear(said, text);
+    button.title = named;
+    button.setAttribute("aria-label", named);
+  };
   return button;
 }
 
@@ -55,7 +63,7 @@ let openDrop = null;
 // A panel under `anchor`, as a ribbon's drop-down: closed by a press elsewhere (but in a menu
 // opened from it, or a dialog), Esc, its button again, or another opening. `render()` is its
 // content, drawn again by redrawDrop() with the keys kept where they were (keepFocus).
-export function drop(anchor, render, { className = "" } = {}) {
+export function drop(anchor, render, { className = "", onClose } = {}) {
   closeDrop();
   closeMenu();
   const node = h(`div.ribbon-drop${className ? `.${className}` : ""}`, { role: "dialog", tabIndex: -1, "aria-label": anchor.title || "" });
@@ -63,7 +71,11 @@ export function drop(anchor, render, { className = "" } = {}) {
   // (Drawn again with the keys in it, they stay in it: on what has them still, else the panel.)
   const draw = () => {
     const had = node.contains(document.activeElement);
-    keepFocus(node, () => clear(node, render()));
+    // (What it shows is the same nodes still -- a gallery, which keeps itself current: left as
+    // it is, scrolled where it was.)
+    const made = [render()].flat(Infinity).filter(Boolean);
+    if (made.length === node.childNodes.length && made.every((child, index) => node.childNodes[index] === child)) return;
+    keepFocus(node, () => clear(node, made));
     if (had && !node.contains(document.activeElement)) node.focus({ preventScroll: true });
   };
   draw();
@@ -101,8 +113,8 @@ export function drop(anchor, render, { className = "" } = {}) {
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("keydown", keys, true);
       window.removeEventListener("resize", place);
-      node.dispatchEvent(new CustomEvent("closed"));
       node.remove();
+      onClose?.();
       anchor.classList.remove("menu-open");
       anchor.setAttribute("aria-expanded", "false");
       if ((refocus || node.contains(document.activeElement)) && before?.isConnected) before.focus({ preventScroll: true });
@@ -202,32 +214,16 @@ export function previewer({ target, draw, keyOf = (variant) => JSON.stringify(va
 
 // -- the gallery --
 
-// Thumbnails in a row, scrolled side to side (by a wheel too), the one in use marked; ← and →
-// go along them. Each is drawn as it comes into sight -- `thumbs(items)` answers their drawings
-// in order ({svg, key} or nothing) -- and drawn again only once `version(item)` says what it
-// shows has changed, the old one kept in sight meanwhile. `card(item)` stands in until then.
-// Pointed at (or reached by the keys), each is shown on the document (`preview(item)`, null
-// once it is left); clicked, it is chosen (`pick(item)`).
+// Thumbnails in a grid that scrolls, each named under it, the one in use marked; the arrows go
+// among them. Each is drawn as it comes into sight -- `thumbs(items)` answers their drawings in
+// order ({svg, key} or nothing) -- and drawn again only once `version(item)` says what it shows
+// has changed, the old one kept in sight meanwhile. `card(item)` stands in until then. Pointed at
+// (or reached by the keys), each is shown on the document (`preview(item)`, null once it is
+// left); clicked, it is chosen (`pick(item)`).
 export function gallery({ label, items = [], name, current, thumbs, card, version, pick, preview, aspect = () => 16 / 9 }) {
-  const strip = h("div.ribbon-strip", { role: "group", "aria-label": label });
-  const back = h("button.ribbon-scroll.back", { type: "button", tabIndex: -1, title: "Scroll Left", "aria-hidden": "true", onclick: () => scrollBy(-1) }, icon("chevron", { class: "flip" }));
-  const on = h("button.ribbon-scroll.on", { type: "button", tabIndex: -1, title: "Scroll Right", "aria-hidden": "true", onclick: () => scrollBy(1) }, icon("chevron"));
-  const node = h("div.ribbon-gallery", {}, back, strip, on);
+  const node = h("div.ribbon-gallery.scroll-thin", { role: "group", "aria-label": label });
   const cells = new Map();
   let list = [];
-  const scrollBy = (way) => strip.scrollBy({ left: way * Math.max(120, strip.clientWidth - 80), behavior: "smooth" });
-  const ends = () => {
-    back.hidden = strip.scrollLeft <= 1;
-    on.hidden = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
-  };
-  strip.addEventListener("scroll", ends, { passive: true });
-  new ResizeObserver(ends).observe(strip);
-  // A wheel turned over it goes along it, as a trackpad's sideways swipe does.
-  strip.addEventListener("wheel", (event) => {
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || strip.scrollWidth <= strip.clientWidth) return;
-    event.preventDefault();
-    strip.scrollLeft += event.deltaY;
-  }, { passive: false });
   // -- drawn as they come into sight, a few asked for at once --
   const seen = new Set();
   let asking = false, again = false;
@@ -260,20 +256,20 @@ export function gallery({ label, items = [], name, current, thumbs, card, versio
   const sight = new IntersectionObserver((entries) => {
     for (const entry of entries) { if (entry.isIntersecting) seen.add(entry.target); else seen.delete(entry.target); }
     ask();
-  }, { root: strip, rootMargin: "0px 240px" });
+  }, { root: node, rootMargin: "120px 0px" });
   const keyOf = (item) => String(item.value);
   // -- pointed at, reached by the keys --
   let over = null;
   const point = (item) => { over = item; preview?.(item); };
-  strip.addEventListener("pointerleave", () => { if (over) { over = null; preview?.(null); } });
-  strip.addEventListener("focusout", (event) => { if (!strip.contains(event.relatedTarget) && over) { over = null; preview?.(null); } });
+  node.addEventListener("pointerleave", () => { if (over) { over = null; preview?.(null); } });
+  node.addEventListener("focusout", (event) => { if (!node.contains(event.relatedTarget) && over) { over = null; preview?.(null); } });
   const cellOf = (item) => {
     const cell = h("button.ribbon-thumb.waiting", {
       type: "button", title: name(item), "aria-label": name(item), "aria-pressed": "false",
       onclick: () => pick(item),
       onpointerenter: () => point(item),
       onfocus: () => { if (cell.matches(":focus-visible")) point(item); },
-    }, h("span.ribbon-pic", {}, card(item)));
+    }, h("span.ribbon-frame", {}, h("span.ribbon-pic", {}, card(item))), h("span.ribbon-name", {}, name(item)));
     sight.observe(cell);
     return cell;
   };
@@ -295,28 +291,27 @@ export function gallery({ label, items = [], name, current, thumbs, card, versio
       const wanted = new Set(list.map(keyOf));
       for (const [key, cell] of cells) if (!wanted.has(key)) { sight.unobserve(cell); seen.delete(cell); cells.delete(key); }
       for (const item of list) if (!cells.has(keyOf(item))) cells.set(keyOf(item), cellOf(item));
-      clear(strip, list.map((item) => cells.get(keyOf(item))));
-      keys ||= roving(strip, () => [...strip.children]);
+      clear(node, list.map((item) => cells.get(keyOf(item))));
+      keys ||= roving(node, () => [...node.children]);
       api.refresh();
     },
     // What is in use marked.
     mark() {
       node.style.setProperty("--thumb-ratio", String(aspect()));
       mark();
-      keys?.mark(strip.querySelector(".ribbon-thumb.on") || strip.firstElementChild);
+      keys?.mark(node.querySelector(".ribbon-thumb.on") || node.firstElementChild);
     },
     // ... and what shows something else now drawn again.
     refresh() {
       api.mark();
       ask();
-      requestAnimationFrame(ends);
     },
     // The one in use in sight.
     reveal() {
-      const chosen = strip.querySelector(".ribbon-thumb.on");
+      const chosen = node.querySelector(".ribbon-thumb.on");
       if (!chosen) return;
-      const box = chosen.getBoundingClientRect(), room = strip.getBoundingClientRect();
-      if (box.left < room.left || box.right > room.right) strip.scrollLeft += box.left - room.left - (room.width - box.width) / 2;
+      const box = chosen.getBoundingClientRect(), room = node.getBoundingClientRect();
+      if (box.top < room.top || box.bottom > room.bottom) node.scrollTop += box.top - room.top - (room.height - box.height) / 2;
     },
   };
   // (Filled once it is shown: what it asks of its host may not be there yet.)
