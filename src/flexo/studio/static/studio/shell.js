@@ -503,6 +503,7 @@ function applyTheme(mode) {
 
 export async function start() {
   applyTheme(remembered("theme", "auto"));
+  markTab();
   const root = document.getElementById("studio");
   let info;
   try {
@@ -1318,11 +1319,26 @@ function typeAgain(keys) {
 
 // A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
 
+// The studio's mark, its app icon's: the red wedge (flexo-studio's make_icon.py) as it is
+// drawn small -- the f cut as one slanted shape, crossed by a red wedge that reaches its node,
+// under a red sun -- without the guide's hairline, which no pixel here could show.
+const MARK = '<circle cx="152" cy="58" r="26" fill="#c8102e"/><polygon points="58,172 84,34 132,34 128,58 108,58 87,172" fill="#1a1a1a"/><polygon points="30,89 30,115 166,104" fill="#c8102e"/><rect x="166" y="94" width="18" height="18" fill="#1a1a1a"/>';
 function markIcon() {
-  const node = icon("info");
-  node.firstChild.setAttribute("d", "M3 4.5h4v7H3zM9 4.5h4v3H9zM9 9.5h4v2H9zM7 8h2");
-  node.setAttribute("stroke-width", "1.6");
+  const node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  node.setAttribute("viewBox", "0 0 200 200");
+  node.setAttribute("aria-hidden", "true");
+  node.innerHTML = MARK;
   return node;
+}
+// The browser's tab shows it too: the mark on its cream tile.
+function markTab() {
+  if (typeof document === "undefined" || document.querySelector('link[rel="icon"]')) return;
+  const tile = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#efe6d2"/>${MARK}</svg>`;
+  const link = document.createElement("link");
+  link.rel = "icon";
+  link.type = "image/svg+xml";
+  link.href = `data:image/svg+xml,${encodeURIComponent(tile)}`;
+  document.head.append(link);
 }
 
 // Copied, its button says so where it is -- a tick a moment, as a Mac's does -- not in a note

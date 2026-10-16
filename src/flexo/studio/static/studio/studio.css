@@ -477,10 +477,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .command-list .menu-item[aria-disabled] { color: var(--ink-3); cursor: default; }
 .command-list .menu-item[aria-disabled] svg, .command-list .menu-item[aria-disabled] .kbd { opacity: 0.55; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: 8px; font-weight: 600; letter-spacing: -0.01em; }
-/* The app's mark, in its icon's blue: a sign of whose window this is, not a button to press. */
+/* The app's mark, its icon's red wedge on cream: a sign of whose window this is, not a button
+   to press. (Cream in both appearances, as the icon is.) */
 .brand { cursor: default; }
-.brand-mark { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(180deg, #6a86ff, #3a52e6); color: #fff; display: grid; place-items: center; }
-.brand-mark svg { width: 14px; height: 14px; }
+.brand-mark { width: 20px; height: 20px; border-radius: 5px; background: #efe6d2; box-shadow: inset 0 0 0 0.5px #cdbf9f; display: grid; place-items: center; }
+.brand-mark svg { width: 16px; height: 16px; }
 .file { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip {
