@@ -534,7 +534,7 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
                 figure[key] = str((base / value).resolve())
     for node in document.get("nodes") or []:
         properties = node.get("properties") if isinstance(node, dict) else None
-        for key in ("source", "density"):
+        for key in ("source", "density", "ss_from"):
             value = properties.get(key) if isinstance(properties, dict) else None
             if isinstance(value, str) and value and (base / value).is_file():
                 properties[key] = str((base / value).resolve())

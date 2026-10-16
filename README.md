@@ -273,8 +273,13 @@ page, engraved colour otherwise) unless `look=` names one; it is drawn on the
 figure's page colour and that colour taken out, so it sits on the page with no
 box; its ink is the figure's, and its helices and strands take the colours a
 protein map in the figure gives them. `colors={"A": "Kinase"}` colours a chain
-(or a residue, subunit, or entity) with a hex colour or one of the figure's
-tones; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
+(or a residue such as `SER195` or a ligand such as `6V0401`, a subunit, an entity,
+or a selection such as `resi 10-24` or `not polymer`) with a hex colour or one of
+the figure's tones, a later one over an earlier one where they overlap; a group
+the molecule has none of is said. `ss_from="end.pdb"` colours each residue by its
+secondary structure in another file, in the look's helix, strand and loop colours,
+while it is drawn with its own -- a diffusion run's frames coloured by the
+structure they end as; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
 `surface`, and `site` are mol-sketch selections (`site="ligand"` picks out the
 largest ligand's pocket). The rest of mol-sketch is there too: `palette=` names
 one of its group palettes, `density=` draws a density map with the model

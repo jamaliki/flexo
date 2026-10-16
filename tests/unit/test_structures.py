@@ -293,17 +293,18 @@ def test_without_mol_sketch_a_structure_says_how_to_get_it(monkeypatch) -> None:
 
 
 def test_a_colour_for_a_chain_the_structure_lacks_is_said_with_the_chains_it_has() -> None:
-    from flexo.structures import _check_chains, _NoSuchChain
+    pytest.importorskip("molsketch")
 
-    class Loaded:
-        def _info(self) -> dict:
-            return {"structure": {"name": "1a7g", "chains": ["E"]}}
+    def problem(colors: dict[str, str]):
+        with flexo.Figure("odd") as figure:
+            figure.root.structure("model", DATA / "1a7g.cif", colors=colors)
+        return structure_problem(figure.spec.nodes[0], figure_style(figure.spec))
 
-    _check_chains(Loaded(), (("E", "#d55e00"), ("SER195", "#000000"), ("SER195.E", "#111111"),
-                             ("entity:1", "#222222")))
-    with pytest.raises(_NoSuchChain, match='"A" names no chain of 1A7G') as caught:
-        _check_chains(Loaded(), (("A", "#d55e00"),))
-    assert "Its chains are E" in caught.value.hint
+    assert problem({"E": "#d55e00", "ALA291": "#000000", "THR292.E": "#111111",
+                    "entity:1": "#222222", "SO41": "#333333"}) is None
+    said = problem({"A": "#d55e00"})
+    assert said is not None and said.message.startswith('"A" names no chain of 1A7G')
+    assert "Its chains are E" in (said.hint or "")
 
 
 def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> None:

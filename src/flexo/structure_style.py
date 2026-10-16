@@ -285,6 +285,7 @@ _MOLECULE = _pane(
                     "Carbon matches the carbons. Rainbow runs blue to red along each chain.",
                     labels={"ss": "Secondary Structure", "carbon": "Carbon", "rainbow": "Rainbow"},
                 ),
+                _own("properties.ss_from"),
                 _choice(
                     "surface_color",
                     "Colour Surface By",

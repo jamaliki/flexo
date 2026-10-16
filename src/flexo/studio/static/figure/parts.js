@@ -27,6 +27,7 @@ import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
+import { structureColours } from "/static/kinds/figure/structurecolours.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -6746,9 +6747,13 @@ export function figureParts(host) {
         return ui.field(field.label, h("div.grid2", {}, half(0), half(1)), options);
       }
       case "file":
-        return ui.field(field.label, h("div.row", {}, ui.input({ value: typing(key) ?? value ?? "", mono: true, key, onChange: set }),
+        return ui.field(field.label, h("div.row", {}, ui.input({ value: typing(key) ?? value ?? "", placeholder: field.placeholder || "", mono: true, key, onChange: set }),
           h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
+        // (A structure's colours: rows of selections, in order -- structurecolours.js.)
+        if (item?.kind === "structure" && field.key === "properties.colors") {
+          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced });
+        }
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":
         return ui.field(field.label, groupPalette(item, value, set), options);

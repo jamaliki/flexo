@@ -8,9 +8,14 @@ watercolour, pen and ink -- as a panel of the figure:
   theme, dark paper on a dark page, engraved colour otherwise;
 - it is drawn on the figure's own page colour, which is then taken out, so the
   molecule sits on whatever is behind it with no box round it;
-- ``colors`` names a colour for a chain (``"A"``), a residue (``"SER195"``), a
-  subunit or an entity -- a hex colour, or one of the figure's **tones**, so the
-  kinase domain on the protein map and the chain in the structure are one colour;
+- ``colors`` names a colour for a chain (``"A"``), a residue (``"SER195"``, a ligand
+  ``"6V0401"``), a subunit, an entity or a selection (``"resi 10-24"``, ``"not polymer"``)
+  -- a hex colour, or one of the figure's **tones**, so the kinase domain on the protein
+  map and the chain in the structure are one colour -- a later row over an earlier one
+  where they overlap (see ``flexo.structure_colours``);
+- ``ss_from`` colours it by another file's secondary structure, in the look's helix,
+  strand and loop colours, while it is drawn with its own: frames of a diffusion run
+  coloured by the structure they end as;
 - ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame it, and ``pan_x`` and
   ``pan_y`` shift it (fractions of its box); ``cartoon``, ``sticks``, and ``surface``
   say what to draw (mol-sketch selections), and ``site`` marks an active site -- a
@@ -304,10 +309,13 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
             return _Problem("source", f"Couldn't draw {name}",
                             f"“{ask.source}” isn't a PDB ID or a file in the folder.")
         return _Problem("source", f"Couldn't read {name}", said)
+    from flexo.structure_colours import Unseen, check
+
     try:
-        _one_at_a_time(_check_chains, figure, ask.colours)
-    except _NoSuchChain as error:
-        return _Problem("colors", name, _sentence(str(error)), error.hint, drawn=True)
+        _one_at_a_time(check, figure, ask)
+    except Unseen as error:
+        return _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
+                        drawn=True)
     return None
 
 
@@ -728,6 +736,10 @@ class _Ask:
     roles that matter most first: what a molecule drawn as shapes is painted by."""
     step: int = 1
     """Which of a scene's steps is drawn (1, its first), once its arrows are in: ``_frame``."""
+    ss_from: str | None = None
+    """The file (or PDB entry) whose secondary structure it is coloured by, and when it was
+    saved: ``flexo.structure_colours``."""
+    ss_stamp: float = 0.0
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -803,6 +815,13 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         density = str(density).strip()
         if Path(density).expanduser().exists() and outside(Path(density).expanduser()):
             raise _fail(node, "density", "The map file is outside the folder.")
+    ss_from = str(node.property("ss_from") or "").strip() or None
+    ss_path = Path(ss_from).expanduser() if ss_from else None
+    if ss_path is not None and ss_path.exists():
+        if outside(ss_path):
+            raise _fail(node, "ss_from", "The file its secondary structure is from is outside "
+                        "the folder.")
+        ss_from = str(ss_path)
     pan = (node.property("pan_x"), node.property("pan_y"))
     within = node.property("site_within")
     group_palette = node.property("palette")
@@ -829,6 +848,8 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         bool(node.property("solvent")),
         tuple(paints),
         1 if step is None else int(step),
+        ss_from,
+        ss_path.stat().st_mtime if ss_path is not None and ss_path.exists() else 0.0,
     )
 
 
@@ -980,13 +1001,12 @@ def _drawn(ask: _Ask):
 
     import molsketch as ms
 
+    from flexo.structure_colours import paint
+
     figure = _loaded(ask.source, ask.stamp).copy()
     frame = _frame(figure, ask)
     if frame is not None:
         figure.frame(frame)
-    # A colour for a chain the molecule lacks would show nowhere: it is left out, and said
-    # (structure_problem).
-    _, missing = _chains(figure, ask.colours)
     figure = figure.look(ask.look)
     figure.set(palette={"paper": ask.paper, **dict(ask.roles)}, **THE_FIGURES)
     if ask.group_palette:
@@ -1012,9 +1032,9 @@ def _drawn(ask: _Ask):
         )
         # The paper is taken out after: it stays the figure's own.
         figure.set(**{"palette.paper": ask.paper})
-    for group, colour in ask.colours:
-        if group not in missing:
-            figure.color(group, colour)
+    # Its colours, a later row over an earlier one -- but those that would show nowhere,
+    # left out and said (structure_problem).
+    paint(figure, ask)
     if ask.show:
         figure.show(**dict(ask.show))
     if "sticks" not in dict(ask.show):
@@ -1100,7 +1120,9 @@ def _settings(ask: _Ask) -> dict[str, object]:
                 out[f"{prefix}{key}"] = item
         return out
 
-    chains = _chains(figure, ())[0]
+    from flexo.structure_colours import said as colours_said
+
+    chains = _chains(figure)
     selected = [(f"properties.{name}", text) for name, text in ask.show]
     if ask.site and ask.site != "ligand":
         selected.append(("properties.site", ask.site))
@@ -1122,6 +1144,8 @@ def _settings(ask: _Ask) -> dict[str, object]:
         "palettes": ms.palettes(),
         "chains": chains,
         "selections": {key: said for key, said in found if said},
+        # What each row of its colours colours, and the ligands a row may name.
+        "colours": colours_said(figure, ask),
     }
 
 
@@ -1139,6 +1163,8 @@ class _Atom:
     ss: str
     entity: str
     subunit: str
+    group: str = ""
+    """Its residue by mol-sketch's name, which it is coloured by: ``SER195.A``."""
 
 
 @functools.lru_cache(maxsize=8)
@@ -1154,7 +1180,7 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
             str(atom.get("el") or ""), str(atom.get("resn") or ""), int(atom.get("resi") or 0),
             str(atom.get("chain") or ""), str(atom.get("name") or ""), bool(atom.get("het")),
             str(atom.get("ss") or ""), str(atom.get("entity") or ""),
-            str(atom.get("subunit") or ""),
+            str(atom.get("subunit") or ""), str(atom.get("group") or ""),
         )
         for atom in atoms.values()
     )
@@ -1292,44 +1318,11 @@ def _selection_problem(text: str, atoms: tuple[_Atom, ...], name: str, chains: l
     return said
 
 
-class _NoSuchChain(ValueError):
-    """A colour for a chain the structure does not have (it would colour nothing)."""
-
-    def __init__(self, message: str, hint: str) -> None:
-        super().__init__(message)
-        self.hint = hint
-
-
-_RESIDUE = re.compile(r"[A-Za-z]{1,3}-?\d+[A-Za-z]?(\.\w+)?")
-
-
-def _chains(figure, colours: tuple[tuple[str, str], ...]) -> tuple[list[str], list[str]]:
-    """The chains the molecule has, and the groups of ``colours`` that name a chain it does
-    not (a residue, an entity or a chain's residue is not checked here)."""
+def _chains(figure) -> list[str]:
+    """The chains the molecule has, by the author's names, as the file gives them."""
 
     structure = figure._info().get("structure") or {}
-    chains = [str(chain) for chain in structure.get("chains") or ()]
-    if not chains:
-        return chains, []
-    missing = [
-        group for group, _ in colours
-        if not (":" in group or _RESIDUE.fullmatch(group) or group in chains)
-    ]
-    return chains, missing
-
-
-def _check_chains(figure, colours: tuple[tuple[str, str], ...]) -> None:
-    """Say a colour given to a chain the structure does not have -- mol-sketch would
-    quietly colour nothing -- naming the chains it has."""
-
-    chains, missing = _chains(figure, colours)
-    for group in missing[:1]:
-        name = _called((figure._info().get("structure") or {}).get("name"))
-        raise _NoSuchChain(
-            f'"{group}" names no chain of {name}, so its colour would show nowhere.',
-            f"Its chains are {', '.join(chains)} "
-            "(the author's chain names, as the file gives them).",
-        )
+    return [str(chain) for chain in structure.get("chains") or ()]
 
 
 def _theme_look(style: LayoutStyle, palette: Palette) -> str:

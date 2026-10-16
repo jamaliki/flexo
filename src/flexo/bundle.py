@@ -150,9 +150,9 @@ class Reference:
 
 def figure_references(data: object, base: Path, where: str = "") -> list[Reference]:
     """What a figure document names (a figure file's, or one written in a deck): its theme
-    and palette files, each part's picture, structure, map, scene, plot and the plot's data,
-    and the pictures among the shapes drawn over it -- found from ``base``, as
-    ``flexo.studio.figure_kind.parse`` finds them."""
+    and palette files, each part's picture, structure (and the one it is coloured by), map,
+    scene, plot and the plot's data, and the pictures among the shapes drawn over it --
+    found from ``base``, as ``flexo.studio.figure_kind.parse`` finds them."""
 
     found: list[Reference] = []
     if not isinstance(data, Mapping):
@@ -186,6 +186,10 @@ def figure_references(data: object, base: Path, where: str = "") -> list[Referen
         density = properties.get("density")
         if isinstance(density, str) and density.strip():
             found.append(Reference(density, f"{here}.density", base, "density"))
+        # (The structure one is coloured by the secondary structure of: a file, or an entry.)
+        coloured_by = properties.get("ss_from") if kind == "structure" else None
+        if isinstance(coloured_by, str) and coloured_by.strip():
+            found.append(Reference(coloured_by, f"{here}.ss_from", base, "structure"))
         if kind == "plot" and properties.get("data") is not None:
             from flexo.plots import named
 

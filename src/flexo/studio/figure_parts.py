@@ -598,6 +598,16 @@ def _structure() -> dict[str, Any]:
                 "bool",
                 hint="Draw the waters and lone ions where they lie",
             ),
+            # (Coloured by another's secondary structure -- a diffusion run's frames by the
+            # structure they end as -- each drawn with its own: flexo.structure_colours.)
+            _field(
+                "properties.ss_from",
+                "Secondary Structure From",
+                "file",
+                types=["structure"],
+                placeholder="This structure",
+                hint="Helices, strands and loops coloured as another file\u2019s are",
+            ),
             _field(
                 "properties.colors",
                 "Colours",
@@ -605,13 +615,14 @@ def _structure() -> dict[str, Any]:
                 # A new row colours a chain the structure has that no row colours yet.
                 row={"group": "@chain", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or Residue", "chain",
-                            hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain, Residue or Selection", "chain",
+                            hint="A, SER195, resi 10-24, not polymer"),
                     _column(
                         "color", "Colour", "colour", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="These override the palette, the look and its colours (such as Helices)",
+                hint="A later row wins over an earlier one; these override the palette, the "
+                "look and its colours (such as Helices)",
             ),
             _field(
                 "properties.site",

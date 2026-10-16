@@ -1497,6 +1497,7 @@ class GroupBuilder:
         density: str | Path | None = None,
         scheme: str | None = None,
         step: int | None = None,
+        ss_from: str | Path | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1508,9 +1509,11 @@ class GroupBuilder:
         flat, outlined style, nested as shapes -- in its own colours, or with
         ``scheme="figure"`` in the theme's fills, which ``flexo retheme`` recolours
         ...). ``colors`` maps a chain,
-        residue, subunit, or entity to a colour -- a hex colour or one of the
-        figure's tones, so a chain can match its domain
-        on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
+        residue, subunit, entity, or selection (``"resi 10-24"``) to a colour -- a
+        hex colour or one of the figure's tones, so a chain can match its domain
+        on a protein map -- a later one over an earlier one where they overlap;
+        ``ss_from`` colours it by another file's secondary structure, in the look's
+        helix, strand and loop colours. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
         it; ``cartoon``, ``sticks``, and ``surface`` are mol-sketch selections of what
         to draw, and ``site`` marks an active site (``"ligand"``: the largest ligand's
         pocket). ``palette`` names a mol-sketch group palette, ``style`` sets any field
@@ -1537,6 +1540,7 @@ class GroupBuilder:
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
             ("palette", palette), ("density", None if density is None else str(density)),
             ("scheme", scheme), ("step", step),
+            ("ss_from", None if ss_from is None else str(ss_from)),
         ):
             if value is not None:
                 properties[name] = value
