@@ -1,0 +1,66 @@
+/* Find and replace (findbar.js): the bar over a document's stage, its matches marked where
+   they are shown, and the top bar's search listing them (shell.js's palette). */
+
+.find-bar { display: grid; gap: 6px; padding: 7px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; z-index: 6; }
+.find-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.find-field { flex: 0 1 340px; min-width: 120px; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background: var(--raised); cursor: text; transition: border-color 0.12s, box-shadow 0.12s; }
+.find-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.find-field > svg { width: 13px; height: 13px; flex: none; color: var(--ink-3); }
+.find-input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: var(--ink); font: var(--text-body); padding: 0; }
+.find-input::placeholder { color: var(--ink-3); }
+.find-count { flex: none; color: var(--ink-3); font: var(--text-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.find-count.none { color: var(--error); }
+.find-option { margin-left: 4px; height: 24px; }
+.find-gap { flex: 1; }
+.find-more svg { transition: transform 0.15s; }
+.find-more.open svg { transform: rotate(90deg); }
+/* The replace field under the find field, the disclosure's room before it. */
+.find-replace { padding-left: 28px; }
+.find-replace .btn { margin-left: 2px; }
+
+/* In a deck: the bar over the stage, its own row -- the slide is fitted under it. */
+.deck-center:has(> .find-bar) { grid-template-rows: auto minmax(0, 1fr) auto; }
+/* In a figure: over the stage's top, the stage (and its zoom) put under it. */
+.fig-center > .find-bar { position: absolute; top: 0; left: 0; right: 0; }
+.fig-center:has(> .find-bar) > .fig-stage { top: var(--find-height, 41px); }
+.fig-center:has(> .find-bar) > .fig-zoom { top: calc(var(--find-height, 41px) + 14px); }
+
+/* The matches on a slide or a figure: every one faint, the one gone to strong -- a
+   highlighter's yellow laid over the words, their ink kept (multiplied; on a dark page,
+   screened). */
+.find-marks { pointer-events: none; mix-blend-mode: multiply; }
+.find-marks.dark { mix-blend-mode: screen; }
+.find-marks rect { fill: #ffe15c; fill-opacity: 0.55; }
+.find-marks rect.current { fill: #ffbe1a; fill-opacity: 0.95; stroke: #e39a00; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.find-marks.dark rect { fill: #8a6d00; fill-opacity: 0.8; }
+.find-marks.dark rect.current { fill: #c99700; fill-opacity: 1; stroke: #ffd24d; }
+/* A match in words that are not drawn as letters (an equation): its object framed. */
+.find-marks rect.whole { fill: none; stroke: #e39a00; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.find-marks rect.whole.current { stroke-dasharray: none; stroke-width: 2; }
+
+/* In the speaker notes: the same marks, over the notes' own words, which stay where they are. */
+.find-notes { position: absolute; pointer-events: none; overflow: hidden; color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; }
+.find-notes mark { color: transparent; background: rgba(255, 214, 46, 0.45); border-radius: 2px; }
+.find-notes mark.current { background: rgba(255, 176, 0, 0.6); box-shadow: 0 0 0 1px rgba(227, 154, 0, 0.9); }
+
+/* The top bar's search: the document's matches by where each is, above the commands. */
+.palette .found-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 8px 3px; font: var(--text-label); color: var(--ink-2); min-width: 0; }
+.palette .found-head:first-child { padding-top: 4px; }
+.palette .found-head .found-title { font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette .found-item .menu-text { min-width: 0; }
+.palette .found-item .found-words { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.palette .found-item mark { background: rgba(255, 214, 46, 0.55); color: var(--ink); border-radius: 2px; padding: 0 1px; }
+.palette .found-item .found-where { margin-left: auto; padding-left: 12px; color: var(--ink-3); font: var(--text-small); white-space: nowrap; }
+.palette .found-head.commands { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 9px; }
+/* Opened from the top bar's field, the search drops down from where it is. */
+.scrim.palette-scrim.anchored { background: transparent; padding: 0; display: block; }
+.scrim.palette-scrim.anchored .palette { position: fixed; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .palette .found-item mark { background: rgba(201, 151, 0, 0.6); color: var(--ink); }
+  :root:not([data-theme="light"]) .find-notes mark { background: rgba(201, 151, 0, 0.45); }
+  :root:not([data-theme="light"]) .find-notes mark.current { background: rgba(230, 170, 0, 0.6); }
+}
+:root[data-theme="dark"] .palette .found-item mark { background: rgba(201, 151, 0, 0.6); color: var(--ink); }
+:root[data-theme="dark"] .find-notes mark { background: rgba(201, 151, 0, 0.45); }
+:root[data-theme="dark"] .find-notes mark.current { background: rgba(230, 170, 0, 0.6); }

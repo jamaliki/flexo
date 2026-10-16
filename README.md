@@ -1390,6 +1390,14 @@ changes in words, to go back or forward to any of them.
   what the page has no control for can be written there. Lint messages sit under
   the drawing; clicking one chooses the part it is about. flexo-talk edits the
   figures on a deck's slides the same way, where they are drawn.
+- **Find and replace**: ⌘F opens a bar over the document (a figure, or with flexo-talk
+  a deck) that finds a word in all of it as it is typed -- a figure's labels, its lines'
+  and modules' words, the words of the shapes drawn over it -- marking each where it is
+  drawn and saying "2 of 5"; Return and ⇧Return (⌘G, ⇧⌘G) go from one to the next,
+  **Match Case** and **Whole Words** narrow it, ⌥⌘F shows **Replace** and **Replace
+  All** (each one step in the history), and Esc closes it, the last match's shape
+  chosen. The top bar's **Search** (⌘K) finds the same words, listed above the
+  commands and documents it finds. One engine does both (`static/studio/finding.js`).
 - **Themes**: a theme's colours (palette, tones, page), type, lines and shapes,
   and spacing, each shown as the base theme has it until changed, with samples
   drawn as you go -- figures, slides, or any deck in the folder.
