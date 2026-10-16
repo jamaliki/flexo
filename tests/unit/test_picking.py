@@ -184,6 +184,7 @@ def test_a_box_of_words_is_measured_by_its_letters_ink_not_its_lines_height() ->
       });
       const lines = [run("A1", 623, 222.9, "700"), run("B", 626, 238.3, "400")];
       const text = (children) => ({
+        localName: "text",
         querySelectorAll: (what) => (what === "tspan"
           ? children.filter((c) => c.localName === "tspan") : children),
       });
@@ -206,3 +207,100 @@ def test_a_box_of_words_is_measured_by_its_letters_ink_not_its_lines_height() ->
     assert made["two"] == [623, 213.7, 637, 238.4]
     assert made["fonts"] == ["normal 700 12.8px Figtree", "normal 400 12.8px Figtree"]
     assert made["maths"] is None and made["unmeasured"] is None
+
+
+# A <text>'s runs (each <tspan>, or a link's), and a <g> of them with formulas among them
+# (texmath's `flexo-math` groups, moved to where each is set), as the page has them.
+NODES = """
+const run = (text, x, y) => ({
+  localName: "tspan", textContent: text, querySelector: () => null,
+  getNumberOfChars: () => text.length,
+  getStartPositionOfChar: () => ({ x, y }),
+  getEndPositionOfChar: (n) => ({ x: x + 7 * (n + 1), y }),
+});
+const text = (children, nested = children) => ({
+  localName: "text",
+  querySelectorAll: (what) => (what === "tspan"
+    ? nested.filter((c) => c.localName === "tspan") : nested),
+});
+const moved = (x, y) => ({
+  baseVal: { consolidate: () => ({ matrix: { a: 1, b: 0, c: 0, d: 1, e: x, f: y } }) },
+});
+const maths = (box, at) => ({
+  localName: "g", classList: { contains: (name) => name === "flexo-math" }, children: [],
+  getBBox: () => box, transform: moved(...at),
+});
+const group = (children, at = null) => ({
+  localName: "g", classList: { contains: () => false }, children,
+  ...(at ? { transform: moved(...at) } : {}),
+});
+globalThis.getComputedStyle = () => ({
+  fontStyle: "normal", fontWeight: "400", fontSize: "12px", fontFamily: "Figtree",
+});
+const ink = () => ({ up: 9, down: 0 });
+const box = (values) => values && values.map((v) => Math.round(v * 100) / 100);
+"""
+
+
+def test_words_with_maths_drawn_as_shapes_are_their_letters_and_their_formulas() -> None:
+    body = """
+      // "Energy" from x 100 on the baseline at 50, then a formula drawn from (150, 50): its
+      // glyphs reach from 2 left of its own origin to 20 right, 14 above and 5 below it.
+      const fraction = maths({ x: -2, y: -14, width: 22, height: 19 }, [150, 50]);
+      const words = group([text([run("Energy", 100, 50)]), fraction]);
+      // Its lines each a group of their own (a tall formula opened its line), the second moved.
+      const second = group([maths({ x: 0, y: -10, width: 10, height: 12 }, [100, 70])]);
+      const lines = group([group([text([run("A", 100, 50)])]), second]);
+      return {
+        words: box(P.wordsInk(words, ink)), lines: box(P.wordsInk(lines, ink)),
+        // A formula alone: as it is drawn.
+        alone: box(P.wordsInk(group([maths({ x: 0, y: -8, width: 30, height: 10 }, [10, 20])]),
+          ink)),
+        // Anything else drawn among them: none said (its bounds then).
+        other: P.wordsInk(group([text([run("A", 0, 0)]), { localName: "rect", children: [] }]),
+          ink),
+      };
+    """
+    made = run(NODES + body)
+    # Letters from 100 to 142, 9 above the baseline at 50; the formula from 148 to 170, 36 to 55.
+    assert made["words"] == [100, 36, 170, 55]
+    assert made["lines"] == [100, 41, 110, 72]
+    assert made["alone"] == [10, 12, 40, 22]
+    assert made["other"] is None
+
+
+def test_a_link_s_words_are_letters_too() -> None:
+    body = """
+      const linked = run("site", 120, 40);
+      const link = { localName: "a" };
+      return box(P.wordsInk(text([run("A ", 100, 40)], [run("A ", 100, 40), link, linked]), ink));
+    """
+    made = run(NODES + body)
+    assert made == [100, 31, 148, 40]
+
+
+def test_a_box_of_words_pointed_at_shows_where_it_is_picked() -> None:
+    made = run("""
+      const layer = { getScreenCTM: () => new Matrix(1, 0, 0, 1, 0, 0) };
+      const element = {
+        getBBox: () => ({ x: 105, y: 52, width: 20, height: 10 }),
+        getScreenCTM: () => new Matrix(1, 0, 0, 1, 0, 0),
+      };
+      const node = (id) => (id === "s.0.text" ? element : null);
+      const hits = P.wordsPicker({ node, layer, unit: () => 1 });
+      const words = { kind: "text", at: [100, 50], width: 40, text: "A1" };
+      const flat = { box: [100, 50, 40, 16], turn: 0 };
+      const turned = { box: [100, 50, 40, 16], turn: 90 };
+      const found = hits.words(words, flat, "s.0");
+      return {
+        found, filled: hits.words({ ...words, fill: "accent" }, flat, "s.0"),
+        missing: hits.words(words, flat, "s.1"),
+        corners: P.wordsCorners(flat, found, 3).map(round),
+        // Turned as its box is, about its middle (120, 58).
+        turned: P.wordsCorners(turned, found).map(round),
+      };
+    """)
+    assert made["found"] == [5, 2, 25, 12]
+    assert made["filled"] is None and made["missing"] is None
+    assert made["corners"] == [[102, 49], [128, 49], [128, 65], [102, 65]]
+    assert made["turned"] == [[126, 43], [126, 63], [116, 63], [116, 43]]

@@ -7,6 +7,8 @@
 .shape-mark.along { stroke: var(--accent); stroke-opacity: 0.3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none; }
 .shape-mark.along.hover { stroke-opacity: 0.15; }
 .shape-mark.group-frame { stroke-dasharray: 4 3; }
+/* A box of words with no fill nor outline, chosen: where its words are, faint in its frame. */
+.shape-mark.letters:not(.hover) { stroke-opacity: 0.4; stroke-dasharray: 2 2; }
 .shape-handle { fill: #ffffff; stroke: var(--accent); pointer-events: all; touch-action: none; }
 .shape-handle:hover { fill: var(--accent); }
 .shape-handle.adjust { fill: #ffc21a; stroke: #8a5d00; }

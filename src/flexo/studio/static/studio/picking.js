@@ -4,6 +4,8 @@
 // over it) is picked beside and round them; a box filled or outlined is picked anywhere in its
 // frame, as before. On a slide, over a figure, and inside groups alike; and on every move of
 // the pointer, so each box's words are measured once (as the page draws them), then kept.
+// Its words are their letters and any maths among them drawn as shapes; pointed at, it shows
+// where it is picked -- round its words, not its frame (shapes.js).
 //
 // And the page's drawn shapes by id, found in one pass over its drawing, again only once it is
 // drawn anew: what a move of the pointer asks for, many times over on a slide of drawings, is
@@ -56,28 +58,64 @@ export function inkOf(text, font) {
   return Number.isFinite(up) && Number.isFinite(down) ? { up, down } : null;
 }
 
-// A box of words' ink, in its <text>'s own units, [left, top, right, bottom]: each run of it
-// (a <tspan> of its own, or its words) from its first letter to the end of its last, and from
-// the top of its ink to the bottom of it about its baseline -- not the line's height, its
-// letters' ("A1" has none below its baseline). Null where that cannot be said of it (words
-// with more than runs of letters in them, a page with no way to measure): its bounds then.
+// A box of words' ink, in its element's own units, [left, top, right, bottom]. A <text>: each
+// run of it (a <tspan> of its own -- a link's too -- or its words) from its first letter to
+// the end of its last, and from the top of its ink to the bottom of it about its baseline --
+// not the line's height, its letters' ("A1" has none below its baseline). Words with maths
+// among them (a <g> of <text>s, each formula a `flexo-math` group of the shapes it is drawn
+// as; or of lines, each its own): their letters' ink and each formula as it is drawn, all
+// told. Null where that cannot be said of it (anything else drawn in them, a page with no way
+// to measure): its bounds then.
 export function wordsInk(element, ink = inkOf) {
-  if ([...element.querySelectorAll("*")].some((child) => child.localName !== "tspan")) return null;
-  const runs = [...element.querySelectorAll("tspan")].filter((run) => !run.querySelector("tspan"));
   const box = [Infinity, Infinity, -Infinity, -Infinity];
+  if (!inkInto(box, element, ink, null, true)) return null;
+  return box.every(Number.isFinite) ? box : null;
+}
+const isMaths = (node) => node.localName === "g" && Boolean(node.classList?.contains("flexo-math"));
+// (Each piece of it put in `box`, in the element's units: `placed`, how its parent's are those
+// -- a formula moved to where it is set, its letters as they are; the element's own transform
+// none of them. False, it cannot be said.)
+function inkInto(box, node, ink, placed, outer = false) {
+  const local = outer ? null : matrixOf(node);
+  const own = placed && local ? compose(placed, local) : placed || local;
+  if (node.localName === "text") return textInk(box, node, ink, own);
+  if (isMaths(node)) {
+    let drawn;
+    try { drawn = node.getBBox(); } catch { return false; }
+    if (drawn && (drawn.width || drawn.height)) put(box, own, [drawn.x, drawn.y, drawn.x + drawn.width, drawn.y + drawn.height]);
+    return true;
+  }
+  if (node.localName !== "g") return false;
+  for (const child of node.children || []) if (!inkInto(box, child, ink, own)) return false;
+  return true;
+}
+function textInk(box, element, ink, placed) {
+  if ([...element.querySelectorAll("*")].some((child) => child.localName !== "tspan" && child.localName !== "a")) return false;
+  const runs = [...element.querySelectorAll("tspan")].filter((run) => !run.querySelector("tspan"));
   for (const run of runs.length ? runs : [element]) {
     const count = run.getNumberOfChars?.() || 0, text = run.textContent || "";
     if (!count || !text.trim()) continue;
     const start = run.getStartPositionOfChar(0), end = run.getEndPositionOfChar(count - 1);
     const style = globalThis.getComputedStyle?.(run);
     const reach = style ? ink(text, `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`) : null;
-    if (!reach) return null;
-    box[0] = Math.min(box[0], start.x, end.x);
-    box[2] = Math.max(box[2], start.x, end.x);
-    box[1] = Math.min(box[1], start.y - reach.up);
-    box[3] = Math.max(box[3], start.y + reach.down);
+    if (!reach) return false;
+    put(box, placed, [Math.min(start.x, end.x), start.y - reach.up, Math.max(start.x, end.x), start.y + reach.down]);
   }
-  return box.every(Number.isFinite) ? box : null;
+  return true;
+}
+// A node's own transform, as a matrix: null, none.
+function matrixOf(node) {
+  try { return node.transform?.baseVal?.consolidate?.()?.matrix || null; } catch { return null; }
+}
+const compose = (m, n) => ({ a: m.a * n.a + m.c * n.b, b: m.b * n.a + m.d * n.b, c: m.a * n.c + m.c * n.d, d: m.b * n.c + m.d * n.d,
+  e: m.a * n.e + m.c * n.f + m.e, f: m.b * n.e + m.d * n.f + m.f });
+function put(box, matrix, [left, top, right, bottom]) {
+  const corners = matrix ? [[left, top], [right, top], [right, bottom], [left, bottom]].map(([x, y]) => [matrix.a * x + matrix.c * y + matrix.e, matrix.b * x + matrix.d * y + matrix.f])
+    : [[left, top], [right, bottom]];
+  for (const [x, y] of corners) {
+    box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
+    box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+  }
 }
 
 // The picker for a page: `node(id)`, its drawn element of that id; `layer`, the <svg> over it
@@ -97,16 +135,31 @@ export function wordsPicker({ node, layer, unit, ink = inkOf }) {
       .map(([x, y]) => { const at = new DOMPoint(x, y).matrixTransform(matrix); return [at.x, at.y]; });
     return wordsFrom(corners, made);
   }
-  // Whether `point` is on the words of the box `spec` drawn as `id` (`made`, as it is now):
-  // true or false; null where it draws none (it is then picked by its frame).
-  return function hits(spec, made, point, id) {
+  // The words of the box `spec` drawn as `id` (`made`, as it is now), as wordsFrom says them:
+  // null where it is filled or outlined, or draws none (it is then its frame).
+  function words(spec, made, id) {
     if (!bare(spec)) return null;
     const element = node(`${id}.text`);
     if (!element) return null;
     if (!kept.has(element)) kept.set(element, measure(element, made));
-    const words = kept.get(element);
-    return words ? onWords(made, words, point, WORDS_MARGIN / (unit() || 1)) : null;
-  };
+    return kept.get(element);
+  }
+  // Whether `point` is on them: true or false; null where it draws none (it is then picked by
+  // its frame). And `hits.words`, them -- where the pointer shows it is.
+  function hits(spec, made, point, id) {
+    const found = words(spec, made, id);
+    return found ? onWords(made, found, point, WORDS_MARGIN / (unit() || 1)) : null;
+  }
+  hits.words = words;
+  return hits;
+}
+
+// The corners of `words` (as wordsFrom says them) on the page, `margin` round them, in the box
+// `made`, turned as it is: what a box of words with no fill nor outline shows pointed at.
+export function wordsCorners(made, words, margin = 0) {
+  const [x, y] = made.box, centre = F.centreOf(made);
+  const left = x + words[0] - margin, top = y + words[1] - margin, right = x + words[2] + margin, bottom = y + words[3] + margin;
+  return [[left, top], [right, top], [right, bottom], [left, bottom]].map((point) => (made.turn ? F.turned(point, centre, made.turn) : point));
 }
 
 // The elements of the page's drawing (`drawing()`, its <svg>) by id, found in one pass and

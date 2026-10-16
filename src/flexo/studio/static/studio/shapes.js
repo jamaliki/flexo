@@ -34,7 +34,7 @@ import * as Snap from "/static/studio/snapping.js";
 import * as Align from "/static/studio/aligning.js";
 import { alignTools, nearer, drawSpacing } from "/static/studio/aligntools.js";
 import { groupTools } from "/static/studio/groups.js";
-import { wordsPicker, drawnIds } from "/static/studio/picking.js";
+import { wordsPicker, drawnIds, wordsCorners, WORDS_MARGIN } from "/static/studio/picking.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -438,7 +438,16 @@ export function shapeEditor(host) {
       return;
     }
     const corners = cornersOf(made);
-    marks.append(S("polygon", { points: corners.map((p) => p.join(",")).join(" "), class: `shape-mark ${kind}`, "stroke-width": 1.5 * px }));
+    // (A box of words with no fill nor outline is where its words are: pointed at, there --
+    // where it is picked; chosen, its frame, which sizing changes, with its words faint in it.)
+    const letters = spec.kind === "text" ? wordsHit.words(spec, made, idOf(index)) : null;
+    const ring = (points, name, width) => marks.append(S("polygon", { points: points.map((p) => p.join(",")).join(" "), class: name, "stroke-width": width }));
+    if (letters && kind === "hover") { ring(wordsCorners(made, letters, WORDS_MARGIN * px), `shape-mark ${kind} letters`, 1.5 * px); return; }
+    ring(corners, `shape-mark ${kind}`, 1.5 * px);
+    // (Only where its frame is wider or taller than its words: a box as wide as they are shows
+    // its frame alone.)
+    const room = 2 * WORDS_MARGIN * px;
+    if (letters && (made.box[2] - (letters[2] - letters[0]) > room || made.box[3] - (letters[3] - letters[1]) > room)) ring(wordsCorners(made, letters, WORDS_MARGIN * px), "shape-mark letters", px);
   }
   function handle(point, kind, cursor, onDown, title = "") {
     const px = 1 / unit();
