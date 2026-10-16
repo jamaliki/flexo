@@ -29,6 +29,7 @@
 import { h, icon, ui, menu } from "/static/studio/studio.js";
 import { alignTools } from "/static/studio/aligntools.js";
 import * as M from "/static/studio/mixing.js";
+import { chosenOrder, acrossOrder } from "/static/studio/ordering.js";
 
 export function mixedChoice(ctx) {
   const { studio, shapes, own } = ctx;
@@ -66,7 +67,7 @@ export function mixedChoice(ctx) {
   function pressShape(event) {
     if (!(event.shiftKey || event.metaKey) || event.button !== 0 || shapes.armed?.() || shapes.at(event) === null) return false;
     if (!ownNow().length) return false;
-    together(() => { own.choose(ownNow()); shapes.press(event); });
+    clicked(() => together(() => { own.choose(ownNow()); shapes.press(event); }));
     settle();
     return true;
   }
@@ -74,7 +75,7 @@ export function mixedChoice(ctx) {
   function pickOwn(pick, same) {
     if (!pick || !shapesNow().length) return false;
     const picks = M.toggled(ownNow(), pick, same);
-    together(() => { shapes.choose(shapesNow()); own.choose(picks); });
+    clicked(() => together(() => { shapes.choose(shapesNow()); own.choose(picks); }));
     settle();
     return true;
   }
@@ -82,6 +83,9 @@ export function mixedChoice(ctx) {
   function band(picks, indices) {
     if (!picks.length || !indices.length) return false;
     together(() => { own.choose(picks); shapes.choose(indices, { quiet: true }); });
+    // (No click order: what it chose, in reading order, across both -- ordering.js.)
+    across.banded(banding);
+    ownSeen = ownKeys();
     remember();
     return true;
   }
@@ -189,26 +193,46 @@ export function mixedChoice(ctx) {
   const OWN = "own:";
   const ownOf = (key) => JSON.parse(key.slice(OWN.length));
   const isOwn = (key) => typeof key === "string" && key.startsWith(OWN);
-  // In the order they were chosen: the page's own first (chosen before the shapes were added).
-  let order = [];
-  const picksInOrder = () => {
-    const keys = [...ownNow().map((pick) => OWN + JSON.stringify(pick)), ...(shapes.order?.() || shapesNow())];
-    order = [...order.filter((key) => keys.includes(key)), ...keys.filter((key) => !order.includes(key))];
-    return order;
-  };
+  // In the order they were chosen, one order across both kinds -- each shape's when, kept by the
+  // shapes' editor, and the page's own here (ordering.js): what the page holds chosen before the
+  // shapes were, first; a band's, in reading order.
+  const ownKeys = () => ownNow().map((pick) => OWN + JSON.stringify(pick));
+  const ownOrder = chosenOrder();
+  let ownSeen = [], banding = null;
+  const across = acrossOrder([
+    { keys: ownKeys, stampOf: (key) => ownOrder.stampOf(key), stampAs: (key, when) => ownOrder.stampAs(key, when), box: (key) => own.box(ownOf(key)) },
+    { keys: () => shapesNow(), stampOf: (index) => shapes.stampOf?.(index) ?? null, stampAs: (index, when) => shapes.stampAs?.(index, when), box: (index) => shapes.boxOf(index) },
+  ]);
+  // (A press: a band from it keeps, with ⇧ or ⌘, what is chosen as it is pressed.)
+  window.addEventListener("pointerdown", (event) => { banding = { kept: new Set(event.shiftKey || event.metaKey ? [...ownKeys(), ...shapesNow()] : []), base: null }; }, true);
+  // A click that puts one in (or takes one out): what the page holds chosen alone before, when
+  // it was chosen; one it puts in, now.
+  function clicked(run) {
+    const was = on() ? ownSeen : (ownOrder.chose([], ownKeys()), ownKeys());
+    const out = run();
+    ownOrder.chose(was, ownKeys());
+    ownSeen = ownKeys();
+    return out;
+  }
+  const picksInOrder = () => across.ordered();
   // (What it moves: the shapes not locked -- one by its name.)
   const moved = () => { const moving = shapesNow().filter((index) => !shapes.lockedAt(index)); return moving.length === 1 ? shapes.nameOf(moving[0]) : M.counted(moving.length, wordsNow()[1]); };
   const arranging = alignTools({
     picks: () => (on() ? picksInOrder() : []),
     box: (key) => (isOwn(key) ? own.box(ownOf(key)) : shapes.boxOf(key)),
-    // (The page's own stay where they are laid out: what the shapes align to, never moved.)
+    // (The page's own stay where they are laid out: what the shapes align to, never moved --
+    // but spread among, as fixed members of a Distribute.)
     locked: (key) => isOwn(key) || shapes.lockedAt(key),
+    fixed: (key) => isOwn(key),
+    few: () => `Choose three or more ${wordsNow()[1].toLowerCase()}s or ${wordsNow()[0].toLowerCase()}s`,
     name: (key) => (isOwn(key) ? own.name(ownOf(key)) : shapes.nameOf(key)),
     frame: () => ctx.frame(), noun: ctx.noun || "page",
     move: (list, key, dx, dy) => { if (!isOwn(key)) shapes.moveIn(list, key, dx, dy); },
     // Named for the shapes it moves: "Align 2 Shapes Left".
     edit: (mutate, said) => shapes.change(mutate, said.replace(/^(\w+) (\d+ Shapes|\S+)/, (_, verb) => `${verb} ${moved()}`)),
     renderInspector: () => ctx.render(), showPanel: () => ctx.showPanel?.(),
+    // (Arrange in a Grid…'s sheet: the shapes drawn where they would go.)
+    show: (moves) => shapes.showMoves?.(moves),
   });
 
   // -- what may be done with both, by name --

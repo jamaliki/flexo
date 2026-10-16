@@ -373,3 +373,225 @@ def test_each_move_looks_at_each_box_once() -> None:
     # A move well within a frame: a few hundredths of a millisecond, here.
     assert made["each"] < 1.0
     assert made["built"] < 50
+
+
+def test_objects_chosen_with_shapes_are_spread_among_as_fixed_members() -> None:
+    made = run("""
+      // Two objects (laid out: fixed) at 0..100 and 300..400, a shape 40 wide at 120.
+      const three = [
+        { id: "own:a", box: box(0, 0, 100, 50), locked: true, fixed: true },
+        { id: 7, box: box(120, 10, 40, 20) },
+        { id: "own:b", box: box(300, 0, 100, 50), locked: true, fixed: true },
+      ];
+      // An object among four shapes: each run either side of it spread on its own, it staying.
+      const five = [
+        { id: 0, box: box(0, 0, 20, 10) }, { id: 1, box: box(30, 0, 20, 10) },
+        { id: "own:m", box: box(100, 0, 40, 10), locked: true, fixed: true },
+        { id: 2, box: box(150, 0, 20, 10) }, { id: 3, box: box(300, 0, 20, 10) },
+      ];
+      const locked = { id: 9, box: box(0, 0, 5, 5), locked: true };
+      return {
+        three: moved(A.distributeMoves(three, "across")),
+        centres: moved(A.distributeMoves(three, "centres")),
+        five: moved(A.distributeMoves(five, "across")),
+        can: [A.distributable(three), A.distributable(three.slice(0, 2)),
+          A.distributable([three[0], three[2], { ...three[0], id: "own:c" }]),
+          A.distributable([three[0], three[2], locked])],
+        none: A.distributeMoves([three[0], three[2], locked], "across"),
+      };
+    """)
+    # The gaps either side of the shape made equal: (300 - 100 - 40) / 2 = 80 -> 180.
+    assert made["three"] == {"7": [60, 0]}
+    # Centres 50 and 350: the shape's (140) at 200.
+    assert made["centres"] == {"7": [60, 0]}
+    # Left of the object: 20 .. 100 with 20 between, 30 either side (50). Right of it: 140 ..
+    # 300, 70 either side (210). The first and the last stay.
+    assert made["five"] == {"0": [0, 0], "1": [20, 0], "2": [60, 0], "3": [0, 0]}
+    # Three or more taking part, one free to move: a locked shape is not one.
+    assert made["can"] == [True, False, False, False]
+    assert made["none"] == []
+
+
+def test_set_by_the_app_all_at_once_kept_and_told_once() -> None:
+    made = run("""
+      const told = [];
+      A.onAligning((now, how) => told.push([now.to, now.group, now.gap, how]));
+      A.setAligning({ to: "last", group: true, gap: 8 }, "app");
+      A.setAligning({ to: "last", group: true, gap: 8 }, "app");
+      A.setAligning({ to: "nowhere", group: "yes", gap: "wide" }, "app");
+      A.setAligning({ gap: 0 });
+      const stored = Object.fromEntries(kept);
+      kept.set("flexo-studio-align-to", "first");
+      A.setAligning({ to: "biggest" }, "stored");
+      return { told, stored, after: Object.fromEntries(kept), now: A.aligning() };
+    """)
+    assert made["told"] == [
+        ["last", True, 8, "app"],
+        ["last", True, 0, "app"],
+        ["biggest", True, 0, "stored"],
+    ]
+    assert made["stored"] == {
+        "flexo-studio-align-to": "last",
+        "flexo-studio-align-group": "on",
+        "flexo-studio-align-gap": "0",
+    }
+    # (Another tab's, already kept: not stored again.)
+    assert made["after"]["flexo-studio-align-to"] == "first"
+    assert made["now"] == {"to": "biggest", "group": True, "gap": 0}
+
+
+def test_an_edge_sized_catches_where_its_gap_is_as_wide_as_its_rows() -> None:
+    made = run("""
+      // A row, the one sized aside: 0..40, 140..180 and 210..250 (30 apart).
+      const s = A.spacing([box(0, 0, 40, 40), box(140, 0, 40, 40), box(210, 0, 40, 40)]);
+      // Its right edge at 108 (it starts at 70, 30 after the first): caught at 110.
+      const right = s.edge(box(70, 0, 38, 40), 0, "end", 6);
+      const marks = s.marks(right, box(70, 0, 40, 40));
+      // Its left edge at 66 (it ends at 110, 30 before the next): caught at 70.
+      const left = s.edge(box(66, 0, 44, 40), 0, "start", 6);
+      // Too far from any.
+      const far = s.edge(box(70, 0, 20, 40), 0, "end", 6);
+      // Down a column: 0..20 and 50..70 (30 apart), 170..190; its bottom edge at 138.
+      const column = A.spacing([box(0, 0, 40, 20), box(0, 50, 40, 20), box(0, 170, 40, 20)]);
+      const down = column.edge(box(0, 100, 40, 38), 1, "end", 6);
+      // Never past its own other edge: the gap wanted would put its end before its start.
+      const narrow = A.spacing([box(0, 0, 10, 10), box(100, 0, 10, 10), box(140, 0, 10, 10)]);
+      const past = narrow.edge(box(96, 0, 3, 10), 0, "start", 6);
+      return { right, marks, left, far, down, past };
+    """)
+    assert made["right"]["shift"] == pytest.approx(2)
+    assert made["right"]["size"] == pytest.approx(30)
+    # Its gaps either side as wide, and the row's own.
+    spans = sorted((m["from"], m["to"]) for m in made["marks"])
+    assert spans == [(40, 70), (110, 140), (180, 210)]
+    assert made["left"]["shift"] == pytest.approx(4)
+    assert made["far"] is None
+    assert made["down"]["shift"] == pytest.approx(2)
+    assert made["down"]["axis"] == 1
+    assert made["past"] is None
+
+
+def test_sized_or_drawn_the_nearer_of_a_guide_and_an_equal_gap_wins() -> None:
+    made = run("""
+      const s = A.spacing([box(0, 0, 40, 40), box(140, 0, 40, 40), box(210, 0, 40, 40)]);
+      // Sized by its right edge (it starts at 70): the pointer at 108; a guide at 105 is
+      // nearer than the gap's 110 -- or, at 112, farther.
+      const across = { x: true, y: false };
+      const caughtAt = (to) => (value) =>
+        (Math.abs(to - value) <= 6 ? { gap: to - value, at: to } : null);
+      const at = (x, to) => A.sizeCatch(s, { point: [x, 20], fixed: [70, 20], box: [70, 0, 100, 40],
+        sides: across, reach: 6, guide: caughtAt(to) });
+      const even = at(108, 1000), guide = at(108, 107), both = at(108, 110);
+      // None: guides alone (⌥, a shape turned); drawn, its corner (from 70, 0) across alone.
+      const plain = A.sizeCatch(null, { point: [108, 20], fixed: [70, 20], box: [70, 0, 100, 40],
+        sides: across, reach: 6, guide: () => null });
+      const drawn = A.sizeCatch(s, { point: [108, 38], fixed: [70, 0], box: [70, 0, 70, 0],
+        sides: { x: true, y: true }, reach: 6, guide: () => null, ways: across });
+      const made = [70, 0, 110, 40];
+      return { even: even.point, evenMarks: even.marks(made).length,
+        guide: [guide.point, guide.guides],
+        both: [both.point, both.guides, both.marks(made).length],
+        plain: plain.point, drawn: drawn.point };
+    """)
+    assert made["even"] == [110, 20]
+    assert made["evenMarks"] == 3
+    assert made["guide"] == [[107, 20], [{"axis": "x", "at": 107}]]
+    # (One place for both: the guide drawn, and the gaps marked.)
+    assert made["both"] == [[110, 20], [{"axis": "x", "at": 110}], 3]
+    assert made["plain"] == [108, 20]
+    assert made["drawn"] == [110, 38]
+
+
+ORDERING = """
+const O = await import(new globalThis.URL("./ordering.js", URL).href);
+"""
+
+
+def test_first_and_last_chosen_follow_the_clicks_not_the_list() -> None:
+    made = run(
+        ORDERING
+        + """
+      const order = O.chosenOrder();
+      // Clicked: the fourth, then the second, then the third (⇧).
+      order.chose([], [3]); order.chose([3], [3, 1]); order.chose([3, 1], [3, 1, 2]);
+      const clicked = order.ordered([1, 2, 3]);
+      const kept = order.entries();
+      // Brought to front, the second and third: [s0, s1, s2, s3] -> [s0, s3, s1, s2].
+      const was = ["s0", "s1", "s2", "s3"], now = ["s0", "s3", "s1", "s2"];
+      order.moved(O.placesAfter(was, now));
+      const fronted = order.ordered([1, 2, 3]);
+      // One moved where it is (another made in its place), one taken away before it.
+      const places = O.placesAfter(["a", "b", "c"], ["a", "B", "c"]);
+      const gone = O.placesAfter(["a", "b", "c"], ["b", "c"]);
+      // Undone: as it was then.
+      order.restore(kept);
+      const undone = order.ordered([1, 2, 3]);
+      // One taken out and put back in: chosen again, last.
+      order.chose([1, 2, 3], [1, 2]); order.chose([1, 2], [1, 2, 3]);
+      const again = order.ordered([1, 2, 3]);
+      order.chose([1, 2, 3], []);
+      return { clicked, fronted, undone, again, places: [0, 1, 2].map(places),
+        gone: [0, 1, 2].map(gone), cleared: order.entries() };
+    """
+    )
+    assert made["clicked"] == [3, 1, 2]
+    # By the shape, not its place: the fourth, first chosen, is now second in the list.
+    assert made["fronted"] == [1, 2, 3]
+    assert made["places"] == [0, 1, 2]
+    assert made["gone"] == [-1, 0, 1]
+    assert made["undone"] == [3, 1, 2]
+    assert made["again"] == [1, 2, 3]
+    assert made["cleared"] == []
+
+
+def test_a_band_chooses_in_reading_order_after_what_it_kept() -> None:
+    made = run(
+        ORDERING
+        + """
+      const boxes = { 0: box(200, 0, 10, 10), 1: box(0, 100, 10, 10), 2: box(0, 0, 10, 10),
+        3: box(100, 2, 10, 10), 4: box(0, 300, 5, 5) };
+      const at = (key) => boxes[key];
+      const order = O.chosenOrder();
+      order.chose([], [3]);
+      // ⇧ and a band, growing: the right one touched first, then two more.
+      order.pressed(true);
+      order.chose([3], [3, 0], { band: at });
+      order.chose([3, 0], [3, 0, 1, 2], { band: at });
+      const kept = order.ordered([0, 1, 2, 3]);
+      // Then one clicked: after them all.
+      order.pressed(true);
+      order.chose([0, 1, 2, 3], [0, 1, 2, 3, 4]);
+      const clicked = order.ordered([0, 1, 2, 3, 4]);
+      // A band of its own (no ⇧): none kept, all in reading order.
+      order.pressed(false);
+      order.chose([0, 1, 2, 3, 4], [0, 3], { band: at });
+      return { kept, clicked, fresh: order.ordered([0, 3]) };
+    """
+    )
+    # The one clicked before it first; then top to bottom, left to right.
+    assert made["kept"] == [3, 2, 0, 1]
+    assert made["clicked"] == [3, 2, 0, 1, 4]
+    assert made["fresh"] == [3, 0]
+
+
+def test_one_order_across_a_slides_objects_and_its_shapes() -> None:
+    made = run(
+        ORDERING
+        + """
+      const own = O.chosenOrder(), shapes = O.chosenOrder();
+      // An object chosen, then a shape (⇧), then another object, then another shape.
+      own.chose([], ["own:a"]); shapes.chose([], [5]);
+      own.chose(["own:a"], ["own:a", "own:b"]); shapes.chose([5], [5, 2]);
+      const boxes = { "own:a": box(0, 200, 10, 10), "own:b": box(0, 0, 10, 10),
+        2: box(50, 0, 10, 10), 5: box(50, 200, 10, 10) };
+      const kind = (keys, order) => ({ keys: () => keys, stampOf: order.stampOf,
+        stampAs: order.stampAs, box: (key) => boxes[key] });
+      const both = O.acrossOrder([kind(["own:a", "own:b"], own), kind([2, 5], shapes)]);
+      const clicks = both.ordered();
+      // A band across both, keeping the second shape (⇧): it first, the rest as they read.
+      both.banded({ kept: new Set([2]), base: null });
+      return { clicks, banded: both.ordered() };
+    """
+    )
+    assert made["clicks"] == ["own:a", 5, "own:b", 2]
+    assert made["banded"] == [2, "own:b", "own:a", 5]

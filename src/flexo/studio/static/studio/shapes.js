@@ -32,9 +32,10 @@ import { pathTools } from "/static/studio/pathtools.js";
 import { gradientFields } from "/static/studio/gradients.js";
 import * as Snap from "/static/studio/snapping.js";
 import * as Align from "/static/studio/aligning.js";
-import { alignTools, nearer, drawSpacing } from "/static/studio/aligntools.js";
+import { alignTools, nearer, drawSpacing, sizeCatch } from "/static/studio/aligntools.js";
 import { groupTools } from "/static/studio/groups.js";
 import { wordsPicker, drawnIds } from "/static/studio/picking.js";
+import { chosenOrder, placesAfter } from "/static/studio/ordering.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 function S(name, attributes = {}, ...children) {
@@ -143,7 +144,9 @@ export function shapeEditor(host) {
   const glueKey = host.glueKey || "object";
   const ownKeys = host.ownKeys || [];
   let chosen = [];
-  let picked = [];
+  // (When each chosen was, for Align's first and last chosen: by the shape, not its place -- ordering.js.)
+  const picked = chosenOrder();
+  let touchedNow = false;
   let chosenOn = -1;
   let tool = null;
   let gesture = null;
@@ -157,6 +160,8 @@ export function shapeEditor(host) {
   const handles = S("g", { class: "shape-handles" });
   layer.append(previews, marks, guides, handles);
   const tip = h("div.size-tip.shape-tip", { hidden: true });
+  // (A press: a band dragged from it chooses in reading order, ⇧ or ⌘ keeping what is chosen.)
+  window.addEventListener("pointerdown", (event) => { picked.pressed(event.shiftKey || event.metaKey); touchedNow = false; }, true);
   groups.bind({ S, h, icon, ui, layer, before: marks, pageNode: () => page(), stage: () => host.stage, toScreen: (point) => toScreen(point), unit: () => unit(),
     list: () => shapesOf(), chosen: () => chosenNow(), choose: (indices, options) => choose(indices, options), union: (indices) => unionOf(indices),
     hit: (event) => shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }), busy: () => Boolean(gesture?.started),
@@ -287,11 +292,13 @@ export function shapeEditor(host) {
 
   // -- what is chosen --
 
-  function choose(indices, { quiet = false } = {}) {
+  function choose(indices, { quiet = false, band = false } = {}) {
     closeWords();
+    const was = chosenNow();
     chosen = [...new Set(indices)].filter((index) => Number.isInteger(index)).sort((a, b) => a - b);
-    // (And the order they were chosen in, for Align's first and last chosen: aligntools.js.)
-    picked = [...picked.filter((index) => chosen.includes(index)), ...indices.filter((index, n) => chosen.includes(index) && !picked.includes(index) && indices.indexOf(index) === n)];
+    // (And the order they were chosen in, for Align's first and last chosen; a band's, in
+    // reading order: ordering.js.)
+    picked.chose(was, [...new Set(indices)].filter((index) => chosen.includes(index)), band || touchedNow ? { band: (index) => boundsOf(index) } : {});
     chosenOn = slideIndex();
     if (tools?.points.active() && !chosen.includes(tools.points.index())) tools.points.leave({ quiet: true });
     if (chosen.length) host.leaveOthers();
@@ -300,12 +307,13 @@ export function shapeEditor(host) {
   function clear({ quiet = false } = {}) {
     if (!chosen.length && !words) return;
     closeWords();
+    picked.chose(chosen, []);
     chosen = [];
     if (!quiet) { place(); host.renderInspector(); host.reportFocus(); }
   }
   // Undone or redone, what a change did to the page's shapes is chosen again. (The host keeps
   // it with the change, as it lands: `{ slide, before, after }`, the page's place as `slide`.)
-  const mark = (before, after) => host.mark({ slide: slideIndex(), before: before ? [...before] : [], after: after ? [...after] : [] });
+  const mark = (before, after, order = null) => host.mark({ slide: slideIndex(), before: before ? [...before] : [], after: after ? [...after] : [], ...(order ? { order } : {}) });
   function restore(entry, undone) {
     const said = entry.shapes;
     const picks = (undone ? said.before : said.after) || [];
@@ -314,6 +322,8 @@ export function shapeEditor(host) {
     if (!groups.restore(said, picks)) { chosen = []; chosenOn = slideIndex(); return; }
     chosen = picks.filter((index) => index < shapesOf().length);
     chosenOn = slideIndex();
+    // (In the order they were chosen in then.)
+    if (said.order) picked.restore(undone ? said.order.before : said.order.after);
     if (chosen.length) host.leaveOthers();
   }
 
@@ -322,15 +332,21 @@ export function shapeEditor(host) {
   // panel not drawn again (a slider being dragged in it: see slider).
   function edit(mutate, label, { after = undefined, merge = null, quiet = false, panel = true } = {}) {
     if (host.awayFrom("change shapes")) return false;
-    const before = chosenNow();
+    const before = chosenNow(), order = picked.entries();
     // (Chosen as the change lands: the panel drawn by it shows what is chosen after it.)
     if (Array.isArray(after)) { chosen = after; chosenOn = slideIndex(); }
+    let places = null;
+    const mine = [...shapesOf()];
     const made = host.edit((list) => {
+      const was = [...list];
       const out = mutate(list);
+      // (Where each went in the list: the order they were chosen in kept by the shape.)
+      places = placesAfter(was, Array.isArray(out) ? out : list, mine);
       return Array.isArray(out) ? out : list;
     }, { label, ...(merge ? { merge, hold: true } : {}), ...(quiet ? { quiet: true } : {}) });
     if (!made) { chosen = before; return false; }
-    mark(before, Array.isArray(after) ? after : before);
+    if (places) picked.moved(places);
+    mark(before, Array.isArray(after) ? after : before, { before: order, after: picked.entries() });
     objectsSeen = null;
     if (panel) host.renderInspector();
     place();
@@ -816,7 +832,7 @@ export function shapeEditor(host) {
     const picks = [...g.keep, ...touched];
     if (picks.join() === g.key) return;
     g.key = picks.join();
-    choose(picks, { quiet: true });
+    choose(picks, { quiet: true, band: true });
   }
 
   // What a drag catches at: the slide's edges and middles, and the edges and middles of the
@@ -978,9 +994,16 @@ export function shapeEditor(host) {
     let left = x, right = x + w, top = y, bottom = y + h;
     const sides = { x: name.includes("e") || name.includes("w"), y: name.includes("n") || name.includes("s") };
     let px = local[0], py = local[1];
+    let spaced = null;
     if (!free && !g.turn) {
-      if (sides.x) { const caught = catchAt([px], g.targets.xs); if (caught) { px += caught.gap; guide("x", caught.at); } }
-      if (sides.y) { const caught = catchAt([py], g.targets.ys); if (caught) { py += caught.gap; guide("y", caught.at); } }
+      // Each edge that moves caught at a guide, or -- the nearer -- where its gap to its neighbour
+      // is as wide as its row's (or column's) are, as Keynote's spacing guides (aligntools.js:
+      // what does not move looked at once, as the drag starts); not about its middle, nor its
+      // proportions kept.
+      const even = event.altKey || (event.shiftKey && sides.x && sides.y) ? null : (g.spacing ||= Align.spacing(g.targets.boxes || []));
+      spaced = sizeCatch(even, { point: [px, py], fixed, box: [x, y, x + w, y + h], sides, reach: NEAR / unit(), guide: (at, axis) => catchAt([at], axis === "x" ? g.targets.xs : g.targets.ys) });
+      [px, py] = spaced.point;
+      for (const line of spaced.guides) guide(line.axis, line.at);
     }
     if (sides.x) { if (event.altKey) { left = fixed[0] - Math.abs(px - fixed[0]); right = fixed[0] + Math.abs(px - fixed[0]); } else { left = Math.min(px, fixed[0]); right = Math.max(px, fixed[0]); } }
     if (sides.y) { if (event.altKey) { top = fixed[1] - Math.abs(py - fixed[1]); bottom = fixed[1] + Math.abs(py - fixed[1]); } else { top = Math.min(py, fixed[1]); bottom = Math.max(py, fixed[1]); } }
@@ -995,6 +1018,7 @@ export function shapeEditor(host) {
       } else { left = fixed[0] - width / 2; top = fixed[1] - height / 2; }
     }
     const fresh = [left, top, width, height];
+    if (spaced) drawSpacing(guides, spaced.marks([left, top, left + width, top + height]), 1 / unit(), S);
     g.made = fresh;
     live = new Map();
     putBack();
@@ -1317,6 +1341,20 @@ export function shapeEditor(host) {
     if (down) { y += down.gap; guide("y", down.at); }
     return [x, y];
   }
+  // The corner dragged of a shape being drawn, caught at guides and -- the nearer -- where its
+  // gaps to its neighbours are as wide as its row's (or column's) are, as it is sized
+  // (aligntools.js); not drawn about its start (⌥) nor square (⇧). A box of words, across alone.
+  function drawCaught(point, g, free, event, words = false) {
+    if (free) return point;
+    const start = g.points[0];
+    const even = event.shiftKey || event.altKey ? null : (g.spacing ||= Align.spacing(g.targets.boxes || []));
+    const made = sizeCatch(even, { point, fixed: start, box: [...start, ...start], sides: { x: true, y: true }, reach: NEAR / unit(), ways: { x: true, y: !words },
+      guide: (at, axis) => catchAt([at], axis === "x" ? g.targets.xs : g.targets.ys) });
+    for (const line of made.guides) guide(line.axis, line.at);
+    const [x1, y1] = made.point;
+    drawSpacing(guides, made.marks([Math.min(start[0], x1), Math.min(start[1], y1), Math.max(start[0], x1), Math.max(start[1], y1)]), 1 / unit(), S);
+    return made.point;
+  }
   function drawnSpec(g, point, event, free) {
     const kind = g.kind, form = F.family(kind), start = g.points[0];
     if (kind === "pen") return { kind, points: g.points.map(rounded) };
@@ -1329,7 +1367,7 @@ export function shapeEditor(host) {
       } else end = caught(end, g, free);
       return { kind, from: rounded(start), to: rounded(end) };
     }
-    let [x0, y0] = start, [x1, y1] = caught(point, g, free);
+    let [x0, y0] = start, [x1, y1] = drawCaught(point, g, free, event, kind === "text");
     let w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
     if (event.shiftKey) { const side = Math.max(w, h); w = h = side; x1 = x0 + Math.sign(x1 - x0 || 1) * side; y1 = y0 + Math.sign(y1 - y0 || 1) * side; }
     let left = Math.min(x0, x1), top = Math.min(y0, y1);
@@ -1701,12 +1739,29 @@ export function shapeEditor(host) {
   // the page; one alone, the page -- or beside it; three or more spaced evenly (`way`: across,
   // down, or by their edges or middles), a gap apart, or in a grid. Locked ones stay.
   const arranging = alignTools({
-    picks: () => { const now = chosenNow(); return [...picked.filter((index) => now.includes(index)), ...now.filter((index) => !picked.includes(index))]; },
+    picks: () => picked.ordered(chosenNow()),
     box: (index) => boundsOf(index), locked: (index) => shapesOf()[index]?.locked, name: (index) => shapeLabel(shapesOf()[index]),
     frame: () => frameOf(), noun,
     move: (list, index, dx, dy) => { list[index] = withPlaces(F.moved(list[index], round(dx), round(dy))); },
     edit: (mutate, label) => edit(mutate, label), renderInspector: () => host.renderInspector(), showPanel: () => host.showPanel?.(),
+    // (Arrange in a Grid…'s sheet: where they would go, drawn as a drag draws them.)
+    show: (moves) => showMoves(moves),
   });
+  // Shapes drawn moved by `moves` ({ id: index, dx, dy }), as a drag draws them -- the list as
+  // it is -- and the lines glued to them; none (null): as they are.
+  function showMoves(moves) {
+    if (gesture) return;
+    live = new Map();
+    putBack();
+    for (const { id, dx, dy } of moves || []) {
+      const spec = shapesOf()[id];
+      if (!spec) continue;
+      live.set(id, F.moved(spec, dx, dy));
+      setAside(id, { transform: `translate(${dx} ${dy})` });
+    }
+    if (moves?.length) followGlued(moves.map((move) => move.id));
+    place();
+  }
   function align(side) { return arranging.align(side); }
   function distribute(way) { return arranging.distribute(way); }
   function flip(way) {
@@ -2185,6 +2240,8 @@ export function shapeEditor(host) {
   // The band dragged across the slide: the shapes it touches (by their frames on screen).
   function touched(left, top, right, bottom) {
     const a = screenToFrame(left, top), b = screenToFrame(right, bottom);
+    // (What is chosen until the next press is a band's: in reading order -- ordering.js.)
+    touchedNow = true;
     return shapesOf().map((_, index) => index).filter((index) => {
       const box = boundsOf(index);
       return box && box[2] >= a[0] && box[0] <= b[0] && box[3] >= a[1] && box[1] <= b[1];
@@ -2226,11 +2283,14 @@ export function shapeEditor(host) {
     // the order they were, each one's box, name and lock, one moved in a change of the list,
     // and the change itself.
     at: (event) => shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }),
-    order: () => { const now = chosenNow(); return [...picked.filter((index) => now.includes(index)), ...now.filter((index) => !picked.includes(index))]; },
+    order: () => picked.ordered(chosenNow()),
+    // (When each was chosen, one order with what the page holds: ordering.js.)
+    stampOf: (index) => picked.stampOf(index), stampAs: (index, when) => picked.stampAs(index, when),
     boxOf: (index) => boundsOf(index),
     nameOf: (index) => shapeLabel(shapesOf()[index]),
     lockedAt: (index) => Boolean(shapesOf()[index]?.locked),
     moveIn: (list, index, dx, dy) => { list[index] = withPlaces(F.moved(list[index], round(dx), round(dy))); },
+    showMoves: (moves) => showMoves(moves),
     change: (mutate, label, options) => edit(mutate, label, options),
   };
 }
