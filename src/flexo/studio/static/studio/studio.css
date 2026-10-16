@@ -342,8 +342,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start-icon svg { width: 20px; height: 20px; }
 .start-words { display: grid; gap: 2px; min-width: 0; }
 .start-title { font-weight: 640; font-size: 14px; }
-.start-hint { color: var(--ink-3); font: var(--text-small); }
-.welcome p.start-where { margin: -10px 0 0; color: var(--ink-3); font: var(--text-small); }
 .doc-when { color: var(--ink-3); font-size: 12px; white-space: nowrap; margin-left: 12px; min-width: 120px; text-align: right; }
 .welcome-section { padding: 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
 .doc-list { display: grid; gap: 2px; }

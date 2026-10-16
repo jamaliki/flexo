@@ -1136,17 +1136,15 @@ export async function start() {
   const renderWelcome = () => {
     const folderName = String(info.folder).split("/").filter(Boolean).pop() || "this folder";
     // Each kind offered, said as the New menu says it, side by side however many there are.
-    const offered = [["deck", "Deck", "Slides for a talk"], ["figure", "Figure", "A diagram laid out automatically"], ["theme", "Theme", "Fonts, colours and lines"]]
+    const offered = [["deck", "Deck"], ["figure", "Figure"], ["theme", "Theme"]]
       .filter(([kind]) => offers(workspace, kind));
-    const card = ([kind, title, hint]) => h("button.start-card", { type: "button", onclick: () => (kind === "deck" ? newDeck(workspace) : askName(workspace, kind, UNTITLED[kind])) },
-      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title), h("span.start-hint", {}, hint)));
+    const card = ([kind, title]) => h("button.start-card", { type: "button", onclick: () => (kind === "deck" ? newDeck(workspace) : askName(workspace, kind, UNTITLED[kind])) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title)));
     // The folder's documents by name, as the Finder lists them, each with when it was changed.
     const listed = [...workspace.documents].sort((a, b) => docName(a.file).localeCompare(docName(b.file), undefined, { numeric: true, sensitivity: "base" }) || a.file.localeCompare(b.file));
     clear(welcome, h("div.welcome-inner", {},
       wedgeHead("New Document"),
       h("div.start-cards", { style: { gridTemplateColumns: `repeat(${Math.max(2, offered.length)}, minmax(0, 1fr))` } }, offered.map(card)),
-      // Where what is made goes: a file in the folder (its whole path in the tooltip).
-      h("p.start-where", { title: info.folder }, `Each is a file in “${folderName}”, saved as you work.`),
       listed.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, folderName),
         h("div.doc-list", {}, listed.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, docName(item.file)),
