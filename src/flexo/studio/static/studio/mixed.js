@@ -4,13 +4,14 @@
 // chosen of the other; a band across both chooses what it touches of both. Each shows as
 // chosen as it does alone. Chosen together they are:
 // - named in the inspector ("2 Objects, 3 Shapes"), with Cut, Copy, Duplicate and Delete, and
-//   Align and Distribute for the shapes, what the page holds among what they align to (it stays:
-//   it is laid out, not placed) -- a drawing's left edge to a text's;
+//   Align and Distribute for both: what the page holds moved with the shapes where the page can
+//   move it (`own.movable`: a slide's objects, placed where they are put), else among what they
+//   align to, staying where it is laid out (a figure's parts) -- a drawing's left edge to a text's;
 // - deleted by ⌫, cut, copied and pasted by ⌘X, ⌘C and ⌘V (each kind's copy in one: pasted,
 //   each goes where it goes pasted alone), duplicated by ⌘D -- each one step in the history,
 //   named for both; undone or redone, both are chosen again;
-// - nudged by the arrows, the shapes alone (the page's own things are laid out); dragged as
-//   each kind is dragged, the other staying where it is;
+// - nudged by the arrows -- the shapes, and what the page holds where it moves it with them
+//   (`own.nudge`); dragged as each kind is dragged, the other staying where it is;
 // - the same commands by name, for the palette, the right-click menu and the Mac app's menus.
 // A plain click chooses one thing, as ever; Esc, or a click where nothing is, chooses none.
 //
@@ -22,7 +23,11 @@
 //   choose(picks) (those chosen, the shapes kept), alone() (one left alone chosen as one is),
 //   remove(picks, cut), duplicate(picks) (the copies chosen), clip(), paste(clip) (what is
 //   pasted chosen), accepts(clip) (a copy of its own kind), count(clip) (how many it holds),
-//   all(), settled() (a promise: its edits have landed) -- each change one step or more;
+//   all(), settled() (a promise: its edits have landed) -- each change one step or more; and,
+//   where the page moves its own with the shapes: movable(pick), locked(pick), move(moves,
+//   label, shapesChange) (moves: [{ pick, dx, dy }], with the shapes' list changed in place by
+//   `shapesChange`, one step), show(moves) (drawn moved, as a drag draws them; null: as they
+//   are) and nudge(event) (the arrows: true where it moved them, with the shapes);
 // - page(), goTo(page), render(), crumb(), frame(), clipChosen(cut), clipItems(), undoNote(text,
 //   options), away(what).
 
@@ -215,24 +220,53 @@ export function mixedChoice(ctx) {
     return out;
   }
   const picksInOrder = () => across.ordered();
-  // (What it moves: the shapes not locked -- one by its name.)
-  const moved = () => { const moving = shapesNow().filter((index) => !shapes.lockedAt(index)); return moving.length === 1 ? shapes.nameOf(moving[0]) : M.counted(moving.length, wordsNow()[1]); };
+  // (Whether one of the page's own moves with the shapes: else it stays where it is laid out.)
+  const movable = (key) => Boolean(own.move && own.movable?.(ownOf(key)));
+  // (What it moves, named: one by its name, else how many of each.)
+  const movedName = (ownKeys, shapeKeys) => {
+    if (ownKeys.length + shapeKeys.length === 1) return ownKeys.length ? own.name(ownOf(ownKeys[0])) : shapes.nameOf(shapeKeys[0]);
+    return [ownKeys.length ? M.counted(ownKeys.length, wordsNow()[0]) : "", shapeKeys.length ? M.counted(shapeKeys.length, wordsNow()[1]) : ""].filter(Boolean).join(" and ");
+  };
+  const renamed = (said, ownKeys, shapeKeys) => said.replace(/^(\w+) (\d+ Shapes|\S+)/, (_, verb) => `${verb} ${movedName(ownKeys, shapeKeys)}`);
+  // (What a change would move of the page's own, gathered as it is made: see edit.)
+  let gathered = null;
   const arranging = alignTools({
     picks: () => (on() ? picksInOrder() : []),
     box: (key) => (isOwn(key) ? own.box(ownOf(key)) : shapes.boxOf(key)),
-    // (The page's own stay where they are laid out: what the shapes align to, never moved --
-    // but spread among, as fixed members of a Distribute.)
-    locked: (key) => isOwn(key) || shapes.lockedAt(key),
-    fixed: (key) => isOwn(key),
+    // (The page's own the page cannot move stay where they are laid out: what the shapes align
+    // to, never moved -- but spread among, as fixed members of a Distribute.)
+    locked: (key) => (isOwn(key) ? !movable(key) || Boolean(own.locked?.(ownOf(key))) : shapes.lockedAt(key)),
+    fixed: (key) => isOwn(key) && !movable(key),
     few: () => `Choose three or more ${wordsNow()[1].toLowerCase()}s or ${wordsNow()[0].toLowerCase()}s`,
     name: (key) => (isOwn(key) ? own.name(ownOf(key)) : shapes.nameOf(key)),
     frame: () => ctx.frame(), noun: ctx.noun || "page",
-    move: (list, key, dx, dy) => { if (!isOwn(key)) shapes.moveIn(list, key, dx, dy); },
-    // Named for the shapes it moves: "Align 2 Shapes Left".
-    edit: (mutate, said) => shapes.change(mutate, said.replace(/^(\w+) (\d+ Shapes|\S+)/, (_, verb) => `${verb} ${moved()}`)),
+    move: (list, key, dx, dy) => { if (!isOwn(key)) shapes.moveIn(list, key, dx, dy); else gathered?.push({ key, dx, dy }); },
+    // Named for what it moves: "Align 2 Shapes Left", "Align 1 Object and 2 Shapes Left". The
+    // page's own moved with the shapes, one step (own.move); else the shapes alone.
+    edit: (mutate, said) => {
+      gathered = [];
+      const probe = shapes.list().map((spec) => (spec ? structuredClone(spec) : spec));
+      try { mutate(probe); } finally { /* (gathered as it went) */ }
+      const mine = gathered.filter(({ key }) => movable(key));
+      gathered = null;
+      const drawn = probe.flatMap((spec, index) => (JSON.stringify(spec) !== JSON.stringify(shapes.list()[index]) ? [index] : []));
+      if (!mine.length) return shapes.change(mutate, renamed(said, [], drawn));
+      const before = snapshot();
+      joining += 1;
+      let made = false;
+      try {
+        made = own.move(mine.map(({ key, dx, dy }) => ({ pick: ownOf(key), dx, dy })), renamed(said, mine.map(({ key }) => key), drawn), drawn.length ? (list) => { mutate(list); } : null);
+      } finally { joining -= 1; }
+      if (made) mark(studio.past[studio.past.length - 1], before, snapshot());
+      settle();
+      return made;
+    },
     renderInspector: () => ctx.render(), showPanel: () => ctx.showPanel?.(),
-    // (Arrange in a Grid…'s sheet: the shapes drawn where they would go.)
-    show: (moves) => shapes.showMoves?.(moves),
+    // (Arrange in a Grid…'s sheet: what would move drawn where it would go.)
+    show: (moves) => {
+      shapes.showMoves?.(moves ? moves.filter((move) => !isOwn(move.id)) : null);
+      own.show?.(moves ? moves.filter((move) => isOwn(move.id) && movable(move.id)).map(({ id, dx, dy }) => ({ pick: ownOf(id), dx, dy })) : null);
+    },
     // (The page's Arrange tab, where it has one: the shapes' editor's.)
     tab: () => Boolean(shapes.arrangeTab?.()), showTab: () => shapes.showArrange?.(),
   });
@@ -288,8 +322,9 @@ export function mixedChoice(ctx) {
     if (mod && !event.altKey && !event.shiftKey && k.toLowerCase() === "a") { chooseAll(); return true; }
     if (mod && event.shiftKey && !event.altKey && k.toLowerCase() === "a") { arranging.reveal(); return true; }
     if (!mod && k === "Escape") { clear(); return true; }
-    // (The arrows nudge the shapes: the page's own are laid out, never nudged.)
-    if (!mod && k.startsWith("Arrow")) return shapes.key(event);
+    // (The arrows nudge the shapes -- and the page's own with them where it moves them: a
+    // slide's objects placed where they are put. Laid out, they stay.)
+    if (!mod && k.startsWith("Arrow")) return Boolean(own.nudge?.(event)) || shapes.key(event);
     // (Return and the letters type in one shape chosen alone, never in several things.)
     if (!mod && !event.altKey && (k === "Enter" || [...k].length === 1)) return true;
     return false;
@@ -309,8 +344,7 @@ export function mixedChoice(ctx) {
           ui.button("Copy", () => ctx.clipChosen?.(false), { small: true, icon: "copy", title: "Copy (⌘C)" })),
         h("div.row", {},
           ui.button("Duplicate", () => duplicate(), { small: true, icon: "duplicate", title: "Duplicate (⌘D)" }),
-          ui.button("Delete", () => remove(), { small: true, icon: "trash", kind: "danger", title: "Delete (⌫)" })),
-        h("div.hint-line", {}, `The arrows move the ${wordsNow()[1].toLowerCase()}s; the ${wordsNow()[0].toLowerCase()}s stay where they are laid out.`)),
+          ui.button("Delete", () => remove(), { small: true, icon: "trash", kind: "danger", title: "Delete (⌫)" }))),
       // (In the page's Arrange tab, where it has one: a line here going there.)
       shapes.arrangeTab?.() ? arranging.link() : arranging.section(),
     ].filter(Boolean);

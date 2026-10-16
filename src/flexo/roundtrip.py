@@ -544,7 +544,8 @@ def _merge_map(old: CommentedMap, new: dict) -> CommentedMap:
             # A key the file did not have goes after the one the document has before it (a
             # list of it put together as one would be: an object moved there is itself).
             keys = list(old)
-            listed = isinstance(value, (list, tuple))
+            # (A few numbers -- a point, a size -- on one line, as a person writes them.)
+            listed = isinstance(value, (list, tuple)) and not _numbers(value)
             made = _merge_seq(CommentedSeq(), list(value)) if listed else _fresh(value)
             old.insert(keys.index(before) + 1 if before in keys else 0, key, made)
         before = key

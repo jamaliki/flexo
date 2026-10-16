@@ -21,7 +21,8 @@
 // `ctx` is the editor's: picks() (those chosen, in the order they were chosen), box(index)
 // ([left, top, right, bottom] as drawn), locked(index), fixed(index) (what the page lays out,
 // chosen with the shapes: never moved, but spread among -- aligning.js), name(index)
-// ("Rectangle"), frame() (the page: [x, y, width, height]), noun ("slide", "figure"),
+// ("Rectangle"), frame() (the page: [x, y, width, height]), noun ("slide", "figure"), word
+// (what each is called: "Shape", the default; a slide's objects, "Object"),
 // move(list, index, dx, dy) (one moved in a change of the list), edit(mutate, label),
 // show(moves) (those moves drawn where they would go, as a drag draws them, not made; null:
 // as they are), few (what Distribute says it needs), renderInspector(), and showPanel() (the
@@ -64,7 +65,6 @@ export function settingCommands(pageName = "Page") {
   ];
 }
 
-const plural = (count) => (count === 1 ? "Shape" : `${count} Shapes`);
 const capital = (word) => word.charAt(0).toUpperCase() + word.slice(1);
 const pt = (value) => `${Math.round(value * 100) / 100} pt`;
 
@@ -74,11 +74,15 @@ if (typeof document !== "undefined") document.addEventListener?.("pointerdown", 
 
 export function alignTools(ctx) {
   const noun = ctx.noun || "page";
+  // What one is called, and several: "Shape", "3 Shapes" (a slide's objects, "3 Objects").
+  const word = ctx.word || "Shape", lower = word.toLowerCase();
+  const plural = (count) => (count === 1 ? word : `${count} ${word}s`);
+  const two = word === "Shape" ? TWO : `Choose two or more ${lower}s`;
   const pageName = capital(noun);
   // What each choice of Relative to is called here: the page as the slide or the figure.
   const toName = (value) => (value === "page" ? pageName : A.RELATIVE_NAMES[value]);
   const items = () => ctx.picks().map((index) => ({ id: index, box: ctx.box(index), locked: Boolean(ctx.locked(index)), fixed: Boolean(ctx.fixed?.(index)) })).filter((item) => item.box);
-  const few = () => (typeof ctx.few === "function" ? ctx.few() : ctx.few) || FEW;
+  const few = () => (typeof ctx.few === "function" ? ctx.few() : ctx.few) || (word === "Shape" ? FEW : `Choose three or more ${lower}s`);
   // Whether Distribute may spread them: three or more, not locked (those fixed among them), one free to move.
   const spreads = () => A.distributable(items());
   const page = () => { const [x, y, width, height] = ctx.frame(); return [x, y, x + width, y + height]; };
@@ -88,7 +92,7 @@ export function alignTools(ctx) {
   function apply(moves, words) {
     const moving = moves.filter((move) => Math.abs(move.dx) > 0.004 || Math.abs(move.dy) > 0.004);
     if (!moving.length) {
-      toast(moves.length ? "Already in place" : "Locked shapes stay where they are", { icon: "align-left", seconds: 2 });
+      toast(moves.length ? "Already in place" : `Locked ${lower}s stay where they are`, { icon: "align-left", seconds: 2 });
       return false;
     }
     return ctx.edit((list) => { for (const { id, dx, dy } of moving) ctx.move(list, id, dx, dy); }, words);
@@ -237,8 +241,6 @@ export function alignTools(ctx) {
     bits.push(ui.field("Relative to", ui.select({ value: relative, key: "shape.align-to", options: A.RELATIVE.map((value) => ({ value, label: toName(value) })),
         onChange: (value) => A.setAlignTo(value) })),
       ui.toggle({ value: A.asGroup(), label: GROUPED, key: "shape.align-group", onChange: (on) => A.setAsGroup(on) }));
-    if (!count) bits.push(h("div.hint-line.align-hint", {}, TWO));
-    else if (!many) bits.push(h("div.hint-line.align-hint", {}, `One shape aligns to the ${noun}${tab ? "; choose two or more to put them beside or space them" : ""}`));
     const onto = many ? (relative === "selection" ? "" : ` to the ${toName(relative)}`) : ` to the ${pageName}`;
     // (A row greyed says why, in its buttons' tooltips.)
     const row = (on, why, entries) => h("div.row.arrange-row.align-row", { title: on ? "" : why }, entries.map(([glyph, title, run]) => {
@@ -247,20 +249,20 @@ export function alignTools(ctx) {
       return node;
     }));
     if (all) bits.push(h("div.align-label", {}, "Align"));
-    bits.push(row(count > 0, "Choose a shape", SIDES.map(([side, words, glyph]) => [glyph, `${words}${onto}`, () => align(side)])));
+    bits.push(row(count > 0, `Choose a ${lower}`, SIDES.map(([side, words, glyph]) => [glyph, `${words}${onto}`, () => align(side)])));
     if (all) {
       const beside = relative === "selection" ? "the selection" : relative === "page" ? `the ${noun}` : `the ${toName(relative).toLowerCase()}`;
       bits.push(h("div.align-label", {}, "Beside"),
-        row(many, TWO, BESIDE.map(([side, words, glyph, , how]) => [glyph, `${words} ${beside}: ${how}`, () => align(side)])));
-      // (Greyed with fewer than three to spread, saying why.)
+        row(many, two, BESIDE.map(([side, words, glyph, , how]) => [glyph, `${words} ${beside}: ${how}`, () => align(side)])));
+      // (Greyed with fewer than three to spread: why, in each button's tooltip.)
       const spread = spreads(), why = few();
       const ways = (list) => list.map(([how, words, glyph, , said]) => [glyph, `${words}: ${said.toLowerCase()}`, () => distribute(how)]);
-      bits.push(h("div.align-label", {}, "Distribute", spread || !count ? null : h("span.align-why", {}, why)), row(spread, why, ways(SPREADS.slice(0, 4))), row(spread, why, ways(SPREADS.slice(4))));
+      bits.push(h("div.align-label", {}, "Distribute"), row(spread, why, ways(SPREADS.slice(0, 4))), row(spread, why, ways(SPREADS.slice(4))));
       const gap = ui.number({ value: A.gapSet(), step: 1, min: -1000, max: 10000, unit: "pt", key: "shape.align-gap", onChange: (value) => A.setGap(value ?? A.GAP) });
-      const spaces = row(free > 1, TWO, [["space-across", "Space Across by the Gap: left to right, the leftmost staying", () => space("across")],
+      const spaces = row(free > 1, two, [["space-across", "Space Across by the Gap: left to right, the leftmost staying", () => space("across")],
         ["space-down", "Space Down by the Gap: top to bottom, the topmost staying", () => space("down")]]);
       bits.push(h("div.row.align-gap", {}, ui.field("Gap", gap), ...spaces.children));
-      const grid = ui.button("Arrange in a Grid…", () => gridSheet(), { small: true, icon: "grid", title: free > 1 ? "In rows and columns, a gap between" : TWO });
+      const grid = ui.button("Arrange in a Grid…", () => gridSheet(), { small: true, icon: "grid", title: free > 1 ? "In rows and columns, a gap between" : two });
       grid.disabled = free < 2;
       bits.push(h("div.row", {}, grid));
     }
@@ -283,7 +285,7 @@ export function alignTools(ctx) {
   function gridSheet() {
     const chosen = items(), free = chosen.filter((item) => !item.locked), count = free.length;
     const stay = chosen.filter((item) => item.locked && !item.fixed).length;
-    if (count < 2) { toast("Choose two or more shapes (not locked) to arrange in a grid", { icon: "grid", seconds: 3 }); return false; }
+    if (count < 2) { toast(`Choose two or more ${lower}s (not locked) to arrange in a grid`, { icon: "grid", seconds: 3 }); return false; }
     let columns = kept.columns && kept.columns <= count ? kept.columns : Math.ceil(Math.sqrt(count));
     let rows = A.rowsFor(count, columns);
     let across = kept.across ?? A.gapSet(), down = kept.down ?? A.gapSet();
@@ -316,8 +318,8 @@ export function alignTools(ctx) {
           options: [{ value: "left", icon: "align-left", title: "Left" }, { value: "centre", icon: "align-centre", title: "Centre" }, { value: "right", icon: "align-right", title: "Right" }] }),
         ui.segmented({ value: cell.valign, key: "grid.valign", onChange: (value) => { cell.valign = value; preview(); },
           options: [{ value: "top", icon: "align-top", title: "Top" }, { value: "middle", icon: "align-middle", title: "Middle" }, { value: "bottom", icon: "align-bottom", title: "Bottom" }] }))),
-      h("div.hint-line", {}, `${plural(count, "shape")}, in the order they read: left to right, then top to bottom. Each column is as wide as its widest; each row as tall as its tallest.`),
-      stay ? h("div.hint-line.grid-locked", {}, `${plural(stay, "locked shape")} stay${stay === 1 ? "s" : ""} put`) : null);
+      h("div.hint-line", {}, `${plural(count, lower)}, in the order they read: left to right, then top to bottom. Each column is as wide as its widest; each row as tall as its tallest.`),
+      stay ? h("div.hint-line.grid-locked", {}, `${plural(stay, `locked ${lower}`)} stay${stay === 1 ? "s" : ""} put`) : null);
     const arrange = () => {
       Object.assign(kept, { columns, across, down, ...cell });
       // (Drawn there already: the page's drawing takes its place as it comes -- or, nothing

@@ -412,6 +412,42 @@ def test_objects_chosen_with_shapes_are_spread_among_as_fixed_members() -> None:
     assert made["none"] == []
 
 
+def test_objects_placed_with_shapes_are_aligned_and_spread_as_shapes_are() -> None:
+    """A slide's objects the page moves with the shapes (placed where they are put, or taken
+    out of line as they move: mixed.js's own.movable) are no fixed members: aligned, spread and
+    gridded as shapes are -- one locked still staying, what the rest line up with."""
+
+    made = run("""
+      const text = { id: "own:t", box: box(48, 127, 414, 24) };
+      const picture = { id: "own:p", box: box(498, 127, 358, 268) };
+      const shape = { id: 0, box: box(80, 400, 120, 80) };
+      const page = [0, 0, 960, 540];
+      const three = [text, picture, shape];
+      const locked = { ...picture, locked: true }, held = [text, locked, shape];
+      const between = [text, { ...picture, box: box(300, 200, 100, 50) }, shape];
+      return {
+        left: moved(A.alignMoves(three, "left", { page }).moves),
+        bottom: moved(A.alignMoves(three, "bottom", { page }).moves),
+        right: moved(A.alignMoves(three, "right", { relative: "page", page }).moves),
+        held: moved(A.alignMoves(held, "top", { page }).moves),
+        heldAnchor: A.alignMoves(held, "top", { relative: "biggest", page }).anchor.id,
+        spread: moved(A.distributeMoves(between, "down")),
+        can: A.distributable(three),
+      };
+    """)
+    # Their bounds' left edge, the text's: the picture and the shape move to it.
+    assert made["left"] == {"own:t": [0, 0], "own:p": [-450, 0], "0": [-32, 0]}
+    # The shape's bottom, the lowest: the objects move down to it.
+    assert made["bottom"] == {"own:t": [0, 329], "own:p": [0, 85], "0": [0, 0]}
+    assert made["right"] == {"own:t": [498, 0], "own:p": [104, 0], "0": [760, 0]}
+    # A locked picture stays, and is what the others line up with where it is the biggest.
+    assert made["held"].get("own:p", [0, 0]) == [0, 0] and made["heldAnchor"] == "own:p"
+    # Spread down, the text and the shape outermost staying, the picture between them.
+    assert made["spread"]["own:t"] == [0, 0] and made["spread"]["0"] == [0, 0]
+    assert made["spread"]["own:p"][1] == pytest.approx(((400 - 151) - 50) / 2 + 151 - 200, abs=1e-3)
+    assert made["can"] is True
+
+
 def test_set_by_the_app_all_at_once_kept_and_told_once() -> None:
     made = run("""
       const told = [];
