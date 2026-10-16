@@ -14,12 +14,13 @@
 //   leave(match)       the bar closed (Esc): what is chosen left on the last match
 //
 // As words are typed every match is found, the first from where the document is shown gone
-// to; Return and ⇧Return (⌘G and ⇧⌘G) go to the next and the one before. Match Case and
+// to; Return and ⇧Return in its field go to the next and the one before -- and n and ⇧N
+// (vim's) wherever no words are typed, while it is open. Match Case and
 // Whole Words narrow what is found. Replace puts the words typed in place of the match gone
 // to and goes on to the next; Replace All, of every match. Esc closes it.
 
 import { h, icon, ui, toast } from "./ui.js";
-import { wordIndex, search, around, ordinals, patternOf, findIn } from "./finding.js";
+import { wordIndex, search, around, ordinals, patternOf, findIn, findStep } from "./finding.js";
 
 const MAC = typeof navigator !== "undefined" && /Mac|iP/.test(navigator.platform || "");
 // What a match is known by again once the document has changed: its field, where it is.
@@ -59,7 +60,7 @@ export function finder(studio, host) {
     button.addEventListener("mousedown", (event) => event.preventDefault());
     return button;
   };
-  const previousButton = step("up", "Previous (⇧⌘G)", -1), nextButton = step("down", "Next (⌘G)", 1);
+  const previousButton = step("up", "Previous (⇧↩, or ⇧N)", -1), nextButton = step("down", "Next (↩, or N)", 1);
   const more = h("button.btn.ghost.small.icon.find-more", { type: "button", title: "Replace (⌥⌘F)", "aria-expanded": "false",
     onmousedown: (event) => event.preventDefault(), onclick: () => showReplace(!state.replacing, { focus: !state.replacing }) }, icon("chevron"));
   const replaceButton = ui.button("Replace", () => replaceOne(), { small: true });
@@ -254,18 +255,21 @@ export function finder(studio, host) {
   return api;
 }
 
-// The keys, wherever the keys are in the document: ⌘F (Find…), ⌥⌘F (Find and Replace…), ⌘G
-// and ⇧⌘G while the bar is open (Find Next, Find Previous: else they are Group and Ungroup,
-// the shapes chosen), ⌘E (Use Selection for Find: but while words are typed on a slide, where
-// it is Code). In the Mac app the menus' items do the same.
+// The keys, wherever the keys are in the document: ⌘F (Find…), ⌥⌘F (Find and Replace…), n
+// and ⇧N while the bar is open and no words are typed (Find Next, Find Previous: finding.js's
+// findStep), ⌘E (Use Selection for Find: but while words are typed on a slide, where it is
+// Code). In the Mac app the menus' items do the same. (Taken on the window as the key comes,
+// before the document's own keys: n never starts typing over a shape chosen while finding.)
 export function findKeys(workspace) {
   window.addEventListener("keydown", (event) => {
-    if (!(MAC ? event.metaKey : event.ctrlKey) || (MAC && event.ctrlKey)) return;
     const found = workspace.active?.finder;
     if (!found || document.querySelector(".scrim, .present")) return;
-    const take = () => { event.preventDefault(); event.stopPropagation(); };
+    const take = () => { event.preventDefault(); event.stopImmediatePropagation(); };
+    // (A menu open -- a right-click's, a pop-up's -- has the keys.)
+    const step = document.querySelector(".menu") ? 0 : findStep(event, { open: found.isOpen, at: document.activeElement });
+    if (step) { take(); if (step > 0) found.next(); else found.previous(); return; }
+    if (!(MAC ? event.metaKey : event.ctrlKey) || (MAC && event.ctrlKey)) return;
     if (event.code === "KeyF" && !event.shiftKey) { take(); found.open({ replace: event.altKey }); return; }
-    if (event.code === "KeyG" && !event.altKey && found.isOpen) { take(); if (event.shiftKey) found.previous(); else found.next(); return; }
     if (event.code === "KeyE" && !event.altKey && !event.shiftKey) {
       const at = document.activeElement;
       // (Words typed in on a slide: ⌘E makes them code.)
