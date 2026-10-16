@@ -297,6 +297,52 @@ carries it as vectors, and each shape records the role it was painted in, so `fl
 retheme` recolours it with the rest of the figure. In a sketched theme it keeps its
 own clean line.
 
+#### A diffusion run, frame by frame
+
+![A diffusion run of one structure, five copies at five noise levels (examples/biology.py)](examples/build/diffusion.preview.png)
+
+```yaml
+nodes:
+  - {id: t100, kind: structure, label: "t = 100", properties: {source: 5KKA.pdb, look: flat, noise: 1}}
+  - {id: t30, kind: structure, label: "t = 30", properties: {source: 5KKA.pdb, look: flat, noise: 0.3}}
+  - {id: t20, kind: structure, label: "t = 20", properties: {source: 5KKA.pdb, look: flat, noise: 0.16}}
+  - {id: t10, kind: structure, label: "t = 10", properties: {source: 5KKA.pdb, look: flat, noise: 0.06}}
+  - {id: t0, kind: structure, label: "t = 0", properties: {source: 5KKA.pdb, look: flat}}
+groups:
+  - {id: run, role: layout, layout: {kind: row, gap: 16}, children: [t100, t30, t20, t10, t0]}
+edges:
+  - {from: t100, to: t30}
+  - {from: t30, to: t20}
+  - {from: t20, to: t10}
+  - {from: t10, to: t0}
+```
+
+A structure's `noise` draws it as a diffusion model does on its way, from 0 (the
+file itself) to 1 (a random coil): it is the share of the run still to go, t over its
+steps, so `noise: 0.3` is t = 30 of a hundred steps, or t = 15 of fifty. Copies of one
+structure alike but for their noise are moments of one trajectory, so a series is five
+copies of one part, with no frames made elsewhere. `fixed:` holds a mol-sketch selection
+where the file has it -- a residue whole when any of its atoms is selected -- for a
+motif-scaffolding run (`fixed: resi 34+94+119+177 or resn 6V0`), or a target a binder is
+made for (`fixed: chain B`); `seed:` picks another run (0 unless given). In the studio,
+a structure's Molecule tab has them under Noise.
+
+The prior is a random coil with a protein's own local geometry (its C-alphas 3.8 Å apart,
+each angle between 85° and 135°), wandering in a ball about the size of the chain folded,
+and through a motif's C-alphas. Stretches of the chain then fold to the file's shape, the
+short ones first, so helices form, right-handed, before their packing: at noise 0.3 the
+chain is 70% as far from the file as its prior (RMS) and its helices forming, at 0.16 a
+quarter (its shape is there), at 0.06 a twelfth (nearly the file). Throughout, each bond
+keeps the file's length and each angle stays within a protein's, so the trace is never
+broken where the file's is not, and a helix is never squashed into a rod; the file's
+helices and strands are drawn where they have formed. Every residue moves rigidly with
+its C-alpha, turned as the chain is turned there, so side chains and sticks stay
+chemically sane; a ligand, ion or water not held moves with the residue nearest it. Each
+chain folds on its own, round where it ends up, and is seen as the file is: `yaw` and
+`pitch` turn every copy alike. A trajectory is worked out once for each file, chain,
+seed and what is held -- in about a second for 300 residues -- and kept in memory and in
+flexo's cache folder; any noise after that is drawn at once.
+
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
 ```python

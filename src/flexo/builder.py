@@ -1497,6 +1497,9 @@ class GroupBuilder:
         density: str | Path | None = None,
         scheme: str | None = None,
         step: int | None = None,
+        noise: float | None = None,
+        fixed: str | None = None,
+        seed: int | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1517,8 +1520,11 @@ class GroupBuilder:
         of mol-sketch's style over the look (``{"fill": "ink colour", "line":
         {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
         EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
-        points (20 by 15 label sizes by default), its name above it. Needs mol-sketch
-        installed.
+        points (20 by 15 label sizes by default), its name above it. ``noise`` draws it
+        as a diffusion model does on its way, from 0 (the file) to 1 (a random coil);
+        ``fixed`` is a selection held where the file has it meanwhile (a motif), and
+        ``seed`` picks the run -- copies alike but for ``noise`` are moments of one
+        trajectory (see ``flexo.structure_noise``). Needs mol-sketch installed.
         """
 
         properties: dict[str, object] = {"source": str(source)}
@@ -1536,7 +1542,8 @@ class GroupBuilder:
             ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
             ("palette", palette), ("density", None if density is None else str(density)),
-            ("scheme", scheme), ("step", step),
+            ("scheme", scheme), ("step", step), ("noise", noise), ("fixed", fixed),
+            ("seed", seed),
         ):
             if value is not None:
                 properties[name] = value
