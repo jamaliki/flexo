@@ -1143,7 +1143,7 @@ export async function start() {
     // The folder's documents by name, as the Finder lists them, each with when it was changed.
     const listed = [...workspace.documents].sort((a, b) => docName(a.file).localeCompare(docName(b.file), undefined, { numeric: true, sensitivity: "base" }) || a.file.localeCompare(b.file));
     clear(welcome, h("div.welcome-inner", {},
-      h("h1", {}, "New Document"),
+      wedgeHead("New Document"),
       h("div.start-cards", { style: { gridTemplateColumns: `repeat(${Math.max(2, offered.length)}, minmax(0, 1fr))` } }, offered.map(card)),
       // Where what is made goes: a file in the folder (its whole path in the tooltip).
       h("p.start-where", { title: info.folder }, `Each is a file in “${folderName}”, saved as you work.`),
@@ -1357,6 +1357,18 @@ function markIcon() {
   node.setAttribute("aria-hidden", "true");
   node.innerHTML = MARK;
   return node;
+}
+// The red wedge in the page's own ink -- its words' colour, light or dark -- over a title set as
+// the welcome window's poster is (a heavy condensed Futura, in capitals, a red rule under it):
+// for the studio's quiet places that greet, a folder's start and a deck with no slides yet.
+const WEDGE_PARTS = '<circle class="wedge-red" cx="152" cy="58" r="26"/><polygon class="wedge-ink" points="58,172 84,34 132,34 128,58 108,58 87,172"/><polygon class="wedge-red" points="30,89 30,115 166,104"/><rect class="wedge-ink" x="166" y="94" width="18" height="18"/>';
+export function wedgeHead(title, { tag = "h1" } = {}) {
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  mark.setAttribute("viewBox", "0 0 200 200");
+  mark.setAttribute("aria-hidden", "true");
+  mark.classList.add("wedge-mark");
+  mark.innerHTML = WEDGE_PARTS;
+  return h("div.wedge-head", {}, mark, h("div.wedge-words", {}, h(`${tag}.wedge-title`, {}, title), h("span.wedge-rule")));
 }
 // The browser's tab shows it too: the mark on its cream tile.
 function markTab() {

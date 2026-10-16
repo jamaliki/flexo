@@ -482,6 +482,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand { cursor: default; }
 .brand-mark { width: 20px; height: 20px; border-radius: 5px; background: #efe6d2; box-shadow: inset 0 0 0 0.5px #cdbf9f; display: grid; place-items: center; }
 .brand-mark svg { width: 16px; height: 16px; }
+/* The red wedge over a poster's title, where the studio greets (shell.js wedgeHead): its ink
+   the words' own colour, its red the icon's. */
+:root { --display: "Futura", "Avenir Next Condensed", "Arial Narrow", sans-serif; --wedge-red: #c8102e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wedge-red: #d7263d; } }
+:root[data-theme="dark"] { --wedge-red: #d7263d; }
+.wedge-head { display: flex; align-items: flex-end; gap: 14px; }
+.wedge-mark { width: 58px; height: 58px; flex: none; }
+.wedge-mark .wedge-ink { fill: var(--ink); } .wedge-mark .wedge-red { fill: var(--wedge-red); }
+.wedge-words { display: grid; justify-items: start; padding-bottom: 4px; }
+.wedge-head .wedge-title { font-family: var(--display); font-weight: 800; font-stretch: condensed; text-transform: uppercase;
+  font-size: 30px; line-height: 0.9; letter-spacing: 0.01em; margin: 0; color: var(--ink); }
+.wedge-rule { width: 30px; height: 4px; background: var(--wedge-red); margin-top: 8px; }
 .file { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip {
