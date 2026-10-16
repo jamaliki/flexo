@@ -37,15 +37,38 @@ export const clipsOf = (clip) => (clip?.what === "mixed" ? (Array.isArray(clip.c
 // The steps the studio's history (`studio.past`) took from `from` on, made one, named `label`:
 // undone, all of it is undone. Each kept as its own part where another's change came between
 // two (session.js's parts: undone, those alone are taken back). A step made elsewhere (a
-// figure's own file, `apply`) is none to join: they are left as they are. The step, else null.
+// figure's own file, `apply`) among them: one step made elsewhere too, which puts each back
+// where it was made -- the files first, then the document (session.js's travelPart) -- so a
+// figure's parts kept in a file of their own, deleted with the slide's shapes, come back
+// with them by one ⌘Z. (A studio that cannot: they are left as they are.) The step, else null.
 export function joinSteps(studio, from, label = null) {
   const past = studio?.past;
   if (!Array.isArray(past) || from < 0 || from >= past.length) return null;
   const steps = past.slice(from);
-  if (steps.some((step) => step.apply)) return null;
   if (steps.length === 1) {
     if (label) Object.assign(steps[0], { label, said: null });
     return steps[0];
+  }
+  if (steps.some((step) => step.apply)) {
+    if (typeof studio.travelPart !== "function") return null;
+    const files = steps.filter((step) => step.apply), own = steps.filter((step) => !step.apply);
+    const told = (step) => { try { return studio.said?.(step) || {}; } catch { return {}; } };
+    const placed = steps.map(told).find((said) => said.place !== undefined || said.where !== undefined) || {};
+    const last = steps[steps.length - 1];
+    const joined = {
+      label: label || last.label || null, at: last.at, place: placed.place, where: placed.where,
+      before: steps[0].before, after: last.after, steps,
+      // (Undone, the last made first: each file put back, then the document's changes taken
+      // back; made again, in the order they were made.)
+      apply(target) {
+        const order = (list) => (target === "before" ? [...list].reverse() : list);
+        return order(files).reduce((done, step) => done.then(() => step.apply(target)), Promise.resolve())
+          .then(() => { for (const step of order(own)) studio.travelPart(step, target); });
+      },
+    };
+    past.splice(from, steps.length, joined);
+    studio.step?.();
+    return joined;
   }
   const parts = steps.flatMap((step) => step.parts || [{ before: step.before, after: step.after }]);
   const apart = parts.some((part, n) => n > 0 && part.before !== parts[n - 1].after);

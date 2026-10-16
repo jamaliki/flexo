@@ -147,6 +147,52 @@ def test_steps_made_elsewhere_or_none_are_not_joined() -> None:
     }
 
 
+def test_steps_made_elsewhere_and_here_are_one_put_back_where_each_was_made() -> None:
+    result = run("""
+      const A = { n: 1 }, B = { n: 2 }, C = { n: 3 };
+      const done = [];
+      const file = (name) => ({
+        before: B, after: B, label: name,
+        apply: (target) => { done.push(`${name} ${target}`); return Promise.resolve(); },
+      });
+      const studio = {
+        past: [
+          { before: A, after: B, label: "Delete Rectangle" }, file("Delete “a”"),
+          { before: B, after: C, label: "Move Shape" }, file("Delete “b”"),
+        ],
+        travelPart: (step, target) => done.push(`${step.label} ${target}`),
+        said: (step) => (step.label === "Delete Rectangle"
+          ? { text: step.label, place: "Slide 3", where: 2 } : { text: step.label }),
+      };
+      const joined = M.joinSteps(studio, 0, "Delete Both");
+      await joined.apply("before");
+      const undone = [...done];
+      done.length = 0;
+      await joined.apply("after");
+      return { count: studio.past.length, label: joined.label,
+        place: [joined.place, joined.where], undone, redone: done };
+    """)
+    # Undone: each file put back, the last first, then the deck's changes taken back, the last
+    # first; made again, in the order they were made.
+    assert result == {
+        "count": 1,
+        "label": "Delete Both",
+        "place": ["Slide 3", 2],
+        "undone": [
+            "Delete “b” before",
+            "Delete “a” before",
+            "Move Shape before",
+            "Delete Rectangle before",
+        ],
+        "redone": [
+            "Delete “a” after",
+            "Delete “b” after",
+            "Delete Rectangle after",
+            "Move Shape after",
+        ],
+    }
+
+
 def test_shift_click_puts_one_in_or_takes_it_out() -> None:
     result = run("""
       const same = (a, b) => a.region === b.region && a.index === b.index;
