@@ -7,6 +7,8 @@
 .shape-mark.along { stroke: var(--accent); stroke-opacity: 0.3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none; }
 .shape-mark.along.hover { stroke-opacity: 0.15; }
 .shape-mark.group-frame { stroke-dasharray: 4 3; }
+/* A box of words with no fill nor outline, chosen: where its words are, faint in its frame. */
+.shape-mark.letters:not(.hover) { stroke-opacity: 0.4; stroke-dasharray: 2 2; }
 .shape-handle { fill: #ffffff; stroke: var(--accent); pointer-events: all; touch-action: none; }
 .shape-handle:hover { fill: var(--accent); }
 .shape-handle.adjust { fill: #ffc21a; stroke: #8a5d00; }
@@ -39,7 +41,17 @@
 .align-section .align-gap .field { flex: 1; min-width: 0; margin-right: 6px; }
 .align-section.shown { animation: align-shown 0.9s ease-out; border-radius: 8px; }
 @keyframes align-shown { from { box-shadow: 0 0 0 3px var(--accent-soft, rgba(10, 132, 255, 0.25)); } to { box-shadow: 0 0 0 3px transparent; } }
+.align-section .align-why { margin-left: 6px; font-weight: 400; color: var(--ink-3); }
+/* Format's one line going to the Arrange tab, where Arrange and Align and Distribute are. */
+.align-link-section { padding-top: 6px; padding-bottom: 6px; }
+.btn.align-link { width: 100%; justify-content: flex-start; gap: 8px; color: var(--ink-2); }
+.btn.align-link .btn-label { flex: 1; text-align: left; }
 .grid-sheet { display: grid; gap: 12px; min-width: 300px; }
+/* Its sheet aside, at the top right, the page under it undimmed: the shapes are drawn where they
+   would go while it is open. */
+.scrim.grid-scrim { background: rgba(20, 18, 15, 0.06); place-items: start end; padding: 64px 24px 24px; }
+.scrim.grid-scrim .dialog { width: min(380px, calc(100vw - 32px)); }
+.grid-sheet .grid-locked { color: var(--ink-2); }
 .grid-sheet .row { gap: 12px; }
 .grid-sheet .row .field { flex: 1; }
 .grid-cell { display: grid; gap: 6px; }

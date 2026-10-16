@@ -8,9 +8,14 @@ import { bundles, bundleName } from "./bundles.js";
 import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
 import { alignTo, asGroup, onAligning } from "./aligning.js";
+import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
+// Align and Distribute's Relative To and Move as a Group, the person's: offered whatever is
+// chosen, for a document that has shapes -- its page named as it names it (aligntools.js).
+const PAGE_NAMES = { deck: "Slide", figure: "Figure" };
+const alignSettings = (session) => (session && PAGE_NAMES[session.kind] ? settingCommands(PAGE_NAMES[session.kind]) : []);
 // A new document's name, as a Mac app's: Untitled (Untitled 2, if that is taken).
 const UNTITLED = { deck: "Untitled.yaml", figure: "Untitled Figure.yaml", theme: "Untitled Theme.yaml" };
 // Each far from the others in hue, the first few most of all (they are given in the order
@@ -80,7 +85,13 @@ function remember(key, value) { try { localStorage.setItem(`flexo-studio-${key}`
 // A document's name as a Mac app shows it: "Lab meeting", not "Lab meeting.yaml".
 // (A theme file's ".theme" too: "Order queue.theme.yaml" is "Order queue".)
 // (A bundle's document is named as the bundle is: bundles.js.)
-const docName = (file) => bundleName(file) ?? String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+const plainName = (file) => bundleName(file) ?? String(file).split("/").pop().replace(/(\.theme)?\.(ya?ml|json)$/i, "");
+// A figure a deck holds, in a tab of its own (talk.yaml#pipeline: flexo.studio.embedded), is
+// named for the figure and its deck: "pipeline — talk".
+const docName = (file) => {
+  const [held, key] = String(file).split(/#(.*)/s);
+  return key && /\.(ya?ml|json)$/i.test(held) ? `${key} — ${plainName(held)}` : plainName(file);
+};
 
 // A file renamed: what is said of it, with the file it is now to open.
 function movedNote(workspace, text, moved) {
@@ -704,6 +715,8 @@ export async function start() {
     // Snapping turned in another window of the app: this one's turned too, quietly, whatever
     // it shows (magnet.js).
     if (name === "snapping" && (arg === "on" || arg === "off")) { setSnapping(arg === "on", "app"); return; }
+    // So too Relative To, Move as a Group and the gap (aligntools.js's aligningInApp).
+    if (name === "aligning") { try { aligningFromApp(JSON.parse(arg || "{}")); } catch { /* not one */ } return; }
     const session = workspace.active;
     const field = typingIn(document.activeElement) ? document.activeElement : null;
     // A sheet open (a name asked for, the shortcuts): the menus wait, as a Mac's do while a
@@ -728,20 +741,28 @@ export async function start() {
         session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
           (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
-      case "export": if (session?.exports.some((item) => item.format === arg)) session.exportFiles([arg]); break;
+      case "export": {
+        // (An export of the kind's own -- a figure on a slide as a file -- runs as it says.)
+        const entry = session?.exports.find((item) => item.format === arg);
+        if (entry?.run) entry.run();
+        else if (entry) session.exportFiles([arg]);
+        break;
+      }
       case "present": session?.present?.(); break;
       // One of the document's own commands, by the label reported below (the app's Insert
       // and Slide menus): "Add Picture" runs "Add Picture…".
       case "run": {
         const bare = (label) => String(label ?? "").trim().replace(/…$/, "");
-        session?.commands().find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
+        // (Relative To and Move as a Group too, whatever is chosen: the studio's own.)
+        [...(session?.commands() || []), ...alignSettings(session || { kind: "deck" })].find((command) => !command.disabled && [command.label, ...(command.also || [])].some((label) => bare(label) === bare(arg)))?.run();
         break;
       }
       case "palette": palette(workspace); break;
       case "find": palette(workspace, { find: true }); break;
       case "assistant": side.toggle("assistant"); break;
       case "activity": side.toggle("activity"); break;
-      case "new": askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
+      case "new": if (arg === "deck") newDeck(workspace); else askName(workspace, arg, UNTITLED[arg] || "Untitled.yaml"); break;
+      case "new-in-folder": askName(workspace, arg || "deck", UNTITLED[arg || "deck"] || "Untitled.yaml"); break;
       case "close-tab": if (session) workspace.close(session.file); break;
       case "rename": if (session) nameDocument(workspace, session.file); break;
       case "duplicate-document": if (session) nameDocument(workspace, session.file, { copy: true }); break;
@@ -769,6 +790,10 @@ export async function start() {
   // (`also`: Edit › Duplicate); one greyed is not offered.
   const doable = (session) => {
     try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
+  };
+  // What each command greyed says of why, by label.
+  const whyNot = (session) => {
+    try { return session ? Object.fromEntries(session.commands().filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint])) : {}; } catch { return {}; }
   };
   // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
   const doesKey = (session, keys) => {
@@ -799,6 +824,8 @@ export async function start() {
         snapping: snapping(),
         // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
         align_to: alignTo(), align_group: asGroup(),
+        // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
+        why: whyNot(session),
       });
     }, 80);
   };
@@ -808,6 +835,7 @@ export async function start() {
   onAligning(() => report());
   magnetKeys();
   snappingInApp();
+  aligningInApp();
   // A slide or part chosen changes what can be done; so does a field taking the keys
   // (⌘D is then the field's), and a sheet opening or closing.
   for (const event of ["status", "active", "opened", "closed", "documents", "focus", "side"]) workspace.on(event, report);
@@ -1107,17 +1135,15 @@ export async function start() {
   const renderWelcome = () => {
     const folderName = String(info.folder).split("/").filter(Boolean).pop() || "this folder";
     // Each kind offered, said as the New menu says it, side by side however many there are.
-    const offered = [["deck", "Deck", "Slides for a talk"], ["figure", "Figure", "A diagram laid out automatically"], ["theme", "Theme", "Fonts, colours and lines"]]
+    const offered = [["deck", "Deck"], ["figure", "Figure"], ["theme", "Theme"]]
       .filter(([kind]) => offers(workspace, kind));
-    const card = ([kind, title, hint]) => h("button.start-card", { type: "button", onclick: () => askName(workspace, kind, UNTITLED[kind]) },
-      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title), h("span.start-hint", {}, hint)));
+    const card = ([kind, title]) => h("button.start-card", { type: "button", onclick: () => (kind === "deck" ? newDeck(workspace) : askName(workspace, kind, UNTITLED[kind])) },
+      h("span.start-icon", {}, icon(KIND_ICONS[kind])), h("span.start-words", {}, h("span.start-title", {}, title)));
     // The folder's documents by name, as the Finder lists them, each with when it was changed.
     const listed = [...workspace.documents].sort((a, b) => docName(a.file).localeCompare(docName(b.file), undefined, { numeric: true, sensitivity: "base" }) || a.file.localeCompare(b.file));
     clear(welcome, h("div.welcome-inner", {},
-      h("h1", {}, "New Document"),
+      wedgeHead("New Document"),
       h("div.start-cards", { style: { gridTemplateColumns: `repeat(${Math.max(2, offered.length)}, minmax(0, 1fr))` } }, offered.map(card)),
-      // Where what is made goes: a file in the folder (its whole path in the tooltip).
-      h("p.start-where", { title: info.folder }, `Each is a file in “${folderName}”, saved as you work.`),
       listed.length ? h("div.welcome-section", {}, h("h2", { title: info.folder }, folderName),
         h("div.doc-list", {}, listed.map((item) => h("button.doc-row", { type: "button", title: item.file, onclick: () => workspace.open(item.file) },
           icon(KIND_ICONS[item.kind] || "file"), h("span.doc-name", {}, docName(item.file)),
@@ -1318,11 +1344,28 @@ function typeAgain(keys) {
 
 // A folder in the home folder as the Finder's Go menu says it: ~/Documents/talks.
 
+// The studio's mark, its app icon's: the red wedge (flexo-studio's make_icon.py) as it is
+// drawn small -- the f cut as one slanted shape, crossed by a red wedge that reaches its node,
+// under a red sun -- without the guide's hairline, which no pixel here could show.
+const MARK = '<circle cx="152" cy="58" r="26" fill="#c8102e"/><polygon points="58,172 84,34 132,34 128,58 108,58 87,172" fill="#1a1a1a"/><polygon points="30,89 30,115 166,104" fill="#c8102e"/><rect x="166" y="94" width="18" height="18" fill="#1a1a1a"/>';
 function markIcon() {
-  const node = icon("info");
-  node.firstChild.setAttribute("d", "M3 4.5h4v7H3zM9 4.5h4v3H9zM9 9.5h4v2H9zM7 8h2");
-  node.setAttribute("stroke-width", "1.6");
+  const node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  node.setAttribute("viewBox", "0 0 200 200");
+  node.setAttribute("aria-hidden", "true");
+  node.innerHTML = MARK;
   return node;
+}
+// The red wedge in the page's own ink -- its words' colour, light or dark -- over a title set as
+// the welcome window's poster is (a heavy condensed Futura, in capitals, a red rule under it):
+// for the studio's quiet places that greet, a folder's start and a deck with no slides yet.
+const WEDGE_PARTS = '<circle class="wedge-red" cx="152" cy="58" r="26"/><polygon class="wedge-ink" points="58,172 84,34 132,34 128,58 108,58 87,172"/><polygon class="wedge-red" points="30,89 30,115 166,104"/><rect class="wedge-ink" x="166" y="94" width="18" height="18"/>';
+export function wedgeHead(title, { tag = "h1" } = {}) {
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  mark.setAttribute("viewBox", "0 0 200 200");
+  mark.setAttribute("aria-hidden", "true");
+  mark.classList.add("wedge-mark");
+  mark.innerHTML = WEDGE_PARTS;
+  return h("div.wedge-head", {}, mark, h("div.wedge-words", {}, h(`${tag}.wedge-title`, {}, title), h("span.wedge-rule")));
 }
 
 // Copied, its button says so where it is -- a tick a moment, as a Mac's does -- not in a note
@@ -1351,12 +1394,56 @@ function newMenu(anchor, workspace) {
   menu(anchor, [
     { title: "New" },
     ...[
-      { icon: "deck", label: "Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      // A deck is one file of its own, a bundle (newDeck) -- or, asked for, a file among this
+      // folder's (not inside a bundle's, which holds one deck).
+      { icon: "deck", label: "Deck", hint: "Slides for a talk, as one file (.flexo)", run: () => newDeck(workspace), kind: "deck" },
+      ...(workspace.info.bundle ? [] : [{ icon: "deck", label: "Deck in This Folder", hint: "Slides as a YAML file beside this folder’s others", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" }]),
       { icon: "figure", label: "Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),
     ...(open.length ? ["-", { title: "Open" }, ...open.slice(0, 20).map((item) => ({ icon: KIND_ICONS[item.kind] || "file", label: docName(item.file), note: item.file.includes("/") ? item.file.split("/").slice(0, -1).join("/") : "", hint: item.title, run: () => workspace.open(item.file) }))] : []),
   ]);
+}
+
+// New Deck, as Keynote's File › New: a deck of its own, one file -- a bundle (.flexo), which
+// keeps its pictures and figures inside it, to keep and to send. In the Mac app it is made where
+// its person says, in a save panel, and opened in a window of its own; in a browser, beside this
+// folder's documents (beside the bundle edited here), named in a sheet, and opened in a tab of
+// its own. (A deck among the folder's files is New › Deck in This Folder.)
+export function newDeck(workspace) {
+  const app = window.pywebview?.api;
+  if (app?.new_deck) { app.new_deck(); return; }
+  const bundle = workspace.info.bundle;
+  const taken = new Set(workspace.documents.map((item) => item.file.toLowerCase()));
+  let name = "Untitled";
+  for (let n = 2; taken.has(`${name}.flexo`.toLowerCase()); n++) name = `Untitled ${n}`;
+  const input = ui.input({ value: name });
+  const problem = h("div.field-problem", { hidden: true });
+  const say = (text) => { problem.textContent = text || ""; problem.hidden = !text; };
+  let busy = false;
+  const go = () => {
+    const stem = input.value.trim().replace(/\.flexo$/i, "");
+    if (!stem || /[/\\:]/.test(stem)) { say(!stem ? "Enter a name." : "A name can’t contain / \\ or :."); input.focus(); return false; }
+    if (busy) return false;
+    busy = true;
+    // (Its tab opened in the click that asked, as a browser opens one only then.)
+    const tab = window.open("", "_blank");
+    workspace.api("/api/bundle/new", { name: stem, kind: "deck", client: workspace.client, who: workspace.me })
+      .then((made) => {
+        box.close();
+        if (tab) tab.location = made.address;
+        toast(tab ? `Made “${made.name}”, open in a new tab.` : h("span", {}, `Made “${made.name}”. `, h("a", { href: made.address, target: "_blank" }, "Open it")), { icon: "check", seconds: 8 });
+      })
+      .catch((error) => { tab?.close(); say(error.message); input.focus(); })
+      .finally(() => { busy = false; });
+    return false;
+  };
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); go(); } });
+  const where = bundle ? `beside “${bundle.name}”` : "in this folder";
+  const box = dialog({ title: "New Deck", body: [ui.field("Name", input, { hint: `One file, ${where}, holding its pictures and figures` }), problem],
+    actions: [{ label: "Cancel" }, { label: "Create", kind: "primary", run: go }] });
+  input.focus();
+  input.select();
 }
 
 export function askName(workspace, kind, suggestion) {
@@ -1460,7 +1547,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (Shapes Chosen)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["⇧ ⌘ C", "Set Colour: Paste a Colour’s Code onto What Is Chosen (Nothing Chosen on a Slide: Its Background)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
@@ -1653,12 +1740,15 @@ export function palette(workspace, { find = false } = {}) {
     { icon: "target", label: workspace.follow ? "Stop Following Agents" : "Follow Agents", run: () => workspace.setFollow(!workspace.follow) },
     { icon: "collaborate", label: "Work with Agents…", run: () => connectDialog(workspace) },
     { icon: "keyboard", label: "Keyboard Shortcuts", keys: "⌘/", run: () => shortcutsDialog() },
+    // What Align lines shapes up with, and Move as a Group: a setting, whatever is chosen.
+    ...alignSettings(session),
     // Appearance, as the toolbar's button offers it: the one in use is there, greyed.
     ...[["auto", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([value, name]) => ({ icon: value === "dark" ? "moon" : value === "light" ? "sun" : "appearance",
       label: `Appearance: ${name}`, disabled: remembered("theme", "auto") === value, hint: remembered("theme", "auto") === value ? "In use" : "", run: () => workspace.appearance?.(value) })),
     ...[
       // Each said as the New menu says it.
-      { icon: "deck", label: "New Deck", hint: "Slides for a talk", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" },
+      { icon: "deck", label: "New Deck", hint: "Slides for a talk, as one file (.flexo)", run: () => newDeck(workspace), kind: "deck" },
+      ...(workspace.info.bundle ? [] : [{ icon: "deck", label: "New Deck in This Folder", hint: "Slides as a YAML file beside this folder’s others", run: () => askName(workspace, "deck", UNTITLED.deck), kind: "deck" }]),
       { icon: "figure", label: "New Figure", hint: "A diagram laid out automatically", run: () => askName(workspace, "figure", UNTITLED.figure), kind: "figure" },
       { icon: "theme", label: "New Theme", hint: "Fonts, colours and lines", run: () => askName(workspace, "theme", UNTITLED.theme), kind: "theme" },
     ].filter((item) => offers(workspace, item.kind)),

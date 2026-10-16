@@ -4,6 +4,7 @@
 // written; every other setting shows the base's value, ready to change.
 
 import { h, clear, icon, ui, popover, closeMenu, keepFocus, picture, themeName, themeUses, exportLabel } from "/static/studio/studio.js";
+import { hexField, hexOf, shownHex, applyColour, rememberColour } from "/static/studio/hexcolour.js";
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800];
 const PAGE_NAMES = {
@@ -124,31 +125,60 @@ export function mount(studio, container) {
     // The picker is the swatch's, not a stop of its own for Tab: the swatch is (Return or
     // Space opens it), and the hex beside it.
     const picker = h("input", { type: "color", tabIndex: -1, "aria-hidden": "true", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : "#ffffff",
-      oninput: () => { hex.value = picker.value; swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
+      oninput: () => { hex.show(picker.value); swatch.style.background = picker.value; swatch.classList.remove("none"); set(path, picker.value); } });
     // No colour is the hatched chip every "None" is drawn as.
     const swatch = h(`span.colour-swatch${value ? "" : ".none"}`, { style: { background: value || "" }, title: value || "None", role: "button", tabIndex: 0, "aria-label": `${label}: choose a colour`,
       onclick: () => picker.click(), onkeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); picker.click(); } } });
-    const hex = ui.input({ value: get(path) || "", placeholder: base(path) || "None", mono: true, key: path.join("."),
-      onInput: (text) => { if (/^#[0-9a-f]{6}$/i.test(text)) { picker.value = text; swatch.style.background = text; swatch.classList.remove("none"); set(path, text); } else if (!text) set(path, null); } });
+    // Its code typed or pasted (any way a colour is written: hexcolour.js), taken on Return,
+    // on leaving it and at once when pasted, one step of its own; the base's, faintly, unset.
+    const hex = hexField({ value: get(path) || null, placeholder: hexOf(base(path)) ? shownHex(hexOf(base(path))) : base(path) || "None", key: path.join("."), title: label,
+      apply: (colour) => applyColour(() => { picker.value = colour; swatch.style.background = colour; swatch.classList.remove("none"); set(path, colour); }, colour) });
+    picker.addEventListener("change", () => rememberColour(picker.value));
     return row(label, path, h("div.colour-field", {}, swatch, picker, hex));
   };
 
   const paletteView = () => {
     const colours = get(["palette"]) ?? base(["palette"]) ?? [];
-    const list = Array.isArray(colours) ? colours : [];
+    const list = Array.isArray(colours) ? [...colours] : [];
     // Said in the history by the colour changed: "Change Colour 2", "Change Theme Colours".
     const write = (next, label = "Change Theme Colours") => set(["palette"], next, { quiet: false, label });
+    // One colour chosen (a click on its chip, or the keys on it): its code beside its name under
+    // them, to type or paste; a double-click (Return, Space) changes it in the system's picker.
+    const at = Math.min(paletteAt, Math.max(0, list.length - 1));
+    const recolour = (index, colour) => {
+      const next = [...list];
+      next[index] = colour;
+      list[index] = colour;
+      chips[index].style.background = colour;
+      chips[index].title = `${shownHex(colour)} — click to choose, double-click to change`;
+      set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` });
+    };
     const chips = list.map((value, index) => {
-      const picker = h("input", { type: "color", value, tabIndex: -1, "aria-hidden": "true", oninput: () => { chip.style.background = picker.value; const next = [...list]; next[index] = picker.value; set(["palette"], next, { label: `Change Colour ${index + 1}`, merge: `palette.${index}` }); } });
-      const chip = h("div.palette-chip", { style: { background: value }, title: `${value} — click to change`, role: "button", tabIndex: 0, "aria-label": `Colour ${index + 1}, ${value}`,
-        onclick: () => picker.click(), onkeydown: (event) => { if (event.target === chip && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); picker.click(); } } }, picker,
+      const picker = h("input", { type: "color", value: hexOf(value) || "#888888", tabIndex: -1, "aria-hidden": "true",
+        oninput: () => { if (index === at) code?.show(picker.value); recolour(index, picker.value); }, onchange: () => rememberColour(picker.value) });
+      const chip = h(`div.palette-chip${index === at ? ".chosen" : ""}`, { style: { background: value }, title: `${shownHex(hexOf(value) || value)} — click to choose, double-click to change`, role: "button", tabIndex: 0,
+        "aria-pressed": String(index === at), "aria-label": `Colour ${index + 1}, ${value}`,
+        onclick: (event) => { if (event.detail > 1 || index === at) return; paletteAt = index; renderForm(); form.querySelector('[data-key="palette.code"]')?.focus(); },
+        ondblclick: () => picker.click(),
+        onfocus: (event) => { if (event.target === chip && index !== at && !chip.matches(":hover")) { paletteAt = index; renderForm(); form.querySelectorAll(".palette-chip")[index]?.focus(); } },
+        onkeydown: (event) => { if (event.target === chip && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); picker.click(); } } }, picker,
         h("button.palette-remove", { type: "button", title: "Remove colour", onclick: (event) => { event.stopPropagation(); write(list.filter((_, i) => i !== index), `Remove Colour ${index + 1}`); } }, icon("close")));
       return chip;
     });
+    const code = list.length ? hexField({ value: list[at], key: "palette.code", title: `Colour ${at + 1}`, placeholder: "Hex",
+      apply: (colour) => applyColour(() => recolour(at, colour), colour) }) : null;
     const tones = studio.info?.tones || [];
     return h("div.palette-block", {},
       h("div.palette-chips", {}, chips,
-        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => write([...list, "#888888"], "Add Colour") }, icon("plus"))),
+        // (The colour added is chosen, its code ready to be pasted over.)
+        h("button.palette-add", { type: "button", title: "Add colour", onclick: () => {
+          paletteAt = list.length;
+          write([...list, "#888888"], "Add Colour");
+          const field = form.querySelector('[data-key="palette.code"]');
+          field?.focus();
+          field?.select();
+        } }, icon("plus"))),
+      code ? h("div.palette-code", {}, h("span.palette-code-name", {}, `Colour ${at + 1}`), code) : null,
       h("div.row", {},
         // Each palette by sight, as the deck's Palette pop-up shows them: its colours, then its
         // name; the one the theme holds ticked.
@@ -169,6 +199,8 @@ export function mount(studio, container) {
   const font = (label, path, note, hint) => row(label, path, ui.font({ value: get(path) || "", options: catalog.fonts,
     placeholder: (path.length > 1 && base(path)) || note, key: path.join("."), onChange: (value) => set(path, value || null, { quiet: false }) }), { hint });
   let tab = shownTab;
+  // The palette's colour chosen, whose code shows under it.
+  let paletteAt = 0;
   // The folder's figures and decks, and which of them are drawn in this theme: kept
   // across redraws of the form, and asked for again when documents come and go.
   let uses = themeUses(studio);

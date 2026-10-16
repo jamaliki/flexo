@@ -4,7 +4,7 @@
 
 export { h, clear, icon, ui, menu, popover, closeMenu, dialog, toast, readable, mathWords, inQuotes, typingName, exportLabel, suggestedFonts, roving } from "./ui.js";
 export { merge3, same } from "./merge.js";
-export { avatar, colourOf, ago, copyable, nameOf } from "./shell.js";
+export { avatar, colourOf, ago, copyable, nameOf, wedgeHead } from "./shell.js";
 export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes.js";
 import { start } from "./shell.js";
 export { ownResources } from "./drawings.js";

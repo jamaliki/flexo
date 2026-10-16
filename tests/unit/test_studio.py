@@ -1997,6 +1997,62 @@ process.exit(0);
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_change_of_a_figure_s_own_file_and_the_deck_together_is_one_step() -> None:
+    """A figure's parts kept in a file of their own deleted with the slide's shapes: the deck's
+    change and the file's, joined (mixing.js's joinSteps), are one step -- undone, the file is
+    put back and the deck's change taken back, both by one ⌘Z; made again, both again."""
+    root = Path(__file__).parents[2] / "src/flexo/studio/static/studio"
+    code = FAKE_PAGE + (
+        f"const {{ Session }} = await import({json.dumps((root / 'session.js').as_uri())});\n"
+        f"const M = await import({json.dumps((root / 'mixing.js').as_uri())});\n"
+        """
+const workspace = {
+  client: "me", me: { id: "me" }, sessions: new Map(), on() {}, url: (route) => route,
+  api: async () => new Promise(() => {}),
+};
+const info = {
+  file: "talk.yaml", version: 1, saved: 1, exists: true, document: { shapes: ["box", "ring"] },
+};
+const session = new Session(workspace, info);
+const wait = () => new Promise((done) => setTimeout(done, 50));
+const file = { text: "parts: [a, b]" }, put = [];
+const said = {};
+session.change((d) => { d.shapes = ["ring"]; }, { label: "Delete Rectangle" });
+const from = session.past.length - 1;
+session.record({ label: "Delete “a”", place: "Slide 3", where: 2, apply(target) {
+  put.push(target);
+  file.text = target === "before" ? "parts: [a, b]" : "parts: [b]";
+  return Promise.resolve();
+} });
+file.text = "parts: [b]";
+const joined = M.joinSteps(session, from, "Delete 1 Figure Shape and 1 Shape");
+said.steps = [session.past.length, session.said(joined).text, session.said(joined).where];
+session.undo();
+await wait();
+said.undone = [session.document.shapes, file.text, [...put], session.past.length,
+  session.future.length];
+const changes = [];
+session.on("change", ({ source, entry }) => changes.push([source, entry?.text]));
+session.redo();
+await wait();
+said.redone = [session.document.shapes, file.text, put, session.past.length,
+  session.future.length, changes];
+console.log(JSON.stringify(said));
+process.exit(0);
+"""
+    )
+    result = subprocess.run(
+        ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
+    )
+    assert json.loads(result.stdout) == {
+        "steps": [1, "Delete 1 Figure Shape and 1 Shape", 2],
+        "undone": [["box", "ring"], "parts: [a, b]", ["before"], 0, 1],
+        "redone": [["ring"], "parts: [b]", ["before", "after"], 1, 0,
+                   [["history", "Delete 1 Figure Shape and 1 Shape"]]],
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_typing_held_in_one_place_undoes_alone_and_what_it_kept_is_said() -> None:
     script = Path(__file__).parents[2] / "src/flexo/studio/static/studio/session.js"
     code = FAKE_PAGE + (

@@ -427,6 +427,18 @@ export class Session {
     return document;
   }
 
+  // One change of the document taken back (or made again) as a part of a step made elsewhere
+  // that holds it -- a figure's own file changed with the deck, one step (mixing.js's
+  // joinSteps) -- as `trip` takes back one of its own: on the document as it is now, what
+  // could not be done said. The step's trip says it is travelled.
+  travelPart(entry, target) {
+    const current = target === "before" ? "after" : "before", was = this.document, lost = [];
+    const document = this.travelOne(entry, target, current, lost);
+    if (lost.length) this.unmade([{ entry, lost }], target, true);
+    entry.undid = target === "before" ? { from: was, to: document } : null;
+    this.document = document;
+  }
+
   travelled(entry) {
     this.lastMerge = null;
     this.emit("change", { quiet: false, source: "history", entry: this.said(entry) });

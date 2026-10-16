@@ -342,8 +342,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .start-icon svg { width: 20px; height: 20px; }
 .start-words { display: grid; gap: 2px; min-width: 0; }
 .start-title { font-weight: 640; font-size: 14px; }
-.start-hint { color: var(--ink-3); font: var(--text-small); }
-.welcome p.start-where { margin: -10px 0 0; color: var(--ink-3); font: var(--text-small); }
 .doc-when { color: var(--ink-3); font-size: 12px; white-space: nowrap; margin-left: 12px; min-width: 120px; text-align: right; }
 .welcome-section { padding: 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
 .doc-list { display: grid; gap: 2px; }
@@ -477,10 +475,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .command-list .menu-item[aria-disabled] { color: var(--ink-3); cursor: default; }
 .command-list .menu-item[aria-disabled] svg, .command-list .menu-item[aria-disabled] .kbd { opacity: 0.55; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: 8px; font-weight: 600; letter-spacing: -0.01em; }
-/* The app's mark, in its icon's blue: a sign of whose window this is, not a button to press. */
+/* The app's mark, its icon's red wedge on cream: a sign of whose window this is, not a button
+   to press. (Cream in both appearances, as the icon is.) */
 .brand { cursor: default; }
-.brand-mark { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(180deg, #6a86ff, #3a52e6); color: #fff; display: grid; place-items: center; }
-.brand-mark svg { width: 14px; height: 14px; }
+.brand-mark { width: 20px; height: 20px; border-radius: 5px; background: #efe6d2; box-shadow: inset 0 0 0 0.5px #cdbf9f; display: grid; place-items: center; }
+.brand-mark svg { width: 16px; height: 16px; }
+/* The red wedge over a poster's title, where the studio greets (shell.js wedgeHead): its ink
+   the words' own colour, its red the icon's. */
+:root { --display: "Futura", "Avenir Next Condensed", "Arial Narrow", sans-serif; --wedge-red: #c8102e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wedge-red: #d7263d; } }
+:root[data-theme="dark"] { --wedge-red: #d7263d; }
+.wedge-head { display: flex; align-items: flex-end; gap: 14px; }
+.wedge-mark { width: 58px; height: 58px; flex: none; }
+.wedge-mark .wedge-ink { fill: var(--ink); } .wedge-mark .wedge-red { fill: var(--wedge-red); }
+.wedge-words { display: grid; justify-items: start; padding-bottom: 4px; }
+.wedge-head .wedge-title { font-family: var(--display); font-weight: 800; font-stretch: condensed; text-transform: uppercase;
+  font-size: 30px; line-height: 0.9; letter-spacing: 0.01em; margin: 0; color: var(--ink); }
+.wedge-rule { width: 30px; height: 4px; background: var(--wedge-red); margin-top: 8px; }
 .file { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip {
@@ -926,6 +937,43 @@ details.more > .inner { display: grid; gap: 10px; margin-top: 12px; }
 .own-colour > span { font: var(--text-hint); color: var(--ink-3); }
 .own-colour .colour-control { position: relative; }
 .own-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
+
+/* -- a colour by its code (hexcolour.js), in the studio's monospaced face: on a colour's
+   label's line, after the colours applied last; beside a well; in ⇧⌘C's popover -- */
+.hex-field { flex: none; width: 72px; height: 22px; min-width: 0; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--raised); color: var(--ink);
+  font: 500 11px/20px var(--mono); letter-spacing: 0.02em; outline: none; transition: border-color 0.12s, box-shadow 0.12s; }
+.hex-field::placeholder { color: var(--ink-3); font: 400 11px/20px var(--font); letter-spacing: 0; }
+.hex-field:hover { border-color: var(--ink-3); }
+.hex-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-halo); }
+.hex-field.invalid, .hex-field.invalid:focus { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-soft); }
+.hex-side { display: flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
+.field.has-side { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.field.has-side > :not(.label):not(.hex-side) { grid-column: 1 / -1; }
+/* (On the label's line, taking no more of it than the label does.) */
+.field.has-side > .hex-side { grid-row: 1; grid-column: 2; margin: -4px 0; }
+.swatches > .hex-side { margin-left: 2px; }
+.recent-dots { display: flex; gap: 4px; }
+.recent-dot { width: 14px; height: 14px; flex: none; border: 0; padding: 0; border-radius: 50%; box-shadow: var(--chip-ring); cursor: pointer; }
+.recent-dot:hover { box-shadow: var(--chip-ring), 0 0 0 2px var(--panel), 0 0 0 3.5px var(--ink-3); }
+.colour-control > .hex-field { margin: 0 2px 0 6px; }
+/* A thing's own colours side by side: each code under its well. */
+.own-colours { gap: 18px; }
+.own-colour .colour-control { display: grid; justify-items: center; gap: 4px; }
+.own-colour .colour-control > .hex-field { width: 66px; margin: 0; }
+.own-colour .colour-control .btn { left: calc(50% + 17px); }
+
+/* ⇧⌘C's popover: what it colours, its code (the keys in it), which of the thing's colours,
+   and the colours applied last. */
+.menu.colour-pop { width: 248px; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.colour-pop-what { font: var(--text-label); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.colour-pop-row { display: flex; align-items: center; gap: 8px; }
+.colour-pop-row > .hex-field { flex: 1 1 0; width: 0; height: 30px; font-size: 13px; line-height: 28px; padding: 0 8px; }
+.colour-pop-row > .hex-field::placeholder { font-size: 12px; line-height: 28px; }
+.colour-pop-chip { flex: none; width: 30px; height: 30px; border-radius: 6px; box-shadow: var(--chip-ring); background: repeating-linear-gradient(135deg, var(--raised) 0 4px, var(--sunken) 4px 8px); }
+.colour-pop .segmented > button { min-width: 0; }
+.colour-pop-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.colour-pop-recent .recent-dot { width: 20px; height: 20px; }
+.colour-pop-hint { font: var(--text-hint); color: var(--ink-3); }
 
 /* -- palettes, chosen by sight -- */
 .palette-strip { display: inline-flex; gap: 2px; }
