@@ -34,7 +34,8 @@ def run(body: str) -> object:
 def test_what_is_beside_the_page_is_caught_at_and_told_apart_from_the_page_s_own() -> None:
     made = run("""
       // The page's own: its edges and middle, one shape's.
-      const targets = { xs: [0, 480, 960, 100, 150, 200], ys: [0, 270, 540, 50, 75, 100], boxes: [] };
+      const targets = { xs: [0, 480, 960, 100, 150, 200], ys: [0, 270, 540, 50, 75, 100],
+        boxes: [] };
       // On the slide before: a picture, its left edge the shape's own.
       const beside = { boxes: [[100, 300, 400, 500]] };
       const caught = B.withBeside(targets, beside);
