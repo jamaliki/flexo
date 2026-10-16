@@ -10,6 +10,7 @@ rebound domain name can reach it.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gzip
 import json
 import mimetypes
@@ -350,6 +351,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
                 return
             workspace.acting(name, data.get("action") or {})
+            if workspace.set_aside and "document" in data:
+                # A file taken out of a bundle as no document named it, named again by the
+                # page's document (an embedding undone, not yet sent): back before it is read.
+                with contextlib.suppress(Exception):
+                    workspace.follow_uploads([(doc.path.parent, data["document"])])
             answer = act(data.get("document", doc.document), data.get("action") or {},
                          doc.path.parent)
             if isinstance(answer, dict) and "released" in answer:

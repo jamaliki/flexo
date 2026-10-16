@@ -660,12 +660,14 @@ class Workspace:
                 with contextlib.suppress(Exception):
                     then()
 
-    def follow_uploads(self) -> None:
+    def follow_uploads(self, also: list[tuple[Path, Any]] | None = None) -> None:
         """Keep the copies this studio made in step with its documents, as a document
         changes: a copy no document uses any more (its picture's adding undone, or the
         picture deleted) is taken out of the folder at once, and put back if one uses it
         again (redone). A copy no document has used yet is left be -- its document is about
-        to -- and so is one any other file in the folder names (a document not open here)."""
+        to -- and so is one any other file in the folder names (a document not open here).
+        ``also``: documents as a page has them, not yet sent (``(folder, document)``), that
+        name what they name too: an edit asked of one is made with its files there."""
 
         with self.lock:
             if not self.uploads:
@@ -674,7 +676,7 @@ class Workspace:
             uploads = set(self.uploads)
         written = [
             (doc.path.parent, json.dumps(doc.document, ensure_ascii=False)) for doc in docs
-        ]
+        ] + [(folder, json.dumps(document, ensure_ascii=False)) for folder, document in also or []]
         for upload in sorted(uploads):
             if any(_names(upload, folder, text) for folder, text in written):
                 self.used_uploads.add(upload)

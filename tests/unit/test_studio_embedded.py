@@ -182,6 +182,11 @@ def test_files_a_document_no_longer_names_go_from_a_bundle_and_come_back(tmp_pat
         assert not file.exists()
         doc.update({"text": named}, doc.version, PERSON)  # undone: it is named again
         assert file.read_text(encoding="utf-8") == SAMPLE_FIGURE
+        # Named by a page's document not yet sent (an edit asked of it): back before it is read.
+        doc.update({"text": named.replace("figures/old.yaml", "gone")}, doc.version, PERSON)
+        assert not file.exists()
+        workspace.follow_uploads([(tmp_path, {"text": named})])
+        assert file.read_text(encoding="utf-8") == SAMPLE_FIGURE
     finally:
         workspace.close()
 
