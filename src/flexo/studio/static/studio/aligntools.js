@@ -27,7 +27,7 @@
 // as they are), few (what Distribute says it needs), renderInspector(), and showPanel() (the
 // inspector shown, if it was hidden).
 
-import { h, ui, menu, dialog, toast } from "./ui.js";
+import { h, icon, ui, menu, dialog, toast } from "./ui.js";
 import * as A from "./aligning.js";
 
 // The sides and middles, the besides, and the ways to spread: each [value, label, icon, words].
@@ -47,8 +47,9 @@ export const SPREADS = [["across", "Distribute Horizontally", "distribute-across
 export const relativeLabel = (value) => `Align Relative to ${A.RELATIVE_NAMES[value]}`;
 export const GROUPED = "Move as a Group";
 export const SHOW = "Align and Distribute…";
-// Why Distribute is greyed, as its hint and tooltip say it.
+// Why Distribute is greyed, as its hint and tooltip say it; and the rest, with fewer than two.
 export const FEW = "Choose three or more shapes";
+export const TWO = "Choose two or more shapes";
 
 // What Align lines shapes up with, and whether it moves them as a group: the person's setting,
 // changed at any time, shapes chosen or not -- in the palette, and by these labels the Mac
@@ -129,10 +130,14 @@ export function alignTools(ctx) {
     return apply(made.moves, `Arrange ${plural(all.length)} in a ${made.rows} × ${made.columns} Grid`);
   }
 
-  // The inspector's section shown, the keys on its first control (⇧⌘A, Align and Distribute…).
+  // The inspector's section shown, the keys on its first control (⇧⌘A, Align and Distribute…):
+  // in the page's tab of its own (`showTab`, Arrange) whatever is chosen, else in Format.
   function reveal() {
-    if (!ctx.picks().length) return false;
-    ctx.showPanel?.();
+    if (ctx.tab?.()) ctx.showTab();
+    else {
+      if (!ctx.picks().length) return false;
+      ctx.showPanel?.();
+    }
     ctx.renderInspector();
     // (Drawn at once; else a moment later. Never waiting on a frame: a window behind others
     // draws none.)
@@ -140,7 +145,7 @@ export function alignTools(ctx) {
       const node = [...document.querySelectorAll(".align-section")].find((each) => each.offsetParent !== null);
       if (!node) {
         if (again) setTimeout(() => show(false), 60);
-        else toast("Show the inspector (Format) to align them", { icon: "align-left", seconds: 3 });
+        else toast(ctx.tab?.() ? "Show the inspector (Arrange) to align them" : "Show the inspector (Format) to align them", { icon: "align-left", seconds: 3 });
         return;
       }
       node.scrollIntoView({ block: "nearest" });
@@ -154,7 +159,7 @@ export function alignTools(ctx) {
   }
 
   // Relative to, and moving as a group: the person's (aligning.js), shown again where shown.
-  A.onAligning(() => { if (ctx.picks().length && document.querySelector(".align-section")) ctx.renderInspector(); });
+  A.onAligning(() => { if ((ctx.picks().length || ctx.tab?.()) && document.querySelector(".align-section")) ctx.renderInspector(); });
 
   // The words a command's hint says of what they are aligned to now.
   const anchorWords = () => {
@@ -217,43 +222,55 @@ export function alignTools(ctx) {
     return true;
   }
   const button = (glyph, title, run) => ui.button("", run, { kind: "ghost", small: true, icon: glyph, title });
-  function section() {
+  // In the inspector: Relative to and Move as a Group, then the sides, beside, spread, a gap and
+  // a grid. In a tab of its own (`tab`: the deck's Arrange, the figure's), every row is there
+  // whatever is chosen, greyed where it does not apply, saying what it needs -- Relative to and
+  // the gap still settings to change; elsewhere, as many rows as apply.
+  function section({ tab = false } = {}) {
     const picks = ctx.picks(), count = picks.length;
-    if (!count) return null;
-    const many = count > 1;
+    if (!count && !tab) return null;
+    const many = count > 1, all = tab || many;
+    const free = items().filter((item) => !item.locked).length;
     const relative = A.alignTo();
     const bits = [];
-    // (A setting, changed with one shape chosen too: what several will be aligned to.)
+    // (A setting, changed with one shape chosen too, or none: what several will be aligned to.)
     bits.push(ui.field("Relative to", ui.select({ value: relative, key: "shape.align-to", options: A.RELATIVE.map((value) => ({ value, label: toName(value) })),
         onChange: (value) => A.setAlignTo(value) })),
       ui.toggle({ value: A.asGroup(), label: GROUPED, key: "shape.align-group", onChange: (on) => A.setAsGroup(on) }));
-    if (!many) bits.push(h("div.hint-line", {}, `One shape aligns to the ${noun}`));
+    if (!count) bits.push(h("div.hint-line.align-hint", {}, TWO));
+    else if (!many) bits.push(h("div.hint-line.align-hint", {}, `One shape aligns to the ${noun}${tab ? "; choose two or more to put them beside or space them" : ""}`));
     const onto = many ? (relative === "selection" ? "" : ` to the ${toName(relative)}`) : ` to the ${pageName}`;
-    if (many) bits.push(h("div.align-label", {}, "Align"));
-    bits.push(h("div.row.arrange-row.align-row", {}, SIDES.map(([side, words, glyph]) => button(glyph, `${words}${onto}`, () => align(side)))));
-    if (many) {
+    // (A row greyed says why, in its buttons' tooltips.)
+    const row = (on, why, entries) => h("div.row.arrange-row.align-row", { title: on ? "" : why }, entries.map(([glyph, title, run]) => {
+      const node = button(glyph, on ? title : `${title.split(":")[0]}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`, run);
+      node.disabled = !on;
+      return node;
+    }));
+    if (all) bits.push(h("div.align-label", {}, "Align"));
+    bits.push(row(count > 0, "Choose a shape", SIDES.map(([side, words, glyph]) => [glyph, `${words}${onto}`, () => align(side)])));
+    if (all) {
       const beside = relative === "selection" ? "the selection" : relative === "page" ? `the ${noun}` : `the ${toName(relative).toLowerCase()}`;
       bits.push(h("div.align-label", {}, "Beside"),
-        h("div.row.arrange-row.align-row", {}, BESIDE.map(([side, words, glyph, , how]) => button(glyph, `${words} ${beside}: ${how}`, () => align(side)))));
-    }
-    if (many) {
+        row(many, TWO, BESIDE.map(([side, words, glyph, , how]) => [glyph, `${words} ${beside}: ${how}`, () => align(side)])));
       // (Greyed with fewer than three to spread, saying why.)
-      const spread = spreads(), why = few(), says = (words, said) => (spread ? `${words}: ${said.toLowerCase()}` : `${words}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`);
-      const row = (ways) => h("div.row.arrange-row.align-row", { title: spread ? "" : why }, ways.map(([how, words, glyph, , said]) => {
-        const node = button(glyph, says(words, said), () => distribute(how));
-        node.disabled = !spread;
-        return node;
-      }));
-      bits.push(h("div.align-label", {}, "Distribute", spread ? null : h("span.align-why", {}, why)), row(SPREADS.slice(0, 4)), row(SPREADS.slice(4)));
-    }
-    if (many) {
+      const spread = spreads(), why = few();
+      const ways = (list) => list.map(([how, words, glyph, , said]) => [glyph, `${words}: ${said.toLowerCase()}`, () => distribute(how)]);
+      bits.push(h("div.align-label", {}, "Distribute", spread || !count ? null : h("span.align-why", {}, why)), row(spread, why, ways(SPREADS.slice(0, 4))), row(spread, why, ways(SPREADS.slice(4))));
       const gap = ui.number({ value: A.gapSet(), step: 1, min: -1000, max: 10000, unit: "pt", key: "shape.align-gap", onChange: (value) => A.setGap(value ?? A.GAP) });
-      bits.push(h("div.row.align-gap", {}, ui.field("Gap", gap),
-        button("space-across", "Space Across by the Gap: left to right, the leftmost staying", () => space("across")),
-        button("space-down", "Space Down by the Gap: top to bottom, the topmost staying", () => space("down"))));
-      bits.push(h("div.row", {}, ui.button("Arrange in a Grid…", () => gridSheet(), { small: true, icon: "grid", title: "In rows and columns, a gap between" })));
+      const spaces = row(free > 1, TWO, [["space-across", "Space Across by the Gap: left to right, the leftmost staying", () => space("across")],
+        ["space-down", "Space Down by the Gap: top to bottom, the topmost staying", () => space("down")]]);
+      bits.push(h("div.row.align-gap", {}, ui.field("Gap", gap), ...spaces.children));
+      const grid = ui.button("Arrange in a Grid…", () => gridSheet(), { small: true, icon: "grid", title: free > 1 ? "In rows and columns, a gap between" : TWO });
+      grid.disabled = free < 2;
+      bits.push(h("div.row", {}, grid));
     }
     return h("div.section.align-section", {}, h("div.section-title", {}, "Align and Distribute"), bits);
+  }
+  // In Format, where Arrange and Align and Distribute have a tab of their own: one line, going there.
+  function link() {
+    const go = h("button.btn.ghost.small.align-link", { type: "button", title: "Where it is, its order, and Align and Distribute: the Arrange tab (⇧⌘A)", onclick: () => reveal() },
+      icon("arrange"), h("span.btn-label", {}, "Arrange, Align and Distribute"), icon("chevron"));
+    return h("div.section.align-link-section", {}, go);
   }
 
   // -- Arrange in a Grid… --
@@ -322,7 +339,7 @@ export function alignTools(ctx) {
     return true;
   }
 
-  return { align, distribute, space, grid, gridSheet, reveal, commands, menuItem, menuItems, section };
+  return { align, distribute, space, grid, gridSheet, reveal, commands, menuItem, menuItems, section, link };
 }
 
 // -- equal spacing while one is dragged --
@@ -336,16 +353,33 @@ export { nearer, sizeCatch } from "./aligning.js";
 // In the Mac app, whose windows each have their own storage (a folder's own address): the app
 // keeps Relative to, Move as a Group and the gap for them all, from one launch to the next, as
 // it keeps snapping (magnet.js) -- told when one is changed here, and asked as this window opens
-// and each time it comes to the front. (Another window's change reaches this one as the app's
-// "aligning" command: shell.js.) The app with none kept yet takes this window's.
+// and each time it comes to the front; another window's change reaches this one as the app's
+// "aligning" command (shell.js: `aligningFromApp`). The app with none kept yet takes this
+// window's. What it keeps has a version, one later at each change: an answer older than one
+// this window has seen -- an ask the app answered before it kept a change made here -- is not
+// taken, nor one to an ask made while a change of this window's is on its way.
+let seen = -1;
+const newer = (kept) => { const version = Number(kept?.version ?? 0); if (!Number.isFinite(version) || version < seen) return false; seen = version; return true; };
+export function aligningFromApp(kept) {
+  if (kept && typeof kept === "object" && newer(kept)) A.setAligning(kept, "app");
+}
 export function aligningInApp() {
   const api = () => (typeof window === "undefined" ? null : window.pywebview?.api);
-  A.onAligning((said, how) => { if (how === "here") Promise.resolve(api()?.aligning?.(said)).catch(() => {}); });
-  const ask = () => Promise.resolve(api()?.aligning?.()).then((kept) => {
-    if (!kept || typeof kept !== "object") return;
-    if (Object.keys(kept).length) A.setAligning(kept, "app");
-    else api()?.aligning?.(A.aligning());
-  }).catch(() => {});
+  let changes = 0, sending = 0;
+  A.onAligning((said, how) => {
+    if (how !== "here") return;
+    changes += 1;
+    sending += 1;
+    Promise.resolve(api()?.aligning?.(said)).then((kept) => { if (kept && typeof kept === "object") newer(kept); }).catch(() => {}).finally(() => { sending -= 1; });
+  });
+  const ask = () => {
+    const asked = changes;
+    return Promise.resolve(api()?.aligning?.()).then((kept) => {
+      if (asked !== changes || sending || !kept || typeof kept !== "object") return;
+      if (Object.keys(kept).length) aligningFromApp(kept);
+      else api()?.aligning?.(A.aligning());
+    }).catch(() => {});
+  };
   window.addEventListener("pywebviewready", ask);
   window.addEventListener("focus", ask);
   if (api()?.aligning) ask();

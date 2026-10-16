@@ -147,6 +147,8 @@ export function shapeEditor(host) {
   // (When each chosen was, for Align's first and last chosen: by the shape, not its place -- ordering.js.)
   const picked = chosenOrder();
   let touchedNow = false;
+  // (The page's Arrange tab, where it has one -- its own Align and Distribute: `arrangeIn`.)
+  let arrangeTab = null;
   let chosenOn = -1;
   let tool = null;
   let gesture = null;
@@ -1746,6 +1748,8 @@ export function shapeEditor(host) {
     edit: (mutate, label) => edit(mutate, label), renderInspector: () => host.renderInspector(), showPanel: () => host.showPanel?.(),
     // (Arrange in a Grid…'s sheet: where they would go, drawn as a drag draws them.)
     show: (moves) => showMoves(moves),
+    // (The page's Arrange tab, where it has one: ⇧⌘A goes there.)
+    tab: () => Boolean(arrangeTab), showTab: () => arrangeTab?.(),
   });
   // Shapes drawn moved by `moves` ({ id: index, dx, dy }), as a drag draws them -- the list as
   // it is -- and the lines glued to them; none (null): as they are.
@@ -2116,12 +2120,23 @@ export function shapeEditor(host) {
       sections.push(h("div.section", {}, h("div.section-title", {}, "Text"), textBits,
         count === 1 && !specs[0].locked ? ui.button(specs[0].text ? "Edit Text" : "Add Text", () => editWords(picks[0], { selectAll: true }), { small: true, kind: "ghost", icon: "pencil" }) : null));
     }
-    sections.push(h("div.section", {}, h("div.section-title", {}, "Arrange"), arrangeFields(picks, specs)));
-    // Align and Distribute, with what they are aligned to (aligntools.js).
-    sections.push(arranging.section());
+    // Arrange, and Align and Distribute with what they are aligned to (aligntools.js) -- in the
+    // page's Arrange tab where it has one (arrangePanel), a line here going there.
+    if (arrangeTab) sections.push(arranging.link());
+    else sections.push(h("div.section", {}, h("div.section-title", {}, "Arrange"), arrangeFields(picks, specs)), arranging.section());
     // The page's own settings for them: a slide's builds, a figure's part they move with.
     if (host.panel) sections.push(...host.panel(picks, specs, { set, edit, choose, slider }));
     return sections;
+  }
+  // The page's Arrange tab, as Keynote's: where those chosen are, their order, flips, lock and
+  // group, then Align and Distribute -- greyed, saying what it needs, with none chosen
+  // (Relative to and the gap still to be changed).
+  function arrangePanel() {
+    const picks = words ? [] : chosenNow();
+    const align = arranging.section({ tab: true });
+    if (!picks.length) return [align];
+    const specs = picks.map((index) => F.normalised(shapesOf()[index]));
+    return [h("div.section", {}, h("div.section-title", {}, "Arrange"), arrangeFields(picks, specs)), align];
   }
   // A slider: each step of a drag made as it is dragged, `onChange(value, { live: true })` --
   // quietly, the panel not drawn again under the pointer (drawn again, the slider would be
@@ -2291,6 +2306,12 @@ export function shapeEditor(host) {
     lockedAt: (index) => Boolean(shapesOf()[index]?.locked),
     moveIn: (list, index, dx, dy) => { list[index] = withPlaces(F.moved(list[index], round(dx), round(dy))); },
     showMoves: (moves) => showMoves(moves),
+    // The page's Arrange tab (`open()` shows it): Arrange and Align and Distribute go there,
+    // a line in Format going to it; what it shows, and ⇧⌘A (Align and Distribute…) to it.
+    arrangeIn: (open) => { arrangeTab = typeof open === "function" ? open : null; },
+    arrangeTab: () => Boolean(arrangeTab), showArrange: () => arrangeTab?.(),
+    arrangePanel: () => arrangePanel(),
+    revealArrange: () => arranging.reveal(),
     change: (mutate, label, options) => edit(mutate, label, options),
   };
 }

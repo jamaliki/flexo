@@ -7,8 +7,8 @@ import { AssistantPanel, MARK_COLOURS, OTHER_MARK } from "./assistant.js";
 import { bundles, bundleName } from "./bundles.js";
 import { snapping, setSnapping, toggleSnapping, onSnapping } from "./snapping.js";
 import { magnetKeys, sayTurned, snappingInApp } from "./magnet.js";
-import { alignTo, asGroup, onAligning, setAligning } from "./aligning.js";
-import { settingCommands, aligningInApp } from "./aligntools.js";
+import { alignTo, asGroup, onAligning } from "./aligning.js";
+import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -710,7 +710,7 @@ export async function start() {
     // it shows (magnet.js).
     if (name === "snapping" && (arg === "on" || arg === "off")) { setSnapping(arg === "on", "app"); return; }
     // So too Relative To, Move as a Group and the gap (aligntools.js's aligningInApp).
-    if (name === "aligning") { try { setAligning(JSON.parse(arg || "{}"), "app"); } catch { /* not one */ } return; }
+    if (name === "aligning") { try { aligningFromApp(JSON.parse(arg || "{}")); } catch { /* not one */ } return; }
     const session = workspace.active;
     const field = typingIn(document.activeElement) ? document.activeElement : null;
     // A sheet open (a name asked for, the shortcuts): the menus wait, as a Mac's do while a
@@ -1475,7 +1475,7 @@ const SHORTCUTS = [
     ["⌘ Z", "Undo"], ["⇧ ⌘ Z", "Redo"], ["⌥ ⌘ Z", "Show History"],
     ["⌘ S", "Save (Documents Also Save as You Work)"], ["⇧ ⌘ S", "Duplicate the Document"], ["⌘ N", "New Deck", "app"], ["⌥ ⌘ N", "New Talk…", "app"], ["⌘ W", "Close Tab", "app"],
     ["⇧ ⌘ ] [", "Next or Previous Tab"], ["⌥ ⌘ R", "Show in Finder", "app"],
-    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (Shapes Chosen)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
+    ["⌥ ⌘ I", "Go to the Inspector (Esc: Back)"], ["%", "Snapping On or Off (the Magnet; ⌘ While Dragging: the Other Way)"], ["⇧ ⌘ A", "Align and Distribute (the Arrange Tab)"], ["? ⌘ /", "Keyboard Shortcuts"], ["⇧ ⌘ 1", "Welcome to Flexo Studio", "app"]]],
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],

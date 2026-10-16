@@ -110,6 +110,16 @@ export function mount(studio, main) {
     // The figure and every file it names, as one file to send (flexo.bundle).
     { icon: "export", label: exportLabel("Flexo Bundle"), hint: "The figure and every file it names, as one file", run: () => studio.exportFiles(["flexo"]) },
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
+  // Format and Arrange, as a deck's toolbar has them: the inspector as one or the other --
+  // Arrange what is chosen arranged, lined up and spaced (arrangeForm), whatever is chosen.
+  let arranging = false;
+  const tabButton = (on, label, glyph, title) => ui.button(label, () => { arranging = on; renderInspector(); }, { kind: "ghost", icon: glyph, title });
+  const formatButton = tabButton(false, "Format", "slide", "Format what is chosen, or the figure");
+  const arrangeButton = tabButton(true, "Arrange", "arrange", "Arrange the shapes drawn over the figure: align, distribute, order, flip, lock, group (⇧⌘A)");
+  studio.actions.append(h("span.sep"), formatButton, arrangeButton);
+  const showTabs = () => {
+    for (const [button, on] of [[formatButton, !arranging], [arrangeButton, arranging]]) { button.classList.toggle("on", on); button.setAttribute("aria-pressed", String(on)); }
+  };
 
   // A drawing kept back while a part is carried, and how long after it is let go the one
   // kept back is put in (the drawing its move makes has come by then, and is the one seen).
@@ -213,6 +223,8 @@ export function mount(studio, main) {
   shapes = figureShapes({ studio, figure, page, stage, center, button: drawButton,
     changed: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); studio.focus(shapes.any() ? { label: `Figure · ${mixed?.on() ? mixed.name() : shapes.label()}` } : null); },
     clipItems: () => clipItems(), withParts: () => mixed });
+  // (Their Arrange and Align and Distribute in the inspector's Arrange, a line in Format going there.)
+  shapes.arrangeIn(() => showArrange());
   mixed = figureMixed({ studio, figure, shapes, page, box: (id) => boxOf(id),
     render: () => { renderInspector(); renderOutline(); renderBar(); placeMarks(); },
     frame: () => { const view = drawingOf()?.viewBox?.baseVal; return view && view.width ? [view.x, view.y, view.width, view.height] : [0, 0, 600, 400]; },
@@ -615,12 +627,33 @@ export function mount(studio, main) {
   // -- the inspector --
   function renderInspector() {
     root.classList.toggle("wide", figure.wantsRoom());
+    showTabs();
     keepFocus(inspectorBody, () => {
-      // (A shape drawn over the figure chosen: its panel, as a slide's shape's.)
-      clear(inspectorBody, figure.model && mixed?.on() ? mixed.panel() : figure.model && shapes?.any() ? shapes.panel() : figure.model ? figure.panel()
+      // (A shape drawn over the figure chosen: its panel, as a slide's shape's. Arrange: theirs.)
+      clear(inspectorBody, figure.model && arranging ? arrangeForm() : figure.model && mixed?.on() ? mixed.panel() : figure.model && shapes?.any() ? shapes.panel() : figure.model ? figure.panel()
         : h("div.empty", {}, "This file can’t be read as a figure. Fix it in Source; the messages below the drawing show where."));
     });
   }
+  // Arrange, as a deck's tab of it: the shapes drawn over the figure -- alone, or with its parts
+  // -- arranged, lined up and spaced (overlay.js, mixed.js, aligntools.js); its own parts put in
+  // one row or one column; nothing to align chosen, its rows greyed, saying what they need.
+  function arrangeForm() {
+    const head = (name, hint) => h("div.section.block-top.arrange-top", {}, h("div.insp-title", {}, icon("arrange"),
+      h("div.insp-words", {}, h("div.insp-name", {}, name), h("div.insp-hint", {}, hint))));
+    if (mixed?.on()) return [head(`${mixed.name()} Selected`, "The figure’s shapes stay where it lays them out; those drawn over it line up with them"), ...mixed.arrangePanel()];
+    if (shapes?.any()) return [head(shapes.label(), shapes.count() > 1 ? "Where they are, their order, and how they line up" : "Where it is, its order, and how it lines up"), ...shapes.arrangePanel()];
+    const chosen = figure.selected.filter((id) => id !== figure.model?.root).length;
+    const out = [head(chosen ? `${chosen === 1 ? "1 Shape" : `${chosen} Shapes`} Selected` : "Nothing Selected", chosen ? "The figure lays its shapes out" : "Choose shapes to arrange them")];
+    if (chosen) {
+      const ways = [["row", "Align in a Row", "Put them in one row, in the order they are seen"], ["column", "Align in a Column", "Put them in one column, in the order they are seen"]];
+      out.push(h("div.section", {}, h("div.section-title", {}, "The Figure’s Shapes"),
+        h("div.row", {}, ways.map(([way, label, title]) => { const button = ui.button(label, () => figure.alignChosen(way), { small: true, icon: "layout", title: figure.canAlign() ? title : "Choose two or more of its shapes" }); button.disabled = !figure.canAlign(); return button; })),
+        h("div.hint-line", {}, "Shapes drawn over it, ⇧-clicked, line up with them")));
+    }
+    if (shapes) out.push(...shapes.arrangePanel());
+    return out;
+  }
+  function showArrange() { arranging = true; renderInspector(); }
 
   // -- files --
   // A theme file made from the theme in use, next to the figure, and the figure put in it:
@@ -906,6 +939,8 @@ export function mount(studio, main) {
       setZoom(event.shiftKey ? null : 1);
       return;
     }
+    // ⇧⌘A, nothing to align chosen: Arrange shown all the same (the shapes', with them chosen).
+    if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === "a") { event.preventDefault(); shapes.revealArrange(); return; }
     figure.key(event);
   });
 
@@ -1052,6 +1087,9 @@ export function mount(studio, main) {
   const shapesChosen = () => figure.selected.some((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root));
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
+    // Align and Distribute… (⇧⌘A), Arrange shown, with nothing to align chosen too (the shapes'
+    // own, with shapes chosen: aligntools.js).
+    ...(shapes?.any() || mixed?.on() ? [] : [{ icon: "arrange", label: "Align and Distribute…", keys: "⇧⌘A", hint: "Arrange: Relative to, and the rest once shapes are chosen", run: () => shapes.revealArrange() }]),
     // Cut and Copy of what is chosen, as ⌘X and ⌘C do them, named for it; Paste of what was.
     ...(!typingNow() && clipOf() ? [{ icon: "cut", label: `Cut ${clipName(clipOf())}`, keys: "⌘X", run: () => clipChosen(true) },
       { icon: "copy", label: `Copy ${clipName(clipOf())}`, keys: "⌘C", run: () => clipChosen(false) }] : []),

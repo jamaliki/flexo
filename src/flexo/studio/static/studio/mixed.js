@@ -233,6 +233,8 @@ export function mixedChoice(ctx) {
     renderInspector: () => ctx.render(), showPanel: () => ctx.showPanel?.(),
     // (Arrange in a Grid…'s sheet: the shapes drawn where they would go.)
     show: (moves) => shapes.showMoves?.(moves),
+    // (The page's Arrange tab, where it has one: the shapes' editor's.)
+    tab: () => Boolean(shapes.arrangeTab?.()), showTab: () => shapes.showArrange?.(),
   });
 
   // -- what may be done with both, by name --
@@ -309,7 +311,8 @@ export function mixedChoice(ctx) {
           ui.button("Duplicate", () => duplicate(), { small: true, icon: "duplicate", title: "Duplicate (⌘D)" }),
           ui.button("Delete", () => remove(), { small: true, icon: "trash", kind: "danger", title: "Delete (⌫)" })),
         h("div.hint-line", {}, `The arrows move the ${wordsNow()[1].toLowerCase()}s; the ${wordsNow()[0].toLowerCase()}s stay where they are laid out.`)),
-      arranging.section(),
+      // (In the page's Arrange tab, where it has one: a line here going there.)
+      shapes.arrangeTab?.() ? arranging.link() : arranging.section(),
     ].filter(Boolean);
   }
 
@@ -318,6 +321,8 @@ export function mixedChoice(ctx) {
     pressShape, pickOwn, band, clear, chooseAll,
     remove, duplicate, clip, paste, restore,
     commands, shapeCommands, menuItems, context, key, panel,
+    // The page's Arrange tab: Align and Distribute for both, the shapes aligned with the rest.
+    arrangePanel: () => [arranging.section({ tab: true })],
     align: (side) => arranging.align(side),
   };
 }
