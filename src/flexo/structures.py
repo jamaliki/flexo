@@ -17,7 +17,10 @@ watercolour, pen and ink -- as a panel of the figure:
   strand and loop colours, while it is drawn with its own: frames of a diffusion run
   coloured by the structure they end as;
 - ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame it, and ``pan_x`` and
-  ``pan_y`` shift it (fractions of its box); ``cartoon``, ``sticks``, and ``surface``
+  ``pan_y`` shift it (fractions of its box); ``frame`` names a frame it shares with other
+  structures of the figure, all drawn with one camera, at one scale, about one centre -- a
+  diffusion trajectory, a motif held fixed -- as the first of them is turned and framed
+  (``flexo.structure_frames``); ``cartoon``, ``sticks``, and ``surface``
   say what to draw (mol-sketch selections), and ``site`` marks an active site -- a
   selection, or ``ligand`` for the largest ligand and what lies within ``site_within``
   Å of it -- its residues labelled with ``site_labels``;
@@ -25,7 +28,9 @@ watercolour, pen and ink -- as a panel of the figure:
   map with it (``auto``: the map the entry was built into; an EMDB ID; or a map file),
   and ``style`` sets any field of mol-sketch's style over the look, nested as
   mol-sketch writes them -- ``style: {fill: ink colour, line: {width: 2}}`` (see
-  ``flexo.structure_style``).
+  ``flexo.structure_style``);
+- its name is set over the molecule, or under it with ``title_side: bottom``; inline
+  markup gives a word of it a slant: ``[t]{italic} = 100``.
 
 mol-sketch is an optional dependency (``pip install "flexo[molecules]"``, or the
 ``python`` folder of a mol-sketch clone). The picture is drawn at print
@@ -151,10 +156,37 @@ def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
     )
 
 
+TITLE_SIDES = ("top", "bottom")
+"""Where a structure's name is set: over its molecule (``title_side: top``, as it is unless
+written) or under it (``bottom``)."""
+
+
+def structure_title_side(node: NodeSpec) -> str:
+    """Where the structure's name is set (``TITLE_SIDES``): over it, unless it says under."""
+
+    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
+    return written if written in TITLE_SIDES else TITLE_SIDES[0]
+
+
+def title_side_problem(node: NodeSpec) -> Diagnostic | None:
+    """A title side written that is neither, as a warning: the name is set over it."""
+
+    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
+    if node.kind != "structure" or written in TITLE_SIDES:
+        return None
+    return Diagnostic(
+        "structure.title-side",
+        f"A structure\u2019s name can\u2019t stand at “{written}”: it is set over the molecule.",
+        Severity.WARNING, entity_id=node.id,
+        hint="Its properties.title_side is top (over the molecule) or bottom (under it).",
+    )
+
+
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
-    """The panel: the molecule's box, under the component's name if it has one. A molecule
-    that can't be had (a PDB entry not downloaded, a file that does not read) is a dashed
-    panel the same size saying why, so the rest of the figure is drawn all the same."""
+    """The panel: the molecule's box, under the component's name if it has one -- or the name
+    under the box, ``title_side: bottom``. A molecule that can't be had (a PDB entry not
+    downloaded, a file that does not read) is a dashed panel the same size saying why, so the
+    rest of the figure is drawn all the same."""
 
     measures = units(style)
     u = measures.u
@@ -162,21 +194,24 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     height = float(node.property("height") or 15.0 * u)  # type: ignore[arg-type]
     words = []
     top = 0.0
+    named = 0.0
     if node.label:
         # A long name is set on as many lines as the panel is wide, not over its edges.
         title = structure_title(node, style)
+        named = title.height + 0.3 * u
+        below = structure_title_side(node) == "bottom"
         words.append(
             Words(
                 f"{node.id}.label",
                 node.label,
                 title,
                 width / 2.0,
-                title.baseline,
+                height + 0.3 * u + title.baseline if below else title.baseline,
                 weight=style.typography.title_weight,
             )
         )
-        top = title.height + 0.3 * u
-    size = Size(width, top + height)
+        top = 0.0 if below else named
+    size = Size(width, named + height)
     middle = (top + height / 2.0) / size.height
     ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
     problem = _problem(node, style)

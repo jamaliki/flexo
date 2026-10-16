@@ -130,11 +130,14 @@ gene, per domain, per condition), and has ports where arrows belong.
 - `timeline(id, events=[{"at": 0, "label": "Seed"}], spans=[{"start": 1, "end":
   3, "label": "Treatment"}], unit="day")`.
 - `structure(id, "1ubq" or "model.cif", look=, colors={"A": "kinase"}, yaw=,
-  pitch=, cartoon=, sticks=, surface=, site=)`: a molecule drawn by hand by
-  mol-sketch (the `molecules` extra); a chain can take the tone of its domain.
+  pitch=, cartoon=, sticks=, surface=, site=, frame=, title_side=)`: a molecule drawn by
+  hand by mol-sketch (the `molecules` extra); a chain can take the tone of its domain.
   `colors` keys are chains, residues (`SER195`, a ligand `6V0401`) or selections
   (`"resi 10-24"`), a later one over an earlier one; `ss_from="end.pdb"` colours
-  it by another file's secondary structure.
+  it by another file's secondary structure. Structures naming one `frame` (a diffusion
+  trajectory, a motif held fixed) are drawn with one camera, at one scale, about one
+  centre, turned and framed as the first of them is; `title_side="bottom"` sets the
+  name under the molecule.
   `look="flat"`: PyMOL's flat, outlined style in the theme's fills, as vector shapes
   that `flexo retheme` recolours.
 

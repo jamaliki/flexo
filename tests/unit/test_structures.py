@@ -526,8 +526,9 @@ def test_every_field_of_mol_sketchs_style_is_offered_or_said_why_not() -> None:
 
 
 def test_a_structures_own_fields_are_each_in_one_of_its_panes() -> None:
-    """A structure's panel is its words, then its panes: each of its own fields (its file,
-    what it draws, its site, its map, its view) is in one of them, where it belongs."""
+    """A structure's panel is its words (and where they stand), then its panes: each of its
+    own fields (its file, what it draws, its site, its map, its view, its frame) is in one of
+    them, where it belongs."""
 
     from flexo.structure_style import PANES
     from flexo.studio.figure_parts import catalogue
@@ -543,7 +544,9 @@ def test_a_structures_own_fields_are_each_in_one_of_its_panes() -> None:
         if field.get("own")
     ]
     fields = [field["key"] for field in part["fields"] if field["type"] != "molsketch"]
-    assert sorted(placed) == sorted(key for key in fields if key != "label")
+    assert sorted(placed) == sorted(
+        key for key in fields if key not in {"label", "properties.title_side"}
+    )
     assert not [field for field in part["fields"] if field.get("more")]
     # What is drawn as a cartoon, sticks or a surface, a click away: the look's, none, or one
     # of those most reached for.

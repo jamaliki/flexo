@@ -27,6 +27,7 @@ from flexo.layout import fit_figure, measure_figure
 from flexo.pages import lettered
 from flexo.routing import route_figure
 from flexo.routing.room import crossing_room, crossings, room_needed, with_room
+from flexo.structure_frames import framed
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import SVGDocument
 from flexo.themes import figure_palette, figure_style
@@ -68,6 +69,8 @@ def compile_figure(
     held = (frames, lines) if any(lines) else None
     # Each shape's words in the weight and slant it asks for (``flexo.wording``).
     figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
+    # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames).
+    figure = framed(figure, layout_style)
     figure = _with_margin_for(frames, figure, layout_style)
     figure = _with_room_for_titles(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)

@@ -1498,6 +1498,8 @@ class GroupBuilder:
         scheme: str | None = None,
         step: int | None = None,
         ss_from: str | Path | None = None,
+        frame: str | None = None,
+        title_side: str | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1520,8 +1522,10 @@ class GroupBuilder:
         of mol-sketch's style over the look (``{"fill": "ink colour", "line":
         {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
         EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
-        points (20 by 15 label sizes by default), its name above it. Needs mol-sketch
-        installed.
+        points (20 by 15 label sizes by default), its name above it (``title_side=
+        "bottom"``: under it). Structures naming the same ``frame`` are drawn with one
+        camera, at one scale, about one centre, turned and framed as the first of them is
+        (``flexo.structure_frames``). Needs mol-sketch installed.
         """
 
         properties: dict[str, object] = {"source": str(source)}
@@ -1539,7 +1543,7 @@ class GroupBuilder:
             ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
             ("palette", palette), ("density", None if density is None else str(density)),
-            ("scheme", scheme), ("step", step),
+            ("scheme", scheme), ("step", step), ("frame", frame), ("title_side", title_side),
             ("ss_from", None if ss_from is None else str(ss_from)),
         ):
             if value is not None:

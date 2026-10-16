@@ -793,6 +793,7 @@ _CAMERA = _pane(
         _section(
             "View",
             (
+                _own("properties.frame"),
                 _own("properties"),
                 _own("properties.yaw"),
                 _own("properties.pitch"),
