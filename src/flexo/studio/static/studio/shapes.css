@@ -80,6 +80,8 @@
 /* A group entered (groups.js): a quiet dotted frame round its shapes, and a chip over it naming
    where one is -- each level a way back out to it, ✕ out a level (Esc). */
 .shape-entered-frame { fill: none; stroke: var(--accent-line); stroke-dasharray: 1 3; stroke-linecap: round; }
+/* A band dragged in it, choosing its shapes: as the page's own band is drawn. */
+.shape-band { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--accent); }
 /* (Under the shapes' layer: a handle over it is still the handle's to drag.) */
 .group-chip { position: absolute; z-index: 5; display: flex; align-items: center; gap: 0; height: 22px; box-sizing: border-box; padding: 0 2px 0 2px; border-radius: 7px; background: var(--raised); border: 1px solid var(--line-strong); box-shadow: var(--shadow-1); font: 500 11px/1 var(--font); color: var(--ink-3); white-space: nowrap; pointer-events: auto; user-select: none; -webkit-user-select: none; cursor: default; }
 .group-chip[hidden] { display: none; }

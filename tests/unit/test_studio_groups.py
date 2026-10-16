@@ -382,3 +382,193 @@ def test_a_group_s_shape_may_be_locked_where_the_page_lets_its_shapes_be() -> No
         freeform.checked(group(box(0, 0, locked=True)))
     with pytest.raises(freeform.ShapeError, match="true or false"):
         freeform.checked(group(box(0, 0, locked="yes")), extra=("locked",))
+
+
+# -- what is outside the group entered: what a piece in it catches at, lines glued across --
+
+
+def test_what_a_piece_inside_a_group_catches_at_is_every_level_s_other_shapes() -> None:
+    made = run(
+        """
+      return {
+        top: G.outside(PAGE, []),
+        one: G.outside(PAGE, [1]).map((one) => [one.path, one.spec.id ?? one.spec.kind]),
+        two: G.outside(PAGE, [1, 1]).map((one) => [one.path, one.spec.id ?? one.spec.kind]),
+        gone: G.outside(PAGE, [0, 4]).map((one) => one.path),
+        places: [...G.places(PAGE)],
+        deep: G.shapeAt(PAGE, [1, 1, 0]).id, none: G.shapeAt(PAGE, [0, 2]) ?? null,
+        holds: [G.holds([1], [1, 1, 0]), G.holds([1, 1, 0], [1, 1, 0]), G.holds([1, 0], [1, 1]),
+          G.holds([1, 1], [1])],
+      };
+    """,
+        [
+            box(0, 0, id="a"),
+            group(box(10, 0, id="b"), group(box(20, 0, id="deep"), box(30, 0)), id="g"),
+            box(40, 0),
+        ],
+    )
+    # At the page's own level, nothing is outside; in a group, the page's other shapes; two
+    # levels in, those and the outer group's other shapes too (a group among them, one shape).
+    assert made["top"] == []
+    assert made["one"] == [[[0], "a"], [[2], "rectangle"]]
+    assert made["two"] == [[[0], "a"], [[2], "rectangle"], [[1, 0], "b"]]
+    # (A path through a shape that is no group: the page's level alone.)
+    assert made["gone"] == [[1], [2]]
+    assert made["places"] == [["a", [0]], ["g", [1]], ["b", [1, 0]], ["deep", [1, 1, 0]]]
+    assert made["deep"] == "deep" and made["none"] is None
+    assert made["holds"] == [True, True, False, False]
+
+
+# A shape (X) on the page; a group with a shape (Y) and a line glued from Y to X; a line on the
+# page glued to Y; a group with a line glued between its own two shapes.
+GLUED = [
+    box(0, 0, id="X"),
+    group(
+        box(100, 0, id="Y"),
+        {
+            "kind": "line",
+            "id": "L",
+            "from": {"shape": "Y", "side": "left"},
+            "to": {"shape": "X", "side": "right"},
+        },
+    ),
+    {"kind": "line", "id": "M", "from": {"shape": "Y", "side": "bottom"}, "to": [100, 100]},
+    group(
+        box(200, 0, id="P"),
+        box(300, 0, id="Q"),
+        {"kind": "arrow", "from": {"shape": "P"}, "to": {"shape": "Q"}},
+    ),
+    {"kind": "line", "from": [0, 50], "to": [50, 50]},
+]
+
+
+def test_lines_glued_from_one_level_to_another_are_found_to_follow_what_moves() -> None:
+    made = run(
+        """
+      const glued = (moving) => G.gluedAcross(PAGE, moving);
+      return {
+        // X moved on the page: the line in the group glued to it.
+        x: glued([[0]]),
+        // The group moved: its line glued to X (not moving), and the page's line glued to Y in it.
+        group: glued([[1]]),
+        // Y moved inside the group: the page's line, and the line beside it.
+        y: glued([[1, 0]]),
+        // The line itself moved: not one to follow (it is drawn as it is moved); M moved: none.
+        line: glued([[1, 1]]), m: glued([[2]]),
+        // A group moved with its line glued between its own shapes: it moves as it is.
+        own: glued([[3]]), ownShape: glued([[3, 0]]),
+        none: glued([[4]]),
+      };
+    """,
+        GLUED,
+    )
+    assert made["x"] == [[1, 1]]
+    assert made["group"] == [[1, 1], [2]]
+    assert made["y"] == [[1, 1], [2]]
+    assert made["line"] == [] and made["m"] == []
+    assert made["own"] == [] and made["ownShape"] == [[3, 2]]
+    assert made["none"] == []
+
+
+def test_inside_a_group_what_is_outside_it_is_found_from_where_one_is() -> None:
+    made = run(
+        EDITOR
+        + """
+      const at0 = { outside: tools.outside(), glued: tools.glued([0]) };
+      tools.enter(1);
+      return {
+        at0,
+        outside: tools.outside().map((one) => one.path),
+        located: [tools.locate("X"), tools.locate("L"), tools.locate("nobody")],
+        shape: tools.shapeAt([1, 0]).id,
+        drawn: [tools.drawnAt([1, 1]), tools.drawnAt([0])],
+        // Y (index 0 where one is) moved: the line beside it, and the page's line glued to it.
+        glued: tools.glued([0]),
+        faded: [tools.faded([1, 0]), tools.faded([0])],
+      };
+    """,
+        [*GLUED[:1], {**GLUED[1], "opacity": 0.5}, *GLUED[2:]],
+    )
+    assert made["at0"] == {"outside": [], "glued": [[1, 1]]}
+    assert made["outside"] == [[0], [2], [3], [4]]
+    assert made["located"] == [[0], [1, 1], None]
+    assert made["shape"] == "Y"
+    assert made["drawn"] == ["slide1.shapes.1.1", "slide1.shapes.0"]
+    assert made["glued"] == [[1, 1], [2]]
+    assert made["faded"] == [0.5, 1]
+
+
+def test_pressed_on_the_page_s_empty_space_inside_a_group_one_stays_for_a_band() -> None:
+    made = drawn("""
+      tools.enter(1, { at: at(45, 65), deep: true });
+      // Nothing there, at any level, and nothing of the page's own (the editor's band): still in.
+      const clear = [tools.outward(at(500, 500), { clear: () => true }), tools.path(), chosen];
+      // On something of the page's own (a slide's object): out of every group, as before.
+      const object = [tools.outward(at(500, 500), { clear: () => false }), tools.path()];
+      return { clear, object };
+    """)
+    assert made["clear"] == [None, [1, 1, 2], [1]]
+    assert made["object"] == [None, []]
+
+
+def test_shift_clicked_pieces_are_chosen_together_in_the_group_nearest_round_them() -> None:
+    made = run("""
+      return {
+        two: G.widened([[1, 1, 0]], [1, 1, 1]),
+        apart: G.widened([[1, 1, 0]], [1, 1, 2, 1]),
+        page: G.widened([[1, 1, 0]], [0]),
+        out: G.widened([[1, 1, 0], [1, 1, 1]], [1, 0]),
+        // The piece chosen, or in one chosen, or nothing chosen: as ever.
+        same: G.widened([[1, 1, 0]], [1, 1, 0]), inside: G.widened([[1]], [1, 1, 0]),
+        none: G.widened([], [1, 0]),
+      };
+    """)
+    assert made["two"] == {"level": [1, 1], "picks": [0, 1]}
+    assert made["apart"] == {"level": [1, 1], "picks": [0, 2]}
+    assert made["page"] == {"level": [], "picks": [1, 0]}
+    assert made["out"] == {"level": [1], "picks": [1, 0]}
+    assert made["same"] is None and made["inside"] is None and made["none"] is None
+
+
+def test_a_click_then_a_shift_click_on_two_pieces_of_a_drawing_chooses_both_in_it() -> None:
+    made = drawn("""
+      // The drawing clicked at a box (chosen whole, the box under the pointer kept), then
+      // another box of it ⇧-clicked: in the group round both, both chosen.
+      const click = (x, y, index) => { chosen = [index]; tools.pressed(at(x, y), index); };
+      click(15, 15, 1);
+      const two = [tools.extend(at(45, 15)), tools.path(), chosen];
+      tools.leave();
+      // In groups of their own in it: those of the group round them both.
+      click(15, 15, 1);
+      const apart = [tools.extend(at(45, 65)), tools.path(), chosen];
+      tools.leave();
+      click(80, 90, 1);
+      const frame = [tools.extend(at(15, 15)), tools.path(), chosen];
+      tools.leave();
+      // The same piece again, the page's empty space, another shape on the page: as ever (the
+      // editor's: chosen or not where one is).
+      click(15, 15, 1);
+      const same = [tools.extend(at(16, 16)), tools.path()];
+      const empty = [tools.extend(at(500, 500)), tools.path()];
+      const onPage = [tools.extend(at(205, 205)), tools.path()];
+      // Chosen some other way (no piece of it clicked): as ever.
+      tools.pressed(at(205, 205), 0);
+      chosen = [1];
+      const other = [tools.extend(at(45, 15)), tools.path()];
+      // In the group, two chosen: ⇧ on a piece outside it, in the drawing -- out to the
+      // drawing, the group and that piece chosen.
+      click(15, 15, 1);
+      tools.extend(at(45, 15));
+      const out = [tools.extend(at(80, 90)), tools.path(), chosen];
+      return { two, apart, frame, same, empty, onPage, other, out };
+    """)
+    assert made["two"] == [True, [1, 1], [0, 1]]
+    assert made["apart"] == [True, [1, 1], [0, 2]]
+    assert made["frame"] == [True, [1], [0, 1]]
+    assert (
+        made["same"] == [False, []]
+        and made["empty"] == [False, []]
+        and made["onPage"] == [False, []]
+    )
+    assert made["other"] == [False, []]
+    assert made["out"] == [True, [1], [1, 0]]

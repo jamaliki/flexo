@@ -109,6 +109,82 @@ export const enterable = (spec) => isGroup(spec) && !spec.locked && spec.shapes.
 // page names it), then its place in each level (`slide1.shapes.3.0.2`).
 export const drawnId = (outer, path, index) => [outer, ...path.slice(1), index].join(".");
 
+// -- the page's shapes at every level, seen from a group entered --
+
+// The shape at `path` (an index in each level) in `list`, however deep, or undefined.
+export function shapeAt(list, path) {
+  let spec, shapes = list;
+  for (const index of path) {
+    spec = Array.isArray(shapes) ? shapes[index] : undefined;
+    shapes = spec?.shapes;
+  }
+  return spec;
+}
+
+// Whether the shape at `outer` is the one at `path`, or holds it (a group, a shape in it).
+export const holds = (outer, path) => outer.length <= path.length && outer.every((index, depth) => path[depth] === index);
+
+// Every shape outside the group at `path`, level by level -- the page's own but the group that
+// leads in, then each group's round it but the one that leads in -- where each is: what a piece
+// inside catches at as it is dragged, as those beside it do. (A group among them is one shape.)
+export function outside(list, path) {
+  const out = [];
+  let shapes = list;
+  path.forEach((index, depth) => {
+    if (!Array.isArray(shapes)) return;
+    shapes.forEach((spec, n) => { if (n !== index && spec && typeof spec === "object") out.push({ spec, path: [...path.slice(0, depth), n] }); });
+    shapes = isGroup(shapes[index]) ? shapes[index].shapes : null;
+  });
+  return out;
+}
+
+// Where each shape named is, at every level: its name (`id`) to its path.
+export function places(list) {
+  const found = new Map();
+  const walk = (items, at) => items.forEach((item, n) => {
+    if (!item || typeof item !== "object") return;
+    if (item.id !== undefined && item.id !== null) found.set(String(item.id), [...at, n]);
+    if (isGroup(item)) walk(item.shapes, [...at, n]);
+  });
+  walk(Array.isArray(list) ? list : [], []);
+  return found;
+}
+
+// ⇧- or ⌘-click on `piece` (the path to the shape under the pointer, as deep as ⌥-click finds
+// it) with those at `held` chosen (the first clicked, as deep): where to choose them together --
+// the group nearest round them all (`level`), and its shapes they are, or are in (`picks`, in
+// the order they were chosen). Null where the piece is one chosen, or in one: chosen or not
+// as ever.
+export function widened(held, piece) {
+  if (!held.length || held.some((path) => holds(path, piece) || holds(piece, path))) return null;
+  const all = [...held, piece];
+  let depth = 0;
+  while (all.every((path) => path.length > depth + 1 && path[depth] === all[0][depth])) depth += 1;
+  return { level: all[0].slice(0, depth), picks: [...new Set(all.map((path) => path[depth]))] };
+}
+
+const isLine = (spec) => spec?.kind !== "group" && "from" in spec && "to" in spec;
+const gluedNames = (spec) => [spec.from, spec.to].filter((end) => end && !Array.isArray(end) && typeof end === "object" && end.shape !== undefined).map((end) => String(end.shape));
+
+// The lines of the page, at every level, to draw again as those at `moving` (paths) move: one
+// not moving with an end glued to a shape moving (or in one), and one moving with them -- in a
+// group moved -- with an end glued to a shape that is not. (Those moving are drawn as they are
+// moved; a line moved with what it is glued to moves as it is.) Where each is.
+export function gluedAcross(list, moving, found = places(list)) {
+  const moves = (path) => moving.some((one) => holds(one, path));
+  const out = [];
+  const walk = (items, at) => items.forEach((item, n) => {
+    if (!item || typeof item !== "object") return;
+    const path = [...at, n];
+    if (isGroup(item)) { walk(item.shapes, path); return; }
+    if (!isLine(item) || moving.some((one) => one.length === path.length && holds(one, path))) return;
+    const mine = moves(path);
+    if (gluedNames(item).some((name) => found.has(name) && moves(found.get(name)) !== mine)) out.push(path);
+  });
+  walk(Array.isArray(list) ? list : [], []);
+  return out;
+}
+
 // -- the page's host, seen from inside a group --
 
 const listOf = (host) => { const list = host.list(); return Array.isArray(list) ? list : []; };
@@ -240,8 +316,9 @@ export function groupTools(page) {
 
   // Pressed where nothing of the group is: a shape outside it, at its own level -- out to
   // there, nothing chosen yet (its index, for the press to choose); else out of every group
-  // (null). Outside one, null.
-  function outward(event) {
+  // (null) -- but, on the page's empty space (`clear`), still in it: the press is a band there,
+  // or a click that leaves them once it is let go (the editor's). Outside one, null.
+  function outward(event, { clear = () => false } = {}) {
     const from = here();
     if (!from.length) return null;
     for (let depth = from.length - 1; depth >= 0; depth -= 1) {
@@ -251,9 +328,20 @@ export function groupTools(page) {
         return found.index;
       }
     }
-    leave();
+    if (!clear()) leave();
     return null;
   }
+
+  // What is outside the group entered, for what is dragged in it to catch at, and the lines
+  // glued from one level to another: where a named shape is (a path from the page's own), the
+  // shape at a path, and the id the page draws it with -- the names found again only once the
+  // page's shapes change.
+  let placed = { list: null, places: new Map() };
+  const placesNow = () => {
+    const list = topList();
+    if (placed.list !== list) placed = { list, places: places(list) };
+    return placed.places;
+  };
 
   // ⌥-click: the shape under the pointer however deep in groups, those round it entered.
   function deepPick(event) {
@@ -262,6 +350,31 @@ export function groupTools(page) {
     go(found.path, [found.index]);
     return true;
   }
+
+  // ⇧- or ⌘-click on a piece of a group chosen (or of one beside it, or outside the group one
+  // is in): in the group nearest round them both, what they are of it chosen together -- two
+  // boxes of a drawing, chosen by a click and a ⇧-click from the page, the drawing entered and
+  // both chosen; in groups of their own in it, those groups. (The piece first clicked is the
+  // one under the pointer then, as deep as ⌥-click finds it: `pressed`.) False where it is one
+  // chosen, or in one, or beside them where one is: chosen or not there, as ever.
+  let first = null;
+  function pressed(event, index) {
+    const found = under(event, here(), true);
+    first = found.index === null ? null : { on: page.page(), from: [...here()], pick: index, path: [...found.path, found.index] };
+  }
+  function extend(event) {
+    const from = here(), picks = editor.chosen();
+    if (!picks.length) return false;
+    const found = under(event, [], true);
+    if (found.index === null) return false;
+    const mine = first && first.on === page.page() && same(first.from, from) && picks.length === 1 && picks[0] === first.pick
+      && holds([...from, first.pick], first.path) && shapeAt(topList(), first.path);
+    const next = widened(mine ? [first.path] : picks.map((index) => [...from, index]), [...found.path, found.index]);
+    if (!next || same(next.level, from)) return false;
+    go(next.level, next.picks);
+    return true;
+  }
+  const same = (a, b) => a.length === b.length && a.every((index, depth) => b[depth] === index);
 
   // Undone or redone: inside the group the change was made in, while it is there (`said`, the
   // shapes' mark; `picks`, what it chose). A figure drawn again only later: once it is.
@@ -469,10 +582,18 @@ export function groupTools(page) {
   }
 
   return {
-    host, bind, enter, out, leave, outward, deepPick, restore, check, update, paint, key, commands, menuItems, crumbs, panelRows, ungroupAll, names,
+    host, bind, enter, out, leave, outward, deepPick, pressed, extend, restore, check, update, paint, key, commands, menuItems, crumbs, panelRows, ungroupAll, names,
     path: () => [...here()],
     depth: () => here().length,
     // The page's own shapes, whatever group is entered.
     top: topList,
+    outside: () => outside(topList(), here()),
+    locate: (name) => placesNow().get(String(name)) || null,
+    shapeAt: (at) => shapeAt(topList(), at),
+    drawnAt: (at) => [page.idOf(at[0]), ...at.slice(1)].join("."),
+    // The lines to draw again as those at `indices` where one is move (gluedAcross).
+    glued: (indices) => gluedAcross(topList(), indices.map((index) => [...here(), index]), placesNow()),
+    // The opacity of the groups round the shape at `at`, all told.
+    faded: (at) => at.slice(0, -1).reduce((made, _, depth) => made * Number(shapeAt(topList(), at.slice(0, depth + 1))?.opacity ?? 1), 1),
   };
 }

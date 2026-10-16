@@ -329,7 +329,8 @@ export function mount(studio, main) {
   stage.addEventListener("pointerdown", (event) => {
     // (A shape being drawn may start off the page: the page grows to hold it.)
     if (shapes.armed() && !page.contains(event.target) && shapes.press(event)) return;
-    if (event.target === stage && figure.model) figure.band(event);
+    // (Inside a group of shapes, a band chooses among its shapes, the group kept: shapes.js.)
+    if (event.target === stage && figure.model && !shapes.band(event)) figure.band(event);
   });
 
   // Files dropped on the figure are added to it: pictures and drawings (PNG, JPEG, SVG, PDF,
