@@ -1,6 +1,7 @@
-"""Snapping on or off (``studio/static/studio/snapping.js``): what ⌘ does to a drag either way,
-kept for the person from one launch to the next, and turned in one tab, turned in the others --
-run in Node, with this browser's storage stood in for."""
+"""Snapping to guides, to the grid or off (``studio/static/studio/snapping.js``): what ⌘ does to
+a drag either way, kept for the person from one launch to the next, turned in one tab, turned in
+the others, and what a box catches at on the grid -- run in Node, with this browser's storage
+stood in for."""
 
 from __future__ import annotations
 
@@ -152,4 +153,79 @@ def test_turned_in_another_tab_it_turns_here_without_storing_again() -> None:
         "off": False,
         "on": True,
         "writes": 0,
+    }
+
+
+def test_the_magnet_goes_from_guides_to_the_grid_to_off_and_round_again() -> None:
+    made = run("""
+      const s = await fresh();
+      const told = [];
+      s.onSnapping((on, how, mode) => told.push([on, how, mode]));
+      const seen = [s.snapMode()];
+      for (let turn = 0; turn < 3; turn += 1) seen.push(s.cycleSnapping());
+      // On to the grid, then turned on: still the grid's; off, then on: guides.
+      s.setSnapMode("grid");
+      const stays = s.setSnapping(true) && s.snapMode();
+      s.setSnapping(false);
+      s.setSnapping(true);
+      const back = s.snapMode();
+      s.setSnapMode("sideways");
+      return { seen, told: told.slice(0, 3), stays, back, odd: s.snapMode(),
+        grid: (s.setSnapMode("grid"),
+          [s.snapping(), s.toGrid(), s.toGuides(), s.free(false), s.free(true), s.snapWord()]) };
+    """)
+    assert made == {
+        "seen": ["guides", "grid", "off", "guides"],
+        "told": [[True, "here", "grid"], [False, "here", "off"], [True, "here", "guides"]],
+        "stays": "grid",
+        "back": "guides",
+        "odd": "guides",
+        # Snapping to the grid is snapping: ⌘ frees a drag, as it does from guides.
+        "grid": [True, True, False, False, True, "grid"],
+    }
+
+
+def test_the_grid_is_kept_as_its_word_and_read_back() -> None:
+    made = run("""
+      const first = await fresh();
+      first.setSnapMode("grid");
+      const stored = kept.get("flexo-studio-snapping");
+      const again = (await fresh()).snapMode();
+      first.setSnapMode("guides");
+      return { stored, again, guides: kept.get("flexo-studio-snapping"),
+        words: ["on", "grid", "off", "maybe", undefined].map((word) => first.fromWord(word)) };
+    """)
+    assert made == {
+        "stored": "grid",
+        "again": "grid",
+        "guides": "on",
+        "words": ["guides", "grid", "off", None, None],
+    }
+
+
+def test_a_box_catches_at_the_grid_by_its_edges_and_at_the_layout_by_its_middle_too() -> None:
+    made = run("""
+      const s = await fresh();
+      // Squares' lines at 0, 12, 24, 36; a layout's at 30 (its middle may catch there).
+      const values = [0, 12, 24, 30, 36];
+      values.edges = new Set([0, 12, 24, 36]);
+      return {
+        // A box 3.4 wide, its middle a hair from 12 -- but on the squares a middle does not
+        // catch; its left does, at 12, a little further.
+        edges: s.nearest([10.5, 12.2, 13.9], values, 2),
+        // Its middle near the layout's line: caught there.
+        middle: s.nearest([26.5, 29.5, 32.5], values, 2),
+        // A point catches at the squares' lines by itself.
+        point: s.nearest([11], values, 2),
+        // Guides (no edges said): any of the three, as ever.
+        guides: s.nearest([13.5, 18.5, 23.5], [19], 2),
+        none: s.nearest([5], values, 2),
+      };
+    """)
+    assert made == {
+        "edges": {"gap": 1.5, "at": 12},
+        "middle": {"gap": 0.5, "at": 30},
+        "point": {"gap": 1, "at": 12},
+        "guides": {"gap": 0.5, "at": 19},
+        "none": None,
     }

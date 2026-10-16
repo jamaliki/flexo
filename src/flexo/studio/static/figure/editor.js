@@ -14,6 +14,8 @@ import { figureShapes } from "/static/kinds/figure/overlay.js";
 import { figureMixed } from "/static/kinds/figure/mixed.js";
 import { clipsOf } from "/static/studio/mixing.js";
 import { magnetButton } from "/static/studio/magnet.js";
+import { gridButton, gridCommand } from "/static/studio/gridpaper.js";
+import { fromShapes, fromParts, together } from "/static/studio/helpkeys.js";
 import { colourKey, boxAround } from "/static/studio/colourkey.js";
 import { shapeColours, shapesBox } from "/static/studio/shapecolours.js";
 import { partColours, partsBox } from "/static/kinds/figure/partcolours.js";
@@ -48,9 +50,7 @@ export function mount(studio, main) {
     zoomValue,
     ui.button("", () => zoomBy(1.25), { kind: "ghost", icon: "plus", small: true, title: "Zoom In (⌘+)" }),
     ui.button("Fit", () => setZoom(null), { kind: "ghost", small: true, title: "Zoom to Fit (⇧⌘0)" }),
-    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }),
-    // Snapping, on or off (%), for the shapes drawn over it and its parts' handles alike.
-    h("span.zoom-sep"), magnetButton());
+    ui.button("1:1", () => setZoom(1), { kind: "ghost", small: true, title: "Actual Size (⌘0)" }));
   // Clicked, a zoom button does not keep the keys (as a Mac window's toolbar buttons don't):
   // it would look pressed while the drawing is zoomed on from the keyboard.
   for (const button of zoomBar.querySelectorAll("button")) button.addEventListener("mousedown", (event) => event.preventDefault());
@@ -127,7 +127,9 @@ export function mount(studio, main) {
   // Design: the Design bar across the window, as a deck's -- the figure's theme, colours, font,
   // page, panel letters and sizes (designbar.js).
   const designButton = ui.button("Design", () => design.toggle(), { kind: "ghost", icon: "palette", title: "Show Design (⇧⌘D)" });
-  studio.actions.append(h("span.sep"), formatButton, arrangeButton, designButton);
+  // Snap (%), for the shapes drawn over it and its parts' handles alike, and Grid (#), beside
+  // Arrange.
+  studio.actions.append(h("span.sep"), magnetButton(), gridButton(), h("span.sep"), formatButton, arrangeButton, designButton);
   const showTabs = () => {
     for (const [button, on] of [[formatButton, !arranging], [arrangeButton, arranging]]) { button.classList.toggle("on", on); button.setAttribute("aria-pressed", String(on)); }
     designButton.classList.toggle("on", Boolean(design?.open));
@@ -1125,6 +1127,11 @@ export function mount(studio, main) {
     return chosenName() || (chosen.length > 1 ? `${chosen.length} Lines` : "Line");
   };
   const shapesChosen = () => figure.selected.some((id) => figure.nodeOf(id) || (figure.groupOf(id) && id !== figure.model?.root));
+  // What is being done to the figure now, for the keys the help bar along the window's foot
+  // says (helpbar.js): a drag of the shapes drawn over it or of its own -- one sized, a line
+  // bent (their marks on the page) -- its lines drawn, and what is chosen, both kinds together.
+  studio.help = () => together({ chosen: mixed?.on() ? "mixed" : "" }, fromShapes(shapes?.doing?.()),
+    fromParts(figure, { sizing: page.classList.contains("fig-sizing"), bending: document.body.classList.contains("fig-grabbing") }));
   studio.commands = () => [
     { icon: "plus", label: "Add Shape…", run: () => figure.addPalette(addButton) },
     // Align and Distribute… (⇧⌘A), Arrange shown, with nothing to align chosen too (the shapes'
@@ -1190,6 +1197,8 @@ export function mount(studio, main) {
     { icon: "export", label: "Export as PNG…", run: () => studio.exportFiles(["png"]) },
     { icon: "code", label: "Show Source", run: () => { state.tab = "source"; showTab(); } },
     design.command(),
+    // The grid over the figure (gridpaper.js).
+    gridCommand(),
     { icon: "list", label: "Show Shapes", run: () => { state.tab = "parts"; showTab(); } },
     ...(figure.model ? figure.model.nodes.map((node) => ({ icon: "target", label: `Select ${inQuotes(figure.nameOf(node.id))}`, hint: node.id, run: () => figure.select([node.id]) })) : []),
   ];

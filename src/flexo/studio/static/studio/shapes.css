@@ -2,6 +2,22 @@
    handles and guides over the page, in its own units; the popover of their kinds; their
    words typed in them; their settings in the inspector. */
 .shape-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 6; }
+/* The grid over the page (grid.js, gridpaper.js), in its own units: graph paper in non-photo
+   blue, every fifth line darker, the middles darker still, and the layout over it in the mark's
+   red -- under the frames and handles, never taking a click; lighter on a dark page. */
+.flexo-grid { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.flexo-grid > svg { display: block; width: 100%; height: 100%; }
+.flexo-grid path, .flexo-grid rect { fill: none; vector-effect: non-scaling-stroke; }
+.flexo-grid .grid-minor { stroke: rgba(60, 160, 220, 0.17); }
+.flexo-grid .grid-major { stroke: rgba(40, 140, 205, 0.36); }
+.flexo-grid .grid-middle { stroke: rgba(25, 120, 190, 0.72); }
+.flexo-grid .grid-layout { stroke: rgba(200, 16, 46, 0.72); }
+.flexo-grid .grid-place { stroke: rgba(200, 16, 46, 0.5); fill: rgba(200, 16, 46, 0.045); }
+.flexo-grid.dark .grid-minor { stroke: rgba(140, 200, 245, 0.2); }
+.flexo-grid.dark .grid-major { stroke: rgba(140, 200, 245, 0.4); }
+.flexo-grid.dark .grid-middle { stroke: rgba(165, 212, 250, 0.75); }
+.flexo-grid.dark .grid-layout { stroke: rgba(255, 112, 124, 0.85); }
+.flexo-grid.dark .grid-place { stroke: rgba(255, 112, 124, 0.6); fill: rgba(255, 112, 124, 0.06); }
 .shape-mark { fill: none; stroke: var(--accent); }
 .shape-mark.hover { stroke: var(--accent-line); stroke-dasharray: 5 3; }
 .shape-mark.along { stroke: var(--accent); stroke-opacity: 0.3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: none; }

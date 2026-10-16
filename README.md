@@ -664,7 +664,7 @@ middle along the line, toward its target (`0.25`) or its source (`-0.25`). In th
 studio, drag the handle on a curved or straight line's middle anywhere: the curve
 passes through it, and it snaps half way between the ends, to straight, to where
 the line bows of itself, and level with either end (hold ⌘ to place it freely -- or, with
-snapping turned off by the magnet in the zoom bar, to snap it;
+snapping turned off by Snap (the magnet) in the toolbar, to snap it;
 double-click it to let the line bow of itself again). Where a curve bows out of its
 container, the container makes room for it, as it does for any line.
 
@@ -849,9 +849,12 @@ In the studio, Draw in the figure's toolbar offers every kind: drag on the figur
 one (a click makes it its usual size -- or, for a ring, a highlight, a box or a brace, a click
 on a part draws it round that part, a filled one behind it so that it hides nothing), and it
 is moved, sized, turned, bent, glued, styled, grouped, stacked and copied as on a slide,
-catching at the parts' edges and middles as it goes -- unless the magnet in the zoom bar (or
-%) has turned snapping off, when nothing catches, a line's end is glued only with ⌘ held,
-and a part's handles snap only with ⌘ too. A shape drawn on a part is put on it, and moves
+catching at the parts' edges and middles as it goes -- unless Snap (the magnet) in the toolbar
+(or %) has turned snapping off, when nothing catches, a line's end is glued only with ⌘ held,
+and a part's handles snap only with ⌘ too. **#** (or Grid in the toolbar, or View ›
+Show Grid) draws graph paper over the figure, its squares sized to it; snapping to the grid
+(the magnet's next turn after guides, or View › Snap to Grid), a shape catches at its lines
+instead. A shape drawn on a part is put on it, and moves
 with it; its panel's **Moves With** chooses
 another part, or none, and **Drawn** puts it in front of the parts or behind them.
 
@@ -1442,6 +1445,13 @@ changes in words, to go back or forward to any of them.
   saved after 1.5 s without typing (at most every 8 s), not 0.35 s, so the
   service carries fewer versions and two computers save at once less often.
 - ⌘K searches every command, slide, and file; `?` lists the keys.
+- The **help bar**, one row along the window's foot, names the keys for what is being done
+  now, a keycap and a word or two each: while a shape is dragged, what ⇧, ⌥ and ⌘ do to the
+  drag (each lit while it is held) and Esc; while the find bar is open, ↩ and ⇧↩ in its field
+  and N and ⇧N once the keys are elsewhere; while words are typed, theirs; else those of what
+  is chosen, or of the page. **View › Hide Help Bar** (the palette, the Mac app, its own
+  right-click) hides it, kept in the browser; it says the keys as the Keyboard Shortcuts
+  sheet does (`studio/helpkeys.js`).
 
 Other packages add kinds of document through the `flexo.studio` entry-point
 group (`flexo.studio.Kind` says what one provides) and samples for the theme

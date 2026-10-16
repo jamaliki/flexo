@@ -220,6 +220,10 @@ const ICONS = {
   rotate: "M12.5 8a4.5 4.5 0 11-1.3-3.2M12.5 2.5v2.5H10",
   // Snapping: a horseshoe magnet, its poles up and marked, as Inkscape's.
   magnet: "M3 2.5V8a5 5 0 0010 0V2.5h-3V8a2 2 0 01-4 0V2.5zM3 5.5h3M10 5.5h3",
+  // Snapping to the grid: the magnet, smaller, and #, the grid's key.
+  magnetGrid: "M1.5 1.5V5a4 4 0 008 0V1.5H7V5a1.5 1.5 0 01-3 0V1.5zM1.5 3.5H4M7 3.5h2.5M11.25 9.5v5M13.75 9.5v5M9.5 11.25H15M9.5 13.75H15",
+  // The grid: graph paper, a square of nine.
+  graph: "M2.5 2.5h11v11h-11zM6.17 2.5v11M9.83 2.5v11M2.5 6.17h11M2.5 9.83h11",
 };
 // Parts of an icon filled rather than drawn: Appearance's circle, half dark as on a Mac.
 const FILLS = {
