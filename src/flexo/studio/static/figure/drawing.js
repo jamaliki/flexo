@@ -14,6 +14,7 @@
 // shows the change already (words typed, a colour dragged).
 
 import { h, clear, icon, ui, inQuotes, typingName } from "/static/studio/studio.js";
+import { hexField, applyColour, rememberColour } from "/static/studio/hexcolour.js";
 
 const SHOWN = 12;
 const kept = new Map();
@@ -161,8 +162,9 @@ function sections(found, options) {
   return [wordsSection, coloursSection].filter(Boolean);
 }
 
-// A colour well: the system's picker, a drag through it one change; changed from what is
-// drawn, a button takes it back.
+// A colour well: the system's picker, a drag through it one change; its code beside it, typed
+// or pasted (hexcolour.js), one step of its own; changed from what is drawn, a button takes it
+// back.
 function well(value, own, key, title, onChange) {
   const input = h("input", { type: "color", value, "data-key": key, "aria-label": title });
   const chip = h("span.colour-chip", { style: { background: value } });
@@ -170,12 +172,16 @@ function well(value, own, key, title, onChange) {
   let timer = 0, last = null;
   input.addEventListener("input", () => {
     chip.style.background = input.value;
+    field.show(input.value);
     last = input.value;
     // (At most every tenth of a second, and its last colour always.)
     if (!timer) timer = setTimeout(() => { timer = 0; onChange(last, true); }, 100);
   });
+  input.addEventListener("change", () => rememberColour(input.value));
+  const field = hexField({ value, key: `${key}:hex`, title, placeholder: "Hex",
+    apply: (hex) => applyColour(() => { input.value = hex; chip.style.background = hex; onChange(hex, false); }, hex) });
   const reset = own ? ui.button("", () => onChange(null, false), { kind: "ghost", small: true, icon: "undo", title: "As Drawn" }) : null;
-  return h("div.colour-control", {}, body, reset);
+  return h("div.colour-control", {}, body, field, reset);
 }
 
 // What a panel's thumbnail of a slide's picture shows: the picture as the slide draws it --

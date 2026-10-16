@@ -2,6 +2,8 @@
 // Every field a person types in can carry a `key`, so a form drawn again while
 // they type (someone else changed the document) gives them their field back.
 
+import { hexField, hexOf, shownHex, recentColours, rememberColour, applyColour } from "./hexcolour.js";
+
 // -- elements -------------------------------------------------------------------------
 
 export function h(tag, props, ...children) {
@@ -277,8 +279,11 @@ export const ui = {
       if (target.matches(".palette-pick, .type-pick")) { target.id ||= `${id}-choice`; target.setAttribute("aria-labelledby", `${id} ${target.id}`); }
       else target.setAttribute("aria-labelledby", id);
     }
-    return h(`div.field${inline ? ".inline" : ""}`, {},
-      label ? h("label.label", { title: said }, id ? h("span", { id }, label) : label, hint ? h("span.hint", {}, hint) : null) : null, control);
+    // What a control keeps beside its label (a colour's code, and the colours used last), on
+    // the label's line: it takes no line of its own.
+    const side = label && !inline && control?.besideLabel ? control.besideLabel : null;
+    return h(`div.field${inline ? ".inline" : ""}${side ? ".has-side" : ""}`, {},
+      label ? h("label.label", { title: said }, id ? h("span", { id }, label) : label, hint ? h("span.hint", {}, hint) : null) : null, side, control);
   },
 
   input({ value = "", placeholder = "", onInput, onChange, type = "text", mono, list, width, key } = {}) {
@@ -690,16 +695,19 @@ export const ui = {
   // Colours to choose from; `custom` adds one more, any colour, from the system's picker. A
   // row of them is one stop for Tab, as a segmented control is; the chosen one is ticked,
   // the one with the keys ringed with the focus's glow.
+  // A custom colour also by its code, typed or pasted, beside the label (hexcolour.js): taken,
+  // `onChange(hex, { alpha })` -- its alpha, written after it (#1f77b4cc), for the thing's
+  // opacity where it has one -- one step of its own; and the colours applied last, offered.
   swatches({ value, colours, onChange, none = true, noneTitle = "None", custom = false, key } = {}) {
     const node = h("div.swatches", { role: "radiogroup" });
     // `noneTitle`: what no colour of its own is ("Default", where it is the words' own colour).
     const all = [...(none ? [{ value: null, colour: null, title: noneTitle }] : []), ...colours];
-    const choose = (button, next) => {
+    const choose = (button, next, how) => {
       node.querySelectorAll(".swatch").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-checked", "false"); });
       button.classList.add("on");
       button.setAttribute("aria-checked", "true");
       keys.mark(button.matches("label") ? button.querySelector("input") : button);
-      onChange?.(next);
+      onChange?.(next, how);
     };
     const buttons = all.map((item) => {
       const chosen = item.value === (value ?? null);
@@ -715,8 +723,22 @@ export const ui = {
       const own = HEX.test(value || "") && !all.some((item) => item.value === value) ? value : null;
       const input = h("input", { type: "color", value: own || "#888888", title: "Custom colour", "aria-label": "Custom colour" });
       well = h(`label.swatch.custom${own ? ".on" : ""}${own && light(own) ? ".light" : ""}`, { title: "Custom colour", style: own ? { background: own } : {} }, icon("plus"), input);
-      input.addEventListener("input", () => { well.style.background = input.value; well.classList.toggle("light", light(input.value)); choose(well, input.value); });
+      input.addEventListener("input", () => { well.style.background = input.value; well.classList.toggle("light", light(input.value)); field?.show(input.value); choose(well, input.value); });
+      input.addEventListener("change", () => rememberColour(input.value));
       node.append(well);
+      // A code taken is the well's colour, as if picked there (the colour as it is written, never
+      // one of the theme's by its name, which a theme changes).
+      const taken = (hex, alpha) => applyColour(() => {
+        input.value = hex;
+        well.style.background = hex;
+        well.classList.toggle("light", light(hex));
+        choose(well, hex, { alpha });
+      }, hex, alpha);
+      const said = value === undefined ? "Mixed" : value === null ? (/^(no |none)/i.test(noneTitle) ? "None" : "Theme") : typeof value === "object" ? "Gradient" : "Theme";
+      const field = hexField({ value: typeof value === "string" ? value : null, placeholder: said, apply: taken, title: "Custom Colour",
+        key: `${key || `swatches:${all.map((item) => item.value).join("|")}`}:hex` });
+      node.besideLabel = h("div.hex-side", {}, recentDots((hex) => { field.show(hex); taken(hex, null); }), field);
+      node.append(node.besideLabel);
     }
     const keys = roving(node, () => [...buttons, ...(well ? [well.querySelector("input")] : [])],
       key || `swatches:${all.map((item) => item.value).join("|")}`);
@@ -724,20 +746,42 @@ export const ui = {
   },
 
   // One colour of a thing's own, or none (the theme's): a well that opens the system's
-  // picker, and a button to go back to the theme's.
+  // picker, its code typed or pasted beside it (hexcolour.js: `onChange(hex, { alpha })`, one
+  // step of its own), and a button to go back to the theme's.
   colour({ value, onChange, title = "", key } = {}) {
     const set = HEX.test(value || "") ? value : null;
     const input = h("input", { type: "color", value: set || "#888888", "data-key": key, "aria-label": [title, "Colour"].filter(Boolean).join(" ") });
     const well = h(`label.colour-well${set ? "" : ".unset"}`, { title: [title, set || "Default"].filter(Boolean).join(": ") },
       h("span.colour-chip", { style: set ? { background: set } : {} }), input);
-    input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; onChange?.(input.value); });
-    const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; onChange?.(null); },
+    input.addEventListener("input", () => { well.classList.remove("unset"); well.firstChild.style.background = input.value; field.show(input.value); onChange?.(input.value); });
+    input.addEventListener("change", () => rememberColour(input.value));
+    const reset = ui.button("", () => { well.classList.add("unset"); well.firstChild.style.background = ""; field.show(null); reset.hidden = true; onChange?.(null); },
       { kind: "ghost", small: true, icon: "undo", title: "Reset" });
     reset.hidden = !set;
     input.addEventListener("input", () => { reset.hidden = false; });
-    return h("div.colour-control", {}, well, reset);
+    const field = hexField({ value: hexOf(value), placeholder: "Default", title: title || "Colour", key: key ? `${key}:hex` : null,
+      apply: (hex, alpha) => applyColour(() => {
+        input.value = hex;
+        well.classList.remove("unset");
+        well.firstChild.style.background = hex;
+        well.title = [title, shownHex(hex)].filter(Boolean).join(": ");
+        reset.hidden = false;
+        onChange?.(hex, { alpha });
+      }, hex, alpha) });
+    return h("div.colour-control", {}, well, field, reset);
   },
 };
+
+// The colours the person applied last (hexcolour.js), small, before a colour's code: one
+// clicked is applied as its code would be. (The pointer's: the keys go to the code's field.)
+const RECENT_SHOWN = 5;
+function recentDots(apply) {
+  const list = recentColours().slice(0, RECENT_SHOWN);
+  if (!list.length) return null;
+  return h("div.recent-dots", {}, list.map((hex) => h(`button.recent-dot${light(hex) ? ".light" : ""}`, {
+    type: "button", tabIndex: -1, title: `Recent: ${shownHex(hex)}`, "aria-label": `Recent Colour ${shownHex(hex)}`, style: { background: hex },
+    onmousedown: (event) => event.preventDefault(), onclick: () => apply(hex) })));
+}
 
 const HEX = /^#[0-9a-f]{6}$/i;
 // How light a colour is (0 black, 1 white), however it is written (#rgb, #rrggbb with or

@@ -2007,14 +2007,15 @@ export function shapeEditor(host) {
     const style = [];
     if (closedAll || flat.some((spec) => F.isClosed(spec))) {
       style.push(ui.field("Fill", ui.swatches({ value: shared("fill") === "none" ? null : shared("fill") ?? undefined, colours: fills, none: true, noneTitle: "No Fill", custom: true, key: "shape.fill",
-        onChange: (value) => set({ fill: value ?? "none" }, "Change Fill", "fill") })));
+        // (A code with an alpha after it, #1f77b4cc, is the fill's opacity too: hexcolour.js.)
+        onChange: (value, how) => set({ fill: value ?? "none", ...(how?.alpha != null ? { fill_opacity: how.alpha } : {}) }, "Change Fill", "fill") })));
       // Or a gradient: its kind, its ends' colours and its way (gradients.js).
       style.push(...gradientFields({ value: shared("fill"), ui, h, set: (fill, label) => set({ fill }, label, "fill"),
         swatches: (value, onChange, key) => ui.swatches({ value, colours: fills, none: false, custom: true, key, onChange }) }));
       if (shared("fill") !== "none") style.push(ui.field("Fill Opacity", slider(shared("fill_opacity"), 0, 1, 0.01, (value, how) => set({ fill_opacity: value }, "Change Fill", "fill-opacity", how), "shape.fill_opacity", true)));
     }
     style.push(ui.field(linesAll ? "Line" : "Outline", ui.swatches({ value: shared("line") === "none" ? null : shared("line") ?? undefined, colours: strokes, none: true, noneTitle: "No Line", custom: true, key: "shape.line",
-      onChange: (value) => set({ line: value ?? "none" }, linesAll ? "Change Line" : "Change Outline", "line") })));
+      onChange: (value, how) => set({ line: value ?? "none", ...(how?.alpha != null ? { line_opacity: how.alpha } : {}) }, linesAll ? "Change Line" : "Change Outline", "line") })));
     if (shared("line") !== "none") {
       style.push(ui.field("Width", ui.number({ value: shared("line_width") ?? null, placeholder: shared("line_width") === undefined ? "Mixed" : "", min: 0, max: 200, step: 0.25, unit: "pt", key: "shape.line_width",
         onChange: (value) => set({ line_width: value ?? null }, "Change Line Width") })));
@@ -2213,6 +2214,9 @@ export function shapeEditor(host) {
     leaveGroup: () => groups.out(),
     ungroupAll: () => groups.ungroupAll(),
     set,
+    // Those chosen as they are written (inside a group entered, its own): their colours, for
+    // ⇧⌘C (shapecolours.js).
+    specs: () => chosenNow().map((index) => shapesOf()[index]).filter(Boolean),
     any: () => chosenNow().length > 0,
     busy: () => Boolean(gesture?.started || drawingNow || tools?.pen.drawing() || tools?.points.busy()),
     editPoints: (index) => paths().points.start(index),
