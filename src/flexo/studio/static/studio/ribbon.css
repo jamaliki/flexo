@@ -1,0 +1,125 @@
+/* The Design bar (ribbon.js): a document's design across the window under the toolbar, as
+   PowerPoint's ribbon has it -- one row, low, in the toolbar's grey: the theme gallery taking
+   the room there is, the pull-downs two to a column beside it. */
+
+.ribbon {
+  --thumb-h: 44px;
+  display: flex; align-items: center; gap: 2px; min-width: 0; height: 58px; box-sizing: border-box;
+  padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden;
+}
+.ribbon[hidden] { display: none; }
+.ribbon-sep { flex: none; width: 1px; height: 36px; background: var(--line); margin: 0 8px; }
+.ribbon-stack { flex: none; display: grid; grid-template-rows: 24px 24px; gap: 3px; align-content: center; justify-items: start; }
+
+/* A pull-down: what is in use, its name, a chevron. */
+.ribbon-pull {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; max-width: 190px; padding: 0 5px 0 4px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  font: 400 12px/1 var(--font); white-space: nowrap;
+}
+.ribbon-pull:hover, .ribbon-pull.menu-open { background: var(--line); color: var(--ink); }
+.ribbon-pull:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.ribbon-pull .ribbon-label { overflow: hidden; text-overflow: ellipsis; }
+.ribbon-pull .ribbon-chevron { width: 11px; height: 11px; flex: none; color: var(--ink-3); }
+.ribbon-face { display: inline-flex; align-items: center; flex: none; gap: 2px; min-width: 16px; justify-content: center; }
+.ribbon-face > svg { width: 15px; height: 15px; color: var(--ink-2); }
+.ribbon-face .palette-strip span { width: 6px; height: 13px; border-radius: 2px; }
+.ribbon-aa { font-size: 13px; font-weight: 600; line-height: 1; color: var(--ink); min-width: 18px; text-align: center; }
+.ribbon-chip { width: 15px; height: 13px; border-radius: 3px; box-shadow: var(--chip-ring-strong); }
+.ribbon-chip.none { background: repeating-conic-gradient(var(--sunken) 0 25%, var(--raised) 0 50%) 0 0 / 6px 6px; }
+.ribbon-chip.picture { display: grid; place-items: center; background: var(--sunken); }
+.ribbon-chip.picture svg { width: 10px; height: 10px; color: var(--ink-3); }
+.ribbon-ratio { display: grid; place-items: center; height: 12px; border: 1.5px solid var(--ink-3); border-radius: 2px; font: 600 8px/1 var(--font); color: var(--ink-3); }
+.ribbon-count { font: 600 10px/1 var(--font); color: var(--ink-3); min-width: 8px; }
+/* A button of the bar's own, not a pull-down (Customise…). */
+.ribbon .btn.ghost.ribbon-button { height: 24px; padding: 0 6px; font: 400 12px/1 var(--font); color: var(--ink-2); gap: 5px; }
+.ribbon .btn.ghost.ribbon-button svg { width: 14px; height: 14px; }
+
+/* The gallery: thumbnails side by side, scrolled along, the one in use ringed. */
+.ribbon-gallery { position: relative; flex: 1 1 auto; min-width: 150px; max-width: max-content; display: flex; align-items: center; height: 100%; }
+.ribbon-strip { flex: 1 1 auto; min-width: 0; display: flex; gap: 6px; align-items: center; overflow-x: auto; overflow-y: hidden; padding: 4px 3px; scrollbar-width: none; scroll-padding: 0 20px; }
+.ribbon-strip::-webkit-scrollbar { display: none; }
+.ribbon-thumb {
+  flex: none; position: relative; height: var(--thumb-h); width: calc(var(--thumb-h) * var(--thumb-ratio, 1.7778)); padding: 0;
+  border: 0; border-radius: 4px; background: var(--raised); cursor: pointer; overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line-strong); transition: box-shadow 0.1s;
+}
+.ribbon-thumb:hover { box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 3px var(--line); }
+.ribbon-thumb.on { box-shadow: 0 0 0 2px var(--accent); }
+.ribbon-thumb.on:hover { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--accent-soft); }
+.ribbon-thumb:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 5px var(--focus-halo); }
+.ribbon-thumb.problem { opacity: 0.55; }
+.ribbon-pic { position: absolute; inset: 0; display: block; line-height: 0; }
+.ribbon-pic > .picture { width: 100%; height: 100%; }
+/* Drawn on a page as the stage's is (white), in a dark studio too: a figure has no page of its own. */
+.ribbon-pic:has(> .picture) { background: #fff; }
+/* What stands in while a thumbnail is drawn: the theme's page, its type, its colours. */
+.ribbon-card { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 7px; }
+.ribbon-card .theme-aa { font-size: 15px; }
+.ribbon-card .theme-tones span { width: 6px; height: 13px; border-radius: 2px; }
+.ribbon-thumb.waiting .ribbon-card { animation: ribbon-wait 1.2s ease-in-out infinite alternate; }
+@keyframes ribbon-wait { to { opacity: 0.6; } }
+.ribbon-scroll {
+  position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); display: grid; place-items: center;
+  width: 18px; height: 30px; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px;
+  background: var(--raised); color: var(--ink-2); cursor: pointer; box-shadow: var(--shadow-1);
+}
+.ribbon-scroll[hidden] { display: none; }
+.ribbon-scroll.back { left: -2px; }
+.ribbon-scroll.on { right: -2px; }
+.ribbon-scroll svg { width: 12px; height: 12px; }
+.ribbon-scroll .flip { transform: scaleX(-1); }
+
+/* Narrower, the pull-downs keep what is in use and lose their names, then the gallery its room
+   (a class the bar's width gives it, ribbon.js: WebKit scrolls a size container back to its
+   start whenever what is in it is drawn again, and the gallery is). */
+.ribbon.narrow .ribbon-pull .ribbon-label { display: none; }
+.ribbon.narrow .ribbon-pull { padding: 0 3px; }
+.ribbon.tight .ribbon-sep { margin: 0 4px; }
+.ribbon.tight .btn.ghost.ribbon-button .btn-label { display: none; }
+
+/* -- a pull-down's panel -- */
+.ribbon-drop {
+  position: fixed; z-index: 49; min-width: 220px; max-width: 380px; overflow: auto; box-sizing: border-box;
+  padding: 6px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: var(--shadow-2); animation: pop 0.12s ease-out; color: var(--ink);
+}
+.ribbon-drop:focus { outline: none; }
+.ribbon-drop .drop-title { font: var(--text-label); color: var(--ink-3); padding: 6px 6px 4px; }
+.ribbon-drop .drop-title:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 10px; }
+.ribbon-drop .drop-body { display: grid; gap: 8px; padding: 2px 6px 6px; }
+.ribbon-drop .drop-body.drop-page { padding-top: 6px; }
+.ribbon-drop .field { margin: 0; }
+.ribbon-drop .palette-choices { padding: 0; }
+/* A choice in a panel shown in its own look: a font in its face, a background as its colour. */
+.drop-choices { display: grid; gap: 1px; }
+.drop-choice {
+  display: grid; grid-template-columns: 14px auto minmax(0, 1fr); align-items: center; column-gap: 8px; padding: 5px 8px 5px 4px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; font: var(--text-body); min-width: 0;
+}
+.drop-choice::before { content: ""; width: 14px; height: 14px; }
+.drop-choice.on::before { background: currentColor; -webkit-mask: var(--tick) center / 14px no-repeat; mask: var(--tick) center / 14px no-repeat; }
+.drop-choice:hover, .drop-choice:focus { outline: none; background: var(--accent-soft); }
+.drop-choice .drop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-choice .drop-sample { font-size: 19px; line-height: 1.1; min-width: 34px; }
+.drop-choice .drop-pair { display: grid; gap: 1px; min-width: 0; }
+.drop-choice .drop-pair b { font-size: 15px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-choice .drop-pair span { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 2px 4px 6px; }
+.drop-tile {
+  display: grid; gap: 4px; justify-items: stretch; padding: 4px; border: 1px solid var(--line-strong); border-radius: 7px;
+  background: var(--raised); color: var(--ink); cursor: pointer; font: var(--text-small); text-align: center; min-width: 0;
+}
+.drop-tile:hover { border-color: var(--ink-3); }
+.drop-tile.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.drop-tile:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-halo); border-color: var(--accent); }
+.drop-swatch { display: block; aspect-ratio: 16 / 9; border-radius: 4px; box-shadow: var(--chip-ring); }
+.drop-swatch.none { background: repeating-conic-gradient(var(--sunken) 0 25%, var(--raised) 0 50%) 0 0 / 10px 10px; }
+.drop-swatch.picture { display: grid; place-items: center; background: var(--sunken) center / cover no-repeat; }
+.drop-swatch.picture svg { width: 18px; height: 18px; color: var(--ink-3); }
+.drop-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.drop-row .input { flex: 1; min-width: 0; }
+
+/* -- the live preview: the document as it would be, over it -- */
+.design-preview { position: absolute; inset: 0; z-index: 30; pointer-events: none; line-height: 0; background: inherit; border-radius: inherit; overflow: hidden; }
+.design-preview > .picture { width: 100%; height: 100%; }
