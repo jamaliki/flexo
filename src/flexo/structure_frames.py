@@ -16,7 +16,11 @@ two of them differently. Structures that name the same frame are drawn as one::
 - **One camera.** Each is turned as the frame's first (its **owner**: the first of them in the
   figure's ``nodes``) is turned by its ``yaw``, ``pitch`` and ``roll`` -- the same way in space,
   their coordinates read in one frame, whatever axes mol-sketch would start each along. So the
-  owner is drawn as it would be alone, and the others are seen from where it is seen.
+  owner is drawn as it would be alone, and the others are seen from where it is seen. A noised
+  structure (``flexo.structure_noise``) is framed as mol-sketch draws it -- the noised
+  molecule's atoms -- and its turn read against the file's axes, as it is alone: copies of one
+  file at several noises are one camera in the file's own coordinates, what they hold fixed
+  in one place in every box.
 - **One scale.** Each is drawn at the same ångströms to the point: the scale at which every one
   of them, drawn about the frame's centre, fits its own box -- the largest's -- times the owner's
   ``zoom``. The ball of noise is drawn small, and grows.
@@ -130,13 +134,17 @@ def frame_problems(spec: FigureSpec) -> list[Diagnostic]:
 
 @dataclass(frozen=True, slots=True)
 class _Geometry:
-    """What a member is framed by, as mol-sketch reads it: the atoms its framing is fitted to
-    (``fitPoints``, in the file's coordinates), the axes it starts along (``base``: its scene's
-    coordinates are ``base @ p``), and the camera it is drawn with unturned."""
+    """What a member is framed by, as mol-sketch draws it: the atoms its framing is fitted to
+    (``fitPoints``, in the file's coordinates: of the molecule drawn, noised or not), the axes
+    mol-sketch starts it along (``base``: its scene's coordinates are ``base @ p``), the axes
+    its ``yaw``, ``pitch`` and ``roll`` are read against (``seen``: its own, ``base`` -- but a
+    noised structure's are the file's, as ``flexo.structure_noise`` turns it to be seen as
+    the file is), and the camera it is drawn with unturned (its turn, as it is read)."""
 
     points: object  # (n, 3) numpy array
     base: object  # (3, 3) numpy array
     camera: tuple[tuple[str, float], ...]
+    seen: object  # (3, 3) numpy array
 
 
 def _box(node: NodeSpec, style: LayoutStyle) -> tuple[float, float]:
@@ -199,7 +207,7 @@ def _geometry_of(node: NodeSpec, style: LayoutStyle) -> tuple[object, _Geometry]
 def _geometry(ask) -> _Geometry:
     import numpy as np
 
-    from flexo.structures import _drawn
+    from flexo.structures import _drawn, _noised
 
     spec = _drawn(ask)._spec()
     # (A density map is not what it is framed on here: left out of what is asked.)
@@ -212,11 +220,18 @@ def _geometry(ask) -> _Geometry:
     # A scene is framed on the atoms of all its steps, in its own coordinates.
     points = settled["points"] or settled["scene"]
     held = np.asarray(points or [0.0, 0.0, 0.0], dtype=float).reshape(-1, 3)
-    unturned = tuple(
-        (key, float(camera.get(key) or (1.0 if key == "zoom" else 0.0)))
+    unturned = {
+        key: float(camera.get(key) or (1.0 if key == "zoom" else 0.0))
         for key in ("yaw", "pitch", "roll", "zoom", "panX", "panY", "fov")
-    )
-    return _Geometry(held, turn, unturned)
+    }
+    noised = _noised(ask)
+    if noised is None:
+        return _Geometry(held, turn, tuple(unturned.items()), turn)
+    # Noised, mol-sketch reads the molecule along its own axes, and flexo turns it back to be
+    # seen as the file is (``noised.turn``, from its scene to the file's): its turn is read
+    # against the file's axes, unturned the file's.
+    unturned |= {"yaw": 0.0, "pitch": 0.0, "roll": 0.0}
+    return _Geometry(held, turn, tuple(unturned.items()), np.array(noised.turn) @ turn)
 
 
 _FIT = """MolSketchCore.flexoFit = (spec) => {
@@ -359,10 +374,13 @@ def _points_per_pixel(box: tuple[float, float]) -> float:
     return min(box[0] / width, box[1] / height)
 
 
-def member_camera(frame: Framing, points, base, box) -> dict[str, float]:
-    """The camera mol-sketch draws a member with (``points``, ``base``, ``box`` as for
-    ``framing``) for its atoms to be where ``frame`` puts them: its own turn, zoom, pan and
-    field of view, in mol-sketch's names."""
+def member_camera(frame: Framing, points, base, box, seen=None) -> dict[str, float]:
+    """The camera a member is drawn with (``points``, ``base``, ``box`` as for ``framing``)
+    for mol-sketch to draw its atoms where ``frame`` puts them: its own turn, zoom, pan and
+    field of view, in mol-sketch's names. Its turn is read against ``seen`` (its own axes,
+    ``base``, unless said): a noised structure's against the file's, as flexo turns a noised
+    molecule (``flexo.structures._drawn``), so that it is drawn at the turn mol-sketch is to
+    draw it at -- turned the once."""
 
     import numpy as np
 
@@ -377,7 +395,7 @@ def member_camera(frame: Framing, points, base, box) -> dict[str, float]:
     per_pixel = _points_per_pixel(box)
     pixels = frame.scale / per_pixel  # pixels to the ångström, as the frame draws it
     fitted = min(width * 0.9 / (spans[0] + 2.6), (height - 24) / (spans[1] + 2.4))
-    yaw, pitch, roll = angles(own)
+    yaw, pitch, roll = angles(own if seen is None else frame.turn @ seen.T)
     if frame.eye == math.inf:
         zoom, fov = pixels / fitted, 0.0
     else:
@@ -411,10 +429,10 @@ def _cameras(members: tuple[NodeSpec, ...], style: LayoutStyle) -> dict[str, dic
     (_, (owner_ask, owner)), owner_node = known[0], known[0][0]
     camera = _owner_camera(owner_ask, owner)
     boxes = {node.id: _box(node, style) for node, _ in known}
-    frame = framing(camera, owner.base, boxes[owner_node.id],
+    frame = framing(camera, owner.seen, boxes[owner_node.id],
                     [(held.points, held.base, boxes[node.id]) for node, (_, held) in known])
     return {
-        node.id: member_camera(frame, held.points, held.base, boxes[node.id])
+        node.id: member_camera(frame, held.points, held.base, boxes[node.id], held.seen)
         for node, (_, held) in known
     }
 
@@ -448,9 +466,9 @@ def framed_view(spec: FigureSpec, identifier: str, style: LayoutStyle,
     for a structure in a frame of two or more, its points in the frame's coordinates (the
     owner's scene's: turned by the frame's ``yaw``, ``pitch`` and ``roll`` they are where the
     frame's camera puts them), the frame's camera, and the frame (``shared``: its ``name``,
-    ``owner`` and ``members``). Every structure also says the axes its own scene is along
-    (``base``, rows, of the file's coordinates) and -- in a frame -- the turn it would be
-    drawn alone with to be seen as it is now (``alone``)."""
+    ``owner`` and ``members``). Every structure also says the axes its turn is read against
+    (``base``, rows, of the file's coordinates: its scene's, a noised one's file's) and -- in
+    a frame -- the turn it would be drawn alone with to be seen as it is now (``alone``)."""
 
     import numpy as np
 
@@ -461,7 +479,7 @@ def framed_view(spec: FigureSpec, identifier: str, style: LayoutStyle,
     held = _geometry_of(node, style)
     if held is None:
         return view
-    view["base"] = _rows(held[1].base)
+    view["base"] = _rows(held[1].seen)
     name = frame_of(node)
     members = frames_of(spec).get(name or "", ())
     if len(members) < 2:
@@ -473,7 +491,9 @@ def framed_view(spec: FigureSpec, identifier: str, style: LayoutStyle,
     owner_node, (owner_ask, owner) = known[0]
     camera = _owner_camera(owner_ask, owner)
     own = held[1]
-    into = owner.base @ own.base.T  # this one's scene's coordinates into the owner's
+    # This one's scene's coordinates (as the studio is told them: a noised one's, the file's)
+    # into the owner's.
+    into = owner.seen @ own.seen.T
 
     def moved(point):
         return [round(float(value), 2) for value in into @ np.asarray(point[:3], dtype=float)]
@@ -481,7 +501,7 @@ def framed_view(spec: FigureSpec, identifier: str, style: LayoutStyle,
     view["centre"] = [round(float(value), 3) for value in into @ np.asarray(view["centre"])]
     view["chains"] = [[moved(point) for point in chain] for chain in view["chains"]]
     view["atoms"] = [[*moved(atom), *atom[3:]] for atom in view["atoms"]]
-    view["fit"] = _outermost(own.points @ owner.base.T)
+    view["fit"] = _outermost(own.points @ owner.seen.T)
     view["camera"] = {
         "yaw": camera["yaw"], "pitch": camera["pitch"], "roll": camera["roll"],
         "zoom": camera["zoom"], "pan_x": camera["panX"], "pan_y": camera["panY"],
@@ -493,7 +513,7 @@ def framed_view(spec: FigureSpec, identifier: str, style: LayoutStyle,
                              strict=True))
     view["shared"] = {
         "name": name, "owner": owner_node.id, "members": [member.id for member, _ in known],
-        "base": _rows(owner.base),
+        "base": _rows(owner.seen),
     }
     return view
 

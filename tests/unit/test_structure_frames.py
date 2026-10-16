@@ -218,6 +218,54 @@ def test_structures_in_a_frame_are_drawn_by_mol_sketch_with_their_atoms_where_it
     assert 'id="row.part.molecule"' in compiled.document.text
 
 
+def test_a_noised_series_in_a_frame_is_one_camera_in_the_files_coordinates(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Copies of one file at noise 1, 0.3 and 0, a motif held: mol-sketch reads each noised
+    molecule along its own axes and flexo turns it back to be seen as the file is -- in a
+    frame, each is turned the frame's way the once, so the held atoms land in the same place
+    of every box, and the studio turns them all from the frame's own turn."""
+
+    pytest.importorskip("molsketch")
+    np = pytest.importorskip("numpy")
+    from flexo import structure_noise
+    from flexo.serialization import figure_to_document
+    from flexo.structure_frames import framed
+    from flexo.studio.figure_kind import FigureKind
+    from flexo.themes import figure_style
+
+    monkeypatch.setattr(structure_noise, "_cache_folder", lambda: tmp_path / "noise")
+    with flexo.Figure("noised") as figure:
+        row = figure.root.row("row", gap=10)
+        for name, noise in (("t100", 1.0), ("t30", 0.3), ("t0", None)):
+            row.structure(name, DATA / "1a7g.cif", look="flat", frame="run", width=100,
+                          height=100, sticks="none", noise=noise, fixed="resi 300+310",
+                          seed=4, **({"yaw": 30, "pitch": 10} if name == "t100" else {}))
+    spec = figure.spec
+    style = figure_style(spec)
+    drawn = {node.id: node for node in framed(spec, style).nodes}
+    # One file, so one turn read against its axes for every copy: the frame's.
+    for node in drawn.values():
+        turn = [node.property(name) for name in ("yaw", "pitch", "roll")]
+        assert turn == pytest.approx([30, 10, 0], abs=1e-4), node.id
+    for atom in ("GLY300:CA", "TYR310:CA"):
+        seen = [_mark(drawn[f"row.{name}"], style, atom) for name in ("t100", "t30", "t0")]
+        assert max(math.dist(seen[0], other) for other in seen[1:]) < 1.0, (atom, seen)
+    # The studio: the frame's turn, the file's axes, its points in the file's coordinates.
+    text = json.dumps(figure_to_document(spec))
+    views = {
+        name: FigureKind().act({"text": text, "suffix": ".json"},
+                               {"do": "structure-view", "id": f"row.{name}"}, tmp_path)["view"]
+        for name in ("t30", "t0")
+    }
+    assert (views["t30"]["camera"]["yaw"], views["t30"]["camera"]["pitch"]) == (30, 10)
+    assert views["t30"]["alone"] == {"yaw": 30, "pitch": 10, "roll": 0}
+    assert np.allclose(views["t30"]["base"], views["t0"]["base"], atol=1e-5)
+    assert np.allclose(views["t30"]["shared"]["base"], views["t0"]["base"], atol=1e-5)
+    near = np.array([p for chain in views["t30"]["chains"] for p in chain])
+    assert near.shape[1] == 3 and np.isfinite(near).all()
+
+
 def test_a_frames_settings_are_its_firsts_and_anothers_own_are_said_unused(
     tmp_path: Path,
 ) -> None:
