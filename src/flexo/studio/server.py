@@ -239,12 +239,15 @@ class Handler(BaseHTTPRequestHandler):
             self._drawn(query)
         elif route == "/api/picture":
             # A photograph a drawing names: its address carries its version, so it keeps.
+            # (A GIF plays, or is shown still at a frame of it: ``still``, from 1.)
             path = workspace.path(_one(query, "path"))
-            if path.suffix.lower() not in {".png", ".jpg", ".jpeg"} or not path.is_file():
+            if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".gif"} or not path.is_file():
                 raise FileNotFoundError(f"no picture {_one(query, 'path')}")
+            from flexo.animated import still_frame
             from flexo.studio import pictures
 
-            body, kind = pictures.shown(path)
+            still = still_frame((query.get("still") or ["0"])[0]) if query.get("still") else 0
+            body, kind = pictures.shown(path, still)
             self._reply(200, body, kind, cache=True)
         elif route == "/api/events":
             name, person = (query.get("name") or [""])[0], (query.get("person") or [""])[0]
@@ -639,7 +642,7 @@ class Handler(BaseHTTPRequestHandler):
     def _drawing(self, query: dict[str, list[str]]) -> dict[str, object]:
         """An SVG picture's texts and colours as its file has them, for its panel to show
         and change (``flexo.restyle.described``); none for a photograph, or an SVG that
-        does not read. ``stamp``: when the file last changed."""
+        does not read -- and a GIF's ``animation``. ``stamp``: when the file last changed."""
 
         from flexo.artwork import load_artwork
         from flexo.diagnostics import FlexoError
@@ -647,6 +650,13 @@ class Handler(BaseHTTPRequestHandler):
 
         target = self._picture_file(query)
         stamp = target.stat().st_mtime_ns
+        if target.suffix.lower() == ".gif":
+            # How it plays, for its panel to say: its frames, and the seconds they take.
+            from flexo.animated import animation
+
+            played = animation(target)
+            shown = {"frames": played.frames, "seconds": played.seconds} if played else None
+            return {"texts": [], "colours": [], "stamp": stamp, "animation": shown}
         if target.suffix.lower() != ".svg":
             return {"texts": [], "colours": [], "stamp": stamp}
         try:

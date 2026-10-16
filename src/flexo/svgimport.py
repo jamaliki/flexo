@@ -3917,7 +3917,7 @@ def _picture_bytes(href: str) -> tuple[bytes | None, str]:
             suffix = ".png"
         if not suffix and data[:3] == b"\xff\xd8\xff":
             suffix = ".jpg"
-        if suffix in (".gif", ".webp"):
+        if suffix == ".webp":
             data, suffix = _as_png(data), ".png"
         return (data if suffix and data else None), suffix
     path_text = href[7:] if href.startswith("file://") else href
@@ -3927,7 +3927,7 @@ def _picture_bytes(href: str) -> tuple[bytes | None, str]:
     if (
         candidate.is_absolute()
         and candidate.is_file()
-        and candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".svg")
+        and candidate.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".svg")
     ):
         suffix = ".jpg" if candidate.suffix.lower() == ".jpeg" else candidate.suffix.lower()
         return candidate.read_bytes(), suffix

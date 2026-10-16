@@ -756,7 +756,10 @@ def _read_element(
         ), placed)
         group.items.append(_cut(picture, _region_of(context.get("-flexo-clip"))))
     elif tag == "svg":
-        if _drawable(child):
+        windowed = _windowed(child, context, environment, placed)
+        if windowed is not None:
+            group.items.append(windowed)
+        elif _drawable(child):
             _viewport(child, group, context, alpha, environment, placed)
         else:
             group.items.append(_transformed(_nested_svg(child), placed))
@@ -917,6 +920,84 @@ def _viewport(
     _read_children(element, nested, inner, opacity, environment, _compose(matrix, fit))
     if nested.items:
         group.items.append(nested)
+
+
+def _windowed(
+    element: ET.Element,
+    context: dict[str, str],
+    environment: _Environment,
+    matrix: Matrix,
+) -> Image | None:
+    """A picture cropped by a window on it, as a GIF is (a pattern stops it playing): a
+    nested ``<svg>`` saying where the whole of the picture is drawn (``data-flexo-whole``)
+    and holding only it, the part kept its viewport -- an oval of it, or a shape's outline,
+    where the picture's own clip-path is one. The picture, cropped, as one: None for any
+    other nested drawing."""
+
+    if element.get("data-flexo-whole") is None:
+        return None
+    inside = [item for item in element if local_name(item.tag) not in _WINDOW_KEPT]
+    if len(inside) != 1 or local_name(inside[0].tag) != "image" or inside[0].get("transform"):
+        return None
+    source = inside[0]
+    x, y = _float(element, "x"), _float(element, "y")
+    width = _length(element.get("width")) or 0.0
+    height = _length(element.get("height")) or 0.0
+    view = [float(v) for v in re.split(r"[ ,]+", element.get("viewBox", "").strip()) if v]
+    if len(view) != 4 or view[2] <= 0 or view[3] <= 0:
+        view = [0.0, 0.0, width, height]
+    width, height = width or view[2], height or view[3]
+    left, top, drawn_w, drawn_h = Image(
+        None, x, y, width, height, "", element.get("preserveAspectRatio", "xMidYMid meet")
+    ).placed(view[2], view[3])
+    fit = (drawn_w / view[2], 0.0, 0.0, drawn_h / view[3], left - view[0] * drawn_w / view[2],
+           top - view[1] * drawn_h / view[3])
+    inner = _compose(matrix, fit)
+    href = source.get("href") or source.get("{http://www.w3.org/1999/xlink}href") or ""
+    picture = _transformed(Image(
+        element.get("id"), _float(source, "x"), _float(source, "y"), _float(source, "width"),
+        _float(source, "height"), href, source.get("preserveAspectRatio", "xMidYMid meet"),
+    ), inner)
+    corners = (_map(matrix, (x, y)), _map(matrix, (x + width, y + height)))
+    window = (min(corners[0][0], corners[1][0]), min(corners[0][1], corners[1][1]),
+              max(corners[0][0], corners[1][0]), max(corners[0][1], corners[1][1]))
+    region = _intersect(window, _region_of(context.get("-flexo-clip")))
+    found = re.fullmatch(r"\s*url\(\s*['\"]?#([^)'\"]+)['\"]?\s*\)\s*", source.get("clip-path", ""))
+    clip = environment.ids.get(found.group(1)) if found else None
+    if clip is None or clip.get("clipPathUnits", "userSpaceOnUse") != "userSpaceOnUse":
+        return replace(picture, clip=region)
+    shapes = [item for item in clip if local_name(item.tag) not in {"title", "desc"}]
+    if len(shapes) != 1:
+        return replace(picture, clip=region)
+    shape, kind = shapes[0], local_name(shapes[0].tag)
+    placed = _compose(_compose(inner, _parse_transform(clip.get("transform"))),
+                      _parse_transform(shape.get("transform")))
+    if kind == "path":
+        outline = tuple(
+            Segment(s.kind, tuple(_map(placed, p) for p in s.points))
+            for s in parse_path(shape.get("d", ""))
+        )
+        points = [p for segment in outline for p in segment.points]
+        if not points:
+            return replace(picture, clip=region)
+        bounds = (min(p[0] for p in points), min(p[1] for p in points),
+                  max(p[0] for p in points), max(p[1] for p in points))
+        return replace(picture, clip=_intersect(bounds, region), outline=outline)
+    if kind in {"ellipse", "circle"}:
+        cx, cy = _float(shape, "cx"), _float(shape, "cy")
+        rx = _float(shape, "r") if kind == "circle" else _float(shape, "rx")
+        ry = _float(shape, "r") if kind == "circle" else _float(shape, "ry")
+        ends = (_map(placed, (cx - rx, cy - ry)), _map(placed, (cx + rx, cy + ry)))
+        oval = (min(ends[0][0], ends[1][0]), min(ends[0][1], ends[1][1]),
+                max(ends[0][0], ends[1][0]), max(ends[0][1], ends[1][1]))
+        shown = _intersect(oval, region)
+        whole = all(abs(edge - kept) < 0.01 for edge, kept in zip(shown, oval, strict=True))
+        return replace(picture, clip=shown, oval=whole)
+    return replace(picture, clip=region)
+
+
+_WINDOW_KEPT = frozenset({"title", "desc", "defs", "clipPath"})
+"""What a picture's window holds besides the picture: the clip that shapes it, and words."""
 
 
 def _patterned(

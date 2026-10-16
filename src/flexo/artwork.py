@@ -1,10 +1,11 @@
-"""Author-supplied artwork: load, sanitize, and size an embedded SVG or PNG.
+"""Author-supplied artwork: load, sanitize, and size an embedded SVG, PNG, JPEG or GIF.
 
 An ``image`` component carries no compiler-drawn ink. It carries a file the
 author drew -- a molecule icon, a density-map view -- and Flexo's whole job is
 to put that file into the figure *without* redrawing it: an SVG arrives as
 vector content nested at the node's bounds, a PNG as a data URI, and both travel
-inside the editable and portable SVG with no companion file to lose.
+inside the editable and portable SVG with no companion file to lose. A GIF is a
+photograph as a PNG is, which plays where a screen shows it (``flexo.animated``).
 
 Two consequences shape everything below. Because the artwork is inlined rather
 than referenced, it has to be safe to inline: a file that would execute script,
@@ -36,6 +37,8 @@ from flexo.units import NUMBER_PATTERN, POINTS_PER_UNIT
 SVG_SUFFIXES = frozenset({".svg"})
 PNG_SUFFIXES = frozenset({".png"})
 JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
+GIF_SUFFIXES = frozenset({".gif"})
+"""A GIF: a photograph that plays (``flexo.animated``), placed as a PNG is."""
 PAGE_SUFFIXES = frozenset({".pdf", ".ai"})
 """A PDF's page, and an Illustrator file's artboard (an Illustrator file is a PDF with
 Illustrator's own data beside it): read as the vectors they are (``flexo.pdfart``)."""
@@ -66,7 +69,7 @@ class Artwork:
     node_id: str
     path: Path
     format: str
-    """``"svg"``, ``"png"``, or ``"jpeg"``."""
+    """``"svg"``, ``"png"``, ``"jpeg"``, or ``"gif"``."""
     width: float | None
     """Intrinsic width in points, or ``None`` when the file declares none."""
     height: float | None
@@ -80,10 +83,11 @@ class Artwork:
 
     @property
     def data_uri(self) -> str:
-        """Base64 ``data:`` URI of the bytes (PNG and JPEG artwork only): the file's own,
-        or, for a turned or CMYK JPEG, the photograph upright and in RGB."""
+        """Base64 ``data:`` URI of the bytes (PNG, JPEG and GIF artwork only): the file's
+        own -- a GIF's every frame -- or, for a turned or CMYK JPEG, the photograph upright
+        and in RGB."""
 
-        if self.format not in {"png", "jpeg"}:
+        if self.format not in PHOTOGRAPHS:
             return ""
         if self.upright:
             return _upright_uri(str(self.path), self.stamp)
@@ -98,6 +102,10 @@ class Artwork:
         return self.width / self.height
 
 
+PHOTOGRAPHS = frozenset({"png", "jpeg", "gif"})
+"""The formats carried as their own bytes, a photograph's: not drawn as vectors."""
+
+
 picture_link: ContextVar[Callable[[Artwork], str] | None] = ContextVar(
     "flexo_picture_link", default=None
 )
@@ -110,7 +118,7 @@ def picture_href(artwork: Artwork) -> str:
     studio draws for its page, and the photograph itself otherwise."""
 
     link = picture_link.get()
-    if link is not None and artwork.format in {"png", "jpeg"}:
+    if link is not None and artwork.format in PHOTOGRAPHS:
         return link(artwork)
     return artwork.data_uri
 
@@ -206,14 +214,14 @@ def load_artwork(node_id: str, source: str) -> Artwork:
 
     path, page = _page_of(Path(source).expanduser())
     suffix = path.suffix.lower()
-    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES | PAGE_SUFFIXES:
+    if suffix not in SVG_SUFFIXES | PNG_SUFFIXES | JPEG_SUFFIXES | GIF_SUFFIXES | PAGE_SUFFIXES:
         raise _error(
             "image.source.unsupported",
             node_id,
             path,
             f'Unsupported artwork format "{suffix or path.name}".',
             hint="Embed an .svg, .pdf or Illustrator (.ai) file for vector artwork, "
-            "or a .png or .jpg file for a render.",
+            "a .png or .jpg file for a render, or a .gif for one that plays.",
         )
     if outside(path):
         raise _error(
@@ -297,7 +305,7 @@ camera writes before a JPEG's frame."""
 def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
     path = Path(resolved)
     try:
-        if path.suffix.lower() in PNG_SUFFIXES | JPEG_SUFFIXES:
+        if path.suffix.lower() in PNG_SUFFIXES | JPEG_SUFFIXES | GIF_SUFFIXES:
             with path.open("rb") as handle:
                 data = handle.read(HEADER)
         else:
@@ -313,6 +321,8 @@ def _load(node_id: str, resolved: str, mtime_ns: int, size: int) -> Artwork:
         return _png_artwork(node_id, path, data, mtime_ns)
     if path.suffix.lower() in JPEG_SUFFIXES:
         return _jpeg_artwork(node_id, path, data, mtime_ns)
+    if path.suffix.lower() in GIF_SUFFIXES:
+        return _gif_artwork(node_id, path, data, mtime_ns)
     return _svg_artwork(node_id, path, data)
 
 
@@ -336,6 +346,26 @@ def _png_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artwo
         float(pixel_width) * scale,
         float(pixel_height) * scale,
         stamp=stamp,
+    )
+
+
+def _gif_artwork(node_id: str, path: Path, data: bytes, stamp: int = 0) -> Artwork:
+    """A GIF travels as its own bytes, every frame of it, like a PNG; its size is its
+    logical screen's, which every frame is drawn on."""
+
+    from flexo.animated import gif_size
+
+    size = gif_size(data)
+    if size is None or not all(size):
+        raise _error(
+            "image.gif.invalid",
+            node_id,
+            path,
+            "The file does not begin with a GIF header.",
+        )
+    scale = POINTS_PER_UNIT["px"]
+    return Artwork(
+        node_id, path, "gif", float(size[0]) * scale, float(size[1]) * scale, stamp=stamp
     )
 
 

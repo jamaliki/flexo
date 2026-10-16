@@ -7,8 +7,9 @@ export { merge3, same } from "./merge.js";
 export { avatar, colourOf, ago, copyable, nameOf, wedgeHead } from "./shell.js";
 export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes.js";
 import { start } from "./shell.js";
-export { ownResources } from "./drawings.js";
-export { pastedDrawing, pastedOwn, svgOfWords } from "./clipboard.js";
+import { stillGifs } from "./drawings.js";
+export { ownResources, stillGifs, stillHref } from "./drawings.js";
+export { pastedDrawing, pastedGif, pastedOwn, svgOfWords } from "./clipboard.js";
 export { copyOut, copiedHere } from "./copyout.js";
 export { drawingPaster, clipboardDrawing, DRAWING_FILE } from "./drawingpaste.js";
 
@@ -176,6 +177,9 @@ export function picture(svg, hash, { natural = false } = {}) {
   const drawing = holder.content.querySelector("svg");
   // Its links are part of the picture: never a place for the keys, nor followed.
   for (const link of holder.content.querySelectorAll("a")) { link.removeAttribute("href"); link.removeAttributeNS("http://www.w3.org/1999/xlink", "href"); }
+  // A GIF in it holds still, at the frame paper shows: a slide's every copy in the list
+  // playing would be work for nothing (drawings.js).
+  stillGifs(holder.content);
   if (drawing && !natural) {
     drawing.removeAttribute("width");
     drawing.removeAttribute("height");

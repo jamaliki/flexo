@@ -1,6 +1,8 @@
 """Photographs as the studio's page is shown them: a drawing names each by its address
 instead of carrying it (a photo of 20 MB went to the page with every keystroke on its
-slide), and the page is sent it once for each version, no larger than a screen needs."""
+slide), and the page is sent it once for each version, no larger than a screen needs. A GIF
+is sent as it is, every frame of it, to play -- or, asked for its still (``still``), that
+frame alone: a thumbnail's, or one paused."""
 
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ LIGHT = 1_500_000
 KEPT = 256_000_000
 """Bytes of photographs kept ready to send again."""
 
-_KEPT: OrderedDict[tuple[str, int], tuple[bytes, str]] = OrderedDict()
+_KEPT: OrderedDict[tuple[str, int, int], tuple[bytes, str]] = OrderedDict()
 _LOCK = threading.Lock()
 
 
@@ -44,18 +46,27 @@ def linked(workspace: Any):
         picture_link.reset(token)
 
 
-def shown(path: Path) -> tuple[bytes, str]:
-    """The photograph at ``path`` as the page is sent it, and its media type."""
+def shown(path: Path, still: int = 0) -> tuple[bytes, str]:
+    """The photograph at ``path`` as the page is sent it, and its media type: a GIF's
+    frame ``still`` (from 1) alone, where one is asked for."""
 
     stamp = path.stat().st_mtime_ns
-    key = (str(path), stamp)
+    gif = path.suffix.lower() == ".gif"
+    key = (str(path), stamp, still if gif else 0)
     with _LOCK:
         if key in _KEPT:
             _KEPT.move_to_end(key)
             return _KEPT[key]
         data = path.read_bytes()
         kind = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-        if len(data) > LIGHT:
+        if gif and still:
+            from flexo.animated import still_png
+
+            data, kind = still_png(data, still), "image/png"
+        elif gif:
+            # Every frame, to play: made smaller, it would be one picture.
+            kind = "image/gif"
+        if len(data) > LIGHT and not (gif and not still):
             data, kind = _smaller(data, kind)
         _KEPT[key] = (data, kind)
         while len(_KEPT) > 1 and sum(len(item[0]) for item in _KEPT.values()) > KEPT:

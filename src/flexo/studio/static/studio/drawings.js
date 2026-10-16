@@ -21,3 +21,21 @@ export function ownResources(svg) {
   }
   return svg;
 }
+
+// A GIF a drawing names by the studio's address for it (flexo.studio.pictures), shown still:
+// the frame its picture names for paper (data-flexo-still, from 1), or `frame` -- a slide's
+// thumbnail, or a picture paused. Every other picture is left as it is.
+const GIF_LINK = /^\/api\/picture\?(?:[^#]*&)?path=[^&#]*\.gif(?:[&#]|$)/i;
+export function stillHref(href, frame = 1) {
+  const link = String(href || "");
+  if (!GIF_LINK.test(link)) return link;
+  return `${link.replace(/&still=\d*/g, "")}&still=${Math.max(1, Math.round(Number(frame)) || 1)}`;
+}
+export function stillGifs(root, frame = null) {
+  for (const image of root?.querySelectorAll?.("image") || []) {
+    const href = image.getAttribute("href") || "";
+    const still = stillHref(href, frame ?? (Number(image.getAttribute("data-flexo-still")) || 1));
+    if (still !== href) image.setAttribute("href", still);
+  }
+  return root;
+}
