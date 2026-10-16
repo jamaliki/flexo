@@ -855,6 +855,16 @@ and a part's handles snap only with ⌘ too. A shape drawn on a part is put on i
 with it; its panel's **Moves With** chooses
 another part, or none, and **Drawn** puts it in front of the parts or behind them.
 
+The figure's parts and the shapes drawn over it are one choice, as Keynote's objects are:
+⇧-click (or ⌘-click) a part with shapes chosen, or a shape with parts chosen, and both are
+chosen ("2 Shapes, 1 Drawn Shape"); a band across both chooses what it touches of each.
+Together they are deleted (⌫), cut, copied and pasted (⌘X, ⌘C, ⌘V: the parts pasted as
+parts, the shapes as shapes), and duplicated (⌘D) -- each one step, named for both, both
+chosen again by its undo -- and the inspector offers that, with Align and Distribute for the
+shapes, the parts among what they line up with. The arrows nudge the shapes; the parts are
+laid out, and move as they do alone. On a slide, a figure being edited is the same with the
+slide's shapes over it.
+
 A group of shapes -- one made with ⌘G, or a drawing pasted from Inkscape, with its groups
 inside it -- is entered as Inkscape enters one: double-click it (or choose it and press
 Return, or Enter Group in its right-click menu and the palette). Its shapes are then the
