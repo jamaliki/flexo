@@ -125,7 +125,8 @@ A plot: {id, kind: plot, properties: {source: plots.py, function: name}, width, 
   through a library that opens files itself (HDF5, Parquet), which is not seen otherwise.
 A node, a group and a frame each take line: dashed|dotted for their outline, as an edge does.
 A node's properties set its whole label: bold: true, italic: true, size: 6pt, align: left|right;
-  an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side).
+  an image's crop it: crop_left|crop_top|crop_right|crop_bottom (hundredths cut off that side);
+  a GIF image plays, and still: 12 is the frame its PDF and PNG show (from 1; the first unset).
 figure: {hide: [ids], dim: [ids], highlight: [ids]} leaves parts out, draws them faint, or draws
   all but them faint -- where they stand, nothing moved (one figure shown several ways in a talk).
 shapes: drawn over the figure where they are put, taking no room -- what you would open Inkscape

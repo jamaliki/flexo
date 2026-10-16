@@ -7,7 +7,7 @@
 // the figure, comments and all, and anything the page offers no control for can
 // be written there.
 
-import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing, pastedOwn, copyOut, copiedHere, drawingPaster, DRAWING_FILE } from "/static/studio/studio.js";
+import { h, clear, icon, ui, menu, dialog, keepFocus, toast, themeField, ownResources, inQuotes, exportLabel, pastedDrawing, pastedOwn, pastedGif, copyOut, copiedHere, drawingPaster, DRAWING_FILE } from "/static/studio/studio.js";
 import { figureParts, glyph, groupGlyph, lookFrom, plain, oneLine, titled, widenLines, drawnRect } from "/static/kinds/figure/parts.js";
 import { describeDrawing } from "/static/kinds/figure/drawing.js";
 import { figureShapes } from "/static/kinds/figure/overlay.js";
@@ -366,10 +366,10 @@ export function mount(studio, main) {
     if (event.target === stage && figure.model && !shapes.band(event)) figure.band(event);
   });
 
-  // Files dropped on the figure are added to it: pictures and drawings (PNG, JPEG, SVG, PDF,
-  // Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
+  // Files dropped on the figure are added to it: pictures and drawings (PNG, JPEG, GIF, SVG,
+  // PDF, Illustrator) as pictures, structure files (PDB, mmCIF) drawn by mol-sketch -- after the
   // shape they are let go on, in the group they are let go in, or else after what is chosen.
-  const PICTURE_FILE = /\.(png|jpe?g|svg|pdf|ai)$/i, STRUCTURE_FILE = /\.(pdb|cif|mmcif|ent)$/i;
+  const PICTURE_FILE = /\.(png|jpe?g|gif|svg|pdf|ai)$/i, STRUCTURE_FILE = /\.(pdb|cif|mmcif|ent)$/i;
   // A .json dropped is a structure when it is a mol-sketch scene (it has steps), not a
   // figure or a theme written in JSON.
   const sceneFile = async (file) => /\.json$/i.test(file.name) && (await file.slice(0, 4_000_000).text()).includes('"keyframes"');
@@ -386,14 +386,14 @@ export function mount(studio, main) {
     // (Never opened in place of the studio, as a browser opens a file dropped where none is taken.)
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
-    dropSaid("Drop pictures (PNG, JPEG, SVG, PDF) or structure files (PDB, mmCIF) to add them to the figure");
+    dropSaid("Drop pictures (PNG, JPEG, GIF, SVG, PDF) or structure files (PDB, mmCIF) to add them to the figure");
   });
   center.addEventListener("dragleave", (event) => { if (!center.contains(event.relatedTarget)) dropSaid(""); });
   // The width a picture dropped comes in at: its own, unless that is more than half the
   // page (a photograph's own size is several pages) -- then half the page, to be sized from
   // there by its corners. Null for its own, and for a file whose size is not read here (a PDF).
   async function fittingWidth(file) {
-    if (!/\.(png|jpe?g|svg)$/i.test(file.name)) return null;
+    if (!/\.(png|jpe?g|gif|svg)$/i.test(file.name)) return null;
     const address = URL.createObjectURL(file);
     try {
       const picture = new Image();
@@ -426,7 +426,7 @@ export function mount(studio, main) {
     const scenes = new Set();
     for (const file of files) if (await sceneFile(file)) scenes.add(file);
     const taken = files.filter((file) => PICTURE_FILE.test(file.name) || STRUCTURE_FILE.test(file.name) || scenes.has(file));
-    if (!taken.length) { toast("Only pictures (PNG, JPEG, SVG, PDF, Illustrator), structure files (PDB, mmCIF) and mol-sketch scenes can be added to a figure.", { icon: "info", seconds: 6 }); return; }
+    if (!taken.length) { toast("Only pictures (PNG, JPEG, GIF, SVG, PDF, Illustrator), structure files (PDB, mmCIF) and mol-sketch scenes can be added to a figure.", { icon: "info", seconds: 6 }); return; }
     try {
       for (const file of taken) {
         const kind = STRUCTURE_FILE.test(file.name) || scenes.has(file) ? "structure" : "image";
@@ -883,7 +883,8 @@ export function mount(studio, main) {
     if (clip) return;
     // Pictures and structure files copied elsewhere are added after what is chosen -- and a
     // drawing (Inkscape's) as its SVG, not as the picture of it the web view hands over.
-    const files = [...(data?.files || [])], drawing = pastedDrawing(data), own = pastedOwn(data);
+    // (A GIF copied is the GIF, to play: asked for now, as the paste's clipboard goes after.)
+    const files = [...(data?.files || [])], drawing = pastedDrawing(data), own = pastedOwn(data), animated = pastedGif(data);
     if (!drawing && !files.length) return;
     event.preventDefault();
     // Copied in a window of another folder: what it is, not the picture beside it.
@@ -896,7 +897,8 @@ export function mount(studio, main) {
     }
     const drawn = await drawing;
     if (drawn) { await drawings.shapesOf(drawn); return; }
-    if (files.length) await addFiles(files);
+    const gif = animated && await animated;
+    if (files.length) await addFiles(gif ? [gif] : files);
   });
   // The web view offers Edit › Paste and ⌘V to a page with nothing typed in only when the page
   // asks first (the studio's beforepaste): the figure asks whenever it takes a paste, pictures

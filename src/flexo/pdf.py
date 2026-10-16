@@ -46,7 +46,13 @@ from flexo.portable import SYNTHETIC_SLANT, run_outline
 ARTWORK_DPI = 300.0
 """The resolution nested SVG artwork is rasterised at."""
 
-_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml"}
+_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+}
 _NAMED = {"black": "#000000", "white": "#ffffff", "transparent": None, "none": None}
 _OPERATORS = {"M": "m", "L": "l", "C": "c"}
 _CAPS = {"butt": 0, "round": 1, "square": 2}
@@ -119,7 +125,10 @@ def pdf_bytes(
 ) -> bytes:
     if isinstance(pages, str | Drawing):
         pages = [pages]
-    drawings = [read_drawing(page) if isinstance(page, str) else page for page in pages]
+    from flexo.animated import stilled
+
+    # (A GIF is the frame its picture names, as paper shows it: flexo.animated.)
+    drawings = [read_drawing(stilled(page)) if isinstance(page, str) else page for page in pages]
     return _Writer(title, author, tags, language).write(drawings)
 
 
@@ -681,6 +690,15 @@ class _Content:
         mime, data = _decode(item.href)
         if mime is None:
             return
+        if mime == "image/gif":
+            # Paper does not play: its first frame (a drawing read from an SVG has the frame
+            # its picture names in its place already, ``pdf_bytes``).
+            from flexo.animated import still_png
+
+            try:
+                data, mime = still_png(data), "image/png"
+            except Exception:  # a GIF Pillow cannot read is left out, as any unreadable
+                return
         if mime == "image/svg+xml":
             import resvg_py
 

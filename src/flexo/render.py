@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from flexo.artwork import crop_of, picture_href
+from flexo.artwork import PHOTOGRAPHS, crop_of, picture_href
 from flexo.badges import badge_icon, draw_badge, draw_icon
 from flexo.components import (
     FIT_NEVER,
@@ -906,8 +906,8 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
         parent, part = window, f"{spec.id}.artwork.whole"
     else:
         part = f"{spec.id}.artwork"
-    if artwork.format in {"png", "jpeg"}:
-        element(
+    if artwork.format in PHOTOGRAPHS:
+        picture = element(
             parent,
             "image",
             id=part,
@@ -918,6 +918,12 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
             preserveAspectRatio=_ARTWORK_FIT,
             href=picture_href(artwork),
         )
+        if artwork.format == "gif":
+            # The frame a PDF or PNG shows of it (flexo.animated): the first, or as it says.
+            from flexo.animated import STILL, still_frame
+
+            if (still := still_frame(spec.property("still", 1))) > 1:
+                picture.set(STILL, str(still))
         return
     nested = ET.fromstring(artwork.markup)
     for name, value in (

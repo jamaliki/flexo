@@ -78,15 +78,23 @@ def export_outputs(
         return OutputFiles(editable)
     text = compilation.document.text
     drawing = read_drawing(text)
+    # Paper's: each GIF the frame its picture names (flexo.animated); the SVGs play them.
+    still = drawing
+    if "data:image/gif" in text:
+        from flexo.animated import stilled
+
+        still = read_drawing(stilled(text))
     if portable is not None or png is not None:
         root = ET.fromstring(text)
-        outlined = portable_svg(drawing, width=root.get("width"), height=root.get("height"))
+        size = {"width": root.get("width"), "height": root.get("height")}
+        outlined = portable_svg(drawing, **size)
         if portable is not None:
             portable.write_text(outlined, encoding="utf-8")
         if png is not None:
-            png.write_bytes(rasterise(outlined, dpi))
+            shown = outlined if still is drawing else portable_svg(still, **size)
+            png.write_bytes(rasterise(shown, dpi))
     if pdf is not None:
-        write_pdf(drawing, pdf, title=compilation.measured.semantic.id)
+        write_pdf(still, pdf, title=compilation.measured.semantic.id)
     return OutputFiles(editable, portable, pdf, png)
 
 
@@ -98,6 +106,11 @@ def rasterise(svg_text: str, dpi: float = 192.0) -> bytes:
     import resvg_py
 
     fonts = [str(directory) for directory in font_directories()]
+    if "data:image/gif" in svg_text:
+        from flexo.animated import stilled
+
+        # A PNG does not play: each GIF the frame its picture names (flexo.animated).
+        svg_text = stilled(svg_text)
     if "data:image/svg+xml;base64," in svg_text:
         svg_text = _pictures_drawn(svg_text, dpi, fonts)
     if "<image" in svg_text:

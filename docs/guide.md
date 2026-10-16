@@ -749,6 +749,14 @@ block. An SVG source stays vector: Flexo nests the file's content at the
 node's bounds with its viewBox intact, so it remains selectable in an editor
 and stays vector in the PDF. A PNG or JPEG is embedded as a data URI.
 
+**GIFs.** A GIF is embedded as a PNG is, every frame of it, and plays wherever
+a screen shows the figure: the studio, a browser opening its SVG, a slide program.
+A PDF or PNG cannot play, so it shows one frame: the first, or the one the
+image's `still` property names, counted from 1 (`panel.image("cell", "cell.gif",
+properties={"still": 12})`, or `properties: {source: cell.gif, still: 12}` in a
+document). Cropped (`crop_left` and the others), it still plays: the crop is a
+window on it.
+
 **Illustrator and PDF files.** An Illustrator file is a PDF with Illustrator's
 own data beside it (unless it was saved with "Create PDF Compatible File"
 unticked, which Flexo says), and Flexo reads its artboard back as a drawing:
@@ -766,15 +774,15 @@ version of its file and kept, so a figure built again does not read it again. Ar
 it.
 
 **Size.** An SVG's intrinsic size comes from its `width` and `height`
-attributes, or else from its viewBox read as CSS pixels. A PNG's comes from its
-pixel size at 96 dpi. Give only `width` or only `height` and the other follows
+attributes, or else from its viewBox read as CSS pixels. A PNG's, a JPEG's or a
+GIF's comes from its pixel size at 96 dpi. Give only `width` or only `height` and the other follows
 the artwork's aspect ratio. Give both and the artwork is letterboxed inside
 those bounds. Both accept any length or `"cells:N"`. A file with no size of its
 own needs an explicit size.
 
 **Paths.** A relative path resolves against the working directory at compile
 time, so absolute paths are more reliable. A missing or unreadable file, or a
-suffix other than `.svg`, `.png`, `.jpg`, `.pdf` or `.ai`, raises `FlexoError`
+suffix other than `.svg`, `.png`, `.jpg`, `.gif`, `.pdf` or `.ai`, raises `FlexoError`
 with a diagnostic that names the node and the path.
 
 **Safety checks.** Artwork is checked before it is inlined. A file is rejected

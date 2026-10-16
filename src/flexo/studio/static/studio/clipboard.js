@@ -80,3 +80,41 @@ export function pastedOwn(data) {
     try { return words ? JSON.parse(words) : null; } catch { return null; }
   }, () => null);
 }
+
+// A GIF pasted, as the GIF it is -- every frame, to play -- never the still picture a copy
+// hands the page instead: a browser's Copy Image puts a GIF on the clipboard as a PNG of its
+// first frame (its address in the HTML beside it), and the web view hands Safari's GIF on as
+// "image.png". A promise of the GIF as a file (null if there is none after all) -- or null at
+// once where the paste brings no picture alone, or brings a GIF already, named as one (copied
+// in the Finder). Where it is found: the picture handed over, if its bytes are a GIF's; in
+// the Mac app, the GIF on the clipboard (its `clipboard_gif`: Safari's, Preview's, a .gif
+// copied in the Finder); else the picture the copied HTML shows, if the page may fetch it.
+// Asked for as the paste comes, before anything is waited for: its clipboard goes after.
+const GIF = /\.gif$/i;
+const gifBytes = (bytes) => bytes.length > 5 && String.fromCharCode(...bytes.slice(0, 4)) === "GIF8";
+export function pastedGif(data) {
+  const files = [...(data?.files || [])];
+  if (!files.length || !files.every(pictured) || files.some((file) => GIF.test(file.name || "") || /^image\/gif\b/i.test(file.type || ""))) return null;
+  const app = globalThis.pywebview?.api;
+  const html = files.length === 1 ? data?.getData?.("text/html") || "" : "";
+  const shown = [...html.matchAll(/<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)].map((found) => found[1].replace(/&amp;/g, "&"));
+  const source = shown.length === 1 && (/^data:image\/gif[;,]/i.test(shown[0]) || /^https?:[^?#]*\.gif(?:[?#]|$)/i.test(shown[0])) ? shown[0] : null;
+  const asked = files.length === 1 && app?.clipboard_gif ? Promise.resolve(app.clipboard_gif()).catch(() => null) : null;
+  const named = (name, fallback = "image.gif") => (GIF.test(name || "") ? name : fallback);
+  return (async () => {
+    // (Handed over as itself under a PNG's name: only named again.)
+    if (files.length === 1) {
+      const bytes = new Uint8Array(await files[0].arrayBuffer().catch(() => new ArrayBuffer(0)));
+      if (gifBytes(bytes)) return new File([bytes], named(files[0].name?.replace(/\.\w+$/, ".gif")), { type: "image/gif" });
+    }
+    const given = await asked;
+    if (given?.data) return new File([Uint8Array.from(atob(given.data), (c) => c.charCodeAt(0))], named(given.name), { type: "image/gif" });
+    if (!source) return null;
+    try {
+      const reply = await fetch(source, { credentials: "omit", signal: AbortSignal.timeout?.(4000) });
+      const bytes = reply.ok ? new Uint8Array(await reply.arrayBuffer()) : null;
+      if (!bytes || !gifBytes(bytes)) return null;
+      return new File([bytes], source.startsWith("data:") ? "image.gif" : named(decodeURIComponent(new URL(source).pathname.split("/").pop() || "")), { type: "image/gif" });
+    } catch { return null; }
+  })();
+}

@@ -307,6 +307,10 @@ class Copied:
             dpi = 72.0 * self.scale
             outlined = self.svg()
             fonts = [str(directory) for directory in font_directories()]
+            if "data:image/gif" in outlined:
+                from flexo.animated import stilled
+
+                outlined = stilled(outlined)  # (a picture does not play: a GIF's first frame)
             if "data:image/svg+xml;base64," in outlined:
                 outlined = _pictures_drawn(outlined, dpi, fonts)
             if "<image" in outlined:

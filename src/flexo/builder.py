@@ -1836,9 +1836,12 @@ class GroupBuilder:
         and the PDF each carry the artwork with them.
 
         Size follows the file. Its intrinsic size comes from its ``width`` and
-        ``height``, or from its viewBox read as CSS pixels; a PNG's comes from
-        its pixel size at 96 dpi. Give ``width`` or ``height`` alone and the
-        other follows the artwork's aspect ratio; give both and the drawing
+        ``height``, or from its viewBox read as CSS pixels; a PNG's (a JPEG's, a
+        GIF's) comes from its pixel size at 96 dpi. A GIF plays wherever a screen
+        shows it; a PDF or PNG shows its first frame, or the one its ``still``
+        property names (counted from 1: ``properties={"still": 12}``). Give
+        ``width`` or ``height`` alone and the other follows the artwork's aspect
+        ratio; give both and the drawing
         letterboxes inside those bounds rather than distorting. Both extents
         take any length or ``"cells:N"``, so a panel of icons can be exactly as
         tall as the vector stack beside it.
