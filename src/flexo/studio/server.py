@@ -45,7 +45,8 @@ HANG_UP_CHECK = 0.25
 """How often, in seconds, a quiet connection is looked at for a window gone without a word
 (crashed, killed, its browser closed under it)."""
 FILE_TYPES = {
-    "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf", ".ai"),
+    "image": (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".tif", ".tiff", ".bmp", ".heic",
+              ".heif", ".avif", ".pdf", ".ai"),
     "figure": (".yaml", ".yml", ".json"),
     "python": (".py",),
     "theme": (".yaml", ".yml", ".json"),
@@ -484,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
             "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ").strip()
             or "file"
         )
-        target = folder / clean
+        target = folder / _named_as_it_is(clean, data)
         self.workspace.relative(target)  # inside the folder, or PermissionError
         stem, suffix, count = target.stem, target.suffix, 1
         while target.exists() and target.read_bytes() != data:
@@ -748,6 +749,35 @@ class Handler(BaseHTTPRequestHandler):
             return bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
         except (OSError, ValueError):
             return True
+
+
+_SUFFIX_OF = {
+    "png": (".png",),
+    "jpeg": (".jpg", ".jpeg"),
+    "gif": (".gif",),
+    "webp": (".webp",),
+    "tiff": (".tiff", ".tif"),
+    "bmp": (".bmp",),
+    "heic": (".heic", ".heif"),
+    "avif": (".avif",),
+}
+"""The names each kind of photograph goes by, its usual one first."""
+
+
+def _named_as_it_is(name: str, data: bytes) -> str:
+    """A photograph's file name with the ending of what its bytes are: a PNG copied from a web
+    page under a ``.jpg`` address is saved as ``.png``. Other files keep their names."""
+
+    from flexo.artwork import RASTER_SUFFIXES, _sniffed
+
+    path = Path(name)
+    if path.suffix.lower() not in RASTER_SUFFIXES:
+        return name
+    kind = _sniffed(data[:64])
+    endings = _SUFFIX_OF.get(kind or "")
+    if not endings or path.suffix.lower() in endings:
+        return name
+    return f"{path.stem}{endings[0]}"
 
 
 def _one(query: dict[str, list[str]], key: str) -> str:

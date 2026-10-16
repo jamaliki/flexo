@@ -227,6 +227,26 @@ def test_pictures_beside_the_document_are_listed_and_uploaded(
     assert not (workspace.root / "assets" / "beside.png").exists()
 
 
+def test_a_picture_pasted_under_the_wrong_name_is_saved_as_what_it_is(
+    served: tuple[str, Workspace],
+) -> None:
+    # (A PNG copied from a web page under a .jpg address -- Steamboat Willie, its background
+    # clear -- is a .png in the folder; a name that is right, or no picture's, is kept.)
+    base, workspace = served
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+    for name, data, saved in (
+        ("steamboat-willie.jpg", png, "assets/steamboat-willie.png"),
+        ("photo.jpeg", b"\xff\xd8\xff\xe0 jfif", "assets/photo.jpeg"),
+        ("notes.pdf", png, "assets/notes.pdf"),
+    ):
+        request = urllib.request.Request(
+            f"{base}/api/upload?file=figure.yaml&name={name}",
+            data=data,
+            headers={"X-Studio-Token": workspace.token},
+        )
+        assert json.loads(OPENER.open(request).read())["path"] == saved
+
+
 # -- people and agents at once ------------------------------------------------------------
 
 

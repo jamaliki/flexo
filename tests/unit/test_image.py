@@ -307,10 +307,16 @@ def test_a_missing_or_unsupported_source_names_the_node_and_the_path(tmp_path: P
 
 
 def test_a_png_that_is_not_a_png_is_rejected(tmp_path: Path) -> None:
+    # (Read as what its bytes are: a PNG's signature with nothing after it is a broken PNG;
+    # bytes that are no picture at all are said to be none.)
     target_file = tmp_path / "render.png"
-    target_file.write_bytes(b"GIF89a not really")
+    target_file.write_bytes(b"\x89PNG\r\n\x1a\n and then nothing")
     with pytest.raises(FlexoError, match=r"image\.png\.invalid"):
         load_artwork("panel.art", str(target_file))
+    other = tmp_path / "other.png"
+    other.write_bytes(b"\x89PNG but cut short")
+    with pytest.raises(FlexoError, match=r"image\.source\.unknown"):
+        load_artwork("panel.art", str(other))
 
 
 def test_an_image_node_round_trips_through_the_schema_document(tmp_path: Path) -> None:
