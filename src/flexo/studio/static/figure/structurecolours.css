@@ -1,0 +1,16 @@
+/* A structure's rows of colours (structurecolours.js): a grip, what the row colours -- the
+   widest, in the monospace selections are typed in -- its colour, and a delete button. A
+   dozen show at once; more scroll in their own list. */
+.mol-colour-rows { display: grid; gap: 3px; max-height: calc(12 * 26px + 11 * 3px); overflow-y: auto; margin: 0 -2px; padding: 0 2px; }
+.mol-colour-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(92px, 26%) 24px; gap: 4px; align-items: center; height: 26px; }
+.mol-colour-row .input { height: 26px; font: var(--text-small); padding-left: 6px; padding-right: 4px; min-width: 0; width: 100%; }
+.mol-colour-row .input.mono { font-family: var(--mono); font-size: 11.5px; }
+.mol-colour-what, .mol-colour-paint { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.mol-colour-what .input, .mol-colour-paint .input { flex: 1; }
+.mol-colour-grip { display: grid; place-items: center; width: 14px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ink-3); cursor: grab; touch-action: none; }
+.mol-colour-grip:hover, .mol-colour-grip:focus-visible { color: var(--ink); }
+.mol-colour-grip svg { width: 12px; height: 12px; }
+.mol-colour-rows.sorting { cursor: grabbing; }
+.mol-colour-rows.sorting .mol-colour-row:not(.lifted) { transition: transform 0.12s ease; }
+.mol-colour-row.lifted { position: relative; z-index: 1; background: var(--raised); box-shadow: var(--shadow-2); border-radius: 5px; }
+.mol-colour-row.lifted .mol-colour-grip { cursor: grabbing; }

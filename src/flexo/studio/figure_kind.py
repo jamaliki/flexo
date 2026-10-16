@@ -101,7 +101,11 @@ A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width
   mol-sketch scene (.json: a reaction drawn with its orbitals, lone pairs, arrows and measures),
   step (a scene's: 1, its first; drawn as its arrows finish), look (engraved-colour, textbook,
   flat, ...), scheme (flat: look, its own coral and amber, or figure, the figure's tones), width,
-  height, style: {mol-sketch's settings: show: {orbitals, measures}, lone_pair_style, ...}}}.
+  height, yaw, pitch, roll, zoom, pan_x, pan_y, frame (a name: structures naming one frame are
+  drawn with one camera, at one scale, about one centre, as the first of them is turned and
+  framed -- a diffusion trajectory, a motif held fixed), title_side: top|bottom (its label over
+  or under the molecule), style: {mol-sketch's settings: show: {orbitals, measures},
+  lone_pair_style, ...}}}.
 A reaction mechanism: {id, kind: mechanism, properties: {steps: [{smiles: "[OH-:5].[CH3:1]
   [C:2](=[O:3])[Cl:4]", arrows: ["5 -> 2", "2=3 -> 3"], label, reagents, conditions},
   {arrows: ["3 -> 2", "2-4 -> 4"]}]}} -- the atoms its arrows name are mapped ([O-:5] is 5); an
@@ -534,7 +538,7 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
                 figure[key] = str((base / value).resolve())
     for node in document.get("nodes") or []:
         properties = node.get("properties") if isinstance(node, dict) else None
-        for key in ("source", "density"):
+        for key in ("source", "density", "ss_from"):
             value = properties.get(key) if isinstance(properties, dict) else None
             if isinstance(value, str) and value and (base / value).is_file():
                 properties[key] = str((base / value).resolve())
@@ -608,26 +612,29 @@ def structure_problems(spec) -> list[Any]:
     """What keeps each structure in ``spec`` from being drawn as written, as warnings: the
     figure is drawn all the same, a structure that can't be had as a panel saying why."""
 
-    from flexo.structures import structure_problem
+    from flexo.structure_frames import frame_problems
+    from flexo.structures import structure_problem, title_side_problem
     from flexo.themes import figure_style
 
     style = figure_style(spec)
     found = [structure_problem(node, style) for node in spec.nodes if node.kind == "structure"]
-    return [item for item in found if item is not None]
+    found += [title_side_problem(node) for node in spec.nodes if node.kind == "structure"]
+    return [item for item in found if item is not None] + frame_problems(spec)
 
 
 def view_of(spec, identifier: str) -> dict[str, Any]:
     """The trace and turn of the structure ``identifier`` in ``spec``, drawn as ``spec``
-    says (its theme chooses the look): for any kind that draws figures."""
+    says (its theme chooses the look) -- in a frame with others, as the frame turns it
+    (``flexo.structure_frames.framed_view``): for any kind that draws figures."""
 
-    from flexo.structures import structure_view
+    from flexo.structure_frames import framed_view
     from flexo.studio.figure_edit import EditError
     from flexo.themes import figure_palette, figure_style
 
     node = next((item for item in spec.nodes if item.id == identifier), None)
     if node is None or node.kind != "structure":
         raise EditError(f"“{identifier}” isn't a structure.")
-    return structure_view(node, figure_style(spec), figure_palette(spec))
+    return framed_view(spec, identifier, figure_style(spec), figure_palette(spec))
 
 
 def _is_file(value: object) -> bool:

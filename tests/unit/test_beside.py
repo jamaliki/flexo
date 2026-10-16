@@ -1,7 +1,7 @@
-"""Guides from beside the page (``studio/static/studio/beside.js``): what a deck's neighbouring
-slides hold caught at as the page's own edges and middles are -- told apart, for their guides
-to be drawn in a colour of their own, and the page's own kept its own -- and a nudge that would
-step over one of them stopped on it, run in Node."""
+"""Guides from beside the page (``studio/static/studio/beside.js``): what a deck's slides
+overlaid hold caught at as the page's own edges and middles are -- told apart, for their guides
+to be drawn in a colour of their own (the tint of the slide each is on), and the page's own kept
+its own -- and a nudge that would step over one of them stopped on it, run in Node."""
 
 from __future__ import annotations
 
@@ -85,3 +85,21 @@ def test_a_nudge_that_would_step_over_a_guide_beside_the_page_stops_on_it() -> N
     assert made["far"] == {"dx": -1, "dy": 0, "guides": []}
     assert made["near"]["dx"] == pytest.approx(-1.3)
     assert made["hair"]["dx"] == pytest.approx(-0.755)
+
+
+def test_a_guide_caught_at_a_slide_overlaid_says_the_tint_of_that_slide() -> None:
+    made = run("""
+      // Two slides overlaid, each box in its slide's tint: the nearer slide's first.
+      const near = Object.assign([100, 300, 400, 500], { tint: "#2f63d6" });
+      const far = Object.assign([100, 320, 380, 500], { tint: "#d8452b" });
+      const caught = B.withBeside({ xs: [0], ys: [0], boxes: [] }, { boxes: [near, far] });
+      const nudged = B.nudgeCaught([395, 10, 405, 20], 10, 0, { boxes: [near, far] });
+      return {
+        left: B.besideAt(caught, "x", 100).tint, right: B.besideAt(caught, "x", 380).tint,
+        nudged: nudged.guides.map((guide) => [guide.at, guide.box.tint]),
+      };
+    """)
+    # A guide both slides have is the nearer's, in its tint; each other, its own slide's.
+    assert made["left"] == "#2f63d6"
+    assert made["right"] == "#d8452b"
+    assert made["nudged"] == [[400, "#2f63d6"]]

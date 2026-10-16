@@ -1584,6 +1584,10 @@ const SHORTCUTS = [
   ["Slides", [["⇧ ⌘ N", "New Slide"], ["↑ ↓ PgUp PgDn", "Previous or Next Slide"], ["Home End", "First or Last Slide"],
     ["⌘ D", "Duplicate"], ["⌘ ↩", "Present"], ["⌥ ⌘ P", "Play Slideshow", "app"], ["⌥ ⌘ ↩", "Play from Start"],
     ["⌘ + −", "Zoom In or Out (or Pinch, or ⌘-Scroll)"], ["⌘ 0", "Actual Size"], ["⇧ ⌘ 0", "Fit Slide"]]],
+  // A deck's slides overlaid on the one shown (flexo-talk's across.js).
+  ["Overlaying Slides", [["O", "Overlay the Slides Chosen in the List (One Chosen: Those Either Side), or Stop"], ["⇞ ⇟", "Previous or Next Overlaid Slide"],
+    ["Click", "An Overlaid Slide’s Object: Go to Its Slide and Select It"], ["⌘ Drag", "Without Catching at What Is Overlaid (Snapping Off: With It)"],
+    ["Esc", "Stop Overlaying (With Nothing Selected)"]]],
   ["In the Slide List", [["↩", "New Slide"], ["⇧ ↑ ↓", "Select the Slide Above or Below Too"], ["⌘ A", "Select All Slides"], ["⌫", "Delete"],
     ["⌘ X", "Cut"], ["⌘ C", "Copy"], ["⌘ V", "Paste"], ["⌥ ↑ ↓", "Move the Slides Up or Down"]]],
   ["Objects on a Slide", [["⇥", "Next Title or Object (⇧⇥: Previous)"], ["↩", "Edit Text, First Cell or First Shape; Crop a Picture"], ["⌘ A", "Select All Objects"], ["⇧ or ⌘ Click", "Select One More (or One Less)"], ["Drag", "Select the Objects It Touches (from an Empty Spot)"], ["Esc", "Deselect"], ["⌫", "Delete"], ["⌘ D", "Duplicate"],

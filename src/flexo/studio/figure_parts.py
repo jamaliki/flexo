@@ -9,7 +9,8 @@ figure file (``label``, ``properties.length``, ``layout.gap``) and how it is
 edited:
 
 - ``text``, ``markup`` (flexo's inline markup), ``code`` (monospace, several lines);
-- ``integer``, ``number``, ``length`` (``12pt``, ``4mm``), ``bool``;
+- ``integer``, ``number``, ``length`` (``12pt``, ``4mm``), ``bool``; ``slider``, a number
+  from ``min`` to ``max`` dragged or typed (a structure's noise);
 - ``choice`` (one of ``options``, each shown as ``labels`` names it) and ``combo``
   (usually one of ``options``);
 - ``records``: a table of rows, each a mapping with the given ``columns`` -- a
@@ -19,6 +20,8 @@ edited:
   ``structure``);
 - ``view``: a molecule's ``properties.yaw``, ``pitch``, and ``zoom``, changed a step
   at a time by buttons, as one turns a molecule in a viewer;
+- ``structframe``: the frame a structure shares with others (``flexo.structure_frames``):
+  none, one of the figure's, or a new one;
 - ``step``: which of a mol-sketch scene's steps is drawn, chosen by the names it gives them;
 - ``molsketch``: a structure's mol-sketch settings, laid out in ``panes``
   (``flexo.structure_style``), which hold the structure's other fields too.
@@ -510,6 +513,7 @@ def _bench() -> list[dict[str, Any]]:
 def _structure() -> dict[str, Any]:
     from flexo.structure_style import PANES, SECTIONS
     from flexo.structures import LOOKS, SCHEMES
+    from flexo.structures import TITLE_SIDES as STRUCTURE_TITLE_SIDES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
 
@@ -598,6 +602,42 @@ def _structure() -> dict[str, Any]:
                 "bool",
                 hint="Draw the waters and lone ions where they lie",
             ),
+            # (Coloured by another's secondary structure -- a diffusion run's frames by the
+            # structure they end as -- each drawn with its own: flexo.structure_colours.)
+            _field(
+                "properties.ss_from",
+                "Secondary Structure From",
+                "file",
+                types=["structure"],
+                placeholder="This structure",
+                hint="Helices, strands and loops coloured as another file\u2019s are",
+            ),
+            # Noised as a diffusion model draws it on its way (flexo.structure_noise): copies
+            # at 1, 0.3, 0.16, 0.06 and 0 are a run's frames at t = 100, 30, 20, 10 and 0.
+            _field(
+                "properties.noise",
+                "Noise",
+                "slider",
+                min=0,
+                max=1,
+                step=0.01,
+                default=0,
+                hint="0 is the file, 1 a random coil: 0.3 is t = 30 of a hundred steps",
+            ),
+            _field(
+                "properties.fixed",
+                "Fixed",
+                "text",
+                hint="Held where the file has it while the rest is noised: resi 34+94 or resn 6V0",
+            ),
+            _field(
+                "properties.seed",
+                "Seed",
+                "integer",
+                min=0,
+                default=0,
+                hint="Copies with the same seed are moments of one run",
+            ),
             _field(
                 "properties.colors",
                 "Colours",
@@ -605,13 +645,14 @@ def _structure() -> dict[str, Any]:
                 # A new row colours a chain the structure has that no row colours yet.
                 row={"group": "@chain", "color": "#e69f00"},
                 columns=[
-                    _column("group", "Chain or Residue", "chain",
-                            hint="A, SER195, entity:1, subunit:L"),
+                    _column("group", "Chain, Residue or Selection", "chain",
+                            hint="A, SER195, resi 10-24, not polymer"),
                     _column(
                         "color", "Colour", "colour", options=list(TONES), hint="#e69f00 or a tone"
                     ),
                 ],
-                hint="These override the palette, the look and its colours (such as Helices)",
+                hint="A later row wins over an earlier one; these override the palette, the "
+                "look and its colours (such as Helices)",
             ),
             _field(
                 "properties.site",
@@ -634,6 +675,14 @@ def _structure() -> dict[str, Any]:
                 "text",
                 hint="auto for the entry's own map, an EMDB ID, or a map file",
             ),
+            # (Structures that share a frame are turned, zoomed and moved as one: its first's
+            # view is theirs, flexo.structure_frames.)
+            _field(
+                "properties.frame",
+                "Frame",
+                "structframe",
+                hint="Structures in one frame are turned, scaled and centred as one",
+            ),
             _field("properties", "View", "view", hint="Or drag its rotate handle"),
             _field("properties.yaw", "Yaw", "number", unit="°"),
             _field("properties.pitch", "Pitch", "number", unit="°"),
@@ -654,8 +703,18 @@ def _structure() -> dict[str, Any]:
             ),
         ],
         # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
-        # and nothing round it.)
-        common=[LABEL],
+        # and nothing round it. Its name over the molecule, or under it.)
+        common=[
+            LABEL,
+            _field(
+                "properties.title_side",
+                "Title Position",
+                "choice",
+                options=list(STRUCTURE_TITLE_SIDES),
+                labels={"top": "Top", "bottom": "Bottom"},
+                default="top",
+            ),
+        ],
         needs_file=True,
         unavailable="" if ready else "Requires flexo[structures,molecules]",
     )

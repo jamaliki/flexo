@@ -355,3 +355,6 @@ body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !i
 .drawing-size { flex: 1; min-width: 0; max-width: 96px; }
 .drawing-wells { display: flex; flex-wrap: wrap; gap: 8px 10px; }
 .section-title .drawing-reset { margin-left: auto; }
+
+/* A share dragged or typed (a structure's noise): the slider, its number beside it. */
+.slider-row .typed-number { flex: none; width: 76px; }

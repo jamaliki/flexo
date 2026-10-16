@@ -25,6 +25,7 @@
 //   edit                    what ↩ does to the object chosen: "text", "cells", "numbers",
 //                           "captions", "crop", "shapes", or none
 //   inGroup                 a group of shapes entered, as Inkscape's is
+//   overlay                 a deck's slides overlaid on the one shown (its across.js)
 //   grid, snapping          the grid shown; snapping "guides", "grid" or "off"
 // Here too, whether the bar is shown. Read in Node as in the studio; drawn: helpbar.js.
 
@@ -216,6 +217,11 @@ const PAGES = {
   figure: (c) => said(GENERAL, row("⌘ A", "Select All"), viewing(c)),
 };
 const ANYWHERE = () => said(["General"], row("⌘ K", "Search"), row("⌘ /", "Shortcuts"));
+// A deck's slides overlaid, nothing chosen on the slide (the slide list's choice aside): O stops
+// it, Page Up and Page Down go among them, a ghost's object is clicked to go to it, and what
+// catches as a drag goes.
+const OVERLAID = (c) => said(["Overlaying Slides", "General", "Shapes"], row("O", "Stop Overlaying"), row("⇞ ⇟", "Overlaid Slides"),
+  row("Click", "Edit on Its Slide"), row("%", "Snapping"), freely(c));
 const IN_GROUP = [row("Esc", "Leave Group"), row("⌘ A", "Select All")];
 
 // The keys for `c`, at most MOST of them: each { keys, words }, with the sheet's groups they
@@ -225,7 +231,8 @@ export function itemsFor(c = {}) {
   if (c.drag) return said(DRAG, (DRAGS[c.drag] || DRAGS.plain)(c));
   if (FIND[c.find]) return FIND[c.find](c);
   if (c.typing) return (TYPING[c.typing] || TYPING.field)(c);
-  const own = MODES[c.mode]?.(c) || CHOSEN[c.chosen]?.(c)
+  const overlaid = c.overlay && c.page === "deck" && !c.inGroup && (!c.chosen || c.chosen === "slides");
+  const own = MODES[c.mode]?.(c) || (overlaid ? OVERLAID(c) : null) || CHOSEN[c.chosen]?.(c)
     || (c.inGroup ? said(["Shapes", ...GENERAL], IN_GROUP, (PAGES[c.page] || ANYWHERE)(c)) : null)
     || (PAGES[c.page] || ANYWHERE)(c);
   const head = c.find === "open" ? FOUND : [];

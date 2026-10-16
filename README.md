@@ -273,8 +273,13 @@ page, engraved colour otherwise) unless `look=` names one; it is drawn on the
 figure's page colour and that colour taken out, so it sits on the page with no
 box; its ink is the figure's, and its helices and strands take the colours a
 protein map in the figure gives them. `colors={"A": "Kinase"}` colours a chain
-(or a residue, subunit, or entity) with a hex colour or one of the figure's
-tones; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
+(or a residue such as `SER195` or a ligand such as `6V0401`, a subunit, an entity,
+or a selection such as `resi 10-24` or `not polymer`) with a hex colour or one of
+the figure's tones, a later one over an earlier one where they overlap; a group
+the molecule has none of is said. `ss_from="end.pdb"` colours each residue by its
+secondary structure in another file, in the look's helix, strand and loop colours,
+while it is drawn with its own -- a diffusion run's frames coloured by the
+structure they end as; `yaw`, `pitch`, `roll`, `zoom` turn and frame it; `cartoon`, `sticks`,
 `surface`, and `site` are mol-sketch selections (`site="ligand"` picks out the
 largest ligand's pocket). The rest of mol-sketch is there too: `palette=` names
 one of its group palettes, `density=` draws a density map with the model
@@ -296,6 +301,98 @@ is nested as shapes rather than a picture, so it stays sharp at any size, the PD
 carries it as vectors, and each shape records the role it was painted in, so `flexo
 retheme` recolours it with the rest of the figure. In a sketched theme it keeps its
 own clean line.
+
+#### Structures that share a frame
+
+A run of structures -- a diffusion model's steps from noise to the folded protein, a motif
+scaffolded five ways, the states of a motor -- reads as one only when each is seen the same
+way. Drawn alone, each is fitted to its own box (`zoom` 1 fits what is drawn), so the small
+ball of noise is drawn as large as the protein it becomes; and each starts along its own
+principal axes, so the same `yaw` turns two of them differently. Structures that name the
+same `frame` are drawn as one:
+
+```yaml
+nodes:
+  - id: t100
+    kind: structure
+    label: "[t]{italic} = 100"
+    properties: {source: frames/t100.pdb, frame: diffusion, yaw: 20, pitch: -10, title_side: bottom}
+  - id: t0
+    kind: structure
+    label: "[t]{italic} = 0"
+    properties: {source: frames/t000.pdb, frame: diffusion, title_side: bottom}
+```
+
+- **One camera**: each is turned as the first of them (in the figure's `nodes`) is turned by
+  its `yaw`, `pitch` and `roll` -- the same way in space, their coordinates read in one frame.
+  The first is drawn as it would be alone; the others are seen from where it is seen.
+- **One scale**: the same ångströms to the point, the scale at which each of them fits its
+  own box -- the largest's -- times the first's `zoom`. The noise is drawn small, and grows.
+- **One centre**: the middle of all they draw together, moved by the first's `pan_x` and
+  `pan_y`. A motif held fixed, or a trajectory aligned, stays where it is in every panel.
+
+Each keeps its own box, look, colours and what it draws. The first one's `yaw`, `pitch`,
+`roll`, `zoom`, `pan_x` and `pan_y` are the frame's; another's own are not used (and said,
+where they differ). With a flat projection (the engraved, textbook and flat looks) each atom
+is drawn exactly where the frame's camera puts it; in perspective each is seen from the
+frame's eye, exact at the frame's centre and within a share of the perspective elsewhere. In
+Python: `row.structure("t0", "frames/t000.pdb", frame="diffusion", title_side="bottom")`.
+
+In the studio, turning any of them by its rotate handle turns them all as it is dragged, and
+setting the yaw, pitch or roll (or the zoom, or the offset) in its panel's **Camera** tab sets
+them for the frame -- one step to undo. The Camera tab's **Frame** puts a structure in one of
+the figure's frames (each with how many structures it has), in a new frame of its own, or in
+none: out of a frame, it keeps the turn it was seen at.
+
+A structure's name stands over the molecule, or under it with `title_side: bottom`; its words
+take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics (asterisks are
+drawn as typed).
+
+#### A diffusion run, frame by frame
+
+![A diffusion run of one structure, five copies at five noise levels (examples/biology.py)](examples/build/diffusion.preview.png)
+
+```yaml
+nodes:
+  - {id: t100, kind: structure, label: "t = 100", properties: {source: 5KKA.pdb, look: flat, noise: 1}}
+  - {id: t30, kind: structure, label: "t = 30", properties: {source: 5KKA.pdb, look: flat, noise: 0.3}}
+  - {id: t20, kind: structure, label: "t = 20", properties: {source: 5KKA.pdb, look: flat, noise: 0.16}}
+  - {id: t10, kind: structure, label: "t = 10", properties: {source: 5KKA.pdb, look: flat, noise: 0.06}}
+  - {id: t0, kind: structure, label: "t = 0", properties: {source: 5KKA.pdb, look: flat}}
+groups:
+  - {id: run, role: layout, layout: {kind: row, gap: 16}, children: [t100, t30, t20, t10, t0]}
+edges:
+  - {from: t100, to: t30}
+  - {from: t30, to: t20}
+  - {from: t20, to: t10}
+  - {from: t10, to: t0}
+```
+
+A structure's `noise` draws it as a diffusion model does on its way, from 0 (the
+file itself) to 1 (a random coil): it is the share of the run still to go, t over its
+steps, so `noise: 0.3` is t = 30 of a hundred steps, or t = 15 of fifty. Copies of one
+structure alike but for their noise are moments of one trajectory, so a series is five
+copies of one part, with no frames made elsewhere. `fixed:` holds a mol-sketch selection
+where the file has it -- a residue whole when any of its atoms is selected -- for a
+motif-scaffolding run (`fixed: resi 34+94+119+177 or resn 6V0`), or a target a binder is
+made for (`fixed: chain B`); `seed:` picks another run (0 unless given). In the studio,
+a structure's Molecule tab has them under Noise.
+
+The prior is a random coil with a protein's own local geometry (its C-alphas 3.8 Å apart,
+each angle between 85° and 135°), wandering in a ball about the size of the chain folded,
+and through a motif's C-alphas. Stretches of the chain then fold to the file's shape, the
+short ones first, so helices form, right-handed, before their packing: at noise 0.3 the
+chain is 70% as far from the file as its prior (RMS) and its helices forming, at 0.16 a
+quarter (its shape is there), at 0.06 a twelfth (nearly the file). Throughout, each bond
+keeps the file's length and each angle stays within a protein's, so the trace is never
+broken where the file's is not, and a helix is never squashed into a rod; the file's
+helices and strands are drawn where they have formed. Every residue moves rigidly with
+its C-alpha, turned as the chain is turned there, so side chains and sticks stay
+chemically sane; a ligand, ion or water not held moves with the residue nearest it. Each
+chain folds on its own, round where it ends up, and is seen as the file is: `yaw` and
+`pitch` turn every copy alike. A trajectory is worked out once for each file, chain,
+seed and what is held -- in about a second for 300 residues -- and kept in memory and in
+flexo's cache folder; any noise after that is drawn at once.
 
 ![Trees (examples/biology.py)](examples/build/trees.preview.png)
 
@@ -1359,7 +1456,8 @@ changes in words, to go back or forward to any of them.
   the part's own face and size; with a part chosen, typing types over its words, as on a
   Keynote shape, and ⌘G groups the parts chosen (⇧⌘G ungroups). A chosen structure
   turns by its rotate handle (or by
-  the buttons in its panel), and a structure or picture is sized by its corners;
+  the buttons in its panel), with every structure that shares its frame, and a structure or
+  picture is sized by its corners;
   a shape's **Type** may be made either, its file asked for. Right-click a part
   for what can be done with it. **Connect**
   draws a line from one part to the next (or drag from a part's **+** to another); double-click a part or a line to
@@ -1449,7 +1547,8 @@ changes in words, to go back or forward to any of them.
   now, a keycap and a word or two each: while a shape is dragged, what ⇧, ⌥ and ⌘ do to the
   drag (each lit while it is held) and Esc; while the find bar is open, ↩ and ⇧↩ in its field
   and N and ⇧N once the keys are elsewhere; while words are typed, theirs; else those of what
-  is chosen, or of the page. **View › Hide Help Bar** (the palette, the Mac app, its own
+  is chosen, or of the page (a deck's slides overlaid: O to stop, ⇞⇟ among them, a click on
+  one's object, and snapping's). **View › Hide Help Bar** (the palette, the Mac app, its own
   right-click) hides it, kept in the browser; it says the keys as the Keyboard Shortcuts
   sheet does (`studio/helpkeys.js`).
 

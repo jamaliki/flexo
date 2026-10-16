@@ -27,6 +27,8 @@ import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
+import { structureColours } from "/static/kinds/figure/structurecolours.js";
+import * as Frames from "/static/kinds/figure/structframes.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
 export const GLYPHS = {
@@ -871,6 +873,8 @@ export function figureParts(host) {
     gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes", line_up: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
   function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
+    // A framed structure turned, zoomed or moved: every structure of its frame alike (structframes.js).
+    action = Frames.framedAction(model()?.nodes, action);
     // With the studio away, a host that keeps its drawing as it was (a deck's slide) refuses
     // what would put the figure's parts elsewhere, and says so; what is typed is held.
     if (!KEPT.has(action.do) && host.away?.(REFUSED[action.do] || "change the figure’s shapes")) { failed?.(); return; }
@@ -1846,7 +1850,8 @@ export function figureParts(host) {
     // A molecule turned a step at a time, and its view reset, as its View buttons do.
     if (node?.kind === "structure") {
       const turn = (by) => {
-        const next = ((((Number(node.properties?.yaw ?? 0) + by) % 360) + 540) % 360) - 180;
+        // (A framed one's turn is its frame's: its first's.)
+        const next = ((((Number(valueAt(node, "properties.yaw") ?? 0) + by) % 360) + 540) % 360) - 180;
         update({ type: "node", id }, { "properties.yaw": next || null });
       };
       items.push({ icon: "left", label: "Rotate Left 30°", run: () => turn(-30) }, { icon: "right", label: "Rotate Right 30°", run: () => turn(30) },
@@ -3429,7 +3434,7 @@ export function figureParts(host) {
   const moleculeOf = (id) => host.element(`${id}.molecule`);
   async function viewOf(id) {
     const node = nodeOf(id);
-    const key = JSON.stringify([id, node?.properties]);
+    const key = JSON.stringify([id, node?.properties, Frames.viewKey(model()?.nodes, id)]);
     if (!views.has(key)) views.set(key, host.run({ do: "structure-view", id }, { merge: null }).then((result) => result?.view || null).catch(() => null));
     return views.get(key);
   }
@@ -3440,17 +3445,36 @@ export function figureParts(host) {
     const molecule = moleculeOf(id);
     if (!molecule) return;
     const outer = host.overlay.getBoundingClientRect(), box = drawnRect(molecule);
-    const ratio = window.devicePixelRatio || 1;
-    const canvas = h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
-      style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
+    const canvas = turnCanvas(molecule);
     const tip = h("div.fig-turn-tip", { style: { left: `${box.left - outer.left + box.width / 2}px`, top: `${box.top - outer.top + box.height + 6}px` } });
     turning = { id, molecule, canvas, tip, from: { x: event.clientX, y: event.clientY }, by: { x: 0, y: 0 }, view: null, frame: 0, moved: false };
     const mine = turning;
     viewOf(id).then((view) => { if (turning === mine) { mine.view = view; turnDraw(); } });
+    // In a frame with others, they all turn with it, each on a canvas of its own (structframes.js).
+    mine.members = Frames.membersOf(model()?.nodes, id)?.map((node) => {
+      if (node.id === id) return mine;
+      const other = moleculeOf(node.id);
+      const one = { id: node.id, molecule: other, canvas: other ? turnCanvas(other) : null, view: null };
+      viewOf(node.id).then((view) => {
+        if (turning !== mine) return;
+        // (One the frame can't have -- not drawn, or not read -- is left out of it, as it is drawn.)
+        if (view?.fit) one.view = view;
+        else { mine.members = mine.members.filter((each) => each !== one); one.canvas.remove(); one.molecule.classList.remove("fig-turning"); }
+        turnDraw();
+      });
+      return one;
+    }).filter((one) => one.canvas) || null;
     window.addEventListener("pointermove", turnMove);
     window.addEventListener("pointerup", turnEnd);
     window.addEventListener("pointercancel", turnCancel);
     window.addEventListener("keydown", turnKey, true);
+  }
+  // A canvas over a molecule's box, for what it draws to be drawn turning.
+  function turnCanvas(molecule) {
+    const outer = host.overlay.getBoundingClientRect(), box = drawnRect(molecule);
+    const ratio = window.devicePixelRatio || 1;
+    return h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
+      style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
   }
   const TURN = 0.5;  // degrees a pixel
   const angle = (value) => Math.round(((((value % 360) + 540) % 360) - 180) * 10) / 10;
@@ -3466,6 +3490,7 @@ export function figureParts(host) {
       turning.moved = true;
       host.overlay.append(turning.canvas, turning.tip);
       turning.molecule.classList.add("fig-turning");
+      for (const one of turning.members || []) if (one !== turning) { host.overlay.append(one.canvas); one.molecule.classList.add("fig-turning"); }
       document.body.classList.add("fig-grabbing");
     }
     if (!turning.frame) turning.frame = requestAnimationFrame(() => { if (turning) { turning.frame = 0; turnDraw(); } });
@@ -3479,10 +3504,21 @@ export function figureParts(host) {
     if (!turning.moved) return;
     const angles = turnAngles();
     tip.textContent = `Yaw ${Math.round(angles.yaw)}° · Pitch ${Math.round(angles.pitch)}°`;
+    // A frame's, each as the frame turns them, once each is known.
+    const members = turning.members;
+    if (members) {
+      if (!members.every((one) => one.view?.fit)) return;
+      const projectors = Frames.framedProjectors(members.map((one) => one.view), members.map((one) => one.canvas), angles);
+      members.forEach((one, index) => turnPaint(one.canvas, one.view, angles, projectors[index]));
+      return;
+    }
+    turnPaint(canvas, view, angles);
+  }
+  function turnPaint(canvas, view, angles, projector = null) {
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
     if (!view?.centre || !(view.chains.length || view.atoms.length)) return;
-    const { at, perAngstrom } = moleculeProjector(view, angles, canvas.width, canvas.height);
+    const { at, perAngstrom } = projector || moleculeProjector(view, angles, canvas.width, canvas.height);
     // (The accent as a colour a canvas takes: the Mac's may be named, AccentColor, not given.)
     const probe = h("span", { style: { color: "var(--accent)", display: "none" } });
     host.overlay.append(probe);
@@ -3564,6 +3600,7 @@ export function figureParts(host) {
     was.canvas.remove();
     was.tip.remove();
     was.molecule.classList.remove("fig-turning");
+    for (const one of was.members || []) { one.canvas.remove(); one.molecule.classList.remove("fig-turning"); }
   }
   function turnEnd() {
     const was = turnFinish();
@@ -6433,7 +6470,8 @@ export function figureParts(host) {
   }
 
   // -- fields, from the catalogue --
-  const valueAt = (item, key) => key.split(".").reduce((at, part) => (at == null ? undefined : at[part]), item);
+  // (A framed structure's turn, zoom and offset are its frame's: its first's, structframes.js.)
+  const valueAt = (item, key) => key.split(".").reduce((at, part) => (at == null ? undefined : at[part]), Frames.readFrom(model()?.nodes, item, key));
   // -- colours: a part's tone (a colour of the theme's, shared by parts with the same
   // tone), or colours of its own, which win over the tone and the theme --
 
@@ -6674,6 +6712,19 @@ export function figureParts(host) {
         return ui.field(field.label, typedField({ value, key, placeholder: field.default !== undefined ? String(field.default) : "Auto",
           number: { min: field.min, max: field.max, step: field.step ?? (field.type === "integer" ? 1 : undefined), integer: field.type === "integer", unit: field.unit },
           onCommit: set }), options);
+      case "slider": {
+        // A share dragged or typed: drawn again once let go, not at each step of the drag
+        // (a molecule takes a moment to draw), or once typed.
+        const low = field.min ?? 0, high = field.max ?? 1, rest = field.default ?? low;
+        const range = h("input.range", { type: "range", min: low, max: high, step: field.step ?? 0.01, "aria-label": field.label });
+        range.value = String(value ?? rest);
+        range.dataset.key = `${key}:range`;
+        const keep = (next) => set(next === null || next === rest ? null : next);
+        const typedNumber = typedField({ value, key, placeholder: String(rest), number: { min: low, max: high, step: field.step ?? 0.01 }, onCommit: keep });
+        range.addEventListener("input", () => { typedNumber.input.value = range.value; });
+        range.addEventListener("change", () => keep(Number(range.value)));
+        return ui.field(field.label, h("div.row.range-row.slider-row", {}, range, typedNumber), options);
+      }
       case "bool": {
         const on = value ?? field.default ?? false;
         // A switch's hint is said beside it: the label column is narrow.
@@ -6746,12 +6797,20 @@ export function figureParts(host) {
         return ui.field(field.label, h("div.grid2", {}, half(0), half(1)), options);
       }
       case "file":
-        return ui.field(field.label, h("div.row", {}, ui.input({ value: typing(key) ?? value ?? "", mono: true, key, onChange: set }),
+        return ui.field(field.label, h("div.row", {}, ui.input({ value: typing(key) ?? value ?? "", placeholder: field.placeholder || "", mono: true, key, onChange: set }),
           h("span.fixed", {}, ui.button("Choose…", async () => { const file = await host.chooseFile({ title: "Choose a File", types: field.types }); if (file) set(file); }, { small: true, icon: "folder" }))), options);
       case "records":
+        // (A structure's colours: rows of selections, in order -- structurecolours.js.)
+        if (item?.kind === "structure" && field.key === "properties.colors") {
+          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced });
+        }
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":
         return ui.field(field.label, groupPalette(item, value, set), options);
+      case "structframe":
+        // The frame it shares with other structures: theirs, its own, or none (structframes.js).
+        return ui.field(field.label, Frames.frameSelect({ ui, nodes: model()?.nodes || [], node: item, views: viewOf,
+          apply: (targets, label) => act({ do: "update", target: targets[0], targets }, { select: false, label }) }), options);
       case "molsketch":
         // (A structure's mol-sketch settings are its panes: structurePanes.)
         return null;

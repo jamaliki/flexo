@@ -1497,6 +1497,12 @@ class GroupBuilder:
         density: str | Path | None = None,
         scheme: str | None = None,
         step: int | None = None,
+        ss_from: str | Path | None = None,
+        frame: str | None = None,
+        title_side: str | None = None,
+        noise: float | None = None,
+        fixed: str | None = None,
+        seed: int | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1508,17 +1514,25 @@ class GroupBuilder:
         flat, outlined style, nested as shapes -- in its own colours, or with
         ``scheme="figure"`` in the theme's fills, which ``flexo retheme`` recolours
         ...). ``colors`` maps a chain,
-        residue, subunit, or entity to a colour -- a hex colour or one of the
-        figure's tones, so a chain can match its domain
-        on a protein map. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
+        residue, subunit, entity, or selection (``"resi 10-24"``) to a colour -- a
+        hex colour or one of the figure's tones, so a chain can match its domain
+        on a protein map -- a later one over an earlier one where they overlap;
+        ``ss_from`` colours it by another file's secondary structure, in the look's
+        helix, strand and loop colours. ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame
         it; ``cartoon``, ``sticks``, and ``surface`` are mol-sketch selections of what
         to draw, and ``site`` marks an active site (``"ligand"``: the largest ligand's
         pocket). ``palette`` names a mol-sketch group palette, ``style`` sets any field
         of mol-sketch's style over the look (``{"fill": "ink colour", "line":
         {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
         EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
-        points (20 by 15 label sizes by default), its name above it. Needs mol-sketch
-        installed.
+        points (20 by 15 label sizes by default), its name above it (``title_side=
+        "bottom"``: under it). Structures naming the same ``frame`` are drawn with one
+        camera, at one scale, about one centre, turned and framed as the first of them is
+        (``flexo.structure_frames``). ``noise`` draws it as a diffusion model does on its
+        way, from 0 (the file) to 1 (a random coil); ``fixed`` is a selection held where the
+        file has it meanwhile (a motif), and ``seed`` picks the run -- copies alike but for
+        ``noise`` are moments of one trajectory (see ``flexo.structure_noise``). Needs
+        mol-sketch installed.
         """
 
         properties: dict[str, object] = {"source": str(source)}
@@ -1536,7 +1550,10 @@ class GroupBuilder:
             ("yaw", yaw), ("pitch", pitch), ("roll", roll), ("zoom", zoom),
             ("cartoon", cartoon), ("sticks", sticks), ("surface", surface), ("site", site),
             ("palette", palette), ("density", None if density is None else str(density)),
-            ("scheme", scheme), ("step", step),
+            ("scheme", scheme), ("step", step), ("frame", frame), ("title_side", title_side),
+            ("ss_from", None if ss_from is None else str(ss_from)),
+            ("scheme", scheme), ("step", step), ("noise", noise), ("fixed", fixed),
+            ("seed", seed),
         ):
             if value is not None:
                 properties[name] = value

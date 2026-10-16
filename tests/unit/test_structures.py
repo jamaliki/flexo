@@ -293,17 +293,18 @@ def test_without_mol_sketch_a_structure_says_how_to_get_it(monkeypatch) -> None:
 
 
 def test_a_colour_for_a_chain_the_structure_lacks_is_said_with_the_chains_it_has() -> None:
-    from flexo.structures import _check_chains, _NoSuchChain
+    pytest.importorskip("molsketch")
 
-    class Loaded:
-        def _info(self) -> dict:
-            return {"structure": {"name": "1a7g", "chains": ["E"]}}
+    def problem(colors: dict[str, str]):
+        with flexo.Figure("odd") as figure:
+            figure.root.structure("model", DATA / "1a7g.cif", colors=colors)
+        return structure_problem(figure.spec.nodes[0], figure_style(figure.spec))
 
-    _check_chains(Loaded(), (("E", "#d55e00"), ("SER195", "#000000"), ("SER195.E", "#111111"),
-                             ("entity:1", "#222222")))
-    with pytest.raises(_NoSuchChain, match='"A" names no chain of 1A7G') as caught:
-        _check_chains(Loaded(), (("A", "#d55e00"),))
-    assert "Its chains are E" in caught.value.hint
+    assert problem({"E": "#d55e00", "ALA291": "#000000", "THR292.E": "#111111",
+                    "entity:1": "#222222", "SO41": "#333333"}) is None
+    said = problem({"A": "#d55e00"})
+    assert said is not None and said.message.startswith('"A" names no chain of 1A7G')
+    assert "Its chains are E" in (said.hint or "")
 
 
 def test_a_structure_dragged_round_is_turned_from_its_trace(tmp_path: Path) -> None:
@@ -525,8 +526,9 @@ def test_every_field_of_mol_sketchs_style_is_offered_or_said_why_not() -> None:
 
 
 def test_a_structures_own_fields_are_each_in_one_of_its_panes() -> None:
-    """A structure's panel is its words, then its panes: each of its own fields (its file,
-    what it draws, its site, its map, its view) is in one of them, where it belongs."""
+    """A structure's panel is its words (and where they stand), then its panes: each of its
+    own fields (its file, what it draws, its site, its map, its view, its frame) is in one of
+    them, where it belongs."""
 
     from flexo.structure_style import PANES
     from flexo.studio.figure_parts import catalogue
@@ -542,7 +544,9 @@ def test_a_structures_own_fields_are_each_in_one_of_its_panes() -> None:
         if field.get("own")
     ]
     fields = [field["key"] for field in part["fields"] if field["type"] != "molsketch"]
-    assert sorted(placed) == sorted(key for key in fields if key != "label")
+    assert sorted(placed) == sorted(
+        key for key in fields if key not in {"label", "properties.title_side"}
+    )
     assert not [field for field in part["fields"] if field.get("more")]
     # What is drawn as a cartoon, sticks or a surface, a click away: the look's, none, or one
     # of those most reached for.

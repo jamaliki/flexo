@@ -1,12 +1,14 @@
-// Guides from beside the page: what a page's host has next to it -- a deck's neighbouring
-// slides (flexo-talk's across.js) -- caught at as the page's own edges and middles are, its
-// guides drawn in a colour of their own (`beside`), so a catch reads as "where it is on the
-// slide before". The sums alone, for the shapes' editor (shapes.js) and a deck's objects
+// Guides from beside the page: what a page's host has next to it -- a deck's slides overlaid on
+// the one shown (flexo-talk's across.js) -- caught at as the page's own edges and middles are,
+// its guides drawn in a colour of their own (`beside`), so a catch reads as "where it is on
+// slide 29". The sums alone, for the shapes' editor (shapes.js) and a deck's objects
 // (placing.js); read in Node as in the studio.
 //
 // - Dragged, sized or drawn: the edges and middles of what is beside (`boxes`, [left, top,
 //   right, bottom] in the page's units) are guides as the page's are, with the same magnet and
-//   ⌘ (snapping.js); a guide the page has itself is the page's, in its own colour.
+//   ⌘ (snapping.js); a guide the page has itself is the page's, in its own colour. A box may say
+//   the colour its guides are drawn in (`box.tint`: the tint its slide is overlaid in); the
+//   box a guide was caught at, as given, says it.
 // - Nudged by the arrows: a nudge that would pass one of those guides (or stop just short of
 //   it) stops on it, so a few presses line an edge up with the slide before exactly, where a
 //   point at a time would step over it; the next press goes on past.

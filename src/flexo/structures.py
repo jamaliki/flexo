@@ -8,11 +8,19 @@ watercolour, pen and ink -- as a panel of the figure:
   theme, dark paper on a dark page, engraved colour otherwise;
 - it is drawn on the figure's own page colour, which is then taken out, so the
   molecule sits on whatever is behind it with no box round it;
-- ``colors`` names a colour for a chain (``"A"``), a residue (``"SER195"``), a
-  subunit or an entity -- a hex colour, or one of the figure's **tones**, so the
-  kinase domain on the protein map and the chain in the structure are one colour;
+- ``colors`` names a colour for a chain (``"A"``), a residue (``"SER195"``, a ligand
+  ``"6V0401"``), a subunit, an entity or a selection (``"resi 10-24"``, ``"not polymer"``)
+  -- a hex colour, or one of the figure's **tones**, so the kinase domain on the protein
+  map and the chain in the structure are one colour -- a later row over an earlier one
+  where they overlap (see ``flexo.structure_colours``);
+- ``ss_from`` colours it by another file's secondary structure, in the look's helix,
+  strand and loop colours, while it is drawn with its own: frames of a diffusion run
+  coloured by the structure they end as;
 - ``yaw``, ``pitch``, ``roll``, and ``zoom`` turn and frame it, and ``pan_x`` and
-  ``pan_y`` shift it (fractions of its box); ``cartoon``, ``sticks``, and ``surface``
+  ``pan_y`` shift it (fractions of its box); ``frame`` names a frame it shares with other
+  structures of the figure, all drawn with one camera, at one scale, about one centre -- a
+  diffusion trajectory, a motif held fixed -- as the first of them is turned and framed
+  (``flexo.structure_frames``); ``cartoon``, ``sticks``, and ``surface``
   say what to draw (mol-sketch selections), and ``site`` marks an active site -- a
   selection, or ``ligand`` for the largest ligand and what lies within ``site_within``
   Å of it -- its residues labelled with ``site_labels``;
@@ -20,7 +28,9 @@ watercolour, pen and ink -- as a panel of the figure:
   map with it (``auto``: the map the entry was built into; an EMDB ID; or a map file),
   and ``style`` sets any field of mol-sketch's style over the look, nested as
   mol-sketch writes them -- ``style: {fill: ink colour, line: {width: 2}}`` (see
-  ``flexo.structure_style``).
+  ``flexo.structure_style``);
+- its name is set over the molecule, or under it with ``title_side: bottom``; inline
+  markup gives a word of it a slant: ``[t]{italic} = 100``.
 
 mol-sketch is an optional dependency (``pip install "flexo[molecules]"``, or the
 ``python`` folder of a mol-sketch clone). The picture is drawn at print
@@ -146,10 +156,37 @@ def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
     )
 
 
+TITLE_SIDES = ("top", "bottom")
+"""Where a structure's name is set: over its molecule (``title_side: top``, as it is unless
+written) or under it (``bottom``)."""
+
+
+def structure_title_side(node: NodeSpec) -> str:
+    """Where the structure's name is set (``TITLE_SIDES``): over it, unless it says under."""
+
+    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
+    return written if written in TITLE_SIDES else TITLE_SIDES[0]
+
+
+def title_side_problem(node: NodeSpec) -> Diagnostic | None:
+    """A title side written that is neither, as a warning: the name is set over it."""
+
+    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
+    if node.kind != "structure" or written in TITLE_SIDES:
+        return None
+    return Diagnostic(
+        "structure.title-side",
+        f"A structure\u2019s name can\u2019t stand at “{written}”: it is set over the molecule.",
+        Severity.WARNING, entity_id=node.id,
+        hint="Its properties.title_side is top (over the molecule) or bottom (under it).",
+    )
+
+
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
-    """The panel: the molecule's box, under the component's name if it has one. A molecule
-    that can't be had (a PDB entry not downloaded, a file that does not read) is a dashed
-    panel the same size saying why, so the rest of the figure is drawn all the same."""
+    """The panel: the molecule's box, under the component's name if it has one -- or the name
+    under the box, ``title_side: bottom``. A molecule that can't be had (a PDB entry not
+    downloaded, a file that does not read) is a dashed panel the same size saying why, so the
+    rest of the figure is drawn all the same."""
 
     measures = units(style)
     u = measures.u
@@ -157,21 +194,24 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     height = float(node.property("height") or 15.0 * u)  # type: ignore[arg-type]
     words = []
     top = 0.0
+    named = 0.0
     if node.label:
         # A long name is set on as many lines as the panel is wide, not over its edges.
         title = structure_title(node, style)
+        named = title.height + 0.3 * u
+        below = structure_title_side(node) == "bottom"
         words.append(
             Words(
                 f"{node.id}.label",
                 node.label,
                 title,
                 width / 2.0,
-                title.baseline,
+                height + 0.3 * u + title.baseline if below else title.baseline,
                 weight=style.typography.title_weight,
             )
         )
-        top = title.height + 0.3 * u
-    size = Size(width, top + height)
+        top = 0.0 if below else named
+    size = Size(width, named + height)
     middle = (top + height / 2.0) / size.height
     ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
     problem = _problem(node, style)
@@ -304,10 +344,13 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
             return _Problem("source", f"Couldn't draw {name}",
                             f"“{ask.source}” isn't a PDB ID or a file in the folder.")
         return _Problem("source", f"Couldn't read {name}", said)
+    from flexo.structure_colours import Unseen, check
+
     try:
-        _one_at_a_time(_check_chains, figure, ask.colours)
-    except _NoSuchChain as error:
-        return _Problem("colors", name, _sentence(str(error)), error.hint, drawn=True)
+        _one_at_a_time(check, figure, ask)
+    except Unseen as error:
+        return _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
+                        drawn=True)
     return None
 
 
@@ -659,7 +702,8 @@ def _failing(ask: _Ask) -> tuple:
     the page it is drawn on."""
 
     return (ask.source, ask.stamp, ask.view, ask.show, ask.site, ask.group_palette, ask.style,
-            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent)
+            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent, ask.noise,
+            ask.fixed, ask.seed)
 
 
 def _hatched(aspect: float) -> bytes:
@@ -728,6 +772,17 @@ class _Ask:
     roles that matter most first: what a molecule drawn as shapes is painted by."""
     step: int = 1
     """Which of a scene's steps is drawn (1, its first), once its arrows are in: ``_frame``."""
+    ss_from: str | None = None
+    """The file (or PDB entry) whose secondary structure it is coloured by, and when it was
+    saved: ``flexo.structure_colours``."""
+    ss_stamp: float = 0.0
+    noise: float = 0.0
+    """How far along its way from the file to a random coil it is drawn (``flexo.structure_noise``):
+    0, the file itself."""
+    fixed: str = ""
+    """What of it is held where the file has it, noised: a selection."""
+    seed: int = 0
+    """Which run of noise it is a moment of."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -803,6 +858,13 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         density = str(density).strip()
         if Path(density).expanduser().exists() and outside(Path(density).expanduser()):
             raise _fail(node, "density", "The map file is outside the folder.")
+    ss_from = str(node.property("ss_from") or "").strip() or None
+    ss_path = Path(ss_from).expanduser() if ss_from else None
+    if ss_path is not None and ss_path.exists():
+        if outside(ss_path):
+            raise _fail(node, "ss_from", "The file its secondary structure is from is outside "
+                        "the folder.")
+        ss_from = str(ss_path)
     pan = (node.property("pan_x"), node.property("pan_y"))
     within = node.property("site_within")
     group_palette = node.property("palette")
@@ -810,6 +872,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     if step is not None and (isinstance(step, bool) or not isinstance(step, int | float) or step < 1
                              or step != int(step)):
         raise _fail(node, "step", "A scene's step is a whole number, from 1 for its first.")
+    noise, fixed, seed = _noise(node)
     return _Ask(
         str(path) if path.exists() else source.strip(),
         path.stat().st_mtime if path.exists() else 0.0,
@@ -829,7 +892,27 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         bool(node.property("solvent")),
         tuple(paints),
         1 if step is None else int(step),
+        ss_from,
+        ss_path.stat().st_mtime if ss_path is not None and ss_path.exists() else 0.0,
+        noise,
+        fixed,
+        seed,
     )
+
+
+def _noise(node: NodeSpec) -> tuple[float, str, int]:
+    """A structure's ``noise`` (0 to 1), ``fixed`` (a selection) and ``seed``, checked."""
+
+    noise, fixed, seed = (node.property(name) for name in ("noise", "fixed", "seed"))
+    if noise is not None and (isinstance(noise, bool) or not isinstance(noise, int | float)
+                              or not 0 <= noise <= 1):
+        raise _fail(node, "noise", "A structure's noise is a number from 0 (the file) to 1.",
+                    hint="0.3 is t = 30 of a run of a hundred steps.")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int | float)
+                             or seed != int(seed) or seed < 0):
+        raise _fail(node, "seed", "A structure's seed is a whole number, from 0.")
+    return (0.0 if noise is None else float(noise), str(fixed or "").strip(),
+            0 if seed is None else int(seed))
 
 
 def _style(node: NodeSpec) -> tuple[tuple[str, object], ...]:
@@ -920,8 +1003,13 @@ def _read_kept(path: str, stamp: int, pid: str):
 
 
 def _forget_loaded() -> None:
+    import sys
+
     _read.cache_clear()
     _read_kept.cache_clear()
+    noise = sys.modules.get("flexo.structure_noise")
+    if noise is not None:
+        noise.forget()  # (its molecules were read into the engine let go, too)
 
 
 _loaded.cache_clear = _forget_loaded  # type: ignore[attr-defined]
@@ -980,13 +1068,13 @@ def _drawn(ask: _Ask):
 
     import molsketch as ms
 
-    figure = _loaded(ask.source, ask.stamp).copy()
+    from flexo.structure_colours import paint
+
+    noised = _noised(ask)
+    figure = (_loaded(ask.source, ask.stamp) if noised is None else noised.figure).copy()
     frame = _frame(figure, ask)
     if frame is not None:
         figure.frame(frame)
-    # A colour for a chain the molecule lacks would show nowhere: it is left out, and said
-    # (structure_problem).
-    _, missing = _chains(figure, ask.colours)
     figure = figure.look(ask.look)
     figure.set(palette={"paper": ask.paper, **dict(ask.roles)}, **THE_FIGURES)
     if ask.group_palette:
@@ -1012,15 +1100,19 @@ def _drawn(ask: _Ask):
         )
         # The paper is taken out after: it stays the figure's own.
         figure.set(**{"palette.paper": ask.paper})
-    for group, colour in ask.colours:
-        if group not in missing:
-            figure.color(group, colour)
+    # Its colours, a later row over an earlier one -- but those that would show nowhere,
+    # left out and said (structure_problem).
+    paint(figure, ask)
     if ask.show:
         figure.show(**dict(ask.show))
     if "sticks" not in dict(ask.show):
         _solvent(figure, ask)
-    if ask.view or ask.pan:
-        figure.view(**dict(ask.view), **({"pan": ask.pan} if ask.pan else {}))
+    if ask.view or ask.pan or noised is not None:
+        view = dict(ask.view)
+        if noised is not None:
+            # (Seen as the file is: mol-sketch turns what it reads to its own axes.)
+            view |= noised.view(*(view.get(name, 0.0) for name in ("yaw", "pitch", "roll")))
+        figure.view(**view, **({"pan": ask.pan} if ask.pan else {}))
     if ask.site == "ligand":
         try:
             figure.site(ligand=True, within=ask.site_within or 5.0)
@@ -1038,6 +1130,24 @@ def _drawn(ask: _Ask):
                 "auto (the map the entry was built into), an EMDB ID as EMD-11638, or a map file",
             ) from None
     return figure
+
+
+def _noised(ask: _Ask):
+    """The molecule at its noise, read into mol-sketch (``flexo.structure_noise``) -- or
+    None, drawn as the file has it."""
+
+    if not ask.noise:
+        return None
+    from flexo import structure_noise
+
+    try:
+        fixed = structure_noise.fixed_residues(ask.source, ask.stamp, ask.fixed)
+    except _BadSelection as error:
+        raise _Unknown("fixed", str(error)) from None
+    try:
+        return structure_noise.drawn(_loaded(ask.source, ask.stamp), ask.noise, ask.seed, fixed)
+    except ValueError as error:
+        raise _Unknown("noise", str(error)) from None
 
 
 def _solvent(figure, ask: _Ask) -> None:
@@ -1100,10 +1210,14 @@ def _settings(ask: _Ask) -> dict[str, object]:
                 out[f"{prefix}{key}"] = item
         return out
 
-    chains = _chains(figure, ())[0]
+    from flexo.structure_colours import said as colours_said
+
+    chains = _chains(figure)
     selected = [(f"properties.{name}", text) for name, text in ask.show]
     if ask.site and ask.site != "ligand":
         selected.append(("properties.site", ask.site))
+    if ask.fixed:
+        selected.append(("properties.fixed", ask.fixed))
     atoms = _atoms(ask.source, ask.stamp) if selected else ()
     name = _called((figure._info().get("structure") or {}).get("name"))
     found = ((key, _selection_problem(text, atoms, name, chains)) for key, text in selected)
@@ -1122,6 +1236,8 @@ def _settings(ask: _Ask) -> dict[str, object]:
         "palettes": ms.palettes(),
         "chains": chains,
         "selections": {key: said for key, said in found if said},
+        # What each row of its colours colours, and the ligands a row may name.
+        "colours": colours_said(figure, ask),
     }
 
 
@@ -1139,6 +1255,8 @@ class _Atom:
     ss: str
     entity: str
     subunit: str
+    group: str = ""
+    """Its residue by mol-sketch's name, which it is coloured by: ``SER195.A``."""
 
 
 @functools.lru_cache(maxsize=8)
@@ -1154,7 +1272,7 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
             str(atom.get("el") or ""), str(atom.get("resn") or ""), int(atom.get("resi") or 0),
             str(atom.get("chain") or ""), str(atom.get("name") or ""), bool(atom.get("het")),
             str(atom.get("ss") or ""), str(atom.get("entity") or ""),
-            str(atom.get("subunit") or ""),
+            str(atom.get("subunit") or ""), str(atom.get("group") or ""),
         )
         for atom in atoms.values()
     )
@@ -1292,44 +1410,11 @@ def _selection_problem(text: str, atoms: tuple[_Atom, ...], name: str, chains: l
     return said
 
 
-class _NoSuchChain(ValueError):
-    """A colour for a chain the structure does not have (it would colour nothing)."""
-
-    def __init__(self, message: str, hint: str) -> None:
-        super().__init__(message)
-        self.hint = hint
-
-
-_RESIDUE = re.compile(r"[A-Za-z]{1,3}-?\d+[A-Za-z]?(\.\w+)?")
-
-
-def _chains(figure, colours: tuple[tuple[str, str], ...]) -> tuple[list[str], list[str]]:
-    """The chains the molecule has, and the groups of ``colours`` that name a chain it does
-    not (a residue, an entity or a chain's residue is not checked here)."""
+def _chains(figure) -> list[str]:
+    """The chains the molecule has, by the author's names, as the file gives them."""
 
     structure = figure._info().get("structure") or {}
-    chains = [str(chain) for chain in structure.get("chains") or ()]
-    if not chains:
-        return chains, []
-    missing = [
-        group for group, _ in colours
-        if not (":" in group or _RESIDUE.fullmatch(group) or group in chains)
-    ]
-    return chains, missing
-
-
-def _check_chains(figure, colours: tuple[tuple[str, str], ...]) -> None:
-    """Say a colour given to a chain the structure does not have -- mol-sketch would
-    quietly colour nothing -- naming the chains it has."""
-
-    chains, missing = _chains(figure, colours)
-    for group in missing[:1]:
-        name = _called((figure._info().get("structure") or {}).get("name"))
-        raise _NoSuchChain(
-            f'"{group}" names no chain of {name}, so its colour would show nowhere.',
-            f"Its chains are {', '.join(chains)} "
-            "(the author's chain names, as the file gives them).",
-        )
+    return [str(chain) for chain in structure.get("chains") or ()]
 
 
 def _theme_look(style: LayoutStyle, palette: Palette) -> str:
@@ -1472,7 +1557,7 @@ def _view(ask: _Ask) -> dict[str, object]:
         for a, b, *order in keyframe.get("bonds") or ()
         if a in held and b in held and (not order or order[0] != 0)
     ]
-    return {
+    shown = {
         "camera": {
             "yaw": float(camera.get("yaw") or 0.0),
             "pitch": float(camera.get("pitch") or 0.0),
@@ -1499,6 +1584,9 @@ def _view(ask: _Ask) -> dict[str, object]:
             "site": float(rep.get("siteScale") or 1.9),
         },
     }
+    # Noised, it is shown as the file is seen: in the file's turn, at its own yaw and pitch.
+    noised = _noised(ask)
+    return shown if noised is None else noised.as_seen(shown, dict(ask.view))
 
 
 def _without_paper(pixels, paper: str):

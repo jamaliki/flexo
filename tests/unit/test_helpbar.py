@@ -290,6 +290,43 @@ def test_words_typed_a_path_drawn_a_crop_and_nothing_while_presenting() -> None:
     }
 
 
+def test_slides_overlaid_say_their_keys_until_something_on_the_slide_is_chosen() -> None:
+    made = run("""
+      const k = await fresh();
+      const deck = { page: "deck", overlay: true, snapping: "guides" };
+      const of = (c) => shown(k.itemsFor({ ...deck, ...c }));
+      return {
+        overlaid: of({}),
+        // Snapping off, ⌘ catches; the slides chosen in the list (the overlay's), its keys still.
+        free: of({ snapping: "off", chosen: "slides" }),
+        // Something on the slide chosen: its keys, as ever; a drag, the drag's.
+        chosen: of({ chosen: "placed", edit: "crop" })[0],
+        drag: of({ drag: "move" }),
+        // A figure has no slides to overlay.
+        figure: shown(k.itemsFor({ page: "figure", overlay: true }))[0],
+      };
+    """)
+    assert made == {
+        "overlaid": [
+            "O Stop Overlaying",
+            "⇞ ⇟ Overlaid Slides",
+            "Click Edit on Its Slide",
+            "% Snapping",
+            "⌘ Without Snapping",
+        ],
+        "free": [
+            "O Stop Overlaying",
+            "⇞ ⇟ Overlaid Slides",
+            "Click Edit on Its Slide",
+            "% Snapping",
+            "⌘ With Snapping",
+        ],
+        "chosen": "↩ Crop",
+        "drag": ["⇧ One Way", "⌥ Copy", "⌘ Without Snapping", "Esc Cancel"],
+        "figure": "⌘ A Select All",
+    }
+
+
 def test_what_the_shapes_editor_and_a_figure_say_is_read_as_a_context() -> None:
     made = run("""
       const k = await fresh();
@@ -346,6 +383,9 @@ CONTEXTS = [
         {"find": "find"},
         {"find": "replace"},
         {"inGroup": True},
+        {"overlay": True},
+        {"overlay": True, "chosen": "slides"},
+        {"overlay": True, "snapping": "off"},
         *(
             {"typing": kind}
             for kind in (

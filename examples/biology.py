@@ -13,7 +13,9 @@ What this example is here to show:
 * **``tree``** reads Newick and draws a phylogram, rectangular or circular,
   with its clades coloured and named;
 * **``wellplate``** and **``timeline``** draw a methods figure's plate layout
-  and protocol.
+  and protocol;
+* a **``structure``**'s ``noise`` draws it as a diffusion model does on its way, so
+  copies of it at 1, 0.3, 0.16, 0.06 and 0 are a run's frames.
 
 A domain, a clade, or a condition takes a colour by its name, as a gene does:
 the kinase domain is one colour in both protein maps.
@@ -21,6 +23,7 @@ the kinase domain is one colour in both protein maps.
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import flexo
@@ -124,6 +127,22 @@ def molecule() -> flexo.FigureSpec:
     return figure.spec
 
 
+def diffusion() -> flexo.FigureSpec:
+    """A diffusion model's frames, from a random coil to the structure: five copies of one
+    structure, alike but for their noise -- moments of one trajectory."""
+
+    with flexo.Figure("diffusion", width="double-column") as figure:
+        row = figure.root.row("run", gap=10, align="center")
+        frames = [
+            row.structure(f"t{t}", E2_STRUCTURE, label=f"t = {t}", look="flat", noise=noise,
+                          sticks="none", style={"cartoon_color": "rainbow"}, width=80, height=80)
+            for t, noise in ((100, 1.0), (30, 0.3), (20, 0.16), (10, 0.06), (0, None))
+        ]
+        for one, other in pairwise(frames):
+            figure.connect(one, other)
+    return figure.spec
+
+
 def trees() -> flexo.FigureSpec:
     clades = [
         {"tips": "Human, Gorilla", "label": "Primates"},
@@ -176,7 +195,7 @@ def main() -> None:
         ("proteins", proteins()),
         ("trees", trees()),
         ("structure", structure()),
-        *((("molecule", molecule()),) if _can_draw_molecules() else ()),
+        *((("molecule", molecule()), ("diffusion", diffusion())) if _can_draw_molecules() else ()),
         ("bench", bench()),
     ):
         result = build(spec, OUTPUT, stem=name, formats=("editable", "png"), dpi=DPI)

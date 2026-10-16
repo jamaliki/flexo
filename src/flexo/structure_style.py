@@ -269,6 +269,11 @@ _MOLECULE = _pane(
             open=True,
         ),
         _section(
+            "Noise",
+            (_own("properties.noise"), _own("properties.fixed"), _own("properties.seed")),
+            open=True,
+        ),
+        _section(
             "Colour",
             (
                 _choice(
@@ -285,6 +290,7 @@ _MOLECULE = _pane(
                     "Carbon matches the carbons. Rainbow runs blue to red along each chain.",
                     labels={"ss": "Secondary Structure", "carbon": "Carbon", "rainbow": "Rainbow"},
                 ),
+                _own("properties.ss_from"),
                 _choice(
                     "surface_color",
                     "Colour Surface By",
@@ -792,6 +798,7 @@ _CAMERA = _pane(
         _section(
             "View",
             (
+                _own("properties.frame"),
                 _own("properties"),
                 _own("properties.yaw"),
                 _own("properties.pitch"),

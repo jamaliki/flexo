@@ -115,6 +115,8 @@ const ICONS = {
   // Four panels: a figure of several parts.
   grid: "M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5h-4.5zM9 9h4.5v4.5H9z",
   slide: "M2 3.5h12v9H2z",
+  // Slides overlaid (a deck's Overlay Slides): one over another, the one behind dashed.
+  overlay: "M5.5 5.5V3.5H7M8.75 3.5h1.5M12 3.5h1.5V5M13.5 6.5v1M13.5 8.75v.75H12M2.5 6.5h8v6h-8z",
   // Arrange (the inspector's tab): two shapes lined up on an edge, a third spaced beside them.
   arrange: "M2.5 2v12M4.5 3.5h5v3.5h-5zM4.5 9h8v3.5h-8zM12 3.5h1.5v3.5H12",
   section: "M2 3.5h12v9H2zM5 8h6",
