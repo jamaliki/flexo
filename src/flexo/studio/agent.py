@@ -173,7 +173,9 @@ To mark up a slide -- an arrow at part of a figure, a ring round a structure's p
 label, a highlight, a dimension -- add shapes to the slide where they belong (its guide says how), \
 rather than change the figure or picture under them. To mark up a figure itself, wherever it is \
 shown, draw them in the figure's own shapes, attached to the parts they point at, ring or label \
-(on, around, an end's {part: id}), so they follow the parts as the figure is laid out again."""
+(on, around, an end's {part: id}), so they follow the parts as the figure is laid out again. A \
+figure for a deck is written inside the deck (its guide says how), not as a figure file of its \
+own, unless the user asks for a file."""
 
 
 class Tools:

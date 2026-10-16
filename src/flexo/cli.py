@@ -51,6 +51,12 @@ def parser() -> argparse.ArgumentParser:
     bundled.add_argument(
         "--output", "-o", type=Path, help="The bundle to write (default: beside it, as .flexo)."
     )
+    bundled.add_argument(
+        "--figure-files",
+        action="store_true",
+        help="Keep a deck's figure files as files in the bundle (by default their figures are "
+        "written into the deck as it is bundled).",
+    )
     unbundled = subcommands.add_parser(
         "unbundle", help="Write a bundle (.flexo) out as a plain folder."
     )
@@ -310,7 +316,7 @@ def _bundle(arguments: argparse.Namespace) -> int:
     from flexo.bundle import pack
     from flexo.studio.bundles import said_left
 
-    made = pack(arguments.source, arguments.output)
+    made = pack(arguments.source, arguments.output, embed=not arguments.figure_files)
     count = len(made.gathered.files)
     print(f"{made.path} ({count} file{'s' if count != 1 else ''}, {_size(made.size)})")
     for note in said_left(made.gathered.left):

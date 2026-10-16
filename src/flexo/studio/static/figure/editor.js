@@ -106,9 +106,10 @@ export function mount(studio, main) {
     { icon: "image", label: exportLabel("PNG"), run: () => studio.exportFiles(["png"]) },
     "-",
     { icon: "export", label: exportLabel("All Formats"), run: () => studio.exportFiles(["editable", "portable", "pdf", "png"]) },
-    "-",
-    // The figure and every file it names, as one file to send (flexo.bundle).
-    { icon: "export", label: exportLabel("Flexo Bundle"), hint: "The figure and every file it names, as one file", run: () => studio.exportFiles(["flexo"]) },
+    // The figure and every file it names, as one file to send (flexo.bundle) -- not one a deck
+    // holds (talk.yaml#pipeline), which is sent with its deck.
+    ...(String(studio.file).includes("#") ? [] : ["-",
+      { icon: "export", label: exportLabel("Flexo Bundle"), hint: "The figure and every file it names, as one file", run: () => studio.exportFiles(["flexo"]) }]),
   ], { align: "end" }), { icon: "export", kind: "ghost" }));
 
   // A drawing kept back while a part is carried, and how long after it is let go the one
@@ -182,8 +183,8 @@ export function mount(studio, main) {
     chooseFile,
     themeField: (value, set) => themeField(studio, { value, onPick: set, onCustomise: (current) => customiseTheme(current, set) }),
     tones: () => studio.info?.tones,
-    // The figure is named as its file is.
-    name: () => String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, ""),
+    // The figure is named as its file is (one a deck holds, by its key: talk.yaml#pipeline).
+    name: () => (String(studio.file || "").includes("#") ? String(studio.file).split("#").pop() : String(studio.file || "").split("/").pop().replace(/\.ya?ml$/i, "")),
     // Edits held while the studio is away: the document is not saved meanwhile.
     waiting: (on) => { studio.waiting = Math.max(0, (studio.waiting || 0) + (on ? 1 : -1)); studio.emit("status"); },
     held: () => studio.emit("status"),

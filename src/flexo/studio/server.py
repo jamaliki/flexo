@@ -350,8 +350,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
                 return
             workspace.acting(name, data.get("action") or {})
-            self._json(act(data.get("document", doc.document), data.get("action") or {},
-                           doc.path.parent))
+            answer = act(data.get("document", doc.document), data.get("action") or {},
+                         doc.path.parent)
+            if isinstance(answer, dict) and "released" in answer:
+                # Files the edit leaves the document no longer needing (a figure file whose
+                # figure went into the deck): a bundle's own, taken out of it once no document
+                # names them -- a folder's, its person's, left be.
+                answer = dict(answer)
+                workspace.release([Path(str(file)) for file in answer.pop("released") or []])
+            self._json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming
 
@@ -360,6 +367,19 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/trust":
             workspace.trust()
             self._json({"ok": True})
+        elif route == "/api/bundle/new":
+            # New Deck: a bundle of its own, beside the folder's documents (beside the bundle
+            # edited here, for one), opened in a studio of its own for a tab of its own.
+            from flexo.studio.bundles import new_bundle, open_beside
+
+            keeper = getattr(workspace, "bundle", None)
+            folder = keeper.path.parent if keeper is not None else workspace.root
+            stem = str(data.get("name") or "").strip()
+            if not stem or "/" in stem or "\\" in stem or stem.startswith("."):
+                raise ValueError("Enter a name.")
+            made = new_bundle(folder / stem, str(data.get("kind") or "deck"))
+            address = open_beside(workspace, made)
+            self._json({"path": str(made), "name": made.name, "address": address})
         elif route == "/api/bundle/unpack":
             # File > Unpack Bundle: the bundle edited here, written out as a plain folder.
             from flexo.studio.bundles import unpack_beside
@@ -788,6 +808,14 @@ def start(
     page offers to make (all, if not given)."""
 
     path = Path(target or ".").resolve()
+    if path.suffix.lower() == ".flexo" and not path.exists():
+        # A bundle that is not there yet: made, holding a new document (a deck, unless
+        # ``kind`` says), as a new deck is made by default -- one file, to keep and to send.
+        from flexo.studio import kinds
+        from flexo.studio.bundles import new_bundle
+
+        new_bundle(path, kind or ("deck" if "deck" in kinds() else "figure"))
+        trusted = True if trusted is None else trusted  # (made here, by its person)
     folder, start_file = (path, "") if path.is_dir() else (path.parent, path.name)
     keeper = None
     if path.suffix.lower() == ".flexo":
@@ -863,7 +891,12 @@ def main(argv: Sequence[str] | None = None, *, kind: str | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="flexo studio", description="Edit documents in the browser."
     )
-    parser.add_argument("file", nargs="?", help="a document, or a folder (default: this folder)")
+    parser.add_argument(
+        "file",
+        nargs="?",
+        help="a document, a folder (default: this folder), or a bundle (.flexo: made, with a new "
+        "document in it, if it is not there)",
+    )
     parser.add_argument(
         "--port", type=int, default=0, help="the port to serve on (default: any free one)"
     )
