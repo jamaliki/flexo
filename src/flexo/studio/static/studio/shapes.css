@@ -41,7 +41,6 @@
 .align-section .align-gap .field { flex: 1; min-width: 0; margin-right: 6px; }
 .align-section.shown { animation: align-shown 0.9s ease-out; border-radius: 8px; }
 @keyframes align-shown { from { box-shadow: 0 0 0 3px var(--accent-soft, rgba(10, 132, 255, 0.25)); } to { box-shadow: 0 0 0 3px transparent; } }
-.align-section .align-why { margin-left: 6px; font-weight: 400; color: var(--ink-3); }
 /* Format's one line going to the Arrange tab, where Arrange and Align and Distribute are. */
 .align-link-section { padding-top: 6px; padding-bottom: 6px; }
 .btn.align-link { width: 100%; justify-content: flex-start; gap: 8px; color: var(--ink-2); }

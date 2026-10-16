@@ -254,10 +254,10 @@ export function alignTools(ctx) {
       const beside = relative === "selection" ? "the selection" : relative === "page" ? `the ${noun}` : `the ${toName(relative).toLowerCase()}`;
       bits.push(h("div.align-label", {}, "Beside"),
         row(many, two, BESIDE.map(([side, words, glyph, , how]) => [glyph, `${words} ${beside}: ${how}`, () => align(side)])));
-      // (Greyed with fewer than three to spread, saying why.)
+      // (Greyed with fewer than three to spread: why, in each button's tooltip.)
       const spread = spreads(), why = few();
       const ways = (list) => list.map(([how, words, glyph, , said]) => [glyph, `${words}: ${said.toLowerCase()}`, () => distribute(how)]);
-      bits.push(h("div.align-label", {}, "Distribute", spread || !count ? null : h("span.align-why", {}, why)), row(spread, why, ways(SPREADS.slice(0, 4))), row(spread, why, ways(SPREADS.slice(4))));
+      bits.push(h("div.align-label", {}, "Distribute"), row(spread, why, ways(SPREADS.slice(0, 4))), row(spread, why, ways(SPREADS.slice(4))));
       const gap = ui.number({ value: A.gapSet(), step: 1, min: -1000, max: 10000, unit: "pt", key: "shape.align-gap", onChange: (value) => A.setGap(value ?? A.GAP) });
       const spaces = row(free > 1, two, [["space-across", "Space Across by the Gap: left to right, the leftmost staying", () => space("across")],
         ["space-down", "Space Down by the Gap: top to bottom, the topmost staying", () => space("down")]]);
