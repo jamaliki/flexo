@@ -269,6 +269,11 @@ _MOLECULE = _pane(
             open=True,
         ),
         _section(
+            "Noise",
+            (_own("properties.noise"), _own("properties.fixed"), _own("properties.seed")),
+            open=True,
+        ),
+        _section(
             "Colour",
             (
                 _choice(

@@ -9,7 +9,8 @@ figure file (``label``, ``properties.length``, ``layout.gap``) and how it is
 edited:
 
 - ``text``, ``markup`` (flexo's inline markup), ``code`` (monospace, several lines);
-- ``integer``, ``number``, ``length`` (``12pt``, ``4mm``), ``bool``;
+- ``integer``, ``number``, ``length`` (``12pt``, ``4mm``), ``bool``; ``slider``, a number
+  from ``min`` to ``max`` dragged or typed (a structure's noise);
 - ``choice`` (one of ``options``, each shown as ``labels`` names it) and ``combo``
   (usually one of ``options``);
 - ``records``: a table of rows, each a mapping with the given ``columns`` -- a
@@ -610,6 +611,32 @@ def _structure() -> dict[str, Any]:
                 types=["structure"],
                 placeholder="This structure",
                 hint="Helices, strands and loops coloured as another file\u2019s are",
+            ),
+            # Noised as a diffusion model draws it on its way (flexo.structure_noise): copies
+            # at 1, 0.3, 0.16, 0.06 and 0 are a run's frames at t = 100, 30, 20, 10 and 0.
+            _field(
+                "properties.noise",
+                "Noise",
+                "slider",
+                min=0,
+                max=1,
+                step=0.01,
+                default=0,
+                hint="0 is the file, 1 a random coil: 0.3 is t = 30 of a hundred steps",
+            ),
+            _field(
+                "properties.fixed",
+                "Fixed",
+                "text",
+                hint="Held where the file has it while the rest is noised: resi 34+94 or resn 6V0",
+            ),
+            _field(
+                "properties.seed",
+                "Seed",
+                "integer",
+                min=0,
+                default=0,
+                hint="Copies with the same seed are moments of one run",
             ),
             _field(
                 "properties.colors",

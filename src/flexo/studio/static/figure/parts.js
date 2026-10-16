@@ -6712,6 +6712,19 @@ export function figureParts(host) {
         return ui.field(field.label, typedField({ value, key, placeholder: field.default !== undefined ? String(field.default) : "Auto",
           number: { min: field.min, max: field.max, step: field.step ?? (field.type === "integer" ? 1 : undefined), integer: field.type === "integer", unit: field.unit },
           onCommit: set }), options);
+      case "slider": {
+        // A share dragged or typed: drawn again once let go, not at each step of the drag
+        // (a molecule takes a moment to draw), or once typed.
+        const low = field.min ?? 0, high = field.max ?? 1, rest = field.default ?? low;
+        const range = h("input.range", { type: "range", min: low, max: high, step: field.step ?? 0.01, "aria-label": field.label });
+        range.value = String(value ?? rest);
+        range.dataset.key = `${key}:range`;
+        const keep = (next) => set(next === null || next === rest ? null : next);
+        const typedNumber = typedField({ value, key, placeholder: String(rest), number: { min: low, max: high, step: field.step ?? 0.01 }, onCommit: keep });
+        range.addEventListener("input", () => { typedNumber.input.value = range.value; });
+        range.addEventListener("change", () => keep(Number(range.value)));
+        return ui.field(field.label, h("div.row.range-row.slider-row", {}, range, typedNumber), options);
+      }
       case "bool": {
         const on = value ?? field.default ?? false;
         // A switch's hint is said beside it: the label column is narrow.

@@ -139,7 +139,9 @@ gene, per domain, per condition), and has ports where arrows belong.
   centre, turned and framed as the first of them is; `title_side="bottom"` sets the
   name under the molecule.
   `look="flat"`: PyMOL's flat, outlined style in the theme's fills, as vector shapes
-  that `flexo retheme` recolours.
+  that `flexo retheme` recolours. `noise=0.3` draws it as a diffusion model does on its
+  way (0 the file, 1 a random coil; t = 30 of 100), `fixed="resi 34+94 or resn LIG"`
+  holds a motif, `seed=` picks the run: copies alike but for `noise` are one trajectory.
 
 **Grids**: `cells(id, grid, key, ...)` draws a grid written as text, one row per
 line and one symbol per word (`.` empty), or rows of values -- a plate map, a

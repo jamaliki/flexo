@@ -702,7 +702,8 @@ def _failing(ask: _Ask) -> tuple:
     the page it is drawn on."""
 
     return (ask.source, ask.stamp, ask.view, ask.show, ask.site, ask.group_palette, ask.style,
-            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent)
+            ask.pan, ask.density, ask.site_within, ask.site_labels, ask.solvent, ask.noise,
+            ask.fixed, ask.seed)
 
 
 def _hatched(aspect: float) -> bytes:
@@ -775,6 +776,13 @@ class _Ask:
     """The file (or PDB entry) whose secondary structure it is coloured by, and when it was
     saved: ``flexo.structure_colours``."""
     ss_stamp: float = 0.0
+    noise: float = 0.0
+    """How far along its way from the file to a random coil it is drawn (``flexo.structure_noise``):
+    0, the file itself."""
+    fixed: str = ""
+    """What of it is held where the file has it, noised: a selection."""
+    seed: int = 0
+    """Which run of noise it is a moment of."""
 
 
 def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
@@ -864,6 +872,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     if step is not None and (isinstance(step, bool) or not isinstance(step, int | float) or step < 1
                              or step != int(step)):
         raise _fail(node, "step", "A scene's step is a whole number, from 1 for its first.")
+    noise, fixed, seed = _noise(node)
     return _Ask(
         str(path) if path.exists() else source.strip(),
         path.stat().st_mtime if path.exists() else 0.0,
@@ -885,7 +894,25 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         1 if step is None else int(step),
         ss_from,
         ss_path.stat().st_mtime if ss_path is not None and ss_path.exists() else 0.0,
+        noise,
+        fixed,
+        seed,
     )
+
+
+def _noise(node: NodeSpec) -> tuple[float, str, int]:
+    """A structure's ``noise`` (0 to 1), ``fixed`` (a selection) and ``seed``, checked."""
+
+    noise, fixed, seed = (node.property(name) for name in ("noise", "fixed", "seed"))
+    if noise is not None and (isinstance(noise, bool) or not isinstance(noise, int | float)
+                              or not 0 <= noise <= 1):
+        raise _fail(node, "noise", "A structure's noise is a number from 0 (the file) to 1.",
+                    hint="0.3 is t = 30 of a run of a hundred steps.")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int | float)
+                             or seed != int(seed) or seed < 0):
+        raise _fail(node, "seed", "A structure's seed is a whole number, from 0.")
+    return (0.0 if noise is None else float(noise), str(fixed or "").strip(),
+            0 if seed is None else int(seed))
 
 
 def _style(node: NodeSpec) -> tuple[tuple[str, object], ...]:
@@ -976,8 +1003,13 @@ def _read_kept(path: str, stamp: int, pid: str):
 
 
 def _forget_loaded() -> None:
+    import sys
+
     _read.cache_clear()
     _read_kept.cache_clear()
+    noise = sys.modules.get("flexo.structure_noise")
+    if noise is not None:
+        noise.forget()  # (its molecules were read into the engine let go, too)
 
 
 _loaded.cache_clear = _forget_loaded  # type: ignore[attr-defined]
@@ -1038,7 +1070,8 @@ def _drawn(ask: _Ask):
 
     from flexo.structure_colours import paint
 
-    figure = _loaded(ask.source, ask.stamp).copy()
+    noised = _noised(ask)
+    figure = (_loaded(ask.source, ask.stamp) if noised is None else noised.figure).copy()
     frame = _frame(figure, ask)
     if frame is not None:
         figure.frame(frame)
@@ -1074,8 +1107,12 @@ def _drawn(ask: _Ask):
         figure.show(**dict(ask.show))
     if "sticks" not in dict(ask.show):
         _solvent(figure, ask)
-    if ask.view or ask.pan:
-        figure.view(**dict(ask.view), **({"pan": ask.pan} if ask.pan else {}))
+    if ask.view or ask.pan or noised is not None:
+        view = dict(ask.view)
+        if noised is not None:
+            # (Seen as the file is: mol-sketch turns what it reads to its own axes.)
+            view |= noised.view(*(view.get(name, 0.0) for name in ("yaw", "pitch", "roll")))
+        figure.view(**view, **({"pan": ask.pan} if ask.pan else {}))
     if ask.site == "ligand":
         try:
             figure.site(ligand=True, within=ask.site_within or 5.0)
@@ -1093,6 +1130,24 @@ def _drawn(ask: _Ask):
                 "auto (the map the entry was built into), an EMDB ID as EMD-11638, or a map file",
             ) from None
     return figure
+
+
+def _noised(ask: _Ask):
+    """The molecule at its noise, read into mol-sketch (``flexo.structure_noise``) -- or
+    None, drawn as the file has it."""
+
+    if not ask.noise:
+        return None
+    from flexo import structure_noise
+
+    try:
+        fixed = structure_noise.fixed_residues(ask.source, ask.stamp, ask.fixed)
+    except _BadSelection as error:
+        raise _Unknown("fixed", str(error)) from None
+    try:
+        return structure_noise.drawn(_loaded(ask.source, ask.stamp), ask.noise, ask.seed, fixed)
+    except ValueError as error:
+        raise _Unknown("noise", str(error)) from None
 
 
 def _solvent(figure, ask: _Ask) -> None:
@@ -1161,6 +1216,8 @@ def _settings(ask: _Ask) -> dict[str, object]:
     selected = [(f"properties.{name}", text) for name, text in ask.show]
     if ask.site and ask.site != "ligand":
         selected.append(("properties.site", ask.site))
+    if ask.fixed:
+        selected.append(("properties.fixed", ask.fixed))
     atoms = _atoms(ask.source, ask.stamp) if selected else ()
     name = _called((figure._info().get("structure") or {}).get("name"))
     found = ((key, _selection_problem(text, atoms, name, chains)) for key, text in selected)
@@ -1500,7 +1557,7 @@ def _view(ask: _Ask) -> dict[str, object]:
         for a, b, *order in keyframe.get("bonds") or ()
         if a in held and b in held and (not order or order[0] != 0)
     ]
-    return {
+    shown = {
         "camera": {
             "yaw": float(camera.get("yaw") or 0.0),
             "pitch": float(camera.get("pitch") or 0.0),
@@ -1527,6 +1584,9 @@ def _view(ask: _Ask) -> dict[str, object]:
             "site": float(rep.get("siteScale") or 1.9),
         },
     }
+    # Noised, it is shown as the file is seen: in the file's turn, at its own yaw and pitch.
+    noised = _noised(ask)
+    return shown if noised is None else noised.as_seen(shown, dict(ask.view))
 
 
 def _without_paper(pixels, paper: str):

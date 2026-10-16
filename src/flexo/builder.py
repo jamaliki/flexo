@@ -1500,6 +1500,9 @@ class GroupBuilder:
         ss_from: str | Path | None = None,
         frame: str | None = None,
         title_side: str | None = None,
+        noise: float | None = None,
+        fixed: str | None = None,
+        seed: int | None = None,
         **options: object,
     ) -> NodeHandle:
         """A molecule drawn by hand with mol-sketch (see ``flexo.structures``).
@@ -1525,7 +1528,11 @@ class GroupBuilder:
         points (20 by 15 label sizes by default), its name above it (``title_side=
         "bottom"``: under it). Structures naming the same ``frame`` are drawn with one
         camera, at one scale, about one centre, turned and framed as the first of them is
-        (``flexo.structure_frames``). Needs mol-sketch installed.
+        (``flexo.structure_frames``). ``noise`` draws it as a diffusion model does on its
+        way, from 0 (the file) to 1 (a random coil); ``fixed`` is a selection held where the
+        file has it meanwhile (a motif), and ``seed`` picks the run -- copies alike but for
+        ``noise`` are moments of one trajectory (see ``flexo.structure_noise``). Needs
+        mol-sketch installed.
         """
 
         properties: dict[str, object] = {"source": str(source)}
@@ -1545,6 +1552,8 @@ class GroupBuilder:
             ("palette", palette), ("density", None if density is None else str(density)),
             ("scheme", scheme), ("step", step), ("frame", frame), ("title_side", title_side),
             ("ss_from", None if ss_from is None else str(ss_from)),
+            ("scheme", scheme), ("step", step), ("noise", noise), ("fixed", fixed),
+            ("seed", seed),
         ):
             if value is not None:
                 properties[name] = value
