@@ -256,8 +256,20 @@ export function shapeEditor(host) {
     if (!spec) return null;
     if (spec.kind === "text") return F.geometry(spec, null, measured(index, path) || undefined);
     if (F.family(spec.kind) === "line" && (isEnd(spec.from) || isEnd(spec.to))) return F.geometry(spec, F.glued(spec, find));
+    // (A group holding a line glued: its frame where that line is now, its ends where what they
+    // are glued to is -- dragged whole, not where its ends were written: see boundsAt.)
+    if (spec.kind === "group" && holdsGlued(spec)) {
+      const box = boundsAt(spec, [...groups.path(), index, ...path]);
+      if (box) return { segments: [], closed: false, box: [box[0], box[1], box[2] - box[0], box[3] - box[1]], turn: 0, heads: [], area: null, label: null, ends: null };
+    }
     if (!drawnAs.has(spec)) drawnAs.set(spec, F.geometry(spec));
     return drawnAs.get(spec);
+  }
+  // Whether a group holds a line glued, at any depth (kept by the group as written).
+  const gluedIn = new WeakMap();
+  function holdsGlued(spec) {
+    if (!gluedIn.has(spec)) gluedIn.set(spec, (spec.shapes || []).some((child) => child && (child.kind === "group" ? holdsGlued(child) : F.family(child.kind) === "line" && (isEnd(child.from) || isEnd(child.to)))));
+    return gluedIn.get(spec);
   }
   function find(end) {
     if (end.shape !== undefined) {
@@ -926,9 +938,15 @@ export function shapeEditor(host) {
         previews.append(node);
       });
     } else {
+      // (A line glued to what stays -- its end there staying, as it will once let go -- drawn
+      // where its ends are now: its drawing moved whole would show it elsewhere than its frame.
+      // Its ends as the drag began, found once: g.ends.)
+      g.ends ||= g.originals.map((spec) => (F.family(spec.kind) === "line" && (isEnd(spec.from) || isEnd(spec.to)) ? F.glued(spec, find) : null));
+      g.indices.forEach((index, n) => live.set(index, F.moved(g.originals[n], dx, dy)));
       g.indices.forEach((index, n) => {
-        live.set(index, F.moved(g.originals[n], dx, dy));
-        setAside(index, { transform: `translate(${dx} ${dy})` });
+        const was = g.ends[n], now = was && F.glued(live.get(index), find);
+        if (now && now.some((point, k) => Math.abs(point[0] - was[k][0] - dx) > 0.01 || Math.abs(point[1] - was[k][1] - dy) > 0.01)) preview(index, live.get(index));
+        else setAside(index, { transform: `translate(${dx} ${dy})` });
       });
       followGlued(g.indices);
     }
