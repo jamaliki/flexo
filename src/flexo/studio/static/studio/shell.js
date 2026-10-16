@@ -514,7 +514,6 @@ function applyTheme(mode) {
 
 export async function start() {
   applyTheme(remembered("theme", "auto"));
-  markTab();
   const root = document.getElementById("studio");
   let info;
   try {
@@ -1367,16 +1366,6 @@ export function wedgeHead(title, { tag = "h1" } = {}) {
   mark.classList.add("wedge-mark");
   mark.innerHTML = WEDGE_PARTS;
   return h("div.wedge-head", {}, mark, h("div.wedge-words", {}, h(`${tag}.wedge-title`, {}, title), h("span.wedge-rule")));
-}
-// The browser's tab shows it too: the mark on its cream tile.
-function markTab() {
-  if (typeof document === "undefined" || document.querySelector('link[rel="icon"]')) return;
-  const tile = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#efe6d2"/>${MARK}</svg>`;
-  const link = document.createElement("link");
-  link.rel = "icon";
-  link.type = "image/svg+xml";
-  link.href = `data:image/svg+xml,${encodeURIComponent(tile)}`;
-  document.head.append(link);
 }
 
 // Copied, its button says so where it is -- a tick a moment, as a Mac's does -- not in a note
