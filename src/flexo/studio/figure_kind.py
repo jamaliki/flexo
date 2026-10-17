@@ -380,6 +380,7 @@ class FigureKind:
         )
         files = [base / value for value in (spec.style, spec.palette) if _is_file(value)]
         files += _plot_files(spec, base)
+        files += _part_files(_shaped(spec, drawn_over), base)
         said = [*report.diagnostics, *structure_problems(spec)]
         # (A plot not run yet, its Python still starting, is asked for again by the page.)
         again = any(item.code == WAITING for item in said)
@@ -462,6 +463,35 @@ def _plot_files(spec, base: Path) -> list[Path]:
         if node.kind == PLOT_KIND and source and not outside(base / source):
             function = str(node.property("function", "") or "").strip()
             found += files(base / source, function, node.property("data"))
+    return found
+
+
+def _part_files(spec, base: Path) -> list[Path]:
+    """The files the figure's parts draw -- each picture (a PDF's page, its file), structure,
+    map and structure one is coloured by, and the pictures among the shapes drawn over it --
+    found from ``base`` as ``parse`` finds them: one edited, the figure is drawn again. (A PDB
+    ID is no file.)"""
+
+    from flexo.plots import PLOT_KIND
+    from flexo.shape_pictures import sources
+
+    names = [
+        str(value).strip()
+        for node in spec.nodes
+        if node.kind != PLOT_KIND
+        for key, value in node.properties
+        if key in ("source", "density", "ss_from") and isinstance(value, str) and value.strip()
+    ]
+    for shape in spec.shapes:
+        if '"picture"' in shape.written:
+            names += sources([shape.spec])
+    found = []
+    for name in names:
+        path = base / Path(name).expanduser()
+        if not path.is_file() and "#" in name:
+            path = path.with_name(path.name.rpartition("#")[0])  # (a PDF's page: art.pdf#2)
+        if path.is_file():
+            found.append(path)
     return found
 
 
