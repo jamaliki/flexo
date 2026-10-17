@@ -652,7 +652,7 @@ def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
         # than shapes -- on no paper, so nothing need be taken out of it.
         drawn = figure.svg_or_image(size, scale=1.0)
         if not isinstance(drawn, str):
-            return keep_drawing(ask, aspect, drawn.png())
+            return keep_drawing(ask, aspect, _png(drawn.to_numpy()))
     else:  # (a mol-sketch before it could)
         drawn = figure.svg(size, scale=1.0)
     if any(mark in drawn for mark in _PICTURED):
