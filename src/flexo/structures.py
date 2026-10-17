@@ -63,8 +63,9 @@ import struct
 import threading
 import xml.etree.ElementTree as ET
 import zlib
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import NamedTuple
 
 from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
@@ -313,6 +314,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
                                                    re.IGNORECASE):
         return _Problem("source", f"Couldn't find {name}", "There is no such file in the folder.")
+    from flexo.structure_kept import checked, keep_checked
+
+    known, kept = checked(ask, name)
+    if known:  # (checked before, as it is now: not read again)
+        return None if kept is None else _Problem(**kept)
     fetched = not Path(ask.source).exists()
     try:
         figure = _one_at_a_time(_drawn, ask)
@@ -342,8 +348,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     try:
         _one_at_a_time(check, figure, ask)
     except Unseen as error:
-        return _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
-                        drawn=True)
+        found = _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
+                         drawn=True)
+        keep_checked(ask, name, asdict(found))
+        return found
+    keep_checked(ask, name, None)
     return None
 
 
@@ -568,6 +577,11 @@ def structure_png(
     if _failed.get(_failing(ask)):
         return _hatched(width / height)
     try:
+        if ask.look in VECTOR_LOOKS:
+            # (Drawn once with its shapes: a picture where they would not do.)
+            drawn = _one_at_a_time(_render_svg, ask, width / height)
+            if isinstance(drawn, bytes):
+                return drawn
         return _one_at_a_time(_render, ask, width / height)
     except Exception as error:
         # What mol-sketch said, without where in its code it said it.
@@ -592,10 +606,10 @@ def structure_svg(
     if ask.look not in VECTOR_LOOKS or _failed.get(_failing(ask)):
         return None
     try:
-        markup = _one_at_a_time(_render_svg, ask, width / height)
+        drawn = _one_at_a_time(_render_svg, ask, width / height)
     except Exception:
         return None  # structure_png meets the same failure, and says it
-    return None if markup is None else _own_ids(markup, f"{node.id}.molecule")
+    return _own_ids(drawn, f"{node.id}.molecule") if isinstance(drawn, str) else None
 
 
 _PICTURED = ("<image", "mix-blend-mode", "<filter", "<pattern", "<mask", "Gradient", "<clipPath")
@@ -605,7 +619,16 @@ a rectangle: a drawing with any of them is embedded as a picture instead."""
 
 
 @functools.lru_cache(maxsize=32)
-def _render_svg(ask: _Ask, aspect: float) -> str | None:
+def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
+    """The molecule in a look drawn as shapes: its SVG, painted by role -- or, drawn with
+    more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
+    as PNG bytes, from the same drawing."""
+
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect)
+    if kept is not None:
+        return kept
     figure = _drawn(ask)
     long_side = 1200  # as _render draws it: the same pen weight against the molecule
     size = (
@@ -617,11 +640,18 @@ def _render_svg(ask: _Ask, aspect: float) -> str | None:
         figure.label_site(size)
     # No paper laid down: the figure's page is under it (its colour is still the paper's).
     figure.set(**{"paper.transparent": True})
-    text = figure.svg(size, scale=1.0)
-    if any(mark in text for mark in _PICTURED):
-        return None
-    shading = float(figure.style.get("shading") or 0.0)
-    return _painted_by_role(text, ask, min(max(0.3 * shading, 0.0), 1.0))
+    if hasattr(figure, "svg_or_image"):
+        # One drawing, either way: mol-sketch hands back its picture where it holds more
+        # than shapes -- on no paper, so nothing need be taken out of it.
+        drawn = figure.svg_or_image(size, scale=1.0)
+        if not isinstance(drawn, str):
+            return keep_drawing(ask, aspect, _png(drawn.to_numpy()))
+    else:  # (a mol-sketch before it could)
+        drawn = figure.svg(size, scale=1.0)
+    if any(mark in drawn for mark in _PICTURED):
+        return keep_drawing(ask, aspect, _render(ask, aspect))
+    shading = min(max(0.3 * float(figure.style.get("shading") or 0.0), 0.0), 1.0)
+    return keep_drawing(ask, aspect, _painted_by_role(drawn, ask, shading))
 
 
 def _painted_by_role(text: str, ask: _Ask, shade: float) -> str:
@@ -1154,18 +1184,24 @@ def _solvent(figure, ask: _Ask) -> None:
 def _ions(source: str, stamp: float) -> tuple[str, ...]:
     """The residues of a structure that are one atom, but for waters: its ions."""
 
-    atoms: dict[tuple[str, int, str], list[_Atom]] = {}
-    for atom in _atoms(source, stamp):
-        if atom.het and atom.element.upper() != "H" and atom.resn not in {"HOH", "WAT"}:
-            atoms.setdefault((atom.chain, atom.resi, atom.resn), []).append(atom)
-    lone = {resn for (_, _, resn), held in atoms.items() if len(held) == 1}
+    heavy: dict[tuple[str, int, str], int] = {}
+    for residue in _residues(source, stamp):
+        if residue.het and residue.heavy and residue.resn not in {"HOH", "WAT"}:
+            key = (residue.chain, residue.resi, residue.resn)
+            heavy[key] = heavy.get(key, 0) + residue.heavy
+    lone = {resn for (_, _, resn), count in heavy.items() if count == 1}
     # A residue name that is one atom somewhere and more elsewhere is not an ion.
-    more = {resn for (_, _, resn), held in atoms.items() if len(held) > 1}
+    more = {resn for (_, _, resn), count in heavy.items() if count > 1}
     return tuple(sorted(lone - more))
 
 
 @functools.lru_cache(maxsize=32)
 def _render(ask: _Ask, aspect: float) -> bytes:
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect, "png")
+    if isinstance(kept, bytes):
+        return kept
     figure = _drawn(ask)
     # mol-sketch's pen is sized for its own canvas (1920 wide): drawn at that
     # scale and shrunk into the box, the lines keep their weight against the molecule.
@@ -1179,7 +1215,7 @@ def _render(ask: _Ask, aspect: float) -> bytes:
         figure.label_site(size)
     image = figure.render(size, scale=1.0)
     pixels = image.to_numpy()
-    return _png(_without_paper(pixels, ask.paper))
+    return keep_drawing(ask, aspect, _png(_without_paper(pixels, ask.paper)), "png")
 
 
 @functools.lru_cache(maxsize=16)
@@ -1262,6 +1298,74 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
             str(atom.get("subunit") or ""), str(atom.get("group") or ""),
         )
         for atom in atoms.values()
+    )
+
+
+class _Residue(NamedTuple):
+    """A residue as mol-sketch's scene says it of each of its atoms (a tuple: a ribosome's
+    18 000 are made at once)."""
+
+    group: str
+    """Its name in mol-sketch, which it is coloured by: ``SER195.A``."""
+    resn: str
+    resi: int
+    chain: str
+    het: bool
+    ss: str
+    entity: str
+    subunit: str
+    heavy: int
+    """How many of its atoms are not hydrogens."""
+
+
+@functools.lru_cache(maxsize=8)
+def _residues(source: str, stamp: float) -> tuple[_Residue, ...]:
+    """The molecule's residues, in its order (what its colours and its ions are worked out
+    on): read from mol-sketch a residue at a time, not from its every atom -- a ribosome's
+    220 000 atoms took seconds to read, its 18 000 residues take milliseconds."""
+
+    return _residues_of(_loaded(source, stamp)) or _grouped(_atoms(source, stamp))
+
+
+def _residues_of(figure) -> tuple[_Residue, ...] | None:
+    """A mol-sketch figure's residues -- None for a scene, or from a mol-sketch that can't
+    list them (one before it could)."""
+
+    from molsketch._engine import CoreError, engine
+
+    try:
+        table = engine().call("residues", figure._spec())
+    except CoreError as error:
+        if "not a function" in str(error):
+            return None
+        raise
+    if not table:
+        return None
+    return tuple(
+        _Residue(f"{resn}{resi}{'.' + chain if chain else ''}", resn, int(resi), chain,
+                 bool(het), ss or "", entity or "", subunit or "", heavy)
+        for resn, resi, chain, het, ss, entity, subunit, heavy in zip(
+            table["resn"], table["resi"], table["chain"], table["het"], table["ss"],
+            table["entity"], table["subunit"], table["heavy"], strict=True,
+        )
+    )
+
+
+def _grouped(atoms: tuple[_Atom, ...]) -> tuple[_Residue, ...]:
+    """Atoms as the residues they are of, in the order they first come."""
+
+    found: dict[str, list] = {}
+    for atom in atoms:
+        key = atom.group or f"{atom.resn}{atom.resi}{'.' + atom.chain if atom.chain else ''}"
+        held = found.get(key)
+        if held is None:
+            found[key] = [atom, 0]
+            held = found[key]
+        held[1] += atom.element.upper() != "H"
+    return tuple(
+        _Residue(key, atom.resn, atom.resi, atom.chain, atom.het, atom.ss, atom.entity,
+                 atom.subunit, heavy)
+        for key, (atom, heavy) in found.items()
     )
 
 

@@ -51,9 +51,18 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from flexo.structure_names import compound_names, entity_names
-from flexo.structures import _NUCLEIC, _atoms, _BadSelection, _called, _selection
+from flexo.structures import (
+    _NUCLEIC,
+    _atoms,
+    _BadSelection,
+    _called,
+    _residues,
+    _residues_of,
+    _selection,
+)
 
 SHADES = {"H": "helix", "E": "sheet", "L": "loop"}
 """The colour of mol-sketch's palette each secondary structure is coloured in."""
@@ -75,8 +84,10 @@ class Unseen(ValueError):
         self.title = title
 
 
-@dataclass(frozen=True, slots=True)
-class Residue:
+class Residue(NamedTuple):
+    """A residue of the molecule, as it is coloured (a tuple: a ribosome's 18 000 are made at
+    once)."""
+
     key: str
     """mol-sketch's name for it, what it is coloured by: ``SER195.A``."""
     resn: str
@@ -90,20 +101,49 @@ class Residue:
 
 class Molecule:
     """A molecule's residues, in its file's order, and its atoms (each with the place of its
-    residue), as its colours are worked out on them."""
+    residue), as its colours are worked out on them. Its atoms are read only when asked
+    for -- by a selection, tested on each -- as most rows (a chain, a residue, a subunit)
+    need its residues alone, and a large molecule's atoms take seconds to read."""
 
-    def __init__(self, residues: tuple[Residue, ...], atoms: tuple, owners: tuple[int, ...]):
+    def __init__(self, residues: tuple[Residue, ...], source: str, stamp: float):
         self.residues = residues
-        self.atoms = atoms
-        self.owners = owners
+        self.source = source
+        self.stamp = stamp
         self.chains: dict[str, tuple[int, ...]] = _index(residues, lambda residue: residue.chain)
-        self.entities = _index(residues, lambda residue: residue.entity)
-        self.subunits = _index(residues, lambda residue: residue.subunit.upper())
-        self.named = _index(residues, lambda residue: f"{residue.resn.upper()}{residue.resi}")
-        self.keyed = {
+
+    # (Each worked out when first asked for: a row names one kind of group.)
+    @functools.cached_property
+    def entities(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: residue.entity)
+
+    @functools.cached_property
+    def subunits(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: residue.subunit.upper())
+
+    @functools.cached_property
+    def named(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: f"{residue.resn.upper()}{residue.resi}")
+
+    @functools.cached_property
+    def keyed(self) -> dict[str, int]:
+        return {
             f"{residue.resn.upper()}{residue.resi}.{residue.chain}": place
-            for place, residue in enumerate(residues)
+            for place, residue in enumerate(self.residues)
         }
+
+    @functools.cached_property
+    def atoms(self) -> tuple:
+        return _atoms(self.source, self.stamp)
+
+    @functools.cached_property
+    def owners(self) -> tuple[int, ...]:
+        """The place of each atom's residue."""
+
+        places = {residue.key: place for place, residue in enumerate(self.residues)}
+        return tuple(
+            places[atom.group or f"{atom.resn}{atom.resi}{'.' + atom.chain if atom.chain else ''}"]
+            for atom in self.atoms
+        )
 
     def residue(self, text: str) -> tuple[int, ...]:
         """The residues ``SER195`` (in any chain) or ``SER195.A`` names: none, for a name
@@ -140,21 +180,17 @@ def _index(residues: tuple[Residue, ...], key) -> dict[str, tuple[int, ...]]:
 
 @functools.lru_cache(maxsize=8)
 def molecule(source: str, stamp: float) -> Molecule:
-    """The molecule ``source`` holds, by residue (``flexo.structures._atoms``)."""
+    """The molecule ``source`` holds, by residue (``flexo.structures._residues``)."""
 
-    atoms = _atoms(source, stamp)
-    places: dict[str, int] = {}
+    seen: set[str] = set()
     residues: list[Residue] = []
-    owners: list[int] = []
-    for atom in atoms:
-        key = atom.group or f"{atom.resn}{atom.resi}{'.' + atom.chain if atom.chain else ''}"
-        place = places.get(key)
-        if place is None:
-            place = places[key] = len(residues)
-            residues.append(Residue(key, atom.resn, atom.resi, atom.chain, atom.entity,
-                                    atom.subunit or "X", atom.het, atom.ss or "L"))
-        owners.append(place)
-    return Molecule(tuple(residues), atoms, tuple(owners))
+    for held in _residues(source, stamp):
+        if held.group in seen:
+            continue
+        seen.add(held.group)
+        residues.append(Residue(held.group, held.resn, held.resi, held.chain, held.entity,
+                                held.subunit or "X", held.het, held.ss or "L"))
+    return Molecule(tuple(residues), source, stamp)
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,9 +305,9 @@ def _secondary(source: str, stamp: float) -> dict[tuple[str, int], str]:
     number, as mol-sketch assigns it."""
 
     found: dict[tuple[str, int], str] = {}
-    for atom in _atoms(source, stamp):
-        if not atom.het and atom.resn.upper() not in _NUCLEIC:
-            found.setdefault((atom.chain, atom.resi), atom.ss or "L")
+    for residue in _residues(source, stamp):
+        if not residue.het and residue.resn.upper() not in _NUCLEIC:
+            found.setdefault((residue.chain, residue.resi), residue.ss or "L")
     return found
 
 
@@ -304,16 +340,12 @@ def drawn_as(figure) -> dict[tuple[str, int], str]:
     number -- as its cartoon is cut into helices and strands: its own secondary structure, a
     helix of fewer than three residues and a strand of one drawn as loop."""
 
-    from molsketch._engine import engine
-
-    atoms = engine().call("sceneJson", figure._spec())["keyframes"][0]["atoms"]
     ss: dict[tuple[str, int], str] = {}
-    for atom in atoms.values():
-        if atom.get("het") or str(atom.get("resn") or "").upper() in _NUCLEIC:
+    for residue in _drawn_residues(figure):
+        if residue.het or residue.resn.upper() in _NUCLEIC:
             continue
-        key = (str(atom.get("chain") or ""), int(atom.get("resi") or 0))
-        code = str(atom.get("ss") or "L")
-        ss.setdefault(key, code if code in ("H", "E") else "L")
+        code = residue.ss or "L"
+        ss.setdefault((residue.chain, residue.resi), code if code in ("H", "E") else "L")
     drawn: dict[tuple[str, int], str] = {}
     keys = sorted(ss)
     start = 0
@@ -328,6 +360,24 @@ def drawn_as(figure) -> dict[tuple[str, int], str]:
             drawn[key] = code
         start = k
     return drawn
+
+
+def _drawn_residues(figure) -> tuple:
+    """The residues of mol-sketch's ``figure`` (``flexo.structures._residues_of``), or for a
+    mol-sketch that can't list them, its scene's atoms (each has what its residue has)."""
+
+    found = _residues_of(figure)
+    if found is not None:
+        return found
+    from molsketch._engine import engine
+
+    atoms = engine().call("sceneJson", figure._spec())["keyframes"][0]["atoms"]
+    return tuple(
+        Residue("", str(atom.get("resn") or ""), int(atom.get("resi") or 0),
+                str(atom.get("chain") or ""), "", "", bool(atom.get("het")),
+                str(atom.get("ss") or ""))
+        for atom in atoms.values()
+    )
 
 
 _unread: dict[tuple[str, float], Exception] = {}
