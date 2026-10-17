@@ -83,6 +83,10 @@ class Picture:
     images: tuple[tuple[str, float, float, float, float], ...] = ()
     """Boxes (id, x, y, width, height) a picture fills with an image drawn at render
     time -- a molecule, drawn by mol-sketch in the figure's colours."""
+    drawn: tuple[float, float] | None = None
+    """The top and bottom of what it draws, its names aside -- a named structure's molecule,
+    a mechanism's structures over the names under them: where a line meets it, and what a
+    row lines it up by (``MeasuredNode.drawn``). ``None``: all of it."""
 
 
 def _f(value: float) -> str:

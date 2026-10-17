@@ -13,7 +13,7 @@ from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.geometry import Point, Rect, Size
 from flexo.ir.semantic import LayoutKind, LayoutSpec
 from flexo.layout.gaps import split_grid_gaps
-from flexo.layout.grid import grid_anchor_lines, grid_plan, grid_tracks
+from flexo.layout.grid import GridPlan, grid_anchor_lines, grid_plan, grid_tracks
 from flexo.style import LayoutStyle
 
 _EPSILON = 1e-7
@@ -25,6 +25,16 @@ Text sits on a baseline; a component sits on the line its side ports live on.
 Aligning boxes lines up whatever the boxes happen to contain -- a caption under
 a vector, an inset's illustration -- while aligning port lines is what makes an
 arrow run straight from one component through the next.
+"""
+
+CENTRE_ALIGN = "center"
+"""``align`` value that centres children across the way a group runs.
+
+A row centres each child on one line -- its box's middle, but for a part drawn over a
+name or under one (a named structure, picture or mechanism: ``MeasuredNode.drawn``), whose
+drawing's middle it is, and for a group of such parts, the line they stand on
+(``MeasuredGroup.middle``). So a ``+`` between two named molecules stands level with them,
+not with them and their names.
 """
 
 NON_ANCHOR_KINDS = frozenset({"label", "spacer"})
@@ -55,6 +65,35 @@ def resolved_anchors(
     anchors: tuple[Point, ...] | None,
 ) -> tuple[Point, ...]:
     return anchor_offsets(sizes) if anchors is None else anchors
+
+
+def middle_lines(
+    layout: LayoutSpec,
+    sizes: tuple[Size, ...],
+    middles: tuple[float | None, ...] | None,
+) -> tuple[float, ...] | None:
+    """Where each child's middle is, down from its top, for a row (or a grid's row) that
+    centres what it holds (``CENTRE_ALIGN``) -- or ``None`` when every one's is its box's, so
+    the row centres its boxes exactly as it always has. Equal sizes centre their boxes."""
+
+    if middles is None or layout.align != CENTRE_ALIGN or layout.equal_size:
+        return None
+    lines = tuple(
+        size.height / 2.0 if middle is None else middle
+        for size, middle in zip(sizes, middles, strict=True)
+    )
+    if all(abs(line - size.height / 2.0) <= 1e-6 for line, size in zip(lines, sizes, strict=True)):
+        return None
+    return lines
+
+
+def _middle_reach(sizes: tuple[Size, ...], lines: tuple[float, ...]) -> tuple[float, float]:
+    """How far above their shared middle line some of ``sizes`` reach, and how far below."""
+
+    return (
+        max(lines),
+        max(size.height - line for size, line in zip(sizes, lines, strict=True)),
+    )
 
 
 def cross_extent(
@@ -93,6 +132,7 @@ def arrangement_size(
     gaps: tuple[float, ...] | None = None,
     child_ids: tuple[str, ...] | None = None,
     anchors: tuple[Point, ...] | None = None,
+    middles: tuple[float | None, ...] | None = None,
 ) -> Size:
     if not child_sizes:
         return Size(0.0, 0.0)
@@ -107,10 +147,14 @@ def arrangement_size(
     # Equal sizes line up by their centres: an anchor measured on a child's own
     # size would set each resized box off by a different amount.
     lines = resolved_anchors(values, None if layout.equal_size else anchors)
+    # (Centred on their drawings' middles, a row may be taller than its tallest part.)
+    middle = middle_lines(layout, values, middles)
     if actual_kind == "row":
         height = (
             sum(cross_extent(values, lines, vertical=True))
             if ports
+            else sum(_middle_reach(values, middle))
+            if middle is not None
             else max(size.height for size in values)
         )
         return Size(sum(size.width for size in values) + sum(axis_gaps), height)
@@ -134,6 +178,8 @@ def arrangement_size(
     # Without names no child can be addressed, so every one of them flows.
     plan = grid_plan(layout, child_ids if child_ids is not None else ("",) * len(values))
     column_widths, row_heights = grid_tracks(plan, values, layout, lines if ports else None)
+    if middle is not None and not ports:
+        row_heights = _middle_rows(plan, values, middle)[2]
     column_gaps, row_gaps = split_grid_gaps(
         gaps,
         plan.columns,
@@ -159,6 +205,7 @@ def arrange(
     column_gap: float,
     anchors: tuple[Point, ...] | None = None,
     group_id: str = "",
+    middles: tuple[float | None, ...] | None = None,
 ) -> tuple[Rect, ...]:
     """One rectangle per child, in the order the children were given."""
 
@@ -167,6 +214,7 @@ def arrange(
     sizes = _equalized(child_sizes) if layout.equal_size else child_sizes
     ports = layout.align == PORT_ALIGN
     lines = resolved_anchors(sizes, None if layout.equal_size else anchors)
+    middle = None if ports else middle_lines(layout, sizes, middles)
     if kind == "row":
         total = sum(size.width for size in sizes) + sum(gaps)
         start, actual_gaps = linear_justification(layout.justify, content.width, total, gaps)
@@ -177,12 +225,18 @@ def arrange(
             # centred row would: the canvas is wider than what it holds.
             ascent, descent = cross_extent(sizes, lines, vertical=True)
             ascent += max(0.0, content.height - ascent - descent) / 2.0
+        elif middle is not None:
+            # (Centred on one line through the middles of what they draw: CENTRE_ALIGN.)
+            ascent, descent = _middle_reach(sizes, middle)
+            ascent += max(0.0, content.height - ascent - descent) / 2.0
         result = []
         for index, size in enumerate(sizes):
             height = content.height if layout.align == "stretch" else size.height
             y = (
                 content.y + ascent - lines[index].y
                 if ports
+                else content.y + ascent - middle[index]
+                if middle is not None
                 else cross_position(layout.align, content.y, content.height, height)
             )
             result.append(Rect(x, y, size.width, height))
@@ -241,7 +295,23 @@ def arrange(
         gaps=gaps,
         anchors=lines if ports else None,
         group_id=group_id,
+        middles=middle,
     )
+
+
+def _middle_rows(
+    plan: GridPlan, sizes: tuple[Size, ...], lines: tuple[float, ...]
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    """For a grid that centres its rows' parts on their middles (``middle_lines``): how far
+    above its line each row's parts reach, how far below, and so how tall each row is."""
+
+    tops = [0.0] * plan.rows
+    bottoms = [0.0] * plan.rows
+    for (row, _), size, line in zip(plan.cells, sizes, lines, strict=True):
+        tops[row] = max(tops[row], line)
+        bottoms[row] = max(bottoms[row], size.height - line)
+    heights = tuple(top + bottom for top, bottom in zip(tops, bottoms, strict=True))
+    return tuple(tops), tuple(bottoms), heights
 
 
 def _arrange_grid(
@@ -255,9 +325,14 @@ def _arrange_grid(
     gaps: tuple[float, ...] | None = None,
     anchors: tuple[Point, ...] | None,
     group_id: str,
+    middles: tuple[float, ...] | None = None,
 ) -> tuple[Rect, ...]:
     plan = grid_plan(layout, child_ids)
     column_widths, row_heights = grid_tracks(plan, sizes, layout, anchors)
+    tops: tuple[float, ...] = ()
+    if middles is not None and anchors is None:
+        # (Each row's parts centred on one line through the middles of what they draw.)
+        tops, _, row_heights = _middle_rows(plan, sizes, middles)
     column_gaps, row_gaps = split_grid_gaps(gaps, plan.columns, plan.rows, column_gap, row_gap)
     needed = Size(
         sum(column_widths) + sum(column_gaps),
@@ -285,6 +360,17 @@ def _arrange_grid(
     ys = [start_y]
     for height, gap in zip(row_heights[:-1], row_gaps, strict=True):
         ys.append(ys[-1] + height + gap)
+    if anchors is None and tops:
+        assert middles is not None
+        return tuple(
+            Rect(
+                cross_position(layout.align, xs[column], column_widths[column], size.width),
+                ys[row] + tops[row] - line,
+                size.width,
+                size.height,
+            )
+            for (row, column), size, line in zip(plan.cells, sizes, middles, strict=True)
+        )
     if anchors is None:
         return tuple(
             Rect(

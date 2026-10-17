@@ -194,14 +194,16 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     size = Size(width, named + height)
     middle = drawing_middle(side, named, size.height)
     ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
+    # (Named, the molecule is what a line meets and a row lines up, not it and its name.)
+    drawn = (top, top + height) if named else None
     problem = _problem(node, style)
     if problem is None or problem.drawn:
         return Picture(
             size, (), tuple(words), ports,
-            images=((f"{node.id}.molecule", 0.0, top, width, height),),
+            images=((f"{node.id}.molecule", 0.0, top, width, height),), drawn=drawn,
         )
     shapes, said = _placeholder(node, measures, problem, top, width, height)
-    return Picture(size, shapes, (*words, *said), ports)
+    return Picture(size, shapes, (*words, *said), ports, drawn=drawn)
 
 
 def _placeholder(node: NodeSpec, measures, problem: _Problem, top: float, width: float,

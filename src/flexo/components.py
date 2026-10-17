@@ -1098,13 +1098,3 @@ def centred_port(kind: str, port: PortSpec) -> bool:
         and any(item.name == port.name for item in definition.ports)
     )
 
-
-def centred_at(kind: str, port: PortSpec) -> float:
-    """Where along its side a line alone there at ``port`` (a ``centred_port``) meets a
-    component of ``kind``, as a fraction of the side: the middle -- but a structure's or a
-    picture's left or right at the middle of its drawing, its name over it or under it
-    (``flexo.title_sides``), as its port says."""
-
-    if kind in SIDED_KINDS and port.side in {Side.WEST, Side.EAST}:
-        return port.offset
-    return 0.5

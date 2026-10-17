@@ -26,7 +26,6 @@ from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import ancestors, parent_map
 from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.semantic import FigureSpec, PortRef, PortSpec
-from flexo.title_sides import SIDED_KINDS
 
 _SIDES = (Side.NORTH, Side.EAST, Side.SOUTH, Side.WEST)
 
@@ -419,9 +418,9 @@ def _dominant_axis_side(tied: tuple[Side, ...], votes: tuple[_Vote, ...]) -> Sid
 def _resided(node: FittedNode, chosen: dict[str, Side]) -> FittedNode:
     """Rewrite one node's port sides, and the positions that follow from them."""
 
-    kind = node.measured.spec.kind
+    drawn = node.measured.drawn is not None
     specs = tuple(
-        replace(port, side=chosen[port.name], offset=_turned_offset(kind, port, chosen[port.name]))
+        replace(port, side=chosen[port.name], offset=_turned_offset(drawn, port, chosen[port.name]))
         if port.name in chosen
         else port
         for port in node.measured.spec.ports
@@ -439,12 +438,12 @@ def _resided(node: FittedNode, chosen: dict[str, Side]) -> FittedNode:
     )
 
 
-def _turned_offset(kind: str, port: PortSpec, side: Side) -> float:
+def _turned_offset(drawn: bool, port: PortSpec, side: Side) -> float:
     """Where along ``side`` a port turned to it stands: where it stood along its own -- but
-    a structure's or a picture's, whose left and right ports are as far down as the middle
-    of its drawing (``flexo.title_sides``), turned to its top or bottom stands at the
-    middle of it."""
+    a named structure's, picture's or mechanism's (``drawn``), whose left and right ports are
+    as far down as the middle of its drawing (``flexo.title_sides``), turned to its top or
+    bottom stands at the middle of it."""
 
-    if kind in SIDED_KINDS and port.side.horizontal != side.horizontal:
+    if drawn and port.side.horizontal != side.horizontal:
         return 0.5
     return port.offset

@@ -17,6 +17,7 @@ import functools
 
 from flexo.diagnostics import Diagnostic, Severity
 from flexo.geometry import Rect
+from flexo.ir.fitted import FittedNode
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec
 from flexo.style import LayoutStyle, TypographyStyle
@@ -119,14 +120,27 @@ def drawing_middle(side: str, band: float, height: float) -> float:
     return min(1.0, max(0.0, (top + (height - band) / 2.0) / height))
 
 
-def drawn_between(
-    node: NodeSpec, title: TextMetrics, bounds: Rect, style: LayoutStyle
-) -> tuple[float, float] | None:
-    """The top and bottom of a named structure's or picture's drawing in its ``bounds``, its
-    name (``title``, as measured) aside: the stretch of its left and right a line meets it
-    on. ``None`` for any other node, and for one with no name."""
+def drawn_span(node: FittedNode) -> tuple[float, float] | None:
+    """The top and bottom, on the page, of what a named structure, picture or mechanism draws
+    in the bounds it was given, its name aside (``MeasuredNode.drawn``): where a line meets it
+    from either side, at the middle when alone there. ``None`` for any other node."""
 
-    if node.kind not in SIDED_KINDS or not title.lines:
+    measured = node.measured
+    if measured.drawn is None:
         return None
-    drawn = drawing_box(bounds, title_side(node), title_band(title, style))
-    return drawn.top, drawn.bottom
+    top, bottom = measured.drawn
+    bounds = node.bounds
+    if measured.spec.kind == "image":
+        # (Its artwork fills its box but for its name's band.)
+        return bounds.y + top, bounds.bottom - (measured.intrinsic_size.height - bottom)
+    # (A drawn part's picture is centred in its bounds: flexo.render_drawn.)
+    y = bounds.y + (bounds.height - measured.intrinsic_size.height) / 2.0
+    return y + top, y + bottom
+
+
+def middle_y(node: FittedNode) -> float:
+    """Where on the page the middle of what ``node`` draws is, down the page: its drawing's,
+    over its name or under it (``drawn_span``), else its box's."""
+
+    span = drawn_span(node)
+    return node.bounds.center.y if span is None else (span[0] + span[1]) / 2.0

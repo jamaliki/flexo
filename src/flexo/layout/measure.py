@@ -20,16 +20,24 @@ from flexo.drawn import DRAWN_KINDS, picture
 from flexo.geometry import Point, Rect, Size
 from flexo.ir.measured import MeasuredFigure, MeasuredGroup, MeasuredNode, TextMetrics
 from flexo.ir.semantic import FigureSpec, GroupSpec, NodeSpec, layout_connections
-from flexo.layout.arrange import NON_ANCHOR_KINDS, arrange, arrangement_size, declared_size
+from flexo.layout.arrange import (
+    CENTRE_ALIGN,
+    NON_ANCHOR_KINDS,
+    PORT_ALIGN,
+    arrange,
+    arrangement_size,
+    declared_size,
+)
 from flexo.layout.flow import lower_flows
 from flexo.layout.gaps import routing_gaps_for_group
+from flexo.layout.grid import grid_plan
 from flexo.layout.order import optimized_child_orders
 from flexo.routing.aside import writing_room
 from flexo.shapes import CLOUD_MEASURE, SHAPE_KINDS, label_room
 from flexo.style import LayoutStyle, TypographyStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
-from flexo.title_sides import drawing_middle, drawing_title, title_band, title_side
+from flexo.title_sides import drawing_title, title_band, title_side
 from flexo.units import CellSpan
 from flexo.validate import merge_matched_stacks, normalize_and_validate, resolve_alignment
 from flexo.wording import typography_of
@@ -76,6 +84,7 @@ def measure_figure(
     node_kinds = {node.spec.id: node.spec.kind for node in measured_nodes}
     node_sizes = {node.spec.id: node.intrinsic_size for node in measured_nodes}
     node_anchors = {node.spec.id: node.anchor for node in measured_nodes}
+    node_middles = {node.spec.id: node.middle for node in measured_nodes}
     groups_by_id = {group.id: group for group in semantic.groups}
     child_orders = optimized_child_orders(semantic)
     outward = outward_connections(semantic)
@@ -94,11 +103,21 @@ def measure_figure(
                 anchors.append(child.anchor)
         return tuple(sizes), tuple(anchors)
 
+    def child_middles(child_ids: tuple[str, ...]) -> tuple[float | None, ...]:
+        """Where each child's drawing's middle is (a named molecule's), or ``None``: its
+        box's (``MeasuredNode.drawn``, ``MeasuredGroup.middle``)."""
+
+        return tuple(
+            node_middles[child_id] if child_id in node_middles else measure_group(child_id).middle
+            for child_id in child_ids
+        )
+
     def measure_group(group_id: str) -> MeasuredGroup:
         if group_id in measured_groups:
             return measured_groups[group_id]
         group = groups_by_id[group_id]
         child_sizes, child_anchors = child_geometry(group.children)
+        middles = child_middles(group.children)
         # A title is drawn at the style's title weight, so it is measured there
         # too: a semibold "Sequence module" is wider than the same words at 400,
         # and the band this reserves is the band those glyphs land in.
@@ -125,6 +144,7 @@ def measure_figure(
             gaps=gaps,
             child_ids=group.children,
             anchors=child_anchors,
+            middles=middles,
         )
         padding = group.layout.resolved_padding(layout_style.group_padding)
         title_height = label.height + layout_style.compact_gap.points if group.label else 0.0
@@ -146,6 +166,16 @@ def measure_figure(
                 child_geometry,
                 gaps,
                 outward.get(group_id, {}),
+                child_middles,
+            ),
+            _group_middle(
+                group,
+                declared_size(group.layout, intrinsic),
+                title_height,
+                layout_style,
+                child_geometry,
+                child_middles,
+                gaps,
             ),
         )
         measured_groups[group_id] = measured
@@ -252,8 +282,9 @@ def _measure_node(
     if node.kind in DRAWN_KINDS:
         return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)
-    if node.kind == "image" and label.lines:
-        node = _picture_ports(node, label, size, style)
+    drawn = _picture_drawn(node, label, size, style) if node.kind == "image" else None
+    if drawn is not None:
+        node = _ports_at(node, drawn, size)
     # Given a size of its own, the size it would be without (round its words) is kept
     # too: what an editor's handles snap to.
     # (A decision's is the diamond that hugs its words, smaller than it is of itself.)
@@ -270,10 +301,19 @@ def _measure_node(
             fit = intrinsic_node_size(bare, words, style)
     # A component's ports sit on its side centres, so its own centre is where
     # both port lines cross -- including a vector's, whose bounds are exactly its
-    # cell grid because the caption is a sibling node rather than padding.
+    # cell grid because the caption is a sibling node rather than padding. (A named
+    # picture's cross at the middle of its artwork.)
     return MeasuredNode(
-        node, label, size, Point(size.width / 2.0, size.height / 2.0), fit=fit, room=room
+        node, label, size, _anchor(size, drawn), fit=fit, room=room, drawn=drawn
     )
+
+
+def _anchor(size: Size, drawn: tuple[float, float] | None) -> Point:
+    """Where a component's port lines cross: its middle, or the middle of what it draws
+    over or under its name (``MeasuredNode.drawn``)."""
+
+    middle = size.height / 2.0 if drawn is None else (drawn[0] + drawn[1]) / 2.0
+    return Point(size.width / 2.0, middle)
 
 
 def _picture_title(node: NodeSpec, style: LayoutStyle) -> tuple[float | None, TextMetrics]:
@@ -284,13 +324,26 @@ def _picture_title(node: NodeSpec, style: LayoutStyle) -> tuple[float | None, Te
     return room, drawing_title(node, style, room)
 
 
-def _picture_ports(node: NodeSpec, label: TextMetrics, size: Size, style: LayoutStyle) -> NodeSpec:
-    """A named picture's input and output where a structure's are: at the middle of its
-    drawing, over its name or under it -- not of its box (an author's own ports stay)."""
+def _picture_drawn(
+    node: NodeSpec, label: TextMetrics, size: Size, style: LayoutStyle
+) -> tuple[float, float] | None:
+    """Where a named picture's artwork is, down from its top: under its name or over it
+    (``flexo.title_sides``); ``None`` for one with no name."""
 
-    middle = drawing_middle(title_side(node), title_band(label, style), size.height)
+    if not label.lines:
+        return None
+    band = title_band(label, style)
+    top = 0.0 if title_side(node) == "bottom" else band
+    return top, top + max(0.0, size.height - band)
+
+
+def _ports_at(node: NodeSpec, drawn: tuple[float, float], size: Size) -> NodeSpec:
+    """A named structure's, picture's or mechanism's input and output at the middle of what it
+    draws, over its name or under it -- not of its box (an author's own ports stay)."""
+
+    middle = (drawn[0] + drawn[1]) / 2.0 / size.height if size.height > 0.0 else 0.5
     ports = tuple(
-        replace(port, offset=middle)
+        replace(port, offset=min(1.0, max(0.0, middle)))
         if port.auto_side and port.name in {"input", "output"}
         else port
         for port in node.ports
@@ -365,16 +418,19 @@ def _measure_drawn(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Me
     drawing = picture(node, style)
     size = drawing.size
     placed = {port.name: port for port in drawing.ports}
+    if drawing.drawn is not None and not placed:
+        # (A mechanism's at the middle of its structures, over the names under them.)
+        node = _ports_at(node, drawing.drawn, size)
     ports = tuple(
         replace(port, side=placed[port.name].side, offset=placed[port.name].offset)
         if port.name in placed
         else port
         for port in node.ports
     )
-    anchor = Point(size.width / 2.0, size.height / 2.0)
+    anchor = _anchor(size, drawing.drawn)
     if node.kind == "construct" and "input" in placed:
         anchor = Point(size.width / 2.0, placed["input"].offset * size.height)
-    return MeasuredNode(replace(node, ports=ports), label, size, anchor)
+    return MeasuredNode(replace(node, ports=ports), label, size, anchor, drawn=drawing.drawn)
 
 
 def _one_circle_size(nodes: tuple[MeasuredNode, ...]) -> tuple[MeasuredNode, ...]:
@@ -477,6 +533,7 @@ def _group_anchor(
     child_geometry: Callable[[tuple[str, ...]], tuple[tuple[Size, ...], tuple[Point, ...]]],
     gaps: tuple[float, ...],
     outward: dict[str, int] | None = None,
+    child_middles: Callable[[tuple[str, ...]], tuple[float | None, ...]] | None = None,
 ) -> Point:
     """A group's port line: its anchor child's, carried up into group coordinates.
 
@@ -513,6 +570,7 @@ def _group_anchor(
         column_gap=layout.resolved_column_gap(style.gap),
         anchors=anchors,
         group_id=group.id,
+        middles=child_middles(child_ids) if child_middles is not None else None,
     )
     points = [
         Point(
@@ -538,6 +596,62 @@ def _group_anchor(
         plumb = max(point.x for point in points) - min(point.x for point in points) < 1e-6
         return Point(points[0].x if plumb else centre.x, points[0].y if level else centre.y)
     return centre
+
+
+def _group_middle(
+    group: GroupSpec,
+    size: Size,
+    title_height: float,
+    style: LayoutStyle,
+    child_geometry: Callable[[tuple[str, ...]], tuple[tuple[Size, ...], tuple[Point, ...]]],
+    child_middles: Callable[[tuple[str, ...]], tuple[float | None, ...]],
+    gaps: tuple[float, ...],
+) -> float | None:
+    """The line a row's parts stand on, down from the group's top, where one of them is drawn
+    over a name or under one (``MeasuredGroup.middle``): a row that centres what it holds
+    (``CENTRE_ALIGN``), or lines it up by its port lines, on which a named molecule's are its
+    molecule's -- and a grid of one row. ``None`` for any other group, and for one whose
+    parts' middles are all their boxes': its parent centres its box, as it always has."""
+
+    layout = group.layout
+    if layout.align not in {CENTRE_ALIGN, PORT_ALIGN} or layout.kind not in {"row", "grid"}:
+        return None
+    if layout.equal_size:
+        return None  # (equal boxes are centred on their boxes' middles)
+    child_ids = group.children
+    middles = child_middles(child_ids)
+    sizes, anchors = child_geometry(child_ids)
+    if not any(
+        middle is not None and abs(middle - size.height / 2.0) > 1e-6
+        for middle, size in zip(middles, sizes, strict=True)
+    ):
+        return None
+    if layout.kind == "grid" and grid_plan(layout, child_ids).rows != 1:
+        return None
+    padding = layout.resolved_padding(style.group_padding)
+    content = Rect(
+        padding.left,
+        padding.top + (0.0 if group.title_below else title_height),
+        max(0.0, size.width - padding.horizontal),
+        max(0.0, size.height - padding.vertical - title_height),
+    )
+    bounds = arrange(
+        sizes,
+        child_ids,
+        layout,
+        layout.kind,
+        content,
+        gaps=gaps,
+        row_gap=layout.resolved_row_gap(style.gap),
+        column_gap=layout.resolved_column_gap(style.gap),
+        anchors=anchors,
+        group_id=group.id,
+        middles=middles,
+    )
+    # (Each part stands on the one line: the first says where.)
+    if layout.align == PORT_ALIGN:
+        return bounds[0].y + anchors[0].y
+    return bounds[0].y + (sizes[0].height / 2.0 if middles[0] is None else middles[0])
 
 
 def anchor_children(

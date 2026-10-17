@@ -352,7 +352,10 @@ the theme's title weight -- as a picture's does, so a row of molecules and pictu
 them has its names on one line, in one hand (see [a picture's name](#a-shapes-words-and-a-pictures-name-and-crop)).
 Its words take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics
 (asterisks are drawn as typed). A line meets a named structure at the middle of its molecule,
-not of the molecule and its name, and keeps off the side the name stands on.
+not of the molecule and its name, and keeps off the side the name stands on; a row that
+centres what it holds (`align: center`), or lines it up by its ports, lines it up by its
+molecule too -- as it does a picture, and a mechanism whose steps are named under their
+structures -- so a `+` or a `2` beside it stands level with the molecule.
 
 #### A diffusion run, frame by frame
 
@@ -452,6 +455,12 @@ them. Each step is SMILES -- the molecules apart with `.`, the atoms its arrows 
 mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
 makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
 pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
+
+A step's `label` is set under its structure. A line meets a mechanism at the middle of its
+structures, not of them and the names under them, and a row that centres what it holds lines
+it up by them: `ACV + O₂ → ...` with each molecule named under it, written as mechanisms and
+`+` text parts in a row or grid with `align: center`, has its `+`, its numbers and its
+arrows level with the molecules.
 
 A mechanism may be schematic. A bracket atom whose symbol is no element is a
 placeholder, drawn as it is written -- `[X]`, `[Nu-]`, `[E]`, `[LG]`, `[EWG]`, `[R']`,

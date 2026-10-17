@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from flexo.components import (
     TRANSPARENT_KINDS,
     TRANSPARENT_ROLES,
-    centred_at,
     centred_port,
     route_clearance,
     title_edge,
@@ -28,7 +27,7 @@ from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
 from flexo.routing.vpsc import solve
 from flexo.style import LayoutStyle
-from flexo.title_sides import drawn_between
+from flexo.title_sides import drawn_span
 
 SPREAD_PIN_WEIGHT = 1e-3
 """Weight of an evenly spread pin's wish against a partner pin's own centre.
@@ -1172,10 +1171,9 @@ def _place_on_side(
     along_x = side in {Side.NORTH, Side.SOUTH}
     bounds = node.bounds
     low, high = (bounds.left, bounds.right) if along_x else (bounds.top, bounds.bottom)
-    # (A structure's or a picture's left and right are its drawing's: its name over it or
-    # under it is no place for a line.)
-    spec = node.measured.spec
-    drawn = None if along_x else drawn_between(spec, node.measured.label, bounds, style)
+    # (A named structure's, picture's or mechanism's left and right are its drawing's: its
+    # name over it or under it is no place for a line.)
+    drawn = None if along_x else drawn_span(node)
     if drawn is not None:
         low, high = drawn
     edge = {
@@ -1354,9 +1352,11 @@ def lone_pin(
         if side in {Side.NORTH, Side.SOUTH}
         else (bounds.top, bounds.bottom)
     )
-    # (A structure's or a picture's at the middle of its drawing: centred_at.)
-    along = centred_at(node.measured.spec.kind, port) if port.side is side else 0.5
-    return key, low + (high - low) * along
+    # (A named structure's, picture's or mechanism's at the middle of its drawing.)
+    drawn = drawn_span(node) if side in {Side.WEST, Side.EAST} else None
+    if drawn is not None:
+        low, high = drawn
+    return key, (low + high) / 2.0
 
 
 def _corner_inset(node: FittedNode, style: LayoutStyle) -> float:

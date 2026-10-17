@@ -432,9 +432,16 @@ to `padding`, then to the style's group padding.
 `align` sets where children sit across the axis they are not laid out along.
 It accepts `start`, `center`, `end`, `stretch`, `ports`, and `auto`.
 
-- `start`, `center`, `end`, and `stretch` align the children's boxes.
+- `start`, `center`, `end`, and `stretch` align the children's boxes -- but
+  `center` centres a part drawn over a name or under one (a named structure,
+  picture or mechanism) on the middle of its drawing, not of its box with the
+  name in it, and a row or one-row grid of such parts on the line they stand on.
+  So a `+` between two named molecules, and the line out of one, stand level
+  with the molecules. A centred row with such a part in it may be taller than
+  its tallest child, as a ports-aligned one may.
 - `ports` aligns the line the children's side ports sit on, as text aligns on
-  a baseline.
+  a baseline. A named structure's, picture's or mechanism's ports sit at the
+  middle of its drawing.
 - `auto`, the default for groups and for the figure's root, resolves per
   group: `ports` when the group's children are connected to one another,
   `start` for two or more columns in a row or rows in a column, and `center`
@@ -490,7 +497,9 @@ with flexo.Figure("anchor", width="double-column") as figure:
 
 A line that is the only one on a side of a box leaves (or enters) that side at its
 middle, at a port the component gives the box -- it is never slid along the side to
-make it straight. In a group that centres what it holds, a box joined by one line to
+make it straight. A named structure's, picture's or mechanism's left and right are its
+drawing's: a line meets it at the middle of the molecule or the picture, and several
+spread over the drawing, never over its name. In a group that centres what it holds, a box joined by one line to
 one other is put centred on that other one, so the line runs straight from middle to
 middle (a store under the queue that feeds it); where the two can't be lined up, the
 line bends between the two middles. Several lines on one side still spread evenly
