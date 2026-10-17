@@ -14,3 +14,11 @@
 .mol-colour-rows.sorting .mol-colour-row:not(.lifted) { transition: transform 0.12s ease; }
 .mol-colour-row.lifted { position: relative; z-index: 1; background: var(--raised); box-shadow: var(--shadow-2); border-radius: 5px; }
 .mol-colour-row.lifted .mol-colour-grip { cursor: grabbing; }
+/* What a row colours, chosen (structurepick.js): each name on one line, cut short where it
+   must be -- its tooltip says it whole -- the chain it names at the right, in the grey a
+   menu's shortcut is in. A long list, searched, under its field. */
+.menu.mol-pick-menu { max-width: 340px; }
+.menu.font-menu.mol-pick-menu { width: 300px; }
+.menu.mol-pick-menu .menu-text { min-width: 0; }
+.menu.mol-pick-menu .menu-text > span { font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu.mol-pick-menu .menu-item .kbd { flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: 0; }

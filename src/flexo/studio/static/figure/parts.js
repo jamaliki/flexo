@@ -27,7 +27,7 @@ import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
-import { structureColours } from "/static/kinds/figure/structurecolours.js";
+import { structureColours, schemeClears } from "/static/kinds/figure/structurecolours.js";
 import * as Frames from "/static/kinds/figure/structframes.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
@@ -721,7 +721,7 @@ export function figureParts(host) {
         // One field of the inspector's, by its label: "Change Width"; a switch to show
         // something, "Show Ticks" or "Hide Ticks".
         // (A choice with the values it had hidden given back with it: named by the choice.)
-        const lead = keys.length > 1 ? keys.find((key) => keys.every((other) => other === key || fieldOf(target, other)?.show?.[key] !== undefined)) : null;
+        const lead = keys.length > 1 ? keys.find((key) => keys.every((other) => other === key || fieldOf(target, other)?.show?.[key] !== undefined || fieldOf(target, key)?.clears?.includes(other))) : null;
         const field = keys.length === 1 ? fieldOf(target, keys[0]) : lead ? fieldOf(target, lead) : null;
         if (field?.type === "bool" && /^show /i.test(field.label)) {
           return `${(values[field.key] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
@@ -6598,7 +6598,8 @@ export function figureParts(host) {
     const key = `${scope}:${field.key}`;
     const waiting = typed.get(key);
     const value = waiting && field.key in waiting ? waiting[field.key] : valueAt(item, field.key);
-    const set = (next) => write({ [field.key]: next }, key);
+    // (A structure's colour scheme takes back its own colours under it: structurecolours.js.)
+    const set = (next) => write({ [field.key]: next, ...schemeClears(field, item, next, valueAt) }, key);
     // Words typed: one run from focusing the field to leaving it, however long its pauses.
     const type = (next) => write({ [field.key]: next }, key, true);
     const options = { hint: field.hint };
@@ -6814,7 +6815,7 @@ export function figureParts(host) {
       case "records":
         // (A structure's colours: rows of selections, in order -- structurecolours.js.)
         if (item?.kind === "structure" && field.key === "properties.colors") {
-          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced });
+          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced, source: item.properties?.source });
         }
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":
