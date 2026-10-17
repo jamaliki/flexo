@@ -78,7 +78,11 @@ from ruamel.yaml.scalarstring import (
     SingleQuotedScalarString,
 )
 
+from flexo.group_ends import PLAIN_PORTS
 from flexo.ir.semantic import ID_PATTERN
+from flexo.studio.group_lines import drop_gone, group_ids, outside_groups
+from flexo.studio.group_lines import end_of as group_end
+from flexo.studio.group_lines import named as group_named
 from flexo.studio.merge import merge_text
 
 SHOWN = {"hidden": "hide", "dimmed": "dim", "highlighted": "highlight"}
@@ -158,12 +162,14 @@ def apply(
     was_valid = _reads(text, suffix, base)
     if verb in PLACING:
         document.hold_all()
+    grouped = group_ids(document)
     select = handler(action) or []
     if document.unchanged:
         # Nothing to do: the file's words as they were, to the letter.
         return {"text": text, "select": list(select)}
     document.tidy_alignment()
     document.tidy_frames()
+    drop_gone(document, grouped)  # (lines to a group gone go with it: flexo.group_ends)
     document.tidy_shown()
     result = document.dump()
     if verb in STRUCTURAL and was_valid:
@@ -187,14 +193,25 @@ def astray(data: Any, ids: list[str] | None = None) -> list[str]:
     if not isinstance(data, dict) or not isinstance(data.get("edges"), list):
         return []
     nodes = {str(node.get("id")) for node in data.get("nodes") or [] if isinstance(node, dict)}
+    # (A line may end at a group, as at a part: flexo.group_ends.)
+    groups = {str(group.get("id")) for group in data.get("groups") or [] if isinstance(group, dict)}
+    groups.add(str((data.get("figure") or {}).get("root", "root")))
 
     def there(reference: object) -> bool:
         reference = str(reference)
-        return reference in nodes or reference.rpartition(".")[0] in nodes
+        head, _, port = reference.rpartition(".")
+        return (
+            reference in nodes
+            or reference in groups
+            or head in nodes
+            or (head in groups and port in PLAIN_PORTS)
+        )
 
     def node(reference: object) -> str:
         reference = str(reference)
-        return reference if reference in nodes else reference.rpartition(".")[0] or reference
+        if reference in nodes or reference in groups:
+            return reference
+        return reference.rpartition(".")[0] or reference
 
     said, kept = [], []
     for index, edge in enumerate(data["edges"], start=1):
@@ -602,7 +619,7 @@ class _Document:
     def node_of(self, reference: str) -> str:
         """The node a reference names: itself, or ``node.port``'s node."""
 
-        if reference in self.node_ids():
+        if reference in self.node_ids() or group_end(self, reference) == reference:
             return reference
         head, _, _ = str(reference).rpartition(".")
         return head or reference
@@ -658,7 +675,25 @@ class _Document:
             other = self.node(ends.removeprefix(start)) if ends.startswith(start) else None
             if other is not None:
                 return f"the line from “{self.said(node)}” to “{self.said(other)}”"
+        # (Or a group at either end: flexo.group_ends.)
+        either = [*self.nodes, *self.groups]
+        for one in either:
+            start = f"{one.get('id')}-to-"
+            if not ends.startswith(start):
+                continue
+            rest = ends.removeprefix(start)
+            other = self.node(rest) or self.group(rest)
+            if other is not None:
+                return f"the line from “{self.end_said(one)}” to “{self.end_said(other)}”"
         return "that line"
+
+    def end_said(self, item: Mapping[str, Any]) -> str:
+        """A line's end as a person knows it: a part by its words, a group by its title --
+        else its id."""
+
+        if self.node(str(item.get("id"))) is item:
+            return self.said(item)
+        return group_named(self, str(item.get("id")))
 
     def said(self, node: Mapping[str, Any]) -> str:
         """A part as a person knows it: by its words, else its id."""
@@ -1101,7 +1136,8 @@ class _Document:
         if self.node_of(source) == self.node_of(target):
             raise EditError("A shape can\u2019t be connected to itself.")
         for end in (source, target):
-            if self.node(self.node_of(end)) is None:
+            # (A group is an end as a shape is: flexo.group_ends.)
+            if self.node(self.node_of(end)) is None and group_end(self, end) is None:
                 raise EditError(f"There\u2019s no shape named “{end}” to connect.")
         ends = (self.node_of(source), self.node_of(target))
         if any(
@@ -1109,6 +1145,7 @@ class _Document:
         ):
             raise EditError(f"“{source}” and “{target}” are already connected.")
         self.outside_frames(*ends)
+        outside_groups(self, *ends)
         node = self.node(target)
         target = self.free_input(target)
         if node is not None and node.get("kind") == "attention":
@@ -1256,6 +1293,7 @@ class _Document:
                 # (An end taken to a frame: from outside it, as a new line to it is.)
                 other = item.get("to" if key == "from" else "from")
                 self.outside_frames(self.node_of(str(value)), self.node_of(str(other)))
+                outside_groups(self, self.node_of(str(value)), self.node_of(str(other)))
             if kind == "net" and key.startswith("side:"):
                 self.net_side(item, key.removeprefix("side:"), value)
                 continue

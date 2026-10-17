@@ -834,6 +834,40 @@ own:
   A figure taller than a page with a `height` is treated the same way
   (`layout.height.grown`).
 
+### Lines to a group
+
+A line may start or end at a group, as at a shape -- everything going in, the cell,
+everything coming out, where an arrow from one of the molecules would read as though it
+came from that one alone:
+
+```yaml
+groups:
+- {id: substrates, role: layout, layout: {kind: grid, columns: 3}, children: [acv, plus, oxygen]}
+- {id: products, role: layout, layout: {kind: grid, columns: 4}, children: [ipn, plus2, two, water]}
+edges:
+- {from: substrates, to: cell}
+- {from: cell, to: products}
+```
+
+It meets a group drawn with an outline (a module, a titled box) at that outline, and a
+group that draws none (a layout group, a panel) at the box round what it holds, its
+arrowhead as far short of those parts as it would stop short of one of them -- at the
+middle of the side that faces its other end, or of the side `depart` or `arrive` names.
+Such a line moves nothing: the figure is laid out without it and the line routed to the
+group where the layout put it, never in among the group's parts on its way. In Python,
+`connect()` takes a group (the `module`/`group` you made, or its id) as it takes a shape.
+
+A line between a group and a part or group it holds has no way to it from outside, and is
+refused (`group.line.inside`); so is one to the figure's own root, and one to a port of a
+group, which has none (`substrates.top`: write `substrates` with `depart: north`). A line
+naming neither a part nor a group of the figure is said in plain words, with the ids it
+may have meant. A line to a group is hidden or dimmed with the group, turned and folded
+with the figure on a slide, and in a deck's builds appears with the last of what the group
+holds. In the studio, choose a group and **Connect** draws a line from it to what you
+click next (a click between a group's parts is the group's); the line is listed by its
+ends -- **Substrates → Cell**, a group or part with no words of its own called by its name
+in the file -- and its **From** and **To** offer the groups beside the shapes.
+
 ### Pages and panels
 
 A figure's page is its `width` and, for a page of a fixed size, its `height`;

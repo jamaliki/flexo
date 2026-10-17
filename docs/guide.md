@@ -525,6 +525,35 @@ nodes:
 Only that box moves, as far as the parts beside it reach: the row neither spreads nor
 shifts.
 
+### A line to a group meets the group
+
+An edge's `from` or `to` may name a group -- a layout group, a panel, a module -- as it
+names a component (`{from: substrates, to: cell}`; in Python `connect(module, block)`).
+The line is drawn to the group as a whole: a reaction's substrates into the cell that
+turns them over, its products out of it.
+
+- **Where it meets.** A group drawn with an outline (a container, in a theme that draws
+  its box) is met at that outline. A group that draws none -- `role: layout`, a panel, or
+  a container in a theme that marks only its top -- is met at the tight box round what it
+  holds (and its title, where it writes one), so the arrowhead stops as far short of the
+  parts as it would of one of them. The end is at the middle of the side that faces the
+  other end, or of the side `depart`/`arrive` names, and several lines on one side spread
+  along it as on a box's.
+- **Nothing moves.** Like a line to a frame, it is kept from the layout (`flexo.group_ends`):
+  no part is aligned or re-sided for it. Routing is given the group as a part where it
+  stands, which every other line passes through as before and its own lines keep out of --
+  so a line to a group never runs in among the group's parts. Where the group stands at the
+  edge of what holds it and the line has no room there for its arrow, that edge moves out,
+  as it does for a line round a box.
+- **What is refused.** A line between a group and a part or group it holds
+  (`group.line.inside`), one that starts and ends at the same group, one to the root, and
+  one between a group and a frame round it or inside it. A group has no ports:
+  `substrates.top` is said as an unknown end, with what to write instead. An end that
+  names neither a part nor a group is said with the ids it may have meant.
+- **Everywhere else, a line.** It is hidden or dimmed with the group, keeps its sides when
+  the figure is turned to fit a slide (`fit_in_box`), counts as joining the group's parts
+  when a long row is folded, and round-trips through `figure_to_document`.
+
 ### Heights that match a vector stack
 
 To make a box exactly as tall as an N-cell vector stack, set its height to
