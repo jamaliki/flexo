@@ -1732,6 +1732,8 @@ def _png(pixels) -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", header)
-        + chunk(b"IDAT", zlib.compress(rows, 6))
+        # (level 3: half the time of 6 for a file 7% larger -- a ribosome is drawn and cut, two
+        # encodings, in a cold build)
+        + chunk(b"IDAT", zlib.compress(rows, 3))
         + chunk(b"IEND", b"")
     )
