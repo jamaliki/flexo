@@ -538,7 +538,11 @@ turns them over, its products out of it.
   holds (and its title, where it writes one), so the arrowhead stops as far short of the
   parts as it would of one of them. The end is at the middle of the side that faces the
   other end, or of the side `depart`/`arrive` names, and several lines on one side spread
-  along it as on a box's.
+  along it as on a box's. On the left and right sides the middle is the group's own middle
+  line, where it has one (`MeasuredGroup.middle`: the line a centred row or grid stands its
+  named molecules, pictures and mechanisms on, by their drawings): a line from a reaction's
+  substrates leaves them level with the molecules, not half a name lower, and runs straight
+  on to a part lined up there. Top and bottom keep the middle of the side.
 - **Nothing moves.** Like a line to a frame, it is kept from the layout (`flexo.group_ends`):
   no part is aligned or re-sided for it. Routing is given the group as a part where it
   stands, which every other line passes through as before and its own lines keep out of --

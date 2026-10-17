@@ -670,7 +670,14 @@ def _clear_approaches(
             continue
         reach = style.arrival_clearance.points if end.arriving else style.route_clearance.points
         side = end.group[2]
-        if _approach_clear(end.node.bounds, side, reach, boxes):
+        # (What a frame goes round -- or a group, standing in as one for its lines -- is
+        # inside it, up to its outline: never in front of it.)
+        others = (
+            [box for box in boxes if not end.node.bounds.contains_rect(box)]
+            if spec.kind == "frame"
+            else boxes
+        )
+        if _approach_clear(end.node.bounds, side, reach, others):
             continue
         ranked = _facing_sides(end.node.bounds, end.counterpart, side)[1:]
         # A side facing the counterpart first; failing that, any clear side --
@@ -679,7 +686,7 @@ def _clear_approaches(
         clear = [
             candidate
             for candidate in ranked
-            if _approach_clear(end.node.bounds, candidate, reach, boxes)
+            if _approach_clear(end.node.bounds, candidate, reach, others)
         ]
         facing = [
             candidate for candidate in clear if _faces(end.node.bounds, end.counterpart, candidate)

@@ -137,6 +137,23 @@ def _title(group: FittedGroup, style: LayoutStyle) -> Rect | None:
     return title_rect(group, style)
 
 
+def _level(group: FittedGroup, bounds: Rect) -> tuple[float, float] | None:
+    """Where a line beside a group meets it, as a named part's drawing is met
+    (``MeasuredNode.drawn``, down from the top of ``bounds``, where the group stands in):
+    about the line its centred parts stand on (``MeasuredGroup.middle``) -- level with a
+    row of named molecules, not their names -- so a line from beside them runs straight on
+    to the next part lined up there. ``None``: at the middle of its side."""
+
+    middle = group.measured.middle
+    if middle is None:
+        return None
+    line = group.bounds.y + middle
+    reach = min(line - bounds.top, bounds.bottom - line)
+    if reach <= 0.0:
+        return None
+    return line - reach - bounds.top, line + reach - bounds.top
+
+
 def stood_in(
     fitted: FittedFigure,
     lines: tuple[tuple[EdgeSpec, ...], tuple[NetSpec, ...]],
@@ -151,7 +168,8 @@ def stood_in(
 
     A stand-in is the group's own id, as a frame (``flexo.frames.FRAME_KIND``): in no
     other line's way, and kept out of by its own lines, as out of a box. It is held by the
-    groups that hold the group, and drawn by none: the group is drawn as it is.
+    groups that hold the group, and drawn by none: the group is drawn as it is. A line meets
+    its left or right side on the line the group's centred parts stand on (``_level``).
 
     A line to a group that holds nothing to meet is left out (``undrawn``)."""
 
@@ -179,6 +197,7 @@ def stood_in(
             TextMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ()),
             Size(bounds.width, bounds.height),
             Point(bounds.width / 2.0, bounds.height / 2.0),
+            drawn=_level(group, bounds),
         )
         ports = tuple(
             ResolvedPort(port.name, port.side, bounds.point_on(port.side, port.offset))

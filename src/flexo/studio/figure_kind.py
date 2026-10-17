@@ -94,9 +94,10 @@ An edge may start or end at a group, as at a node -- everything going in, a step
   coming out: {from: substrates, to: cell}, {from: cell, to: products, arrive: west}. It meets
   a group drawn with an outline at its outline, and a layout group or panel (which draws none)
   at the box round what it holds, stopping as short of those parts as of a node; at the middle
-  of the side facing its other end (or depart/arrive's), through none of its parts, and it
-  moves nothing. Never between a group and a part it holds, nor to the root; a group has no
-  ports (substrates.top: write substrates, depart: north).
+  of the side facing its other end (or depart/arrive's) -- at the left or right, level with
+  the drawings of the named parts it centres -- through none of its parts, and it moves
+  nothing. Never between a group and a part it holds, nor to the root; a group has no ports
+  (substrates.top: write substrates, depart: north).
 A picture: {id, kind: image, label, properties: {source: photo.png (.jpg, .svg), title_side:
   top|bottom (its label over or under the picture, set as a structure's is)}, width}. An SVG's
   words are set in the figure's font, the same in every output; its properties may say otherwise --
