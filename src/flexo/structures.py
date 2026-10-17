@@ -1167,13 +1167,14 @@ def _solvent(figure, ask: _Ask) -> None:
 def _ions(source: str, stamp: float) -> tuple[str, ...]:
     """The residues of a structure that are one atom, but for waters: its ions."""
 
-    atoms: dict[tuple[str, int, str], list[_Atom]] = {}
-    for atom in _atoms(source, stamp):
-        if atom.het and atom.element.upper() != "H" and atom.resn not in {"HOH", "WAT"}:
-            atoms.setdefault((atom.chain, atom.resi, atom.resn), []).append(atom)
-    lone = {resn for (_, _, resn), held in atoms.items() if len(held) == 1}
+    heavy: dict[tuple[str, int, str], int] = {}
+    for residue in _residues(source, stamp):
+        if residue.het and residue.heavy and residue.resn not in {"HOH", "WAT"}:
+            key = (residue.chain, residue.resi, residue.resn)
+            heavy[key] = heavy.get(key, 0) + residue.heavy
+    lone = {resn for (_, _, resn), count in heavy.items() if count == 1}
     # A residue name that is one atom somewhere and more elsewhere is not an ion.
-    more = {resn for (_, _, resn), held in atoms.items() if len(held) > 1}
+    more = {resn for (_, _, resn), count in heavy.items() if count > 1}
     return tuple(sorted(lone - more))
 
 
@@ -1275,6 +1276,74 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
             str(atom.get("subunit") or ""), str(atom.get("group") or ""),
         )
         for atom in atoms.values()
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Residue:
+    """A residue as mol-sketch's scene says it of each of its atoms."""
+
+    group: str
+    """Its name in mol-sketch, which it is coloured by: ``SER195.A``."""
+    resn: str
+    resi: int
+    chain: str
+    het: bool
+    ss: str
+    entity: str
+    subunit: str
+    heavy: int
+    """How many of its atoms are not hydrogens."""
+
+
+@functools.lru_cache(maxsize=8)
+def _residues(source: str, stamp: float) -> tuple[_Residue, ...]:
+    """The molecule's residues, in its order (what its colours and its ions are worked out
+    on): read from mol-sketch a residue at a time, not from its every atom -- a ribosome's
+    220 000 atoms took seconds to read, its 18 000 residues take milliseconds."""
+
+    return _residues_of(_loaded(source, stamp)) or _grouped(_atoms(source, stamp))
+
+
+def _residues_of(figure) -> tuple[_Residue, ...] | None:
+    """A mol-sketch figure's residues -- None for a scene, or from a mol-sketch that can't
+    list them (one before it could)."""
+
+    from molsketch._engine import CoreError, engine
+
+    try:
+        table = engine().call("residues", figure._spec())
+    except CoreError as error:
+        if "not a function" in str(error):
+            return None
+        raise
+    if not table:
+        return None
+    return tuple(
+        _Residue(f"{resn}{resi}{'.' + chain if chain else ''}", resn, int(resi), chain,
+                 bool(het), ss or "", entity or "", subunit or "", heavy)
+        for resn, resi, chain, het, ss, entity, subunit, heavy in zip(
+            table["resn"], table["resi"], table["chain"], table["het"], table["ss"],
+            table["entity"], table["subunit"], table["heavy"], strict=True,
+        )
+    )
+
+
+def _grouped(atoms: tuple[_Atom, ...]) -> tuple[_Residue, ...]:
+    """Atoms as the residues they are of, in the order they first come."""
+
+    found: dict[str, list] = {}
+    for atom in atoms:
+        key = atom.group or f"{atom.resn}{atom.resi}{'.' + atom.chain if atom.chain else ''}"
+        held = found.get(key)
+        if held is None:
+            found[key] = [atom, 0]
+            held = found[key]
+        held[1] += atom.element.upper() != "H"
+    return tuple(
+        _Residue(key, atom.resn, atom.resi, atom.chain, atom.het, atom.ss, atom.entity,
+                 atom.subunit, heavy)
+        for key, (atom, heavy) in found.items()
     )
 
 

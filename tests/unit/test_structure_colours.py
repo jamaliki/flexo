@@ -12,6 +12,8 @@ import flexo
 from flexo.structures import structure_problem
 from flexo.themes import figure_palette, figure_style
 
+DATA = Path(__file__).parent / "data"
+
 
 def _molecule(path: Path, *, helix: tuple[int, int] | None = None,
               strand: tuple[int, int] | None = None) -> Path:
@@ -278,3 +280,40 @@ def test_many_residues_are_handed_over_at_once(tmp_path: Path) -> None:
     figure = Figure()
     _hand(figure, {f"ALA{index}.A": "#eeeeee" for index in range(20_000)})
     assert figure.calls == 1 and len(figure._colors) == 20_000
+
+
+def test_a_structures_colours_are_worked_out_without_reading_each_atom(monkeypatch) -> None:
+    """A chain, a residue, an entity or a subunit is found among the residues: a ribosome's
+    220 000 atoms are read only for a selection, which is tested on each."""
+
+    pytest.importorskip("molsketch")
+    from flexo import structure_colours, structures
+
+    structures._residues.cache_clear()
+    structures._atoms.cache_clear()
+    structure_colours.molecule.cache_clear()
+    structure_colours.rows.cache_clear()
+    read: list[str] = []
+    real = structures._atoms.__wrapped__
+
+    def atoms(source, stamp):
+        read.append(source)
+        return real(source, stamp)
+
+    monkeypatch.setattr(structures, "_atoms", atoms)
+    monkeypatch.setattr(structure_colours, "_atoms", atoms)
+    source = str(DATA / "1a7g.cif")
+    stamp = (DATA / "1a7g.cif").stat().st_mtime
+    if structures._residues_of(structures._loaded(source, stamp)) is None:
+        pytest.skip("this mol-sketch can't list a molecule's residues: its atoms are read")
+    found = structure_colours.molecule(source, stamp)
+    named = structure_colours.rows(source, stamp, ("E", "entity:1", "ALA291", "subunit:L"), "E2")
+    assert [bool(row.places) for row in named] == [True, True, True, False]
+    assert read == []
+    # A selection is tested on the atoms (read once, then kept).
+    picked = structure_colours.rows(source, stamp, ("resi 10-24 and chain E",), "E2")
+    assert picked[0].places and read == [source]
+    assert all(found.residues[place].resi in range(10, 25) for place in picked[0].places)
+    # The residues are those the atoms say.
+    by_atoms = structures._grouped(real(source, stamp))
+    assert structures._residues(source, stamp) == by_atoms
