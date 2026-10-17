@@ -408,6 +408,67 @@ def test_the_page_turns_every_structure_of_a_frame_as_one_and_shows_the_frames_o
     assert seen["members"] == ["t100", "t0"]
 
 
+COLOURED_NODES = [
+    {"id": "t100", "kind": "structure", "properties": {
+        "source": "t100.pdb", "frame": "run", "ss_from": "end.pdb",
+        "style": {"palette": {"helix": "#3f7fc0", "sheet": "#e08a2e"}},
+        "colors": [{"group": "A", "color": "#dbebfd"}]}},
+    {"id": "t30", "kind": "structure", "properties": {
+        "source": "t030.pdb", "frame": "run", "ss_from": "end.pdb",
+        "style": {"palette.helix": "#3f7fc0", "palette.sheet": "#d0607a"},
+        "colors": [{"group": "A", "color": "#dbebfd"}]}},
+    {"id": "t0", "kind": "structure", "properties": {
+        "source": "t000.pdb", "frame": "run", "ss_from": "end.pdb",
+        "style": {"palette": {"helix": "#3f7fc0", "sheet": "#e08a2e"}},
+        "colors": [{"group": "A", "color": "#dbebfd"}]}},
+    {"id": "lone", "kind": "structure", "properties": {"source": "lone.pdb"}},
+]
+
+COLOURED = """
+const edit = (id, values) => {
+  const action = frames.framedAction(nodes, { do: "update", target: { type: "node", id }, values });
+  return (action.targets || [action.target]).map((target) => target.id);
+};
+return {
+  helices: edit("t0", { "properties.style.palette.helix": "#1a5d9b" }),
+  strands: edit("t0", { "properties.style.palette.sheet": "#246c2d" }),
+  own: edit("t30", { "properties.style.palette.sheet": "#90394e" }),
+  rows: edit("t100", { "properties.colors": [{ group: "A", color: "#246c2d" }] }),
+  file: edit("t30", { "properties.ss_from": "other.pdb" }),
+  scheme: edit("t0", { "properties.scheme": "figure" }),
+  reset: edit("t0", {
+    "properties.style.palette.helix": null, "properties.style.palette.loop": null }),
+  cartoon: edit("t0", { "properties.style.cartoon_color": "rainbow" }),
+  look: edit("t0", { "properties.look": "watercolour" }),
+  mixed: edit("t0", { "properties.style.palette.helix": "#000000", "properties.yaw": 10 }),
+  lone: edit("lone", { "properties.style.palette.helix": "#000000" }),
+};
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_colour_the_structures_of_a_frame_share_is_changed_on_all_of_them() -> None:
+    """A diffusion run's frames coloured alike: a colour changed on one is changed on each of
+    the frame's that has it -- its style's palette (read nested or by a field's dotted name),
+    its colour rows, the file it is coloured by, its scheme, how its cartoon is coloured --
+    one step, the one edited first. A colour one of them has of its own (t30's strands) stays
+    its own; and an edit of anything else (its look) is the one structure's alone."""
+
+    seen = _page(COLOURED, nodes=COLOURED_NODES)
+    assert seen["helices"] == ["t0", "t100", "t30"]
+    # t30's strands are its own colour: changed on the two that share theirs, not on it.
+    assert seen["strands"] == ["t0", "t100"]
+    assert seen["own"] == ["t30"]
+    assert seen["rows"] == ["t100", "t30", "t0"]
+    assert seen["file"] == ["t30", "t100", "t0"]
+    assert seen["scheme"] == ["t0", "t100", "t30"]
+    assert seen["reset"] == ["t0", "t100", "t30"]
+    assert seen["cartoon"] == ["t0", "t100", "t30"]
+    assert seen["look"] == ["t0"]
+    assert seen["mixed"] == ["t0"]
+    assert seen["lone"] == ["lone"]
+
+
 def _view(fit, *, zoom=1.0, pan=(0.0, 0.0), fov=0.0, yaw=0.0):
     return {
         "centre": [0, 0, 0], "fit": fit, "chains": [], "atoms": [],

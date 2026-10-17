@@ -340,7 +340,10 @@ Python: `row.structure("t0", "frames/t000.pdb", frame="diffusion", title_side="b
 
 In the studio, turning any of them by its rotate handle turns them all as it is dragged, and
 setting the yaw, pitch or roll (or the zoom, or the offset) in its panel's **Camera** tab sets
-them for the frame -- one step to undo. The Camera tab's **Frame** puts a structure in one of
+them for the frame -- one step to undo. So too its colours: a colour changed in its **Look** tab's
+Colours (helices, strands, loops, ink...), its **Molecule** tab's colour rows, Secondary Structure
+From, or how it is coloured, is changed on each structure of the frame that had the same -- one
+step -- while a colour one of them was given of its own stays its own. The Camera tab's **Frame** puts a structure in one of
 the figure's frames (each with how many structures it has), in a new frame of its own, or in
 none: out of a frame, it keeps the turn it was seen at.
 
