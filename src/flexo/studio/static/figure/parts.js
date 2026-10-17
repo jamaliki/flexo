@@ -576,8 +576,9 @@ export function figureParts(host) {
   const nodeOfRef = (ref) => (nodeOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
   const nameOf = (id) => {
     const node = nodeOf(id);
-    // A shape with no words is called what it shows faintly on the drawing ("Block").
-    if (node) return oneLine(node.label) || hintOf(node) || partOf(node)?.title || node.kind;
+    // A shape with no words is called what it shows faintly on the drawing ("Block") -- a
+    // molecule or a picture by the id it was given ("motif"), not one made of its kind's name.
+    if (node) return oneLine(node.label) || givenId(node) || hintOf(node) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
     // A panel by its letter, as it is drawn: "Panel a", and with a title "a Overview".
     if (group?.role === "panel") {
@@ -1670,6 +1671,14 @@ export function figureParts(host) {
     const kind = node?.kind || "block";
     return parts[kind]?.node?.label ? HINTS[kind] || parts[kind].title : "";
   };
+  // A molecule's or a picture's id, where a person gave it ("motif", "cell") -- not one made of
+  // its kind's name as it was added ("structure", "picture-2"): what it is called with no words.
+  const givenId = (node) => {
+    if (!["structure", "image"].includes(node?.kind)) return "";
+    const slug = (words) => String(words || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join("-");
+    const stem = String(node.id || "").replace(/-\d+$/, "");
+    return [node.kind, partOf(node)?.title].some((name) => slug(name) === stem) ? "" : String(node.id || "");
+  };
   // A key typed while a part just added waits for its editor: answers whether it took it.
   function earlyKey(event) {
     if (!early || event.isComposing) return false;
@@ -2375,7 +2384,9 @@ export function figureParts(host) {
     const said = [], shapes = (model()?.nodes || []).map((node) => ({ id: node.id, box: host.box(node.id) })).filter((item) => item.box);
     const meets = (one, other) => one.left < other.left + other.width && one.left + one.width > other.left && one.top < other.top + other.height && one.top + one.height > other.top;
     for (const node of model()?.nodes || []) {
-      const hint = !plain(node.label).trim() && inline?.id !== node.id && !typedOver?.ids.includes(node.id) ? hintOf(node) : "";
+      // (A molecule given an id of its own is named by it, its name a text part beside it as
+      // likely as not: no "Structure" over it.)
+      const hint = !plain(node.label).trim() && inline?.id !== node.id && !typedOver?.ids.includes(node.id) && !givenId(node) ? hintOf(node) : "";
       const at = hint && !host.element(`${node.id}.label`)?.textContent.trim() ? host.box(node.id) : null;
       if (!at) continue;
       look ??= figureLook();
