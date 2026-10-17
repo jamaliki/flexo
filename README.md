@@ -292,6 +292,12 @@ structure's panel shows these settings in mol-sketch's own sections, each with
 what the look gives it until it is given its own. Install the `molecules` extra
 (or `pip install path/to/mol-sketch/python`).
 
+Its part is the molecule as drawn. `width` and `height` (20 by 15 label sizes unless given)
+are the canvas mol-sketch draws it in, the most it may take; the part is then what the
+molecule draws, with a small pad round it, so the lines to it end at the molecule, not at an
+empty box round it, and the figure keeps no room for nothing. Given only a `width` or a
+`height`, the other follows the molecule's proportions as it is seen.
+
 `look="flat"` draws it as PyMOL's flat, outlined figures are drawn -- solid colours,
 a darker shade on a ribbon's far side, thin even outlines, round sticks -- and in the
 figure's own colours: helices in the accent's fill, strands in the warm fill, loops in
@@ -331,7 +337,8 @@ nodes:
 - **One centre**: the middle of all they draw together, moved by the first's `pan_x` and
   `pan_y`. A motif held fixed, or a trajectory aligned, stays where it is in every panel.
 
-Each keeps its own box, look, colours and what it draws. A row of structures wider than its page -- five frames at their usual size are, in a double column -- is drawn with the structures that have no size of their own smaller, all alike, until it fits; one given a `width` or `height` keeps it. The first one's `yaw`, `pitch`,
+Each keeps its own box, look, colours and what it draws, and all are cut alike, to what they
+draw together about the frame's centre: boxes of one size stay one size. A row of structures wider than its page -- five frames at their usual size are, in a double column -- is drawn with the structures that have no size of their own smaller, all alike, until it fits; one given a `width` or `height` keeps it. The first one's `yaw`, `pitch`,
 `roll`, `zoom`, `pan_x` and `pan_y` are the frame's; another's own are not used (and said,
 where they differ). With a flat projection (the engraved, textbook and flat looks) each atom
 is drawn exactly where the frame's camera puts it; in perspective each is seen from the
