@@ -65,6 +65,7 @@ import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import NamedTuple
 
 from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
@@ -1313,9 +1314,9 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _Residue:
-    """A residue as mol-sketch's scene says it of each of its atoms."""
+class _Residue(NamedTuple):
+    """A residue as mol-sketch's scene says it of each of its atoms (a tuple: a ribosome's
+    18 000 are made at once)."""
 
     group: str
     """Its name in mol-sketch, which it is coloured by: ``SER195.A``."""

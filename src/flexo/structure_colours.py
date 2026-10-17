@@ -44,6 +44,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from flexo.structures import (
     _NUCLEIC,
@@ -75,8 +76,10 @@ class Unseen(ValueError):
         self.title = title
 
 
-@dataclass(frozen=True, slots=True)
-class Residue:
+class Residue(NamedTuple):
+    """A residue of the molecule, as it is coloured (a tuple: a ribosome's 18 000 are made at
+    once)."""
+
     key: str
     """mol-sketch's name for it, what it is coloured by: ``SER195.A``."""
     resn: str
@@ -99,12 +102,25 @@ class Molecule:
         self.source = source
         self.stamp = stamp
         self.chains: dict[str, tuple[int, ...]] = _index(residues, lambda residue: residue.chain)
-        self.entities = _index(residues, lambda residue: residue.entity)
-        self.subunits = _index(residues, lambda residue: residue.subunit.upper())
-        self.named = _index(residues, lambda residue: f"{residue.resn.upper()}{residue.resi}")
-        self.keyed = {
+
+    # (Each worked out when first asked for: a row names one kind of group.)
+    @functools.cached_property
+    def entities(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: residue.entity)
+
+    @functools.cached_property
+    def subunits(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: residue.subunit.upper())
+
+    @functools.cached_property
+    def named(self) -> dict[str, tuple[int, ...]]:
+        return _index(self.residues, lambda residue: f"{residue.resn.upper()}{residue.resi}")
+
+    @functools.cached_property
+    def keyed(self) -> dict[str, int]:
+        return {
             f"{residue.resn.upper()}{residue.resi}.{residue.chain}": place
-            for place, residue in enumerate(residues)
+            for place, residue in enumerate(self.residues)
         }
 
     @functools.cached_property
