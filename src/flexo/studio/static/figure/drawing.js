@@ -157,8 +157,7 @@ function sections(found, options) {
   const coloursSection = found.colours.length ? h("div.section.drawing-colours", {},
     h("div.section-title", {}, "Colours", h("span.count", {}, found.colours.length),
       swapped ? h("span.drawing-reset", {}, ui.button("Reset All", () => write({ colours: null }, { label: "Reset the Picture’s Colours" }), { small: true, kind: "ghost", icon: "refresh" })) : null),
-    h("div.drawing-wells", {}, found.colours.map(colourWell)),
-    h("div.hint-line", {}, "Each changes every use of its colour")) : null;
+    h("div.drawing-wells", {}, found.colours.map(colourWell))) : null;
   return [wordsSection, coloursSection].filter(Boolean);
 }
 
