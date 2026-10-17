@@ -3,14 +3,16 @@
 Measures follow the ACS 1996 document settings ChemDraw ships with, scaled to the
 label size ``u``: a bond 1.44 label heights long, a double bond's lines 18 % of a
 bond apart, a wedge as wide at its end as a fifth of a bond, a margin of 0.16 label
-heights round every label. Carbon is a vertex; every other atom is its symbol,
-centred on its place, with its hydrogens on the side its bonds leave free (``OH``,
-``HO``, ``H₂N``). A bond stops short of a label by the margin. A double bond in a
-ring lies inside it, its inner line shortened; one to a labelled end atom (``C=O``)
-is centred on its bond; one between two carbons lies on the side its substituents
-are. A placeholder is its symbol, set as an atom's is, the digits after its letters
-raised (``R¹``). Charges are circled, as mechanisms draw them, or written after the
-symbol. Lone pairs are pairs of dots in the widest gaps an atom has, a radical one dot.
+heights round every label. Carbon is a vertex -- but where two alike bonds run
+straight through it (``O=C=O``, an allene's middle) it is its symbol, or the two would
+read as one long bond; every other atom is its symbol, centred on its place, with its
+hydrogens on the side its bonds leave free (``OH``, ``HO``, ``H₂N``). A bond stops
+short of a label by the margin. A double bond in a ring lies inside it, its inner line
+shortened; one to a labelled end atom (``C=O``) is centred on its bond; one between two
+carbons lies on the side its substituents are. A placeholder is its symbol, set as an
+atom's is, the digits after its letters raised (``R¹``). Charges are circled, as
+mechanisms draw them, or written after the symbol. Lone pairs are pairs of dots in the
+widest gaps an atom has, a radical one dot.
 
 Everything is in points, y down: shapes and words for ``flexo.drawn``.
 """
@@ -22,8 +24,8 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from flexo.chemistry.layout import rings
-from flexo.chemistry.molecule import Atom, Molecule
+from flexo.chemistry.layout import rings, straight_through
+from flexo.chemistry.molecule import Atom, Bond, Molecule
 from flexo.drawn import Shape, Words, path
 from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import TextRun
@@ -156,13 +158,22 @@ class Drawn:
         return (min(xs), min(ys), max(xs), max(ys))
 
 
-def labelled(molecule: Molecule, atom: int) -> bool:
+def labelled(
+    molecule: Molecule, atom: int, bonds: dict[int, list[Bond]] | None = None
+) -> bool:
     """Whether an atom is written: any but carbon, and a carbon with an isotope, on its own
     (``CH₄``), or with one other atom besides hydrogen that is not carbon (``H₃C-Br``,
-    ``H₃C-OH``), where a bare line would say less than its formula. Ethene stays a line."""
+    ``H₃C-OH``), where a bare line would say less than its formula. Ethene stays a line.
+    So is a carbon two alike bonds run straight through (``O=C=O``, ``H₂C=C=CH₂``), which
+    a line would hide; an alkyne's carbons stay a line, as IUPAC has them (GR-2.1.2).
+    ``bonds`` gives each atom's bonds (``bonds_by_atom``), to ask of many atoms at once."""
 
     item = molecule.atoms[atom]
     if item.element != "C" or item.isotope is not None:
+        return True
+    if bonds is None:
+        bonds = bonds_by_atom(molecule)
+    if straight_through(molecule, atom, bonds[atom]):
         return True
     heavy = []
     seen, stack = {atom}, [atom]
@@ -172,11 +183,22 @@ def labelled(molecule: Molecule, atom: int) -> bool:
             heavy.append(molecule.atoms[here].element)
             if len(heavy) > 2:
                 return False
-        for other in molecule.neighbours(here):
+        for bond in bonds[here]:
+            other = bond.other(here)
             if other not in seen:
                 seen.add(other)
                 stack.append(other)
     return len(heavy) == 1 or any(element != "C" for element in heavy)
+
+
+def bonds_by_atom(molecule: Molecule) -> dict[int, list[Bond]]:
+    """Each atom's bonds, the molecule's bonds read once."""
+
+    found: dict[int, list[Bond]] = {index: [] for index in range(len(molecule.atoms))}
+    for bond in molecule.bonds:
+        found[bond.a].append(bond)
+        found[bond.b].append(bond)
+    return found
 
 
 def draw_molecule(
@@ -219,9 +241,11 @@ def draw_molecule(
     # facing what its pair attacks), its charge and other pairs elsewhere.
     for index, leaving in (used or {}).items():
         drawn.atoms[index].taken.extend(leaving)
-    for index in range(len(molecule.atoms)):
-        if labelled(molecule, index):
-            _label(molecule, index, pen, drawn, prefix, charges)
+    # Which atoms are written is asked once, each atom's bonds read once for it.
+    bonds = bonds_by_atom(molecule)
+    written = {index for index in range(len(molecule.atoms)) if labelled(molecule, index, bonds)}
+    for index in sorted(written):
+        _label(molecule, index, pen, drawn, prefix, charges)
     found = rings(molecule, list(range(len(molecule.atoms))))
     for number, bond in enumerate(molecule.bonds):
         style = (wedges or {}).get((bond.a, bond.b)) or (wedges or {}).get((bond.b, bond.a))
@@ -230,10 +254,10 @@ def draw_molecule(
     strokes = [line for stroke in avoid or [] for line in itertools.pairwise(stroke)]
     for index in range(len(molecule.atoms)):
         if charges == "circled" and molecule.charge_of(index) and (
-            abs(molecule.charge_of(index)) == 1 or not labelled(molecule, index)
+            abs(molecule.charge_of(index)) == 1 or index not in written
         ):
             _circled(molecule, index, pen, drawn, prefix, strokes)
-        elif charges != "circled" and molecule.charge_of(index) and not labelled(molecule, index):
+        elif charges != "circled" and molecule.charge_of(index) and index not in written:
             _vertex_charge(molecule, index, pen, drawn, prefix)
     for index, atom in enumerate(molecule.atoms):
         if atom.element in METALS:
@@ -241,7 +265,7 @@ def draw_molecule(
         leaving = (used or {}).get(index, [])
         place = drawn.atoms[index]
         show = 0
-        if pairs == "all" and (labelled(molecule, index) or atom.lone):
+        if pairs == "all" and (index in written or atom.lone):
             show = max(0, atom.lone // 2 - len(leaving))
         radical = bool(atom.lone % 2) and index not in (lone or {})
         marks = _spread(place.taken, show + radical, [])
@@ -556,13 +580,11 @@ def _double_side(molecule: Molecule, bond, drawn: Drawn, found: list[list[int]])
     ]
     a_alone = len(molecule.neighbours(bond.a)) == 1
     b_alone = len(molecule.neighbours(bond.b)) == 1
-    if (
-        (a_alone and labelled(molecule, bond.a))
-        or (b_alone and labelled(molecule, bond.b))
-        or not others
-    ):
+    # A written atom is one given a label's room (``_label``), as ``labelled`` said.
+    a_written, b_written = (bool(drawn.atoms[end].radius[0]) for end in (bond.a, bond.b))
+    if (a_alone and a_written) or (b_alone and b_written) or not others:
         return 0
-    if labelled(molecule, bond.a) and labelled(molecule, bond.b):
+    if a_written and b_written:
         return 0
     score = sum(
         (drawn.atoms[other].point[0] - x1) * nx + (drawn.atoms[other].point[1] - y1) * ny
