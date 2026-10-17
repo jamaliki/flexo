@@ -273,12 +273,15 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .mol-switch .switch { min-height: 22px; }
 /* Colours as wells, a row of each kind under its name. */
 .mol-subhead { margin-bottom: -4px; font: var(--text-hint); color: var(--ink-3); }
-.mol-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px 6px; }
+.mol-colours { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px 6px; }
 .mol-colour { display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; font: var(--text-hint); line-height: 1.25; color: var(--ink-3); text-align: center; }
 .mol-colour[hidden] { display: none; }
 .mol-colour.own { color: var(--accent); }
-.mol-colour .colour-control { position: relative; }
-.mol-colour .colour-control .btn { position: absolute; left: 100%; top: 0; }
+/* Each code under its well, as a thing's own colours have it (studio.css): beside it, the code
+   ran under the next colour's well. */
+.mol-colour .colour-control { position: relative; display: grid; justify-items: center; gap: 4px; }
+.mol-colour .colour-control > .hex-field { width: 66px; margin: 0; }
+.mol-colour .colour-control .btn { position: absolute; left: calc(50% + 17px); top: 0; }
 .mol-colour .colour-well.unset .colour-chip { opacity: 0.55; }
 /* What is drawn as a cartoon (sticks, a surface): its choices most reached for, as chips. */
 .mol-chips { display: flex; flex-wrap: wrap; gap: 4px; }
