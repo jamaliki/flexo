@@ -314,7 +314,7 @@ def test_the_studio_turns_a_frame_from_any_of_its_structures(tmp_path: Path) -> 
 def test_a_structures_name_can_stand_under_it() -> None:
     pytest.importorskip("molsketch")
     from flexo.ir.semantic import NodeSpec
-    from flexo.structures import title_side_problem
+    from flexo.title_sides import title_side_problem
 
     def placed(**options: object):
         with flexo.Figure("named") as figure:
@@ -335,8 +335,17 @@ def test_a_structures_name_can_stand_under_it() -> None:
         assert found, identifier
         return float(found.group(1))
 
+    def height_of(svg: str, identifier: str) -> float:
+        import re
+
+        found = re.search(rf'id="{re.escape(identifier)}"[^>]*?\sheight="([-\d.]+)"', svg)
+        assert found, identifier
+        return float(found.group(1))
+
     assert y_of(over, "model.label") < y_of(over, "model.molecule")
-    assert y_of(under, "model.label") > y_of(under, "model.molecule") + 80
+    # (Under the molecule as it is drawn: its part is the molecule, no taller than 80.)
+    below = y_of(under, "model.molecule") + height_of(under, "model.molecule")
+    assert below < y_of(under, "model.label") < below + 20
     # Its t in italics, as a label's words are given a slant.
     assert 'font-style="italic">t</tspan>' in under
     wrong = NodeSpec("model", kind="structure", properties=(("title_side", "left"),))

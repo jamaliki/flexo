@@ -243,6 +243,11 @@ def room_needed(routed: RoutedFigure, style: LayoutStyle) -> dict[str, dict[str,
     # gap grows, for the line to keep clear of it as of a box.
     for spot, across_x, amount in _hugging(routed, clearance, lane):
         widen(spot, across_x, amount)
+    # A line into a frame or a group at the edge of what it is drawn in, with no room there
+    # for its arrow: the layout never saw it, so left none -- the edge moves out, as for a
+    # line round a box (flexo.frames, flexo.group_ends).
+    for owner_id, side, amount in _cramped_ends(routed, style):
+        needs[owner_id][side] = max(needs[owner_id].get(side, 0.0), amount + lane)
     for owner_id, count in above.items():
         # A lane per connector over the contents, with clearance either side.
         group = routed.fitted.group(owner_id)
@@ -508,6 +513,51 @@ def _hugging(
                 spot = Point(a.x, middle) if upright else Point(middle, a.y)
                 spots.append((spot, upright, clearance - apart + lane))
     return spots
+
+
+def _cramped_ends(routed: RoutedFigure, style: LayoutStyle) -> list[tuple[str, str, float]]:
+    """Where a line comes into (or leaves) a frame standing in the figure for its lines -- a
+    frame's, or a group's -- at the edge of the group the line is drawn in, too near it for
+    the run its arrow needs: that group, which side, and how much more room it wants."""
+
+    stood = {
+        node.measured.spec.id: node.bounds
+        for node in routed.fitted.nodes
+        if node.measured.spec.kind == FRAME_KIND
+    }
+    if not stood:
+        return []
+    figure = routed.fitted.measured.semantic
+    parents = parent_map(figure.groups)
+    reach = style.route_boundary_clearance.points
+    found: list[tuple[str, str, float]] = []
+    for edge in routed.edges:
+        line = edge.centerline
+        if edge.straight or len(line) < 2:
+            continue
+        ends = (
+            (edge.spec.target.node_id, line[-1], line[-2], style.arrival_clearance.points),
+            (edge.spec.source.node_id, line[0], line[1], style.route_clearance.points),
+        )
+        for end, at, before, wanted in ends:
+            box = stood.get(end)
+            if box is None or abs(at.x - before.x) + abs(at.y - before.y) + 1e-6 >= wanted:
+                continue
+            owner_id = bounded_owner(
+                figure, parents, (edge.spec.source.node_id, edge.spec.target.node_id)
+            )
+            owner = routed.fitted.group(owner_id).bounds
+            sides = {
+                "top": (abs(at.y - box.top), box.top - owner.top),
+                "bottom": (abs(at.y - box.bottom), owner.bottom - box.bottom),
+                "left": (abs(at.x - box.left), box.left - owner.left),
+                "right": (abs(at.x - box.right), owner.right - box.right),
+            }
+            side = min(sides, key=lambda name: sides[name][0])
+            short = wanted + reach - sides[side][1]
+            if short > 1e-6:
+                found.append((owner_id, side, short))
+    return found
 
 
 def _nearness(

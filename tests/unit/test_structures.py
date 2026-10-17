@@ -868,7 +868,12 @@ def test_a_row_of_structures_too_wide_for_its_page_draws_them_smaller_to_fit() -
     assert "layout.width.grown" not in said
     widths = {round(compiled.routed.fitted.node(f"row.t{k}").bounds.width, 1) for k in range(5)}
     assert len(widths) == 1 and widths.pop() < 20.0 * flexo.drawn.units(figure_style(figure())).u
-    # One given a size keeps it; the others are drawn smaller.
+    # One given a size keeps it -- the canvas its molecule is drawn in -- and the others are
+    # drawn smaller: each laid out round its molecule, at the frame's one scale.
+    from flexo.structure_fit import drawn_in
+
     sized = compile_figure(figure(sized=True))
-    assert round(sized.routed.fitted.node("row.t0").bounds.width) >= 150
-    assert sized.routed.fitted.node("row.t1").bounds.width < 150
+    nodes = {node.id: node for node in sized.measured.semantic.nodes}
+    assert drawn_in(nodes["row.t0"])[0] == (150, 110)
+    assert drawn_in(nodes["row.t1"])[0][0] < 150
+    assert sized.routed.fitted.node("row.t0").bounds.width <= 150

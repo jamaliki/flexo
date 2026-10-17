@@ -15,10 +15,12 @@ from flexo.frames import (
     place,
     settled,
     split,
-    stood_in,
     title_room,
     undrawn,
 )
+from flexo.group_ends import split as split_grouped
+from flexo.group_ends import standing
+from flexo.group_ends import undrawn as undrawn_grouped
 from flexo.ir.fitted import FittedFigure
 from flexo.ir.measured import MeasuredFigure
 from flexo.ir.routed import RoutedFigure
@@ -27,6 +29,7 @@ from flexo.layout import fit_figure, measure_figure
 from flexo.pages import lettered
 from flexo.routing import route_figure
 from flexo.routing.room import crossing_room, crossings, room_needed, with_room
+from flexo.structure_fit import hugged, proportioned
 from flexo.structure_frames import framed
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import SVGDocument
@@ -66,12 +69,17 @@ def compile_figure(
     whole = lettered(_resolved_shapes(figure, layout_style))
     figure, frames = split(whole)
     lines = ended(whole) if frames else ((), ())
-    held = (frames, lines) if any(lines) else None
+    # (A line to a group moves none of its parts either: laid out without it, and routed
+    # to the group where the layout puts it -- flexo.group_ends.)
+    figure, grouped = split_grouped(figure)
+    held = (frames, lines, grouped) if any(lines) or any(grouped) else None
     # Each shape's words in the weight and slant it asks for (``flexo.wording``).
     figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
-    # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames).
+    # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames),
+    # and each laid out round its molecule as drawn (flexo.structure_fit).
+    figure = proportioned(figure, layout_style)
     unframed = figure
-    figure = framed(figure, layout_style)
+    figure = hugged(framed(figure, layout_style), layout_style, paint_palette)
     figure = _with_margin_for(frames, figure, layout_style)
     figure = _with_room_for_titles(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
@@ -103,7 +111,7 @@ def compile_figure(
                 smaller = _with_smaller_structures(unframed, layout_style, scale)
                 if smaller is unframed:
                     break
-                smaller = framed(smaller, layout_style)
+                smaller = hugged(framed(smaller, layout_style), layout_style, paint_palette)
                 smaller = _with_margin_for(frames, smaller, layout_style)
                 figure = _with_room_for_titles(frames, smaller, layout_style)
                 measured = measure_figure(figure, style=layout_style)
@@ -156,15 +164,15 @@ def _route(fitted: FittedFigure, style: LayoutStyle, held: tuple | None = None) 
     """``fitted`` routed. Where lines end at frames (``held``: the frames, and those
     lines), with each such frame standing in the figure where it will be drawn
     (``flexo.frames.stood_in``) -- routed again should its routes put the frame elsewhere,
-    so that the lines meet its outline as it is drawn."""
+    so that the lines meet its outline as it is drawn. Where lines end at groups (``held``'s
+    last: those lines), each such group standing in it where it is (``flexo.group_ends``)."""
 
     if held is None:
         return route_figure(fitted, style=style)
-    frames, lines = held
-    stood = stood_in(fitted, frames, lines, style)
+    stood = standing(fitted, held, style)
     routed = route_figure(stood, style=style)
     for _ in range(FRAME_ROUNDS):
-        again = stood_in(fitted, frames, lines, style, among=routed)
+        again = standing(fitted, held, style, among=routed)
         if settled(stood, again):
             break
         stood, routed = again, route_figure(again, style=style)
@@ -179,8 +187,7 @@ def _kept(
 
     if held is None:
         return replace(routed, fitted=fitted)
-    frames, lines = held
-    again = stood_in(fitted, frames, lines, style, among=routed)
+    again = standing(fitted, held, style, among=routed)
     if settled(routed.fitted, again):
         return replace(routed, fitted=again)
     return _route(fitted, style, held)
@@ -257,7 +264,7 @@ def _framed(
 
     placed, said = place(frames, routed, style)
     if held is not None:
-        said = (*said, *undrawn(frames, held[1], routed))
+        said = (*said, *undrawn(frames, held[1], routed), *undrawn_grouped(held[2], routed))
     # Its plots drawn (once: kept for the figure's own drawing), and what to say of those
     # that were not.
     if any(node.measured.spec.kind == "plot" for node in fitted.nodes):

@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from typing import Literal
@@ -282,33 +283,158 @@ _INHERITED = (
 
 
 def ink_bounds(drawing: Drawing) -> tuple[float, float, float, float]:
-    """``left, top, right, bottom`` of everything ``drawing`` paints (not its page)."""
+    """``left, top, right, bottom`` of everything ``drawing`` paints (not its page): each
+    curve as far as it goes, not its control points (``curve_extent``), each line half its
+    width beyond that, and none of it beyond the clip of a group it is drawn in.
 
-    xs: list[float] = []
-    ys: list[float] = []
-    for item in drawing.walk():
-        if isinstance(item, Shape):
+    A path's control points are the box it may reach: only a path whose box reaches beyond
+    what the rest is found to paint is followed along its curves, the furthest first -- so a
+    drawing of thousands of curves inside its words and frames costs no more than its box."""
+
+    boxes: list[Region] = []
+    paths: list[tuple[Region, Shape, float, Region | None]] = []
+    stack: list[tuple[Iterator, Region | None]] = [(iter(drawing.root.items), drawing.root.clip)]
+    while stack:
+        items, clip = stack[-1]
+        item = next(items, None)
+        if item is None:
+            stack.pop()
+            continue
+        if isinstance(item, Group):
+            inner = clip if item.clip is None else _intersect(item.clip, clip)
+            stack.append((iter(item.items), inner))
+            continue
+        if isinstance(item, Shape) and item.kind == "path" and item.segments:
             if item.paint.fill is None and item.paint.stroke is None:
                 continue
             reach = item.paint.stroke_width / 2.0 if item.paint.stroke else 0.0
-            xs += [item.x - reach, item.x + item.width + reach]
-            ys += [item.y - reach, item.y + item.height + reach]
-            for head in item.arrowheads:
-                xs += [x for segment in head.outline for x, _ in segment.points]
-                ys += [y for segment in head.outline for _, y in segment.points]
-        elif isinstance(item, Text):
-            corners = _corners(item)
-            xs += [x for x, _ in corners]
-            ys += [y for _, y in corners]
-        elif isinstance(item, Image):
-            left, top, right, bottom = item.x, item.y, item.x + item.width, item.y + item.height
-            if item.clip is not None:
-                left, top, right, bottom = _intersect((left, top, right, bottom), item.clip)
-            xs += [left, right]
-            ys += [top, bottom]
-    if not xs:
+            hull = (item.x - reach, item.y - reach, item.x + item.width + reach,
+                    item.y + item.height + reach)
+            shown = _shown(hull, clip)
+            if shown is not None:
+                paths.append((shown, item, reach, clip))
+            found = [extent for head in item.arrowheads
+                     if (extent := curve_extent(head.outline)) is not None]
+        else:
+            found = _inks(item)
+        boxes += [box for box in (_shown(box, clip) for box in found) if box is not None]
+    if not boxes and not paths:
         return 0.0, 0.0, drawing.width, drawing.height
-    return min(xs), min(ys), max(xs), max(ys)
+    left = min((box[0] for box in boxes), default=math.inf)
+    top = min((box[1] for box in boxes), default=math.inf)
+    right = max((box[2] for box in boxes), default=-math.inf)
+    bottom = max((box[3] for box in boxes), default=-math.inf)
+
+    def beyond(entry: tuple[Region, Shape, float, Region | None]) -> float:
+        hull = entry[0]
+        return max(left - hull[0], top - hull[1], hull[2] - right, hull[3] - bottom)
+
+    for hull, shape, reach, clip in sorted(paths, key=beyond, reverse=True):
+        if hull[0] >= left and hull[1] >= top and hull[2] <= right and hull[3] <= bottom:
+            continue  # (all it could reach is painted already)
+        extent = curve_extent(shape.segments)
+        if extent is None:
+            continue
+        box = _shown(
+            (extent[0] - reach, extent[1] - reach, extent[2] + reach, extent[3] + reach), clip
+        )
+        if box is not None:
+            left, top = min(left, box[0]), min(top, box[1])
+            right, bottom = max(right, box[2]), max(bottom, box[3])
+    if left > right or top > bottom:
+        return 0.0, 0.0, drawing.width, drawing.height
+    return left, top, right, bottom
+
+
+def _shown(box: Region, clip: Region | None) -> Region | None:
+    """``box`` as much of it as ``clip`` shows: None for none of it."""
+
+    if clip is None:
+        return box
+    box = _intersect(box, clip)
+    return None if box[0] > box[2] or box[1] > box[3] else box
+
+
+def _inks(item: Shape | Text | Image) -> list[Region]:
+    """Where ``item`` paints, as ``left, top, right, bottom`` boxes: a rectangle's or an
+    ellipse's, half its line beyond; a text's lines'; a picture's (as much of it as shows).
+    (A path is followed along its curves, by ``ink_bounds``.)"""
+
+    if isinstance(item, Shape):
+        if item.kind == "path" or (item.paint.fill is None and item.paint.stroke is None):
+            return []
+        reach = item.paint.stroke_width / 2.0 if item.paint.stroke else 0.0
+        return [(item.x - reach, item.y - reach, item.x + item.width + reach,
+                 item.y + item.height + reach)]
+    if isinstance(item, Text):
+        corners = _corners(item)
+        if not corners:
+            return []
+        xs, ys = [x for x, _ in corners], [y for _, y in corners]
+        return [(min(xs), min(ys), max(xs), max(ys))]
+    left, top, right, bottom = item.x, item.y, item.x + item.width, item.y + item.height
+    if item.clip is not None:
+        left, top, right, bottom = _intersect((left, top, right, bottom), item.clip)
+    return [(left, top, right, bottom)]
+
+
+def curve_extent(segments: Sequence[Segment]) -> Region | None:
+    """``left, top, right, bottom`` of the line ``segments`` draw: each cubic (a quadratic
+    is one, ``parse_path``) as far as it turns -- where its slope is level, or upright --
+    not as far as its control points, which lie beyond it wherever it bends. None for no
+    points at all.
+
+    A cubic whose control points lie within the box of the points the line passes through
+    (its ends, its corners) turns within it, and is not solved: most of a drawing's curves."""
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for segment in segments:
+        if segment.points:
+            x, y = segment.points[-1]
+            xs.append(x)
+            ys.append(y)
+    if not xs:
+        return None
+    left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+    here: Point | None = None
+    start: Point | None = None
+    for segment in segments:
+        if segment.kind == "C" and here is not None:
+            (ax, ay), (bx, by), end = segment.points
+            if not (left <= ax <= right and left <= bx <= right):
+                for value in _turns(here[0], ax, bx, end[0]):
+                    left, right = min(left, value), max(right, value)
+            if not (top <= ay <= bottom and top <= by <= bottom):
+                for value in _turns(here[1], ay, by, end[1]):
+                    top, bottom = min(top, value), max(bottom, value)
+        if segment.kind == "M":
+            start = segment.points[0]
+        here = segment.points[-1] if segment.points else start
+    return left, top, right, bottom
+
+
+def _turns(p0: float, p1: float, p2: float, p3: float) -> list[float]:
+    """Where, along one axis, the cubic ``p0`` to ``p3`` (controls ``p1``, ``p2``) turns
+    back between its ends: its value wherever its derivative is nought for ``0 < t < 1``."""
+
+    # B'(t) / 3 = a t^2 + b t + c, from the differences of its points.
+    d0, d1, d2 = p1 - p0, p2 - p1, p3 - p2
+    a, b, c = d0 - 2.0 * d1 + d2, 2.0 * (d1 - d0), d0
+    if abs(a) < 1e-12:
+        roots = [-c / b] if abs(b) > 1e-12 else []
+    else:
+        discriminant = b * b - 4.0 * a * c
+        if discriminant < 0.0:
+            return []
+        root = math.sqrt(discriminant)
+        roots = [(-b + root) / (2.0 * a), (-b - root) / (2.0 * a)]
+    found = []
+    for t in roots:
+        if 0.0 < t < 1.0:
+            s = 1.0 - t
+            found.append(s * s * (s * p0 + 3.0 * t * p1) + t * t * (3.0 * s * p2 + t * p3))
+    return found
 
 
 def _corners(text: Text) -> list[Point]:

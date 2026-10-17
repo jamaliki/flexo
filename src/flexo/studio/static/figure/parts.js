@@ -27,7 +27,7 @@ import { drawingSections } from "/static/kinds/figure/drawing.js";
 import * as Styles from "/static/studio/styles.js";
 import * as Snap from "/static/studio/snapping.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
-import { structureColours } from "/static/kinds/figure/structurecolours.js";
+import { structureColours, schemeClears } from "/static/kinds/figure/structurecolours.js";
 import * as Frames from "/static/kinds/figure/structframes.js";
 
 // Small pictures of each kind of part, drawn on a 16-unit square.
@@ -487,6 +487,15 @@ export function drawnRect(element) {
   }
   return box || whole;
 }
+// The whole canvas a molecule is drawn in, on the page: its box shows only the part of it
+// the molecule is drawn on (flexo.structure_fit), which says where all of it lies.
+export function moleculeCanvas(molecule) {
+  const said = molecule?.getAttribute?.("data-flexo-canvas")?.split(" ").map(Number);
+  const matrix = molecule?.getScreenCTM?.();
+  if (said?.length !== 4 || !said.every(Number.isFinite) || !matrix) return drawnRect(molecule);
+  const [a, b] = [[said[0], said[1]], [said[0] + said[2], said[1] + said[3]]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix));
+  return new DOMRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+}
 function viewportRect(svg) {
   const matrix = svg.parentNode?.getScreenCTM?.();
   if (!matrix) return svg.getBoundingClientRect();
@@ -573,11 +582,22 @@ export function figureParts(host) {
   // the history: "Block", "Decision".
   const kindTitle = (kind) => titled(parts[kind || "block"]?.title || "Shape");
   // (A name with no port and no shape of it -- a line "to: nowhere" -- is itself.)
-  const nodeOfRef = (ref) => (nodeOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
+  const nodeOfRef = (ref) => (nodeOf(ref) || groupOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
+  // A group a line may start or end at (flexo.group_ends): any but the figure's own layout.
+  const lineGroup = (id) => Boolean(groupOf(id)) && id !== model()?.root;
+  // A line's end by its words -- or, a part or group with none (a picture, a grid: "Picture",
+  // "Grid", each like the next), by its name in the file: "Substrates → Cell".
+  const endName = (id) => {
+    const item = nodeOf(id) || groupOf(id);
+    if (!item || oneLine(item.label) || item.role === "panel" || id === model()?.root) return nameOf(id);
+    const words = String(id).replace(/[_-]+/g, " ").trim();
+    return words ? `${words[0].toUpperCase()}${words.slice(1)}` : nameOf(id);
+  };
   const nameOf = (id) => {
     const node = nodeOf(id);
-    // A shape with no words is called what it shows faintly on the drawing ("Block").
-    if (node) return oneLine(node.label) || hintOf(node) || partOf(node)?.title || node.kind;
+    // A shape with no words is called what it shows faintly on the drawing ("Block") -- a
+    // molecule or a picture by the id it was given ("motif"), not one made of its kind's name.
+    if (node) return oneLine(node.label) || givenId(node) || hintOf(node) || partOf(node)?.title || node.kind;
     const group = groupOf(id);
     // A panel by its letter, as it is drawn: "Panel a", and with a title "a Overview".
     if (group?.role === "panel") {
@@ -587,7 +607,7 @@ export function figureParts(host) {
     if (group) return oneLine(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) {
-      const ends = `${nameOf(nodeOfRef(edge.from))} → ${nameOf(nodeOfRef(edge.to))}`;
+      const ends = `${endName(nodeOfRef(edge.from))} → ${endName(nodeOfRef(edge.to))}`;
       // Two lines between the same shapes are told apart: by their words, else by number.
       const twins = model().edges.filter((other) => nodeOfRef(other.from) === nodeOfRef(edge.from) && nodeOfRef(other.to) === nodeOfRef(edge.to));
       if (twins.length < 2) return ends;
@@ -598,7 +618,7 @@ export function figureParts(host) {
     // A line that branches, by all its ends: "Q and K, V → Attended value".
     const net = netOf(id);
     const listed = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
-    if (net) return [net.sources, net.targets].map((ends) => listed((ends || []).map((ref) => nameOf(nodeOfRef(ref))))).join(" → ");
+    if (net) return [net.sources, net.targets].map((ends) => listed((ends || []).map((ref) => endName(nodeOfRef(ref))))).join(" → ");
     return id;
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
@@ -720,7 +740,7 @@ export function figureParts(host) {
         // One field of the inspector's, by its label: "Change Width"; a switch to show
         // something, "Show Ticks" or "Hide Ticks".
         // (A choice with the values it had hidden given back with it: named by the choice.)
-        const lead = keys.length > 1 ? keys.find((key) => keys.every((other) => other === key || fieldOf(target, other)?.show?.[key] !== undefined)) : null;
+        const lead = keys.length > 1 ? keys.find((key) => keys.every((other) => other === key || fieldOf(target, other)?.show?.[key] !== undefined || fieldOf(target, key)?.clears?.includes(other))) : null;
         const field = keys.length === 1 ? fieldOf(target, keys[0]) : lead ? fieldOf(target, lead) : null;
         if (field?.type === "bool" && /^show /i.test(field.label)) {
           return `${(values[field.key] ?? field.default ?? false) ? "Show" : "Hide"} ${titled(field.label.slice(5))}`;
@@ -1670,6 +1690,14 @@ export function figureParts(host) {
     const kind = node?.kind || "block";
     return parts[kind]?.node?.label ? HINTS[kind] || parts[kind].title : "";
   };
+  // A molecule's or a picture's id, where a person gave it ("motif", "cell") -- not one made of
+  // its kind's name as it was added ("structure", "picture-2"): what it is called with no words.
+  const givenId = (node) => {
+    if (!["structure", "image"].includes(node?.kind)) return "";
+    const slug = (words) => String(words || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join("-");
+    const stem = String(node.id || "").replace(/-\d+$/, "");
+    return [node.kind, partOf(node)?.title].some((name) => slug(name) === stem) ? "" : String(node.id || "");
+  };
   // A key typed while a part just added waits for its editor: answers whether it took it.
   function earlyKey(event) {
     if (!early || event.isComposing) return false;
@@ -2032,7 +2060,7 @@ export function figureParts(host) {
     if (!on) state.connecting = null;
     else {
       const from = chosenOne();
-      state.connecting = { source: from && nodeOf(from) ? from : null };
+      state.connecting = { source: from && (nodeOf(from) || lineGroup(from)) ? from : null };
     }
     host.changed();
   }
@@ -2045,12 +2073,13 @@ export function figureParts(host) {
         h("span.kbd", {}, "Esc")];
     }
     return [icon("right"),
-      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, nameOf(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
+      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, endName(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
       h("span.kbd", {}, "Esc")];
   }
   function connectTo(id) {
     const connecting = state.connecting;
-    if (!nodeOf(id)) return;
+    // (A line's end may be a group, as a shape: a joined line's, a shape alone.)
+    if (!nodeOf(id) && !(lineGroup(id) && !connecting.add)) return;
     if (connecting.add) {
       const net = netOf(connecting.add);
       if (!net || [...(net.sources || []), ...(net.targets || [])].some((end) => nodeOfRef(end) === id)) return;
@@ -2066,6 +2095,7 @@ export function figureParts(host) {
     // still to be ended somewhere else.)
     for (const [frame, other] of [[id, connecting.source], [connecting.source, id]]) {
       if (holds(frame, other)) { toast(`A line can’t end at ${inQuotes(nameOf(frame))} from inside it: the frame goes round ${inQuotes(nameOf(other))}.`, { icon: "info" }); return; }
+      if (lineGroup(frame) && inside(other, frame)) { toast(`A line can’t end at ${inQuotes(endName(frame))} from inside it: the group holds ${inQuotes(endName(other))}.`, { icon: "info" }); return; }
     }
     const source = connecting.source;
     state.connecting = null;
@@ -2118,6 +2148,21 @@ export function figureParts(host) {
     }
     return around(event);
   }
+  // In Connect, a click between a group's parts is the group's -- one that draws nothing
+  // round them (a layout group) too: the smallest round the point, inside the group clicked.
+  function lineEndAt(event, id) {
+    if (!groupOf(id) || state.connecting?.add) return id;
+    const boxes = new Map();
+    let best = null;
+    for (const group of model()?.groups || []) {
+      if (!lineGroup(group.id) || (id !== model().root && group.id !== id && !inside(group.id, id))) continue;
+      const box = boxOf(group.id, boxes);
+      if (!box || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) continue;
+      const area = (box.right - box.left) * (box.bottom - box.top);
+      if (!best || area < best.area) best = { id: group.id, area };
+    }
+    return best?.id || id;
+  }
   function shapeAround(event, group) {
     let best = null;
     for (const node of model()?.nodes || []) {
@@ -2133,7 +2178,7 @@ export function figureParts(host) {
     // (On what was under the pointer as it was pressed: never what a drawing that came in
     // meanwhile put there.)
     const id = idAt(asPressed(event));
-    if (state.connecting) { if (id) connectTo(id); return; }
+    if (state.connecting) { const end = lineEndAt(asPressed(event), id || model()?.root); if (end) connectTo(end); return; }
     // (The figure's own layout, clicked where nothing is drawn, is nothing: the page clicked,
     // as Keynote's canvas -- the layout is chosen from the list of shapes.)
     const part = id && id !== model()?.root ? id : null;
@@ -2375,7 +2420,9 @@ export function figureParts(host) {
     const said = [], shapes = (model()?.nodes || []).map((node) => ({ id: node.id, box: host.box(node.id) })).filter((item) => item.box);
     const meets = (one, other) => one.left < other.left + other.width && one.left + one.width > other.left && one.top < other.top + other.height && one.top + one.height > other.top;
     for (const node of model()?.nodes || []) {
-      const hint = !plain(node.label).trim() && inline?.id !== node.id && !typedOver?.ids.includes(node.id) ? hintOf(node) : "";
+      // (A molecule given an id of its own is named by it, its name a text part beside it as
+      // likely as not: no "Structure" over it.)
+      const hint = !plain(node.label).trim() && inline?.id !== node.id && !typedOver?.ids.includes(node.id) && !givenId(node) ? hintOf(node) : "";
       const at = hint && !host.element(`${node.id}.label`)?.textContent.trim() ? host.box(node.id) : null;
       if (!at) continue;
       look ??= figureLook();
@@ -2629,7 +2676,11 @@ export function figureParts(host) {
     if (!sizing) return;
     if (!sizing.moved || Math.abs(sizing.scale - 1) < 0.01) { sizing.element.style.transform = ""; return; }
     const { box, unit, scale, id, element } = sizing;
-    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round((box.width / unit) * scale), "properties.height": Math.round((box.height / unit) * scale) } },
+    // A molecule's box is cut from the canvas it is drawn in, which its width and height
+    // are: that is what grows, and the molecule with it, as its box did.
+    const canvas = element.getAttribute?.("data-flexo-canvas")?.split(" ").map(Number);
+    const [wide, high] = canvas?.length === 4 && canvas.every(Number.isFinite) ? [canvas[2], canvas[3]] : [box.width / unit, box.height / unit];
+    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round(wide * scale), "properties.height": Math.round(high * scale) } },
       { then: () => { state.landing = Date.now(); }, failed: () => { element.style.transform = ""; } });
     // Should no new drawing come, it goes back to the size it is drawn at.
     setTimeout(() => { if (element.isConnected) element.style.transform = ""; }, 6000);
@@ -3470,9 +3521,10 @@ export function figureParts(host) {
     window.addEventListener("pointercancel", turnCancel);
     window.addEventListener("keydown", turnKey, true);
   }
-  // A canvas over a molecule's box, for what it draws to be drawn turning.
+  // A canvas over a molecule's box, for what it draws to be drawn turning: over the whole
+  // canvas it is drawn in, which its box is cut from (moleculeCanvas), framed as it will be.
   function turnCanvas(molecule) {
-    const outer = host.overlay.getBoundingClientRect(), box = drawnRect(molecule);
+    const outer = host.overlay.getBoundingClientRect(), box = moleculeCanvas(molecule);
     const ratio = window.devicePixelRatio || 1;
     return h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
       style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
@@ -5912,7 +5964,7 @@ export function figureParts(host) {
   function revealProblem(id, what = null) {
     if (!typeOf(id)) return;
     select([id]);
-    const edge = edgeOf(id), lost = edge ? ["to", "from"].find((key) => !nodeOf(nodeOfRef(edge[key]))) : null;
+    const edge = edgeOf(id), lost = edge ? ["to", "from"].find((key) => !nodeOf(nodeOfRef(edge[key])) && !lineGroup(nodeOfRef(edge[key]))) : null;
     const field = problemField(partOf(nodeOf(id)), what || problemOf(id)?.what);
     if (!field && !lost) return;
     const key = lost ? `edge:${id}:${lost}` : `node:${id}:${field.key}`;
@@ -6082,16 +6134,21 @@ export function figureParts(host) {
   // but for a shape's plain way in or out (its input, its output), which is the shape itself.
   function endSaid(ref, told = namesTold()) {
     const node = nodeOfRef(ref), port = String(ref) !== node ? String(ref).slice(node.length + 1) : "";
-    return `${told.get(node) || nameOf(node)}${port && !PLAIN_PORTS.has(port) ? ` · ${titled(port)}` : ""}`;
+    return `${endCalled(node, told)}${port && !PLAIN_PORTS.has(port) ? ` · ${titled(port)}` : ""}`;
+  }
+  // (One with no words by its name in the file; one named alike told apart: endName.)
+  function endCalled(id, told) {
+    const name = endName(id);
+    return name !== nameOf(id) ? name : told.get(id) || name;
   }
   // Every end a line may have: each shape, then each of its ports -- its plain way in or out
   // only where a line's end (`current`) is written so, in the shape's place, by its name.
   function endOptions(told = namesTold(), current = null) {
     return model().nodes.flatMap((node) => {
       const plain = (node.ports || []).find((port) => PLAIN_PORTS.has(port) && current === `${node.id}.${port}`);
-      return [{ value: plain ? current : node.id, label: told.get(node.id) },
-        ...(node.ports || []).filter((port) => !PLAIN_PORTS.has(port)).map((port) => ({ value: `${node.id}.${port}`, label: `${told.get(node.id)} · ${titled(port)}` }))];
-    });
+      return [{ value: plain ? current : node.id, label: endCalled(node.id, told) },
+        ...(node.ports || []).filter((port) => !PLAIN_PORTS.has(port)).map((port) => ({ value: `${node.id}.${port}`, label: `${endCalled(node.id, told)} · ${titled(port)}` }))];
+    }).concat((model().groups || []).filter((group) => lineGroup(group.id) && !group.implied).map((group) => ({ value: group.id, label: endName(group.id) })));
   }
   // Which side of its shape a line's end meets it on, as its panel says it: one it was
   // asked to (``depart``, ``arrive``), or the side of a port that keeps to one (a
@@ -6195,7 +6252,7 @@ export function figureParts(host) {
     const told = namesTold();
     // An end at a shape the figure has none of (mistyped, or deleted): said, and its field
     // marked -- the one to choose a shape in.
-    const lost = ["to", "from"].filter((key) => !nodeOf(nodeOfRef(edge[key])));
+    const lost = ["to", "from"].filter((key) => !nodeOf(nodeOfRef(edge[key])) && !lineGroup(nodeOfRef(edge[key])));
     const end = (key) => {
       const options = endOptions(told, String(edge[key]));
       const known = options.some((option) => option.value === edge[key]);
@@ -6587,7 +6644,8 @@ export function figureParts(host) {
     const key = `${scope}:${field.key}`;
     const waiting = typed.get(key);
     const value = waiting && field.key in waiting ? waiting[field.key] : valueAt(item, field.key);
-    const set = (next) => write({ [field.key]: next }, key);
+    // (A structure's colour scheme takes back its own colours under it: structurecolours.js.)
+    const set = (next) => write({ [field.key]: next, ...schemeClears(field, item, next, valueAt) }, key);
     // Words typed: one run from focusing the field to leaving it, however long its pauses.
     const type = (next) => write({ [field.key]: next }, key, true);
     const options = { hint: field.hint };
@@ -6803,7 +6861,7 @@ export function figureParts(host) {
       case "records":
         // (A structure's colours: rows of selections, in order -- structurecolours.js.)
         if (item?.kind === "structure" && field.key === "properties.colors") {
-          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced });
+          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced, source: item.properties?.source });
         }
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":

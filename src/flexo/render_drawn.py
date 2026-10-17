@@ -180,19 +180,35 @@ def _image(
 
     import base64
 
+    from flexo.structure_fit import canvas_box, cropped_png, cropped_view, drawn_in
     from flexo.structures import structure_png, structure_svg
 
-    markup = structure_svg(spec, style, palette, width, height)
+    # Laid out round its molecule (flexo.structure_fit): drawn in the canvas it was, the part
+    # that shows cut out of it -- and where the whole canvas lies said, for the studio.
+    fitted = drawn_in(spec)
+    drawn_w, drawn_h = fitted[0] if fitted else (width, height)
+    canvas = (
+        " ".join(_number(value) for value in canvas_box(fitted, x, y, width, height))
+        if fitted
+        else None
+    )
+    markup = structure_svg(spec, style, palette, drawn_w, drawn_h)
     if markup is not None:
-        holder = element(parent, "g", id=identifier, data_flexo_drawn="mol-sketch")
+        holder = element(
+            parent, "g", id=identifier, data_flexo_drawn="mol-sketch", data_flexo_canvas=canvas
+        )
         element(holder, "rect", x=x, y=y, width=width, height=height, fill="none")
         nested = ET.fromstring(markup)
+        if fitted:
+            nested.set("viewBox", cropped_view(nested.get("viewBox", ""), fitted[1]))
         for name, value in (("x", x), ("y", y), ("width", width), ("height", height)):
             nested.set(name, _number(value))
         nested.set("preserveAspectRatio", "xMidYMid meet")
         holder.append(nested)
         return
-    data = structure_png(spec, style, palette, width, height)
+    data = structure_png(spec, style, palette, drawn_w, drawn_h)
+    if fitted:
+        data = cropped_png(data, fitted[1])
     element(
         parent,
         "image",
@@ -202,5 +218,6 @@ def _image(
         width=width,
         height=height,
         preserveAspectRatio="xMidYMid meet",
+        data_flexo_canvas=canvas,
         href="data:image/png;base64," + base64.b64encode(data).decode("ascii"),
     )

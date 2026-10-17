@@ -36,6 +36,7 @@ from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
 from flexo.style import RAMP_ROLES, LayoutStyle, Palette
 from flexo.svg import element, number
+from flexo.title_sides import drawing_box, title_band, title_baseline, title_side
 from flexo.wording import anchor_of, typography_of
 
 
@@ -851,10 +852,11 @@ drawing that lies about its proportions.
 def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
     """Place the author's artwork at the node's bounds, exactly as drawn.
 
-    A labelled image hands the top of those bounds to its caption and draws in
-    what ``motif_area`` leaves, exactly as a matrix or an inset does: the words
-    name the drawing, so they may not be printed across it. An unlabelled image
-    has no band to give up and fills its bounds.
+    A labelled image hands a band of those bounds to its name -- the top, or the
+    bottom with ``title_side: bottom`` -- and draws in what ``drawing_box`` leaves,
+    exactly as a structure does (``flexo.title_sides``): the words name the drawing,
+    so they may not be printed across it. An unlabelled image has no band to give up
+    and fills its bounds.
 
     An SVG source becomes a nested ``<svg>`` viewport carrying the source's own
     viewBox, so the artwork stays real vector content -- crisp at any zoom, and
@@ -869,11 +871,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
     """
 
     spec = node.measured.spec
-    bounds = (
-        motif_area(spec.kind, node.bounds, node.measured.label, style)
-        if node.measured.label.lines
-        else node.bounds
-    )
+    bounds = drawing_box(node.bounds, title_side(spec), title_band(node.measured.label, style))
     from flexo.restyle import node_picture
     from flexo.svg_resources import fonts_are_linked
 
@@ -1063,6 +1061,10 @@ def _label_baseline(node: FittedNode, style: LayoutStyle) -> float:
         # A vector's words are under its cells (vector_caption_band).
         cells = vector_cells(spec, bounds, metrics, style)
         return cells.bottom + style.vector_label_gap.points + metrics.baseline
+    if spec.kind == "image" and metrics.lines:
+        # A picture's name over it or under it, as a structure's is (flexo.title_sides).
+        side, band = title_side(spec), title_band(metrics, style)
+        return bounds.y + title_baseline(side, metrics, style, bounds.height - band)
     if spec.kind in MOTIF_LABEL_KINDS and motif_enabled(spec):
         return bounds.y + style.padding_y.points + metrics.baseline
     if spec.kind in SHAPE_KINDS:
@@ -1098,6 +1100,23 @@ def _render_label(
     palette: Palette,
 ) -> None:
     spec = node.measured.spec
+    if spec.kind == "image":
+        # A picture's name is set as a structure's is: centred on it, in the theme's type at
+        # the title's weight (flexo.title_sides).
+        render_runs(
+            parent,
+            f"{spec.id}.label",
+            node.measured.label,
+            x=node.bounds.center.x,
+            y=_label_baseline(node, style),
+            typography=style.typography,
+            palette=palette,
+            fill_role="muted-ink" if spec.role == CAPTION_ROLE else "ink",
+            fill=paint_override(spec, "label"),
+            anchor="middle",
+            weight=style.typography.title_weight,
+        )
+        return
     area = (
         label_area(spec.kind, node.bounds, node.measured.label, style)
         if spec.kind in SHAPE_KINDS

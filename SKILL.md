@@ -53,6 +53,9 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
   title_side: left|right|bottom-left|bottom-right}}` (the corner its label stands at:
   the top left by default). A line may end at it, from a shape outside it:
   `{from: block, to: stage, arrive: south}` meets the middle of that side of its outline.
+- A line to a group, as to a shape -- what goes in, a step, what comes out:
+  `{from: substrates, to: cell}` meets the group's outline (a layout group or panel: the box
+  round what it holds), moving none of its parts; never between a group and what it holds.
 - A data plot in a figure: `panel.plot(id, "plots.py", "function", width=, height=)`; in a
   file `{kind: plot, properties: {source: plots.py, function: f}}`. The function returns
   a matplotlib figure; flexo sets the font, sizes and colours and lays it out at that size.
@@ -98,7 +101,8 @@ with flexo.Figure("block", width="single-column", theme="paper") as figure:
 `database`, `server`, `cloud`, `queue`, `document`, `person` (software diagrams; lines
 meet their drawn outlines), `loss`, `prediction`,
 `concat`, `tensor`, `matrix`, `sequence`, `vector`, `volume`, `feature_strip`,
-`graph`, `image(id, "art.svg" or "photo.png")`, `inset`, `legend(entries=, badges=)`. Nets:
+`graph`, `image(id, "art.svg" or "photo.png", label=, title_side=)` (its name over it, or
+under it with `title_side="bottom"`, set as a structure's is), `inset`, `legend(entries=, badges=)`. Nets:
 `figure.net(src=a, sinks=[b, c])` (one value to many), `figure.merge(sinks=[a, b], dst=c)`,
 `figure.residual(a, b)`. Any component: `tone="name"` (same tone = same colour),
 `badge="frozen"|"trained"|"tuned"` (snowflake/flame/bolt), `paint={"fill": "#..."}`,
@@ -137,7 +141,7 @@ gene, per domain, per condition), and has ports where arrows belong.
   it by another file's secondary structure. Structures naming one `frame` (a diffusion
   trajectory, a motif held fixed) are drawn with one camera, at one scale, about one
   centre, turned and framed as the first of them is; `title_side="bottom"` sets the
-  name under the molecule.
+  name under the molecule (a picture's name stands where it says too, in the same type).
   `look="flat"`: PyMOL's flat, outlined style in the theme's fills, as vector shapes
   that `flexo retheme` recolours. `noise=0.3` draws it as a diffusion model does on its
   way (0 the file, 1 a random coil; t = 30 of 100), `fixed="resi 34+94 or resn LIG"`

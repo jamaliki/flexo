@@ -432,9 +432,16 @@ to `padding`, then to the style's group padding.
 `align` sets where children sit across the axis they are not laid out along.
 It accepts `start`, `center`, `end`, `stretch`, `ports`, and `auto`.
 
-- `start`, `center`, `end`, and `stretch` align the children's boxes.
+- `start`, `center`, `end`, and `stretch` align the children's boxes -- but
+  `center` centres a part drawn over a name or under one (a named structure,
+  picture or mechanism) on the middle of its drawing, not of its box with the
+  name in it, and a row or one-row grid of such parts on the line they stand on.
+  So a `+` between two named molecules, and the line out of one, stand level
+  with the molecules. A centred row with such a part in it may be taller than
+  its tallest child, as a ports-aligned one may.
 - `ports` aligns the line the children's side ports sit on, as text aligns on
-  a baseline.
+  a baseline. A named structure's, picture's or mechanism's ports sit at the
+  middle of its drawing.
 - `auto`, the default for groups and for the figure's root, resolves per
   group: `ports` when the group's children are connected to one another,
   `start` for two or more columns in a row or rows in a column, and `center`
@@ -490,7 +497,9 @@ with flexo.Figure("anchor", width="double-column") as figure:
 
 A line that is the only one on a side of a box leaves (or enters) that side at its
 middle, at a port the component gives the box -- it is never slid along the side to
-make it straight. In a group that centres what it holds, a box joined by one line to
+make it straight. A named structure's, picture's or mechanism's left and right are its
+drawing's: a line meets it at the middle of the molecule or the picture, and several
+spread over the drawing, never over its name. In a group that centres what it holds, a box joined by one line to
 one other is put centred on that other one, so the line runs straight from middle to
 middle (a store under the queue that feeds it); where the two can't be lined up, the
 line bends between the two middles. Several lines on one side still spread evenly
@@ -515,6 +524,39 @@ nodes:
 
 Only that box moves, as far as the parts beside it reach: the row neither spreads nor
 shifts.
+
+### A line to a group meets the group
+
+An edge's `from` or `to` may name a group -- a layout group, a panel, a module -- as it
+names a component (`{from: substrates, to: cell}`; in Python `connect(module, block)`).
+The line is drawn to the group as a whole: a reaction's substrates into the cell that
+turns them over, its products out of it.
+
+- **Where it meets.** A group drawn with an outline (a container, in a theme that draws
+  its box) is met at that outline. A group that draws none -- `role: layout`, a panel, or
+  a container in a theme that marks only its top -- is met at the tight box round what it
+  holds (and its title, where it writes one), so the arrowhead stops as far short of the
+  parts as it would of one of them. The end is at the middle of the side that faces the
+  other end, or of the side `depart`/`arrive` names, and several lines on one side spread
+  along it as on a box's. On the left and right sides the middle is the group's own middle
+  line, where it has one (`MeasuredGroup.middle`: the line a centred row or grid stands its
+  named molecules, pictures and mechanisms on, by their drawings): a line from a reaction's
+  substrates leaves them level with the molecules, not half a name lower, and runs straight
+  on to a part lined up there. Top and bottom keep the middle of the side.
+- **Nothing moves.** Like a line to a frame, it is kept from the layout (`flexo.group_ends`):
+  no part is aligned or re-sided for it. Routing is given the group as a part where it
+  stands, which every other line passes through as before and its own lines keep out of --
+  so a line to a group never runs in among the group's parts. Where the group stands at the
+  edge of what holds it and the line has no room there for its arrow, that edge moves out,
+  as it does for a line round a box.
+- **What is refused.** A line between a group and a part or group it holds
+  (`group.line.inside`), one that starts and ends at the same group, one to the root, and
+  one between a group and a frame round it or inside it. A group has no ports:
+  `substrates.top` is said as an unknown end, with what to write instead. An end that
+  names neither a part nor a group is said with the ids it may have meant.
+- **Everywhere else, a line.** It is hidden or dimmed with the group, keeps its sides when
+  the figure is turned to fit a slide (`fit_in_box`), counts as joining the group's parts
+  when a long row is folded, and round-trips through `figure_to_document`.
 
 ### Heights that match a vector stack
 
@@ -744,7 +786,8 @@ with flexo.Figure("artwork", width="double-column") as figure:
 ```
 
 An `image` is a component with four pinned ports at its side centres (`input`,
-`output`, `north`, `south`). It wires, lays out, and blocks routes like a
+`output`, `north`, `south`; a named picture's `input` and `output` at the middle
+of its artwork, as a structure's are). It wires, lays out, and blocks routes like a
 block. An SVG source stays vector: Flexo nests the file's content at the
 node's bounds with its viewBox intact, so it remains selectable in an editor
 and stays vector in the PDF. A PNG or JPEG is embedded as a data URI.
@@ -794,12 +837,15 @@ dropped. Every id in the artwork is prefixed with the node's id, so the same
 file can be embedded twice without the copies sharing definitions such as
 gradients.
 
-**Labels.** A `label` takes a band at the top of the box and the artwork gets
-the rest, as on an `inset` or a `matrix`. An authored extent sets the size of
-the whole box, so `height="40pt"` on a labelled image shrinks the artwork, not
-the label. An image without a label reserves no band and is exactly the size of
-its artwork. For a caption below the artwork, put the image and a `label` node
-in a column, as `vector` does.
+**Names.** A `label` is the picture's name, set as a structure's is: centred
+over the artwork in the theme's title weight, 0.3 of the type size above it --
+or under it, with `title_side="bottom"` (`properties: {title_side: bottom}` in a
+document). Its band comes off the side it stands on, and the artwork gets the
+rest. An authored extent sets the size of the whole box, so `height="40pt"` on a
+labelled image shrinks the artwork, not the name; given a `width`, the name wraps
+to it. A line meets a named picture at the middle of its artwork, and keeps off
+the side its name is on. An image without a label reserves no band and is
+exactly the size of its artwork.
 
 ## Shapes over the figure
 

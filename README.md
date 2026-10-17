@@ -292,6 +292,12 @@ structure's panel shows these settings in mol-sketch's own sections, each with
 what the look gives it until it is given its own. Install the `molecules` extra
 (or `pip install path/to/mol-sketch/python`).
 
+Its part is the molecule as drawn. `width` and `height` (20 by 15 label sizes unless given)
+are the canvas mol-sketch draws it in, the most it may take; the part is then what the
+molecule draws, with a small pad round it, so the lines to it end at the molecule, not at an
+empty box round it, and the figure keeps no room for nothing. Given only a `width` or a
+`height`, the other follows the molecule's proportions as it is seen.
+
 `look="flat"` draws it as PyMOL's flat, outlined figures are drawn -- solid colours,
 a darker shade on a ribbon's far side, thin even outlines, round sticks -- and in the
 figure's own colours: helices in the accent's fill, strands in the warm fill, loops in
@@ -331,7 +337,8 @@ nodes:
 - **One centre**: the middle of all they draw together, moved by the first's `pan_x` and
   `pan_y`. A motif held fixed, or a trajectory aligned, stays where it is in every panel.
 
-Each keeps its own box, look, colours and what it draws. A row of structures wider than its page -- five frames at their usual size are, in a double column -- is drawn with the structures that have no size of their own smaller, all alike, until it fits; one given a `width` or `height` keeps it. The first one's `yaw`, `pitch`,
+Each keeps its own box, look, colours and what it draws, and all are cut alike, to what they
+draw together about the frame's centre: boxes of one size stay one size. A row of structures wider than its page -- five frames at their usual size are, in a double column -- is drawn with the structures that have no size of their own smaller, all alike, until it fits; one given a `width` or `height` keeps it. The first one's `yaw`, `pitch`,
 `roll`, `zoom`, `pan_x` and `pan_y` are the frame's; another's own are not used (and said,
 where they differ). With a flat projection (the engraved, textbook and flat looks) each atom
 is drawn exactly where the frame's camera puts it; in perspective each is seen from the
@@ -347,9 +354,15 @@ step -- while a colour one of them was given of its own stays its own. The Camer
 the figure's frames (each with how many structures it has), in a new frame of its own, or in
 none: out of a frame, it keeps the turn it was seen at.
 
-A structure's name stands over the molecule, or under it with `title_side: bottom`; its words
-take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics (asterisks are
-drawn as typed).
+A structure's name stands over the molecule, or under it with `title_side: bottom`, centred in
+the theme's title weight -- as a picture's does, so a row of molecules and pictures named under
+them has its names on one line, in one hand (see [a picture's name](#a-shapes-words-and-a-pictures-name-and-crop)).
+Its words take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics
+(asterisks are drawn as typed). A line meets a named structure at the middle of its molecule,
+not of the molecule and its name, and keeps off the side the name stands on; a row that
+centres what it holds (`align: center`), or lines it up by its ports, lines it up by its
+molecule too -- as it does a picture, and a mechanism whose steps are named under their
+structures -- so a `+` or a `2` beside it stands level with the molecule.
 
 #### A diffusion run, frame by frame
 
@@ -450,6 +463,12 @@ mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
 makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
 pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
 
+A step's `label` is set under its structure. A line meets a mechanism at the middle of its
+structures, not of them and the names under them, and a row that centres what it holds lines
+it up by them: `ACV + O₂ → ...` with each molecule named under it, written as mechanisms and
+`+` text parts in a row or grid with `align: center`, has its `+`, its numbers and its
+arrows level with the molecules.
+
 A mechanism may be schematic. A bracket atom whose symbol is no element is a
 placeholder, drawn as it is written -- `[X]`, `[Nu-]`, `[E]`, `[LG]`, `[EWG]`, `[R']`,
 `[R1]` (its digits raised: R¹), or `[*Ar]`, `[*B]` for a symbol that is also an
@@ -489,10 +508,15 @@ Structures are laid out flat as a chemist would: rings as regular polygons, fuse
 side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan
 and pyrrole standing on their heteroatom, a double bond keeping the side its SMILES
 gives (`F/C=C/F`), a stereocentre drawn with the wedge or hash its `@`/`@@` means. A
-cycloaddition is drawn in the shape of its product, so a diene curls s-cis. The
-proportions are the ACS document settings: bonds 1.44 label heights long, double
-bonds inside their rings, labels clipping the bonds that meet them, hydrogens on the
-side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Reaction arrows carry
+cycloaddition is drawn in the shape of its product, so a diene curls s-cis. A molecule
+alone in its step that is one straight line with a letter in it (`O=O`, `HC≡N`,
+`O=C=O`) lies flat across the page, unless its step's `place` turns it; a bare line of
+carbons (ethene, but-2-yne) keeps its slant. The proportions are the ACS document settings: bonds 1.44
+label heights long, double bonds inside their rings, labels clipping the bonds that
+meet them, hydrogens on the side the bonds leave free (`OH`, `HO`, `H₂N`), charges
+circled. Carbon is a vertex, but a carbon two alike bonds run straight through (CO₂,
+an allene's middle) is written `C`, as IUPAC asks, lest its bonds read as one; an
+alkyne's carbons stay a line. Reaction arrows carry
 their `reagents` over them and `conditions` under them; `arrow` is `forward`,
 `equilibrium`, `resonance` or `none`; steps fold into rows when there are many
 (`per_row=`).
@@ -817,6 +841,43 @@ own:
   A figure taller than a page with a `height` is treated the same way
   (`layout.height.grown`).
 
+### Lines to a group
+
+A line may start or end at a group, as at a shape -- everything going in, the cell,
+everything coming out, where an arrow from one of the molecules would read as though it
+came from that one alone:
+
+```yaml
+groups:
+- {id: substrates, role: layout, layout: {kind: grid, columns: 3}, children: [acv, plus, oxygen]}
+- {id: products, role: layout, layout: {kind: grid, columns: 4}, children: [ipn, plus2, two, water]}
+edges:
+- {from: substrates, to: cell}
+- {from: cell, to: products}
+```
+
+It meets a group drawn with an outline (a module, a titled box) at that outline, and a
+group that draws none (a layout group, a panel) at the box round what it holds, its
+arrowhead as far short of those parts as it would stop short of one of them -- at the
+middle of the side that faces its other end, or of the side `depart` or `arrive` names.
+On its left or right side, that middle is the line the group's parts stand on where it
+centres them: beside a row of named molecules, level with the molecules, not their names,
+so an arrow on to the next part lined up there runs straight.
+Such a line moves nothing: the figure is laid out without it and the line routed to the
+group where the layout put it, never in among the group's parts on its way. In Python,
+`connect()` takes a group (the `module`/`group` you made, or its id) as it takes a shape.
+
+A line between a group and a part or group it holds has no way to it from outside, and is
+refused (`group.line.inside`); so is one to the figure's own root, and one to a port of a
+group, which has none (`substrates.top`: write `substrates` with `depart: north`). A line
+naming neither a part nor a group of the figure is said in plain words, with the ids it
+may have meant. A line to a group is hidden or dimmed with the group, turned and folded
+with the figure on a slide, and in a deck's builds appears with the last of what the group
+holds. In the studio, choose a group and **Connect** draws a line from it to what you
+click next (a click between a group's parts is the group's); the line is listed by its
+ends -- **Substrates → Cell**, a group or part with no words of its own called by its name
+in the file -- and its **From** and **To** offer the groups beside the shapes.
+
 ### Pages and panels
 
 A figure's page is its `width` and, for a page of a fixed size, its `height`;
@@ -982,7 +1043,7 @@ and a click on a shape outside it chooses that one instead. Undo and redo stay i
 groups chosen apart at every level at once; a shape in a group may be written
 `locked: true`, as one on the figure may.
 
-### A shape's words, and a picture's crop
+### A shape's words, and a picture's name and crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,
 `italic: true`, `size: 6pt` and `align: left` (or `right`). The size is what the
@@ -991,6 +1052,27 @@ several chosen) has a **Text** section -- Bold, Italic, the side its lines stand
 and Size -- and ⌘B and ⌘I work on shapes chosen. Single words are bold or italic as
 coloured words are written: `[word]{bold}`, `[lacZ]{italic}` (a label's asterisks are
 drawn as typed); ⌘B and ⌘I do it to the words chosen while a label is typed.
+
+A picture's name (its `label`) is set as a structure's is: centred over it in the theme's
+title weight, or under it with `title_side: bottom`, at the same gap from it. Its band comes
+off the box the picture's `width` and `height` give, on the side it stands on, and a line meets
+the middle of the drawing. In the studio its panel has **Title Position** beside its Label.
+A row of molecules and pictures named under them, lined up by their bottoms, has its names on
+one baseline -- and its arrows level, should the drawings be as tall:
+
+```yaml
+- id: complex
+  kind: structure
+  label: "Complex\n[30 nm]{muted}"
+  properties: {source: 6QZP.cif, width: 120, height: 120, title_side: bottom}
+- id: cell
+  kind: image
+  label: "Cell\n[20 µm]{muted}"
+  height: 141.6               # the box: a drawing 120 tall, and its two lines of name (8 pt)
+  properties: {source: cell.svg, title_side: bottom}
+groups:
+- {id: scale, layout: {kind: row, gap: 22, align: end}, children: [complex, cell]}
+```
 
 A picture in a figure is cropped by how much is cut off each side, in hundredths:
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part

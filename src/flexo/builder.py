@@ -16,6 +16,7 @@ from flexo.components import (
 )
 from flexo.conventions import Conventions, parse_conventions
 from flexo.geometry import Side
+from flexo.group_ends import PLAIN_PORTS
 from flexo.ir.semantic import (
     TITLE_SIDES,
     ArrowEnds,
@@ -466,6 +467,12 @@ class Figure:
         joined = f"{reference.node_id}.{reference.port_name}"
         if joined in ports:
             return PortRef(joined, default_port)
+        if (
+            reference.node_id not in ports
+            and reference.port_name in PLAIN_PORTS
+            and any(draft.id == reference.node_id for draft in self._groups)
+        ):
+            return reference  # (a line to a group: flexo.group_ends)
         if reference.node_id not in ports:
             matches = [node_id for node_id in ports if node_id.endswith(f".{reference.node_id}")]
             if len(matches) == 1:
@@ -541,8 +548,8 @@ class Figure:
 
     def connect(
         self,
-        source: NodeHandle | PortRef | str,
-        target: NodeHandle | PortRef | str,
+        source: NodeHandle | GroupBuilder | PortRef | str,
+        target: NodeHandle | GroupBuilder | PortRef | str,
         *,
         id: str | None = None,
         source_port: str = "output",
@@ -1524,8 +1531,10 @@ class GroupBuilder:
         pocket). ``palette`` names a mol-sketch group palette, ``style`` sets any field
         of mol-sketch's style over the look (``{"fill": "ink colour", "line":
         {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
-        EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
-        points (20 by 15 label sizes by default), its name above it (``title_side=
+        EMDB ID, or a map file). ``width`` and ``height`` are the most the molecule's
+        box may take, in points (20 by 15 label sizes by default): it is drawn in that
+        canvas and its part is what it draws (given one, the other follows the
+        molecule; ``flexo.structure_fit``), its name above it (``title_side=
         "bottom"``: under it). Structures naming the same ``frame`` are drawn with one
         camera, at one scale, about one centre, turned and framed as the first of them is
         (``flexo.structure_frames``). ``noise`` draws it as a diffusion model does on its
@@ -1835,6 +1844,7 @@ class GroupBuilder:
         width: Extent | str | float | None = None,
         height: Extent | str | float | None = None,
         label: str | tuple[TextRun, ...] = "",
+        title_side: str | None = None,
         **options: object,
     ) -> NodeHandle:
         """Place artwork the author drew, as a first-class node.
@@ -1875,18 +1885,23 @@ class GroupBuilder:
         this node's id, so the same file may be embedded twice in one figure
         without the two copies sharing a gradient.
 
-        A ``label`` sits over the artwork, centred, as on any other node. For a
-        caption *under* the drawing, put the image and a ``label`` node in a
-        column, the way ``vector`` captions its stack.
+        A ``label`` is the picture's name, set as a structure's is: centred over
+        the artwork in the theme's title weight, or under it with
+        ``title_side="bottom"`` -- so a row of molecules and pictures named under
+        them has its names on one line. The name's band comes off the box
+        ``width`` and ``height`` give, on the side it stands on.
         """
 
+        properties: dict[str, Scalar] = {"source": str(source)}
+        if title_side is not None:
+            properties["title_side"] = title_side
         return self.node(
             id,
             "image",
             label=label,
             width=width,
             height=height,
-            **_with_properties(options, source=str(source)),  # type: ignore[arg-type]
+            **_with_properties(options, **properties),  # type: ignore[arg-type]
         )
 
     def tensor(
@@ -2624,8 +2639,8 @@ class GroupBuilder:
 
     def connect(
         self,
-        source: NodeHandle | PortRef | str,
-        target: NodeHandle | PortRef | str,
+        source: NodeHandle | GroupBuilder | PortRef | str,
+        target: NodeHandle | GroupBuilder | PortRef | str,
         *,
         id: str | None = None,
         source_port: str = "output",
@@ -2649,7 +2664,9 @@ class GroupBuilder:
         """Draw one connector from ``source`` to ``target``.
 
         Handles take their ``output`` and ``input`` ports; a ``"node.port"``
-        string or a ``PortRef`` names one exactly. ``lane=`` routes the edge
+        string or a ``PortRef`` names one exactly. A group (its builder, or its id)
+        is met at its outline -- or, one that draws none, the box round what it
+        holds -- moving none of its parts (``flexo.group_ends``). ``lane=`` routes the edge
         through an authored corridor instead of wherever the router would take
         it, and a lane-routed edge no longer votes on which side its ports face.
 
@@ -3187,11 +3204,16 @@ TONE_NAMES = {
 """How a legend names the tones components take from their kind."""
 
 
-def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
+def _reference(
+    value: NodeHandle | GroupBuilder | PortRef | str, default_port: str
+) -> PortRef:
     if isinstance(value, PortRef):
         return value
     if isinstance(value, NodeHandle):
         return value.port(default_port)
+    if isinstance(value, GroupBuilder):
+        # A line to a group (``flexo.group_ends``): it meets the group, not a port of it.
+        return PortRef(value.id, default_port)
     return PortRef.parse(value) if "." in value else PortRef(value, default_port)
 
 

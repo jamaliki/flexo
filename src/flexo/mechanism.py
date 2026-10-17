@@ -602,8 +602,15 @@ def mechanism_composed(node: NodeSpec, style: LayoutStyle) -> Composed:
             x += x1 - x0
         width = max(width, x)
         y += row_height + labels_room + (u * 1.4 if row_number < len(rows) - 1 else 0.0)
+    # Its structures over the names under the last of them: what a line meets, at their
+    # middle, and what a row lines it up by (flexo.title_sides) -- not them and their names.
+    drawn = (0.0, y - labels_room) if labels_room and y > labels_room else None
     return Composed(
-        Picture(Size(width, y), tuple(shapes), tuple(words)), kept, pen, panels, problem
+        Picture(Size(width, y), tuple(shapes), tuple(words), drawn=drawn),
+        kept,
+        pen,
+        panels,
+        problem,
     )
 
 

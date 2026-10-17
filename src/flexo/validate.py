@@ -23,18 +23,45 @@ def normalize_and_validate(figure: FigureSpec) -> FigureSpec:
     return normalized
 
 
-def _suggestion(name: str, nodes) -> str | None:
-    """A "did you mean" for an unknown node id, from the ids that exist."""
+def _suggestion(name: str, nodes, groups=()) -> str | None:
+    """A "did you mean" for an unknown end of a line, from the parts and groups that exist
+    -- or, for a port written wrong of one that does, what its ports are."""
 
     from difflib import get_close_matches
 
-    ids = [node_id for node_id in nodes]
+    head = name.rpartition(".")[0]
+    if head in nodes and isinstance(nodes, dict):
+        ports = ", ".join(f"{head}.{port.name}" for port in nodes[head].ports)
+        return f'"{head}" is a part, and its ports are {ports or "none"}.'
+    ids = [*nodes, *groups]
     close = get_close_matches(name, ids, n=3, cutoff=0.6) or [
         node_id for node_id in ids if node_id.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
     ][:3]
+    if head in groups:
+        close = [item for item in close if item != head]
+        grouped = (
+            f'"{head}" is a group, which has no ports: write "{head}" alone, with depart or '
+            "arrive for the side the line meets."
+        )
+        return f"{_meant(close)} {grouped}" if close else grouped
     if not close:
         return "Ids are scoped by their group: a node made in module m as \"x\" is \"m.x\"."
+    return _meant(close)
+
+
+def _meant(close: list[str]) -> str:
     return "Did you mean " + " or ".join(f'"{item}"' for item in close) + "?"
+
+
+def _unknown_end(label: str, name: str) -> str:
+    """What to say of a line's end that names nothing in the figure: the id, and what an end
+    may be."""
+
+    starts = "starts" if label == "source" else "ends"
+    return (
+        f'{label.title()} "{name}" does not exist: a line {starts} at a part, a group, or a '
+        "part\u2019s port (part.port)."
+    )
 
 
 def merge_matched_stacks(figure: FigureSpec) -> FigureSpec:
@@ -356,13 +383,15 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
     for edge in figure.edges:
         for label, reference in (("source", edge.source), ("target", edge.target)):
             node = nodes.get(reference.node_id)
+            if node is None and reference.node_id in groups:
+                continue  # (A line may end at a group: what of it can't, flexo.group_ends.)
             if node is None:
                 diagnostics.append(
                     Diagnostic(
                         f"edge.{label}.unknown-node",
-                        f'{label.title()} node "{reference.node_id}" does not exist.',
+                        _unknown_end(label, reference.node_id),
                         entity_id=edge.id,
-                        hint=_suggestion(reference.node_id, nodes),
+                        hint=_suggestion(reference.node_id, nodes, groups),
                     )
                 )
                 continue
@@ -389,13 +418,15 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
         for label, references in (("source", net.sources), ("target", net.targets)):
             for reference in references:
                 node = nodes.get(reference.node_id)
+                if node is None and reference.node_id in groups:
+                    continue
                 if node is None:
                     diagnostics.append(
                         Diagnostic(
                             f"net.{label}.unknown-node",
-                            f'{label.title()} node "{reference.node_id}" does not exist.',
+                            _unknown_end(label, reference.node_id),
                             entity_id=net.id,
-                            hint=_suggestion(reference.node_id, nodes),
+                            hint=_suggestion(reference.node_id, nodes, groups),
                         )
                     )
                     continue
@@ -413,10 +444,13 @@ def semantic_diagnostics(figure: FigureSpec) -> tuple[Diagnostic, ...]:
                             ),
                         )
                     )
-    # A line may end at a frame, from outside it (flexo.frames).
+    # A line may end at a frame, from outside it (flexo.frames); and at a group, the same
+    # (flexo.group_ends).
     from flexo.frames import refused
+    from flexo.group_ends import refused as refused_grouped
 
     diagnostics.extend(refused(figure))
+    diagnostics.extend(refused_grouped(figure))
     return tuple(diagnostics)
 
 

@@ -63,8 +63,9 @@ import struct
 import threading
 import xml.etree.ElementTree as ET
 import zlib
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import NamedTuple
 
 from flexo.confine import outside
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
@@ -74,6 +75,13 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings, TextRun
 from flexo.structure_style import THE_FIGURES
 from flexo.style import LayoutStyle, Palette
+from flexo.title_sides import (
+    drawing_middle,
+    drawing_title,
+    title_band,
+    title_baseline,
+    title_side,
+)
 
 LOOKS = (
     "engraved-colour",
@@ -92,6 +100,17 @@ LOOKS = (
 SCHEMES = ("look", "figure")
 """Whose colours a flat structure is in: its look's own (mol-sketch's Flat: coral helices,
 amber strands, near-white loops, teal hydrogen bonds), or the figure's tones."""
+
+SCHEMED = (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
+           ("label", "ink"), ("charge", "ink"), ("arrow", "ink"), ("hbond", "accent-stroke"),
+           ("filled", "warm-fill"), ("empty", "accent-fill"), ("measure", "ink"),
+           ("window", "block-fill"))
+"""What a scheme colours: each colour of mol-sketch's palette its look gives -- or, in the
+figure's scheme, the figure's role it is given (helices in the accent's fill, strands in the
+warm one, loops in the neutral fill, words, charges, a mechanism's arrows and its measures
+in ink, hydrogen bonds in the accent's line, a scene's orbitals filled in the warm fill and
+empty in the accent's, the window they are measured against in the neutral fill). A colour
+of the structure's own for one of them wins over either scheme's."""
 
 VECTOR_LOOKS = frozenset({"flat"})
 """Looks whose molecule is nested as shapes, not embedded as a picture. (Its drawing is
@@ -147,39 +166,11 @@ def structure_tones(node: NodeSpec) -> tuple[str, ...]:
 
 def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
     """A structure's name as it is set over its panel: in the title's weight, wrapped to the
-    panel's width."""
+    panel's width (``flexo.title_sides``, as a picture's is)."""
 
     u = units(style).u
     width = float(node.property("width") or 20.0 * u)  # type: ignore[arg-type]
-    return units(style).measurer.measure(
-        node.label, weight=style.typography.title_weight, max_width=width
-    )
-
-
-TITLE_SIDES = ("top", "bottom")
-"""Where a structure's name is set: over its molecule (``title_side: top``, as it is unless
-written) or under it (``bottom``)."""
-
-
-def structure_title_side(node: NodeSpec) -> str:
-    """Where the structure's name is set (``TITLE_SIDES``): over it, unless it says under."""
-
-    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
-    return written if written in TITLE_SIDES else TITLE_SIDES[0]
-
-
-def title_side_problem(node: NodeSpec) -> Diagnostic | None:
-    """A title side written that is neither, as a warning: the name is set over it."""
-
-    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
-    if node.kind != "structure" or written in TITLE_SIDES:
-        return None
-    return Diagnostic(
-        "structure.title-side",
-        f"A structure\u2019s name can\u2019t stand at “{written}”: it is set over the molecule.",
-        Severity.WARNING, entity_id=node.id,
-        hint="Its properties.title_side is top (over the molecule) or bottom (under it).",
-    )
+    return drawing_title(node, style, width)
 
 
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
@@ -195,33 +186,36 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     words = []
     top = 0.0
     named = 0.0
+    side = title_side(node)
     if node.label:
-        # A long name is set on as many lines as the panel is wide, not over its edges.
+        # A long name is set on as many lines as the panel is wide, not over its edges -- as
+        # a picture's is, over it or under it (flexo.title_sides).
         title = structure_title(node, style)
-        named = title.height + 0.3 * u
-        below = structure_title_side(node) == "bottom"
+        named = title_band(title, style)
         words.append(
             Words(
                 f"{node.id}.label",
                 node.label,
                 title,
                 width / 2.0,
-                height + 0.3 * u + title.baseline if below else title.baseline,
+                title_baseline(side, title, style, height),
                 weight=style.typography.title_weight,
             )
         )
-        top = 0.0 if below else named
+        top = 0.0 if side == "bottom" else named
     size = Size(width, named + height)
-    middle = (top + height / 2.0) / size.height
+    middle = drawing_middle(side, named, size.height)
     ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
+    # (Named, the molecule is what a line meets and a row lines up, not it and its name.)
+    drawn = (top, top + height) if named else None
     problem = _problem(node, style)
     if problem is None or problem.drawn:
         return Picture(
             size, (), tuple(words), ports,
-            images=((f"{node.id}.molecule", 0.0, top, width, height),),
+            images=((f"{node.id}.molecule", 0.0, top, width, height),), drawn=drawn,
         )
     shapes, said = _placeholder(node, measures, problem, top, width, height)
-    return Picture(size, shapes, (*words, *said), ports)
+    return Picture(size, shapes, (*words, *said), ports, drawn=drawn)
 
 
 def _placeholder(node: NodeSpec, measures, problem: _Problem, top: float, width: float,
@@ -320,6 +314,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
                                                    re.IGNORECASE):
         return _Problem("source", f"Couldn't find {name}", "There is no such file in the folder.")
+    from flexo.structure_kept import checked, keep_checked
+
+    known, kept = checked(ask, name)
+    if known:  # (checked before, as it is now: not read again)
+        return None if kept is None else _Problem(**kept)
     fetched = not Path(ask.source).exists()
     try:
         figure = _one_at_a_time(_drawn, ask)
@@ -349,8 +348,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     try:
         _one_at_a_time(check, figure, ask)
     except Unseen as error:
-        return _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
-                        drawn=True)
+        found = _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
+                         drawn=True)
+        keep_checked(ask, name, asdict(found))
+        return found
+    keep_checked(ask, name, None)
     return None
 
 
@@ -575,6 +577,11 @@ def structure_png(
     if _failed.get(_failing(ask)):
         return _hatched(width / height)
     try:
+        if ask.look in VECTOR_LOOKS:
+            # (Drawn once with its shapes: a picture where they would not do.)
+            drawn = _one_at_a_time(_render_svg, ask, width / height)
+            if isinstance(drawn, bytes):
+                return drawn
         return _one_at_a_time(_render, ask, width / height)
     except Exception as error:
         # What mol-sketch said, without where in its code it said it.
@@ -599,10 +606,10 @@ def structure_svg(
     if ask.look not in VECTOR_LOOKS or _failed.get(_failing(ask)):
         return None
     try:
-        markup = _one_at_a_time(_render_svg, ask, width / height)
+        drawn = _one_at_a_time(_render_svg, ask, width / height)
     except Exception:
         return None  # structure_png meets the same failure, and says it
-    return None if markup is None else _own_ids(markup, f"{node.id}.molecule")
+    return _own_ids(drawn, f"{node.id}.molecule") if isinstance(drawn, str) else None
 
 
 _PICTURED = ("<image", "mix-blend-mode", "<filter", "<pattern", "<mask", "Gradient", "<clipPath")
@@ -612,7 +619,16 @@ a rectangle: a drawing with any of them is embedded as a picture instead."""
 
 
 @functools.lru_cache(maxsize=32)
-def _render_svg(ask: _Ask, aspect: float) -> str | None:
+def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
+    """The molecule in a look drawn as shapes: its SVG, painted by role -- or, drawn with
+    more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
+    as PNG bytes, from the same drawing."""
+
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect)
+    if kept is not None:
+        return kept
     figure = _drawn(ask)
     long_side = 1200  # as _render draws it: the same pen weight against the molecule
     size = (
@@ -624,11 +640,18 @@ def _render_svg(ask: _Ask, aspect: float) -> str | None:
         figure.label_site(size)
     # No paper laid down: the figure's page is under it (its colour is still the paper's).
     figure.set(**{"paper.transparent": True})
-    text = figure.svg(size, scale=1.0)
-    if any(mark in text for mark in _PICTURED):
-        return None
-    shading = float(figure.style.get("shading") or 0.0)
-    return _painted_by_role(text, ask, min(max(0.3 * shading, 0.0), 1.0))
+    if hasattr(figure, "svg_or_image"):
+        # One drawing, either way: mol-sketch hands back its picture where it holds more
+        # than shapes -- on no paper, so nothing need be taken out of it.
+        drawn = figure.svg_or_image(size, scale=1.0)
+        if not isinstance(drawn, str):
+            return keep_drawing(ask, aspect, _png(drawn.to_numpy()))
+    else:  # (a mol-sketch before it could)
+        drawn = figure.svg(size, scale=1.0)
+    if any(mark in drawn for mark in _PICTURED):
+        return keep_drawing(ask, aspect, _render(ask, aspect))
+    shading = min(max(0.3 * float(figure.style.get("shading") or 0.0), 0.0), 1.0)
+    return keep_drawing(ask, aspect, _painted_by_role(drawn, ask, shading))
 
 
 def _painted_by_role(text: str, ask: _Ask, shade: float) -> str:
@@ -831,15 +854,9 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     # in the figure draws helices and strands -- theirs, so the two agree.
     roles = [("ink", ink)]
     if figured:
-        # Flat in the figure's colours, the whole molecule is: helices in the accent's fill,
-        # strands in the warm one, loops in the neutral fill (a protein map's tones win,
-        # below), words, charges, a mechanism's arrows and its measures in ink, hydrogen
-        # bonds in the accent's line -- and a scene's orbitals, filled in the warm fill and
-        # empty in the accent's, the window they are measured against in the neutral fill.
-        for key, role in (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
-                          ("label", "ink"), ("charge", "ink"), ("arrow", "ink"),
-                          ("hbond", "accent-stroke"), ("filled", "warm-fill"),
-                          ("empty", "accent-fill"), ("measure", "ink"), ("window", "block-fill")):
+        # Flat in the figure's colours, the whole molecule is (SCHEMED; a protein map's tones
+        # win, below).
+        for key, role in SCHEMED:
             roles.append((key, palette.get(role)))
     for tone, key in (("helix", "helix"), ("strand", "sheet")):
         index = palette.tone_index(tone)
@@ -1167,18 +1184,24 @@ def _solvent(figure, ask: _Ask) -> None:
 def _ions(source: str, stamp: float) -> tuple[str, ...]:
     """The residues of a structure that are one atom, but for waters: its ions."""
 
-    atoms: dict[tuple[str, int, str], list[_Atom]] = {}
-    for atom in _atoms(source, stamp):
-        if atom.het and atom.element.upper() != "H" and atom.resn not in {"HOH", "WAT"}:
-            atoms.setdefault((atom.chain, atom.resi, atom.resn), []).append(atom)
-    lone = {resn for (_, _, resn), held in atoms.items() if len(held) == 1}
+    heavy: dict[tuple[str, int, str], int] = {}
+    for residue in _residues(source, stamp):
+        if residue.het and residue.heavy and residue.resn not in {"HOH", "WAT"}:
+            key = (residue.chain, residue.resi, residue.resn)
+            heavy[key] = heavy.get(key, 0) + residue.heavy
+    lone = {resn for (_, _, resn), count in heavy.items() if count == 1}
     # A residue name that is one atom somewhere and more elsewhere is not an ion.
-    more = {resn for (_, _, resn), held in atoms.items() if len(held) > 1}
+    more = {resn for (_, _, resn), count in heavy.items() if count > 1}
     return tuple(sorted(lone - more))
 
 
 @functools.lru_cache(maxsize=32)
 def _render(ask: _Ask, aspect: float) -> bytes:
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect, "png")
+    if isinstance(kept, bytes):
+        return kept
     figure = _drawn(ask)
     # mol-sketch's pen is sized for its own canvas (1920 wide): drawn at that
     # scale and shrunk into the box, the lines keep their weight against the molecule.
@@ -1192,7 +1215,7 @@ def _render(ask: _Ask, aspect: float) -> bytes:
         figure.label_site(size)
     image = figure.render(size, scale=1.0)
     pixels = image.to_numpy()
-    return _png(_without_paper(pixels, ask.paper))
+    return keep_drawing(ask, aspect, _png(_without_paper(pixels, ask.paper)), "png")
 
 
 @functools.lru_cache(maxsize=16)
@@ -1278,15 +1301,86 @@ def _atoms(source: str, stamp: float) -> tuple[_Atom, ...]:
     )
 
 
+class _Residue(NamedTuple):
+    """A residue as mol-sketch's scene says it of each of its atoms (a tuple: a ribosome's
+    18 000 are made at once)."""
+
+    group: str
+    """Its name in mol-sketch, which it is coloured by: ``SER195.A``."""
+    resn: str
+    resi: int
+    chain: str
+    het: bool
+    ss: str
+    entity: str
+    subunit: str
+    heavy: int
+    """How many of its atoms are not hydrogens."""
+
+
+@functools.lru_cache(maxsize=8)
+def _residues(source: str, stamp: float) -> tuple[_Residue, ...]:
+    """The molecule's residues, in its order (what its colours and its ions are worked out
+    on): read from mol-sketch a residue at a time, not from its every atom -- a ribosome's
+    220 000 atoms took seconds to read, its 18 000 residues take milliseconds."""
+
+    return _residues_of(_loaded(source, stamp)) or _grouped(_atoms(source, stamp))
+
+
+def _residues_of(figure) -> tuple[_Residue, ...] | None:
+    """A mol-sketch figure's residues -- None for a scene, or from a mol-sketch that can't
+    list them (one before it could)."""
+
+    from molsketch._engine import CoreError, engine
+
+    try:
+        table = engine().call("residues", figure._spec())
+    except CoreError as error:
+        if "not a function" in str(error):
+            return None
+        raise
+    if not table:
+        return None
+    return tuple(
+        _Residue(f"{resn}{resi}{'.' + chain if chain else ''}", resn, int(resi), chain,
+                 bool(het), ss or "", entity or "", subunit or "", heavy)
+        for resn, resi, chain, het, ss, entity, subunit, heavy in zip(
+            table["resn"], table["resi"], table["chain"], table["het"], table["ss"],
+            table["entity"], table["subunit"], table["heavy"], strict=True,
+        )
+    )
+
+
+def _grouped(atoms: tuple[_Atom, ...]) -> tuple[_Residue, ...]:
+    """Atoms as the residues they are of, in the order they first come."""
+
+    found: dict[str, list] = {}
+    for atom in atoms:
+        key = atom.group or f"{atom.resn}{atom.resi}{'.' + atom.chain if atom.chain else ''}"
+        held = found.get(key)
+        if held is None:
+            found[key] = [atom, 0]
+            held = found[key]
+        held[1] += atom.element.upper() != "H"
+    return tuple(
+        _Residue(key, atom.resn, atom.resi, atom.chain, atom.het, atom.ss, atom.entity,
+                 atom.subunit, heavy)
+        for key, (atom, heavy) in found.items()
+    )
+
+
 _NUCLEIC = frozenset({
     "A", "C", "G", "U", "I", "DA", "DC", "DG", "DT", "DI", "N", "PSU", "5MC", "7MG", "OMG", "OMC",
     "1MA", "2MG", "M2G", "4SU", "H2U", "5MU", "YG", "UR3", "MA6", "6MZ", "A2M", "CM0", "G7M", "QUO",
 })
 _BACKBONE = frozenset({"N", "CA", "C", "O", "OXT"})
 _LISTED = {
-    "chain": "chain", "c.": "chain", "resn": "resn", "r.": "resn", "name": "name", "n.": "name",
+    "resn": "resn", "r.": "resn", "name": "name", "n.": "name",
     "elem": "element", "e.": "element", "ss": "ss", "subunit": "subunit",
 }
+"""What a selection's words match in any case: a residue's name, an atom's, an element. A
+chain is matched as the file writes it, in its case (a ribosome's Le is not its LE), as
+mol-sketch matches it."""
 
 
 class _BadSelection(ValueError):
@@ -1348,6 +1442,9 @@ def _selection(text: str):
         word = aliases.get(word, word)
         if word in simple:
             return simple[word]
+        if word in {"chain", "c."}:
+            chains = set(listed(word))
+            return lambda atom: atom.chain in chains
         if word in _LISTED:
             wanted = {value.upper() for value in listed(word)}
             field = _LISTED[word]

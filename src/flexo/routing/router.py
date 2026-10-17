@@ -45,7 +45,7 @@ from flexo.components import (
     TRANSPARENT_KINDS,
     TRANSPARENT_ROLES,
     route_clearance,
-    titled,
+    title_edge,
 )
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.frames import FRAME_KIND
@@ -669,9 +669,9 @@ def _turn_crossing_ends(
             group = pins_of[key]
             current = key[2]
             turns = [turn for turn in Side if turn.horizontal != current.horizontal]
-            if titled(ends[group[0]].node.measured.spec):
-                # (Never onto a top a name is set across.)
-                turns = [turn for turn in turns if turn is not Side.NORTH]
+            # (Never onto a side a name is set across.)
+            named = title_edge(ends[group[0]].node.measured.spec)
+            turns = [turn for turn in turns if turn is not named]
             if ends[group[0]].node.measured.spec.kind in POINT_KINDS:
                 # A circle's opposite side is as near as any: a skip into a sum
                 # from the left is as natural as from the right.
@@ -788,10 +788,10 @@ def _try_loops(
             across = abs(there.x - here.x) >= abs(there.y - here.y)
             for side in (Side.NORTH, Side.SOUTH) if across else (Side.WEST, Side.EAST):
                 key = (first, second, side)
-                if side is Side.NORTH and any(
-                    titled(ends[end].node.measured.spec) for end in (first, second)
+                if any(
+                    title_edge(ends[end].node.measured.spec) is side for end in (first, second)
                 ):
-                    continue  # never onto a top a name is set across
+                    continue  # never onto a side a name is set across
                 if key in tried or trials >= SIDE_TRIALS + LOOP_TRIALS or not _within_budget():
                     continue
                 tried.add(key)
