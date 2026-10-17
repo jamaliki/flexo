@@ -29,6 +29,7 @@ from flexo.layout import fit_figure, measure_figure
 from flexo.pages import lettered
 from flexo.routing import route_figure
 from flexo.routing.room import crossing_room, crossings, room_needed, with_room
+from flexo.structure_fit import hugged, proportioned
 from flexo.structure_frames import framed
 from flexo.style import LayoutStyle, Palette
 from flexo.svg import SVGDocument
@@ -74,9 +75,11 @@ def compile_figure(
     held = (frames, lines, grouped) if any(lines) or any(grouped) else None
     # Each shape's words in the weight and slant it asks for (``flexo.wording``).
     figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
-    # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames).
+    # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames),
+    # and each laid out round its molecule as drawn (flexo.structure_fit).
+    figure = proportioned(figure, layout_style)
     unframed = figure
-    figure = framed(figure, layout_style)
+    figure = hugged(framed(figure, layout_style), layout_style, paint_palette)
     figure = _with_margin_for(frames, figure, layout_style)
     figure = _with_room_for_titles(frames, figure, layout_style)
     measured = measure_figure(figure, style=layout_style)
@@ -108,7 +111,7 @@ def compile_figure(
                 smaller = _with_smaller_structures(unframed, layout_style, scale)
                 if smaller is unframed:
                     break
-                smaller = framed(smaller, layout_style)
+                smaller = hugged(framed(smaller, layout_style), layout_style, paint_palette)
                 smaller = _with_margin_for(frames, smaller, layout_style)
                 figure = _with_room_for_titles(frames, smaller, layout_style)
                 measured = measure_figure(figure, style=layout_style)

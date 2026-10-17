@@ -262,7 +262,10 @@ def _estimate(spec: FigureSpec, style, width: float, height: float, most: float)
 
     give_up_if_newer()
     try:
-        measured = measure_figure(spec, style=style)
+        # (Its structures laid out round their molecules, as the figure is compiled with them.)
+        from flexo.structure_fit import measured_as_drawn
+
+        measured = measure_figure(measured_as_drawn(spec, style), style=style)
     except Exception:
         return 0.0
     root = next(group for group in measured.groups if group.spec.id == spec.root)

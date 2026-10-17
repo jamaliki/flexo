@@ -1531,8 +1531,10 @@ class GroupBuilder:
         pocket). ``palette`` names a mol-sketch group palette, ``style`` sets any field
         of mol-sketch's style over the look (``{"fill": "ink colour", "line":
         {"width": 2}}``), and ``density`` draws a density map with it (``"auto"``, an
-        EMDB ID, or a map file). ``width`` and ``height`` size the molecule's box in
-        points (20 by 15 label sizes by default), its name above it (``title_side=
+        EMDB ID, or a map file). ``width`` and ``height`` are the most the molecule's
+        box may take, in points (20 by 15 label sizes by default): it is drawn in that
+        canvas and its part is what it draws (given one, the other follows the
+        molecule; ``flexo.structure_fit``), its name above it (``title_side=
         "bottom"``: under it). Structures naming the same ``frame`` are drawn with one
         camera, at one scale, about one centre, turned and framed as the first of them is
         (``flexo.structure_frames``). ``noise`` draws it as a diffusion model does on its
