@@ -860,6 +860,9 @@ It meets a group drawn with an outline (a module, a titled box) at that outline,
 group that draws none (a layout group, a panel) at the box round what it holds, its
 arrowhead as far short of those parts as it would stop short of one of them -- at the
 middle of the side that faces its other end, or of the side `depart` or `arrive` names.
+On its left or right side, that middle is the line the group's parts stand on where it
+centres them: beside a row of named molecules, level with the molecules, not their names,
+so an arrow on to the next part lined up there runs straight.
 Such a line moves nothing: the figure is laid out without it and the line routed to the
 group where the layout put it, never in among the group's parts on its way. In Python,
 `connect()` takes a group (the `module`/`group` you made, or its id) as it takes a shape.

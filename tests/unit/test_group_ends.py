@@ -350,3 +350,48 @@ def test_a_figure_turned_to_fit_a_box_keeps_its_lines_to_groups() -> None:
         "edge.1.ins-to-cell",
         "edge.2.cell-to-outs",
     }
+
+
+REACTION = """
+figure: {id: reaction, width: 420}
+groups:
+- {id: root, role: canvas, layout: {kind: row, gap: 30, align: center}, children: [ins, cell, outs]}
+- {id: ins, role: layout, layout: {kind: grid, columns: 3, column_gap: 6, align: center},
+   children: [water, plus, oxygen]}
+- {id: outs, role: layout, layout: {kind: grid, columns: 2, column_gap: 6, align: center},
+   children: [two, product]}
+nodes:
+- {id: water, kind: mechanism, properties: {steps: [{smiles: O, arrow: none, label: Water}]}}
+- {id: plus, kind: text, label: "+"}
+- {id: oxygen, kind: mechanism, properties: {steps: [{smiles: O=O, arrow: none, label: Oxygen}]}}
+- {id: cell, label: Cell, height: 40}
+- {id: two, kind: text, label: "2"}
+- {id: product, kind: mechanism, properties: {steps: [{smiles: OO, arrow: none, label: Peroxide}]}}
+"""
+
+
+def test_a_line_beside_a_group_of_named_molecules_meets_it_level_with_the_molecules() -> None:
+    """The substrates' line left their box at its middle -- half a name's line under the
+    molecules, which a centred row lines up by their drawings -- and stepped up into the
+    next part. It meets the group on the line its parts stand on, and runs straight."""
+
+    from flexo.title_sides import middle_y
+
+    document = yaml.safe_load(REACTION)
+    document["edges"] = [{"from": "ins", "to": "cell"}, {"from": "cell", "to": "outs"}]
+    drawn = compile_figure(parse_figure(document))
+    assert _errors(drawn) == []
+    ins = drawn.fitted.group("ins")
+    level = ins.bounds.y + ins.measured.middle
+    assert level == pytest.approx(middle_y(drawn.fitted.node("oxygen")))
+    assert level < _held(drawn, "water", "plus", "oxygen").center.y - 2.0
+    for source, target in (("ins", "cell"), ("cell", "outs")):
+        line = _line(drawn, source, target).centerline
+        assert len(line) == 2
+        assert [point.y for point in line] == pytest.approx([level, level])
+    # Above or below it, a line meets the middle of the group's side, as ever.
+    document["edges"] = [{"from": "ins", "to": "cell", "depart": "south", "arrive": "south"}]
+    under = compile_figure(parse_figure(document))
+    start = _line(under, "ins", "cell").centerline[0]
+    held = _held(under, "water", "plus", "oxygen")
+    assert _side_met(held, start) == "south" and start.x == pytest.approx(held.center.x)
