@@ -847,3 +847,28 @@ def test_the_editor_frames_a_turning_molecule_as_mol_sketch_does() -> None:
     turned = placed([[0, 0, 0], [10, 0, 0], [0, 0, 2]], turn=(90, 0, 0))["at"]
     (x0, *_), (x1, *_), (x2, *_) = turned
     assert x1 == pytest.approx(x0, abs=1e-6) and x2 > x0
+
+
+def test_a_row_of_structures_too_wide_for_its_page_draws_them_smaller_to_fit() -> None:
+    """A diffusion run's five frames at their usual size are wider than a double column: they
+    are drawn smaller, alike, until the row fits its page -- with no warning that it grew. A
+    structure given a size of its own keeps it."""
+
+    def figure(sized: bool = False):
+        with flexo.Figure("run", width="double-column") as made:
+            row = made.root.row("row")
+            for k in range(5):
+                own = {"width": 150, "height": 110} if sized and k == 0 else {}
+                row.structure(f"t{k}", DATA / "1a7g.cif", label=f"t = {k}", look="flat",
+                              frame="run", **own)
+        return made.spec
+
+    compiled = compile_figure(figure())
+    said = [d.code for d in compiled.measured.diagnostics]
+    assert "layout.width.grown" not in said
+    widths = {round(compiled.routed.fitted.node(f"row.t{k}").bounds.width, 1) for k in range(5)}
+    assert len(widths) == 1 and widths.pop() < 20.0 * flexo.drawn.units(figure_style(figure())).u
+    # One given a size keeps it; the others are drawn smaller.
+    sized = compile_figure(figure(sized=True))
+    assert round(sized.routed.fitted.node("row.t0").bounds.width) >= 150
+    assert sized.routed.fitted.node("row.t1").bounds.width < 150
