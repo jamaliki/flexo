@@ -487,6 +487,15 @@ export function drawnRect(element) {
   }
   return box || whole;
 }
+// The whole canvas a molecule is drawn in, on the page: its box shows only the part of it
+// the molecule is drawn on (flexo.structure_fit), which says where all of it lies.
+export function moleculeCanvas(molecule) {
+  const said = molecule?.getAttribute?.("data-flexo-canvas")?.split(" ").map(Number);
+  const matrix = molecule?.getScreenCTM?.();
+  if (said?.length !== 4 || !said.every(Number.isFinite) || !matrix) return drawnRect(molecule);
+  const [a, b] = [[said[0], said[1]], [said[0] + said[2], said[1] + said[3]]].map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix));
+  return new DOMRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+}
 function viewportRect(svg) {
   const matrix = svg.parentNode?.getScreenCTM?.();
   if (!matrix) return svg.getBoundingClientRect();
@@ -2629,7 +2638,11 @@ export function figureParts(host) {
     if (!sizing) return;
     if (!sizing.moved || Math.abs(sizing.scale - 1) < 0.01) { sizing.element.style.transform = ""; return; }
     const { box, unit, scale, id, element } = sizing;
-    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round((box.width / unit) * scale), "properties.height": Math.round((box.height / unit) * scale) } },
+    // A molecule's box is cut from the canvas it is drawn in, which its width and height
+    // are: that is what grows, and the molecule with it, as its box did.
+    const canvas = element.getAttribute?.("data-flexo-canvas")?.split(" ").map(Number);
+    const [wide, high] = canvas?.length === 4 && canvas.every(Number.isFinite) ? [canvas[2], canvas[3]] : [box.width / unit, box.height / unit];
+    act({ do: "update", target: { type: "node", id }, values: { "properties.width": Math.round(wide * scale), "properties.height": Math.round(high * scale) } },
       { then: () => { state.landing = Date.now(); }, failed: () => { element.style.transform = ""; } });
     // Should no new drawing come, it goes back to the size it is drawn at.
     setTimeout(() => { if (element.isConnected) element.style.transform = ""; }, 6000);
@@ -3470,9 +3483,10 @@ export function figureParts(host) {
     window.addEventListener("pointercancel", turnCancel);
     window.addEventListener("keydown", turnKey, true);
   }
-  // A canvas over a molecule's box, for what it draws to be drawn turning.
+  // A canvas over a molecule's box, for what it draws to be drawn turning: over the whole
+  // canvas it is drawn in, which its box is cut from (moleculeCanvas), framed as it will be.
   function turnCanvas(molecule) {
-    const outer = host.overlay.getBoundingClientRect(), box = drawnRect(molecule);
+    const outer = host.overlay.getBoundingClientRect(), box = moleculeCanvas(molecule);
     const ratio = window.devicePixelRatio || 1;
     return h("canvas.fig-turn", { width: Math.round(box.width * ratio), height: Math.round(box.height * ratio),
       style: { left: `${box.left - outer.left}px`, top: `${box.top - outer.top}px`, width: `${box.width}px`, height: `${box.height}px` } });
