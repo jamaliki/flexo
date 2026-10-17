@@ -35,6 +35,13 @@ loop that leaves from that residue in the loop's. Only a residue drawn otherwise
 
 mol-sketch is handed each residue's colour by its own name for it (``SER195.A``) -- and a
 chain all one colour but for a few residues, as most are, by the chain's, the few by theirs.
+
+A chain is named as the file writes it, in its case: a ribosome's ``Le`` is not its ``LE``.
+
+What a row may colour is offered (``choices``) as the molecule has it: its subunits, where
+it has more than one (a ribosome's large and small, as mol-sketch tells them by its
+entities' names); its entities of more than one chain, by name; and each chain by the name
+of what it is (``28S rRNA``, ``flexo.structure_names``).
 """
 
 from __future__ import annotations
@@ -45,6 +52,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from flexo.structure_names import compound_names, entity_names
 from flexo.structures import _NUCLEIC, _atoms, _BadSelection, _called, _selection
 
 SHADES = {"H": "helix", "E": "sheet", "L": "loop"}
@@ -459,9 +467,11 @@ def said(figure, ask) -> dict[str, object]:
     try:
         found = molecule(ask.source, ask.stamp)
         each = rows(ask.source, ask.stamp, groups, name)
+        offered = _offered(ask.source, ask.stamp)
     except Exception:  # (its residues unread: nothing said of its rows)
         return {"groups": {}, "ligands": []}
     return {
+        "choices": offered,
         "groups": {
             group: {"residues": len(row.places), "problem": row.problem, "hint": row.hint}
             for group, row in zip(groups, each, strict=True)
@@ -471,3 +481,78 @@ def said(figure, ask) -> dict[str, object]:
             for residue in found.ligands()
         ],
     }
+
+
+SUBUNITS = {"L": "Large Subunit", "S": "Small Subunit", "T": "tRNA and mRNA"}
+"""mol-sketch's subunits (``subunit:L``) by name: as it tells them by its entities' names
+(``28S rRNA`` is of the large, ``40S ribosomal protein S3`` of the small, a tRNA or an mRNA
+of neither). A molecule's other chains are of none (``X``)."""
+
+
+@functools.lru_cache(maxsize=8)
+def _offered(source: str, stamp: float) -> dict[str, list[dict[str, object]]]:
+    return choices(molecule(source, stamp), entity_names(source), compound_names(source))
+
+
+def choices(found: Molecule, entities: dict[str, str],
+            compounds: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> dict[str, list]:
+    """What a row of the molecule's colours may colour, as the studio offers it: its
+    ``subunits`` (where it has more than one), its ``entities`` of more than one chain (an
+    mmCIF's by ``entity:``; a PDB file's molecules, its COMPND records', as their chains), and
+    its ``chains``, each by the name of what it is (``entities``, by entity ID; else
+    ``compounds``, a PDB file's) -- in the file's order."""
+
+    polymer: dict[str, Residue] = {}
+    for chain, places in found.chains.items():
+        if chain:
+            held = (found.residues[place] for place in places)
+            polymer[chain] = next((each for each in held if not each.het),
+                                  found.residues[places[0]])
+    compound = {chain: name for name, chains in compounds for chain in chains}
+    called = {chain: entities.get(residue.entity) or compound.get(chain, "")
+              for chain, residue in polymer.items()}
+
+    by_subunit: dict[str, list[str]] = {}
+    by_entity: dict[str, list[str]] = {}
+    for chain, residue in polymer.items():
+        by_subunit.setdefault(residue.subunit.upper(), []).append(chain)
+        if residue.entity:
+            by_entity.setdefault(residue.entity, []).append(chain)
+    subunits = []
+    if len(set(by_subunit) - {"X"}) > 1:
+        order = list(SUBUNITS)
+        for code in sorted(set(by_subunit) - {"X"},
+                           key=lambda each: (order.index(each) if each in order else 9, each)):
+            named = [called[chain] for chain in by_subunit[code]]
+            subunits.append({"group": f"subunit:{code}", "label": _subunit(code, named),
+                             "chains": len(by_subunit[code])})
+    entities_offered = [
+        {"group": f"entity:{entity}", "label": entities.get(entity) or f"Entity {entity}",
+         "chains": chains}
+        for entity, chains in by_entity.items() if len(chains) > 1
+    ]
+    if not by_entity:  # (a PDB file's molecules: by their chains, as it has no entities)
+        for name, chains in compounds:
+            held = [chain for chain in chains if chain in polymer]
+            if len(held) > 1:
+                entities_offered.append(
+                    {"group": f"chain {'+'.join(held)}", "label": name, "chains": held}
+                )
+    return {
+        "subunits": subunits,
+        "entities": entities_offered,
+        "chains": [{"chain": chain, "name": called[chain]} for chain in polymer],
+    }
+
+
+def _subunit(code: str, names: list[str]) -> str:
+    """A subunit by name: the one of tRNAs and mRNAs by which it holds."""
+
+    if code != "T":
+        return SUBUNITS.get(code, f"Subunit {code}")
+    kinds = {kind for kind in ("tRNA", "mRNA") for name in names if kind.lower() in name.lower()}
+    if kinds == {"tRNA"}:
+        return "tRNA" if len(names) == 1 else "tRNAs"
+    if kinds == {"mRNA"}:
+        return "mRNA"
+    return SUBUNITS["T"]

@@ -6803,7 +6803,7 @@ export function figureParts(host) {
       case "records":
         // (A structure's colours: rows of selections, in order -- structurecolours.js.)
         if (item?.kind === "structure" && field.key === "properties.colors") {
-          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced });
+          return structureColours({ field, value: Array.isArray(value) ? value : [], set, key, settings: settingsOf(item.id), typedField, paced, source: item.properties?.source });
         }
         return recordsControl(field, Array.isArray(value) ? value : [], set, key, valueAt(item, "properties.length"), item);
       case "molpalette":

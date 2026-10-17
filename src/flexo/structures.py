@@ -1284,9 +1284,12 @@ _NUCLEIC = frozenset({
 })
 _BACKBONE = frozenset({"N", "CA", "C", "O", "OXT"})
 _LISTED = {
-    "chain": "chain", "c.": "chain", "resn": "resn", "r.": "resn", "name": "name", "n.": "name",
+    "resn": "resn", "r.": "resn", "name": "name", "n.": "name",
     "elem": "element", "e.": "element", "ss": "ss", "subunit": "subunit",
 }
+"""What a selection's words match in any case: a residue's name, an atom's, an element. A
+chain is matched as the file writes it, in its case (a ribosome's Le is not its LE), as
+mol-sketch matches it."""
 
 
 class _BadSelection(ValueError):
@@ -1348,6 +1351,9 @@ def _selection(text: str):
         word = aliases.get(word, word)
         if word in simple:
             return simple[word]
+        if word in {"chain", "c."}:
+            chains = set(listed(word))
+            return lambda atom: atom.chain in chains
         if word in _LISTED:
             wanted = {value.upper() for value in listed(word)}
             field = _LISTED[word]

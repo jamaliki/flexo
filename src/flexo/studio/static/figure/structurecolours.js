@@ -1,16 +1,19 @@
 // A structure's colours, as rows (flexo.structure_colours): what each row colours -- a chain,
-// a residue, a ligand, or a selection such as resi 10-24 -- typed, or chosen from the
-// molecule's chains, its secondary structure and its ligands; and its colour, in a well or
-// by a tone's name. A later row wins over an earlier one, so a row is dragged up or down by
-// its grip (or moved with ↑ and ↓ from it). What each row colours is asked of the studio:
-// how many residues, said in its tooltip, and why one colours nothing, said under the rows.
-// A dozen rows show at once; more scroll in their own list.
-import { h, clear, icon, ui, menu } from "/static/studio/studio.js";
+// a residue, a ligand, or a selection such as resi 10-24 -- typed, or chosen from what the
+// molecule has: its subunits, its chains by name, its secondary structure and its ligands
+// (structurepick.js); and its colour, in a well or by a tone's name. A later row wins over
+// an earlier one, so a row is dragged up or down by its grip (or moved with ↑ and ↓ from it).
+// What each row colours is asked of the studio: how many residues, said in its tooltip, and
+// why one colours nothing, said under the rows. A dozen rows show at once; more scroll in
+// their own list.
+import { h, clear, icon, ui } from "/static/studio/studio.js";
 import { parseColour, rememberColour } from "/static/studio/hexcolour.js";
+import { pickItems, openPick } from "/static/kinds/figure/structurepick.js";
 
 const COLOURS = ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"];
-// What the molecule's own secondary structure is selected by.
-const SECONDARY = [["Helices", "ss H"], ["Strands", "ss E"], ["Loops", "ss L and polymer"]];
+// What each structure file was last said to have, by its source: its menu opens at once from
+// it while what the studio says now is on its way (a ribosome's takes a while).
+const lastKnown = new Map();
 
 const SHEET = "/static/kinds/figure/structurecolours.css";
 // (Asked for once, as the first rows are drawn.)
@@ -20,8 +23,10 @@ function styled() {
 
 // `typedField` and `paced` are the inspector's own (parts.js): words sent once they are
 // whole, a colour dragged in the system's picker sent as it goes.
-export function structureColours({ field, value, set, key, settings, typedField, paced }) {
+export function structureColours({ field, value, set, key, settings, typedField, paced, source }) {
   styled();
+  let settled = null;
+  settings.then((known) => { settled = known; if (known && source) lastKnown.set(source, known); });
   const rows = value.map((row) => ({ ...(row && typeof row === "object" ? row : {}) }));
   const write = () => set(rows.map((row) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== "" && v !== null && v !== undefined))));
   const tones = field.columns.find((column) => column.name === "color")?.options || [];
@@ -55,23 +60,14 @@ export function structureColours({ field, value, set, key, settings, typedField,
     const group = typedField({ value: row.group, key: cellKey(index, "group"), placeholder, mono: true, onCommit: (text) => { row.group = text; write(); } });
     const pick = h("button.cell-pick", { type: "button", tabIndex: -1, title: "Choose", "aria-label": "Choose What Row Colours" }, icon("chevron-down"));
     pick.addEventListener("click", async () => {
-      const known = await settings;
-      const chains = known?.chains || [], ligands = known?.colours?.ligands || [];
+      const known = settled || (source && lastKnown.get(source)) || await settings;
       // (Chosen as if typed and Return pressed: words still on their way are not sent after.)
       const choose = (text) => () => {
         group.value = text;
         group.dispatchEvent(new Event("input"));
         group.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
       };
-      menu(pick, [
-        { title: "Chains" },
-        ...(chains.length ? chains.map((chain) => ({ label: `Chain ${chain}`, run: choose(chain) })) : [{ label: "No chains found", disabled: true }]),
-        "-",
-        { title: "Secondary Structure" },
-        ...SECONDARY.map(([label, text]) => ({ label, run: choose(text) })),
-        ...(ligands.length ? ["-", { title: "Ligands" }, { label: "Every Ligand", run: choose("hetatm and not water") },
-          ...ligands.map((ligand) => ({ label: ligand.label, run: choose(ligand.group) }))] : []),
-      ]);
+      openPick(pick, pickItems(known, choose));
     });
 
     const hex = /^#[0-9a-f]{6}$/i.test(row.color || "") ? row.color : null;
