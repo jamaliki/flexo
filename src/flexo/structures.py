@@ -575,6 +575,11 @@ def structure_png(
     if _failed.get(_failing(ask)):
         return _hatched(width / height)
     try:
+        if ask.look in VECTOR_LOOKS:
+            # (Drawn once with its shapes: a picture where they would not do.)
+            drawn = _one_at_a_time(_render_svg, ask, width / height)
+            if isinstance(drawn, bytes):
+                return drawn
         return _one_at_a_time(_render, ask, width / height)
     except Exception as error:
         # What mol-sketch said, without where in its code it said it.
@@ -599,10 +604,10 @@ def structure_svg(
     if ask.look not in VECTOR_LOOKS or _failed.get(_failing(ask)):
         return None
     try:
-        markup = _one_at_a_time(_render_svg, ask, width / height)
+        drawn = _one_at_a_time(_render_svg, ask, width / height)
     except Exception:
         return None  # structure_png meets the same failure, and says it
-    return None if markup is None else _own_ids(markup, f"{node.id}.molecule")
+    return _own_ids(drawn, f"{node.id}.molecule") if isinstance(drawn, str) else None
 
 
 _PICTURED = ("<image", "mix-blend-mode", "<filter", "<pattern", "<mask", "Gradient", "<clipPath")
@@ -612,7 +617,11 @@ a rectangle: a drawing with any of them is embedded as a picture instead."""
 
 
 @functools.lru_cache(maxsize=32)
-def _render_svg(ask: _Ask, aspect: float) -> str | None:
+def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
+    """The molecule in a look drawn as shapes: its SVG, painted by role -- or, drawn with
+    more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
+    as PNG bytes, from the same drawing."""
+
     figure = _drawn(ask)
     long_side = 1200  # as _render draws it: the same pen weight against the molecule
     size = (
@@ -624,11 +633,18 @@ def _render_svg(ask: _Ask, aspect: float) -> str | None:
         figure.label_site(size)
     # No paper laid down: the figure's page is under it (its colour is still the paper's).
     figure.set(**{"paper.transparent": True})
-    text = figure.svg(size, scale=1.0)
-    if any(mark in text for mark in _PICTURED):
-        return None
-    shading = float(figure.style.get("shading") or 0.0)
-    return _painted_by_role(text, ask, min(max(0.3 * shading, 0.0), 1.0))
+    if hasattr(figure, "svg_or_image"):
+        # One drawing, either way: mol-sketch hands back its picture where it holds more
+        # than shapes -- on no paper, so nothing need be taken out of it.
+        drawn = figure.svg_or_image(size, scale=1.0)
+        if not isinstance(drawn, str):
+            return drawn.png()
+    else:  # (a mol-sketch before it could)
+        drawn = figure.svg(size, scale=1.0)
+    if any(mark in drawn for mark in _PICTURED):
+        return _render(ask, aspect)
+    shading = min(max(0.3 * float(figure.style.get("shading") or 0.0), 0.0), 1.0)
+    return _painted_by_role(drawn, ask, shading)
 
 
 def _painted_by_role(text: str, ask: _Ask, shade: float) -> str:
