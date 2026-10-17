@@ -179,3 +179,14 @@ export function structureColours({ field, value, set, key, settings, typedField,
     warnings,
     add);
 }
+
+// A scheme chosen does what it says: the structure's own colours for what a scheme colours
+// (its helices, strands and loops; a scene's words, arrows and orbitals) are taken back in
+// the same step -- else they win over it, and the choice changes nothing to be seen. Its
+// rows of colours stay: they are over any scheme. (`field.clears` names them; `valueAt`
+// reads the structure's.)
+export function schemeClears(field, item, next, valueAt) {
+  if (!field.clears || !item || (next ?? field.default) === (valueAt(item, field.key) ?? field.default)) return {};
+  const own = (key) => { const value = valueAt(item, key); return value !== undefined && value !== null && value !== ""; };
+  return Object.fromEntries(field.clears.filter(own).map((key) => [key, null]));
+}

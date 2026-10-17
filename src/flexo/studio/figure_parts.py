@@ -512,7 +512,7 @@ def _bench() -> list[dict[str, Any]]:
 
 def _structure() -> dict[str, Any]:
     from flexo.structure_style import PANES, SECTIONS
-    from flexo.structures import LOOKS, SCHEMES
+    from flexo.structures import LOOKS, SCHEMED, SCHEMES
     from flexo.structures import TITLE_SIDES as STRUCTURE_TITLE_SIDES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
@@ -569,6 +569,9 @@ def _structure() -> dict[str, Any]:
                 default="look",
                 hint="Flat\u2019s own coral helices and amber strands, or the figure\u2019s tones",
                 show={"properties.look": "flat"},
+                # (Chosen, it takes back the structure's own colours for what a scheme colours,
+                # in the same step: else they win over it, and the choice shows nothing.)
+                clears=[f"properties.style.palette.{key}" for key, _ in SCHEMED],
             ),
             _field(
                 "properties.palette",

@@ -93,6 +93,17 @@ SCHEMES = ("look", "figure")
 """Whose colours a flat structure is in: its look's own (mol-sketch's Flat: coral helices,
 amber strands, near-white loops, teal hydrogen bonds), or the figure's tones."""
 
+SCHEMED = (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
+           ("label", "ink"), ("charge", "ink"), ("arrow", "ink"), ("hbond", "accent-stroke"),
+           ("filled", "warm-fill"), ("empty", "accent-fill"), ("measure", "ink"),
+           ("window", "block-fill"))
+"""What a scheme colours: each colour of mol-sketch's palette its look gives -- or, in the
+figure's scheme, the figure's role it is given (helices in the accent's fill, strands in the
+warm one, loops in the neutral fill, words, charges, a mechanism's arrows and its measures
+in ink, hydrogen bonds in the accent's line, a scene's orbitals filled in the warm fill and
+empty in the accent's, the window they are measured against in the neutral fill). A colour
+of the structure's own for one of them wins over either scheme's."""
+
 VECTOR_LOOKS = frozenset({"flat"})
 """Looks whose molecule is nested as shapes, not embedded as a picture. (Its drawing is
 checked all the same: anything a picture holds better is drawn as one; see ``_PICTURED``.)"""
@@ -831,15 +842,9 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
     # in the figure draws helices and strands -- theirs, so the two agree.
     roles = [("ink", ink)]
     if figured:
-        # Flat in the figure's colours, the whole molecule is: helices in the accent's fill,
-        # strands in the warm one, loops in the neutral fill (a protein map's tones win,
-        # below), words, charges, a mechanism's arrows and its measures in ink, hydrogen
-        # bonds in the accent's line -- and a scene's orbitals, filled in the warm fill and
-        # empty in the accent's, the window they are measured against in the neutral fill.
-        for key, role in (("helix", "accent-fill"), ("sheet", "warm-fill"), ("loop", "block-fill"),
-                          ("label", "ink"), ("charge", "ink"), ("arrow", "ink"),
-                          ("hbond", "accent-stroke"), ("filled", "warm-fill"),
-                          ("empty", "accent-fill"), ("measure", "ink"), ("window", "block-fill")):
+        # Flat in the figure's colours, the whole molecule is (SCHEMED; a protein map's tones
+        # win, below).
+        for key, role in SCHEMED:
             roles.append((key, palette.get(role)))
     for tone, key in (("helix", "helix"), ("strand", "sheet")):
         index = palette.tone_index(tone)

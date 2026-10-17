@@ -332,3 +332,60 @@ def test_the_page_offers_a_row_what_the_molecule_has() -> None:
         "})()"
     )
     assert old == [{"title": "Chains"}, {"label": "Chain A", "chain": "A", "run": "A"}]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_a_scheme_chosen_takes_back_the_structures_own_colours_under_it() -> None:
+    """The owner's protein had its own helix, strand and loop colours: The Figure's scheme
+    chosen changed nothing to be seen, as they win over it. Chosen, a scheme takes them back
+    in the same step -- its own ink and its rows of colours stay."""
+
+    from test_pages import _studio
+
+    from flexo.studio.figure_parts import catalogue
+
+    part = catalogue()["parts"]["structure"]
+    field = next(each for each in part["fields"] if each["key"] == "properties.scheme")
+    assert field["clears"][:3] == [
+        "properties.style.palette.helix",
+        "properties.style.palette.sheet",
+        "properties.style.palette.loop",
+    ]
+    node = {
+        "id": "protein",
+        "kind": "structure",
+        "properties": {
+            "source": "3KS3.cif",
+            "look": "flat",
+            "style": {
+                "palette": {
+                    "helix": "#3f7fc0",
+                    "sheet": "#e08a2e",
+                    "loop": "#d9d5de",
+                    "ink": "#242126",
+                }
+            },
+            "colors": [{"group": "resi 94+96+119", "color": "#3a3060"}],
+        },
+    }
+    seen = _studio(
+        "await (async () => {\n"
+        'const colours = await import("/static/kinds/figure/structurecolours.js");\n'
+        "const valueAt = (item, key) => key.split('.').reduce("
+        "(at, part) => (at == null ? undefined : at[part]), item);\n"
+        f"const field = {json.dumps(field)}, node = {json.dumps(node)};\n"
+        "const figure = { ...node, properties: { ...node.properties, scheme: 'figure' } };\n"
+        "return {\n"
+        "  figure: colours.schemeClears(field, node, 'figure', valueAt),\n"
+        "  same: colours.schemeClears(field, node, null, valueAt),\n"
+        "  back: colours.schemeClears(field, figure, null, valueAt),\n"
+        "  other: colours.schemeClears({ key: 'properties.look' }, node, 'textbook', valueAt),\n"
+        "};\n"
+        "})()"
+    )
+    taken = {
+        "properties.style.palette.helix": None,
+        "properties.style.palette.sheet": None,
+        "properties.style.palette.loop": None,
+    }
+    assert seen == {"figure": taken, "same": {}, "back": taken, "other": {}}
