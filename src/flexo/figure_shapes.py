@@ -626,12 +626,13 @@ def part_boxes(fitted: Any, frames: Sequence[Any] = ()) -> dict[str, Box]:
     figure's own among them) and its frames, each its box."""
 
     boxes: dict[str, Box] = {}
-    for group in fitted.groups:
-        bounds = group.bounds
-        boxes[group.measured.spec.id] = (bounds.x, bounds.y, bounds.width, bounds.height)
     for node in fitted.nodes:
         bounds = node.bounds
         boxes[node.measured.spec.id] = (bounds.x, bounds.y, bounds.width, bounds.height)
+    # (A group's own box, over where it stood in for the lines to it: flexo.group_ends.)
+    for group in fitted.groups:
+        bounds = group.bounds
+        boxes[group.measured.spec.id] = (bounds.x, bounds.y, bounds.width, bounds.height)
     for frame in frames:
         bounds = frame.bounds
         boxes[frame.spec.id] = (bounds.x, bounds.y, bounds.width, bounds.height)

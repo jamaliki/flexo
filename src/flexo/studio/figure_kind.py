@@ -81,15 +81,22 @@ Grids: kind cells, properties {grid: "K . K\n. Y R" (one row per line, one symbo
   . empty, numbers shaded on ramp), key: [{symbol, color: tone or #hex, mark, label}], cell,
   gap, corner, lines: ink|muted|#hex, row_labels / column_labels: numbers|letters|"a, b",
   row_side, column_side, ramp: "#lo, #hi", range: "lo, hi", values: true}.
-edges: each {from: node or node.port, to: node or node.port, label, role, head: triangle|stealth|
-  latex|open|hollow|dot|diamond|square, or SBGN's inhibition|catalysis|stimulation|necessary|
-  modulation,
+edges: each {from: node, node.port or group, to: node, node.port or group, label, role, head:
+  triangle|stealth|latex|open|hollow|dot|diamond|square, or SBGN's inhibition|catalysis|
+  stimulation|necessary|modulation,
   arrow: none|both|reversible, tail (the start's head, with arrow: both), back_label, cofactors:
   [ATP, ADP], shape: orthogonal|straight|curved, line: dashed|dotted, tone, width (pt), head_size
-  (1.5 = half as large again)}
+  (1.5 = half as large again), depart/arrive: north|south|east|west (the side it leaves or meets)}
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label, title_side:
   left|right|bottom-left|bottom-right (where its label stands)}; the root group (figure.root,
   "root" by default) holds the rest. A file without groups stacks its nodes.
+An edge may start or end at a group, as at a node -- everything going in, a step, everything
+  coming out: {from: substrates, to: cell}, {from: cell, to: products, arrive: west}. It meets
+  a group drawn with an outline at its outline, and a layout group or panel (which draws none)
+  at the box round what it holds, stopping as short of those parts as of a node; at the middle
+  of the side facing its other end (or depart/arrive's), through none of its parts, and it
+  moves nothing. Never between a group and a part it holds, nor to the root; a group has no
+  ports (substrates.top: write substrates, depart: north).
 A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. An SVG's words
   are set in the figure's font, the same in every output; its properties may say otherwise --
   font: drawn (the faces its file names, as found) or a family; texts: [{id: text1 (the text's

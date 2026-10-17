@@ -188,13 +188,28 @@ def _nodes_under(figure: FigureSpec) -> dict[str, set[str]]:
     return found
 
 
+def _joined(figure: FigureSpec, under: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """The parts each line joins, in pairs, from its start to its end: a line to a group
+    (``flexo.group_ends``) joins each part the group holds."""
+
+    groups = {group.id for group in figure.groups}
+
+    def parts(end: str) -> list[str]:
+        return (sorted(under.get(end, ())) or [end]) if end in groups else [end]
+
+    return [
+        (source, target)
+        for link in layout_connections(figure)
+        for source in parts(link.source.node_id)
+        for target in parts(link.target.node_id)
+    ]
+
+
 def _reads_upward(figure: FigureSpec, under: dict[str, set[str]]) -> bool:
     """Whether the figure's stacks read upward: more wiring between the parts
     of its columns runs from a lower part to a higher one than the other way."""
 
-    pairs = [(edge.source.node_id, edge.target.node_id) for edge in figure.edges]
-    for net in figure.nets:
-        pairs += [(s.node_id, t.node_id) for s in net.sources for t in net.targets]
+    pairs = _joined(figure, under)
     score = 0
     for group in figure.groups:
         if group.layout.kind != "column":
@@ -230,7 +245,7 @@ def wrapped(figure: FigureSpec, *, longest: int = 5, back: bool | None = None) -
     import math
 
     under = _nodes_under(figure)
-    pairs = [(link.source.node_id, link.target.node_id) for link in layout_connections(figure)]
+    pairs = _joined(figure, under)
     taken = {group.id for group in figure.groups} | {node.id for node in figure.nodes}
     kinds = {node.id: node.kind for node in figure.nodes}
     groups: list[GroupSpec] = []

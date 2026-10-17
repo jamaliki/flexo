@@ -13,8 +13,10 @@ import yaml
 from flexo.components import COMPONENTS, normalize_node
 from flexo.conventions import parse_conventions
 from flexo.geometry import Side
+from flexo.group_ends import PLAIN_PORTS
 from flexo.ir.semantic import (
     FIGURE_SIZES,
+    ID_PATTERN,
     EdgeSpec,
     FigureSpec,
     FreeShape,
@@ -69,8 +71,8 @@ def parse_figure(document: object) -> FigureSpec:
     ``kind`` (a block), an edge's ``id`` (numbered as the builder numbers them),
     and ``groups`` (the nodes are stacked in a column, as on a new ``Figure``).
     An edge end may name a node alone -- ``from: encoder`` -- for its usual port,
-    ``output`` where a value leaves and ``input`` where it arrives; ``theme`` is
-    the same as ``style``.
+    ``output`` where a value leaves and ``input`` where it arrives, or a group
+    (``from: substrates``: ``flexo.group_ends``); ``theme`` is the same as ``style``.
     """
 
     document = _written_data(_written_steps(document))
@@ -80,9 +82,20 @@ def parse_figure(document: object) -> FigureSpec:
     assert isinstance(figure_data, dict)
     root = figure_data.get("root", "root")
     node_ids = {item["id"] for item in document["nodes"]}
+    group_ids = {item["id"] for item in document.get("groups", []) if isinstance(item, dict)}
 
     def reference(value: str, port: str) -> PortRef:
-        return PortRef(value, port) if value in node_ids else PortRef.parse(value)
+        # A part or a group by its id; a part's port as part.port (a group's plain way in or
+        # out as the figure writes it, group.output). Anything else is named whole, for
+        # validation to say what it could be (``flexo.validate``).
+        if value in node_ids or value in group_ids or value == root:
+            return PortRef(value, port)
+        head, _, name = value.rpartition(".")
+        if head in node_ids and ID_PATTERN.fullmatch(name):
+            return PortRef(head, name)
+        if head in group_ids and name in PLAIN_PORTS:
+            return PortRef(head, name)
+        return PortRef(value, port)
 
     edges = []
     for index, item in enumerate(document.get("edges", []), start=1):

@@ -16,6 +16,7 @@ from flexo.components import (
 )
 from flexo.conventions import Conventions, parse_conventions
 from flexo.geometry import Side
+from flexo.group_ends import PLAIN_PORTS
 from flexo.ir.semantic import (
     TITLE_SIDES,
     ArrowEnds,
@@ -466,6 +467,12 @@ class Figure:
         joined = f"{reference.node_id}.{reference.port_name}"
         if joined in ports:
             return PortRef(joined, default_port)
+        if (
+            reference.node_id not in ports
+            and reference.port_name in PLAIN_PORTS
+            and any(draft.id == reference.node_id for draft in self._groups)
+        ):
+            return reference  # (a line to a group: flexo.group_ends)
         if reference.node_id not in ports:
             matches = [node_id for node_id in ports if node_id.endswith(f".{reference.node_id}")]
             if len(matches) == 1:
@@ -541,8 +548,8 @@ class Figure:
 
     def connect(
         self,
-        source: NodeHandle | PortRef | str,
-        target: NodeHandle | PortRef | str,
+        source: NodeHandle | GroupBuilder | PortRef | str,
+        target: NodeHandle | GroupBuilder | PortRef | str,
         *,
         id: str | None = None,
         source_port: str = "output",
@@ -2624,8 +2631,8 @@ class GroupBuilder:
 
     def connect(
         self,
-        source: NodeHandle | PortRef | str,
-        target: NodeHandle | PortRef | str,
+        source: NodeHandle | GroupBuilder | PortRef | str,
+        target: NodeHandle | GroupBuilder | PortRef | str,
         *,
         id: str | None = None,
         source_port: str = "output",
@@ -2649,7 +2656,9 @@ class GroupBuilder:
         """Draw one connector from ``source`` to ``target``.
 
         Handles take their ``output`` and ``input`` ports; a ``"node.port"``
-        string or a ``PortRef`` names one exactly. ``lane=`` routes the edge
+        string or a ``PortRef`` names one exactly. A group (its builder, or its id)
+        is met at its outline -- or, one that draws none, the box round what it
+        holds -- moving none of its parts (``flexo.group_ends``). ``lane=`` routes the edge
         through an authored corridor instead of wherever the router would take
         it, and a lane-routed edge no longer votes on which side its ports face.
 
@@ -3187,11 +3196,16 @@ TONE_NAMES = {
 """How a legend names the tones components take from their kind."""
 
 
-def _reference(value: NodeHandle | PortRef | str, default_port: str) -> PortRef:
+def _reference(
+    value: NodeHandle | GroupBuilder | PortRef | str, default_port: str
+) -> PortRef:
     if isinstance(value, PortRef):
         return value
     if isinstance(value, NodeHandle):
         return value.port(default_port)
+    if isinstance(value, GroupBuilder):
+        # A line to a group (``flexo.group_ends``): it meets the group, not a port of it.
+        return PortRef(value.id, default_port)
     return PortRef.parse(value) if "." in value else PortRef(value, default_port)
 
 
