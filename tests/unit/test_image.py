@@ -11,13 +11,13 @@ import yaml
 from flexo.artwork import load_artwork
 from flexo.builder import Figure
 from flexo.compiler import Compilation, compile_figure
-from flexo.components import label_band_height, motif_area
 from flexo.diagnostics import FlexoError
 from flexo.geometry import Point, Side
 from flexo.serialization import dump_figure, parse_figure
 from flexo.style import PALETTES, STYLES
 from flexo.svg import SVG_NS
 from flexo.theme import retheme_svg
+from flexo.title_sides import drawing_title, title_band
 from flexo.units import pt
 
 _ARTWORK = """<?xml version="1.0" encoding="UTF-8"?>
@@ -342,69 +342,176 @@ def test_an_image_is_a_solid_obstacle_for_routing(tmp_path: Path) -> None:
     assert all(not bounds.contains_point(point, strict=True) for point in route)
 
 
-def test_a_label_takes_a_band_off_the_top_and_the_artwork_takes_the_rest(
-    tmp_path: Path,
-) -> None:
-    """R27: an image captions like an inset, never across its own drawing."""
+def _named(compilation: Compilation) -> tuple[ET.Element, ET.Element]:
+    """The picture's name as drawn, and its artwork."""
+
+    root = ET.fromstring(compilation.document.text)
+    label = next(item for item in root.iter() if item.get("id") == "panel.art.label")
+    return label, artwork_element(compilation)
+
+
+def test_a_name_takes_a_band_off_the_top_set_as_a_structures_is(tmp_path: Path) -> None:
+    """R27: an image's name is never set across its own drawing -- and it is set as a
+    structure's is: centred, in the title's weight, a gap of 0.3 type sizes over it."""
 
     compilation = compiled(write_artwork(tmp_path), width="96pt", label="Ligand")
     node = compilation.fitted.node("panel.art")
     style = STYLES["paper"]
-    band = label_band_height("image", node.measured.label, style)
-    area = motif_area("image", node.bounds, node.measured.label, style)
-    root = ET.fromstring(compilation.document.text)
-    label = next(item for item in root.iter() if item.get("id") == "panel.art.label")
+    title = node.measured.label
+    assert title == drawing_title(node.measured.spec, style, 96.0)
+    band = title_band(title, style)
+    assert band == pytest.approx(title.height + 0.3 * style.typography.size.points)
+    label, artwork = _named(compilation)
     assert "".join(item.text or "" for item in label.iter()).strip() == "Ligand"
+    assert label.get("font-weight") == str(style.typography.title_weight)
+    assert label.get("text-anchor") == "middle"
     assert float(label.get("x", "")) == pytest.approx(node.bounds.center.x)
-    baseline = float(label.get("y", ""))
-    assert baseline == pytest.approx(
-        node.bounds.y + style.padding_y.points + node.measured.label.baseline
-    )
-    artwork = artwork_element(compilation)
-    assert float(artwork.get("y", "")) == pytest.approx(area.y)
-    assert area.y >= node.bounds.y + band, "the drawing starts below the words"
-    assert float(artwork.get("height", "")) == pytest.approx(area.height)
-    assert float(artwork.get("width", "")) == pytest.approx(area.width)
+    assert float(label.get("y", "")) == pytest.approx(node.bounds.y + title.baseline)
+    assert float(artwork.get("y", "")) == pytest.approx(node.bounds.y + band)
+    assert float(artwork.get("height", "")) == pytest.approx(node.bounds.height - band)
+    assert float(artwork.get("width", "")) == pytest.approx(node.bounds.width)
     # The band is reserved rather than taken from the drawing: an unlabelled
     # image of the same authored width keeps its whole aspect-ratio height.
     plain = compiled(write_artwork(tmp_path), width="96pt").fitted.node("panel.art")
-    assert node.bounds.height > plain.bounds.height
+    assert node.bounds.height == pytest.approx(plain.bounds.height + band)
 
 
-def test_a_height_only_extent_shrinks_the_artwork_and_not_the_label(
+def test_a_name_under_a_picture_takes_its_band_off_the_bottom(tmp_path: Path) -> None:
+    style = STYLES["paper"]
+    source = write_artwork(tmp_path)
+    over = compiled(source, width="96pt", label="Ligand")
+    under = compiled(source, width="96pt", label="Ligand", title_side="bottom")
+    node = under.fitted.node("panel.art")
+    assert node.measured.spec.property("title_side") == "bottom"
+    # Where its name stands moves nothing round it.
+    assert node.bounds.size == over.fitted.node("panel.art").bounds.size
+    title = node.measured.label
+    band = title_band(title, style)
+    label, artwork = _named(under)
+    drawn = node.bounds.height - band
+    assert float(artwork.get("y", "")) == pytest.approx(node.bounds.y)
+    assert float(artwork.get("height", "")) == pytest.approx(drawn)
+    assert float(label.get("y", "")) == pytest.approx(
+        node.bounds.y + drawn + 0.3 * style.typography.size.points + title.baseline
+    )
+
+
+def test_a_picture_is_named_as_a_structure_beside_it_is(tmp_path: Path) -> None:
+    """One look for a row of molecules and pictures: the same weight, size and gap, and --
+    named under them, the row lined up by its bottoms -- the names on one baseline."""
+
+    with Figure("scales", width=pt(400.0)) as figure:  # noqa: SIM117
+        with figure.row("row", align="end") as row:
+            # (A file that is not there: the structure's panel says so, and is named all the
+            # same.)
+            row.structure("model", tmp_path / "missing.cif", label="Protein", width=90,
+                          height=80, title_side="bottom")
+            row.image("art", write_artwork(tmp_path), height="80pt", label="Cell",
+                      title_side="bottom")
+    compilation = compile_figure(figure.spec)
+    root = ET.fromstring(compilation.document.text)
+    named = {"row.model.label", "row.art.label"}
+    words = {item.get("id"): item for item in root.iter() if item.get("id") in named}
+    structure, picture = words["row.model.label"], words["row.art.label"]
+    for name in ("font-weight", "font-size", "font-family", "text-anchor"):
+        assert structure.get(name) == picture.get(name), name
+    assert float(structure.get("y", "")) == pytest.approx(float(picture.get("y", "")))
+    style = STYLES["paper"]
+    model, art = compilation.fitted.node("row.model"), compilation.fitted.node("row.art")
+    assert model.measured.label.height == pytest.approx(art.measured.label.height)
+    # The same gap under each drawing: the molecule's box, the picture's artwork.
+    artwork = artwork_element(compilation, "row.art.artwork")
+    under_picture = float(picture.get("y", "")) - (
+        float(artwork.get("y", "")) + float(artwork.get("height", ""))
+    )
+    under_molecule = float(structure.get("y", "")) - (model.bounds.y + 80.0)
+    assert under_picture == pytest.approx(under_molecule)
+    assert under_picture == pytest.approx(
+        0.3 * style.typography.size.points + art.measured.label.baseline
+    )
+
+
+def test_a_named_pictures_lines_meet_the_middle_of_its_drawing(tmp_path: Path) -> None:
+    """As a structure's do: not the middle of its box, which takes in its name."""
+
+    style = STYLES["paper"]
+    source = write_artwork(tmp_path)
+    for side in ("top", "bottom"):
+        with Figure("pair", width=pt(320.0)) as figure:  # noqa: SIM117
+            with figure.row("row", align="end") as row:
+                one = row.image("one", source, width="96pt", label="Ligand", title_side=side)
+                two = row.image("two", source, width="96pt", label="Bound", title_side=side)
+                row.connect(one.output, two.input)
+        compilation = compile_figure(figure.spec)
+        node = compilation.fitted.node("row.one")
+        band = title_band(node.measured.label, style)
+        top = node.bounds.y + (band if side == "top" else 0.0)
+        middle = top + (node.bounds.height - band) / 2.0
+        assert abs(middle - node.bounds.center.y) > 5.0
+        assert node.port("output").position.y == pytest.approx(middle)
+        line = compilation.routed.edges[0].centerline
+        assert [point.y for point in line] == pytest.approx([middle] * len(line)), side
+
+
+def test_a_line_keeps_off_the_side_a_pictures_name_stands_on(tmp_path: Path) -> None:
+    """A line from under a picture named under it comes in at its side, not through the
+    name; with its name over it, at the middle of its bottom."""
+
+    def first_point(side: str) -> tuple[float, float]:
+        with Figure("under", width=pt(320.0)) as figure:  # noqa: SIM117
+            with figure.column("stack") as column:
+                art = column.image("art", write_artwork(tmp_path), width="96pt", label="Ligand",
+                                   title_side=side)
+                below = column.block("next", label="Next")
+                column.connect(below.output, art.input)
+        compilation = compile_figure(figure.spec)
+        bounds = compilation.fitted.node("stack.art").bounds
+        end = compilation.routed.edges[0].centerline[-1]
+        return bounds, end
+
+    bounds, end = first_point("bottom")
+    assert end.y < bounds.bottom - 1.0, "not into the name under it"
+    bounds, end = first_point("top")
+    assert end.y == pytest.approx(bounds.bottom)
+    assert end.x == pytest.approx(bounds.center.x), "turned to its bottom: at its middle"
+
+
+def test_a_title_side_that_is_neither_is_said_and_the_name_is_over_it(tmp_path: Path) -> None:
+    from flexo.ir.semantic import NodeSpec
+    from flexo.title_sides import title_side, title_side_problem
+
+    wrong = NodeSpec("art", kind="image", properties=(("title_side", "left"),))
+    said = title_side_problem(wrong)
+    assert said is not None and said.code == "image.title-side"
+    assert "picture" in said.message
+    assert title_side(wrong) == "top"
+    assert title_side_problem(NodeSpec("art", kind="image",
+                                       properties=(("title_side", "Bottom"),))) is None
+    # (Drawn all the same, over it.)
+    over = compiled(write_artwork(tmp_path), width="96pt", label="Ligand", title_side="left")
+    label, artwork = _named(over)
+    assert float(label.get("y", "")) < float(artwork.get("y", ""))
+
+
+def test_a_height_only_extent_shrinks_the_artwork_and_not_the_name(
     tmp_path: Path,
 ) -> None:
-    """The author chose the box; the caption's line is the one size they did not."""
+    """The author chose the box; the name's lines are the one size they did not."""
 
     style = STYLES["paper"]
     roomy = compiled(write_artwork(tmp_path), height="80pt", label="Ligand")
     tight = compiled(write_artwork(tmp_path), height="50pt", label="Ligand")
-    for compilation in (roomy, tight):
+    drawn = {}
+    for compilation, height in ((roomy, 80.0), (tight, 50.0)):
         node = compilation.fitted.node("panel.art")
-        area = motif_area("image", node.bounds, node.measured.label, style)
-        assert node.bounds.height == pytest.approx(
-            80.0 if compilation is roomy else 50.0
-        )
-        assert float(artwork_element(compilation).get("height", "")) == pytest.approx(
-            area.height
-        )
+        assert node.bounds.height == pytest.approx(height)
+        band = title_band(node.measured.label, style)
+        drawn[height] = float(artwork_element(compilation).get("height", ""))
+        assert drawn[height] == pytest.approx(height - band)
     roomy_label = roomy.fitted.node("panel.art").measured.label
     tight_label = tight.fitted.node("panel.art").measured.label
     assert roomy_label.height == tight_label.height, "the words keep their line"
-    assert (
-        motif_area(
-            "image",
-            tight.fitted.node("panel.art").bounds,
-            tight_label,
-            style,
-        ).height
-        < motif_area(
-            "image",
-            roomy.fitted.node("panel.art").bounds,
-            roomy_label,
-            style,
-        ).height
-    )
+    assert drawn[50.0] < drawn[80.0]
 
 
 def test_an_unlabelled_image_reserves_no_band_at_all(tmp_path: Path) -> None:
@@ -433,3 +540,54 @@ def test_a_jpeg_is_embedded_as_its_own_bytes(tmp_path: Path) -> None:
     href = element.get("href") or ""
     assert href.startswith("data:image/jpeg;base64,")
     assert base64.b64decode(href.split(",", 1)[1]).startswith(b"\xff\xd8")
+
+
+def test_a_pictures_panel_has_a_title_position_beside_its_label_as_a_structures_does(
+    tmp_path: Path,
+) -> None:
+    from flexo.studio.figure_kind import structure_problems
+    from flexo.studio.figure_parts import catalogue
+
+    parts = catalogue()["parts"]
+    keys = [field["key"] for field in parts["image"]["fields"]]
+    assert keys[:2] == ["label", "properties.title_side"]
+    picture = parts["image"]["fields"][1]
+    structure = next(
+        field for field in parts["structure"]["fields"] if field["key"] == "properties.title_side"
+    )
+    assert picture == structure
+    assert picture["label"] == "Title Position"
+    assert picture["options"] == ["top", "bottom"] and picture["default"] == "top"
+    # A side that is neither is said in the studio, as a structure's is.
+    with Figure("said", width=pt(320.0)) as figure:
+        figure.root.image("art", write_artwork(tmp_path), label="Cell", title_side="beside")
+    (said,) = structure_problems(figure.spec)
+    assert said.code == "image.title-side" and said.entity_id == "art"
+
+
+def test_a_row_of_a_molecule_and_a_picture_as_tall_named_under_has_its_names_and_line_level(
+    tmp_path: Path,
+) -> None:
+    """Lined up by their bottoms: their names on one baseline, and the line between them at
+    the middle of both drawings -- not of their boxes, which take in the names."""
+
+    style = STYLES["paper"]
+    band = title_band(drawing_title(_named_node("Protein"), style, 90.0), style)
+    with Figure("scales", width=pt(400.0)) as figure:  # noqa: SIM117
+        with figure.row("row", align="end") as row:
+            model = row.structure("model", tmp_path / "missing.cif", label="Protein", width=90,
+                                  height=80, title_side="bottom")
+            art = row.image("art", write_artwork(tmp_path), height=f"{80.0 + band}pt",
+                            label="Cell", title_side="bottom")
+            row.connect(model.output, art.input)
+    compilation = compile_figure(figure.spec)
+    bottom = compilation.fitted.node("row.model").bounds.bottom
+    assert compilation.fitted.node("row.art").bounds.bottom == pytest.approx(bottom)
+    line = compilation.routed.edges[0].centerline
+    assert [point.y for point in line] == pytest.approx([bottom - band - 40.0] * len(line))
+
+
+def _named_node(label: str):
+    from flexo.ir.semantic import NodeSpec, TextRun
+
+    return NodeSpec("named", kind="image", label=(TextRun(label),))

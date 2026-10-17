@@ -54,6 +54,18 @@ class MeasuredNode:
     room: float | None = None
     """How wide a line of its words may run before they wrap, in points (``None``: they
     never wrap): what an editor's box for typing them wraps them at, as they will be drawn."""
+    drawn: tuple[float, float] | None = None
+    """The top and bottom of what it draws, its name aside, down from its own top: a named
+    structure's molecule, a named picture's artwork, a mechanism's structures over their
+    names (``flexo.title_sides``). A line meets it from either side within it, at its middle
+    when alone there; a row that centres what it holds lines it up by that middle, and so
+    does one lined up by its port line (``anchor``). ``None``: its whole box."""
+
+    @property
+    def middle(self) -> float | None:
+        """The middle of what it draws (``drawn``), down from its top; ``None``: its box's."""
+
+        return None if self.drawn is None else (self.drawn[0] + self.drawn[1]) / 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +81,11 @@ class MeasuredGroup:
     middle of cells-plus-caption. Measured at the size the parent will hand the
     group, which is why it is computed here beside ``intrinsic_size``.
     """
+    middle: float | None = None
+    """The line its children's middles stand on, down from its own top, for a parent that
+    centres what it holds: a row of named molecules lined up by their molecules (see
+    ``MeasuredNode.drawn``), which a ``+`` and an arrow beside the row meet level. ``None``:
+    its box's middle -- as it is for any group nothing drawn under a name is lined up in."""
 
 
 @dataclass(frozen=True, slots=True)

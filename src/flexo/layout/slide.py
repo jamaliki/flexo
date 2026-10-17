@@ -47,6 +47,7 @@ from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
 from flexo.ir.semantic import FigureSpec, LayoutKind, layout_connections
 from flexo.layout.measure import anchor_children, outward_connections
 from flexo.style import LayoutStyle
+from flexo.title_sides import drawn_span, middle_y
 
 _CENTER_BAND_FRACTION = 0.3
 """How far port adaptation may slide a port, as a fraction of its side (see ``ports``)."""
@@ -188,6 +189,9 @@ def slide_groups(
                 [by_node[each].bounds for each in by_node if each not in within],
                 along,
                 style.gap.points,
+                # (Level by what they draw: a named molecule's middle is its molecule's.)
+                lift=(middle_y(by_node[other]) - by_node[other].bounds.center.y)
+                - (middle_y(by_node[node.id]) - by_node[node.id].bounds.center.y),
             )
             if abs(shift) <= _EPSILON:
                 continue
@@ -380,9 +384,11 @@ def _level_shift(
     others: list[Rect],
     along: str,
     gap: float,
+    lift: float = 0.0,
 ) -> tuple[float, float]:
     """How far a box at the end of its row or column (``line``, running ``along`` x or y)
-    goes along it to stand level with the box its one line joins it to (``other``), or 0:
+    goes along it to stand level with the box its one line joins it to (``other``) -- down a
+    column, ``lift`` further, where the middles of what they draw are not their boxes' -- or 0:
     only away from the parts ``beside`` it on its line, only if ``other`` stands beside the
     line rather than before or after it, and never onto (or within half a gap of) one of the
     ``others`` -- and how far past the end of ``room`` the line (its frame, should it have
@@ -393,7 +399,7 @@ def _level_shift(
     frame, parts = line.bounds, line.content_bounds
     if along == "y":
         aside = other.right <= frame.left + _EPSILON or other.left >= frame.right - _EPSILON
-        shift = other.center.y - own.center.y
+        shift = other.center.y - own.center.y + lift
         last = all(box.bottom <= own.top + _EPSILON for box in beside)
         first = all(box.top >= own.bottom - _EPSILON for box in beside)
         moved = Rect(own.x, own.y + shift, own.width, own.height)
@@ -704,7 +710,8 @@ def _settled(
     if across == "x":
         apart = abs(mine.bounds.center.x - other.bounds.center.x)
     else:
-        apart = abs(mine.bounds.center.y - other.bounds.center.y)
+        # (A named molecule's middle is its drawing's: flexo.title_sides.)
+        apart = abs(middle_y(mine) - middle_y(other))
     return (
         apart <= _CENTRED
         and _alone(mine, other, across, every, nodes)
@@ -794,6 +801,10 @@ def _reach(
     spec = next(item for item in node.measured.spec.ports if item.name == port.name)
     if alone and centred_port(node.measured.spec.kind, spec):
         at = start + length / 2.0
+        # (A named structure's, picture's or mechanism's at the middle of its drawing.)
+        drawn = drawn_span(node) if across == "y" and port.side in faces else None
+        if drawn is not None:
+            at = (drawn[0] + drawn[1]) / 2.0
         return at, at
     if port.side in faces:
         at = port.position.x if across == "x" else port.position.y

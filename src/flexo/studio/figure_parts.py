@@ -184,6 +184,22 @@ def _title_side(key: str, hint: str, **options: Any) -> dict[str, Any]:
     )
 
 
+def _drawing_title_side() -> dict[str, Any]:
+    """Where a structure's or a picture's name stands: over it, or under it
+    (``flexo.title_sides``)."""
+
+    from flexo.title_sides import TITLE_SIDES as DRAWING_TITLE_SIDES
+
+    return _field(
+        "properties.title_side",
+        "Title Position",
+        "choice",
+        options=list(DRAWING_TITLE_SIDES),
+        labels={"top": "Top", "bottom": "Bottom"},
+        default="top",
+    )
+
+
 COMMON = [LABEL, TONE, BADGE, SHADOW, OUTLINE]
 WORDS_AS_DRAWN = DRAWN_KINDS | {"icon", "spacer", "junction", "image", "frame"}
 """Kinds whose words are not a label set in the shape: a drawing's own, a frame's title."""
@@ -513,7 +529,6 @@ def _bench() -> list[dict[str, Any]]:
 def _structure() -> dict[str, Any]:
     from flexo.structure_style import PANES, SECTIONS
     from flexo.structures import LOOKS, SCHEMES
-    from flexo.structures import TITLE_SIDES as STRUCTURE_TITLE_SIDES
 
     ready = find_spec("molsketch") is not None and find_spec("gemmi") is not None
 
@@ -704,17 +719,7 @@ def _structure() -> dict[str, Any]:
         ],
         # (Its words, but no tone, badge or shadow: mol-sketch draws it in colours of its own,
         # and nothing round it. Its name over the molecule, or under it.)
-        common=[
-            LABEL,
-            _field(
-                "properties.title_side",
-                "Title Position",
-                "choice",
-                options=list(STRUCTURE_TITLE_SIDES),
-                labels={"top": "Top", "bottom": "Bottom"},
-                default="top",
-            ),
-        ],
+        common=[LABEL, _drawing_title_side()],
         needs_file=True,
         unavailable="" if ready else "Requires flexo[structures,molecules]",
     )
@@ -927,7 +932,8 @@ def _basics() -> list[dict[str, Any]]:
                     for side in ("left", "top", "right", "bottom")
                 ),
             ],
-            common=[LABEL],
+            # (Its name over it or under it, set as a structure's is: flexo.title_sides.)
+            common=[LABEL, _drawing_title_side()],
             needs_file=True,
         ),
         # A plot is drawn by a function, at the size it is given (flexo.plots): it has no

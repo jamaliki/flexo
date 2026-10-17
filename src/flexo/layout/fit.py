@@ -41,6 +41,9 @@ class _Child:
     size: Size
     anchor: Point
     node: MeasuredNode | None = None
+    middle: float | None = None
+    """Where its drawing's middle is, down from its top, for a parent that centres what it
+    holds (``MeasuredNode.drawn``, ``MeasuredGroup.middle``); ``None``: its box's."""
 
 
 class _Fitter:
@@ -129,13 +132,14 @@ class _Fitter:
     def _child(self, child_id: str) -> _Child:
         node = self.nodes.get(child_id)
         if node is not None:
-            return _Child(child_id, node.intrinsic_size, node.anchor, node=node)
+            return _Child(child_id, node.intrinsic_size, node.anchor, node=node, middle=node.middle)
         group = self.groups[child_id]
         layout = group.spec.layout
         return _Child(
             child_id,
             declared_size(layout, group.intrinsic_size),
             group.anchor,
+            middle=group.middle,
         )
 
     def _resolve_kind(
@@ -158,6 +162,7 @@ class _Fitter:
             ),
             child_ids=tuple(child.id for child in children),
             anchors=tuple(child.anchor for child in children),
+            middles=tuple(child.middle for child in children),
         )
         fits = (
             requested.width <= available.width + _EPSILON
@@ -180,6 +185,7 @@ class _Fitter:
                 ),
                 child_ids=tuple(child.id for child in children),
                 anchors=tuple(child.anchor for child in children),
+                middles=tuple(child.middle for child in children),
             )
             if (
                 reflowed.width <= available.width + _EPSILON
@@ -230,4 +236,5 @@ class _Fitter:
             column_gap=layout.resolved_column_gap(self.style.gap),
             anchors=tuple(child.anchor for child in children),
             group_id=group_id,
+            middles=tuple(child.middle for child in children),
         )

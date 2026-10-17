@@ -347,9 +347,15 @@ step -- while a colour one of them was given of its own stays its own. The Camer
 the figure's frames (each with how many structures it has), in a new frame of its own, or in
 none: out of a frame, it keeps the turn it was seen at.
 
-A structure's name stands over the molecule, or under it with `title_side: bottom`; its words
-take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics (asterisks are
-drawn as typed).
+A structure's name stands over the molecule, or under it with `title_side: bottom`, centred in
+the theme's title weight -- as a picture's does, so a row of molecules and pictures named under
+them has its names on one line, in one hand (see [a picture's name](#a-shapes-words-and-a-pictures-name-and-crop)).
+Its words take a slant as any label's do, `[t]{italic} = 100` setting the *t* in italics
+(asterisks are drawn as typed). A line meets a named structure at the middle of its molecule,
+not of the molecule and its name, and keeps off the side the name stands on; a row that
+centres what it holds (`align: center`), or lines it up by its ports, lines it up by its
+molecule too -- as it does a picture, and a mechanism whose steps are named under their
+structures -- so a `+` or a `2` beside it stands level with the molecule.
 
 #### A diffusion run, frame by frame
 
@@ -449,6 +455,12 @@ them. Each step is SMILES -- the molecules apart with `.`, the atoms its arrows 
 mapped (`[O-:5]`) -- and its arrows: from a lone pair (`"5 -> 2"`: atom 5's pair
 makes a bond to 2), from a bond to an atom (`"2=3 -> 3"`: the π bond becomes a lone
 pair on 3), a bond moved (`"1=2 -> 2-6"`), a fishhook for one electron (`"~>"`).
+
+A step's `label` is set under its structure. A line meets a mechanism at the middle of its
+structures, not of them and the names under them, and a row that centres what it holds lines
+it up by them: `ACV + O₂ → ...` with each molecule named under it, written as mechanisms and
+`+` text parts in a row or grid with `align: center`, has its `+`, its numbers and its
+arrows level with the molecules.
 
 A mechanism may be schematic. A bracket atom whose symbol is no element is a
 placeholder, drawn as it is written -- `[X]`, `[Nu-]`, `[E]`, `[LG]`, `[EWG]`, `[R']`,
@@ -982,7 +994,7 @@ and a click on a shape outside it chooses that one instead. Undo and redo stay i
 groups chosen apart at every level at once; a shape in a group may be written
 `locked: true`, as one on the figure may.
 
-### A shape's words, and a picture's crop
+### A shape's words, and a picture's name and crop
 
 A shape says how the whole of its label is set, in its properties: `bold: true`,
 `italic: true`, `size: 6pt` and `align: left` (or `right`). The size is what the
@@ -991,6 +1003,27 @@ several chosen) has a **Text** section -- Bold, Italic, the side its lines stand
 and Size -- and ⌘B and ⌘I work on shapes chosen. Single words are bold or italic as
 coloured words are written: `[word]{bold}`, `[lacZ]{italic}` (a label's asterisks are
 drawn as typed); ⌘B and ⌘I do it to the words chosen while a label is typed.
+
+A picture's name (its `label`) is set as a structure's is: centred over it in the theme's
+title weight, or under it with `title_side: bottom`, at the same gap from it. Its band comes
+off the box the picture's `width` and `height` give, on the side it stands on, and a line meets
+the middle of the drawing. In the studio its panel has **Title Position** beside its Label.
+A row of molecules and pictures named under them, lined up by their bottoms, has its names on
+one baseline -- and its arrows level, should the drawings be as tall:
+
+```yaml
+- id: complex
+  kind: structure
+  label: "Complex\n[30 nm]{muted}"
+  properties: {source: 6QZP.cif, width: 120, height: 120, title_side: bottom}
+- id: cell
+  kind: image
+  label: "Cell\n[20 µm]{muted}"
+  height: 141.6               # the box: a drawing 120 tall, and its two lines of name (8 pt)
+  properties: {source: cell.svg, title_side: bottom}
+groups:
+- {id: scale, layout: {kind: row, gap: 22, align: end}, children: [complex, cell]}
+```
 
 A picture in a figure is cropped by how much is cut off each side, in hundredths:
 `crop_left: 10`, `crop_top`, `crop_right`, `crop_bottom`. It is as large as the part
