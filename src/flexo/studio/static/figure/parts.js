@@ -573,7 +573,17 @@ export function figureParts(host) {
   // the history: "Block", "Decision".
   const kindTitle = (kind) => titled(parts[kind || "block"]?.title || "Shape");
   // (A name with no port and no shape of it -- a line "to: nowhere" -- is itself.)
-  const nodeOfRef = (ref) => (nodeOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
+  const nodeOfRef = (ref) => (nodeOf(ref) || groupOf(ref) || !String(ref).includes(".") ? ref : String(ref).slice(0, String(ref).lastIndexOf(".")));
+  // A group a line may start or end at (flexo.group_ends): any but the figure's own layout.
+  const lineGroup = (id) => Boolean(groupOf(id)) && id !== model()?.root;
+  // A line's end by its words -- or, a part or group with none (a picture, a grid: "Picture",
+  // "Grid", each like the next), by its name in the file: "Substrates → Cell".
+  const endName = (id) => {
+    const item = nodeOf(id) || groupOf(id);
+    if (!item || oneLine(item.label) || item.role === "panel" || id === model()?.root) return nameOf(id);
+    const words = String(id).replace(/[_-]+/g, " ").trim();
+    return words ? `${words[0].toUpperCase()}${words.slice(1)}` : nameOf(id);
+  };
   const nameOf = (id) => {
     const node = nodeOf(id);
     // A shape with no words is called what it shows faintly on the drawing ("Block").
@@ -587,7 +597,7 @@ export function figureParts(host) {
     if (group) return oneLine(group.label) || (group.id === model()?.root ? "Layout" : titled(group.layout?.kind || "group"));
     const edge = edgeOf(id);
     if (edge) {
-      const ends = `${nameOf(nodeOfRef(edge.from))} → ${nameOf(nodeOfRef(edge.to))}`;
+      const ends = `${endName(nodeOfRef(edge.from))} → ${endName(nodeOfRef(edge.to))}`;
       // Two lines between the same shapes are told apart: by their words, else by number.
       const twins = model().edges.filter((other) => nodeOfRef(other.from) === nodeOfRef(edge.from) && nodeOfRef(other.to) === nodeOfRef(edge.to));
       if (twins.length < 2) return ends;
@@ -598,7 +608,7 @@ export function figureParts(host) {
     // A line that branches, by all its ends: "Q and K, V → Attended value".
     const net = netOf(id);
     const listed = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
-    if (net) return [net.sources, net.targets].map((ends) => listed((ends || []).map((ref) => nameOf(nodeOfRef(ref))))).join(" → ");
+    if (net) return [net.sources, net.targets].map((ends) => listed((ends || []).map((ref) => endName(nodeOfRef(ref))))).join(" → ");
     return id;
   };
   const chosenOne = () => (state.selected.length === 1 ? state.selected[0] : null);
@@ -2032,7 +2042,7 @@ export function figureParts(host) {
     if (!on) state.connecting = null;
     else {
       const from = chosenOne();
-      state.connecting = { source: from && nodeOf(from) ? from : null };
+      state.connecting = { source: from && (nodeOf(from) || lineGroup(from)) ? from : null };
     }
     host.changed();
   }
@@ -2045,12 +2055,13 @@ export function figureParts(host) {
         h("span.kbd", {}, "Esc")];
     }
     return [icon("right"),
-      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, nameOf(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
+      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, endName(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
       h("span.kbd", {}, "Esc")];
   }
   function connectTo(id) {
     const connecting = state.connecting;
-    if (!nodeOf(id)) return;
+    // (A line's end may be a group, as a shape: a joined line's, a shape alone.)
+    if (!nodeOf(id) && !(lineGroup(id) && !connecting.add)) return;
     if (connecting.add) {
       const net = netOf(connecting.add);
       if (!net || [...(net.sources || []), ...(net.targets || [])].some((end) => nodeOfRef(end) === id)) return;
@@ -2066,6 +2077,7 @@ export function figureParts(host) {
     // still to be ended somewhere else.)
     for (const [frame, other] of [[id, connecting.source], [connecting.source, id]]) {
       if (holds(frame, other)) { toast(`A line can’t end at ${inQuotes(nameOf(frame))} from inside it: the frame goes round ${inQuotes(nameOf(other))}.`, { icon: "info" }); return; }
+      if (lineGroup(frame) && inside(other, frame)) { toast(`A line can’t end at ${inQuotes(endName(frame))} from inside it: the group holds ${inQuotes(endName(other))}.`, { icon: "info" }); return; }
     }
     const source = connecting.source;
     state.connecting = null;
@@ -2118,6 +2130,21 @@ export function figureParts(host) {
     }
     return around(event);
   }
+  // In Connect, a click between a group's parts is the group's -- one that draws nothing
+  // round them (a layout group) too: the smallest round the point, inside the group clicked.
+  function lineEndAt(event, id) {
+    if (!groupOf(id) || state.connecting?.add) return id;
+    const boxes = new Map();
+    let best = null;
+    for (const group of model()?.groups || []) {
+      if (!lineGroup(group.id) || (id !== model().root && group.id !== id && !inside(group.id, id))) continue;
+      const box = boxOf(group.id, boxes);
+      if (!box || event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) continue;
+      const area = (box.right - box.left) * (box.bottom - box.top);
+      if (!best || area < best.area) best = { id: group.id, area };
+    }
+    return best?.id || id;
+  }
   function shapeAround(event, group) {
     let best = null;
     for (const node of model()?.nodes || []) {
@@ -2133,7 +2160,7 @@ export function figureParts(host) {
     // (On what was under the pointer as it was pressed: never what a drawing that came in
     // meanwhile put there.)
     const id = idAt(asPressed(event));
-    if (state.connecting) { if (id) connectTo(id); return; }
+    if (state.connecting) { const end = lineEndAt(asPressed(event), id || model()?.root); if (end) connectTo(end); return; }
     // (The figure's own layout, clicked where nothing is drawn, is nothing: the page clicked,
     // as Keynote's canvas -- the layout is chosen from the list of shapes.)
     const part = id && id !== model()?.root ? id : null;
@@ -5912,7 +5939,7 @@ export function figureParts(host) {
   function revealProblem(id, what = null) {
     if (!typeOf(id)) return;
     select([id]);
-    const edge = edgeOf(id), lost = edge ? ["to", "from"].find((key) => !nodeOf(nodeOfRef(edge[key]))) : null;
+    const edge = edgeOf(id), lost = edge ? ["to", "from"].find((key) => !nodeOf(nodeOfRef(edge[key])) && !lineGroup(nodeOfRef(edge[key]))) : null;
     const field = problemField(partOf(nodeOf(id)), what || problemOf(id)?.what);
     if (!field && !lost) return;
     const key = lost ? `edge:${id}:${lost}` : `node:${id}:${field.key}`;
@@ -6082,16 +6109,21 @@ export function figureParts(host) {
   // but for a shape's plain way in or out (its input, its output), which is the shape itself.
   function endSaid(ref, told = namesTold()) {
     const node = nodeOfRef(ref), port = String(ref) !== node ? String(ref).slice(node.length + 1) : "";
-    return `${told.get(node) || nameOf(node)}${port && !PLAIN_PORTS.has(port) ? ` · ${titled(port)}` : ""}`;
+    return `${endCalled(node, told)}${port && !PLAIN_PORTS.has(port) ? ` · ${titled(port)}` : ""}`;
+  }
+  // (One with no words by its name in the file; one named alike told apart: endName.)
+  function endCalled(id, told) {
+    const name = endName(id);
+    return name !== nameOf(id) ? name : told.get(id) || name;
   }
   // Every end a line may have: each shape, then each of its ports -- its plain way in or out
   // only where a line's end (`current`) is written so, in the shape's place, by its name.
   function endOptions(told = namesTold(), current = null) {
     return model().nodes.flatMap((node) => {
       const plain = (node.ports || []).find((port) => PLAIN_PORTS.has(port) && current === `${node.id}.${port}`);
-      return [{ value: plain ? current : node.id, label: told.get(node.id) },
-        ...(node.ports || []).filter((port) => !PLAIN_PORTS.has(port)).map((port) => ({ value: `${node.id}.${port}`, label: `${told.get(node.id)} · ${titled(port)}` }))];
-    });
+      return [{ value: plain ? current : node.id, label: endCalled(node.id, told) },
+        ...(node.ports || []).filter((port) => !PLAIN_PORTS.has(port)).map((port) => ({ value: `${node.id}.${port}`, label: `${endCalled(node.id, told)} · ${titled(port)}` }))];
+    }).concat((model().groups || []).filter((group) => lineGroup(group.id) && !group.implied).map((group) => ({ value: group.id, label: endName(group.id) })));
   }
   // Which side of its shape a line's end meets it on, as its panel says it: one it was
   // asked to (``depart``, ``arrive``), or the side of a port that keeps to one (a
@@ -6195,7 +6227,7 @@ export function figureParts(host) {
     const told = namesTold();
     // An end at a shape the figure has none of (mistyped, or deleted): said, and its field
     // marked -- the one to choose a shape in.
-    const lost = ["to", "from"].filter((key) => !nodeOf(nodeOfRef(edge[key])));
+    const lost = ["to", "from"].filter((key) => !nodeOf(nodeOfRef(edge[key])) && !lineGroup(nodeOfRef(edge[key])));
     const end = (key) => {
       const options = endOptions(told, String(edge[key]));
       const known = options.some((option) => option.value === edge[key]);
