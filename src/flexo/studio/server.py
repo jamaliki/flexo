@@ -890,6 +890,10 @@ def start(
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]
     sessions.register(folder, server.server_address[1], workspace.token)
+    if start_file:  # (drawn while the page loads: flexo.studio.warmup)
+        from flexo.studio.warmup import warm
+
+        warm(workspace, start_file)
     if browser:
         threading.Timer(0.3, webbrowser.open, (workspace.address,)).start()  # type: ignore[attr-defined]
     return server, workspace
