@@ -331,7 +331,7 @@ nodes:
 - **One centre**: the middle of all they draw together, moved by the first's `pan_x` and
   `pan_y`. A motif held fixed, or a trajectory aligned, stays where it is in every panel.
 
-Each keeps its own box, look, colours and what it draws. The first one's `yaw`, `pitch`,
+Each keeps its own box, look, colours and what it draws. A row of structures wider than its page -- five frames at their usual size are, in a double column -- is drawn with the structures that have no size of their own smaller, all alike, until it fits; one given a `width` or `height` keeps it. The first one's `yaw`, `pitch`,
 `roll`, `zoom`, `pan_x` and `pan_y` are the frame's; another's own are not used (and said,
 where they differ). With a flat projection (the engraved, textbook and flat looks) each atom
 is drawn exactly where the frame's camera puts it; in perspective each is seen from the

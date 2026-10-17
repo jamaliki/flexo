@@ -70,6 +70,7 @@ def compile_figure(
     # Each shape's words in the weight and slant it asks for (``flexo.wording``).
     figure = replace(figure, nodes=tuple(worded(node) for node in figure.nodes))
     # Structures that share a frame, each drawn as the frame sees it (flexo.structure_frames).
+    unframed = figure
     figure = framed(figure, layout_style)
     figure = _with_margin_for(frames, figure, layout_style)
     figure = _with_room_for_titles(frames, figure, layout_style)
@@ -94,6 +95,20 @@ def compile_figure(
                 across = (tighter, attempt)
         if across is not None:
             layout_style, measured = across
+        if _too_wide(measured):
+            # Still wider than its page: the structures with no size of their own drawn
+            # smaller, all alike, until it fits -- a molecule is drawn to fill whatever box
+            # it is given; a structure given a size keeps it.
+            for scale in STRUCTURE_SCALES:
+                smaller = _with_smaller_structures(unframed, layout_style, scale)
+                if smaller is unframed:
+                    break
+                smaller = framed(smaller, layout_style)
+                smaller = _with_margin_for(frames, smaller, layout_style)
+                figure = _with_room_for_titles(frames, smaller, layout_style)
+                measured = measure_figure(figure, style=layout_style)
+                if not _too_wide(measured):
+                    break
     if DRAFT.get():
         # A draft (flexo.draft): laid out with the room, and the slides, the figure's last
         # drawing had; routed from that drawing; no more room asked for, nor a lane tried.
@@ -509,6 +524,28 @@ def _too_large(measured: MeasuredFigure) -> bool:
 
 COMPACT_SCALES = (0.8, 0.65, 0.5)
 """Spacing scales tried, in order, when a figure is wider (or taller) than its page."""
+
+STRUCTURE_SCALES = (0.85, 0.7, 0.6, 0.5, 0.4)
+"""Sizes tried, in order, for the structures with no size of their own when a figure is still
+wider than its page with its spacing tightened: shares of their usual 20 by 15 label sizes."""
+
+
+def _with_smaller_structures(figure: FigureSpec, style: LayoutStyle, scale: float) -> FigureSpec:
+    """``figure`` with each structure that has neither a width nor a height of its own drawn
+    ``scale`` times its usual size -- or ``figure`` itself, with none such."""
+
+    from flexo.drawn import units
+
+    u = units(style).u
+    nodes, changed = [], False
+    for node in figure.nodes:
+        sized = node.property("width") is not None or node.property("height") is not None
+        if node.kind == "structure" and not sized:
+            size = (("width", round(20.0 * u * scale, 3)), ("height", round(15.0 * u * scale, 3)))
+            node = replace(node, properties=(*node.properties, *size))
+            changed = True
+        nodes.append(node)
+    return replace(figure, nodes=tuple(nodes)) if changed else figure
 
 CROSSING_ROOM_TRIALS = 2
 """Most layouts tried, per figure, to route a crossing round instead of through."""

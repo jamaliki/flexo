@@ -178,7 +178,7 @@ export function structureColours({ field, value, set, key, settings, typedField,
   }, { small: true, icon: "plus" });
 
   return h("div.field.records.mol-colour-list", {},
-    h("label.label", { title: field.hint || "" }, field.label, h("span.hint", {}, `${rows.length}`)),
+    h("label.label", { title: field.hint || "" }, field.label),
     rows.length ? list : null,
     warnings,
     add);
