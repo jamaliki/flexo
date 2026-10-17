@@ -27,7 +27,11 @@ drawn with its own shape, coloured by the structure it ends as. Its secondary st
 as mol-sketch has it -- from the file's HELIX and SHEET records (an mmCIF's struct_conf and
 struct_sheet_range) where it has them, else worked out from its alpha carbons, as its
 cartoon is drawn -- so a structure coloured by its own file is coloured as its cartoon is.
-The rows are laid over it.
+A residue whose own drawing is what ``ss_from`` has there (a helix drawn where the end has a
+helix) is left to mol-sketch, which colours a cartoon by the helix, strand or loop it draws:
+a strand's arrowhead, drawn on the first residue after it, in the strand's colour, and the
+loop that leaves from that residue in the loop's. Only a residue drawn otherwise than
+``ss_from`` has it is handed a colour of its own. The rows are laid over it.
 
 mol-sketch is handed each residue's colour by its own name for it (``SER195.A``) -- and a
 chain all one colour but for a few residues, as most are, by the chain's, the few by theirs.
@@ -264,20 +268,58 @@ def _secondary(source: str, stamp: float) -> dict[tuple[str, int], str]:
 
 
 def secondary(found: Molecule, source: str, stamp: float,
-              palette: dict[str, str]) -> dict[int, str]:
+              palette: dict[str, str],
+              drawn: dict[tuple[str, int], str] | None = None) -> dict[int, str]:
     """Each of the molecule's polymer residues coloured by its secondary structure in
     ``source`` -- the residue there of its chain and number -- in ``palette``'s helix, sheet
-    and loop colours, by its place: none that ``source`` lacks."""
+    and loop colours, by its place: none that ``source`` lacks, and none ``drawn`` (what the
+    molecule draws each as: ``drawn_as``) draws as ``source`` has it -- mol-sketch colours
+    those itself, by the element it draws them in."""
 
     taken = _taken(source, stamp)
     shades = {code: palette.get(role) for code, role in SHADES.items()}
     coloured: dict[int, str] = {}
     for place, residue in enumerate(found.residues):
         code = None if residue.het else taken.get((residue.chain, residue.resi))
+        if code is not None and code not in ("H", "E"):
+            code = "L"
+        if code is not None and drawn and drawn.get((residue.chain, residue.resi)) == code:
+            continue
         shade = None if code is None else shades.get(code) or shades["L"]
         if shade and residue.resn.upper() not in _NUCLEIC:
             coloured[place] = shade
     return coloured
+
+
+def drawn_as(figure) -> dict[tuple[str, int], str]:
+    """What mol-sketch draws each polymer residue of ``figure`` in -- H, E or L, by chain and
+    number -- as its cartoon is cut into helices and strands: its own secondary structure, a
+    helix of fewer than three residues and a strand of one drawn as loop."""
+
+    from molsketch._engine import engine
+
+    atoms = engine().call("sceneJson", figure._spec())["keyframes"][0]["atoms"]
+    ss: dict[tuple[str, int], str] = {}
+    for atom in atoms.values():
+        if atom.get("het") or str(atom.get("resn") or "").upper() in _NUCLEIC:
+            continue
+        key = (str(atom.get("chain") or ""), int(atom.get("resi") or 0))
+        code = str(atom.get("ss") or "L")
+        ss.setdefault(key, code if code in ("H", "E") else "L")
+    drawn: dict[tuple[str, int], str] = {}
+    keys = sorted(ss)
+    start = 0
+    for k in range(1, len(keys) + 1):
+        broken = k == len(keys) or keys[k][0] != keys[k - 1][0] or keys[k][1] - keys[k - 1][1] > 2
+        if not broken and ss[keys[k]] == ss[keys[start]]:
+            continue
+        code = ss[keys[start]]
+        if (code == "H" and k - start < 3) or (code == "E" and k - start < 2):
+            code = "L"
+        for key in keys[start:k]:
+            drawn[key] = code
+        start = k
+    return drawn
 
 
 _unread: dict[tuple[str, float], Exception] = {}
@@ -333,8 +375,12 @@ def paint(figure, ask) -> None:
         return
     under: dict[int, str] = {}
     if ask.ss_from:
+        # (A cartoon coloured by secondary structure, as it is unless its style says
+        # otherwise: what it draws as ss_from has it is left to it.)
+        own = (getattr(figure, "style", None) or {}).get("cartoon_color", "ss") in (None, "", "ss")
         try:
-            under = secondary(found, ask.ss_from, ask.ss_stamp, palette)
+            drawn = drawn_as(figure) if own else None
+            under = secondary(found, ask.ss_from, ask.ss_stamp, palette, drawn)
         except Exception:  # (said by check: coloured by its own meanwhile)
             under = {}
     _hand(figure, plan(found, rows(ask.source, ask.stamp, groups, name), colours, under))

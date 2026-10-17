@@ -171,36 +171,56 @@ def test_a_row_that_colours_nothing_is_said_and_the_rest_drawn(tmp_path: Path) -
 def test_a_structure_is_coloured_by_another_files_secondary_structure(tmp_path: Path) -> None:
     """A diffusion run's frames, each coloured by the structure it ends as: each residue in
     the look's helix, strand or loop colour as the other file has it -- its HELIX and SHEET
-    records, here -- the rows over it."""
+    records, here -- the rows over it. A residue the frame draws as the other file has it is
+    left to mol-sketch, which colours it so by the element it draws it in; only those drawn
+    otherwise are handed a colour."""
 
     ms = pytest.importorskip("molsketch")
     frame = _molecule(tmp_path / "frame.pdb")
     end = _molecule(tmp_path / "end.pdb", helix=(2, 5), strand=(7, 8))
     flat = ms.load(str(frame)).look("flat").style["palette"]
-    handed = _handed(_structure(frame, ss_from=end))
-    helix = {key for key, colour in handed.items() if colour == flat["helix"]}
-    strand = {key for key, colour in handed.items() if colour == flat["sheet"]}
-    assert helix == {"GLY2.A", "SER3.A", "LEU4.A", "HIS5.A"}
-    assert strand == {"ALA7.A", "LYS8.A"}
-    # Every other residue of the polymer is a loop (all of chain B): not the ligand, nor the
-    # water.
-    assert handed["ALA1.A"] == handed["VAL6.A"] == handed["B"] == flat["loop"]
-    assert "1PE401.A" not in handed and "HOH501.A" not in handed and "A" not in handed
-    # Its own secondary structure is still its own, worked out from its coordinates -- its
-    # residues 1 to 6 a helix -- and it is drawn with its own shape.
-    from flexo.structure_colours import molecule
+    # The frame's own secondary structure, worked out from its coordinates: residues 1 to 6
+    # a helix, the rest loops -- and it is drawn with that shape.
+    from flexo.structure_colours import drawn_as, molecule
 
+    drawn = drawn_as(ms.load(str(frame)).look("flat"))
+    assert [drawn[("A", n)] for n in range(1, 9)] == ["H"] * 6 + ["L", "L"]
     residues = molecule(str(frame), frame.stat().st_mtime).residues
     own = {residue.key: residue.ss for residue in residues}
     assert own["ALA1.A"] == own["VAL6.A"] == "H" and own["ALA7.A"] != "E"
+    # Drawn in a helix the end has as a loop (1 and 6), or as a loop the end has as a strand
+    # (7 and 8): handed the end's colour. The helix it draws where the end has one (2 to 5),
+    # and chain B, a loop in both: left to mol-sketch -- in the same colours -- as are the
+    # ligand and the water.
+    handed = _handed(_structure(frame, ss_from=end))
+    assert handed == {"ALA1.A": flat["loop"], "VAL6.A": flat["loop"],
+                      "ALA7.A": flat["sheet"], "LYS8.A": flat["sheet"]}
     # A row over it.
     over = _handed(_structure(frame, ss_from=end, colors={"resi 3": "#123456"}))
-    assert over["SER3.A"] == "#123456" and over["GLY2.A"] == flat["helix"]
-    # In the figure's colours, its helices are the accent's fill.
+    assert over["SER3.A"] == "#123456" and over["ALA7.A"] == flat["sheet"]
+    assert "GLY2.A" not in over
+    # In the figure's colours, its strands are the warm fill.
     from flexo.themes import with_tone_roles
 
     spec = _structure(frame, ss_from=end, scheme="figure")
-    assert _handed(spec)["GLY2.A"] == with_tone_roles(figure_palette(spec)).get("accent-fill")
+    assert _handed(spec)["ALA7.A"] == with_tone_roles(figure_palette(spec)).get("warm-fill")
+
+
+def test_a_structure_coloured_by_its_own_file_is_drawn_as_its_cartoon_is(tmp_path: Path) -> None:
+    """Coloured by its own secondary structure, a structure is handed no colour: drawn as a
+    cartoon coloured by secondary structure is, a strand's arrowhead (on the residue after
+    it) in the strand's colour, and the loop leaving from that residue in the loop's -- as a
+    residue's colour, handed over, would paint both."""
+
+    ms = pytest.importorskip("molsketch")
+    # (Named its own: mol-sketch keeps what it has read by a file's name, its length and its
+    # ends, and another test's end.pdb is as long, with the same ends.)
+    end = _molecule(tmp_path / "own.pdb", helix=(2, 5), strand=(6, 7))
+    assert _handed(_structure(end, ss_from=end)) == {}
+    # With its cartoon coloured otherwise (rainbow), each residue is handed its colour.
+    rainbow = _handed(_structure(end, ss_from=end, style={"cartoon_color": "rainbow"}))
+    flat = ms.load(str(end)).look("flat").style["palette"]
+    assert rainbow["GLY2.A"] == flat["helix"] and rainbow["VAL6.A"] == flat["sheet"]
 
 
 def test_a_file_to_colour_by_that_cant_be_had_is_said(tmp_path: Path) -> None:
