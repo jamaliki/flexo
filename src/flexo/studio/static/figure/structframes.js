@@ -4,7 +4,9 @@
 //
 // - An edit of a framed structure's turn, zoom or offset (its handle dragged, its Camera tab's
 //   fields and buttons) made to every structure of its frame alike, one step (framedAction): the
-//   file says the same of each, so whichever comes first says it.
+//   file says the same of each, so whichever comes first says it. So too an edit of its colours
+//   (its Look tab's Colours, its Molecule tab's colour rows, Secondary Structure From, how it is
+//   coloured), made to each of the frame's that shares the colour edited.
 // - Each one's Camera tab showing the frame's (readFrom: its owner's settings).
 // - All of them turning together while one is dragged round by its handle, each drawn as the
 //   frame turns it (framedProjectors), as mol-sketch will draw it.
@@ -45,15 +47,43 @@ export function readFrom(nodes, item, key) {
   return membersOf(nodes, item.id)?.[0] || item;
 }
 
+// A structure's colouring: its colour rows, the file it is coloured by, its scheme and group
+// palette, how its carbons, cartoon and surface are coloured, and each colour of its palette.
+const COLOURS = new Set(["properties.colors", "properties.ss_from", "properties.scheme", "properties.palette",
+  "properties.style.color_by", "properties.style.cartoon_color", "properties.style.surface_color", "properties.style.palette"]);
+export const colourKey = (key) => COLOURS.has(key) || key.startsWith("properties.style.palette.");
+
+// What `node` has at `key` (properties.style.palette.helix), its style read nested or by a
+// field's dotted name.
+function valueAt(node, key) {
+  const parts = key.split(".");
+  let at = node;
+  for (let i = 0; i < parts.length; i += 1) {
+    if (at === null || typeof at !== "object") return undefined;
+    const rest = parts.slice(i).join(".");
+    if (i > 0 && rest in at) return at[rest];
+    at = at[parts[i]];
+  }
+  return at;
+}
+const alike = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 // An edit of the turn, zoom or offset of one structure of a frame, made to all of them: one
-// step. Anything else is as it was.
+// step. An edit of its colours, made to each of the frame's that shares them -- had the same
+// colour, rows or file as it did before the edit -- so a frame's colours change together and a
+// colour one of them was given of its own stays its own. Anything else is as it was.
 export function framedAction(nodes, action) {
   if (action?.do !== "update" || action.targets || action.target?.type !== "node") return action;
   const keys = Object.keys(action.values || {});
-  if (!keys.length || !keys.every((key) => FRAME_KEYS.includes(key))) return action;
+  if (!keys.length) return action;
+  const turned = keys.every((key) => FRAME_KEYS.includes(key)), coloured = keys.every(colourKey);
+  if (!turned && !coloured) return action;
   const members = membersOf(nodes, action.target.id);
   if (!members) return action;
-  const others = members.filter((node) => node.id !== action.target.id);
+  const self = members.find((node) => node.id === action.target.id);
+  const others = members.filter((node) => node.id !== self.id
+    && (turned || keys.every((key) => alike(valueAt(node, key), valueAt(self, key)))));
+  if (!others.length) return action;
   return { ...action, targets: [action.target, ...others.map((node) => ({ type: "node", id: node.id }))] };
 }
 

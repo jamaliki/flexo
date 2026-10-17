@@ -873,7 +873,8 @@ export function figureParts(host) {
     gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes", line_up: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
   function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
-    // A framed structure turned, zoomed or moved: every structure of its frame alike (structframes.js).
+    // A framed structure turned, zoomed or moved: every structure of its frame alike; its colours
+    // changed: each of its frame's that shares them (structframes.js).
     action = Frames.framedAction(model()?.nodes, action);
     // With the studio away, a host that keeps its drawing as it was (a deck's slide) refuses
     // what would put the figure's parts elsewhere, and says so; what is typed is held.
