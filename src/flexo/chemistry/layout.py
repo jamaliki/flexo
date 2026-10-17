@@ -10,7 +10,11 @@ trans).
 
 The molecule is then turned so that its bonds lie on ChemDraw's 30-degree grid,
 preferring the turn that lays a chain out as a horizontal zigzag and a benzene
-ring point up, the molecule wider than tall, and its first atom on the left.
+ring point up, the molecule wider than tall, and its first atom on the left. A
+molecule alone that is one straight line with a letter in it -- two atoms (``O=O``,
+``HC≡N``), or a line straight through a carbon (``O=C=O``, an allene) -- lies flat
+across the page instead; a bare line of carbons (ethene, but-2-yne) keeps its slant,
+which says it is a bond and not a dash or an equals sign.
 
 Coordinates are y-down, as a page's are; a unit is one bond.
 """
@@ -20,7 +24,7 @@ from __future__ import annotations
 import math
 from collections import deque
 
-from flexo.chemistry.molecule import Molecule
+from flexo.chemistry.molecule import Bond, Molecule
 
 type Point = tuple[float, float]
 
@@ -34,7 +38,8 @@ def lay_out(molecule: Molecule, atoms: list[int] | None = None) -> None:
         places = _place(molecule, fragment)
         _keep_double_bond_sides(molecule, places)
         _untangle(molecule, places)
-        places = _turned(molecule, places)
+        # A molecule alone (its SMILES all one molecule) and straight lies flat.
+        places = _turned(molecule, places, alone=len(fragment) == len(molecule.atoms))
         for atom, (x, y) in places.items():
             molecule.atoms[atom].x, molecule.atoms[atom].y = x, y
 
@@ -322,6 +327,27 @@ def _linear(molecule: Molecule, atom: int) -> bool:
     return 3 in orders or orders.count(2) >= 2
 
 
+def straight_through(molecule: Molecule, atom: int, bonds: list[Bond] | None = None) -> bool:
+    """Whether an atom has two bonds, alike, laid out in one straight line through it
+    (within ten degrees): the carbon of O=C=O, an allene's middle, a cumulene's. A carbon
+    there is written, or its two bonds read as one long one (IUPAC GR-2.1.2). An alkyne's
+    carbon, between a single bond and a triple, is not: the change of bond shows it.
+    ``bonds`` are the atom's, if they are known."""
+
+    if bonds is None:
+        bonds = molecule.bonds_of(atom)
+    if len(bonds) != 2 or bonds[0].order != bonds[1].order:
+        return False
+    here = molecule.atoms[atom]
+    ways = []
+    for bond in bonds:
+        other = molecule.atoms[bond.other(atom)]
+        if math.hypot(other.x - here.x, other.y - here.y) < 1e-6:
+            return False  # not laid out yet
+        ways.append(math.atan2(other.y - here.y, other.x - here.x))
+    return abs(math.remainder(ways[0] - ways[1], 2 * math.pi)) >= math.radians(170)
+
+
 def _directions(
     molecule: Molecule,
     atom: int,
@@ -505,13 +531,22 @@ def _untangle(molecule: Molecule, places: dict[int, Point]) -> None:
         places.update(best)
 
 
-def _turned(molecule: Molecule, places: dict[int, Point]) -> dict[int, Point]:
+def _turned(
+    molecule: Molecule, places: dict[int, Point], *, alone: bool = False
+) -> dict[int, Point]:
     """``places`` turned onto the 30-degree grid -- the turn that lays chains out as a
     horizontal zigzag and rings point up, wider than tall, first atom on the left --
-    and centred on the origin."""
+    and centred on the origin. A straight molecule with a letter in it, ``alone``, lies
+    flat. Beside others in its step it keeps the grid: what attacks it comes in along
+    its line (X⁻ on Y-Z), and laid flat the three would stand in a row with no room
+    for the arrow between their letters."""
 
     if len(places) == 1:
         return {atom: (0.0, 0.0) for atom in places}
+    ends = _line_ends(places) if alone else None
+    if ends is not None and _lettered(molecule, list(places)):
+        (x1, y1), (x2, y2) = places[ends[0]], places[ends[1]]
+        return _centred(_rotated(places, -math.atan2(y2 - y1, x2 - x1), False))
     bonds = [bond for bond in molecule.bonds if bond.a in places and bond.b in places]
     first_angle = 0.0
     if bonds:
@@ -545,11 +580,46 @@ def _turned(molecule: Molecule, places: dict[int, Point]) -> dict[int, Point]:
             score = (upright + 2 * level, round(width - height, 3), -round(leftmost, 3), not mirror)
             if best is None or score > best[0]:
                 best = (score, trial)
-    turned = best[1]  # type: ignore[index]
-    xs = [p[0] for p in turned.values()]
-    ys = [p[1] for p in turned.values()]
+    return _centred(best[1])  # type: ignore[index]
+
+
+def _centred(places: dict[int, Point]) -> dict[int, Point]:
+    xs = [p[0] for p in places.values()]
+    ys = [p[1] for p in places.values()]
     cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
-    return {atom: (x - cx, y - cy) for atom, (x, y) in turned.items()}
+    return {atom: (x - cx, y - cy) for atom, (x, y) in places.items()}
+
+
+def _line_ends(places: dict[int, Point]) -> tuple[int, int] | None:
+    """The two end atoms of a molecule laid out as one straight line, the first written
+    of them first -- to stand on the left -- or None if it bends anywhere."""
+
+    first = min(places)
+    one = max(places, key=lambda atom: (math.dist(places[atom], places[first]), -atom))
+    other = max(places, key=lambda atom: (math.dist(places[atom], places[one]), -atom))
+    (x1, y1), (x2, y2) = places[one], places[other]
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length < 1e-6:
+        return None
+    for x, y in places.values():
+        if abs((x2 - x1) * (y - y1) - (y2 - y1) * (x - x1)) / length > 1e-3:
+            return None
+    return (one, other) if one < other else (other, one)
+
+
+def _lettered(molecule: Molecule, atoms: list[int]) -> bool:
+    """Whether a straight molecule has a letter in it: an atom other than a bare carbon
+    (``O=O``, ``Br-Br``, ``HC≡N``), or a carbon two alike bonds run straight through
+    (``O=C=O``, ``H₂C=C=CH₂``) -- in a straight line, any carbon with two alike bonds."""
+
+    for atom in atoms:
+        item = molecule.atoms[atom]
+        if item.element != "C" or item.isotope is not None:
+            return True
+        orders = [bond.order for bond in molecule.bonds_of(atom)]
+        if len(orders) == 2 and orders[0] == orders[1]:
+            return True
+    return False
 
 
 def _level(molecule: Molecule, places: dict[int, Point], ring: list[int]) -> float:
@@ -895,7 +965,12 @@ def _separate(molecule: Molecule, least: float = 0.9) -> None:
 
     def room(atom: int) -> float:
         item = atoms[atom]
-        if item.element == "C" and molecule.neighbours(atom) and item.isotope is None:
+        if (
+            item.element == "C"
+            and molecule.neighbours(atom)
+            and item.isotope is None
+            and not straight_through(molecule, atom)
+        ):
             return 0.15
         return (
             0.35
@@ -904,6 +979,11 @@ def _separate(molecule: Molecule, least: float = 0.9) -> None:
             + 0.15 * (len(item.symbol) > 1)
         )
 
+    if len(fragments) < 2:
+        return
+    # Each atom's room, found once: it reads the molecule's bonds, and a fragment pushed
+    # aside moves whole, its atoms' rooms as they were.
+    rooms = [room(atom) for atom in range(len(atoms))]
     for _ in range(30):
         moved = False
         for i, first in enumerate(fragments):
@@ -911,8 +991,8 @@ def _separate(molecule: Molecule, least: float = 0.9) -> None:
                 closest = min(
                     (
                         math.dist((atoms[a].x, atoms[a].y), (atoms[b].x, atoms[b].y))
-                        - room(a)
-                        - room(b),
+                        - rooms[a]
+                        - rooms[b],
                         a,
                         b,
                     )

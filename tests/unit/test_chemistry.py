@@ -814,6 +814,7 @@ def test_a_lone_pair_an_arrow_takes_faces_what_it_attacks(smiles, arrow) -> None
         ("C[C+:1](C)C.[OH2:3]", "3 -> 1"),  # a cation's vertex, beside its charge
         ("[CH3:1][C:2](=[O:3])[CH3:4].[OH2+:5][H:6]", "3 -> 6; 6-5 -> 5"),  # letters
         ("[NH2:1]C.[CH3:2][C:3](=[O:4])[CH3:5]", "1 -> 3; 3=4 -> 4"),
+        ("[OH-:1].[O:2]=[C:3]=[O:4]", "1 -> 3; 3=4 -> 4"),  # CO2's carbon, written
     ],
 )
 def test_an_arrow_off_a_lone_pair_is_an_s_and_every_head_stops_short_of_its_atom(
@@ -846,3 +847,160 @@ def test_an_arrow_off_a_lone_pair_is_an_s_and_every_head_stops_short_of_its_atom
             + [math.dist(tip, (cx, cy)) - radius for cx, cy, radius in circles]
         )
         assert HEAD_GAP * frame.bond <= nearest <= 2.5 * HEAD_GAP * frame.bond, text
+
+
+def _written(drawn) -> dict[int, str]:
+    """Each atom a drawing writes, by its number, as it is lettered."""
+
+    found = {}
+    for words in drawn.words:
+        matched = re.fullmatch(r"m\.atom(\d+)", words.id)
+        if matched:
+            found[int(matched.group(1))] = "".join(run.text for run in words.runs)
+    return found
+
+
+def _flat(drawn) -> bool:
+    return max(place.point[1] for place in drawn.atoms.values()) - min(
+        place.point[1] for place in drawn.atoms.values()
+    ) == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("smiles", "written"),
+    [
+        ("O=C=O", {0: "O", 1: "C", 2: "O"}),  # carbon dioxide: not O=O
+        ("O=[*C]=O", {0: "O", 1: "C", 2: "O"}),  # as a placeholder too, straight through
+        ("C=C=C", {1: "C"}),  # an allene's middle
+        ("C=C=O", {1: "C", 2: "O"}),  # a ketene's
+        ("C=C=C=C", {1: "C", 2: "C"}),  # a cumulene's
+    ],
+)
+def test_a_carbon_two_alike_bonds_run_straight_through_is_written_and_lies_flat(
+    smiles: str, written: dict[int, str]
+) -> None:
+    from flexo.drawn import units
+
+    u = units(STYLES["paper"]).u
+    drawn = _drawn(smiles)
+    assert _written(drawn) == written
+    assert _flat(drawn)  # across the page, not on a slant
+    assert [place.point[0] for place in drawn.atoms.values()] == sorted(
+        place.point[0] for place in drawn.atoms.values()
+    )
+    for pair, lines in drawn.lines.items():
+        # Each double bond is centred on its bond, its two lines a double bond's gap apart.
+        first, second = sorted(pair)
+        axis = drawn.atoms[first].point[1]
+        (_, y1), _ = lines[0]
+        (_, y2), _ = lines[1]
+        assert (y1 + y2) / 2 == pytest.approx(axis, abs=1e-6)
+        assert abs(y1 - y2) == pytest.approx(0.18 * 1.44 * u, rel=1e-6)
+        # ... and stops short of a written atom's letter by as much as it does of an O's.
+        for (x_start, _), (x_end, _) in lines:
+            for atom, end in ((first, x_start), (second, x_end)):
+                if atom not in written:
+                    continue
+                left, _, right, _ = drawn.atoms[atom].ink[0]
+                apart = left - end if end < left else end - right
+                assert 0.1 * u < apart < 0.25 * u, (smiles, atom)
+
+
+def test_a_carbon_straight_through_a_substituted_allene_is_written_its_chain_still_zigzags():
+    drawn = _drawn("CC=C=CC")  # penta-2,3-diene
+    assert _written(drawn) == {2: "C"}
+    molecule = read_smiles("CC=C=CC")
+    lay_out(molecule)
+    assert _angles(molecule) == {30, 150}
+
+
+@pytest.mark.parametrize(
+    ("smiles", "written", "angles"),
+    [
+        ("C=C", {}, {30}),  # ethene: a line on a slant, never an equals sign
+        ("CC", {}, {30}),
+        ("CC#CC", {}, {30}),  # but-2-yne: an alkyne's carbons a line, as IUPAC has them
+        ("CCC#CCC", {}, {30, 150}),
+        ("CC(C)=O", {3: "O"}, {30, 90, 150}),  # acetone
+        ("CCCC#N", {4: "N"}, {30, 150}),  # a nitrile's carbon, between single and triple
+    ],
+)
+def test_a_line_of_carbons_and_an_alkyne_are_drawn_as_ever(
+    smiles: str, written: dict[int, str], angles: set[int]
+) -> None:
+    assert _written(_drawn(smiles)) == written
+    molecule = read_smiles(smiles)
+    lay_out(molecule)
+    assert _angles(molecule) == angles
+
+
+@pytest.mark.parametrize(
+    ("smiles", "written"),
+    [
+        ("O=O", {0: "O", 1: "O"}),
+        ("[H][H]", {0: "H", 1: "H"}),
+        ("ClCl", {0: "Cl", 1: "Cl"}),
+        ("C#N", {0: "HC", 1: "N"}),  # HC≡N, its hydrogen on the left
+        ("CBr", {0: "H3C", 1: "Br"}),
+    ],
+)
+def test_a_lone_two_atom_molecule_lies_flat_first_atom_on_the_left(
+    smiles: str, written: dict[int, str]
+) -> None:
+    drawn = _drawn(smiles)
+    assert _written(drawn) == written
+    assert _flat(drawn)
+    assert drawn.atoms[0].point[0] < drawn.atoms[1].point[0]
+
+
+def test_a_lone_straight_molecule_is_turned_as_its_place_says() -> None:
+    from flexo.mechanism import mechanism_states
+
+    for smiles, number in (("O=O", 1), ("O=C=O", 2)):
+        steps = [{"smiles": smiles, "arrow": "none", "place": {number: {"turn": 30}}}]
+        panels, problem = mechanism_states(_mechanism(steps)[0].spec.nodes[0])
+        assert problem is None
+        first, last = panels[0].molecule.atoms[0], panels[0].molecule.atoms[-1]
+        angle = math.degrees(math.atan2(last.y - first.y, last.x - first.x))
+        assert angle == pytest.approx(30.0)  # turned clockwise from flat, y down
+
+
+def test_a_straight_molecule_beside_others_in_its_step_keeps_the_grid() -> None:
+    from flexo.mechanism import mechanism_states
+
+    # X- comes in along Y-Z's line: laid flat, the three would stand in a row, the arrow
+    # squeezed between their letters. Alone, Y-Z lies flat.
+    for smiles, flat in (("[X-:1].[Y:2][Z:3]", False), ("[Y:2][Z:3]", True)):
+        steps = [{"smiles": smiles, "arrow": "none"}]
+        panels, _ = mechanism_states(_mechanism(steps)[0].spec.nodes[0])
+        molecule = panels[0].molecule
+        y, z = (molecule.atoms[molecule.index_of(number)] for number in (2, 3))
+        assert (abs(y.y - z.y) < 1e-6) is flat, smiles
+
+
+def test_hydroxide_adding_to_carbon_dioxide_points_at_its_written_carbon() -> None:
+    from flexo.chemistry.curly import HEAD_GAP
+    from flexo.mechanism import mechanism_composed
+
+    steps = [{"smiles": "[OH-:1].[O:2]=[C:3]=[O:4]", "arrows": "1 -> 3; 3=4 -> 4"}]
+    figure, _ = _mechanism(steps)
+    composed = mechanism_composed(figure.spec.nodes[0], STYLES["paper"])
+    drawn, molecule, _ = composed.drawn[0]
+    o2, c3, o4 = (molecule.index_of(number) for number in (2, 3, 4))
+    lettered = {words.id: "".join(run.text for run in words.runs) for words in drawn.words}
+    assert lettered[f"m.step1.atom{c3}"] == "C"
+    # Beside the hydroxide CO2 keeps the grid, still straight through its written carbon.
+    (x2, y2), (x3, y3), (x4, y4) = (drawn.atoms[atom].point for atom in (o2, c3, o4))
+    assert (x3 - x2) * (y4 - y3) - (y3 - y2) * (x4 - x3) == pytest.approx(0.0, abs=1e-6)
+    for number, target in ((0, c3), (1, o4)):
+        (arrow,) = [shape for shape in drawn.shapes if shape.id == f"m.step1.arrow{number}"]
+        tip = tuple(_numbers(arrow.d)[8:10])
+        nearest = min(drawn.atoms, key=lambda atom: math.dist(tip, drawn.atoms[atom].point))
+        assert nearest == target
+        x, y = tip
+        x0, y0, x1, y1 = drawn.atoms[target].ink[0]
+        off = math.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1))
+        assert HEAD_GAP * composed.pen.bond <= off <= 2.5 * HEAD_GAP * composed.pen.bond
+    # What the arrows make is bicarbonate, its carbon a vertex again.
+    made, after, _ = composed.drawn[1]
+    assert not any(words.id == f"m.step2.atom{after.index_of(3)}" for words in made.words)

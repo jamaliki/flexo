@@ -501,10 +501,15 @@ Structures are laid out flat as a chemist would: rings as regular polygons, fuse
 side by side, chains in a horizontal zigzag, every bond on the 30-degree grid, furan
 and pyrrole standing on their heteroatom, a double bond keeping the side its SMILES
 gives (`F/C=C/F`), a stereocentre drawn with the wedge or hash its `@`/`@@` means. A
-cycloaddition is drawn in the shape of its product, so a diene curls s-cis. The
-proportions are the ACS document settings: bonds 1.44 label heights long, double
-bonds inside their rings, labels clipping the bonds that meet them, hydrogens on the
-side the bonds leave free (`OH`, `HO`, `H₂N`), charges circled. Reaction arrows carry
+cycloaddition is drawn in the shape of its product, so a diene curls s-cis. A molecule
+alone in its step that is one straight line with a letter in it (`O=O`, `HC≡N`,
+`O=C=O`) lies flat across the page, unless its step's `place` turns it; a bare line of
+carbons (ethene, but-2-yne) keeps its slant. The proportions are the ACS document settings: bonds 1.44
+label heights long, double bonds inside their rings, labels clipping the bonds that
+meet them, hydrogens on the side the bonds leave free (`OH`, `HO`, `H₂N`), charges
+circled. Carbon is a vertex, but a carbon two alike bonds run straight through (CO₂,
+an allene's middle) is written `C`, as IUPAC asks, lest its bonds read as one; an
+alkyne's carbons stay a line. Reaction arrows carry
 their `reagents` over them and `conditions` under them; `arrow` is `forward`,
 `equilibrium`, `resonance` or `none`; steps fold into rows when there are many
 (`per_row=`).
