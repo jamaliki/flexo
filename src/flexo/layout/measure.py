@@ -29,6 +29,7 @@ from flexo.shapes import CLOUD_MEASURE, SHAPE_KINDS, label_room
 from flexo.style import LayoutStyle, TypographyStyle
 from flexo.text import TextMeasurer, title_runs, title_typography
 from flexo.themes import figure_style
+from flexo.title_sides import drawing_middle, drawing_title, title_band, title_side
 from flexo.units import CellSpan
 from flexo.validate import merge_matched_stacks, normalize_and_validate, resolve_alignment
 from flexo.wording import typography_of
@@ -244,9 +245,15 @@ def _measure_node(
         from flexo.structures import structure_title
 
         label = structure_title(node, style)
+    if node.kind == "image" and node.label:
+        # A picture's name as a structure's is set: in the title's weight, over it or under
+        # it, wrapped to the width it is given (flexo.title_sides).
+        room, label = _picture_title(node, style)
     if node.kind in DRAWN_KINDS:
         return _measure_drawn(node, label, style)
     size = intrinsic_node_size(node, label, style)
+    if node.kind == "image" and label.lines:
+        node = _picture_ports(node, label, size, style)
     # Given a size of its own, the size it would be without (round its words) is kept
     # too: what an editor's handles snap to.
     # (A decision's is the diamond that hugs its words, smaller than it is of itself.)
@@ -267,6 +274,28 @@ def _measure_node(
     return MeasuredNode(
         node, label, size, Point(size.width / 2.0, size.height / 2.0), fit=fit, room=room
     )
+
+
+def _picture_title(node: NodeSpec, style: LayoutStyle) -> tuple[float | None, TextMetrics]:
+    """A picture's name as it is set (``flexo.title_sides``), and the width it wraps at: the
+    width the picture is given, if it is (its box is as wide as its longest line otherwise)."""
+
+    room = style.resolve_extent(node.width).points if node.width is not None else None
+    return room, drawing_title(node, style, room)
+
+
+def _picture_ports(node: NodeSpec, label: TextMetrics, size: Size, style: LayoutStyle) -> NodeSpec:
+    """A named picture's input and output where a structure's are: at the middle of its
+    drawing, over its name or under it -- not of its box (an author's own ports stay)."""
+
+    middle = drawing_middle(title_side(node), title_band(label, style), size.height)
+    ports = tuple(
+        replace(port, offset=middle)
+        if port.auto_side and port.name in {"input", "output"}
+        else port
+        for port in node.ports
+    )
+    return replace(node, ports=ports)
 
 
 def _decision_words(

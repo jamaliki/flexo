@@ -15,6 +15,7 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec
 from flexo.shapes import SHAPE_KINDS, shape_size
 from flexo.style import LayoutStyle
+from flexo.title_sides import SIDED_KINDS, title_band, title_side
 
 TRANSPARENT_KINDS = frozenset({"spacer", "junction", "frame"})
 """Node kinds nothing has to keep clear of: they paint no ink a route can spoil.
@@ -29,16 +30,28 @@ of it (``flexo.frames``, and the router's zones).
 """
 
 TITLED_KINDS = frozenset(
-    {"structure", "protein", "wellplate", "timeline", "construct", "tree", "cells"}
+    {"structure", "image", "protein", "wellplate", "timeline", "construct", "tree", "cells"}
 )
-"""Kinds that set their name over their panel, across its top: a line attached to that
-side would run into the name, so none is (unless the author asks for it)."""
+"""Kinds that set their name over their panel, across its top -- a structure or a picture
+across its bottom, should it say so (``flexo.title_sides``): a line attached to that side
+would run into the name, so none is (unless the author asks for it)."""
 
 
 def titled(spec) -> bool:
-    """Whether ``spec`` (a node) has its name set across its top."""
+    """Whether ``spec`` (a node) has its name set across a side of it (``title_edge``)."""
 
     return spec.kind in TITLED_KINDS and bool(spec.label)
+
+
+def title_edge(spec) -> Side | None:
+    """The side of ``spec`` (a node) its name is set across: its top, or a structure's or a
+    picture's bottom when its ``title_side`` says so; ``None`` for a node with none."""
+
+    if not titled(spec):
+        return None
+    if spec.kind in SIDED_KINDS and title_side(spec) == "bottom":
+        return Side.SOUTH
+    return Side.NORTH
 
 
 CAPTION_KINDS = frozenset({"label", "text"})
@@ -82,7 +95,6 @@ MOTIF_LABEL_KINDS = frozenset(
         "concat",
         "feature-strip",
         "graph",
-        "image",
         "inset",
         "matrix",
         "sequence",
@@ -96,8 +108,9 @@ molecule. Sizing (``intrinsic_node_size``), the label baseline, and every motif
 that paints read the same two functions below, so the band a label is given and
 the area a motif is allowed are the same band and the same area by construction.
 
-``image`` belongs here for the same reason (R27), and its "motif" is the author's
-own artwork: a label centred over a positional-encoding glyph is a caption
+``image`` is kept from its drawing in the same way (R27), but as a structure is: its
+name is a title over the artwork or under it (``flexo.title_sides``), not a band
+inside a box -- a label centred over a positional-encoding glyph is a caption
 printed across the drawing it names. An *unlabelled* image asks for no band and
 therefore gets none -- its bounds stay exactly its artwork, which is the whole
 promise of the kind.
@@ -778,7 +791,7 @@ def default_ports(kind: str, *, labelled: bool = False) -> tuple[PortSpec, ...]:
 
 
 def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
-    """The bounds of an ``image``: its artwork, its label band, or the author's box.
+    """The bounds of an ``image``: its artwork, its name, or the author's box.
 
     One authored extent is enough. Artwork arrives with an aspect ratio, and a
     figure that scales a molecule icon to a column width should not have to
@@ -787,29 +800,22 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
     act of boxing the artwork, which then letterboxes inside those bounds rather
     than distorting.
 
-    A label is *not* part of the artwork, so it takes its own band off the top
-    (``label_band_height`` and ``motif_area``, the same two functions every other
-    motif-label kind reads) and the drawing gets what is left. Which is why an
-    authored extent shrinks the drawing rather than the words: ``height`` names
-    the box, and the caption's line is the one thing in it whose size the author
-    did not choose. An image with no label reserves nothing and comes out exactly
-    as large as the file it carries.
+    A name (``label``, measured as ``flexo.title_sides.drawing_title`` sets it) is *not*
+    part of the artwork, so it takes its own band off the side it stands on -- the top,
+    or the bottom with ``title_side: bottom`` -- as a structure's does, and the drawing
+    gets what is left (``flexo.title_sides.drawing_box``). Which is why an authored
+    extent shrinks the drawing rather than the words: ``height`` names the box, and the
+    name's lines are the one thing in it whose size the author did not choose. The box
+    is never narrower than the name's longest line. An image with no label reserves
+    nothing and comes out exactly as large as the file it carries.
     """
 
     from flexo.restyle import node_picture
 
     # (An SVG's words in the figure's font, or as it says: grown to hold them, it may be wider.)
     artwork = node_picture(node, style.typography.family)
-    band = label_band_height(node.kind, label, style)
-    chrome = (
-        Size(
-            2.0 * style.padding_x.points,
-            band + style.motif_label_gap.points + style.padding_y.points,
-        )
-        if band
-        else Size(0.0, 0.0)
-    )
-    least_width = label.width + 2.0 * style.padding_x.points if band else 0.0
+    band = title_band(label, style)
+    least_width = label.width if band else 0.0
     width = style.resolve_extent(node.width).points if node.width is not None else None
     height = style.resolve_extent(node.height).points if node.height is not None else None
     if width is not None and height is not None:
@@ -831,14 +837,13 @@ def image_size(node: NodeSpec, label: TextMetrics, style: LayoutStyle) -> Size:
             )
         )
     if width is not None:
-        drawn = max(0.0, width - chrome.width)
-        return Size(width, drawn / aspect + chrome.height)
+        return Size(width, width / aspect + band)
     if height is not None:
-        drawn = max(0.0, height - chrome.height)
-        return Size(max(drawn * aspect + chrome.width, least_width), height)
+        drawn = max(0.0, height - band)
+        return Size(max(drawn * aspect, least_width), height)
     return Size(
-        max((artwork.width or 0.0) * across + chrome.width, least_width),
-        (artwork.height or 0.0) * down + chrome.height,
+        max((artwork.width or 0.0) * across, least_width),
+        (artwork.height or 0.0) * down + band,
     )
 
 
@@ -1092,3 +1097,14 @@ def centred_port(kind: str, port: PortSpec) -> bool:
         and definition is not None
         and any(item.name == port.name for item in definition.ports)
     )
+
+
+def centred_at(kind: str, port: PortSpec) -> float:
+    """Where along its side a line alone there at ``port`` (a ``centred_port``) meets a
+    component of ``kind``, as a fraction of the side: the middle -- but a structure's or a
+    picture's left or right at the middle of its drawing, its name over it or under it
+    (``flexo.title_sides``), as its port says."""
+
+    if kind in SIDED_KINDS and port.side in {Side.WEST, Side.EAST}:
+        return port.offset
+    return 0.5

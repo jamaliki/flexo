@@ -40,7 +40,7 @@ from collections import Counter
 from dataclasses import replace
 from itertools import pairwise
 
-from flexo.components import centred_port
+from flexo.components import centred_at, centred_port
 from flexo.geometry import Point, Rect, Side
 from flexo.hierarchy import lined_up
 from flexo.ir.fitted import FittedGroup, FittedNode, ResolvedPort
@@ -793,7 +793,10 @@ def _reach(
     start, length = (bounds.left, bounds.width) if across == "x" else (bounds.top, bounds.height)
     spec = next(item for item in node.measured.spec.ports if item.name == port.name)
     if alone and centred_port(node.measured.spec.kind, spec):
-        at = start + length / 2.0
+        # (A structure's or a picture's at the middle of its drawing: centred_at.)
+        at = start + length * (
+            centred_at(node.measured.spec.kind, spec) if port.side in faces else 0.5
+        )
         return at, at
     if port.side in faces:
         at = port.position.x if across == "x" else port.position.y

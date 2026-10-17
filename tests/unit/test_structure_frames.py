@@ -314,7 +314,7 @@ def test_the_studio_turns_a_frame_from_any_of_its_structures(tmp_path: Path) -> 
 def test_a_structures_name_can_stand_under_it() -> None:
     pytest.importorskip("molsketch")
     from flexo.ir.semantic import NodeSpec
-    from flexo.structures import title_side_problem
+    from flexo.title_sides import title_side_problem
 
     def placed(**options: object):
         with flexo.Figure("named") as figure:

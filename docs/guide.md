@@ -744,7 +744,8 @@ with flexo.Figure("artwork", width="double-column") as figure:
 ```
 
 An `image` is a component with four pinned ports at its side centres (`input`,
-`output`, `north`, `south`). It wires, lays out, and blocks routes like a
+`output`, `north`, `south`; a named picture's `input` and `output` at the middle
+of its artwork, as a structure's are). It wires, lays out, and blocks routes like a
 block. An SVG source stays vector: Flexo nests the file's content at the
 node's bounds with its viewBox intact, so it remains selectable in an editor
 and stays vector in the PDF. A PNG or JPEG is embedded as a data URI.
@@ -794,12 +795,15 @@ dropped. Every id in the artwork is prefixed with the node's id, so the same
 file can be embedded twice without the copies sharing definitions such as
 gradients.
 
-**Labels.** A `label` takes a band at the top of the box and the artwork gets
-the rest, as on an `inset` or a `matrix`. An authored extent sets the size of
-the whole box, so `height="40pt"` on a labelled image shrinks the artwork, not
-the label. An image without a label reserves no band and is exactly the size of
-its artwork. For a caption below the artwork, put the image and a `label` node
-in a column, as `vector` does.
+**Names.** A `label` is the picture's name, set as a structure's is: centred
+over the artwork in the theme's title weight, 0.3 of the type size above it --
+or under it, with `title_side="bottom"` (`properties: {title_side: bottom}` in a
+document). Its band comes off the side it stands on, and the artwork gets the
+rest. An authored extent sets the size of the whole box, so `height="40pt"` on a
+labelled image shrinks the artwork, not the name; given a `width`, the name wraps
+to it. A line meets a named picture at the middle of its artwork, and keeps off
+the side its name is on. An image without a label reserves no band and is
+exactly the size of its artwork.
 
 ## Shapes over the figure
 

@@ -74,6 +74,13 @@ from flexo.ir.measured import TextMetrics
 from flexo.ir.semantic import NodeSpec, PortSpec, Record, Settings, TextRun
 from flexo.structure_style import THE_FIGURES
 from flexo.style import LayoutStyle, Palette
+from flexo.title_sides import (
+    drawing_middle,
+    drawing_title,
+    title_band,
+    title_baseline,
+    title_side,
+)
 
 LOOKS = (
     "engraved-colour",
@@ -147,39 +154,11 @@ def structure_tones(node: NodeSpec) -> tuple[str, ...]:
 
 def structure_title(node: NodeSpec, style: LayoutStyle) -> TextMetrics:
     """A structure's name as it is set over its panel: in the title's weight, wrapped to the
-    panel's width."""
+    panel's width (``flexo.title_sides``, as a picture's is)."""
 
     u = units(style).u
     width = float(node.property("width") or 20.0 * u)  # type: ignore[arg-type]
-    return units(style).measurer.measure(
-        node.label, weight=style.typography.title_weight, max_width=width
-    )
-
-
-TITLE_SIDES = ("top", "bottom")
-"""Where a structure's name is set: over its molecule (``title_side: top``, as it is unless
-written) or under it (``bottom``)."""
-
-
-def structure_title_side(node: NodeSpec) -> str:
-    """Where the structure's name is set (``TITLE_SIDES``): over it, unless it says under."""
-
-    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
-    return written if written in TITLE_SIDES else TITLE_SIDES[0]
-
-
-def title_side_problem(node: NodeSpec) -> Diagnostic | None:
-    """A title side written that is neither, as a warning: the name is set over it."""
-
-    written = str(node.property("title_side") or TITLE_SIDES[0]).strip().lower()
-    if node.kind != "structure" or written in TITLE_SIDES:
-        return None
-    return Diagnostic(
-        "structure.title-side",
-        f"A structure\u2019s name can\u2019t stand at “{written}”: it is set over the molecule.",
-        Severity.WARNING, entity_id=node.id,
-        hint="Its properties.title_side is top (over the molecule) or bottom (under it).",
-    )
+    return drawing_title(node, style, width)
 
 
 def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
@@ -195,24 +174,25 @@ def structure_drawing(node: NodeSpec, style: LayoutStyle) -> Picture:
     words = []
     top = 0.0
     named = 0.0
+    side = title_side(node)
     if node.label:
-        # A long name is set on as many lines as the panel is wide, not over its edges.
+        # A long name is set on as many lines as the panel is wide, not over its edges -- as
+        # a picture's is, over it or under it (flexo.title_sides).
         title = structure_title(node, style)
-        named = title.height + 0.3 * u
-        below = structure_title_side(node) == "bottom"
+        named = title_band(title, style)
         words.append(
             Words(
                 f"{node.id}.label",
                 node.label,
                 title,
                 width / 2.0,
-                height + 0.3 * u + title.baseline if below else title.baseline,
+                title_baseline(side, title, style, height),
                 weight=style.typography.title_weight,
             )
         )
-        top = 0.0 if below else named
+        top = 0.0 if side == "bottom" else named
     size = Size(width, named + height)
-    middle = (top + height / 2.0) / size.height
+    middle = drawing_middle(side, named, size.height)
     ports = (PortSpec("input", Side.WEST, middle), PortSpec("output", Side.EAST, middle))
     problem = _problem(node, style)
     if problem is None or problem.drawn:

@@ -90,8 +90,9 @@ edges: each {from: node or node.port, to: node or node.port, label, role, head: 
 groups: each {id, children: [ids], layout: {kind: row|column|grid, gap}, label, title_side:
   left|right|bottom-left|bottom-right (where its label stands)}; the root group (figure.root,
   "root" by default) holds the rest. A file without groups stacks its nodes.
-A picture: {id, kind: image, properties: {source: photo.png (.jpg, .svg)}, width}. An SVG's words
-  are set in the figure's font, the same in every output; its properties may say otherwise --
+A picture: {id, kind: image, label, properties: {source: photo.png (.jpg, .svg), title_side:
+  top|bottom (its label over or under the picture, set as a structure's is)}, width}. An SVG's
+  words are set in the figure's font, the same in every output; its properties may say otherwise --
   font: drawn (the faces its file names, as found) or a family; texts: [{id: text1 (the text's
   id in the file; one with none is text: 3, its place among the file's texts), words:
   "two\nlines", size (pt, at the drawing's own size), bold, italic, colour: "#c0392b"}];
@@ -610,15 +611,18 @@ def fetched(pdb_id: str) -> str:
 
 def structure_problems(spec) -> list[Any]:
     """What keeps each structure in ``spec`` from being drawn as written, as warnings: the
-    figure is drawn all the same, a structure that can't be had as a panel saying why."""
+    figure is drawn all the same, a structure that can't be had as a panel saying why -- and
+    a structure's or a picture's name written to stand neither over it nor under it."""
 
     from flexo.structure_frames import frame_problems
-    from flexo.structures import structure_problem, title_side_problem
+    from flexo.structures import structure_problem
     from flexo.themes import figure_style
+    from flexo.title_sides import SIDED_KINDS, title_side_problem
 
     style = figure_style(spec)
     found = [structure_problem(node, style) for node in spec.nodes if node.kind == "structure"]
-    found += [title_side_problem(node) for node in spec.nodes if node.kind == "structure"]
+    # (A picture's name stands over it or under it as a structure's does: flexo.title_sides.)
+    found += [title_side_problem(node) for node in spec.nodes if node.kind in SIDED_KINDS]
     return [item for item in found if item is not None] + frame_problems(spec)
 
 
