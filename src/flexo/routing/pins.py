@@ -18,7 +18,7 @@ from flexo.components import (
     TRANSPARENT_ROLES,
     centred_port,
     route_clearance,
-    titled,
+    title_edge,
     vector_cells,
 )
 from flexo.geometry import Point, Rect, Side
@@ -27,6 +27,7 @@ from flexo.ir.fitted import FittedFigure, FittedNode
 from flexo.ir.semantic import EdgeSpec, NetSpec, PortRef, PortSpec
 from flexo.routing.vpsc import solve
 from flexo.style import LayoutStyle
+from flexo.title_sides import drawn_span
 
 SPREAD_PIN_WEIGHT = 1e-3
 """Weight of an evenly spread pin's wish against a partner pin's own centre.
@@ -689,21 +690,23 @@ def _clear_approaches(
 
 
 def _off_titles(ends: list[End], hints: dict[tuple[str, str], Side]) -> None:
-    """Move a pin off the top of a component whose name is set across it (a structure's,
-    a protein's): a line there would start in the name. The pin goes to the best other
-    side facing what it joins -- every end sharing it with it."""
+    """Move a pin off the side of a component its name is set across (a structure's top, or
+    its bottom where its name is under it; a protein's top): a line there would start in the
+    name. The pin goes to the best other side facing what it joins -- every end sharing it
+    with it."""
 
     moved: dict[tuple, Side] = {}
     for end in ends:
         assert end.group is not None
         spec = end.node.measured.spec
-        if end.group[2] is not Side.NORTH or not titled(spec):
+        named = title_edge(spec)
+        if end.group[2] is not named:
             continue
         if end.fixed or (spec.id, end.reference.port_name) in hints:
             continue
         if end.group not in moved:
             ranked = _facing_sides(end.node.bounds, end.counterpart, Side.EAST)
-            moved[end.group] = next(side for side in ranked if side is not Side.NORTH)
+            moved[end.group] = next(side for side in ranked if side is not named)
     for end in ends:
         assert end.group is not None
         if end.group in moved:
@@ -1168,6 +1171,11 @@ def _place_on_side(
     along_x = side in {Side.NORTH, Side.SOUTH}
     bounds = node.bounds
     low, high = (bounds.left, bounds.right) if along_x else (bounds.top, bounds.bottom)
+    # (A named structure's, picture's or mechanism's left and right are its drawing's: its
+    # name over it or under it is no place for a line.)
+    drawn = None if along_x else drawn_span(node)
+    if drawn is not None:
+        low, high = drawn
     edge = {
         Side.NORTH: bounds.top,
         Side.SOUTH: bounds.bottom,
@@ -1344,6 +1352,10 @@ def lone_pin(
         if side in {Side.NORTH, Side.SOUTH}
         else (bounds.top, bounds.bottom)
     )
+    # (A named structure's, picture's or mechanism's at the middle of its drawing.)
+    drawn = drawn_span(node) if side in {Side.WEST, Side.EAST} else None
+    if drawn is not None:
+        low, high = drawn
     return key, (low + high) / 2.0
 
 

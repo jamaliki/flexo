@@ -1842,6 +1842,7 @@ class GroupBuilder:
         width: Extent | str | float | None = None,
         height: Extent | str | float | None = None,
         label: str | tuple[TextRun, ...] = "",
+        title_side: str | None = None,
         **options: object,
     ) -> NodeHandle:
         """Place artwork the author drew, as a first-class node.
@@ -1882,18 +1883,23 @@ class GroupBuilder:
         this node's id, so the same file may be embedded twice in one figure
         without the two copies sharing a gradient.
 
-        A ``label`` sits over the artwork, centred, as on any other node. For a
-        caption *under* the drawing, put the image and a ``label`` node in a
-        column, the way ``vector`` captions its stack.
+        A ``label`` is the picture's name, set as a structure's is: centred over
+        the artwork in the theme's title weight, or under it with
+        ``title_side="bottom"`` -- so a row of molecules and pictures named under
+        them has its names on one line. The name's band comes off the box
+        ``width`` and ``height`` give, on the side it stands on.
         """
 
+        properties: dict[str, Scalar] = {"source": str(source)}
+        if title_side is not None:
+            properties["title_side"] = title_side
         return self.node(
             id,
             "image",
             label=label,
             width=width,
             height=height,
-            **_with_properties(options, source=str(source)),  # type: ignore[arg-type]
+            **_with_properties(options, **properties),  # type: ignore[arg-type]
         )
 
     def tensor(
