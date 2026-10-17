@@ -63,7 +63,7 @@ import struct
 import threading
 import xml.etree.ElementTree as ET
 import zlib
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from flexo.confine import outside
@@ -320,6 +320,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
                                                    re.IGNORECASE):
         return _Problem("source", f"Couldn't find {name}", "There is no such file in the folder.")
+    from flexo.structure_kept import checked, keep_checked
+
+    known, kept = checked(ask, name)
+    if known:  # (checked before, as it is now: not read again)
+        return None if kept is None else _Problem(**kept)
     fetched = not Path(ask.source).exists()
     try:
         figure = _one_at_a_time(_drawn, ask)
@@ -349,8 +354,11 @@ def _checked(ask: _Ask, name: str) -> _Problem | None:
     try:
         _one_at_a_time(check, figure, ask)
     except Unseen as error:
-        return _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
-                        drawn=True)
+        found = _Problem(error.code, error.title or name, _sentence(str(error)), error.hint,
+                         drawn=True)
+        keep_checked(ask, name, asdict(found))
+        return found
+    keep_checked(ask, name, None)
     return None
 
 
@@ -622,6 +630,11 @@ def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
     more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
     as PNG bytes, from the same drawing."""
 
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect)
+    if kept is not None:
+        return kept
     figure = _drawn(ask)
     long_side = 1200  # as _render draws it: the same pen weight against the molecule
     size = (
@@ -638,13 +651,13 @@ def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
         # than shapes -- on no paper, so nothing need be taken out of it.
         drawn = figure.svg_or_image(size, scale=1.0)
         if not isinstance(drawn, str):
-            return drawn.png()
+            return keep_drawing(ask, aspect, drawn.png())
     else:  # (a mol-sketch before it could)
         drawn = figure.svg(size, scale=1.0)
     if any(mark in drawn for mark in _PICTURED):
-        return _render(ask, aspect)
+        return keep_drawing(ask, aspect, _render(ask, aspect))
     shading = min(max(0.3 * float(figure.style.get("shading") or 0.0), 0.0), 1.0)
-    return _painted_by_role(drawn, ask, shading)
+    return keep_drawing(ask, aspect, _painted_by_role(drawn, ask, shading))
 
 
 def _painted_by_role(text: str, ask: _Ask, shade: float) -> str:
@@ -1196,6 +1209,11 @@ def _ions(source: str, stamp: float) -> tuple[str, ...]:
 
 @functools.lru_cache(maxsize=32)
 def _render(ask: _Ask, aspect: float) -> bytes:
+    from flexo.structure_kept import drawing, keep_drawing
+
+    kept = drawing(ask, aspect, "png")
+    if isinstance(kept, bytes):
+        return kept
     figure = _drawn(ask)
     # mol-sketch's pen is sized for its own canvas (1920 wide): drawn at that
     # scale and shrunk into the box, the lines keep their weight against the molecule.
@@ -1209,7 +1227,7 @@ def _render(ask: _Ask, aspect: float) -> bytes:
         figure.label_site(size)
     image = figure.render(size, scale=1.0)
     pixels = image.to_numpy()
-    return _png(_without_paper(pixels, ask.paper))
+    return keep_drawing(ask, aspect, _png(_without_paper(pixels, ask.paper)), "png")
 
 
 @functools.lru_cache(maxsize=16)
