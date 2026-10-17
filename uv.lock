@@ -843,7 +843,7 @@ wheels = [
 [[package]]
 name = "molsketch"
 version = "0.1.0"
-source = { git = "https://github.com/jamaliki/mol-sketch?subdirectory=python#ed8719cf02fd897cbaa3ba67919f37c3719ecb0f" }
+source = { git = "https://github.com/jamaliki/mol-sketch?subdirectory=python#9b622cdc80c04fe468af8764501f7974e1fb6b1a" }
 dependencies = [
     { name = "mini-racer" },
     { name = "numpy" },

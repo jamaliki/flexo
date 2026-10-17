@@ -213,9 +213,8 @@ def test_a_structure_coloured_by_its_own_file_is_drawn_as_its_cartoon_is(tmp_pat
     residue's colour, handed over, would paint both."""
 
     ms = pytest.importorskip("molsketch")
-    # (Named its own: mol-sketch keeps what it has read by a file's name, its length and its
-    # ends, and another test's end.pdb is as long, with the same ends.)
-    end = _molecule(tmp_path / "own.pdb", helix=(2, 5), strand=(6, 7))
+    # (Named as another test's end.pdb is, as long, with the same ends: read as its own.)
+    end = _molecule(tmp_path / "end.pdb", helix=(2, 5), strand=(6, 7))
     assert _handed(_structure(end, ss_from=end)) == {}
     # With its cartoon coloured otherwise (rainbow), each residue is handed its colour.
     rainbow = _handed(_structure(end, ss_from=end, style={"cartoon_color": "rainbow"}))
