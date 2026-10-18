@@ -418,3 +418,34 @@ def test_a_line_and_a_net_keep_their_tone_through_their_document() -> None:
     # Unset, nothing is written.
     data["edges"][0].pop("tone")
     assert "tone" not in figure_to_document(parse_figure(data))["edges"][0]
+
+
+def test_a_figure_files_parts_find_their_files_beside_it_from_any_folder(
+    tmp_path, monkeypatch
+) -> None:
+    # A structure's file, the one it is coloured by and its map are found from the figure
+    # file's folder, not the one it is read from; a PDB ID, or a file that isn't beside it,
+    # is kept as written.
+    from flexo.serialization import load_figure
+
+    folder = tmp_path / "figure"
+    (folder / "assets").mkdir(parents=True)
+    for name in ("model.pdb", "design.pdb", "map.mrc"):
+        (folder / "assets" / name).write_text("", encoding="utf-8")
+    source = folder / "figure.yaml"
+    source.write_text(
+        "figure: {id: beside}\n"
+        "nodes:\n"
+        "  - {id: model, kind: structure, properties: {source: assets/model.pdb,\n"
+        "     ss_from: assets/design.pdb, density: assets/map.mrc}}\n"
+        "  - {id: entry, kind: structure, properties: {source: 1ubq, ss_from: elsewhere.pdb}}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    nodes = {node.id: node for node in load_figure(source).nodes}
+    model = nodes["model"]
+    assert model.property("source") == str((folder / "assets" / "model.pdb").resolve())
+    assert model.property("ss_from") == str((folder / "assets" / "design.pdb").resolve())
+    assert model.property("density") == str((folder / "assets" / "map.mrc").resolve())
+    assert nodes["entry"].property("source") == "1ubq"
+    assert nodes["entry"].property("ss_from") == "elsewhere.pdb"

@@ -563,33 +563,12 @@ def parse(text: str, base: Path, *, suffix: str = ".yaml"):
     """A figure from its file's words, theme and palette files -- and the pictures and
     structures its parts draw -- found from ``base``."""
 
-    from flexo.plots import PLOT_KIND, beside
-    from flexo.serialization import parse_figure
+    from flexo.serialization import found_beside, parse_figure
 
     document = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
     if not isinstance(document, dict):
         raise ValueError("a figure file is a mapping: figure, nodes, edges, groups")
-    figure = document.get("figure")
-    if isinstance(figure, dict):
-        for key in ("theme", "style", "palette"):
-            value = figure.get(key)
-            if _is_file(value) and (base / value).is_file():
-                figure[key] = str((base / value).resolve())
-    for node in document.get("nodes") or []:
-        properties = node.get("properties") if isinstance(node, dict) else None
-        for key in ("source", "density", "ss_from"):
-            value = properties.get(key) if isinstance(properties, dict) else None
-            if isinstance(value, str) and value and (base / value).is_file():
-                properties[key] = str((base / value).resolve())
-        # (The data a plot names is its figure's too: found from the figure's folder.)
-        if isinstance(properties, dict) and node.get("kind") == PLOT_KIND and "data" in properties:
-            properties["data"] = beside(base, properties["data"])
-    if "shapes" in document:
-        from flexo.shape_pictures import anchored
-
-        # (A picture among the shapes drawn over it is found as a part's picture is.)
-        document["shapes"] = anchored(document["shapes"], base)
-    return parse_figure(document)
+    return parse_figure(found_beside(document, base))
 
 
 def _structure_view(document: dict[str, Any], action: dict[str, Any], base: Path) -> Any:

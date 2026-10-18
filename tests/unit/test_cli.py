@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
+
+import pytest
 
 from flexo.cli import main
 from flexo.gallery import vertical_slice
@@ -15,6 +18,8 @@ from flexo.ir.semantic import (
 )
 from flexo.serialization import save_figure
 from flexo.units import pt
+
+DATA = Path(__file__).parent / "data"
 
 
 def clipped_label_figure() -> FigureSpec:
@@ -59,6 +64,40 @@ def test_build_editable_svg(tmp_path: Path) -> None:
     output = tmp_path / "output"
     assert main(["build", str(source), "-o", str(output), "--formats", "editable"]) == 0
     assert (output / "figure.editable.svg").is_file()
+
+
+def test_build_finds_what_a_figure_names_beside_it_from_another_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A structure (and the one it is coloured by) and a picture, named relative to the
+    # figure file, are drawn when it is built from another folder as from its own.
+    pytest.importorskip("molsketch")
+    folder = tmp_path / "figure"
+    (folder / "assets" / "x").mkdir(parents=True)
+    shutil.copy(DATA / "1a7g.cif", folder / "assets" / "x" / "1A7G_E.cif")
+    (folder / "assets" / "x" / "mark.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
+        '<circle cx="10" cy="10" r="8" fill="#c33"/></svg>',
+        encoding="utf-8",
+    )
+    source = folder / "figure.yaml"
+    source.write_text(
+        "figure: {id: beside}\n"
+        "nodes:\n"
+        "  - {id: model, kind: structure, label: E2, width: 120, height: 90,\n"
+        "     properties: {source: assets/x/1A7G_E.cif, ss_from: assets/x/1A7G_E.cif}}\n"
+        "  - {id: mark, kind: image, properties: {source: assets/x/mark.svg}}\n",
+        encoding="utf-8",
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    output = tmp_path / "output"
+    assert main(["build", str(source), "-o", str(output), "--formats", "editable"]) == 0
+    drawn = (output / "figure.editable.svg").read_text(encoding="utf-8")
+    assert "Couldn" not in drawn and "no such file" not in drawn
+    assert "<image" in drawn  # the molecule, drawn as a picture
+    assert "#c33" in drawn.lower()  # the picture, inlined
 
 
 def test_build_writes_outputs_and_reports_lint_errors(tmp_path: Path, capsys) -> None:
