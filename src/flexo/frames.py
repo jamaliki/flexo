@@ -686,8 +686,9 @@ def _expected(
     below: bool = False,
 ) -> list[tuple[float, float]]:
     """Where a line is likely to come down through a frame's title before any is routed:
-    at the middle of a shape at the frame's top that is joined to one above the frame.
-    (A title at the frame's bottom, ``below``: of a shape there joined to one under it.)"""
+    at the middle of a shape at the frame's top that is joined to one above the frame,
+    standing over it. (A title at the frame's bottom, ``below``: of a shape there joined to
+    one under it.) One beside the frame is joined from that side, not through its title."""
 
     inside: dict[str, str] = {}
     for item in named:
@@ -710,7 +711,10 @@ def _expected(
             else:
                 there = boxes[inside[mine]].y <= held.y + 0.5
                 beyond = boxes[other].bottom <= held.y + 0.5
-            if there and beyond:
+            # (One wholly beside the frame -- to its left, or its right -- is joined from that
+            # side, however much higher or lower it stands: no line comes through the band.)
+            over = boxes[other].x < held.right - 0.5 and boxes[other].right > held.x + 0.5
+            if there and beyond and over:
                 middle = boxes[mine].x + boxes[mine].width / 2.0
                 found.append((middle, middle))
     return found
