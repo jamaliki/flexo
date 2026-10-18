@@ -703,9 +703,10 @@ export class Session {
     }
   }
 
+  // Saved now: what the studio answers (in a bundle, its name: saved in it too).
   async saveNow() {
     await this.push();
-    try { await this.workspace.api("/api/save", { file: this.file }); }
+    try { return await this.workspace.api("/api/save", { file: this.file }); }
     catch (error) { throw unreachable(error) ? new Error("can’t reach the studio") : error; }
   }
 

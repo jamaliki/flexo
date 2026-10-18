@@ -583,6 +583,35 @@ def test_a_studio_serves_a_bundle_untrusted_and_saves_it_back(tmp_path: Path) ->
         server.server_close()
 
 
+def test_a_save_in_a_bundles_studio_is_in_the_bundle_when_it_answers(tmp_path: Path) -> None:
+    from flexo.studio.server import start
+
+    path = _deck_free_bundle(tmp_path)
+    server, workspace = start(path, browser=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        # (Nothing but the Save writes the bundle here: not the keeper, once things are quiet.)
+        workspace.bundle._stop.set()
+        workspace.bundle._thread.join(timeout=5)
+        doc = workspace.open("figure.yaml")
+        text = doc.document["text"].replace("First", "Saved at once")
+        doc.update({"text": text}, doc.version, {"id": "test", "name": "Test"})
+        request = urllib.request.Request(
+            f"{url}/api/save",
+            data=json.dumps({"file": "figure.yaml"}).encode(),
+            headers={"Content-Type": "application/json", "X-Studio-Token": workspace.token},
+        )
+        with OPENER.open(request) as response:
+            answer = json.loads(response.read())
+        assert answer["bundle"] == "Shared Figure.flexo"
+        assert b"Saved at once" in zipfile.ZipFile(path).read("figure.yaml")
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
 def test_a_bundle_that_will_not_open_is_said_and_nothing_served(tmp_path: Path) -> None:
     from flexo.studio.server import start
 
