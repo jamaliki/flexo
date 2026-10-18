@@ -47,20 +47,48 @@ def load_figure(source_file: str | Path) -> FigureSpec:
         document = yaml.safe_load(text)
     else:
         raise ValueError("figure specifications must use .yaml, .yml, or .json")
-    # A theme or palette file named in a figure file is found next to it.
-    figure_data = document.get("figure") if isinstance(document, dict) else None
-    if isinstance(figure_data, dict):
+    return parse_figure(found_beside(document, target_file.parent))
+
+
+def found_beside(document: object, base: Path) -> object:
+    """``document`` (a figure file's, parsed) with each file it names found from ``base``,
+    the file's folder, where it is there: its theme and palette files, each part's picture,
+    structure (and the one it is coloured by), map and plot (and the plot's data), and the
+    pictures among the shapes drawn over it. A figure file is then drawn the same from any
+    folder: ``flexo build``, run from elsewhere, draws it as the studio does."""
+
+    if not isinstance(document, dict):
+        return document
+    from flexo.plots import PLOT_KIND, beside
+
+    figure = document.get("figure")
+    if isinstance(figure, dict):
         for key in ("theme", "style", "palette"):
-            value = figure_data.get(key)
-            if isinstance(value, str) and value.lower().endswith((".yaml", ".yml", ".json")):
-                beside = (target_file.parent / value).resolve()
-                if not Path(value).is_absolute() and beside.is_file():
-                    figure_data[key] = str(beside)
-    if isinstance(document, dict) and "shapes" in document:
+            value = figure.get(key)
+            if (
+                isinstance(value, str)
+                and value.lower().endswith((".yaml", ".yml", ".json"))
+                and (base / value).is_file()
+            ):
+                figure[key] = str((base / value).resolve())
+    nodes = document.get("nodes")
+    for node in nodes if isinstance(nodes, list) else []:
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if not isinstance(properties, dict):
+            continue
+        for key in ("source", "density", "ss_from"):
+            value = properties.get(key)
+            if isinstance(value, str) and value and (base / value).is_file():
+                properties[key] = str((base / value).resolve())
+        # (The data a plot names is its figure's too: found from the figure's folder.)
+        if node.get("kind") == PLOT_KIND and "data" in properties:
+            properties["data"] = beside(base, properties["data"])
+    if "shapes" in document:
         from flexo.shape_pictures import anchored
 
-        document["shapes"] = anchored(document["shapes"], target_file.parent)
-    return parse_figure(document)
+        # (A picture among the shapes drawn over it is found as a part's picture is.)
+        document["shapes"] = anchored(document["shapes"], base)
+    return document
 
 
 def parse_figure(document: object) -> FigureSpec:

@@ -823,8 +823,11 @@ the artwork's aspect ratio. Give both and the artwork is letterboxed inside
 those bounds. Both accept any length or `"cells:N"`. A file with no size of its
 own needs an explicit size.
 
-**Paths.** A relative path resolves against the working directory at compile
-time, so absolute paths are more reliable. A missing or unreadable file, or a
+**Paths.** A relative path in a figure file is found from the file's folder,
+as a structure's file, its map and the file it is coloured by are, so `flexo
+build` draws the figure the same from any folder. In a figure built in Python
+it resolves against the working directory at compile time, so absolute paths
+are more reliable there. A missing or unreadable file, or a
 suffix other than `.svg`, `.png`, `.jpg`, `.gif`, `.pdf` or `.ai`, raises `FlexoError`
 with a diagnostic that names the node and the path.
 
