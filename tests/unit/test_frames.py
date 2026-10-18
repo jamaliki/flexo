@@ -1293,3 +1293,47 @@ def test_the_editor_draws_a_line_to_a_frame_and_keeps_it_right() -> None:
     assert (net["kind"], net["sources"], net["targets"]) == ("merge", ["c", "a"], ["third"])
     drawn = compile_figure(parse_figure(yaml.safe_load(joined["text"])))
     assert [stem.port.node_id for stem in drawn.routed.net(net["id"]).target_stems] == ["third"]
+
+
+LANES = """
+figure: {id: lanes}
+groups:
+- {id: root, role: canvas, layout: {kind: column, align: center}, children: [flow, first, second]}
+- id: flow
+  role: layout
+  layout: {kind: row, align: center}
+  children: [source, split, lanes, join]
+- {id: lanes, role: layout, layout: {kind: column, gap: 28, align: start}, children: [upper, lower]}
+- {id: upper, role: layout, layout: {kind: row, align: center}, children: [a1, a2]}
+- {id: lower, role: layout, layout: {kind: row, align: center}, children: [b1, b2]}
+nodes:
+- {id: source, label: Source}
+- {id: split, label: "Split it\\nin two"}
+- {id: a1, label: "Crystal\\nstructure"}
+- {id: a2, label: "Dock\\nreactants"}
+- {id: b1, label: "Chemotype\\nsubstitution"}
+- {id: b2, label: "Initial pose\\nsampling"}
+- {id: join, label: "Assemble and\\nrefine all\\nstates jointly"}
+- {id: first, kind: frame, label: "A: Crystal analysis", properties: {around: "a1, a2"}}
+- {id: second, kind: frame, label: "B: Generation", properties: {around: "b1, b2"}}
+edges:
+- {from: source, to: split}
+- {from: split, to: a1}
+- {from: split, to: b1}
+- {from: a1, to: a2}
+- {from: b1, to: b2}
+- {from: a2, to: join}
+- {from: b2, to: join}
+"""
+
+
+def test_a_frame_joined_from_beside_it_keeps_its_rows_at_the_start_of_their_column() -> None:
+    """Rows in a column aligned at their start, a titled frame round each: a row joined from
+    a shape to its left, which stands higher than the frame once its title has room, has no
+    line coming down through the title -- the frame is not widened for one, and the row's
+    shapes start where the other row's do."""
+
+    compiled = compile_figure(parse_figure(yaml.safe_load(LANES)))
+    assert _box(compiled, "b1").x == pytest.approx(_box(compiled, "a1").x)
+    second = next(frame for frame in compiled.frames if frame.spec.id == "second")
+    assert second.bounds.x < _box(compiled, "b1").x < second.bounds.x + 10.0
