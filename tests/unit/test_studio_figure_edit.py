@@ -319,9 +319,12 @@ def test_lines_land_where_a_part_takes_them() -> None:
     assert net["sources"] == ["y"] and net["targets"] == [f"attention.{p}" for p in "qkv"]
     with pytest.raises(EditError, match="already connected"):
         edit(text, do="connect", source="x", target="encoder")
-    with pytest.raises(EditError, match="itself"):
-        edit(text, do="connect", source="x", target="x")
-    compile_figure(parse(text, Path.cwd()))
+    # A shape to itself: a loop back into it, made once.
+    looped, _ = edit(text, do="connect", source="x", target="x")
+    assert ("x", "x") in edges(looped)
+    with pytest.raises(EditError, match="itself already"):
+        edit(looped, do="connect", source="x", target="x")
+    compile_figure(parse(looped, Path.cwd()))
 
 
 def test_updates_set_and_clear_keys_and_a_new_kind_keeps_what_it_can() -> None:
@@ -1766,3 +1769,21 @@ def test_a_column_aligned_in_a_centred_row_keeps_its_first_shape_level_with_the_
         for node in compiled.fitted.nodes
     }
     assert abs(middle["ask"] - middle["tumble"]) < 1.0 and middle["turn"] > middle["tumble"]
+
+
+def test_a_shape_connected_to_itself_loops_back_into_it_once() -> None:
+    """Connect, then the same shape again: a line from the shape back into itself (a model run
+    on its own output), drawn as a loop on the side nothing else uses -- made once, said so."""
+
+    looped = apply(CHAIN, {"do": "connect", "source": "b", "target": "b"})["text"]
+    assert data(looped)["edges"][-1] == {"from": "b", "to": "b"}
+    routed = compile_figure(parse(looped, Path.cwd())).routed
+    loop = next(e for e in routed.edges if e.spec.source.node_id == e.spec.target.node_id == "b")
+    assert len(loop.centerline) >= 4  # (out of a side, round, and back in: a C)
+    with pytest.raises(EditError, match="loops back to itself already"):
+        apply(looped, {"do": "connect", "source": "b", "target": "b"})
+    notes = FigureKind().describe({"text": CHAIN}, {"text": looped})
+    assert [note["text"] for note in notes] == ["connected “B” to itself"]
+    grouped = CHAIN.replace("edges:\n", "groups:\n- {id: g, children: [c, d]}\nedges:\n")
+    with pytest.raises(EditError, match="only a shape"):
+        apply(grouped, {"do": "connect", "source": "g", "target": "g"})

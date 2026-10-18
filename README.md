@@ -1558,7 +1558,9 @@ changes in words, to go back or forward to any of them.
   on the frame's outline or its title (inside it, on none of its shapes, is nowhere), or
   the frame's own **+** dragged to a shape -- clicked, it asks for the shape, as
   **Connect to…** in its panel does; a chosen line's end dragged round the frame takes
-  another side of it. Shapes chosen anywhere in the figure, in whatever groups, go in one row or
+  another side of it. Connecting a shape and then clicking the same shape again draws a loop
+  back into it -- a step repeated, a model run on its own output -- on the side nothing else
+  uses, to be labelled as any line is ("repeat N times"). Shapes chosen anywhere in the figure, in whatever groups, go in one row or
   column of their own with **Align in a Row** or **Align in a Column** (in their panel,
   their right-click menu and the palette), in the order they are seen, where the first of
   them stood: boxes of a flow chart that have ended up in two columns side by side are put
