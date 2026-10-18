@@ -1134,7 +1134,7 @@ class _Document:
 
     def connect(self, source: str, target: str) -> str:
         if self.node_of(source) == self.node_of(target):
-            raise EditError("A shape can\u2019t be connected to itself.")
+            return self.loop(source)
         for end in (source, target):
             # (A group is an end as a shape is: flexo.group_ends.)
             if self.node(self.node_of(end)) is None and group_end(self, end) is None:
@@ -1161,6 +1161,21 @@ class _Document:
             )
             return identifier
         self.data.setdefault("edges", []).append({"from": source, "to": target})
+        return self.edge_ids()[-1][0]
+
+    def loop(self, source: str) -> str:
+        """A line from a shape back into itself -- a step repeated, a model run on its own
+        output -- drawn on the side nothing else uses (``flexo.routing``): its id."""
+
+        node = self.node(self.node_of(source))
+        if node is None:
+            raise EditError(f"A line can\u2019t loop back to “{source}”: only a shape\u2019s can.")
+        if any(
+            self.node_of(str(e["from"])) == node["id"] and self.node_of(str(e["to"])) == node["id"]
+            for e in self.edges
+        ):
+            raise EditError(f"“{self.said(node)}” loops back to itself already.")
+        self.data.setdefault("edges", []).append({"from": node["id"], "to": node["id"]})
         return self.edge_ids()[-1][0]
 
     def held_by(self, frame: str) -> set[str]:

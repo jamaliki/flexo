@@ -1154,9 +1154,8 @@ def _changes(old: dict[str, Any] | None, new: dict[str, Any] | None) -> list[dic
         if pair not in old["edges"] and not set(pair) & set(added) and not rejoined:
             if pair in told:
                 continue
-            notes.append(
-                {"text": f"connected {called(pair[0])} to {called(pair[1])}", "where": None}
-            )
+            to = "itself" if pair[0] == pair[1] else called(pair[1])
+            notes.append({"text": f"connected {called(pair[0])} to {to}", "where": None})
         elif pair in old["edges"] and old["edges"][pair] != edge:
             notes.append(
                 {

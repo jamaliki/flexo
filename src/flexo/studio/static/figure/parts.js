@@ -648,7 +648,7 @@ export function figureParts(host) {
         if (action.after && groupOf(action.after)) return `Add ${kindTitle(action.kind)} After ${name(action.after)}`;
         return `Add ${kindTitle(action.kind)}`;
       }
-      case "connect": return `Connect ${name(action.source)} to ${name(action.target)}`;
+      case "connect": return `Connect ${name(action.source)} to ${action.source === action.target ? "Itself" : name(action.target)}`;
       case "delete": return many(action.ids, "Delete");
       case "show": return action.all ? "Show All" : many(action.ids, { hidden: "Hide", dimmed: "Dim", highlighted: "Highlight" }[action.as] || "Show");
       case "duplicate": return many(action.ids, "Duplicate");
@@ -2073,7 +2073,8 @@ export function figureParts(host) {
         h("span.kbd", {}, "Esc")];
     }
     return [icon("right"),
-      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, endName(connecting.source)), " ends") : h("span", {}, "Click the shape where the line starts"),
+      connecting.source ? h("span", {}, "Click the shape where the line from ", h("b", {}, endName(connecting.source)), " ends", nodeOf(connecting.source) ? ", or it again for a loop" : "")
+        : h("span", {}, "Click the shape where the line starts"),
       h("span.kbd", {}, "Esc")];
   }
   function connectTo(id) {
@@ -2090,7 +2091,14 @@ export function figureParts(host) {
       return;
     }
     if (!connecting.source) { connecting.source = id; select([id], { reveal: false }); return; }
-    if (id === connecting.source) return;
+    // The shape the line starts at, clicked again: a loop back into it (a step repeated).
+    if (id === connecting.source) {
+      if (!nodeOf(id)) return;
+      state.connecting = null;
+      host.changed();
+      act({ do: "connect", source: id, target: id });
+      return;
+    }
     // (A frame and a shape it goes round: the figure would refuse it -- said here, the line
     // still to be ended somewhere else.)
     for (const [frame, other] of [[id, connecting.source], [connecting.source, id]]) {
