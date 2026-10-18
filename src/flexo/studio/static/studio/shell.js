@@ -106,6 +106,8 @@ function movedNote(workspace, text, moved) {
 // A document whose file does not read -- not since it was opened, or not now (broken while
 // open): shown the one way, the file's words to put right, its line chosen.
 const unreadable = (session) => Boolean(session?.unread || (session?.held && session?.source != null));
+// A Save said: in a bundle's window, in the bundle it is written into (talk.flexo).
+const saved = (answer) => toast(answer?.bundle ? `Saved in “${answer.bundle}”` : "Saved", { icon: "check", seconds: answer?.bundle ? 2 : 1.2 });
 
 // The word on a document's saving: what is true of it and its file, briefly.
 function statusWords(session) {
@@ -748,8 +750,7 @@ export async function start() {
       case "history": if (session && !past.disabled) historyMenu(past, session); break;
       case "save":
         if (unreadable(session)) { unread?.mend(); break; }
-        session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
-          (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+        session?.saveNow().then(saved, (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
         break;
       case "export": {
         // (An export of the kind's own -- a figure on a slide as a file -- runs as it says.)
@@ -1239,8 +1240,7 @@ export async function start() {
       event.preventDefault();
       // A file that does not read is saved as it has been put right, once it reads.
       if (session?.unread) unread?.mend();
-      else session?.saveNow().then(() => toast("Saved", { icon: "check", seconds: 1.2 }),
-        (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
+      else session?.saveNow().then(saved, (error) => toast(`Not saved: ${error.message}`, { kind: "error", icon: "error", seconds: 8 }));
     }
     else if (mod && event.altKey && event.code === "KeyZ") { event.preventDefault(); if (session && !past.disabled) historyMenu(past, session); }
     else if (mod && key === "z" && ownUndo()) { /* the field's own undo */ }

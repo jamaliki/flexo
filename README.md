@@ -1506,8 +1506,8 @@ bundled. A bundle someone sends is read as one from a stranger: no name out of i
 link, nothing larger than 3 GB however small it is packed -- and its Python runs only once
 its person trusts it. The studio opens a bundle into a working folder of its own (in
 `~/Library/Application Support/flexo/bundles`, or the XDG data folder) and writes it back,
-whole, a moment after each change; a bundle saved on another computer meanwhile is taken
-in, as a file changed on disk is.
+whole, a moment after each change -- and at once on Save (⌘S), which says it is saved in the
+bundle; a bundle saved on another computer meanwhile is taken in, as a file changed on disk is.
 
 ### The studio: edit with people and agents, live
 

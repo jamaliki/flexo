@@ -320,7 +320,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not wrote:
                     self._fail(HTTPStatus.CONFLICT, doc.problem or f"{doc.name} was not saved")
                     return
-            self._json({"ok": True, "saved": doc.saved})
+            # A bundle's: the bundle written now, not once things are quiet, and named -- a
+            # Save is saved in the file its person sees (flexo.studio.bundles).
+            keeper = getattr(workspace, "bundle", None)
+            answer = {"ok": True, "saved": doc.saved}
+            if keeper is not None:
+                keeper.save()
+                if keeper.problem is None:
+                    answer["bundle"] = keeper.path.name
+            self._json(answer)
         elif route == "/api/mend":
             # A file that does not read, put right by its person where the studio shows it.
             workspace.open(name).mend(str(data.get("text", "")), over=bool(data.get("over")))
