@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flexo.studio.merge import merge3
+from flexo.studio.merge import clashes, merge3
 
 
 def deck(*slides: dict) -> dict:
@@ -323,3 +323,29 @@ def test_a_slide_moved_and_changed_while_typed_in_is_one_slide() -> None:
             slide("The question moved", "Second paragraph. alice"),
             {"title": "1"},
         ]
+
+
+def test_where_both_changed_one_thing_is_collected_and_nothing_else_is() -> None:
+    base = deck({"title": "Methods", "layout": "content"}, {"title": "B"}, {"title": "C"})
+    apart = (
+        deck({"title": "Methods in brief", "layout": "content"}, {"title": "B"}, {"title": "C"}),
+        deck(
+            {"title": "Methods", "layout": "content"}, {"title": "B"}, {"title": "C", "notes": "x"}
+        ),
+    )
+    alike = (
+        deck({"title": "Knot", "layout": "section"}, {"title": "B"}, {"title": "C"}),
+        deck({"title": "Point", "layout": "statement"}, {"title": "B"}, {"title": "C"}),
+    )
+    with clashes() as found:
+        merge3(base, *apart)
+    assert found == []
+    with clashes() as found:
+        merged = merge3(base, *alike)
+    assert merged["slides"][0] == {"title": "Point", "layout": "statement"}  # (theirs stands)
+    assert {"ours": "section", "theirs": "statement"} in found
+    assert {"ours": "Knot", "theirs": "Point"} in found
+    # A key one side changed and the other took away: the change is lost, and said.
+    with clashes() as found:
+        merge3({"deck": {"theme": "paper"}}, {"deck": {"theme": "lab"}}, {"deck": {}})
+    assert found == [{"ours": "lab", "theirs": None}]

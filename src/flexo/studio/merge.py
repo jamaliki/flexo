@@ -16,13 +16,19 @@ algorithm for the page.
 "item": item}``, an item the other side removed kept for ``side`` ("ours" or
 "theirs"), who edited it; ``{"rewritten": side, "words": words, "typed": typed}``,
 words ``side`` wrote anew, kept whole, and the other's ``typed`` after them.
+
+``clashes()``, a context, collects where both sides changed one thing differently and
+``theirs`` was kept in place of ``ours`` (a word, a setting, a key one side changed and the
+other took away): a merge made with none lost nothing either side did.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from itertools import pairwise
 from typing import Any
 
@@ -31,6 +37,26 @@ _LINES = re.compile(r"[^\n]*\n|[^\n]+")
 _WORDS = re.compile(r"\w+|\s+|[^\w\s]")
 _SPACE = re.compile(r"\s")
 _WORDS_ONLY = re.compile(r"\w+")
+_CLASHES: ContextVar[list | None] = ContextVar("clashes", default=None)
+
+
+@contextlib.contextmanager
+def clashes() -> Iterator[list]:
+    """Within it, each merge's clashes (see the module's words), in a list: ``ours`` and
+    ``theirs`` as each side had the thing."""
+
+    found: list = []
+    token = _CLASHES.set(found)
+    try:
+        yield found
+    finally:
+        _CLASHES.reset(token)
+
+
+def _clash(ours: Any, theirs: Any) -> None:
+    found = _CLASHES.get()
+    if found is not None:
+        found.append({"ours": ours, "theirs": theirs})
 
 
 def merge3(base: Any, ours: Any, theirs: Any, notes: list | None = None) -> Any:
@@ -49,6 +75,7 @@ def merge3(base: Any, ours: Any, theirs: Any, notes: list | None = None) -> Any:
         return merge_items(base if isinstance(base, list) else [], ours, theirs, notes)
     if isinstance(ours, str) and isinstance(theirs, str) and isinstance(base, str):
         return merge_text(base, ours, theirs, notes)
+    _clash(ours, theirs)
     return theirs
 
 
@@ -70,6 +97,7 @@ def merge_text(base: str, ours: str, theirs: str, notes: list | None = None) -> 
 
 def _merge_words(base: str, ours: str, theirs: str, notes: list | None = None) -> str:
     if not any(_SPACE.search(text) for text in (base, ours, theirs)):
+        _clash(ours, theirs)
         return theirs
     words = [_WORDS.findall(text) for text in (base, ours, theirs)]
     # Words one side wrote anew while the other typed in them would be held together only
@@ -187,7 +215,10 @@ def _words_chunk(base: list, ours: list, theirs: list) -> list:
         if typed is not None:
             return [typed]
     merged = _letters(was, "".join(ours), "".join(theirs))
-    return [merged] if merged is not None else list(theirs)
+    if merged is None:
+        _clash("".join(ours), "".join(theirs))
+        return list(theirs)
+    return [merged]
 
 
 def _letters(was: str, ours: str, theirs: str) -> str | None:
@@ -280,6 +311,8 @@ def _merge_dicts(base: dict, ours: dict, theirs: dict, notes: list | None = None
             # if we changed it: theirs wins).
             if was is _MISSING:
                 result[key] = mine
+            elif not _same(was, mine):
+                _clash(mine, None)
         elif was is _MISSING or not _same(was, other):
             # Ours lacks it: kept if they added or changed it, gone if we removed it.
             result[key] = other
