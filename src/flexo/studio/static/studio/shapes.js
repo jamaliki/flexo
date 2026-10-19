@@ -731,7 +731,7 @@ export function shapeEditor(host) {
     const index = shapeAt(event, { clearOf: () => Boolean(host.partAt(event)) }) ?? groups.outward(event);
     if (index === null) return false;
     if (!chosenNow().includes(index)) choose([index]);
-    menu({ x: event.clientX, y: event.clientY }, menuItems());
+    menu({ x: event.clientX, y: event.clientY }, menuItems({ x: event.clientX, y: event.clientY }));
     return true;
   }
 
@@ -2040,7 +2040,7 @@ export function shapeEditor(host) {
   }
   // What being behind what the page holds is called: Keynote's "slide content", a figure.
   const behindNames = host.behindNames || ["Send Behind Slide Content", "Bring Above Slide Content"];
-  function menuItems() {
+  function menuItems(point = null) {
     const picks = chosenNow();
     const named = (label) => commands().find((command) => command.label === label);
     const one = picks.length === 1 ? shapesOf()[picks[0]] : null;
@@ -2062,7 +2062,9 @@ export function shapeEditor(host) {
     const own = commands().filter((command) => command.menu && command.menu !== "first");
     const first = commands().filter((command) => command.menu === "first");
     if (first.length) items.unshift(...first, "-");
-    items.push(...rest, ...(own.length ? ["-", ...own] : []), "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
+    // (And the page's own items, opened where the menu was: a deck's Show ▸.)
+    const page = host.menuItems ? host.menuItems(picks, point).filter(Boolean) : [];
+    items.push(...rest, ...(own.length ? ["-", ...own] : []), ...(page.length ? ["-", ...page] : []), "-", named(picks.length === 1 ? `Delete ${shapeLabel(one)}` : `Delete ${plural(picks.length)}`));
     // (A menu of the studio's has no submenus: Arrange and Align are their items, in place.)
     return items.flatMap((item) => (item?.items ? item.items.filter(Boolean).map((sub) => ({ ...sub })) : [item])).filter(Boolean)
       .map((item) => (item === "-" ? item : { ...item, danger: item.label?.startsWith("Delete") || undefined }));

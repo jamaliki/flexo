@@ -1871,6 +1871,7 @@ export function figureParts(host) {
       if (chosen.every(isLine) && joinable(chosen)) items.push({ icon: "right", label: "Join Lines", run: () => joinLines(chosen) });
       if (shapes && chosen.every((each) => !isLine(each))) items.push({ icon: "layout", label: "Group…", keys: "⌘G", run: () => groupMenu(anchor) });
       if (canAlign()) items.push({ icon: "layout", label: "Align in a Row", run: () => alignChosen("row") }, { icon: "layout", label: "Align in a Column", run: () => alignChosen("column") });
+      items.push(showItem(chosen, anchor));
       if (shapes) items.push({ icon: "duplicate", label: "Duplicate", keys: "⌘D", run: () => duplicate(chosen) });
       items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove(chosen) });
       return items;
@@ -1918,6 +1919,7 @@ export function figureParts(host) {
         { icon: "plus", label: "Add Shape Inside…", run: () => addPalette(anchor, { inside: id }) });
     }
     if (group && !isRoot) items.push({ icon: "layout", label: "Ungroup", run: () => act({ do: "ungroup", id }) });
+    if (node || isLine(id) || (group && !isRoot)) items.push(showItem([id], anchor));
     if (node || (group && !isRoot)) items.push({ icon: "duplicate", label: "Duplicate", keys: "⌘D", run: () => duplicate() });
     if (!isRoot) items.push({ icon: "trash", label: "Delete", keys: "⌫", danger: true, run: () => remove() });
     return items;
@@ -6293,6 +6295,7 @@ export function figureParts(host) {
       }),
         fields(edgeFields(edge).filter((field) => field.key !== "line"), edge, (values, merge, hold) => update({ type: "edge", id: edge.id }, values, merge, hold), `edge:${edge.id}`)),
       lineLookSection([{ type: "edge", id: edge.id, item: edge }]),
+      showSection([edge.id]),
     ];
   }
 
@@ -6339,6 +6342,7 @@ export function figureParts(host) {
         more, trunk),
       h("div.section", {}, fields((catalog.net_fields || [catalog.edge_fields[0]]).filter((field) => field.key !== "line" && field.key !== "via"), net, write, `net:${net.id}`)),
       lineLookSection([{ type: "net", id: net.id, item: net }]),
+      showSection([net.id]),
       h("div.section", {}, h("div.row", {}, ui.button("Separate Lines", () => separateLine(net.id), { small: true, title: "Make each branch a line of its own again" }))),
     ];
   }
@@ -6483,11 +6487,20 @@ export function figureParts(host) {
     return `${said.join(", ")}: drawn where ${said.length === 1 && /^1 /.test(said[0]) ? "it stands" : "they stand"}, and nothing else moved.`;
   }
   function showAs(how, ids = state.selected) {
-    const parts = ids.filter((id) => nodeOf(id) || (groupOf(id) && id !== model()?.root));
+    // (A line too: shown as it says, else as the less shown of its ends -- flexo.showing.)
+    const parts = ids.filter((id) => nodeOf(id) || isLine(id) || (groupOf(id) && id !== model()?.root));
     if (!parts.length) return;
     act({ do: "show", ids: parts, as: how }, { select: false });
   }
   function showAll() { if (anyShownApart()) act({ do: "show", all: true }, { select: false }); }
+  // Show ▸ on a part's right-click menu: the four ways it may be drawn, the one it is ticked --
+  // a second menu where it was opened, as the deck's objects have it (showing.js).
+  function showItem(ids, anchor) {
+    const each = ids.map(shownAs), now = each.every((how) => how === each[0]) ? each[0] || "shown" : "";
+    const ways = [["shown", "Shown"], ["highlighted", "Highlight"], ["dimmed", "Dim"], ["hidden", "Hide"]];
+    return { icon: "eye", label: "Show", keys: "\u25B8", run: () => menu(anchor, [{ title: "Show" },
+      ...ways.map(([how, label]) => ({ label, checked: now === how, run: () => showAs(how, ids) }))]) };
+  }
   function showSection(ids) {
     const each = ids.map(shownAs);
     const value = each.every((how) => how === each[0]) ? each[0] || "shown" : "";

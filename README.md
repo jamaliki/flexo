@@ -1191,10 +1191,13 @@ figure:
 Each lists shapes, groups (all they hold), lines or frames by id; in Python,
 `Figure("pipeline", hide=[...], dim=[...], highlight=[...])`. A line is shown as the
 less shown of its two ends is. What is faint is drawn in colours nearer the page's
-(not see-through), so it is the same in a PDF and a PowerPoint as on the page; what
-is hidden is in no export. In the studio a shape's **Show** is Shown, Highlight,
-Dimmed or Hidden (a hidden part is a ghost while its figure is edited), and
-**Show All** brings everything back.
+(not see-through), so it is the same in a PDF and a PowerPoint as on the page -- a picture
+in it alone is see-through, in the PDF and the PNG too; what is faint already is never drawn
+fainter (a figure dimmed where it is shown, its faint parts in it). What is hidden is in no
+export. In the studio a shape's, a line's and a drawn-over shape's **Show** is Shown,
+Highlight, Dimmed or Hidden (a hidden part is a ghost while its figure is edited), as is
+**Show ▸** on its right-click menu, and **Show All** brings everything back. A slide's
+objects, their parts and its shapes are shown the same four ways (flexo-talk).
 
 ### Laying a figure out for a box (slides, posters)
 

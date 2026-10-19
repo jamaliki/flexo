@@ -747,7 +747,10 @@ class _Content:
         if item.outline:
             # Masked by a shape: within its outline too.
             clip += f"{_path(item.outline)} W n "
-        self.ops.append(f"q {clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
+        # A picture drawn faint (flexo.showing) is see-through: a PDF's alpha reaches images.
+        faint = item.opacity < 1.0
+        alpha = f"/{self.writer.state(item.opacity, item.opacity, 'normal')} gs " if faint else ""
+        self.ops.append(f"q {alpha}{clip}{across} {down} {_n(left)} {_n(top)} cm /{name} Do Q")
 
 
 def _formula_words(source: str) -> str:

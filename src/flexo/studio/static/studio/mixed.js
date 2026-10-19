@@ -289,11 +289,14 @@ export function mixedChoice(ctx) {
     const mine = new Set(commands().map((command) => command.label));
     return list.filter((command) => !mine.has(command.label) && !/^(Delete|Duplicate|Cut|Copy) /.test(command.label) && !(command.also || []).includes("Duplicate"));
   }
-  function menuItems() {
+  function menuItems(point = null) {
     const called = name();
+    // (The page's own, opened where the menu was: a deck's Show ▸.)
+    const page = (ctx.menuItems?.(point) || []).filter(Boolean);
     return [
       ...(ctx.clipItems?.() || []),
       { icon: "duplicate", label: `Duplicate ${called}`, keys: "⌘D", run: () => duplicate() },
+      ...(page.length ? ["-", ...page] : []),
       "-",
       ...["Align Left", "Align Centre", "Align Right", "Align Top", "Align Middle", "Align Bottom"].map((words) => arranging.commands(called).find((command) => command.label === words)).filter(Boolean),
       arranging.menuItem(called),
@@ -308,7 +311,7 @@ export function mixedChoice(ctx) {
     const mine = shape !== null ? shapesNow().includes(shape) : own.at(event) !== null;
     if (!mine) return false;
     event.preventDefault?.();
-    menu({ x: event.clientX, y: event.clientY }, menuItems());
+    menu({ x: event.clientX, y: event.clientY }, menuItems({ x: event.clientX, y: event.clientY }));
     return true;
   }
 

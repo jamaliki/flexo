@@ -3589,9 +3589,9 @@ console.log(JSON.stringify({ ...out, sent }));
     ]
     assert out["offered"] is True and out["alone"] is False
     assert (out["inRow"], out["inColumn"], out["withLine"]) == (False, False, [False, False])
-    # Several chosen, right-clicked: grouped (⌘G), or aligned.
-    assert out["menu"] == [["Group…", "⌘G"], ["Align in a Row", ""],
-                           ["Align in a Column", ""], ["Duplicate", "⌘D"], ["Delete", "⌫"]]
+    # Several chosen, right-clicked: grouped (⌘G), aligned, or shown another way (Show ▸).
+    assert out["menu"] == [["Group…", "⌘G"], ["Align in a Row", ""], ["Align in a Column", ""],
+                           ["Show", "▸"], ["Duplicate", "⌘D"], ["Delete", "⌫"]]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")

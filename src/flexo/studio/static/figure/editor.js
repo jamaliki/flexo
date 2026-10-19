@@ -1165,11 +1165,12 @@ export function mount(studio, main) {
       { icon: "bold", label: "Bold", keys: "⌘B", run: () => figure.toggleWords("bold") },
       { icon: "italic", label: "Italic", keys: "⌘I", run: () => figure.toggleWords("italic") }] : []),
     // What is chosen hidden, dimmed or highlighted where it stands, and all of it back.
-    ...(!typingNow() && shapesChosen() ? [
-      { icon: "eye", label: "Hide", hint: "Not drawn: its place is kept", run: () => figure.showAs("hidden") },
-      { icon: "eye", label: "Dim", hint: "Drawn faint", run: () => figure.showAs("dimmed") },
-      { icon: "eye", label: "Highlight", hint: "The rest of the figure faint", run: () => figure.showAs("highlighted") },
-      { icon: "eye", label: "Show", hint: "Drawn plainly again", run: () => figure.showAs("shown") }] : []),
+    ...(!typingNow() && (shapesChosen() || figure.selected.some((id) => figure.edgeOf(id) || figure.netOf(id))) ? [
+      // (Each also by the Mac app's Format › Show As name for it, as a deck's objects are.)
+      { icon: "eye", label: "Hide", also: ["Show As Hidden"], hint: "Not drawn: its place is kept", run: () => figure.showAs("hidden") },
+      { icon: "eye", label: "Dim", also: ["Show As Dimmed"], hint: "Drawn faint", run: () => figure.showAs("dimmed") },
+      { icon: "eye", label: "Highlight", also: ["Show As Highlighted"], hint: "The rest of the figure faint", run: () => figure.showAs("highlighted") },
+      { icon: "eye", label: "Show", also: ["Show As Shown"], hint: "Drawn plainly again", run: () => figure.showAs("shown") }] : []),
     ...(figure.anyShownApart() ? [{ icon: "eye", label: "Show All", hint: "Nothing hidden, dimmed or highlighted", run: () => figure.showAll() }] : []),
     // Arrange › Move Up and Move Down: a place back or on in its row or column (⌥ and an arrow).
     ...(!typingNow() && figure.canMove(false) ? [{ icon: "up", label: "Move Up", keys: "⌥↑", run: () => figure.moveChosen(false) }] : []),

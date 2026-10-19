@@ -266,7 +266,8 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
   // -- shown plainly, faint, or not at all: the figure's own hide and dim --
   const shownAs = (spec, index) => {
     const id = spec?.id !== undefined ? String(spec.id) : `shapes.${index}`, settings = figure.model?.figure || {};
-    return (settings.hide || []).includes(id) ? "hidden" : (settings.dim || []).includes(id) ? "dimmed" : "shown";
+    return (settings.hide || []).includes(id) ? "hidden" : (settings.dim || []).includes(id) ? "dimmed"
+      : (settings.highlight || []).includes(id) ? "highlighted" : "shown";
   };
   // Named first, should it have no name of its own (a shape's place in the list is no name to
   // keep: it changes as shapes are added and stacked).
@@ -281,7 +282,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
       taken.add(`${base}${n}`);
       return `${base}${n}`;
     });
-    const label = `${{ hidden: "Hide", dimmed: "Dim", shown: "Show" }[how]} ${picks.length === 1 ? shapeLabel(shapes[picks[0]]) : `${picks.length} Shapes`}`;
+    const label = `${{ hidden: "Hide", dimmed: "Dim", highlighted: "Highlight", shown: "Show" }[how]} ${picks.length === 1 ? shapeLabel(shapes[picks[0]]) : `${picks.length} Shapes`}`;
     // (Named and shown so in one step.)
     if (picks.some((index) => shapes[index]?.id === undefined)) {
       edit((all) => { picks.forEach((index, n) => { if (all[index] && all[index].id === undefined) all[index] = { kind: all[index].kind, id: named[n], ...all[index] }; }); return all; },
@@ -297,6 +298,7 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
       ...(convertible(picks.map((index) => list()[index])) ? [convertCommand(() => toParts(picks), name)] : []),
       ...(ways.every((way) => way === "hidden") ? [] : [{ icon: "eye", label: "Hide", hint: `${name}: not drawn, its place kept`, run: () => showAs(picks, "hidden") }]),
       ...(ways.every((way) => way === "dimmed") ? [] : [{ icon: "eye", label: "Dim", hint: `${name}: drawn faint`, run: () => showAs(picks, "dimmed") }]),
+      ...(ways.every((way) => way === "highlighted") ? [] : [{ icon: "eye", label: "Highlight", hint: `${name}: the rest of the figure faint`, run: () => showAs(picks, "highlighted") }]),
       ...(ways.every((way) => way === "shown") ? [] : [{ icon: "eye", label: "Show", hint: `${name}: drawn plainly again`, run: () => showAs(picks, "shown") }]),
     ];
   }
@@ -381,12 +383,12 @@ export function figureShapes({ studio, figure, page, stage, center, button, chan
     const behind = chosen.every((spec) => spec.behind), front = chosen.every((spec) => !spec.behind);
     out.push(ui.field("Drawn", ui.segmented({ value: behind ? "behind" : front ? "front" : null, key: "shape.layer",
       options: [{ value: "front", label: "In Front" }, { value: "behind", label: "Behind" }],
-      onChange: (value) => set({ behind: value === "behind" }, value === "behind" ? "Send Behind the Figure" : "Bring Above the Figure") }),
-    { hint: "Behind, it is a backdrop the parts stand on: over the box of the group that holds them" }));
+      onChange: (value) => set({ behind: value === "behind" }, value === "behind" ? "Send Behind the Figure" : "Bring Above the Figure") })));
+    // Shown, highlighted, dimmed or hidden, as the figure's parts and a slide's objects are.
     const ways = picks.map((index) => shownAs(shapes[index], index));
-    out.push(ui.field("Shown", ui.segmented({ value: ways.every((way) => way === ways[0]) ? ways[0] : null, key: "shape.shown",
-      options: [{ value: "shown", label: "Plainly" }, { value: "dimmed", label: "Faint" }, { value: "hidden", label: "Hidden" }],
-      onChange: (value) => showAs(picks, value) }), { hint: "As the figure's hide and dim say: the layout is the same" }));
+    out.push(ui.field("Show", ui.segmented({ value: ways.every((way) => way === ways[0]) ? ways[0] : null, key: "shape.shown",
+      options: [{ value: "shown", label: "Shown" }, { value: "highlighted", label: "Highlight" }, { value: "dimmed", label: "Dimmed" }, { value: "hidden", label: "Hidden" }],
+      onChange: (value) => showAs(picks, value) })));
     void slider; void specs;
     return [h("div.section", {}, h("div.section-title", {}, "On the Figure"), out)];
   }
