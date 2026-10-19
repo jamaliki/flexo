@@ -141,7 +141,10 @@ const DRAGS = {
   crop: () => [row("⇧", "Keep Proportions"), CANCEL],
   // A figure's shape moved among the others.
   part: () => [row("⌥", "Copy"), CANCEL],
-  // A band, an object carried among the others, a logo along its row: Esc alone.
+  // An object carried among the others in its place: ⌘ takes it out of line, to stay where it
+  // is let go.
+  carry: () => [row("⌘", "Place Freely"), CANCEL],
+  // A band, a logo along its row: Esc alone.
   plain: () => [CANCEL],
 };
 
@@ -260,7 +263,7 @@ export function fromShapes(doing) {
       : doing.drag === "draw" ? (doing.line ? "draw-line" : "draw")
         : doing.drag === "band" ? "plain"
           : doing.drag === "point" || doing.drag === "adjust" ? "handle"
-            : ["move", "turn", "end"].includes(doing.drag) ? doing.drag : "plain";
+            : ["move", "turn", "end", "carry"].includes(doing.drag) ? doing.drag : "plain";
   }
   // (A point of the pen's, or of a path's being edited, dragged.)
   else if (doing.pointDrag) c.drag = doing.points ? "point" : "pen";
