@@ -25,7 +25,10 @@ on another Mac, edit, save and send back, as Keynote's ``.key`` is one file. It 
 ``missing`` are files the document names that were not there when it was bundled, and
 ``outside`` those it names outside its folder (a whole path, ``../``): neither is in the
 bundle, and nothing the document says is rewritten -- each file keeps the name it is named
-by. A bundle opens on Linux and in a browser's studio as on a Mac: it is a plain zip, not a
+by. A bundle the studio saves says too which saving it is, and those it was made from,
+newest first (``"revisions": ["5d1c0e9a7b42", "a3f09b1c2d7e", ...]``): two computers'
+copies of one bundle are merged from the last they had in common (flexo.studio.bundles).
+A bundle opens on Linux and in a browser's studio as on a Mac: it is a plain zip, not a
 macOS package.
 
 What names what is found as each loader finds it (``gather``): a kind of document says what
@@ -56,7 +59,7 @@ import time
 import unicodedata
 import zipfile
 import zlib
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -77,6 +80,8 @@ MOST_BYTES = 3 * 1024**3
 megabytes, but a bundle claiming more than this is refused rather than unpacked (a zip of a
 few kilobytes can claim gigabytes)."""
 MOST_MANIFEST = 1_000_000
+MOST_REVISIONS = 200
+"""Revisions a manifest names, at most: the saving it is, and those it was made from."""
 FOLDER_MOST = 2_000
 """Files taken from one folder a document names (a plot's data folder), at most."""
 APP = ""
@@ -692,8 +697,10 @@ def manifest(
     created: str | None = None,
     left: Iterable[Left] = (),
     files: int = 0,
+    revisions: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """A bundle's ``manifest.json``: what it is, its document, who made it and when."""
+    """A bundle's ``manifest.json``: what it is, its document, who made it and when (and,
+    saved by the studio, which saving it is and those it was made from: ``revisions``)."""
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     left = list(left)
@@ -706,6 +713,7 @@ def manifest(
         "created": created or now,
         "modified": now,
         "files": files,
+        **({"revisions": list(revisions)[:MOST_REVISIONS]} if revisions else {}),
         **(
             {"missing": [item.said() for item in left if item.why != "outside"]}
             if any(item.why != "outside" for item in left)
@@ -739,10 +747,13 @@ def write(
     *,
     previous: Path | None = None,
     known: Known | None = None,
+    check: Callable[[], None] | None = None,
 ) -> Known:
     """Write a bundle of ``files`` (each by its name in it) and the manifest ``about``, as
     one file at ``target``: written beside it and moved over it, so a write cut short (a full
     disk, the app quitting) leaves the bundle as it was, never half of the new one.
+    ``check``, called the moment before it is moved over it, may stop it by raising (the
+    bundle there changed meanwhile: what it holds is taken in first).
 
     ``previous``: a bundle of these files written before, whose entries for files unchanged
     since (``known`` says what they were; else each is read again) are copied as they are --
@@ -793,6 +804,8 @@ def write(
             os.fsync(handle.fileno())
         with contextlib.suppress(OSError):
             os.chmod(partial, target.stat().st_mode & 0o7777 if target.exists() else 0o644)
+        if check is not None:
+            check()
         os.replace(partial, target)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -1165,6 +1178,17 @@ class Bundle:
     @property
     def kind(self) -> str:
         return str(self.manifest.get("kind") or "")
+
+    @property
+    def revisions(self) -> list[str]:
+        """Which saving it is, and those it was made from, newest first (none, for a bundle
+        made otherwise than saved by the studio)."""
+
+        said = self.manifest.get("revisions")
+        if not isinstance(said, list):
+            return []
+        found = [item for item in said if isinstance(item, str) and 0 < len(item) <= 64]
+        return found[:MOST_REVISIONS]
 
     @property
     def left(self) -> list[dict[str, str]]:

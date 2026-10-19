@@ -1,10 +1,10 @@
 // A bundle (one .flexo file holding a document and every file it names) in the studio's
 // window: the window and its document's tab named for the bundle, what the bundle was made
-// without and what happens to it (saved on another computer and taken in, moved, not
-// writable) said as it happens; and, for every deck and figure, Save as Bundle… (in the
-// palette, the Mac app's File menu and the Export menus), and in a bundle's window Unpack
-// Bundle…, which writes it out as a plain folder. The bundle is kept in step by the studio
-// (flexo.studio.bundles): nothing here writes it.
+// without and what happens to it (saved on another computer and taken in, a copy a cloud
+// service made of it merged, moved, not writable) said as it happens; and, for every deck
+// and figure, Save as Bundle… (in the palette, the Mac app's File menu and the Export
+// menus), and in a bundle's window Unpack Bundle…, which writes it out as a plain folder.
+// The bundle is kept in step by the studio (flexo.studio.bundles): nothing here writes it.
 
 import { h, toast } from "./ui.js";
 
@@ -39,6 +39,8 @@ export function bundles(workspace) {
     if (shown.conflict) {
       toast(`Changes made here that never reached ${shown.name} before it changed on another computer are in “${shown.conflict}”, beside it.`, { icon: "info", seconds: 14 });
     }
+    // What became of the copies a cloud service made beside it, as it opened.
+    for (const said of shown.notices || []) toast(said, { icon: "info", seconds: 12 });
   }
   workspace.on("bundle", (event) => {
     const was = shown;
@@ -47,6 +49,7 @@ export function bundles(workspace) {
     if (event.problem && event.problem !== was?.problem) toast(event.problem, { kind: "error", icon: "error", seconds: 8 });
     if (event.taken?.length) toast(`${shown.name} was saved on another computer: its changes are taken in.`, { icon: "info", seconds: 6 });
     if (event.renamed) toast(`The bundle is now “${event.renamed}”.`, { icon: "info" });
+    for (const said of event.notices || []) toast(said, { icon: "info", seconds: 12 });
     retitle(workspace);
     workspace.emit("status", workspace.active);
   });

@@ -13,7 +13,9 @@ half a bundle -- on a thread of its own, entries unchanged copied as they are: t
 waits for it. What changes in the bundle (saved on another computer, carried here by
 iCloud Drive or Dropbox) is taken into the folder, where the studio takes it in as it takes
 in any file changed on disk -- a document this studio changed too merged with it first, from
-the version both had.
+the version both had. And the copy a cloud service keeps beside it when two computers save it
+at once (``talk (1).flexo``) is merged in likewise, and put in the Trash: the folder holds one
+bundle again (``flexo.studio.cloud_bundles``).
 
 A bundle trusted to run its Python is trusted by its place, as a folder is: the browser's
 studio remembers it in the working folder's state, the Mac app in its list of trusted folders.
@@ -31,11 +33,13 @@ import shutil
 import threading
 import time
 import traceback
+import zlib
 from pathlib import Path
 from typing import Any
 
 from flexo import bundle as bundles
 from flexo.bundle import Bundle, BundleError
+from flexo.studio import cloud_bundles as cloud
 
 POLL = 0.4
 """Seconds between looks at the working folder and at the bundle."""
@@ -49,6 +53,14 @@ SHARED_PATIENCE = 20.0
 UNREAD_PATIENCE = 6.0
 """Seconds a bundle changed on disk that does not read (still arriving?) is waited for before
 what is here is written over it."""
+HOLD = 45.0
+"""Seconds the folder waits to be written back, in a folder a cloud service keeps, once it
+is merged with a bundle another computer saved without this one's last saving (which the
+service keeps as a copy beside it): time for that computer, merging the copy, to save the
+merge both want -- one saving, not two at once that conflict again."""
+LOOK = 10.0
+"""Seconds between looks beside the bundle for copies a cloud service made of it (and each
+time its folder changes)."""
 STATE = "bundle.json"
 
 
@@ -111,12 +123,16 @@ class Keeper:
         self.conflict: str | None = None
         """A bundle beside this one holding edits made here that never reached it, the bundle
         having changed meanwhile on another computer (said once, as it opens)."""
+        self.notices: list[str] = []
+        """What became of the copies a cloud service made beside it, as it opened (said once)."""
         self.synced: dict[str, tuple[int, int]] = {}
         """Each file of the bundle, as it was last read or written: its CRC and size."""
         self.stamps: dict[str, tuple[int, int]] = {}
         """Each file of the folder as it was then: its time (ns) and size."""
         self.texts: dict[str, bytes] = {}
-        """Each document's words as they were then: what both sides had, to merge from."""
+        """Each document's words as they were then."""
+        self.history = cloud.History(self.home / "versions")
+        """The versions of the bundle this computer has had, to merge from the one two had."""
         self.known: bundles.Known = {}
         self.facts: tuple[int, int, int] | None = None
         """The bundle's file as it was last read or written."""
@@ -126,12 +142,29 @@ class Keeper:
         self.waiting_since = 0.0
         self.unread_since = 0.0
         self.written_at = 0.0
+        self.held_until = 0.0
+        """Until when the folder is not written back, merged with a bundle saved on another
+        computer from an older version (see ``HOLD``)."""
+        self.since = time.time()
+        """When this studio began keeping it: a copy of a saving here made since is the cloud
+        service's, not someone's own copy of the bundle."""
         self._last: dict[str, tuple[int, int]] | None = None
-        self._merging: set[str] = set()
-        """Documents merged here with a bundle changed elsewhere: still to be written back."""
+        self._looked: dict[str, tuple[Any, ...]] = {}
+        """The copies beside the bundle looked at, as each was then (and the bundle on disk)."""
+        self._kept: dict[str, tuple[int, int, int] | None] = {}
+        """Copies left as they are (they could not be merged), as each was then: said once."""
+        self._away: dict[Path, tuple[tuple[int, int, int] | None, bool]] = {}
+        """Copies to put away once the bundle is written with them (as each was then, and
+        whether it was merged here or held nothing new)."""
+        self._lost: set[str] = set()
+        """Savings here whose changes another computer's changed too, kept in a copy beside
+        the bundle: that copy is never put away."""
+        self._beside: tuple[int, int] | None = None
+        self._looked_at: float | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        shared = _cloud(self.path.parent)
+        self.service = _service(self.path.parent)
+        shared = self.service is not None
         self.quiet = SHARED_QUIET if shared else QUIET
         self.patience = SHARED_PATIENCE if shared else PATIENCE
 
@@ -140,8 +173,10 @@ class Keeper:
     def open(self) -> Keeper:
         """Unpack the bundle into its working folder, or find the folder as it was left: the
         bundle unchanged since, it is not unpacked again; changed (on another computer), what
-        changed is taken in -- and edits made here that never reached it are kept in a bundle
-        beside it, as a cloud service keeps a conflicting copy."""
+        changed is taken in, merged with edits made here that never reached it -- or, where
+        both changed one thing, those edits are kept in a bundle beside it, as a cloud service
+        keeps a conflicting copy. Then the copies a cloud service made beside it are merged
+        (``_look_for_copies``)."""
 
         if not self.path.is_file():
             raise BundleError(f"{self.path.name} isn\u2019t there.")
@@ -156,25 +191,32 @@ class Keeper:
             synced = {name: tuple(value) for name, value in (state.get("synced") or {}).items()}
             stamps = {name: tuple(value) for name, value in (state.get("stamps") or {}).items()}
             fresh = not self.root.is_dir() or not state or state.get("bundle") != str(self.path)
+            # Another bundle altogether put in its place (made anew, not this one saved again:
+            # its manifest says when it was first made)?
+            made = state.get("created")
+            self.replaced = bool(made) and bool(self.created) and made != self.created
+            if state.get("bundle") == str(self.path) and not self.replaced:
+                self.history.load(state)  # (the versions this computer had of it)
             if fresh:
                 self._unpack(opened)
+                self.history.lineage = []
+                self._read_version(opened, entries)
             else:
                 local = bundles.snapshot(self.root, keep_build=self.keep_build)
-                mine = {
-                    name for name in set(local) | set(stamps) if local.get(name) != stamps.get(name)
-                }
+                mine = any(local.get(name) != stamps.get(name) for name in set(local) | set(stamps))
                 theirs = entries != synced
                 self.synced, self.stamps = synced, stamps  # type: ignore[assignment]
-                if theirs and mine:
-                    self.conflict = self._keep_aside()
+                if self.replaced:
+                    if mine:
+                        self.conflict = self._keep_aside()
                     self._unpack(opened)
+                    self._read_version(opened, entries)
                 elif theirs:
-                    self._take(opened, entries)
+                    self._from_bundle(opened, entries, time.monotonic(), opening=mine)
+                elif self.history.latest is None:
+                    self._read_version(opened, entries)
             self.facts = _facts(self.path)
-        # Trusted by its place -- unless what is there now is another bundle altogether (made
-        # anew, not this one saved again: its manifest says when it was first made).
-        made = state.get("created")
-        self.replaced = bool(made) and bool(self.created) and made != self.created
+        # Trusted by its place -- unless what is there now is another bundle altogether.
         self.trusted = (
             bool(state.get("trusted"))
             and state.get("bundle") == str(self.path)
@@ -183,6 +225,8 @@ class Keeper:
         self._seed()
         self._read_texts()
         self._write_state()
+        with self.lock:
+            self._look_for_copies(time.monotonic())
         return self
 
     def _unpack(self, opened: Bundle) -> None:
@@ -203,6 +247,14 @@ class Keeper:
         self.synced = _entries(opened)
         self.stamps = bundles.snapshot(self.root, keep_build=self.keep_build)
         self.known = {}
+
+    def _read_version(self, opened: Bundle, entries: dict[str, tuple[int, int]]) -> None:
+        """The bundle as it is read: a version this computer has had, and the one on disk."""
+
+        revisions = opened.revisions
+        self.history.record(revisions[:1], _documents(opened, entries), entries)
+        self.history.took(revisions)
+        self.history.disk = revisions
 
     def _keep_aside(self) -> str | None:
         """The working folder as it is, written as a bundle beside this one (``talk (edits
@@ -255,6 +307,7 @@ class Keeper:
             "kind": self.kind,
             "left": self.left,
             "conflict": self.conflict,
+            "notices": self.notices,
             "problem": self.problem,
         }
 
@@ -282,14 +335,17 @@ class Keeper:
                 traceback.print_exc()
 
     def step(self, now: float | None = None) -> None:
-        """One look: the bundle changed on disk is taken in; the folder changed, and rested
-        (or changing too long), is written back."""
+        """One look: the bundle changed on disk is taken in, and copies a cloud service made
+        beside it merged; the folder changed, and rested (or changing too long), is written
+        back."""
 
         now = time.monotonic() if now is None else now
         with self.lock:
             facts = _facts(self.path)
             if facts != self.facts:
                 self._bundle_changed(facts, now)
+            if self._copies_due(now):
+                self._look_for_copies(now)
             local = bundles.snapshot(self.root, keep_build=self.keep_build)
             if local != self._last:
                 self._last = local
@@ -301,6 +357,8 @@ class Keeper:
                 self.waiting_since = now
             if self.unread_since and now - self.unread_since < UNREAD_PATIENCE:
                 return
+            if now < self.held_until:
+                return
             rested = now - self.changed_at >= self.quiet
             if rested or now - self.waiting_since >= self.patience:
                 self.save()
@@ -308,11 +366,18 @@ class Keeper:
     def _bundle_changed(self, facts: tuple[int, int, int] | None, now: float) -> None:
         if facts is None:
             # Moved or deleted: followed if it was renamed beside itself; else it is written
-            # there again with the next change.
+            # there again with the next change. (Renamed as a cloud service names the copy it
+            # keeps, it is not followed: the service is putting the other computer's saving in
+            # its place, and the copy is merged once it has.)
             moved = self._renamed()
-            if moved is not None:
+            if moved is not None and not cloud.is_copy_of(self.path, moved, self.service):
                 self._follow(moved)
                 return
+            if moved is not None:
+                if not self.unread_since:
+                    self.unread_since = now
+                if now - self.unread_since < UNREAD_PATIENCE:
+                    return
             if self.problem is None:
                 self._said(
                     problem=f"{self.path.name} was moved or deleted: it is saved there "
@@ -323,9 +388,12 @@ class Keeper:
             with Bundle(self.path) as opened:
                 entries = _entries(opened)
                 if entries != self.synced:
-                    taken = self._take(opened, entries)
+                    taken = self._from_bundle(opened, entries, now)
                     if taken:
                         self._said(taken=taken)
+                elif opened.revisions and opened.revisions != self.history.disk:
+                    # (Saved again elsewhere, as it is here: the savings it holds are these.)
+                    self._took_saving(opened.revisions)
         except BundleError as error:
             # Still arriving (a cloud service mid-copy)? Waited for a moment, then written over.
             if not self.unread_since:
@@ -339,66 +407,180 @@ class Keeper:
             self._said(problem=None)
         self._write_state()
 
-    def _take(self, opened: Bundle, entries: dict[str, tuple[int, int]]) -> list[str]:
-        """Take a bundle changed elsewhere into the folder: each file changed there written
-        here -- over this one if it is unchanged here since, else, a document, merged with it
-        from what both had -- and each it no longer has taken away if unchanged here. The
-        names changed."""
+    def _took_saving(self, revisions: list[str]) -> None:
+        latest = self.history.latest
+        self.history.took(revisions)
+        self.history.disk = revisions
+        if latest is not None and set(latest.heads) <= set(revisions):
+            self.held_until = 0.0
 
-        local = bundles.snapshot(self.root, keep_build=True)
-        taken: list[str] = []
-        for name, entry in entries.items():
-            if self.synced.get(name) == entry:
-                continue
-            mine = name in local and local.get(name) != self.stamps.get(name)
-            target = self.root.joinpath(*name.split("/"))
-            if mine and _documentlike(name) and name in self.texts:
-                theirs = opened.read(name, most=bundles.MOST_MANIFEST * 50)
-                merged = self._merged(name, self.texts[name], target, theirs)
-                if merged is None:
-                    continue  # (kept as it is here: written back with the rest)
-                _replace(target, merged, self.root)
+    def _from_bundle(
+        self,
+        opened: Bundle,
+        entries: dict[str, tuple[int, int]],
+        now: float,
+        *,
+        opening: bool = False,
+    ) -> list[str]:
+        """Take a bundle changed elsewhere into the folder: each file changed there since the
+        version both had written here -- over this one if it is unchanged here, else, a
+        document, merged with it from that version -- and each it no longer has taken away if
+        unchanged here. The names changed.
+
+        Saved from what this computer last saved or took in, the version both had is that;
+        saved from an older one (this computer's saving kept by a cloud service as a copy
+        beside it, or lost), it is the newest both had, and where both changed one thing the
+        bundle's change stands, what was here kept in that copy, or in a bundle beside it
+        (``_keep_aside``); in a folder a cloud service keeps, the folder then waits (``HOLD``)
+        for the other computer to save the merge both want. As it opens, edits made here that
+        never reached it are merged likewise."""
+
+        revisions = opened.revisions
+        latest = self.history.latest
+        base, apart = latest, False
+        if (
+            revisions
+            and latest is not None
+            and latest.heads
+            and not set(latest.heads) <= set(revisions)
+            and revisions[0] not in self.history.lineage
+        ):
+            found = self.history.base_for(revisions)
+            if found is not None and found is not latest:
+                base, apart = found, True
+        theirs = _Side(entries, _reader(opened))
+        before = self._folder_side()
+        outcome, unclean = self._absorb(self._base_side(base), before, theirs)
+        if unclean and (apart or opening):
+            kept = self._copy_of(latest.heads) if apart and latest is not None else None
+            if kept is not None:
+                self._lost.update(latest.heads if latest is not None else ())
+                aside = kept.name
             else:
-                opened.extract(self.root, [name], replace=True)
-            taken.append(name)
-        for name in set(self.synced) - set(entries):
+                aside = self._keep_aside()
+            self.conflict = aside
+            if aside and not opening:
+                self._notice(
+                    f"{self.path.name} was saved on another computer, changing the same "
+                    "things as this one did: the other computer\u2019s changes are in place, "
+                    f"and this one\u2019s are kept in \u201c{aside}\u201d, beside it."
+                )
+            # (The bundle's stands where both changed one thing.)
+            outcome.update({name: "theirs" for name in unclean if outcome.get(name) == "ours"})
+        taken = self._apply(outcome, opened)
+        self._settle(entries, outcome, before)
+        if apart and latest is not None and base is not None:
+            self._record_merged(base, latest, theirs, revisions, flip=False)
+        else:
+            self.history.record(revisions[:1], _documents(opened, entries), entries)
+        self.history.took(revisions)
+        self.history.disk = revisions
+        self.held_until = now + HOLD if apart and self.service else 0.0
+        self._seed()
+        return taken
+
+    def _absorb(
+        self, base: _Side, ours: _Side, theirs: _Side, *, flip: bool = False
+    ) -> tuple[dict[str, str | bytes | None], set[str]]:
+        """What becomes of each file, ``theirs`` (another computer's version) taken into
+        ``ours`` from ``base``, the version both had: ``"theirs"``, taken as it is there;
+        words, a document merged; None, taken away; ``"ours"``, kept as it is here -- only
+        those not already alike. And those changed both ways where a merge loses one side's
+        change (a picture changed on both, a document both changed one thing in, a document
+        that can't be merged): what becomes of them keeps one side's (the merged document,
+        ``theirs``'s picture -- or ``ours``'s with ``flip``)."""
+
+        outcome: dict[str, str | bytes | None] = {}
+        unclean: set[str] = set()
+        for name in sorted(set(base.entries) | set(theirs.entries)):
+            was, other = base.entries.get(name), theirs.entries.get(name)
+            if other == was:
+                continue  # not changed there
+            mine = ours.entry(name)
+            if mine == other:
+                continue  # (alike already)
+            if mine == was:
+                outcome[name] = "theirs" if other is not None else None
+            elif other is None:
+                outcome[name] = "ours"  # changed here, taken away there: kept
+            elif mine is None:
+                outcome[name] = "theirs"  # taken away here, changed there: kept
+            elif _documentlike(name) and was is not None:
+                merged, clashed = self._merged(
+                    name, base.text(name), ours.text(name), theirs.text(name), flip=flip
+                )
+                outcome[name] = merged if merged is not None else "ours"
+                if merged is None or clashed:
+                    unclean.add(name)
+            else:
+                outcome[name] = "ours" if flip else "theirs"
+                unclean.add(name)
+        return outcome, unclean
+
+    def _apply(self, outcome: dict[str, str | bytes | None], source: Bundle) -> list[str]:
+        """Each file's outcome (``_absorb``) made in the folder: the names changed."""
+
+        changed: list[str] = []
+        for name, made in outcome.items():
             target = self.root.joinpath(*name.split("/"))
-            if name in local and local.get(name) == self.stamps.get(name):
+            if made == "ours":
+                continue
+            if made == "theirs":
+                source.extract(self.root, [name], replace=True)
+            elif isinstance(made, bytes):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _replace(target, made, self.root)
+            else:
                 with contextlib.suppress(OSError):
                     target.unlink()
-                taken.append(name)
-        now_here = bundles.snapshot(self.root, keep_build=True)
-        for name in taken:
-            if name in now_here and name in entries and name not in self._merging:
-                self.stamps[name] = now_here[name]
-            elif name not in entries:
-                self.stamps.pop(name, None)
-        self.synced = dict(entries)
-        self._seed()
-        for name in taken:
-            if _documentlike(name) and name in entries:
-                with contextlib.suppress(Exception):
-                    self.texts[name] = opened.read(name, most=bundles.MOST_MANIFEST * 50)
-        return sorted(taken)
+            changed.append(name)
+        return changed
 
-    def _merged(self, name: str, base: bytes, ours_path: Path, theirs: bytes) -> bytes | None:
+    def _settle(
+        self,
+        entries: dict[str, tuple[int, int]],
+        outcome: dict[str, str | bytes | None],
+        before: _Side,
+    ) -> None:
+        """The folder, a bundle taken into it, in step with that bundle: each file as the
+        bundle has it known unchanged since; any other, to be written back."""
+
+        now_here = bundles.snapshot(self.root, keep_build=True)
+        stamps: dict[str, tuple[int, int]] = {}
+        for name, stamp in now_here.items():
+            made = outcome.get(name, "")
+            if made == "theirs" or (made == "" and before.entry(name) == entries.get(name)):
+                stamps[name] = stamp
+        self.stamps = stamps
+        self.synced = dict(entries)
+
+    def _merged(
+        self,
+        name: str,
+        base: bytes | None,
+        ours: bytes | None,
+        theirs: bytes | None,
+        *,
+        flip: bool = False,
+    ) -> tuple[bytes | None, bool]:
         """A document changed both here and elsewhere since both last had it, merged by its
-        kind as the studio merges two people's edits: its words, or None if it can't be."""
+        kind as the studio merges two people's edits -- ``theirs`` standing where both changed
+        one thing (``ours``, with ``flip``), in ``ours``'s words: its words (None if it can't
+        be), and whether both changed one thing (words one wrote anew as the other typed in
+        them, kept together, among them)."""
 
         from flexo.studio import kinds as all_kinds
-        from flexo.studio.merge import merge3
+        from flexo.studio.merge import clashes, merge3
 
-        try:
-            ours_text = ours_path.read_bytes()
-        except OSError:
-            return None
+        if base is None or ours is None or theirs is None:
+            return None, False
         kinds = all_kinds()
         scratch = self.home / f".merging-{secrets.token_hex(4)}"
         scratch.mkdir(parents=True, exist_ok=True)
         try:
             suffix = Path(name).suffix
             versions = {}
-            for label, data in (("base", base), ("ours", ours_text), ("theirs", theirs)):
+            for label, data in (("base", base), ("ours", ours), ("theirs", theirs)):
                 file = scratch / f"{label}{suffix}"
                 file.write_bytes(data)
                 versions[label] = file
@@ -412,68 +594,346 @@ class Keeper:
                 None,
             )
             if kind is None:
-                return None
+                return None, False
             loaded = {label: kind.load(file) for label, file in versions.items()}
             notes: list = []
-            merged = merge3(loaded["base"], loaded["ours"], loaded["theirs"], notes)
-            mend = getattr(kind, "mended", None)
-            if mend is not None:
-                merged = mend(merged, notes, loaded["base"])
+            first, second = ("theirs", "ours") if flip else ("ours", "theirs")
+            with clashes() as clashed:
+                merged = merge3(loaded["base"], loaded[first], loaded[second], notes)
+                clashed += [note for note in notes if "rewritten" in note]
+                mend = getattr(kind, "mended", None)
+                if mend is not None:
+                    merged = mend(merged, notes, loaded["base"])
             out = scratch / f"merged{suffix}"
             try:
-                kind.save(out, merged, previous=ours_text.decode("utf-8"))
+                kind.save(out, merged, previous=ours.decode("utf-8"))
             except TypeError:
                 kind.save(out, merged)
-            self._merging.add(name)
-            return out.read_bytes()
+            return out.read_bytes(), bool(clashed)
         except Exception:
             traceback.print_exc()
-            return None
+            return None, False
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 
+    # -- the versions two computers had --
+
+    def _base_side(self, version: cloud.Version | None) -> _Side:
+        """A version this computer had, as one side of a merge; with none kept (a working
+        folder left by an older studio), the bundle as last read or written, its words not
+        known."""
+
+        if version is None:
+            return _Side(dict(self.synced), lambda name: None)
+        return _Side(version.entries, lambda name: self.history.text(version, name))
+
+    def _folder_side(self) -> _Side:
+        """The working folder as it is, as one side of a merge: each file's CRC (as the bundle
+        has it, if unchanged since; else read) and its words."""
+
+        local = bundles.snapshot(self.root, keep_build=True)
+        found: dict[str, tuple[int, int] | None] = {}
+
+        def entry(name: str) -> tuple[int, int] | None:
+            if name not in found:
+                stamp = local.get(name)
+                if stamp is None:
+                    found[name] = None
+                elif stamp == self.stamps.get(name) and name in self.synced:
+                    found[name] = self.synced[name]
+                else:
+                    try:
+                        found[name] = (bundles._crc(self._file(name)), stamp[1])
+                    except OSError:
+                        found[name] = None
+            return found[name]
+
+        def text(name: str) -> bytes | None:
+            try:
+                return self._file(name).read_bytes()
+            except OSError:
+                return None
+
+        return _Side({}, text, entry)
+
+    def _record_merged(
+        self,
+        base: cloud.Version,
+        latest: cloud.Version,
+        theirs: _Side,
+        revisions: list[str],
+        *,
+        flip: bool,
+    ) -> None:
+        """The version two computers both come to: this one's latest and another's, merged
+        from the one both had -- what the other, merging this one's, makes too -- kept to
+        merge their next from (the edits here not yet saved left out)."""
+
+        ours = _Side(
+            latest.entries, lambda name: self.history.text(latest, name), latest.entries.get
+        )
+        outcome, _ = self._absorb(self._base_side(base), ours, theirs, flip=flip)
+        entries = dict(latest.entries)
+        texts = {
+            name: words
+            for name in latest.texts
+            if (words := self.history.text(latest, name)) is not None
+        }
+        for name, made in outcome.items():
+            if made == "theirs":
+                entries[name] = theirs.entries[name]
+                if _documentlike(name) and (words := theirs.text(name)) is not None:
+                    texts[name] = words
+            elif isinstance(made, bytes):
+                entries[name] = (zlib.crc32(made), len(made))
+                texts[name] = made
+            elif made is None:
+                entries.pop(name, None)
+                texts.pop(name, None)
+        self.history.record([*latest.heads, *revisions[:1]], texts, entries)
+
+    # -- copies a cloud service made beside the bundle --
+
+    def _copies_due(self, now: float) -> bool:
+        try:
+            found = os.stat(self.path.parent)
+        except OSError:
+            return False
+        beside = (found.st_mtime_ns, found.st_ino)
+        if beside != self._beside:
+            return True
+        return self._looked_at is None or abs(now - self._looked_at) >= LOOK
+
+    def _look_for_copies(self, now: float) -> None:
+        """Merge each copy of the bundle a cloud service made beside it, when two computers
+        saved it at once (``flexo.studio.cloud_bundles``): its changes taken in as a bundle
+        saved on another computer, from the version both had, the bundle written with them,
+        and the copy put in the Trash. One that changes the same things as edits here, or
+        that can't be told apart from them, is left as it is, and said."""
+
+        with contextlib.suppress(OSError):
+            found = os.stat(self.path.parent)
+            self._beside = (found.st_mtime_ns, found.st_ino)
+        self._looked_at = now
+        if not self.path.is_file():
+            return  # (being put back in its place: looked at once it is)
+        copies = cloud.copies_beside(self.path, self.service)
+        for gone in set(self._looked) - {copy.name for copy in copies}:
+            self._looked.pop(gone, None)
+            self._kept.pop(gone, None)
+        for copy in copies:
+            facts = _facts(copy)
+            if self._kept.get(copy.name, ()) == facts:
+                continue
+            seen = (facts, tuple(self.history.disk[:1]), tuple(self.history.lineage[:1]))
+            if self._looked.get(copy.name) == seen:
+                continue
+            self._looked[copy.name] = seen
+            try:
+                self._take_copy(copy, facts)
+            except Exception:
+                traceback.print_exc()
+        # (Merged: written now, not once things are quiet -- then put away.)
+        if self._away and not self.save():
+            self._write_state()
+
+    def _take_copy(self, copy: Path, facts: tuple[int, int, int] | None) -> None:
+        try:
+            opened = Bundle(copy)
+        except BundleError:
+            return  # (still arriving: looked at again once it changes)
+        with opened:
+            if (
+                not self.created
+                or opened.manifest.get("created") != self.created
+                or opened.document != self.document
+                or _its_own(copy)
+            ):
+                return  # another bundle named alike, or one opened as itself
+            revisions = opened.revisions
+            entries = _entries(opened)
+            if revisions and revisions[0] in self.history.lineage:
+                # A saving the folder holds: once the bundle holds it too (or all it has), the
+                # copy is put away -- made since this studio opened (a saving here the service
+                # kept as a copy), not someone's own copy of an older saving.
+                if (
+                    (revisions[0] in self.history.disk or entries == self.synced)
+                    and revisions[0] not in self._lost
+                    and _made(copy) >= self.since - 60
+                ):
+                    self._away[copy] = (facts, False)
+                return
+            if not revisions and self._had(opened, entries):
+                return  # (from an older studio, with nothing but versions had here)
+            if revisions:
+                base = self.history.base_for(revisions)
+            else:
+                # From an older studio: the version here most like it, before the latest (it
+                # was saved apart from that, or it would be the bundle).
+                main = opened.read(self.document, most=bundles.MOST_MANIFEST * 50)
+                base = self.history.nearest(self.document, main, self.history.versions[:-1])
+            if base is None:
+                self._keep_copy(
+                    copy,
+                    facts,
+                    f"\u201c{copy.name}\u201d holds edits from another computer that can\u2019t "
+                    f"be matched with {self.path.name}\u2019s, so it isn\u2019t merged: it is "
+                    "kept beside it.",
+                )
+                return
+            theirs = _Side(entries, _reader(opened))
+            outcome, unclean = self._absorb(
+                self._base_side(base), self._folder_side(), theirs, flip=True
+            )
+            if unclean:
+                self._keep_copy(
+                    copy,
+                    facts,
+                    f"\u201c{copy.name}\u201d holds edits from another computer that change the "
+                    "same things as edits here, so it isn\u2019t merged: it is kept beside "
+                    f"{self.path.name}.",
+                )
+                return
+            for name in self._apply(outcome, opened):
+                self.stamps.pop(name, None)
+            latest = self.history.latest
+            if latest is not None and revisions:
+                self._record_merged(base, latest, theirs, revisions, flip=True)
+            elif not revisions:
+                self._kept[copy.name] = facts  # (merged once, never again: it names no saving)
+            self.history.took(revisions)
+            self._seed()
+            self._away[copy] = (facts, True)
+
+    def _keep_copy(self, copy: Path, facts: tuple[int, int, int] | None, said: str) -> None:
+        self._kept[copy.name] = facts
+        self._notice(said)
+
+    def _put_away(self) -> None:
+        """The copies merged, now in the bundle as it is written, moved out of its folder."""
+
+        for copy, (facts, merged) in list(self._away.items()):
+            del self._away[copy]
+            self._looked.pop(copy.name, None)  # (looked at again, if it is still there)
+            if _facts(copy) != facts:
+                continue  # changed since: merged again
+            went = cloud.put_away(copy, support().parent / "merged")
+            if went is None and merged:
+                self._notice(
+                    f"Merged edits from another computer ({copy.name}); it couldn\u2019t be "
+                    f"moved away, and holds nothing {self.path.name} doesn\u2019t."
+                )
+            elif went is not None:
+                self._notice(
+                    f"Merged edits from another computer ({copy.name}, now in {went})."
+                    if merged
+                    else f"\u201c{copy.name}\u201d held nothing that isn\u2019t in "
+                    f"{self.path.name}: it is now in {went}."
+                )
+
+    def _copy_of(self, heads: list[str]) -> Path | None:
+        """A copy beside the bundle of this computer's saving ``heads``, if one is there."""
+
+        for copy in cloud.copies_beside(self.path, self.service):
+            with contextlib.suppress(BundleError), Bundle(copy) as opened:
+                if opened.revisions[:1] and opened.revisions[0] in heads:
+                    return copy
+        return None
+
+    def _had(self, opened: Bundle, entries: dict[str, tuple[int, int]]) -> bool:
+        """Whether every file of a bundle is as a version here had it."""
+
+        had = {entry for version in self.history.versions for entry in version.entries.items()}
+        for name, entry in entries.items():
+            if (name, entry) in had:
+                continue
+            if not _documentlike(name):
+                return False
+            words = opened.read(name, most=bundles.MOST_MANIFEST * 50)
+            if not self.history.had(name, words):
+                return False
+        return True
+
+    # -- writing --
+
     def save(self, *, force: bool = False) -> bool:
         """Write the folder back into the bundle if it changed since (``force``: whatever):
-        whether it was written. Said to the pages when it could not be."""
+        whether it was written. A bundle changed on disk since it was last read (saved on
+        another computer) is taken in first, never written over. Said to the pages when it
+        could not be."""
 
         with self.lock:
-            local = bundles.snapshot(self.root, keep_build=self.keep_build)
-            if local == self.stamps and not force:
-                return False
-            files = {name: self.root.joinpath(*name.split("/")) for name in local}
-            if self.document not in files:
-                self._follow_document(files)
-            about = bundles.manifest(
-                self.document, self.kind, created=self.created or None, files=len(files)
-            )
-            previous = (
-                self.path if self.facts is not None and _facts(self.path) == self.facts else None
-            )
-            try:
-                self.known = bundles.write(
-                    self.path, files, about, previous=previous, known=self.known
+            for _ in range(3):
+                now = time.monotonic()
+                facts = _facts(self.path)
+                if facts is not None and self.facts is not None and facts != self.facts:
+                    self._bundle_changed(facts, now)
+                local = bundles.snapshot(self.root, keep_build=self.keep_build)
+                if local == self.stamps and not force:
+                    if self._away:
+                        self._put_away()
+                    return False
+                files = {name: self.root.joinpath(*name.split("/")) for name in local}
+                if self.document not in files:
+                    self._follow_document(files)
+                saving = cloud.revision()
+                revisions = self.history.wrote(saving)
+                about = bundles.manifest(
+                    self.document,
+                    self.kind,
+                    created=self.created or None,
+                    files=len(files),
+                    revisions=revisions,
                 )
-            except (OSError, BundleError) as error:
-                said = (
-                    error.strerror if isinstance(error, OSError) and error.strerror else str(error)
-                )
-                self._said(
-                    problem=f"{self.path.name} could not be saved: {said.rstrip('.')}. "
-                    "Your changes are kept, and saved once it can be."
-                )
-                self.waiting_since = time.monotonic()
+                there = _facts(self.path)
+                previous = self.path if self.facts is not None and there == self.facts else None
+
+                def unchanged(there: tuple[int, int, int] | None = there) -> None:
+                    if _facts(self.path) != there:
+                        raise _Changed
+
+                try:
+                    self.known = bundles.write(
+                        self.path,
+                        files,
+                        about,
+                        previous=previous,
+                        known=self.known,
+                        check=unchanged,
+                    )
+                except _Changed:
+                    continue  # (saved elsewhere as this was written: taken in, then written)
+                except (OSError, BundleError) as error:
+                    said = (
+                        error.strerror
+                        if isinstance(error, OSError) and error.strerror
+                        else str(error)
+                    )
+                    self._said(
+                        problem=f"{self.path.name} could not be saved: {said.rstrip('.')}. "
+                        "Your changes are kept, and saved once it can be."
+                    )
+                    self.waiting_since = time.monotonic()
+                    return False
+                break
+            else:
                 return False
             self.created = about["created"]
             self.facts = _facts(self.path)
             self.stamps = {name: value[:2] for name, value in self.known.items()}
             self.synced = {name: (value[2], value[1]) for name, value in self.known.items()}
-            self._merging.clear()
             self._read_texts()
+            self.history.record([saving], self.texts, self.synced)
+            self.history.lineage = revisions
+            self.history.disk = revisions
+            self.held_until = 0.0
             self.waiting_since = 0.0
             self.written_at = time.monotonic()
             if self.problem is not None:
                 self._said(problem=None)
             self._write_state()
+            if self._away:
+                self._put_away()
             return True
 
     def _follow_document(self, files: dict[str, Path]) -> None:
@@ -523,11 +983,37 @@ class Keeper:
         }
 
     def _read_texts(self) -> None:
+        """Each document as the bundle has it: read from the folder, where it is as written
+        (else from the bundle)."""
+
         self.texts = {}
-        for name in self.stamps:
-            if _documentlike(name):
-                with contextlib.suppress(OSError):
-                    self.texts[name] = self.root.joinpath(*name.split("/")).read_bytes()
+        written: Bundle | None = None
+        try:
+            for name in self.stamps:
+                if not _documentlike(name):
+                    continue
+                with contextlib.suppress(OSError, BundleError, KeyError):
+                    words = self._file(name).read_bytes()
+                    if name in self.synced and zlib.crc32(words) != self.synced[name][0]:
+                        # (Changed again as it was written.)
+                        if written is None:
+                            written = Bundle(self.path)
+                        words = written.read(name, most=bundles.MOST_MANIFEST * 50)
+                    self.texts[name] = words
+        finally:
+            if written is not None:
+                written.close()
+
+    def _file(self, name: str) -> Path:
+        return self.root.joinpath(*name.split("/"))
+
+    def _notice(self, said: str) -> None:
+        """Say what became of a copy beside the bundle: to the pages, or as it opens."""
+
+        if self.workspace is None:
+            self.notices.append(said)
+        else:
+            self._said(notices=[said])
 
     def _said(
         self,
@@ -535,13 +1021,14 @@ class Keeper:
         problem: str | bool | None = False,
         taken: list[str] | None = None,
         renamed: str | None = None,
+        notices: list[str] | None = None,
     ) -> None:
         if problem is not False:
             self.problem = problem  # type: ignore[assignment]
         workspace = self.workspace
         if workspace is None:
             return
-        event: dict[str, Any] = {"type": "bundle", **self.info()}
+        event: dict[str, Any] = {"type": "bundle", **self.info(), "notices": notices or []}
         if taken:
             event["taken"] = taken[:20]
         if renamed:
@@ -567,10 +1054,71 @@ class Keeper:
             "synced": self.synced,
             "stamps": self.stamps,
             "created": self.created,
+            **self.history.state(),
         }
         partial = self.home / f".{STATE}.{secrets.token_hex(4)}"
         partial.write_text(json.dumps(state), encoding="utf-8")
         os.replace(partial, self.home / STATE)
+
+
+class _Changed(Exception):
+    """The bundle changed on disk as it was being written: written once that is taken in."""
+
+
+class _Side:
+    """One side of a merge of bundles (``Keeper._absorb``): its files' CRCs and sizes, and its
+    documents' words."""
+
+    def __init__(
+        self,
+        entries: dict[str, tuple[int, int]],
+        text: Any,
+        entry: Any = None,
+    ) -> None:
+        self.entries = entries
+        self.text = text
+        self.entry = entry if entry is not None else entries.get
+
+
+def _reader(opened: Bundle) -> Any:
+    def text(name: str) -> bytes | None:
+        try:
+            return opened.read(name, most=bundles.MOST_MANIFEST * 50)
+        except (KeyError, BundleError):
+            return None
+
+    return text
+
+
+def _documents(opened: Bundle, entries: dict[str, tuple[int, int]]) -> dict[str, bytes]:
+    """A bundle's documents' words."""
+
+    found = {}
+    for name in entries:
+        if _documentlike(name):
+            with contextlib.suppress(BundleError, KeyError):
+                found[name] = opened.read(name, most=bundles.MOST_MANIFEST * 50)
+    return found
+
+
+def _its_own(copy: Path) -> bool:
+    """Whether a bundle was opened on this computer as itself (not merged: someone's own)."""
+
+    try:
+        said = json.loads((home_of(copy) / STATE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(said, dict) and said.get("bundle") == str(copy.resolve())
+
+
+def _made(path: Path) -> float:
+    """When a file came to be as it is, there: written, or renamed (by a cloud service)."""
+
+    try:
+        found = path.stat()
+    except OSError:
+        return 0.0
+    return max(found.st_mtime, found.st_ctime)
 
 
 def _claims(kind: Any, parsed: Any) -> bool:
@@ -596,10 +1144,12 @@ def _replace(target: Path, data: bytes, root: Path) -> None:
             partial.unlink()
 
 
-def _cloud(folder: Path) -> bool:
+def _service(folder: Path) -> str | None:
+    """The cloud service keeping ``folder`` (``flexo.studio.workspace.cloud_service``)."""
+
     from flexo.studio.workspace import cloud_service
 
-    return cloud_service(folder) is not None
+    return cloud_service(folder)
 
 
 def opened(path: str | Path) -> Keeper:
