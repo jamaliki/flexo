@@ -164,3 +164,31 @@ def test_a_branch_to_a_hidden_shape_is_hidden_and_the_rest_of_its_line_stays() -
     assert marked[f"{net.spec.id}.target.{order.index('b') + 1}"] == "dimmed"
     assert f"{net.spec.id}.target.{order.index('a') + 1}" not in marked
     assert net.spec.id not in marked and f"{net.spec.id}.rail" not in marked
+
+
+def test_what_is_faint_already_is_never_drawn_fainter() -> None:
+    """A figure drawn with parts faint, then dimmed whole where it is shown (a slide's object
+    dimmed): each colour faint once -- and a picture in it see-through once."""
+
+    import xml.etree.ElementTree as ET
+
+    from flexo.showing import DIM, MARK, mark
+
+    root = ET.fromstring(
+        '<svg xmlns="http://www.w3.org/2000/svg"><g id="figure"><g id="a"><rect fill="#000000"/>'
+        '</g><g id="b"><rect fill="#000000"/><image href="x.png"/></g></g></svg>'
+    )
+    mark(root, {"a": DIMMED})
+    mark(root, {"figure": DIMMED, "b": HIDDEN})
+    rects = root.findall(".//{http://www.w3.org/2000/svg}rect")
+    assert [rect.get("fill") for rect in rects] == [faint("#000000", "#ffffff")] * 2
+    picture = root.find(".//{http://www.w3.org/2000/svg}image")
+    assert float(picture.get("opacity")) == pytest.approx(DIM)
+    # What is hidden in it is hidden still: faint is no reason to show it.
+    assert root.find(".//*[@id='b']").get(MARK) == HIDDEN
+    # A part named twice in one drawing -- itself, and inside something faint -- is faint once.
+    again = ET.fromstring('<svg xmlns="http://www.w3.org/2000/svg"><g id="outer"><g id="inner">'
+                          '<rect fill="#000000"/></g></g></svg>')
+    mark(again, {"outer": DIMMED, "inner": DIMMED})
+    rect = again.find(".//{http://www.w3.org/2000/svg}rect")
+    assert rect.get("fill") == faint("#000000", "#ffffff")

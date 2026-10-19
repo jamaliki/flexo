@@ -160,7 +160,8 @@ def mark(
         for element in parent
         if _local(element.tag) == "marker" and element.get("id")
     }
-    for element in list(root.iter()):
+
+    def how_of(element: ET.Element) -> str | None:
         name = element.get("id") or ""
         owner = element.get("data-hit-for") or ""
         how = shown.get(owner) if owner else None
@@ -171,12 +172,24 @@ def mark(
             stem, piece = name.rsplit(".", 1)
             if stem in boxes and piece in {"container", "label", "shadow"}:
                 how = shown.get(stem)
+        return how
+
+    # What is in something faint already -- faint here, or drawn so before (a figure's part,
+    # its figure then dimmed on a slide) -- is faint once: never twice as faint.
+    stack = [(root, False)]
+    while stack:
+        element, faint = stack.pop()
+        how = how_of(element)
         if how == HIDDEN:
             element.set("visibility", "hidden")
             element.set(MARK, HIDDEN)
-        elif how == DIMMED:
+        elif element.get(MARK) == DIMMED:
+            faint = True
+        elif how == DIMMED and not faint:
             element.set(MARK, DIMMED)
             _faded(element, canvas, markers)
+            faint = True
+        stack.extend((child, faint) for child in reversed(list(element)))
 
 
 _PAINTS = ("fill", "stroke", "stop-color", "flood-color")
@@ -192,7 +205,7 @@ def _faded(element: ET.Element, canvas: str, markers: dict) -> None:
     with other lines: a faint line ends in a faint copy of it. A picture's pixels are
     made see-through, there being no other way."""
 
-    for one in element.iter():
+    for one in _unfaded(element):
         for key in _PAINTS:
             value = one.get(key)
             if value and _HEX.fullmatch(value.strip()):
@@ -202,7 +215,7 @@ def _faded(element: ET.Element, canvas: str, markers: dict) -> None:
             styled = _HEX.sub(lambda found: faint(found.group(0), canvas), one.get("style"))
             one.set("style", styled)
         if _local(one.tag) == "image":
-            one.set("opacity", str(DIM))
+            one.set("opacity", f"{DIM * _opacity(one.get('opacity')):.4g}")
         for key in _ENDS:
             found = re.fullmatch(r"url\(#(.+)\)", one.get(key) or "")
             if found is None or found.group(1) not in markers:
@@ -216,6 +229,22 @@ def _faded(element: ET.Element, canvas: str, markers: dict) -> None:
                 markers[name] = (parent, copy)
                 _faded(copy, canvas, {})
             one.set(key, f"url(#{name})")
+
+
+def _unfaded(element: ET.Element):
+    """``element`` and all in it but what is drawn faint already (marked so)."""
+
+    yield element
+    for child in element:
+        if child.get(MARK) != DIMMED:
+            yield from _unfaded(child)
+
+
+def _opacity(value: str | None) -> float:
+    try:
+        return min(1.0, max(0.0, float(value))) if value else 1.0
+    except ValueError:
+        return 1.0
 
 
 def faint(colour: str, canvas: str) -> str:

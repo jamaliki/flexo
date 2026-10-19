@@ -245,3 +245,42 @@ def test_a_writer_that_cannot_clip_is_given_what_a_clip_shows_cut_to_it_curves_a
     assert ends == [(50.0, 25.0), (50.0, 5.0)]
     # Words reaching into the clip are kept whole; words outside it are left out.
     assert isinstance(words, Text) and words.lines[0].runs[0].text == "In"
+
+
+def test_a_picture_drawn_faint_is_read_see_through_and_written_so() -> None:
+    """A picture dimmed (``flexo.showing``: its opacity) is read with it -- drawn as itself, in a
+    window (a GIF cropped), or filling a shape (a picture cropped) -- and the PDF and the portable
+    SVG draw it so."""
+
+    import base64
+    from io import BytesIO
+
+    from PIL import Image as Pixels
+
+    from flexo.drawing import Image
+    from flexo.pdf import pdf_bytes
+    from flexo.portable import portable_svg
+
+    buffer = BytesIO()
+    Pixels.new("RGB", (2, 2), (200, 30, 30)).save(buffer, format="PNG")
+    pixel = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+    faint = f'href="{pixel}" opacity="0.28"'
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">'
+        f'<image id="plain" x="0" y="0" width="10" height="10" {faint}/>'
+        f'<g opacity="0.5"><image id="halved" x="20" y="0" width="10" height="10" {faint}/></g>'
+        '<svg id="window" x="40" y="0" width="10" height="10" viewBox="0 0 10 10" '
+        f'data-flexo-whole=""><image x="0" y="0" width="20" height="20" {faint}/></svg>'
+        '<defs><pattern id="tile" patternUnits="userSpaceOnUse" x="60" y="0" width="10" '
+        f'height="10"><image width="10" height="10" {faint}/></pattern></defs>'
+        '<rect id="cropped" x="60" y="0" width="10" height="10" fill="url(#tile)"/>'
+        f'<image id="whole" x="80" y="0" width="10" height="10" href="{pixel}"/>'
+        "</svg>"
+    )
+    drawing = read_drawing(svg)
+    pictures = {item.id: item.opacity for item in drawing.walk() if isinstance(item, Image)}
+    expected = {"plain": 0.28, "halved": 0.14, "window": 0.28, "cropped": 0.28, "whole": 1.0}
+    assert pictures == pytest.approx(expected)
+    assert "/ca 0.28" in pdf_bytes([svg]).decode("latin-1")
+    image = re.search(r'<image[^>]*id="plain"[^>]*>', portable_svg(svg))[0]
+    assert 'opacity="0.28"' in image

@@ -207,6 +207,9 @@ class Image:
     outline: tuple[Segment, ...] = ()
     """The outline only what is within shows, on the page, as well as within ``clip``: a
     picture masked by a shape (``flexo.masks``); none, where it is not."""
+    opacity: float = 1.0
+    """How much of it shows, from 0 to 1: a picture drawn faint (``flexo.showing``) is drawn
+    see-through, there being no other way to draw its pixels nearer the page's colour."""
 
     def placed(self, width: float, height: float) -> tuple[float, float, float, float]:
         """Where a picture of ``width`` by ``height`` is drawn: ``x, y, w, h``."""
@@ -857,7 +860,7 @@ def _read_element(
         # A rectangle or oval filled with one picture is that picture, cropped to it.
         picture = _patterned(child, tag, context, environment, placed)
         if picture is not None:
-            group.items.append(picture)
+            group.items.append(replace(picture, opacity=picture.opacity * alpha))
             if _paint(context, alpha).stroke is None:
                 return
         shape = _shape(child, tag, context, alpha, environment.markers)
@@ -879,12 +882,13 @@ def _read_element(
             _float(child, "height"),
             child.get("href") or child.get("{http://www.w3.org/1999/xlink}href") or "",
             child.get("preserveAspectRatio", "xMidYMid meet"),
+            opacity=alpha,
         ), placed)
         group.items.append(_cut(picture, _region_of(context.get("-flexo-clip"))))
     elif tag == "svg":
         windowed = _windowed(child, context, environment, placed)
         if windowed is not None:
-            group.items.append(windowed)
+            group.items.append(replace(windowed, opacity=windowed.opacity * alpha))
         elif _drawable(child):
             _viewport(child, group, context, alpha, environment, placed)
         else:
@@ -1083,6 +1087,7 @@ def _windowed(
     picture = _transformed(Image(
         element.get("id"), _float(source, "x"), _float(source, "y"), _float(source, "width"),
         _float(source, "height"), href, source.get("preserveAspectRatio", "xMidYMid meet"),
+        opacity=_fraction(source.get("opacity")),
     ), inner)
     corners = (_map(matrix, (x, y)), _map(matrix, (x + width, y + height)))
     window = (min(corners[0][0], corners[1][0]), min(corners[0][1], corners[1][1]),
@@ -1160,7 +1165,8 @@ def _patterned(
         return None
     href = source.get("href") or source.get("{http://www.w3.org/1999/xlink}href") or ""
     fit = source.get("preserveAspectRatio", "xMidYMid meet")
-    picture = _transformed(Image(element.get("id"), x, y, width, height, href, fit), matrix)
+    picture = _transformed(Image(element.get("id"), x, y, width, height, href, fit,
+                                 opacity=_fraction(source.get("opacity"))), matrix)
     if tag == "path":
         # A picture masked by a shape: shown within its outline.
         outline = tuple(

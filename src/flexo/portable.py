@@ -123,6 +123,8 @@ def _items(
             )
             if item.id:
                 image.set("id", item.id)
+            if item.opacity < 1.0:
+                image.set("opacity", number(item.opacity))
             if item.flip_x or item.flip_y:
                 sx, sy = (-1 if item.flip_x else 1), (-1 if item.flip_y else 1)
                 ex = 2 * item.x + item.width if item.flip_x else 0.0
