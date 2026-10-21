@@ -95,6 +95,29 @@ export function pastedOwnWords(data) {
   }, () => null);
 }
 
+// Flexo's own copy a paste of a picture alone brings, in a browser, from a studio of another
+// folder: copied there, the picture of it was put on the clipboard with Flexo's own copy in a
+// web format of its own (copyout.js), which a paste's data does not hand over -- read from the
+// clipboard (the browser may ask the person, once). A promise of it (null if there is none, or
+// the clipboard is not to be read); null at once in the Mac app, or where the paste brings
+// anything but pictures -- or no drawing beside them, as the studio puts its copy's there
+// (so a screenshot pasted never has the browser ask).
+export function pastedOwnWeb(data) {
+  const files = [...(data?.files || [])];
+  if (globalThis.pywebview?.api || !files.length || !files.every(pictured) || !navigator.clipboard?.read) return null;
+  if (![...(data?.types || [])].includes("image/svg+xml")) return null;
+  return (async () => {
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        if (!item.types.includes(OWN_WEB)) continue;
+        return JSON.parse(await (await item.getType(OWN_WEB)).text());
+      }
+    } catch { /* not to be read, or not Flexo's */ }
+    return null;
+  })();
+}
+const OWN_WEB = "web application/x-flexo-clip";
+
 // What a paste's data (its clipboardData) holds, kept to be read after it is waited on --
 // when the web view has emptied it: each of its types' words, and its files.
 export function heldData(data) {

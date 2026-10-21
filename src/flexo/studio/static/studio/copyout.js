@@ -15,6 +15,8 @@
 // this copy (any of the studio's documents, in any of its tabs: kept for them too).
 let last = null;
 const KEY = "flexo-studio-copied";
+// Flexo's own copy as a browser keeps it beside a picture (clipboard.js's pastedOwnWeb reads it).
+export const OWN = "web application/x-flexo-clip";
 
 function remember(text, clip) {
   last = text && clip ? { text, clip } : null;
@@ -66,6 +68,9 @@ export function copyOut(studio, { svg, keep = [], text = "", clip = null, title 
     const supports = (type) => { try { return Boolean(Item.supports?.(type)); } catch { return false; } };
     const svgType = supports("image/svg+xml") ? "image/svg+xml" : supports("web image/svg+xml") ? "web image/svg+xml" : null;
     if (svgType) parts[svgType] = made.then((drawn) => new Blob([drawn.svg], { type: "image/svg+xml" }));
+    // Flexo's own copy, for a studio of another folder (another origin, which neither the copy's
+    // own data nor this page's storage reaches) to paste as what it is: a web format of its own.
+    if (clip && supports(OWN)) parts[OWN] = new Blob([JSON.stringify(clip)], { type: OWN });
     const after = Promise.resolve(wrote).catch(() => {});
     // (A browser that writes only some of these, or none, keeps the copy as it was.)
     after.then(() => navigator.clipboard.write([new Item(parts)])).catch(() => {});
