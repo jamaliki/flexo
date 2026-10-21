@@ -42,8 +42,10 @@ export function copiedHere(data) {
 // fails, never waits: a copy that cannot be drawn is the copy it was.
 export function copyOut(studio, { svg, keep = [], text = "", clip = null, title = "" } = {}, wrote = null) {
   remember(text, clip);
-  if (!svg) return;
   const app = globalThis.pywebview?.api;
+  // (A copy that is no one drawing -- several slides -- is still Flexo's own on the Mac's
+  // clipboard, for a window of another folder to paste: the app puts that alone there.)
+  if (!svg && !(clip && app?.copy_drawing)) return;
   if (app?.copy_drawing) {
     // After the web view has written the copy (the copy event's, done as it ends): the app
     // adds the drawing to it.

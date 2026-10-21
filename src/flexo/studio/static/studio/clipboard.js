@@ -81,6 +81,32 @@ export function pastedOwn(data) {
   }, () => null);
 }
 
+// Flexo's own copy a paste of words alone brings from a window of another folder: several
+// slides copied there are no one drawing, so the Mac app puts Flexo's own copy on the
+// clipboard beside their words alone (no picture), and the web view hands this page only the
+// words. In the Mac app, a promise of that copy (null if the clipboard holds none of Flexo's);
+// null at once in a browser, or where the paste brings files. The paste's data is gone once
+// anything is waited for: what it holds is kept first (`heldData`).
+export function pastedOwnWords(data) {
+  const app = globalThis.pywebview?.api;
+  if (!app?.clipboard_own || [...(data?.files || [])].length) return null;
+  return Promise.resolve(app.clipboard_own()).then((words) => {
+    try { return words ? JSON.parse(words) : null; } catch { return null; }
+  }, () => null);
+}
+
+// What a paste's data (its clipboardData) holds, kept to be read after it is waited on --
+// when the web view has emptied it: each of its types' words, and its files.
+export function heldData(data) {
+  const kept = {};
+  for (const type of [...(data?.types || []), "text/plain", "text/html", ...SVG_TYPES]) {
+    if (type === "Files" || type in kept) continue;
+    try { kept[type] = data?.getData?.(type) || ""; } catch { kept[type] = ""; }
+  }
+  const files = [...(data?.files || [])];
+  return { files, types: [...(data?.types || [])], getData: (type) => kept[type] ?? "" };
+}
+
 // A GIF pasted, as the GIF it is -- every frame, to play -- never the still picture a copy
 // hands the page instead: a browser's Copy Image puts a GIF on the clipboard as a PNG of its
 // first frame (its address in the HTML beside it), and the web view hands Safari's GIF on as

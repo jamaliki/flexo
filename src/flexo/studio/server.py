@@ -380,6 +380,14 @@ class Handler(BaseHTTPRequestHandler):
                 # names them -- a folder's, its person's, left be.
                 answer = dict(answer)
                 workspace.release([Path(str(file)) for file in answer.pop("released") or []])
+            if isinstance(answer, dict) and "uploaded" in answer:
+                # Files the edit copied into the folder (slides pasted from another deck, with
+                # theirs): the studio's copies, taken away again if nothing comes to use them.
+                answer = dict(answer)
+                for file in answer.pop("uploaded") or []:
+                    with contextlib.suppress(PermissionError):
+                        workspace.relative(Path(str(file)))
+                        workspace.uploads.add(Path(str(file)).resolve())
             self._json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming

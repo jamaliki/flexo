@@ -288,12 +288,16 @@ await new Promise((done) => setTimeout(done, 20));
 out.before = calls.length;
 wrote();
 await new Promise((done) => setTimeout(done, 20));
-out.app = calls;
+out.app = calls.slice();
 out.studio = made.length;
-// No drawing (several slides): Flexo's own copy remembered, nothing drawn.
+// No drawing (several slides): Flexo's own copy remembered, and put on the Mac's clipboard
+// alone, for a window of another folder -- nothing drawn; nothing at all with no copy of its own.
 copyOut(studio, { svg: "", text: "Two", clip: { what: "slides" } });
 await new Promise((done) => setTimeout(done, 20));
-out.undrawn = calls.length;
+out.undrawn = calls.slice(1);
+copyOut(studio, { svg: "", text: "Words" });
+await new Promise((done) => setTimeout(done, 20));
+out.unowned = calls.length;
 // Pasted in a window of another folder: Flexo's own copy, from the app, when a picture alone
 // came -- never asked otherwise.
 const owned = [];
@@ -305,6 +309,18 @@ const files = (...names) => ({ files: names.map((name) => new File(["x"], name))
 out.own = await pastedOwn(files("image.png"));
 out.notOwn = [pastedOwn(files()), pastedOwn(files("image.png", "notes.txt"))];
 out.owned = owned.length;
+// Words alone pasted in the app (several slides copied in another folder's window): Flexo's own
+// copy asked for, the paste's data kept to be read after; never with files, nor in a browser.
+const held = heldData({ types: ["text/plain", "text/html", "Files"], files: [],
+  getData: (type) => ({ "text/plain": "A two\\nA three", "text/html": "<p>A</p>" })[type] ?? "" });
+out.held = [held.getData("text/plain"), held.getData("text/html"),
+  held.getData("image/svg+xml"), held.files.length];
+out.words = await pastedOwnWords({ files: [], getData: () => "A two" });
+out.wordsWithFiles = pastedOwnWords(files("image.png"));
+globalThis.pywebview = { api: { clipboard_own: () => "" } };
+out.wordsNotOwn = await pastedOwnWords({ files: [] });
+globalThis.pywebview = undefined;
+out.wordsInABrowser = pastedOwnWords({ files: [] });
 console.log(JSON.stringify(out));
 """
 
@@ -314,7 +330,8 @@ def test_the_page_copies_out_as_the_browser_or_the_app_allows() -> None:
     static = Path(__file__).parents[2] / "src/flexo/studio/static/studio"
     code = (
         f"import {{ copyOut, copiedHere }} from {json.dumps((static / 'copyout.js').as_uri())};\n"
-        f"import {{ pastedOwn }} from {json.dumps((static / 'clipboard.js').as_uri())};\n" + COPIES
+        f"import {{ pastedOwn, pastedOwnWords, heldData }} from "
+        f"{json.dumps((static / 'clipboard.js').as_uri())};\n" + COPIES
     )
     done = subprocess.run(
         ["node", "--input-type=module", "-e", code], capture_output=True, text=True, check=True
@@ -338,9 +355,15 @@ def test_the_page_copies_out_as_the_browser_or_the_app_allows() -> None:
             "title": "Slide",
         }
     ]
-    assert found["undrawn"] == 1
+    assert found["undrawn"] == [
+        {"svg": "", "keep": [], "text": "Two", "clip": '{"what":"slides"}', "title": ""}
+    ]
+    assert found["unowned"] == 2
     assert (
         found["own"] == {"what": "parts"}
         and found["notOwn"] == [None, None]
         and found["owned"] == 1
     )
+    assert found["held"] == ["A two\nA three", "<p>A</p>", "", 0]
+    assert found["words"] == {"what": "parts"} and found["wordsWithFiles"] is None
+    assert found["wordsNotOwn"] is None and found["wordsInABrowser"] is None

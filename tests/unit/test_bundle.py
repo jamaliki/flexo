@@ -160,6 +160,22 @@ def test_a_figure_brings_every_file_it_names_and_those_they_name(tmp_path: Path)
     assert gathered.left[0].where == "nodes[10].source"
 
 
+def test_one_name_is_followed_alone_through_the_files_it_names(tmp_path: Path) -> None:
+    """``followed``: what one name stands for -- a figure file and every file it names in turn,
+    by their names from the folder -- or a picture alone; one not there or outside, left."""
+
+    folder = _figure_folder(tmp_path)
+    figure = B.followed(B.Reference("figure.yaml", "slides[0].body[0]", folder, "document"), folder)
+    whole = B.gather(folder / "figure.yaml")
+    assert figure.files == whole.files
+    picture = B.followed(B.Reference("art/photo.png", "x", folder), folder)
+    assert list(picture.files) == ["art/photo.png"] and not picture.left
+    gone = B.followed(B.Reference("art/none.png", "x", folder), folder)
+    assert not gone.files and [left.why for left in gone.left] == ["missing"]
+    out = B.followed(B.Reference("../elsewhere.png", "x", folder), folder)
+    assert not out.files and [left.why for left in out.left] == ["outside"]
+
+
 def test_a_file_outside_the_documents_folder_is_left_out_and_said(tmp_path: Path) -> None:
     folder = _figure_folder(tmp_path)
     _write(tmp_path / "shared/protein.cif", "data_PROT\n")
