@@ -1,7 +1,7 @@
-"""The figure editor kept quick (``studio/static/figure/parts.js``, ``parts.css``): a line
-measured once however often it is drawn anew; a figure read back as it is drawing nothing again;
-and no drag's class that has every element of the page styled again as it begins and ends -- run
-in Node where it is code."""
+"""The figure editor kept quick (``studio/static/figure/parts.js``, ``parts.css``): a theme colour
+painted on a shape at once, as the figure will paint it; a line measured once however often it
+is drawn anew; a figure read back as it is drawing nothing again; and no drag's class that has
+every element of the page styled again as it begins and ends -- run in Node where it is code."""
 
 from __future__ import annotations
 
@@ -65,6 +65,71 @@ def run(body: str) -> object:
         [node, "--input-type=module", "-e", script], capture_output=True, text=True, check=True
     )
     return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+TONES = """
+const tones = {
+  colours: [
+    { fill: "#dbebfd", stroke: "#1a5d9b", ink: "#242126", motif: "#1a5d9b" },
+    { fill: "#fee4ce", stroke: "#824c0d", ink: "#3a2006", motif: "#a0601a" },
+  ],
+  neutral: { fill: "#f1eff4", stroke: "#76707d", ink: "#242126", motif: "#76707d" },
+};
+"""
+
+
+def test_a_shape_given_a_theme_colour_is_painted_as_the_figure_paints_it() -> None:
+    out = run(
+        TONES
+        + """
+      return {
+        // A shape of the block's paint given the second colour: its fill, outline and words the
+        // tone's, by the tone's roles; its shadow as it was.
+        toned: P.retoned([{ role: "block-fill", colour: "#F1EFF4" },
+          { role: "block-stroke", colour: "#76707d" }, { role: "ink", colour: "#242126" },
+          { role: "shadow", colour: "#2c2830" }], tones, "2"),
+        // One of the first colour made grey again: the block's paint, its words the ink.
+        neutral: P.retoned([{ role: "tone-1-fill", colour: "#dbebfd" },
+          { role: "tone-1-ink", colour: "#242126" }, { role: "tone-1-motif", colour: "#1a5d9b" }],
+          tones, "neutral"),
+      };
+    """
+    )
+    assert out == {
+        "toned": [
+            {"role": "tone-2-fill", "colour": "#fee4ce"},
+            {"role": "tone-2-stroke", "colour": "#824c0d"},
+            {"role": "tone-2-ink", "colour": "#3a2006"},
+            None,
+        ],
+        "neutral": [
+            {"role": "block-fill", "colour": "#f1eff4"},
+            {"role": "ink", "colour": "#242126"},
+            {"role": "block-motif", "colour": "#76707d"},
+        ],
+    }
+
+
+def test_a_shape_the_page_cannot_tell_the_paint_of_waits_for_its_drawing() -> None:
+    out = run(
+        TONES
+        + """
+      const block = [{ role: "block-fill", colour: "#f1eff4" }];
+      return [
+        // Painted otherwise than the theme says (a figure in a theme of its own).
+        P.retoned([{ role: "block-fill", colour: "#123456" }], tones, "1"),
+        // Of a kind's own colour family, which a tone takes over the page cannot tell.
+        P.retoned([{ role: "accent-fill", colour: "#dbebfd" }], tones, "1"),
+        // A colour the theme does not have, a tone by name, or none (the kind's own).
+        P.retoned(block, tones, "9"), P.retoned(block, tones, "encoder"),
+        P.retoned(block, tones, null),
+        // A theme that says nothing of its tones' words (an older studio's answer).
+        P.retoned([{ role: "ink", colour: "#242126" }],
+          { colours: [{ fill: "#dbebfd", stroke: "#1a5d9b" }], neutral: tones.neutral }, "1"),
+      ];
+    """
+    )
+    assert out == [None, None, None, None, None, None]
 
 
 def test_a_line_is_measured_once_however_often_it_is_drawn_anew() -> None:

@@ -1708,6 +1708,10 @@ def test_a_drawn_figure_says_which_colour_each_tone_takes(tmp_path: Path) -> Non
     tones = drawing.info["tones"]
     assert tones["used"] == {"encoder": 1} and len(tones["colours"]) == 8
     assert tones["colours"][0]["fill"].startswith("#")
+    # Its words' and its marks' colours too, and the grey's: a shape given a tone is painted
+    # with them on the page at once (parts.js retoned).
+    assert all(set(colour) == {"fill", "stroke", "ink", "motif"} for colour in tones["colours"])
+    assert set(tones["neutral"]) == {"fill", "stroke", "ink", "motif"}
 
 
 def test_the_figures_guide_for_agents_says_how_each_thing_is_written_and_says_it_truly() -> None:

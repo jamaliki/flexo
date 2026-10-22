@@ -609,6 +609,34 @@ export function lookFrom(href) {
   document.head.append(link);
 }
 
+// A shape painted from the theme's roles, given the theme's colour `value` ("1"... or
+// "neutral"): for each of what it is painted with now (`painted`: { role, colour }, the role
+// its drawing names and the colour it is drawn in), the role and colour it is painted with then,
+// as the figure paints a shape of that colour (flexo.render.toned: the block's paint and its
+// words' ink are the tone's) -- null where they stay as they are -- or null for all, should any
+// be what the page cannot tell (a role painted otherwise than the theme `tones` says: a figure
+// in a theme of its own; a kind's own colour family).
+export function retoned(painted, tones, value) {
+  const index = /^\d+$/.test(String(value ?? "")) ? Number(value) : null;
+  const to = value === "neutral" ? tones?.neutral : index ? tones?.colours?.[index - 1] : null;
+  if (!to) return null;
+  const same = (one, other) => typeof one === "string" && typeof other === "string" && one.trim().toLowerCase() === other.trim().toLowerCase();
+  const out = [];
+  for (const { role, colour } of painted) {
+    const toned = /^tone-(\d+)-(fill|stroke|motif|ink)$/.exec(role), block = /^block-(fill|stroke|motif)$/.exec(role);
+    const part = toned ? toned[2] : block ? block[1] : role === "ink" ? "ink" : null;
+    if (!part) {
+      if (/^(accent|warm|container|inset)-/.test(role)) return null;
+      out.push(null);
+      continue;
+    }
+    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
+    if (!known || !same(colour, known) || !to[part]) return null;
+    out.push({ role: index ? `tone-${index}-${part}` : part === "ink" ? "ink" : `block-${part}`, colour: to[part] });
+  }
+  return out;
+}
+
 // Asked for as soon as an editor that may show a figure is loaded (a deck's, a figure's),
 // not when a figure is first chosen: chosen with the studio away, its parts are styled.
 lookFrom("/static/kinds/figure/parts.css");
@@ -901,6 +929,7 @@ export function figureParts(host) {
       if (renamed) { queue.unshift({ ...job, retried: true, action: { ...job.action, target: { ...target, id: renamed } } }); continue; }
       toast(error.message, { kind: "error", icon: "error", seconds: 6 });
       if (job.merge) typed.delete(job.merge);
+      job.unpaint?.();
       job.failed?.();
     }
     run();
@@ -945,7 +974,7 @@ export function figureParts(host) {
   const REFUSED = { add: "add shapes", connect: "connect shapes", delete: "delete shapes", paste: "paste shapes", duplicate: "duplicate shapes",
     gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes", line_up: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
-  function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
+  function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false, unpaint = null } = {}) {
     // A framed structure turned, zoomed or moved: every structure of its frame alike; its colours
     // changed: each of its frame's that shares them (structframes.js).
     action = Frames.framedAction(model()?.nodes, action);
@@ -970,6 +999,10 @@ export function figureParts(host) {
     // (When it was made, and which it is, for the history: a run of typing from its first key.)
     const job = { action, merge, hold, choose, then, failed, follow, fresh, label: action.do === "read" || action.do === "structure-view" ? null : label || said(action, merge),
       at: older[0]?.at ?? Date.now(), key: older[0]?.key ?? (jobCount += 1), made: (madeCount += 1) };
+    // (What it painted on the drawing at once, put back should it not be made -- and what those
+    // it replaces painted before it, the latest first: paintTone.)
+    const unpaints = [unpaint, ...older.map((each) => each.unpaint)].filter(Boolean);
+    if (unpaints.length) job.unpaint = () => { for (const each of unpaints) each(); };
     if (merge) lastMade.set(merge, job.made);
     // Made while the studio is away, behind those held for it: shown as made at once (what
     // it shows put back, should it be taken back, to before the words it replaces).
@@ -1025,10 +1058,11 @@ export function figureParts(host) {
           if (target?.type === "node" && nodeOf(target.id) && !job.retried) { parked.push({ job, error }); setTimeout(unpark, 2000); continue; }
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           if (job.merge) typed.delete(job.merge);
+          job.unpaint?.();
           job.failed?.();
           continue;
         }
-        if (!result) { if (job.merge) typed.delete(job.merge); job.failed?.(); continue; }
+        if (!result) { if (job.merge) typed.delete(job.merge); job.unpaint?.(); job.failed?.(); continue; }
         // The drawing that comes after an edit that moves parts lands smoothly.
         if (LANDS.has(job.action.do)) state.landing = Date.now();
         if (job.merge && !queue.some((next) => next.merge === job.merge)) typed.delete(job.merge);
@@ -1111,6 +1145,7 @@ export function figureParts(host) {
     if (!job || job.taken) return false;
     job.taken = true;
     takenBack.push(job);
+    job.unpaint?.();
     for (const [where, key, value] of [...(job.shown || [])].reverse()) {
       if (value === undefined) delete where[key]; else where[key] = value;
     }
@@ -6694,15 +6729,55 @@ export function figureParts(host) {
   const GROUP_OWN = { fill: "Background", stroke: "Border", label: "Title" };
   const TONE_NAMES = () => Object.values(parts).flatMap((part) => part.fields).find((field) => field.key === "properties.tone")?.options.filter((name) => !/^\d+$/.test(name)) || [];
 
+  // -- a theme colour chosen, painted at once --
+  // Shapes given one of the theme's colours (a chip) are painted with it on the drawing as it is
+  // chosen -- their fill, outline, words and marks, each as the figure paints a shape of that
+  // colour (flexo.render.toned: the roles of the block's paint and of its words, the tone's) --
+  // not a moment later, when the figure drawn with it comes back (and is put in where it
+  // changed, which it finds painted already). Should the change not be made, or be taken back
+  // while the studio is away, what was painted is put back. Only shapes painted from those roles
+  // alone, each painted as the page knows the theme paints them: else the drawing is waited for,
+  // as ever (a figure in a theme of its own, a shape of its own colour or of a kind's).
+  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io"]);
+  function paintTone(nodes, value) {
+    if (!nodes.length) return null;
+    const found = [];
+    for (const node of nodes) {
+      const element = host.element(node.id);
+      if (!element || !TONED_KINDS.has(node.item?.kind || "block") || node.item?.properties?.["paint-fill"] || node.item?.properties?.["paint-stroke"]) return null;
+      for (const each of [element, ...element.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
+        for (const attribute of ["fill", "stroke"]) {
+          const role = each.getAttribute(`data-flexo-${attribute}`);
+          if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute) });
+        }
+      }
+    }
+    const now = retoned(found, host.tones?.(), value);
+    if (!now) return null;
+    const changes = found.map((was, at) => now[at] && { ...was, now: now[at].role, painted: now[at].colour }).filter(Boolean);
+    for (const { each, attribute, now: role, painted } of changes) {
+      each.setAttribute(attribute, painted);
+      each.setAttribute(`data-flexo-${attribute}`, role);
+    }
+    // (Put back only where it is as it was painted: not over a drawing come since.)
+    return changes.length ? () => {
+      for (const { each, attribute, role, colour, now: named, painted } of [...changes].reverse()) {
+        if (each.getAttribute(`data-flexo-${attribute}`) !== named || each.getAttribute(attribute) !== painted) continue;
+        each.setAttribute(attribute, colour);
+        each.setAttribute(`data-flexo-${attribute}`, role);
+      }
+    } : null;
+  }
+
   function colourSection(targets) {
     const nodes = targets.filter((target) => target.type === "node");
     const tones = host.tones?.();
     const scope = targets.map((target) => target.id).join(",");
     // One edit for every chosen thing; a colour dragged in the picker is one undo step.
-    const paint = (type, values) => {
+    const paint = (type, values, unpaint = null) => {
       const list = targets.filter((target) => target.type === type);
       if (list.length) act({ do: "update", targets: list.map(({ type: kind, id }) => ({ type: kind, id })), values },
-        { merge: `colour:${type}:${Object.keys(values)[0]}:${scope}`, select: false });
+        { merge: `colour:${type}:${Object.keys(values)[0]}:${scope}`, select: false, unpaint });
     };
     const common = (read) => {
       const values = targets.map((target) => read(target) ?? null);
@@ -6730,7 +6805,7 @@ export function figureParts(host) {
       value: toneNow, noneTitle: "Default",
       // Each tone as a filled chip in its strong colour, as a palette's colours are shown.
       colours: [...neutral, ...offered],
-      onChange: (value) => paint("node", { "properties.tone": value }),
+      onChange: (value) => paint("node", { "properties.tone": value }, paintTone(nodes, value)),
     }), mixed ? { hint: "Mixed" } : {}) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
     // Sent as it is typed; the words in the field stay the person's while they type.
