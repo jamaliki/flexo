@@ -2334,7 +2334,18 @@ export function figureParts(host) {
   // The + in clear space on the side the flow goes on -- slid along that side, or else
   // on another, if a line or a label is there.
   // (`cornered`: the part has handles at its corners, which the + keeps well clear of.)
+  // (Placed again as it was while the drawing, the figure, the part's box and the page are as
+  // they were: a click, the drawing come in, the panel drawn -- each places the + anew.)
+  let plusKept = null;
   function plusPlace(id, box, towards = null, cornered = false) {
+    const seen = host.overlay.getBoundingClientRect();
+    const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
+    if (plusKept && plusKept.key.length === key.length && plusKept.key.every((value, index) => value === key[index])) return plusKept.place;
+    const place = plusFound(id, box, towards, cornered);
+    plusKept = { key, place };
+    return place;
+  }
+  function plusFound(id, box, towards, cornered) {
     // (A branch's on the side it goes: under the part, or beside it.)
     const flow = towards || sideOf(id, box);
     // On the side the part it adds will go, clear of what is drawn there: along that side,
@@ -2439,18 +2450,17 @@ export function figureParts(host) {
     });
   }
   function markViews() {
-    // A line chosen is marked along its path, not by the box round it.
-    // (The lines' twins are in the drawing, not the overlay.)
-    for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
-    // (But for one whose words are being typed: its words' box is where it is marked.)
-    for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
+    // (Everything measured before anything is marked, and the words only for a group's tag:
+    // a click measures the drawing once.)
     const outer = host.overlay.getBoundingClientRect();
     let page = host.element(model()?.root);
     while (page?.ownerSVGElement) page = page.ownerSVGElement;
-    const words = [...(page?.querySelectorAll("text") || [])].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width);
+    let measured = null;
+    const wordsDrawn = () => (measured ??= [...(page?.querySelectorAll("text") || [])].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width));
     const tagPlace = (box, name) => {
+      const words = wordsDrawn();
       const width = String(name).length * 6.5 + 14, height = 19;
       const spots = [["", box.left - 2, box.top - height], [".inside", box.left + box.width - width - 3, box.top + 3], [".below", box.left - 2, box.top + box.height]];
       const clear = ([, left, top]) => !words.some((rect) => rect.left < outer.left + left + width && rect.right > outer.left + left
@@ -2649,6 +2659,11 @@ export function figureParts(host) {
         }));
       }
     }
+    // A line chosen is marked along its path, not by the box round it.
+    // (The lines' twins are in the drawing, not the overlay.)
+    for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
+    // (But for one whose words are being typed: its words' box is where it is marked.)
+    for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     return views;
   }
 
@@ -4665,7 +4680,10 @@ export function figureParts(host) {
     }
     for (const element of was.lines) element.classList.remove("fig-faded");
   }
+  // (How many drawings have come in: what was measured of the one before is measured again.)
+  let drawings = 0;
   function landing() {
+    drawings += 1;
     if (drag?.started) { dragFinish(); host.overlay.classList.remove("fig-dragging"); }  // its drawing is going
     if (!state.landing || Date.now() - state.landing > 6000 || !model()) { putDown(); return null; }
     const before = new Map();
