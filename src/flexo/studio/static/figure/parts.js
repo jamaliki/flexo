@@ -4264,6 +4264,7 @@ export function figureParts(host) {
   // false: it is there at once.)
   function sendHome(was, { glide = true } = {}) {
     clearTimeout(was.wait);
+    if (letDown === was) letDown = null;
     unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
     for (const { element, base } of was.moving) {
@@ -4301,6 +4302,7 @@ export function figureParts(host) {
     for (const { element } of was.moving) { element.classList.add("fig-settling"); element.classList.remove("fig-over-line"); }
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
+    letDown = was;
     // Let go on a line: put into it, between the two it joins -- a figure seen folded to fit
     // written as seen first, in the same step, so that the rest keep their lines.
     if (at.kind === "splice") {
@@ -4639,9 +4641,27 @@ export function figureParts(host) {
     state.landing = Date.now();
     state.settling = true;
   }
+  // A part let go, carried where it was let go until the drawing it makes comes back (letGo).
+  let letDown = null;
+  // That drawing come, the part is put back where the drawing it was carried over has it --
+  // once where it was carried is known, for it to land from there: the drawing put in where
+  // it changed (a deck's slide) keeps what did not, and would show it lifted still.
+  function putDown() {
+    const was = letDown;
+    letDown = null;
+    if (!was) return;
+    clearTimeout(was.wait);
+    unlift(was.moving);
+    for (const { element, base } of was.moving) {
+      if (base) element.setAttribute("transform", base);
+      else element.removeAttribute("transform");
+      element.classList.remove("fig-lifted", "fig-settling", "fig-astray", "fig-over-line");
+    }
+    for (const element of was.lines) element.classList.remove("fig-faded");
+  }
   function landing() {
     if (drag?.started) { dragFinish(); host.overlay.classList.remove("fig-dragging"); }  // its drawing is going
-    if (!state.landing || Date.now() - state.landing > 6000 || !model()) return null;
+    if (!state.landing || Date.now() - state.landing > 6000 || !model()) { putDown(); return null; }
     const before = new Map();
     for (const node of model().nodes) {
       const box = drawnRect(host.element(node.id));
@@ -4663,6 +4683,7 @@ export function figureParts(host) {
       paths: new Map([...element.querySelectorAll("path[id]")].map((path) => [path.id.slice(element.id.length), path.getAttribute("d")])),
       label: element.querySelector('[id$=".label"]')?.getBoundingClientRect(),
     }]));
+    putDown();
     return before;
   }
   function land(before) {
