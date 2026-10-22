@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from flexo.compiler import Compilation, compile_figure
+from flexo.confine import once
 from flexo.draft import drafting, give_up_if_newer
 from flexo.drawing import ink_bounds, read_drawing
 from flexo.figure_shapes import free
@@ -71,6 +72,7 @@ class BoxFit:
     """The layout style it was compiled with (tighter spacing), for linting it again."""
 
 
+@once()  # (its files looked at once, however many ways it is tried)
 def fit_in_box(
     figure: Figure | FigureSpec,
     width: float,

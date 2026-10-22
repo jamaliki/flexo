@@ -67,7 +67,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
-from flexo.confine import outside
+from flexo.confine import found
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.drawn import Picture, Shape, Words, path, units
 from flexo.geometry import Side, Size
@@ -867,18 +867,23 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         paints += [(role, palette.get(role)) for role in ("accent-fill", "warm-fill", "block-fill",
                                                           "accent-stroke")]
     paints.append(("canvas", paper))  # last: a fill as white as the page is still a fill
+    # (Each file looked at once: whether it is there, when it was saved, and -- while the studio
+    # serves a folder -- whether it is in it, asked of the disk afresh only for a file that is
+    # not the one found there before: flexo.confine.found.)
     path = Path(source).expanduser()
-    if path.exists() and outside(path):
+    on_disk, away = found(path)
+    if on_disk is not None and away:
         raise _fail(node, "source", "The structure file is outside the folder.")
     density = node.property("density")
     if density is not None:
         density = str(density).strip()
-        if Path(density).expanduser().exists() and outside(Path(density).expanduser()):
+        if found(Path(density).expanduser())[1]:  # (there, and outside)
             raise _fail(node, "density", "The map file is outside the folder.")
     ss_from = str(node.property("ss_from") or "").strip() or None
     ss_path = Path(ss_from).expanduser() if ss_from else None
-    if ss_path is not None and ss_path.exists():
-        if outside(ss_path):
+    ss_disk, ss_away = found(ss_path) if ss_path is not None else (None, False)
+    if ss_disk is not None:
+        if ss_away:
             raise _fail(node, "ss_from", "The file its secondary structure is from is outside "
                         "the folder.")
         ss_from = str(ss_path)
@@ -891,8 +896,8 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         raise _fail(node, "step", "A scene's step is a whole number, from 1 for its first.")
     noise, fixed, seed = _noise(node)
     return _Ask(
-        str(path) if path.exists() else source.strip(),
-        path.stat().st_mtime if path.exists() else 0.0,
+        str(path) if on_disk is not None else source.strip(),
+        on_disk.st_mtime if on_disk is not None else 0.0,
         look,
         paper,
         tuple(colours),
@@ -910,7 +915,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         tuple(paints),
         1 if step is None else int(step),
         ss_from,
-        ss_path.stat().st_mtime if ss_path is not None and ss_path.exists() else 0.0,
+        ss_disk.st_mtime if ss_disk is not None else 0.0,
         noise,
         fixed,
         seed,
