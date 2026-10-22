@@ -301,3 +301,31 @@ def test_a_nets_end_sides_turn_with_the_figure() -> None:
     (net,) = turned(spec).nets
     assert dict(net.sides) == {"a.output": Side.EAST, "c.input": Side.WEST}
     compile_figure(turned(spec))
+
+
+def test_a_layout_kept_that_is_already_the_best_is_drawn_settled_at_once(monkeypatch) -> None:
+    import flexo.boxfit as boxfit
+
+    # A stack that fits its box as written: laid out afresh, it is compiled once, as written.
+    fresh = flexo.fit_in_box(_stack(), 300, 900, words=12, largest=18)
+    compiles = []
+    real = boxfit.compile_figure
+
+    def counted(*args, **kwargs):
+        compiles.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(boxfit, "compile_figure", counted)
+    whole = flexo.fit_in_box(
+        _stack(), 300, 900, words=12, largest=18, keep="as written", whole=True
+    )
+    # Kept and drawn in full, once: what settling it would draw, said to be so.
+    assert len(compiles) == 1 and whole.best and not fresh.best
+    assert whole.layout == fresh.layout and whole.scale == fresh.scale
+    assert whole.compilation.document.text == fresh.compilation.document.text
+    # In a wide box turning it would set it larger: kept as written, it is not yet its best.
+    compiles.clear()
+    wide = flexo.fit_in_box(
+        _stack(), 800, 200, words=12, largest=18, keep="as written", whole=True
+    )
+    assert len(compiles) == 1 and wide.layout == "as written" and not wide.best

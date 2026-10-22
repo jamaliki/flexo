@@ -69,6 +69,9 @@ class BoxFit:
     errors: int
     style: LayoutStyle | None = None
     """The layout style it was compiled with (tighter spacing), for linting it again."""
+    best: bool = False
+    """Drawn in the layout kept (``keep``, ``whole``), in full, and the one laid out afresh
+    every way would be: what the figure settles to."""
 
 
 def fit_in_box(
@@ -82,6 +85,7 @@ def fit_in_box(
     pad: float = 2.0,
     keep: str | None = None,
     fold: bool | None = None,
+    whole: bool = False,
 ) -> BoxFit:
     """``figure`` laid out to fill a ``width`` by ``height`` box (points).
 
@@ -95,7 +99,9 @@ def fit_in_box(
     ``keep`` names a layout this returned before (its ``layout``): the figure is
     drawn that way alone, in one compile, rather than every way being tried -- as an
     editor draws a figure again and again while it is changed, its layout holding
-    still, and finds the best one once the changes stop.
+    still, and finds the best one once the changes stop. ``whole``: the layout kept is
+    drawn in full when it is the one every way would be tried from first and none of the
+    others could do better than it (``BoxFit.best``) -- the figure as it settles, at once.
     """
 
     spec = figure if isinstance(figure, FigureSpec) else figure.spec
@@ -128,6 +134,19 @@ def fit_in_box(
         for name, variant in variants
     ]
     candidates = [item for item in every if turn or not item[0].startswith("turned")]
+    folding = turn if fold is None else fold
+    if keep is not None and whole and keep == candidates[0][0]:
+        # (As laid out afresh it would be: the first way tried, the others measured, none
+        # tried further.)
+        with drafting(False):
+            kept = _kept(keep, every, width, height, most, base, pad)
+        settles = kept is not None and _settles(
+            kept, style, candidates, width, height, most, least, folding
+        )
+        if settles:
+            return replace(kept, best=True)
+        if kept is not None:
+            return kept
     if keep is not None:
         kept = _kept(keep, every, width, height, most, base, pad)
         if kept is not None:
@@ -135,7 +154,6 @@ def fit_in_box(
     # Laid out afresh, every way, a figure is drawn in full: a draft is only ever of the
     # layout kept (flexo.draft), never what is found best.
     with drafting(False):
-        folding = turn if fold is None else fold
         return _afresh(spec, style, candidates, width, height, most, least, base, pad, folding)
 
 
@@ -217,6 +235,26 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
                         compiled, scale, ink, f"{label}{suffix}", base * scale, errors, layout_style
                     )
     return best
+
+
+def _settles(first: BoxFit, style, candidates, width, height, most, least, fold) -> bool:
+    """Whether ``_afresh`` would end in ``first``, the first of ``candidates`` laid out: none
+    of the others measured large enough to be tried, nor a fold promising enough."""
+
+    if first.scale < most - 1e-9:
+        for _, candidate, layout_style in candidates[1:]:
+            room = _estimate(candidate, layout_style or style, width, height, most)
+            if room > first.scale / PREFERENCE:
+                return False
+    if fold and first.scale < least:
+        folds = [item for item in candidates if "within" not in item[0]]
+        promise = max(
+            _estimate(wrapped(candidate), layout_style or style, width, height, most)
+            for _, candidate, layout_style in folds
+        )
+        if promise > first.scale * FOLD_GAIN:
+            return False
+    return True
 
 
 FOLDS = ((", folded", None), (", folded back", True), (", folded on", False))
