@@ -511,7 +511,7 @@ export class Session {
   // Whether this page's document can go to the studio now with its drawing asked for in the
   // same request (push's `drawn`): nothing of its own on its way, and no drawing out.
   canSendDrawn() {
-    return !this.sending && !this.resyncing && !this.unread && !this.unanswered.length && !this.drawBusy && !same(this.document, this.synced);
+    return !this.sending && !this.resyncing && !this.unread && !this.unanswered.length && !this.drawBusy && !this.inStep();
   }
 
   // What a change in the history did, in words, and where: its label, else as the kind
