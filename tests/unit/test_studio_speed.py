@@ -369,3 +369,67 @@ def test_the_assistant_is_found_out_again_once_the_pages_stop_asking_for_drawing
         assert availability.remembered()["provider"] == told[0]["provider"]
     finally:
         workspace.close()
+
+
+def test_a_window_keeps_the_studios_files_by_their_versions(tmp_path: Path) -> None:
+    import re
+
+    from flexo.studio import static_files
+    from flexo.studio.server import STATIC
+
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    server, workspace = start(tmp_path / "figure.yaml", browser=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def get(address: str, **headers: str):
+        try:
+            with opener.open(urllib.request.Request(base + address, headers=headers)) as reply:
+                return reply.status, dict(reply.headers), reply.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers), error.read()
+
+    try:
+        _, _, page = get("/")
+        page = page.decode("utf-8")
+        found = re.search(r'<script type="importmap">(.*?)</script>', page)
+        assert found
+        imports = json.loads(found.group(1))["imports"]
+        ui = static_files.version(STATIC / "studio" / "ui.js")
+        assert imports["/static/studio/ui.js"] == f"/static/studio/ui.js?v={ui}"
+        assert imports["/static/kinds/figure/editor.js"].startswith(
+            "/static/kinds/figure/editor.js?v="
+        )
+        # (The module the page starts from is named as it is: every import of it is the same.)
+        assert "/static/studio/studio.js" not in imports
+        assert page.index('type="importmap"') < page.index('<script type="module"')
+        css = static_files.version(STATIC / "studio" / "studio.css")
+        assert f'href="/static/studio/studio.css?v={css}"' in page
+        # Asked for by its version, kept for good.
+        status, headers, body = get(f"/static/studio/ui.js?v={ui}")
+        assert status == 200 and "immutable" in headers["Cache-Control"]
+        assert body == (STATIC / "studio" / "ui.js").read_bytes()
+        # Otherwise asked after: not changed, and nothing sent again.
+        status, headers, _ = get("/static/studio/ui.js")
+        assert status == 200 and headers["Cache-Control"] == "no-cache"
+        assert headers["ETag"] == f'"{ui}"'
+        status, headers, body = get("/static/studio/ui.js", **{"If-None-Match": f'"{ui}"'})
+        assert status == 304 and body == b""
+        status, headers, _ = get("/static/studio/ui.js?v=another", **{"If-None-Match": '"old"'})
+        assert status == 200 and headers["Cache-Control"] == "no-cache"
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_files_version_is_what_is_in_it(tmp_path: Path) -> None:
+    from flexo.studio import static_files
+
+    script = tmp_path / "a.js"
+    script.write_text("export const a = 1;\n", encoding="utf-8")
+    first = static_files.version(script)
+    assert static_files.version(script) == first
+    script.write_text("export const a = 22;\n", encoding="utf-8")
+    assert static_files.version(script) != first

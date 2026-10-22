@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
-from flexo.studio import sessions
+from flexo.studio import sessions, static_files
 from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
@@ -87,14 +87,20 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing --
 
-    def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
+    def _reply(
+        self, status: int, body: bytes, kind: str, *, cache: bool | str = False, tag: str = ""
+    ) -> None:
         # Sent as it is, never compressed: the studio answers on this machine alone, where
         # gzip costs more than the bytes it saves -- a slide drawing a protein's surface is
         # 1.5 MB of SVG that compresses poorly, 65 milliseconds at every keystroke on it.
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "max-age=86400, immutable" if cache else "no-store")
+        if not isinstance(cache, str):
+            cache = "max-age=86400, immutable" if cache else "no-store"
+        self.send_header("Cache-Control", cache)
+        if tag:
+            self.send_header("ETag", tag)
         self.send_header("X-Content-Type-Options", "nosniff")
         if self.close_connection:
             self.send_header("Connection", "close")
@@ -121,16 +127,28 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
 
-    def _static(self, folder: Path, name: str) -> None:
+    def _static(self, folder: Path, name: str, query: dict[str, list[str]]) -> None:
         target = (folder / name).resolve()
         if folder.resolve() not in target.parents or not target.is_file():
             self._fail(HTTPStatus.NOT_FOUND, f"no {name}")
+            return
+        # Kept for good when asked for by its version, else asked after by it
+        # (flexo.studio.static_files).
+        version = static_files.version(target)
+        tag = f'"{version}"'
+        kept = (query.get("v") or [""])[0] == version
+        if not kept and self.headers.get("If-None-Match") == tag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", tag)
+            self.send_header("Cache-Control", static_files.ASKED)
+            self.end_headers()
             return
         kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if target.suffix == ".js":
             kind = "text/javascript"
         charset = "; charset=utf-8" if kind.startswith("text") else ""
-        self._reply(200, target.read_bytes(), kind + charset)
+        cache = static_files.KEPT if kept else static_files.ASKED
+        self._reply(200, target.read_bytes(), kind + charset, cache=cache, tag=tag)
 
     # -- routes --
 
@@ -144,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
         if route in {"/", "/index.html"}:
             self._index(query)
         elif route.startswith("/static/studio/"):
-            self._static(STATIC / "studio", route.removeprefix("/static/studio/"))
+            self._static(STATIC / "studio", route.removeprefix("/static/studio/"), query)
         elif route.startswith("/fonts/"):
             self._font(route.removeprefix("/fonts/"))
         elif route.startswith("/static/kinds/"):
@@ -153,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind is None:
                 self._fail(HTTPStatus.NOT_FOUND, f"no kind {name}")
             else:
-                self._static(Path(kind.static), rest)
+                self._static(Path(kind.static), rest, query)
         elif route.startswith("/api/"):
             if not self._token_ok(query):
                 self._fail(HTTPStatus.FORBIDDEN, "missing or wrong studio token")
@@ -214,6 +232,11 @@ class Handler(BaseHTTPRequestHandler):
         page = (STATIC / "studio" / "index.html").read_text(encoding="utf-8")
         settings = json.dumps({"token": self.workspace.token, "file": name})
         page = page.replace("/*STUDIO*/null", settings.replace("</", "<\\/"))
+        folders = {"/static/studio/": STATIC / "studio"}
+        for kind_name, kind in self.workspace.kinds.items():
+            if getattr(kind, "static", None):
+                folders[f"/static/kinds/{kind_name}/"] = Path(kind.static)
+        page = static_files.versioned(page, folders, entry="/static/studio/studio.js")
         self._reply(200, page.encode("utf-8"), "text/html; charset=utf-8")
 
     def _api_get(self, route: str, query: dict[str, list[str]]) -> None:
