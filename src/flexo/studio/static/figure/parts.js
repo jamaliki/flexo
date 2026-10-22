@@ -359,6 +359,44 @@ const inSentence = (title) => (/^[A-Z][a-z]/.test(title) ? title.charAt(0).toLow
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
+// An id for an edit, the same each time it is sent (the studio makes it once: flexo.studio.acting).
+const madeOnce = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+// A path's length, and points along it in its own units -- `step` apart from its start, or
+// `steps` even parts of it: found once for each drawing of it (its "d"), however often a + is
+// placed or a part dragged beside it. (getPointAtLength walks the path at every call.)
+const measured = new WeakMap();
+function measuredPath(path) {
+  const d = path.getAttribute("d");
+  let found = measured.get(path);
+  if (!found || found.d !== d) measured.set(path, found = { d, length: path.getTotalLength?.() || 0, points: new Map() });
+  return found;
+}
+const pathLength = (path) => measuredPath(path).length;
+function pointsAlong(path, step) {
+  const found = measuredPath(path), key = `step ${step}`;
+  if (!found.points.has(key)) {
+    if (found.points.size > 8) found.points.clear();  // (zoomed: other steps)
+    const points = [];
+    for (let along = 0; along <= found.length; along += step) { const point = path.getPointAtLength(along); points.push({ x: point.x, y: point.y }); }
+    found.points.set(key, points);
+  }
+  return found.points.get(key);
+}
+function pointsAt(path, steps) {
+  const found = measuredPath(path), key = `steps ${steps}`;
+  if (!found.points.has(key)) {
+    found.points.set(key, Array.from({ length: steps + 1 }, (_, index) => { const point = path.getPointAtLength((found.length * index) / steps); return { x: point.x, y: point.y }; }));
+  }
+  return found.points.get(key);
+}
+// The longest of `paths` that has a length (the first of those as long), or none.
+function longestPath(paths) {
+  let best = null, most = 0;
+  for (const path of paths) { const length = pathLength(path); if (length > most) { best = path; most = length; } }
+  return best;
+}
+
 // Lines are thin: each is given a wide, invisible twin to click, named for the line
 // as it is drawn (the host maps drawn ids to the figure's).
 export function widenLines(svg) {
@@ -939,7 +977,12 @@ export function figureParts(host) {
         let result;
         try {
           current = job;
-          result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label });
+          // (Its drawing may come with it, before it is answered: it lands as smoothly.)
+          if (LANDS.has(job.action.do)) state.landing = Date.now();
+          // (Sent again as it was -- the studio away, its answer lost -- by the same id: made
+          // once, however often it is sent.)
+          job.once ??= madeOnce();
+          result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label, once: job.once });
           // The studio back: what was held goes, and nothing is said to wait -- nor what was
           // taken back while it was away (made again by an edit of its own, not by ⇧⌘Z).
           if (waiting) { waiting = false; takenBack.length = 0; host.waiting?.(false); host.held?.(); }
@@ -2291,7 +2334,18 @@ export function figureParts(host) {
   // The + in clear space on the side the flow goes on -- slid along that side, or else
   // on another, if a line or a label is there.
   // (`cornered`: the part has handles at its corners, which the + keeps well clear of.)
+  // (Placed again as it was while the drawing, the figure, the part's box and the page are as
+  // they were: a click, the drawing come in, the panel drawn -- each places the + anew.)
+  let plusKept = null;
   function plusPlace(id, box, towards = null, cornered = false) {
+    const seen = host.overlay.getBoundingClientRect();
+    const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
+    if (plusKept && plusKept.key.length === key.length && plusKept.key.every((value, index) => value === key[index])) return plusKept.place;
+    const place = plusFound(id, box, towards, cornered);
+    plusKept = { key, place };
+    return place;
+  }
+  function plusFound(id, box, towards, cornered) {
     // (A branch's on the side it goes: under the part, or beside it.)
     const flow = towards || sideOf(id, box);
     // On the side the part it adds will go, clear of what is drawn there: along that side,
@@ -2312,13 +2366,10 @@ export function figureParts(host) {
     // drawing may let the pointer through it, so it is not found by pointing).
     const points = [];
     for (const path of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || []) {
-      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const step = Math.max(length / 200, 3 / (matrix.a || 1));
-      for (let along = 0; along <= length; along += step) {
-        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
-        points.push(point);
-      }
+      for (const at of pointsAlong(path, step)) points.push(new DOMPoint(at.x, at.y).matrixTransform(matrix));
     }
     const offLines = (x, y) => !points.some((point) => Math.abs(point.x - x) < PLUS / 2 + 3 && Math.abs(point.y - y) < PLUS / 2 + 3);
     const corners = !cornered ? [] : nodeOf(id)?.kind === "text" ? [[box.left, box.top + box.height / 2], [box.left + box.width, box.top + box.height / 2]]
@@ -2338,8 +2389,7 @@ export function figureParts(host) {
   // (`handles`: where its handles are, in the overlay's pixels, which it keeps clear of too.)
   function plusOnLine(id, handles = []) {
     const element = host.element(id), outer = host.overlay?.getBoundingClientRect();
-    const longest = (holder) => [...(holder?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength?.())
-      .sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
+    const longest = (holder) => longestPath([...(holder?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength));
     const path = longest(element);
     const matrix = path?.getScreenCTM?.();
     if (!path || !matrix || !outer) return null;
@@ -2356,15 +2406,15 @@ export function figureParts(host) {
     // Every line's points, in the window's pixels: its own, and the others'.
     const points = [];
     for (const each of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path:not(.hit-line), [data-flexo-entity="net"] path:not(.hit-line)') || []) {
-      const at = each.getScreenCTM?.(), length = each.getTotalLength?.() || 0;
+      const at = each.getScreenCTM?.(), length = each.getTotalLength ? pathLength(each) : 0;
       if (!at || !length) continue;
       const step = Math.max(length / 200, 2 / (at.a || 1));
-      for (let along = 0; along <= length; along += step) points.push(new DOMPoint(each.getPointAtLength(along).x, each.getPointAtLength(along).y).matrixTransform(at));
+      for (const point of pointsAlong(each, step)) points.push(new DOMPoint(point.x, point.y).matrixTransform(at));
     }
     const offLines = (spot) => !points.some((point) => Math.hypot(point.x - spot.x, point.y - spot.y) < radius + reach);
     const own = [];
-    const length = path.getTotalLength();
-    for (let along = 0; along <= length; along += Math.max(length / 120, 1)) own.push(screen(path.getPointAtLength(along)));
+    const length = pathLength(path);
+    for (const point of pointsAlong(path, Math.max(length / 120, 1))) own.push(screen(point));
     const offOwn = (spot) => !own.some((point) => Math.hypot(point.x - spot.x, point.y - spot.y) < radius + reach);
     const onPage = (spot) => spot.x - radius > outer.left && spot.y - radius > outer.top && spot.x + radius < outer.right && spot.y + radius < outer.bottom;
     const spots = [];
@@ -2400,18 +2450,17 @@ export function figureParts(host) {
     });
   }
   function markViews() {
-    // A line chosen is marked along its path, not by the box round it.
-    // (The lines' twins are in the drawing, not the overlay.)
-    for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
-    // (But for one whose words are being typed: its words' box is where it is marked.)
-    for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
+    // (Everything measured before anything is marked, and the words only for a group's tag:
+    // a click measures the drawing once.)
     const outer = host.overlay.getBoundingClientRect();
     let page = host.element(model()?.root);
     while (page?.ownerSVGElement) page = page.ownerSVGElement;
-    const words = [...(page?.querySelectorAll("text") || [])].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width);
+    let measured = null;
+    const wordsDrawn = () => (measured ??= [...(page?.querySelectorAll("text") || [])].map((text) => text.getBoundingClientRect()).filter((rect) => rect.width));
     const tagPlace = (box, name) => {
+      const words = wordsDrawn();
       const width = String(name).length * 6.5 + 14, height = 19;
       const spots = [["", box.left - 2, box.top - height], [".inside", box.left + box.width - width - 3, box.top + 3], [".below", box.left - 2, box.top + box.height]];
       const clear = ([, left, top]) => !words.some((rect) => rect.left < outer.left + left + width && rect.right > outer.left + left
@@ -2610,6 +2659,11 @@ export function figureParts(host) {
         }));
       }
     }
+    // A line chosen is marked along its path, not by the box round it.
+    // (The lines' twins are in the drawing, not the overlay.)
+    for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
+    // (But for one whose words are being typed: its words' box is where it is marked.)
+    for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     return views;
   }
 
@@ -3114,10 +3168,10 @@ export function figureParts(host) {
     if (!element || !outer || !(edge || net)) return [];
     const points = [];
     for (const path of element.querySelectorAll("path:not(.hit-line)")) {
-      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const seen = (along) => {
-        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
+        const at = path.getPointAtLength(along), point = new DOMPoint(at.x, at.y).matrixTransform(matrix);
         return { x: point.x - outer.left, y: point.y - outer.top };
       };
       const start = seen(0), end = seen(length);
@@ -3971,13 +4025,12 @@ export function figureParts(host) {
     for (const edge of model()?.edges || []) {
       const from = nodeOfRef(edge.from), to = nodeOfRef(edge.to);
       if (own.has(from) || own.has(to)) continue;
-      const path = [...(host.element(edge.id)?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength?.())
-        .sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
+      const path = longestPath([...(host.element(edge.id)?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength));
       const matrix = path?.getScreenCTM?.();
       if (!matrix) continue;
-      const length = path.getTotalLength(), steps = Math.min(200, Math.max(2, Math.ceil((length * Math.hypot(matrix.a, matrix.b)) / 4)));
-      const points = Array.from({ length: steps + 1 }, (_, index) => {
-        const at = path.getPointAtLength((length * index) / steps), seen = new DOMPoint(at.x, at.y).matrixTransform(matrix);
+      const length = pathLength(path), steps = Math.min(200, Math.max(2, Math.ceil((length * Math.hypot(matrix.a, matrix.b)) / 4)));
+      const points = pointsAt(path, steps).map((at) => {
+        const seen = new DOMPoint(at.x, at.y).matrixTransform(matrix);
         return { x: seen.x, y: seen.y };
       });
       found.push({ id: edge.id, from, to, points });
@@ -4232,6 +4285,7 @@ export function figureParts(host) {
   // false: it is there at once.)
   function sendHome(was, { glide = true } = {}) {
     clearTimeout(was.wait);
+    if (letDown === was) letDown = null;
     unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
     for (const { element, base } of was.moving) {
@@ -4269,6 +4323,7 @@ export function figureParts(host) {
     for (const { element } of was.moving) { element.classList.add("fig-settling"); element.classList.remove("fig-over-line"); }
     // Should no drawing come back (nothing changed after all), it goes home on its own.
     was.wait = setTimeout(() => { if (was.moving[0]?.element.isConnected) sendHome(was); }, 6000);
+    letDown = was;
     // Let go on a line: put into it, between the two it joins -- a figure seen folded to fit
     // written as seen first, in the same step, so that the rest keep their lines.
     if (at.kind === "splice") {
@@ -4607,9 +4662,30 @@ export function figureParts(host) {
     state.landing = Date.now();
     state.settling = true;
   }
+  // A part let go, carried where it was let go until the drawing it makes comes back (letGo).
+  let letDown = null;
+  // That drawing come, the part is put back where the drawing it was carried over has it --
+  // once where it was carried is known, for it to land from there: the drawing put in where
+  // it changed (a deck's slide) keeps what did not, and would show it lifted still.
+  function putDown() {
+    const was = letDown;
+    letDown = null;
+    if (!was) return;
+    clearTimeout(was.wait);
+    unlift(was.moving);
+    for (const { element, base } of was.moving) {
+      if (base) element.setAttribute("transform", base);
+      else element.removeAttribute("transform");
+      element.classList.remove("fig-lifted", "fig-settling", "fig-astray", "fig-over-line");
+    }
+    for (const element of was.lines) element.classList.remove("fig-faded");
+  }
+  // (How many drawings have come in: what was measured of the one before is measured again.)
+  let drawings = 0;
   function landing() {
+    drawings += 1;
     if (drag?.started) { dragFinish(); host.overlay.classList.remove("fig-dragging"); }  // its drawing is going
-    if (!state.landing || Date.now() - state.landing > 6000 || !model()) return null;
+    if (!state.landing || Date.now() - state.landing > 6000 || !model()) { putDown(); return null; }
     const before = new Map();
     for (const node of model().nodes) {
       const box = drawnRect(host.element(node.id));
@@ -4631,6 +4707,7 @@ export function figureParts(host) {
       paths: new Map([...element.querySelectorAll("path[id]")].map((path) => [path.id.slice(element.id.length), path.getAttribute("d")])),
       label: element.querySelector('[id$=".label"]')?.getBoundingClientRect(),
     }]));
+    putDown();
     return before;
   }
   function land(before) {

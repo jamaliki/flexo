@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import gzip
 import json
 import mimetypes
 import queue
@@ -32,7 +31,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
-from flexo.studio import sessions
+from flexo.studio import acting, sessions, static_files
 from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
@@ -54,6 +53,10 @@ FILE_TYPES = {
 }
 """The files each kind of thing is chosen from, by their endings. (A ``.json`` is a
 structure only when it is a mol-sketch scene: ``_files``.)"""
+
+
+_EXPORTING = threading.Lock()
+"""One export at a time, where the kind takes the folder's turn to draw only as it draws."""
 
 
 class Server(ThreadingHTTPServer):
@@ -84,21 +87,21 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing --
 
-    def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
-        encoding = None
-        # Fonts and photographs are compressed already.
-        packed = kind.startswith(("font/", "image/png", "image/jpeg"))
-        compressible = len(body) > 2048 and not packed
-        if compressible and "gzip" in self.headers.get("Accept-Encoding", ""):
-            body = gzip.compress(body, compresslevel=5)
-            encoding = "gzip"
+    def _reply(
+        self, status: int, body: bytes, kind: str, *, cache: bool | str = False, tag: str = ""
+    ) -> None:
+        # Sent as it is, never compressed: the studio answers on this machine alone, where
+        # gzip costs more than the bytes it saves -- a slide drawing a protein's surface is
+        # 1.5 MB of SVG that compresses poorly, 65 milliseconds at every keystroke on it.
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "max-age=86400, immutable" if cache else "no-store")
+        if not isinstance(cache, str):
+            cache = "max-age=86400, immutable" if cache else "no-store"
+        self.send_header("Cache-Control", cache)
+        if tag:
+            self.send_header("ETag", tag)
         self.send_header("X-Content-Type-Options", "nosniff")
-        if encoding:
-            self.send_header("Content-Encoding", encoding)
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()
@@ -124,16 +127,28 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
 
-    def _static(self, folder: Path, name: str) -> None:
+    def _static(self, folder: Path, name: str, query: dict[str, list[str]]) -> None:
         target = (folder / name).resolve()
         if folder.resolve() not in target.parents or not target.is_file():
             self._fail(HTTPStatus.NOT_FOUND, f"no {name}")
+            return
+        # Kept for good when asked for by its version, else asked after by it
+        # (flexo.studio.static_files).
+        version = static_files.version(target)
+        tag = f'"{version}"'
+        kept = (query.get("v") or [""])[0] == version
+        if not kept and self.headers.get("If-None-Match") == tag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("ETag", tag)
+            self.send_header("Cache-Control", static_files.ASKED)
+            self.end_headers()
             return
         kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if target.suffix == ".js":
             kind = "text/javascript"
         charset = "; charset=utf-8" if kind.startswith("text") else ""
-        self._reply(200, target.read_bytes(), kind + charset)
+        cache = static_files.KEPT if kept else static_files.ASKED
+        self._reply(200, target.read_bytes(), kind + charset, cache=cache, tag=tag)
 
     # -- routes --
 
@@ -147,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
         if route in {"/", "/index.html"}:
             self._index(query)
         elif route.startswith("/static/studio/"):
-            self._static(STATIC / "studio", route.removeprefix("/static/studio/"))
+            self._static(STATIC / "studio", route.removeprefix("/static/studio/"), query)
         elif route.startswith("/fonts/"):
             self._font(route.removeprefix("/fonts/"))
         elif route.startswith("/static/kinds/"):
@@ -156,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
             if kind is None:
                 self._fail(HTTPStatus.NOT_FOUND, f"no kind {name}")
             else:
-                self._static(Path(kind.static), rest)
+                self._static(Path(kind.static), rest, query)
         elif route.startswith("/api/"):
             if not self._token_ok(query):
                 self._fail(HTTPStatus.FORBIDDEN, "missing or wrong studio token")
@@ -195,6 +210,34 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, explain(error))
 
+    def _made_picture(self, name: str) -> None:
+        """A picture a drawing carried in itself, taken out of it as the studio sent it to the
+        page (``flexo.studio.inline_pictures``): named by what it is, so kept for good -- and,
+        asked after by its ``ETag``, answered not changed."""
+
+        from flexo.studio import inline_pictures
+
+        kept = inline_pictures.found(name)
+        if kept is None:
+            raise FileNotFoundError(f"no picture {name}")
+        data, kind = kept
+        tag = f'"{name}"'
+        asked = self.headers.get("If-None-Match") == tag
+        self.send_response(HTTPStatus.NOT_MODIFIED if asked else HTTPStatus.OK)
+        self.send_header("ETag", tag)
+        self.send_header("Cache-Control", static_files.KEPT)
+        if not asked:
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            # (An SVG opened by its address is a picture still: nothing in it runs.)
+            self.send_header("Content-Security-Policy", "sandbox")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if not asked:
+            self.wfile.write(data)
+
     def _font(self, name: str) -> None:
         """The bundled fonts, which drawings in the studio name rather than embed."""
 
@@ -217,6 +260,11 @@ class Handler(BaseHTTPRequestHandler):
         page = (STATIC / "studio" / "index.html").read_text(encoding="utf-8")
         settings = json.dumps({"token": self.workspace.token, "file": name})
         page = page.replace("/*STUDIO*/null", settings.replace("</", "<\\/"))
+        folders = {"/static/studio/": STATIC / "studio"}
+        for kind_name, kind in self.workspace.kinds.items():
+            if getattr(kind, "static", None):
+                folders[f"/static/kinds/{kind_name}/"] = Path(kind.static)
+        page = static_files.versioned(page, folders, entry="/static/studio/studio.js")
         self._reply(200, page.encode("utf-8"), "text/html; charset=utf-8")
 
     def _api_get(self, route: str, query: dict[str, list[str]]) -> None:
@@ -238,6 +286,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._drawing(query))
         elif route == "/api/drawn":
             self._drawn(query)
+        elif route == "/api/picture" and query.get("made"):
+            # A picture a drawing carried, taken out of it as it was sent to the page.
+            self._made_picture(_one(query, "made"))
         elif route == "/api/picture":
             # A photograph a drawing names: its address carries its version, so it keeps.
             # (A GIF plays, or is shown still at a frame of it: ``still``, from 1.)
@@ -295,10 +346,21 @@ class Handler(BaseHTTPRequestHandler):
             others = doc.author_since(int(data["base"]), who)
             self._json({"version": version, "document": document, "who": others})
         elif route == "/api/draw":
+            document = data.get("document")
+            if document is None and "base" in data:
+                # The page's document as the studio has it, at the version the page has: not sent
+                # whole (flexo.studio.acting) -- or, the studio started again or that version let
+                # go, sent whole next time.
+                ours = data.get("instance") in (None, workspace.instance)
+                document = acting.sent_document(workspace.open(name), data) if ours else None
+                if document is None:
+                    version = int(data.get("version", 0))
+                    self._json({"version": version, "stale": True, "resend": True})
+                    return
             self._json(
                 workspace.draw(
                     name,
-                    data.get("document"),
+                    document,
                     int(data.get("version", 0)),
                     data.get("known") or {},
                     data.get("hints") or {},
@@ -362,6 +424,24 @@ class Handler(BaseHTTPRequestHandler):
             if act is None:
                 self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
                 return
+            # (An edit the document holds already -- sent again, its answer lost -- is not made
+            # twice: the page takes in the studio's document.)
+            if acting.made_already(workspace, doc, str(data.get("once") or "")):
+                self._json(acting.repeated(doc))
+                return
+            # Sent as the version the page has, not the whole document (flexo.studio.acting):
+            # made on the studio's copy of it -- unless the studio was started again since, or
+            # has let that version go, when the page sends its document whole.
+            if "base" in data and data.get("instance") not in (None, workspace.instance):
+                self._json({"restarted": True})
+                return
+            if "base" in data and data.get("kind") not in (None, doc.kind.name):
+                self._json({"reopen": True, "kind": doc.kind.name})
+                return
+            sent = acting.sent_document(doc, data)
+            if sent is None:
+                self._json({"resend": True})
+                return
             workspace.acting(name, data.get("action") or {})
             if workspace.set_aside and "document" in data:
                 # A file taken out of a bundle as no document named it, named again by the
@@ -372,8 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             # run only once the folder is trusted.)
             drawing = (data.get("action") or {}).get("do") == "previews"
             with workspace.running() if drawing else contextlib.nullcontext():
-                answer = act(data.get("document", doc.document), data.get("action") or {},
-                             doc.path.parent)
+                answer = act(sent, data.get("action") or {}, doc.path.parent)
             if isinstance(answer, dict) and "released" in answer:
                 # Files the edit leaves the document no longer needing (a figure file whose
                 # figure went into the deck): a bundle's own, taken out of it once no document
@@ -388,6 +467,9 @@ class Handler(BaseHTTPRequestHandler):
                     with contextlib.suppress(PermissionError):
                         workspace.relative(Path(str(file)))
                         workspace.uploads.add(Path(str(file)).resolve())
+            if "base" in data and "document" not in data:
+                # Kept at once, and drawn, as asked: answered with what changed alone.
+                answer = acting.answered(workspace, doc, data, sent, answer, who)
             self._json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming
@@ -473,7 +555,7 @@ class Handler(BaseHTTPRequestHandler):
             "open": sorted(workspace.docs),
             "presence": workspace.present(),
             "activity": list(workspace.activity)[-120:],
-            "assistant": _assistant(workspace).state(),
+            "assistant": _assistant_said(workspace),
             "start": self.start_file,
             # A bundle (one .flexo file) edited here: named as it is (flexo.studio.bundles).
             "bundle": workspace.bundle.info() if getattr(workspace, "bundle", None) else None,
@@ -517,6 +599,9 @@ class Handler(BaseHTTPRequestHandler):
             self.workspace.uploads.add(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        nudge = getattr(getattr(self.workspace, "bundle", None), "nudge", None)
+        if nudge is not None:
+            nudge()  # (a bundle's folder: written back once it rests)
         return {"path": target.relative_to(self.workspace.path(name).parent).as_posix()}
 
     def _export(self, doc: Any, data: dict[str, Any]) -> None:
@@ -561,8 +646,14 @@ class Handler(BaseHTTPRequestHandler):
         if into is not None and "into" in takes:
             extra["into"] = into
         given = (document, doc.path.parent, doc.path.stem, *([] if part is None else [part]))
+        # A kind that takes the folder's turn to draw itself takes it only while it draws, not
+        # while it writes its files: the studio draws its person's edits meanwhile. (Exports
+        # still go one at a time: what each leaves out is told to its own page.)
+        turn = workspace.drawing
+        if "drawing" in takes:
+            extra["drawing"], turn = workspace.drawing, _EXPORTING
         try:
-            with workspace.drawing, workspace.running():
+            with turn, workspace.running():
                 # What the export left out and says so (a figure that can't be drawn, left an
                 # empty box): told to the page with what was made.
                 doc.kind.export_notes = []
@@ -849,6 +940,24 @@ def _forget(key: tuple[int, str]) -> None:
         _AGENTS.pop(key, None)
 
 
+def _assistant_said(workspace: Workspace) -> dict[str, Any]:
+    """The assistant's state for a page: who can answer as last found on this computer, at
+    once, while nothing that decides it has changed and the studio is still finding out
+    (flexo.studio.availability); else found out now."""
+
+    from flexo.studio import availability
+
+    new = workspace.assistant is None
+    if new:
+        known = availability.remembered()
+        if known is not None:
+            return {**known, "running": False, "transcript": []}
+    state = _assistant(workspace).state()
+    if new:
+        availability.remember(state)
+    return state
+
+
 def _assistant(workspace: Workspace):
     from flexo.studio.assistant import Assistant
 
@@ -906,10 +1015,11 @@ def start(
     if start_file:
         workspace.address += f"?file={quote(start_file)}"  # type: ignore[attr-defined]
     sessions.register(folder, server.server_address[1], workspace.token)
-    if start_file:  # (drawn while the page loads: flexo.studio.warmup)
-        from flexo.studio.warmup import warm
+    from flexo.studio.warmup import warm, warm_assistant
 
-        warm(workspace, start_file)
+    # (Drawn while the page loads: flexo.studio.warmup.)
+    drawing = warm(workspace, start_file) if start_file else None
+    warm_assistant(workspace, after=drawing)
     if browser:
         threading.Timer(0.3, webbrowser.open, (workspace.address,)).start()  # type: ignore[attr-defined]
     return server, workspace

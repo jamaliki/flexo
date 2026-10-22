@@ -24,6 +24,7 @@ A variable font takes the weight directly on its ``wght`` axis.
 from __future__ import annotations
 
 import difflib
+import functools
 import json
 import logging
 import os
@@ -464,6 +465,7 @@ def require_family(family: str) -> tuple[FontFace, ...]:
     )
 
 
+@functools.lru_cache(maxsize=1024)
 def select_face(faces: tuple[FontFace, ...], weight: int, italic: bool) -> FontFace:
     """The face CSS font matching would draw for ``weight`` and ``italic``.
 
