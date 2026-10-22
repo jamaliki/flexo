@@ -90,6 +90,35 @@ SIZE_LIMIT = 2_000_000
 """Values in one document, at most (a YAML file of aliases can name billions)."""
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
+_DIGESTS: OrderedDict[int, tuple[str, str]] = OrderedDict()
+"""Each page's drawing's hash (``Workspace.draw``), by the drawing: a kind keeps the drawings
+of pages that did not change, and draws them again as they were -- the same words, hashed once."""
+_DIGESTED = [0]  # (how many characters those drawings hold)
+_DIGESTS_HELD = 64_000_000
+
+
+_DIGESTING = threading.Lock()
+
+
+def _digest(svg: str) -> str:
+    with _DIGESTING:
+        kept = _DIGESTS.get(id(svg))
+        if kept is not None and kept[0] is svg:
+            _DIGESTS.move_to_end(id(svg))
+            return kept[1]
+    digest = hashlib.sha1(svg.encode("utf-8")).hexdigest()[:16]
+    with _DIGESTING:
+        kept = _DIGESTS.pop(id(svg), None)
+        if kept is not None:
+            _DIGESTED[0] -= len(kept[0])
+        _DIGESTS[id(svg)] = (svg, digest)
+        _DIGESTED[0] += len(svg)
+        # (Held to a few hundred, and as many characters as a deck's slides: those let go are
+        # hashed again.)
+        while len(_DIGESTS) > 400 or (len(_DIGESTS) > 1 and _DIGESTED[0] > _DIGESTS_HELD):
+            _DIGESTED[0] -= len(_DIGESTS.popitem(last=False)[1][0])
+    return digest
+
 
 class Listener:
     """A page (or an agent) receiving the workspace's events."""
@@ -1438,7 +1467,7 @@ class Workspace:
             if page.pending:
                 pages.append({"id": page.id, "label": page.label, "pending": True, **page.extra})
                 continue
-            digest = hashlib.sha1(page.svg.encode("utf-8")).hexdigest()[:16]
+            digest = _digest(page.svg)
             entry: dict[str, Any] = {
                 "id": page.id,
                 "label": page.label,
