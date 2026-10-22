@@ -463,8 +463,25 @@ export class Session {
   travelled(entry) {
     this.lastMerge = null;
     this.emit("change", { quiet: false, source: "history", entry: this.said(entry) });
+    // (Sent and drawn in one request, where it can be when it goes: the studio draws what it
+    // keeps.)
+    if (this.canSendDrawn()) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = setTimeout(() => {
+        this.pushTimer = null;
+        if (this.canSendDrawn()) this.push({ drawn: true });
+        else { this.push(); this.requestDraw(0); }
+      }, 0);
+      return;
+    }
     this.schedulePush(0);
     this.requestDraw(0);
+  }
+
+  // Whether this page's document can go to the studio now with its drawing asked for in the
+  // same request (push's `drawn`): nothing of its own on its way, and no drawing out.
+  canSendDrawn() {
+    return !this.sending && !this.resyncing && !this.unread && !this.unanswered.length && !this.drawBusy && !same(this.document, this.synced);
   }
 
   // What a change in the history did, in words, and where: its label, else as the kind
@@ -510,7 +527,9 @@ export class Session {
     this.pushTimer = setTimeout(() => { this.pushTimer = null; this.push(); }, delay);
   }
 
-  async push() {
+  // (`drawn`: drawn by the studio as it keeps it, in the same request -- an undo, which took
+  // a request to send and another to draw.)
+  async push({ drawn = false } = {}) {
     // (Not while the file does not read: the studio has nothing to merge it with, and takes
     // it in when it reads -- see told.)
     if (this.sending || this.resyncing || this.unread || same(this.document, this.synced)) return;
@@ -520,14 +539,22 @@ export class Session {
     if (this.unanswered.length) { this.resync(); return; }
     const sent = this.document, from = this.synced;
     this.sending = sent;
+    const draw = drawn ? this.drawAsked() : null;
     this.emit("status");
     let result = null;
     try {
       result = await this.workspace.api("/api/update", {
         file: this.file, kind: this.kind, base: this.version, instance: this.instance, document: sent, client: this.workspace.client, who: this.workspace.me,
+        ...(draw ? { draw } : {}),
       });
     } catch (error) {
       this.sending = null;
+      if (draw) {
+        // (Out of reach, the drawing stays as it was until the studio is back; else it is
+        // asked for by itself.)
+        this.drawBusy -= 1;
+        if (!unreachable(error)) this.requestDraw(0);
+      }
       this.failures += 1;
       if (unreachable(error)) this.unanswered = [...this.unanswered.slice(-19), sent];
       // Out of reach, the page says so once and sends again when it is back; refused,
@@ -545,13 +572,37 @@ export class Session {
     this.sending = null;
     this.failures = 0;
     this.failed = null;
+    if (draw) this.drawBusy -= 1;
     // The studio started again since this page last heard from it: its versions count
     // from the file anew, so the page takes in its document before sending.
     if (result.restarted) this.resync();
     // The file is another kind of document now: it opens again in that kind's editor.
     else if (result.reopen) this.workspace.reopen?.(this.file, result.kind);
     else this.accept(result.version, result.document, sent, result.who, from);
+    if (draw) {
+      // (Its drawing, of the document as the studio keeps it: one changed here since is drawn
+      // next.)
+      if (result.drawing) this.took(draw.version, result.drawing);
+      else this.drawWanted = true;
+      if (!result.drawing || !same(this.document, result.document)) this.drawWanted = true;
+      if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
+    }
     this.emit("status");
+  }
+
+  // A drawing asked for with a request that carries something else (push's `drawn`): counted
+  // as drawOnce counts its own, the timers that would ask for it stopped.
+  drawAsked() {
+    clearTimeout(this.drawTimer);
+    this.drawTimer = null;
+    this.drawWanted = false;
+    const version = this.drawVersion = ++drawings;
+    const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
+    const hints = { ...this.hints(), client: this.workspace.client };
+    this.drawYields = false;
+    this.drawBusy += 1;
+    this.emit("drawing", { version });
+    return { version, known, hints };
   }
 
   // The server's answer to what was sent: keep edits made since, on top of it. `who` made

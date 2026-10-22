@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import xml.etree.ElementTree as ET
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from itertools import combinations, pairwise
 
@@ -45,11 +46,29 @@ class LintReport:
         return "\n".join(item.format() for item in self.diagnostics) or "ok: no diagnostics"
 
 
+_LINTED: OrderedDict[int, tuple[Compilation, LayoutStyle | None, bool, LintReport]] = OrderedDict()
+"""The last few compilations linted, with their reports: a figure laid out for a slide is
+linted as its layout is chosen (``flexo.boxfit``) and again as its slide says what is wrong
+with it -- the same compilation, the same style, 7.5 ms each time a figure with molecules is
+edited."""
+_LINTED_LOCK = threading.Lock()
+LINTED = 8
+
+
 def lint_compilation(
     compilation: Compilation,
     *,
     style: LayoutStyle | None = None,
 ) -> LintReport:
+    from flexo.artwork import picture_link
+
+    # (Linted once: asked again of the very compilation, in the same style, with its pictures
+    # linked or not as they were, the report is the same -- a compilation does not change.)
+    linked = picture_link.get() is not None
+    with _LINTED_LOCK:
+        known = _LINTED.get(id(compilation))
+    if known is not None and known[0] is compilation and known[1] is style and known[2] == linked:
+        return known[3]
     layout_style = style or figure_style(compilation.measured.semantic)
     diagnostics = [
         *_fitted_diagnostics(compilation),
@@ -58,7 +77,13 @@ def lint_compilation(
         *_svg_diagnostics(compilation),
         *_publication_diagnostics(compilation, layout_style),
     ]
-    return LintReport(tuple(diagnostics))
+    report = LintReport(tuple(diagnostics))
+    with _LINTED_LOCK:
+        _LINTED[id(compilation)] = (compilation, style, linked, report)
+        _LINTED.move_to_end(id(compilation))
+        while len(_LINTED) > LINTED:
+            _LINTED.popitem(last=False)
+    return report
 
 
 def lint_svg(svg_text: str) -> LintReport:
