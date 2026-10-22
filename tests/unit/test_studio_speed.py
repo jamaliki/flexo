@@ -4,12 +4,16 @@ page as they are."""
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import pytest
+import yaml
 
+from flexo import roundtrip
 from flexo.studio.figure_kind import SAMPLE_FIGURE
 from flexo.studio.workspace import Workspace
 
@@ -54,4 +58,162 @@ def test_edits_are_taken_while_the_document_is_being_written(tmp_path: Path) -> 
         assert "Output $z$" in (tmp_path / "figure.yaml").read_text(encoding="utf-8")
     finally:
         workspace.close()
+
+
+DECK = """\
+# The lab meeting -- keep this comment
+schema_version: 1
+deck:
+  id: talk
+  theme: paper   # chosen by Kiarash
+
+slides:
+# --- opening ---
+- title: "Making it fast"
+  subtitle: 'What we found'
+  layout: title
+
+- title: The pipeline   # the first real slide
+  body:
+  - bullets:
+    - Generate   # step one
+    - Design
+    - "Quoted: with a colon"
+  - figure:
+      nodes:
+      - id: start
+        label: Start
+      - {id: check, label: Check}
+# A comment between slides, over the third.
+- title: Words
+  body:
+  - text: |
+      A literal block,
+      over two lines.
+  notes: Say this slowly.
+
+  # A comment inside a slide, after a blank line.
+- title: LONG
+  body:
+  - bullets: [one, two, three]
+- layout: section
+  title: Part two
+- title: Shapes
+  shapes:
+  - kind: rectangle
+    at: [100, 120]   # where it was put
+    size: [200, 100]
+- title: Last one
+  body:
+  - bullets:
+    - 'no'
+    - "12"
+# end of the slides
+
+figures:
+  pipeline:
+    nodes:
+    - id: a
+      label: A
+# the very end
+""".replace("LONG", "A very long title, past where a line is wrapped, going on" + " and on" * 9)
+
+
+def _edits(document: dict) -> list[dict]:
+    """A run of edits as typing and dragging make them, each from the one before."""
+
+    made, now = [], copy.deepcopy(document)
+
+    def then(change) -> None:
+        nonlocal now
+        now = copy.deepcopy(now)
+        change(now["slides"])
+        made.append(now)
+
+    then(lambda slides: slides[1]["body"][0]["bullets"].__setitem__(1, "Design it"))
+    then(lambda slides: slides[1]["body"][0]["bullets"].pop(0))  # a bullet taken out...
+    made.append(copy.deepcopy(made[0]))  # ... and put back (an undo)
+    now = copy.deepcopy(made[-1])
+    then(lambda slides: slides[2].__setitem__("title", "Words, words"))
+    then(lambda slides: slides[5]["shapes"][0].__setitem__("at", [104.5, 120]))
+    then(lambda slides: slides[0].__setitem__("title", "Making it faster"))
+    then(lambda slides: slides[6]["body"][0]["bullets"].append("yes, quoted"))
+    then(lambda slides: slides[3].__setitem__("notes", "A note\nover two lines"))
+    then(lambda slides: (slides[0].pop("subtitle"), slides[6].__setitem__("title", "Last")))
+    return made
+
+
+def _whole(previous: str, document: dict, kept) -> str:
+    token = roundtrip._GONE.set(kept)
+    try:
+        return roundtrip._rewrite_whole(previous, document, lambda data: yaml.safe_dump(data))
+    finally:
+        roundtrip._GONE.reset(token)
+
+
+def _in_part(previous: str, document: dict, kept) -> str | None:
+    token = roundtrip._GONE.set(kept)
+    try:
+        return roundtrip._in_part(previous, document)
+    finally:
+        roundtrip._GONE.reset(token)
+
+
+def test_a_deck_written_over_from_its_changed_slides_is_the_file_written_whole() -> None:
+    previous = DECK
+    whole_kept: tuple = (OrderedDict(), OrderedDict())
+    part_kept: tuple = (OrderedDict(), OrderedDict())
+    for document in _edits(yaml.safe_load(DECK)):
+        whole = _whole(previous, document, whole_kept)
+        part = _in_part(previous, document, part_kept)
+        assert part == whole
+        previous = whole
+    # The comments the person wrote are all there still.
+    for comment in ("# The lab meeting", "# chosen by Kiarash", "# --- opening ---",
+                    "# where it was put", "# end of the slides", "# the very end"):
+        assert comment in previous
+
+
+def test_what_is_not_an_edit_of_slides_in_place_is_written_whole() -> None:
+    document = yaml.safe_load(DECK)
+    added = copy.deepcopy(document)
+    added["slides"].insert(2, {"title": "New"})
+    assert _in_part(DECK, added, None) is None
+    moved = copy.deepcopy(document)
+    moved["slides"].append(moved["slides"].pop(1))
+    assert _in_part(DECK, moved, None) is None
+    deck = copy.deepcopy(document)
+    deck["deck"]["theme"] = "dark"
+    assert _in_part(DECK, deck, None) is None
+    anchored = DECK.replace("theme: paper", "theme: &look paper")
+    typed = copy.deepcopy(document)
+    typed["slides"][1]["title"] = "Typed"
+    assert _in_part(anchored, typed, None) is None
+    assert _in_part(DECK, typed, None) is not None
+
+
+def test_a_long_deck_is_written_over_in_a_fraction_of_the_time_of_the_whole() -> None:
+    slides = [
+        {"title": f"Slide {n}", "body": [{"bullets": [f"Point {n} " * 6, ["sub a", "sub b"]]}],
+         "notes": f"Notes for slide {n}"}
+        for n in range(60)
+    ]
+    previous = yaml.safe_dump({"schema_version": 1, "deck": {"id": "long"}, "slides": slides},
+                              sort_keys=False, width=100)
+    document = yaml.safe_load(previous)
+    document["slides"][30]["title"] += " typed"
+
+    def fastest(write) -> float:
+        best = float("inf")
+        for _ in range(3):
+            started = time.process_time()
+            write()
+            best = min(best, time.process_time() - started)
+        return best
+
+    part = fastest(lambda: _in_part(previous, document, None))
+    whole = fastest(lambda: _whole(previous, document, None))
+    assert _in_part(previous, document, None) == _whole(previous, document, None)
+    # (About a seventh; asked for a half, for a busy computer's sake.)
+    assert part < whole / 2
 

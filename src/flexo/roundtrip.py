@@ -30,6 +30,7 @@ import itertools
 import json
 import logging
 import re
+import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -168,6 +169,13 @@ def rewrite(
 
 
 def _rewrite(previous: str, document: Any, fresh: Callable[[Any], str]) -> str:
+    # Where only items of one top-level list changed (a word typed on a slide), written from
+    # those items alone, as the whole file would have them (``_in_part``).
+    quick = _in_part(previous, document)
+    return quick if quick is not None else _rewrite_whole(previous, document, fresh)
+
+
+def _rewrite_whole(previous: str, document: Any, fresh: Callable[[Any], str]) -> str:
     reader = _yaml()
     try:
         old, indent, offset = load_yaml_guess_indent(previous, yaml=reader)
@@ -761,3 +769,276 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (datetime.date, PurePath)):
         return str(value)
     return str(value)
+
+
+# -- a file written over where it changed --
+
+
+_READ: OrderedDict[str, str] = OrderedDict()
+"""What each part of a file reads as (``_key``) -- a top-level key's lines, or an item's of a
+top-level list -- by its words: a file written over at each pause in typing is the parts it
+had last time but one or two, each read once."""
+_READ_LOCK = threading.Lock()
+_ANCHORED = re.compile(r"(?:^[ \t]*|[:?-][ \t]+|[\[{,][ \t]*)&\S", re.M)
+"""Where an anchor may be (``&name`` starting a value): a file with one -- or with words that
+look like one -- is written whole, an alias's node being anywhere in it."""
+_MARKED = re.compile(r"^(?:%|---(?:\s|$)|\.\.\.(?:\s|$))", re.M)
+"""A directive, or a document's start or end marker: a file with one is written whole."""
+
+
+class _Guess:
+    """Ruamel's guess at a file's indents, without the reading that comes with it."""
+
+    def load(self, text: str) -> None:
+        return None
+
+
+def _in_part(previous: str, document: Any) -> str | None:
+    """``_rewrite_whole``'s answer for a file where the document changed only some items of
+    one top-level list, in their places (a word typed on a slide, a shape moved): those items
+    and the ones either side of them (with the list's first and last, and every other
+    top-level part, for all that comes before and after them) written over as the whole file
+    is -- read, merged and dumped by the round trip -- and put back among the rest, as the
+    whole is spliced. A deck of fifty slides is written in a few hundredths of a second,
+    not half a second of the Python the studio's edits wait on. None where it can't be told
+    so (anchors, directives, keys added or moved, items added, moved or taken out): the
+    whole file is written over."""
+
+    if not isinstance(document, dict) or _ANCHORED.search(previous) or _MARKED.search(previous):
+        return None
+    gone = _GONE.get()
+    kept = (OrderedDict(gone[0]), OrderedDict(gone[1])) if gone is not None else None
+    try:
+        made = _written_in_part(previous, document)
+    except Exception:
+        _LOG.debug("a YAML file is written over whole", exc_info=True)
+        made = None
+    if made is None and gone is not None and kept is not None:
+        # (What the merging of a part took out of, or put into, the file's memory of items
+        # taken out is as it was: the whole is merged afresh.)
+        for which, was in zip(gone, kept, strict=True):
+            which.clear()
+            which.update(was)
+    return made
+
+
+def _written_in_part(previous: str, document: dict) -> str | None:
+    root = yaml.compose(previous, Loader=_LOADER)
+    lines = previous.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    was = _sketched(root, lines)
+    if was is None or list(was) != list(document):
+        return None
+    changed = [key for key, part in was.items() if part["key"] != _key(document[key])]
+    if not changed:
+        return _read_back("".join(lines), document)
+    if len(changed) != 1 or was[changed[0]]["items"] is None:
+        return None
+    listed = changed[0]
+    items, new = was[listed]["items"], document[listed]
+    if not isinstance(new, list) or len(new) != len(items):
+        return None
+    keys_old, keys_new = [item["key"] for item in items], [_key(item) for item in new]
+    if not _in_place(keys_old, keys_new):
+        return None
+    pairs = zip(keys_old, keys_new, strict=True)
+    edited = {j for j, (one, other) in enumerate(pairs) if one != other}
+    near = sorted(
+        {0, len(items) - 1} | {k for j in edited for k in (j - 1, j, j + 1) if 0 <= k < len(items)}
+    )
+    if not _in_place([keys_old[at] for at in near], [keys_new[at] for at in near]):
+        return None
+    # The file as these items, and all that is not the list, have it: read, merged and dumped
+    # as the whole would be.
+    part_lines = lines[: items[0]["start"]]
+    for at in near:
+        part_lines += lines[items[at]["start"] : items[at]["end"]]
+    part_lines += lines[items[-1]["end"] :]
+    part_document = {
+        key: [new[at] for at in near] if key == listed else value for key, value in document.items()
+    }
+    reader = _yaml()
+    _, indent, offset = load_yaml_guess_indent(previous, yaml=_Guess())
+    old = reader.load("".join(part_lines))
+    if not isinstance(old, CommentedMap) or list(old) != list(was):
+        return None
+    _comments_to_items(old)
+    ending = _cut_tail(old, list(old)[-1]) if old else None
+    loose: dict[str, Any] = {"out": {}, "new": []}
+    token = _LOOSE.set(loose)
+    try:
+        merged = _merge(old, part_document)
+        _rehome(loose)
+    finally:
+        _LOOSE.reset(token)
+    writer = _yaml()
+    if indent:
+        writer.indent(mapping=indent, sequence=indent, offset=offset or 0)
+    out = io.StringIO()
+    writer.dump(merged, out)
+    text = _trimmed(_undeclared(out.getvalue(), previous)) + (ending or "")
+    written = text.splitlines(keepends=True)
+    now = _parts(reader.load(text), written)
+    dumped_items = now[listed]["items"] if list(now) == list(was) else None
+    if dumped_items is None or len(dumped_items) != len(near):
+        return None
+    if any(now[key]["key"] != part["key"] for key, part in was.items() if key != listed):
+        return None
+    if [item["key"] for item in now[listed]["items"]] != [keys_new[at] for at in near]:
+        return None
+    # Put together as ``_splice`` puts the whole together: what did not change, its lines as
+    # the file had them; what did, as dumped, under the comments the file had over it.
+    gaps = _gaps(lines)
+    first = min(part["start"] for part in was.values())
+    spliced = lines[:first]
+    for key, part in was.items():
+        if key != listed:
+            spliced += lines[part["start"] : part["end"]]
+            continue
+        dumped = now[listed]
+        spliced += _spaced(written[dumped["start"] : dumped["items"][0]["start"]], gaps)
+        for j, item in enumerate(items):
+            if j not in edited:
+                spliced += lines[item["start"] : item["end"]]
+                continue
+            mine = dumped["items"][near.index(j)]
+            spliced += lines[item["start"] : item["line"]]
+            spliced += _spaced(written[mine["line"] : mine["end"]], gaps)
+        spliced += lines[part["tail"][0] : part["tail"][1]]
+    return _read_back("".join(spliced), document)
+
+
+def _read_back(candidate: str, document: Any) -> str | None:
+    """``candidate``, if it reads as ``document`` does (as ``_rewrite_whole`` asks of what it
+    writes); else None."""
+
+    try:
+        return candidate if _plain(yaml.load(candidate, _LOADER)) == _plain(document) else None
+    except Exception:
+        return None
+
+
+def _sketched(root: Any, lines: list[str]) -> dict[Any, dict[str, Any]] | None:
+    """``_parts`` of a file, from where PyYAML's reader (C) finds its keys and items, each
+    part's ``key`` as the round trip reads its words (``_read``). None for a file whose top
+    is not a mapping of plain keys at its left edge, or whose items are not each on the line
+    of its dash."""
+
+    if not isinstance(root, yaml.MappingNode) or not root.value:
+        return None
+    keys: list[str] = []
+    heads: list[int] = []
+    for key_node, _ in root.value:
+        if (
+            not isinstance(key_node, yaml.ScalarNode)
+            or key_node.tag != "tag:yaml.org,2002:str"
+            or key_node.start_mark.column != 0
+        ):
+            return None
+        keys.append(key_node.value)
+        heads.append(key_node.start_mark.line)
+    if len(set(keys)) != len(keys):
+        return None
+
+    def begin(line: int, floor: int) -> int:
+        while line - 1 > floor and lines[line - 1].lstrip().startswith("#"):
+            line -= 1
+        return line
+
+    def tail(start: int, end: int) -> int:
+        while end - 1 > start and (not lines[end - 1].strip() or _remark(lines[end - 1])):
+            end -= 1
+        return end
+
+    starts: list[int] = []
+    for head in heads:
+        starts.append(begin(head, starts[-1] if starts else -1))
+    parts: dict[Any, dict[str, Any]] = {}
+    for at, (key, (_, value)) in enumerate(zip(keys, root.value, strict=True)):
+        end = starts[at + 1] if at + 1 < len(keys) else len(lines)
+        items, rest, key_of = None, None, None
+        listed = isinstance(value, yaml.SequenceNode) and value.value and value.flow_style is False
+        nodes = (yaml.MappingNode, yaml.SequenceNode)
+        if listed and all(isinstance(item, nodes) for item in value.value):
+            item_heads = []
+            for item in value.value:
+                mark = item.start_mark
+                # (Its first key on the line of its dash, where the round trip has it too.)
+                if not lines[mark.line][: mark.column].rstrip().endswith("-"):
+                    return None
+                item_heads.append(mark.line)
+            begins: list[int] = []
+            for head in item_heads:
+                begins.append(begin(head, begins[-1] if begins else starts[at]))
+            last = tail(item_heads[-1], end)
+            ends = [*begins[1:], last]
+            items = []
+            for k, first in enumerate(begins):
+                read = _read("".join(lines[item_heads[k] : ends[k]]), None)
+                items.append({"start": first, "line": item_heads[k], "end": ends[k], "key": read})
+            rest = (last, end)
+            key_of = "[" + ", ".join(item["key"] for item in items) + "]"
+        else:
+            key_of = _read("".join(lines[starts[at] : end]), key)
+        parts[key] = {"start": starts[at], "end": end, "key": key_of, "items": items, "tail": rest}
+    return parts
+
+
+def _read(words: str, key: str | None) -> str:
+    """What a part of a file reads as (``_key``), read by the round trip on its own: an item of
+    a list (``key`` None), or a top-level key's value."""
+
+    with _READ_LOCK:
+        found = _READ.get(words if key is None else f"{key}\x00{words}")
+    if found is not None:
+        return found
+    read = _yaml().load(words)
+    if key is None:
+        if not isinstance(read, CommentedSeq) or len(read) != 1:
+            raise ValueError("not one item")
+        found = _key(read[0])
+    else:
+        if not isinstance(read, CommentedMap) or list(read) != [key]:
+            raise ValueError("not one key")
+        found = _key(read[key])
+    with _READ_LOCK:
+        _READ[words if key is None else f"{key}\x00{words}"] = found
+        while len(_READ) > 4096:
+            _READ.popitem(last=False)
+    return found
+
+
+def _in_place(keys_old: list[str], keys_new: list[str]) -> bool:
+    """Whether ``_merge_seq`` and ``_splice`` pair each item of a list with the one at its
+    own place -- the same, or changed there -- none added, moved or taken out."""
+
+    sources: list[int | None] = [None] * len(keys_new)
+    used: set[int] = set()
+    matcher = difflib.SequenceMatcher(None, keys_old, keys_new, autojunk=False)
+    opcodes = matcher.get_opcodes()
+    for tag, i1, _i2, j1, j2 in opcodes:
+        if tag == "equal":
+            for k in range(j2 - j1):
+                sources[j1 + k] = i1 + k
+                used.add(i1 + k)
+    for j, key in enumerate(keys_new):
+        if sources[j] is None:
+            found = next(
+                (i for i, key_old in enumerate(keys_old) if key_old == key and i not in used), None
+            )
+            if found is not None:
+                sources[j] = found
+                used.add(found)
+    _earliest(sources, keys_new, [True] * len(keys_new))
+    _first_of_runs(sources, keys_old)
+    used = {source for source in sources if source is not None}
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag != "replace":
+            continue
+        free = [i for i in range(i1, i2) if i not in used]
+        for j in range(j1, j2):
+            if sources[j] is None and free:
+                sources[j] = free.pop(0)
+                used.add(sources[j])  # type: ignore[arg-type]
+    return sources == list(range(len(keys_old)))
