@@ -626,6 +626,8 @@ class Workspace:
         """Each document's pages' drawings, as last drawn: as sent, and their hashes (``draw``)."""
         self.acts: dict[str, int] = {}
         """How many edits the pages have asked of each document's kind (``acting``)."""
+        self.drawn_at = 0.0
+        """When a page last asked for a drawing (``time.monotonic``)."""
         self._documents: dict[Path, tuple[float, str | None]] = {}
         self._unread: dict[Path, bool] = {}  # files of a kind that do not read as it has them
         self._stop = threading.Event()
@@ -1409,6 +1411,7 @@ class Workspace:
     def draw(
         self, name: str, document: Any, version: int, known: dict[str, str], hints: dict[str, Any]
     ) -> dict[str, Any]:
+        self.drawn_at = time.monotonic()
         doc = self.open(name)
         # Each page counts its own drawings; an older one waiting its turn is dropped.
         client = f"{name}\0{hints.get('client', '')}"

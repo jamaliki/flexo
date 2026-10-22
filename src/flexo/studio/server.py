@@ -470,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
             "open": sorted(workspace.docs),
             "presence": workspace.present(),
             "activity": list(workspace.activity)[-120:],
-            "assistant": _assistant(workspace).state(),
+            "assistant": _assistant_said(workspace),
             "start": self.start_file,
             # A bundle (one .flexo file) edited here: named as it is (flexo.studio.bundles).
             "bundle": workspace.bundle.info() if getattr(workspace, "bundle", None) else None,
@@ -855,6 +855,24 @@ def _forget(key: tuple[int, str]) -> None:
         _AGENTS.pop(key, None)
 
 
+def _assistant_said(workspace: Workspace) -> dict[str, Any]:
+    """The assistant's state for a page: who can answer as last found on this computer, at
+    once, while nothing that decides it has changed and the studio is still finding out
+    (flexo.studio.availability); else found out now."""
+
+    from flexo.studio import availability
+
+    new = workspace.assistant is None
+    if new:
+        known = availability.remembered()
+        if known is not None:
+            return {**known, "running": False, "transcript": []}
+    state = _assistant(workspace).state()
+    if new:
+        availability.remember(state)
+    return state
+
+
 def _assistant(workspace: Workspace):
     from flexo.studio.assistant import Assistant
 
@@ -914,9 +932,9 @@ def start(
     sessions.register(folder, server.server_address[1], workspace.token)
     from flexo.studio.warmup import warm, warm_assistant
 
-    if start_file:  # (drawn while the page loads: flexo.studio.warmup)
-        warm(workspace, start_file)
-    warm_assistant(workspace)
+    # (Drawn while the page loads: flexo.studio.warmup.)
+    drawing = warm(workspace, start_file) if start_file else None
+    warm_assistant(workspace, after=drawing)
     if browser:
         threading.Timer(0.3, webbrowser.open, (workspace.address,)).start()  # type: ignore[attr-defined]
     return server, workspace

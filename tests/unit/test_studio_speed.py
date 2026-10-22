@@ -172,8 +172,14 @@ def test_a_deck_written_over_from_its_changed_slides_is_the_file_written_whole()
         assert part == whole
         previous = whole
     # The comments the person wrote are all there still.
-    for comment in ("# The lab meeting", "# chosen by Kiarash", "# --- opening ---",
-                    "# where it was put", "# end of the slides", "# the very end"):
+    for comment in (
+        "# The lab meeting",
+        "# chosen by Kiarash",
+        "# --- opening ---",
+        "# where it was put",
+        "# end of the slides",
+        "# the very end",
+    ):
         assert comment in previous
 
 
@@ -210,12 +216,16 @@ def test_a_file_opened_is_read_ahead_a_little_at_a_time_for_its_first_writing() 
 
 def test_a_long_deck_is_written_over_in_a_fraction_of_the_time_of_the_whole() -> None:
     slides = [
-        {"title": f"Slide {n}", "body": [{"bullets": [f"Point {n} " * 6, ["sub a", "sub b"]]}],
-         "notes": f"Notes for slide {n}"}
+        {
+            "title": f"Slide {n}",
+            "body": [{"bullets": [f"Point {n} " * 6, ["sub a", "sub b"]]}],
+            "notes": f"Notes for slide {n}",
+        }
         for n in range(60)
     ]
-    previous = yaml.safe_dump({"schema_version": 1, "deck": {"id": "long"}, "slides": slides},
-                              sort_keys=False, width=100)
+    previous = yaml.safe_dump(
+        {"schema_version": 1, "deck": {"id": "long"}, "slides": slides}, sort_keys=False, width=100
+    )
     document = yaml.safe_load(previous)
     document["slides"][30]["title"] += " typed"
 
@@ -294,4 +304,68 @@ def test_a_photograph_kept_from_another_run_of_the_studio_is_shown_with_this_run
         assert "svg" not in again["pages"][0]  # (the same drawing: not sent again)
     finally:
         del doc.kind.draw
+        workspace.close()
+
+
+def test_who_can_answer_is_said_at_once_as_last_found_while_nothing_deciding_it_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flexo.studio import availability
+    from flexo.studio.server import _assistant_said
+
+    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", str(tmp_path / "anthropic"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a-test-key")
+    assert availability.remembered() is None
+    workspace = Workspace(tmp_path)
+    try:
+        found = _assistant_said(workspace)  # (found out, the SDKs asked)
+        assert workspace.assistant is not None
+    finally:
+        workspace.close()
+    kept = availability.remembered()
+    assert kept == {key: found[key] for key in kept}
+    assert "a-test-key" not in availability._file().read_text(encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        # A studio started again says so at once, its assistant not yet made.
+        assert _assistant_said(workspace) == {**kept, "running": False, "transcript": []}
+        assert workspace.assistant is None
+    finally:
+        workspace.close()
+    # A key changed, or the SDK's configuration, and it is found out again.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "another-test-key")
+    assert availability.remembered() is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a-test-key")
+    assert availability.remembered() == kept
+    (tmp_path / "anthropic").mkdir()
+    (tmp_path / "anthropic" / "active_config").write_text("work\n", encoding="utf-8")
+    assert availability.remembered() is None
+
+
+def test_the_assistant_is_found_out_again_once_the_pages_stop_asking_for_drawings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flexo.studio import availability, warmup
+
+    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", str(tmp_path / "anthropic"))
+    monkeypatch.setattr(warmup, "QUIET", 0.4)
+    availability.remember({"available": False, "why": "As it was.", "provider": "nobody"})
+    workspace = Workspace(tmp_path)
+    told: list[dict] = []
+    workspace.broadcast = told.append
+    try:
+        workspace.drawn_at = time.monotonic()
+        warmup.warm_assistant(workspace)
+        for _ in range(6):  # (a page drawing its slides)
+            time.sleep(0.1)
+            workspace.drawn_at = time.monotonic()
+        assert workspace.assistant is None
+        deadline = time.monotonic() + 20
+        while not told and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert workspace.assistant is not None
+        # The pages told who answers, as it is found now.
+        assert told[0]["event"] == "availability" and told[0]["provider"] != "nobody"
+        assert availability.remembered()["provider"] == told[0]["provider"]
+    finally:
         workspace.close()
