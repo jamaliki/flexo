@@ -7,7 +7,7 @@
 // into this copy, keeping edits not yet sent. Undo takes back this person's own
 // change, and only that: it is a merge too, so others' later edits stay.
 
-import { merge3, mergeAnswer, replay, same, stable } from "./merge.js";
+import { merge3, mergeAnswer, replay, same, share, stable } from "./merge.js";
 import { toast, h, inQuotes, dialog } from "./ui.js";
 
 // Whether the studio answers, for the page as a whole: while it doesn't, one notice
@@ -157,6 +157,21 @@ function ownWords(parts) {
   return own;
 }
 
+// `from` copied for a change that reaches only its part at `path`: that part copied whole, each
+// object holding it copied alone, the rest `from`'s own -- or null, with no part there.
+function copiedAlong(from, path) {
+  if (from === null || typeof from !== "object") return null;
+  const top = Array.isArray(from) ? [...from] : { ...from };
+  let at = top;
+  for (let step = 0; step < path.length; step += 1) {
+    const key = path[step], kid = at[key];
+    if (kid === null || typeof kid !== "object") return null;
+    at[key] = step === path.length - 1 ? structuredClone(kid) : Array.isArray(kid) ? [...kid] : { ...kid };
+    at = at[key];
+  }
+  return top;
+}
+
 export class Session {
   constructor(workspace, info) {
     this.workspace = workspace;
@@ -230,7 +245,16 @@ export class Session {
 
   get doc() { return this.document; }
   get catalogue() { return this.catalog; }
-  get pendingLocal() { return !same(this.document, this.synced) || Boolean(this.sending) || Boolean(this.waiting); }
+  get pendingLocal() { return !this.inStep() || Boolean(this.sending) || Boolean(this.waiting); }
+  // Whether the document is the one the studio has: asked by every word said of its saving --
+  // the tab's, the bar's -- several times at each key typed, the whole deck compared each time.
+  // Told once for each pair of them (a document is replaced as it changes, never changed).
+  inStep() {
+    const seen = this.stepSeen;
+    if (seen && seen.document === this.document && seen.synced === this.synced) return seen.same;
+    this.stepSeen = { document: this.document, synced: this.synced, same: same(this.document, this.synced) };
+    return this.stepSeen.same;
+  }
   // This page's own edits not yet in the file (others' are theirs to show).
   get unsaved() { return this.pendingLocal || this.savedVersion < this.ownVersion; }
   // Saving is those edits on their way to the file; with the studio out of reach, they
@@ -277,12 +301,18 @@ export class Session {
   // history (else the kind's `describe` says it); `hold` joins the run of edits however long
   // the pauses in it (words typed in one place, from opening to done, are one step).
   // `drawn`: its drawing is on its way already (an edit the studio drew as it made it: act).
-  change(mutate, { merge = null, quiet = false, label = null, hold = false, drawn = false } = {}) {
+  // `within`: the path of the one part of the document the change can reach (["slides", 3]: an
+  // object's words typed on its slide): that part alone is copied for it, not the whole deck at
+  // every key typed.
+  change(mutate, { merge = null, quiet = false, label = null, hold = false, drawn = false, within = null } = {}) {
     const before = this.document;
-    const next = structuredClone(before);
+    const next = (within && copiedAlong(before, within)) || structuredClone(before);
     const result = mutate(next);
-    const after = result === undefined ? next : result;
-    if (same(after, before)) return;
+    // (All it did not change is `before`'s own: the document's every later comparison with the
+    // ones before it -- for its saving's word, its step in the history, its drawing -- finds
+    // where they differ at once, not walking the whole deck at each key typed. See share.)
+    const after = share(result === undefined ? next : result, before);
+    if (after === before) return;
     const now = Date.now();
     const top = this.past[this.past.length - 1];
     const joins = merge && top && this.lastMerge?.key === merge && (hold || now - this.lastMerge.at < 1500);
@@ -463,8 +493,25 @@ export class Session {
   travelled(entry) {
     this.lastMerge = null;
     this.emit("change", { quiet: false, source: "history", entry: this.said(entry) });
+    // (Sent and drawn in one request, where it can be when it goes: the studio draws what it
+    // keeps.)
+    if (this.canSendDrawn()) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = setTimeout(() => {
+        this.pushTimer = null;
+        if (this.canSendDrawn()) this.push({ drawn: true });
+        else { this.push(); this.requestDraw(0); }
+      }, 0);
+      return;
+    }
     this.schedulePush(0);
     this.requestDraw(0);
+  }
+
+  // Whether this page's document can go to the studio now with its drawing asked for in the
+  // same request (push's `drawn`): nothing of its own on its way, and no drawing out.
+  canSendDrawn() {
+    return !this.sending && !this.resyncing && !this.unread && !this.unanswered.length && !this.drawBusy && !this.inStep();
   }
 
   // What a change in the history did, in words, and where: its label, else as the kind
@@ -510,24 +557,34 @@ export class Session {
     this.pushTimer = setTimeout(() => { this.pushTimer = null; this.push(); }, delay);
   }
 
-  async push() {
+  // (`drawn`: drawn by the studio as it keeps it, in the same request -- an undo, which took
+  // a request to send and another to draw.)
+  async push({ drawn = false } = {}) {
     // (Not while the file does not read: the studio has nothing to merge it with, and takes
     // it in when it reads -- see told.)
-    if (this.sending || this.resyncing || this.unread || same(this.document, this.synced)) return;
+    if (this.sending || this.resyncing || this.unread || this.inStep()) return;
     // A send no answer came for may have reached the studio all the same: its document is
     // taken in first, merged from what of this page's it has (resync), not sent on top again --
     // a letter typed as it went entered twice.
     if (this.unanswered.length) { this.resync(); return; }
     const sent = this.document, from = this.synced;
     this.sending = sent;
+    const draw = drawn ? this.drawAsked() : null;
     this.emit("status");
     let result = null;
     try {
       result = await this.workspace.api("/api/update", {
         file: this.file, kind: this.kind, base: this.version, instance: this.instance, document: sent, client: this.workspace.client, who: this.workspace.me,
+        ...(draw ? { draw } : {}),
       });
     } catch (error) {
       this.sending = null;
+      if (draw) {
+        // (Out of reach, the drawing stays as it was until the studio is back; else it is
+        // asked for by itself.)
+        this.drawBusy -= 1;
+        if (!unreachable(error)) this.requestDraw(0);
+      }
       this.failures += 1;
       if (unreachable(error)) this.unanswered = [...this.unanswered.slice(-19), sent];
       // Out of reach, the page says so once and sends again when it is back; refused,
@@ -545,13 +602,37 @@ export class Session {
     this.sending = null;
     this.failures = 0;
     this.failed = null;
+    if (draw) this.drawBusy -= 1;
     // The studio started again since this page last heard from it: its versions count
     // from the file anew, so the page takes in its document before sending.
     if (result.restarted) this.resync();
     // The file is another kind of document now: it opens again in that kind's editor.
     else if (result.reopen) this.workspace.reopen?.(this.file, result.kind);
     else this.accept(result.version, result.document, sent, result.who, from);
+    if (draw) {
+      // (Its drawing, of the document as the studio keeps it: one changed here since is drawn
+      // next.)
+      if (result.drawing) this.took(draw.version, result.drawing);
+      else this.drawWanted = true;
+      if (!result.drawing || !same(this.document, result.document)) this.drawWanted = true;
+      if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
+    }
     this.emit("status");
+  }
+
+  // A drawing asked for with a request that carries something else (push's `drawn`): counted
+  // as drawOnce counts its own, the timers that would ask for it stopped.
+  drawAsked() {
+    clearTimeout(this.drawTimer);
+    this.drawTimer = null;
+    this.drawWanted = false;
+    const version = this.drawVersion = ++drawings;
+    const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
+    const hints = { ...this.hints(), client: this.workspace.client };
+    this.drawYields = false;
+    this.drawBusy += 1;
+    this.emit("drawing", { version });
+    return { version, known, hints };
   }
 
   // The server's answer to what was sent: keep edits made since, on top of it. `who` made
@@ -559,6 +640,9 @@ export class Session {
   accept(version, document, sent, who = null, from = null) {
     if (version < this.version) return;
     const local = this.document;
+    // (The answer read anew shares with what was sent all that came back as it went -- the
+    // whole of it, mostly: it and the document here are then compared at once. See share.)
+    document = share(document, sent);
     // What was sent came back as it went though others changed it meanwhile: theirs were the
     // same edit (a space both typed at one place), taken as one.
     if (who && from && same(document, sent) && same(local, sent)) this.emit("absorbed", { base: from, incoming: document, before: local, who });
@@ -583,7 +667,7 @@ export class Session {
     this.kept(notes, who);
     const waiting = this.lastRemote;
     if (waiting && waiting.version > this.version) this.remote(waiting);
-    if (!same(this.document, this.synced)) this.schedulePush();
+    if (!this.inStep()) this.schedulePush();
   }
 
   // Another's change, from the workspace's events.
@@ -608,7 +692,7 @@ export class Session {
       this.requestDraw();
     } else if (merged) this.emit("absorbed", { base, incoming: event.document, before, who: event.who });
     this.kept(notes, event.who);
-    if (!same(this.document, this.synced)) this.schedulePush();
+    if (!this.inStep()) this.schedulePush();
     this.emit("status");
   }
 
@@ -716,7 +800,7 @@ export class Session {
     this.requestDraw(0);
     // (Its file gone meanwhile -- moved, renamed, deleted -- it is not written again until
     // its person saves it, told so: a second copy is not made behind their back.)
-    if (!same(this.document, this.synced) && !(restarted && !info.exists)) this.schedulePush(0);
+    if (!this.inStep() && !(restarted && !info.exists)) this.schedulePush(0);
     else if (restarted && !info.exists && info.problem) {
       // Renamed while the studio was away: the file it is now is a click away.
       const open = info.moved ? h("a", { href: "#", onclick: (event) => { event.preventDefault(); this.workspace.open?.(info.moved); } }, `Open ${info.moved}`) : null;
@@ -743,7 +827,7 @@ export class Session {
   // (`once`: the edit's id, the same however often it is sent -- one the studio holds already
   // is answered `repeat`, not made again: what the studio has is taken in.)
   async act(action, { apply = (document) => this.change(() => document, { quiet: true, drawn: true }), keep = true, once = null } = {}) {
-    if (this.sending || this.resyncing || this.unread || this.held || this.unanswered.length || !same(this.document, this.synced)) return null;
+    if (this.sending || this.resyncing || this.unread || this.held || this.unanswered.length || !this.inStep()) return null;
     const sent = this.document;
     if (!keep) {
       const answer = await this.workspace.api("/api/act", { file: this.file, kind: this.kind, base: this.version, instance: this.instance, action });
@@ -858,7 +942,7 @@ export class Session {
     this.emit("drawing", { version });
     // (This page's document the studio's, at the version it has: that version is sent, not the
     // document -- unless the studio could not find it last time.)
-    const kept = !this.sending && !this.resyncing && !this.unanswered.length && !this.sendWhole && same(this.document, this.synced);
+    const kept = !this.sending && !this.resyncing && !this.unanswered.length && !this.sendWhole && this.inStep();
     const asked = kept ? { base: this.version, instance: this.instance } : { document: this.document };
     let result;
     try {

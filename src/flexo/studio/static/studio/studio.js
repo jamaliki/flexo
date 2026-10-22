@@ -46,7 +46,7 @@ export function keepFocus(container, render, { undone = false } = {}) {
   const selection = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
   const caret = key && active.isContentEditable ? caretIn(active) : null;
   const was = selection && typeof active.value === "string" ? active.value : caret ? textIn(active) : null;
-  const scroll = container.scrollTop;
+  const scroll = scrolledOf(container);
   // (A field drawn again for an undo shows what is now, not what was being typed: ui.number.)
   if (undone && key) active.undone = true;
   render();
@@ -69,6 +69,18 @@ export function keepFocus(container, render, { undone = false } = {}) {
     const moved = was !== null && now !== null && now !== was ? placed(now, selection) : selection;
     try { again.setSelectionRange(...moved); } catch { /* a field without a caret */ }
   }
+}
+
+// How far a form is scrolled, as it last scrolled: its scrollTop read as it is drawn again lays
+// the whole window out there and then -- a slide gone to, its stage and its list just changed
+// -- to be laid out again as the frame is drawn. (Read once, then kept as it scrolls.)
+const scrolled = new WeakMap();
+function scrolledOf(container) {
+  if (!scrolled.has(container)) {
+    scrolled.set(container, container.scrollTop);
+    container.addEventListener("scroll", () => scrolled.set(container, container.scrollTop), { passive: true });
+  }
+  return scrolled.get(container);
 }
 
 // How many letters `was` and `now` have alike at their start, and then at their end.

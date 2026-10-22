@@ -36,7 +36,7 @@ def linked(workspace: Any):
             name = workspace.relative(artwork.path)
         except PermissionError:
             return artwork.data_uri
-        query = urlencode({"path": name, "v": artwork.stamp, "token": workspace.token})
+        query = urlencode({"path": name, "v": _version(artwork), "token": workspace.token})
         return f"/api/picture?{query}"
 
     token = picture_link.set(link)
@@ -44,6 +44,19 @@ def linked(workspace: Any):
         yield
     finally:
         picture_link.reset(token)
+
+
+def _version(artwork: Any) -> str | int:
+    """A photograph's version, as its address says it for the page to load it again once it
+    changes: what is in it, hashed (once while the disk says it is the same file:
+    ``flexo.kept_versions.content``) -- not when it was saved, so a figure's layout kept with
+    its address in it, found again for a deck unpacked afresh elsewhere, names it as a drawing
+    made there would."""
+
+    from flexo.kept_versions import content
+
+    held = content(str(artwork.path))
+    return held[:16] if held else artwork.stamp
 
 
 def shown(path: Path, still: int = 0) -> tuple[bytes, str]:

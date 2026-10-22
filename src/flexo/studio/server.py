@@ -114,6 +114,18 @@ class Handler(BaseHTTPRequestHandler):
     def _fail(self, status: int, message: str) -> None:
         self._json({"error": message}, status)
 
+    def _drawing_json(self, data: object) -> None:
+        """An answer carrying a drawing: framed for a page that reads it so -- its SVG sent as
+        it is, not escaped into JSON and read back out of it (``flexo.studio.framing``)."""
+
+        from flexo.studio import framing
+
+        body = framing.framed(data) if framing.ACCEPT in self.headers.get("Accept", "") else None
+        if body is None:
+            self._json(data)
+        else:
+            self._reply(200, body, framing.ACCEPT)
+
     def _host_ok(self) -> bool:
         host = self.headers.get("Host", "")
         name = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
@@ -344,7 +356,12 @@ class Handler(BaseHTTPRequestHandler):
             version, document = doc.update(data["document"], int(data["base"]), who, client)
             # Whose changes it was merged with, for the page to name them.
             others = doc.author_since(int(data["base"]), who)
-            self._json({"version": version, "document": document, "who": others})
+            answer = {"version": version, "document": document, "who": others}
+            asked = data.get("draw")
+            if isinstance(asked, dict):
+                # Drawn as it is kept, asked so (an undo): one request, where it took two.
+                answer["drawing"] = acting.drawn(workspace, doc, document, asked)
+            self._drawing_json(answer)
         elif route == "/api/draw":
             document = data.get("document")
             if document is None and "base" in data:
@@ -357,7 +374,7 @@ class Handler(BaseHTTPRequestHandler):
                     version = int(data.get("version", 0))
                     self._json({"version": version, "stale": True, "resend": True})
                     return
-            self._json(
+            self._drawing_json(
                 workspace.draw(
                     name,
                     document,
@@ -470,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
             if "base" in data and "document" not in data:
                 # Kept at once, and drawn, as asked: answered with what changed alone.
                 answer = acting.answered(workspace, doc, data, sent, answer, who)
-            self._json(answer)
+            self._drawing_json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming
 
@@ -1035,6 +1052,10 @@ def serve(
     """Serve the studio for a folder, or a file in it (made when first changed), until stopped."""
 
     server, workspace = start(target, port=port, kind=kind, browser=browser)
+    # (Its documents written by a process of their own, not between its drawings.)
+    from flexo.studio import writer
+
+    writer.start()
     print(f"flexo studio: {workspace.address}")  # type: ignore[attr-defined]
     keeper = getattr(workspace, "bundle", None)
     if keeper is not None:
@@ -1053,6 +1074,7 @@ def serve(
         print()
     finally:
         workspace.close()
+        writer.stop()
         sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
 

@@ -512,12 +512,15 @@ def _tones(spec) -> dict[str, Any]:
     from flexo.themes import TONE_COUNT, figure_palette, figure_style, with_tone_roles
 
     palette = with_tone_roles(figure_palette(spec))
+    # (Its words' and its marks' colours too: a shape given a tone is painted with it on the
+    # page at once, as the figure will draw it, not when the figure comes back drawn so.)
     colours = [
-        {"fill": palette.get(f"tone-{index}-fill"), "stroke": palette.get(f"tone-{index}-stroke")}
+        {part: palette.get(f"tone-{index}-{part}") for part in ("fill", "stroke", "ink", "motif")}
         for index in range(1, TONE_COUNT + 1)
     ]
     # The theme's grey, as a shape toned ``neutral`` is painted (its block paint).
-    neutral = {"fill": palette.get("block-fill"), "stroke": palette.get("block-stroke")}
+    neutral = {part: palette.get(f"block-{part}") for part in ("fill", "stroke", "motif")}
+    neutral["ink"] = palette.get("ink")
     return {"colours": colours, "used": _tone_map(spec, figure_style(spec)), "neutral": neutral}
 
 

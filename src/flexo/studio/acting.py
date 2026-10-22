@@ -246,16 +246,27 @@ def answered(
     answer["delta"] = changes(sent, final)
     asked = data.get("draw")
     if isinstance(asked, dict):
-        answer["drawing"] = workspace.draw(
-            doc.name,
-            final,
-            int(asked.get("version", 0)),
-            asked.get("known") or {},
-            asked.get("hints") or {},
-        )
-        if "version" in answer:
-            # (Written to its file once its drawing is answered, not while it is drawn: the
-            # two would only wait on each other.)
-            with doc.lock:
-                doc.changed_at = max(doc.changed_at, time.monotonic())
+        answer["drawing"] = drawn(workspace, doc, final, asked, kept="version" in answer)
     return answer
+
+
+def drawn(
+    workspace: Any, doc: Any, document: Any, asked: dict[str, Any], *, kept: bool = True
+) -> dict[str, Any]:
+    """``document`` -- the page's, as the studio now keeps it -- drawn as the page asks
+    (``asked``: its drawing's ``version``, the pages it ``known``s, its ``hints``) in the
+    request that kept it: an edit made (``answered``), an undo sent (``/api/update``)."""
+
+    drawing = workspace.draw(
+        doc.name,
+        document,
+        int(asked.get("version", 0)),
+        asked.get("known") or {},
+        asked.get("hints") or {},
+    )
+    if kept:
+        # (Written to its file once its drawing is answered, not while it is drawn: the
+        # two would only wait on each other.)
+        with doc.lock:
+            doc.changed_at = max(doc.changed_at, time.monotonic())
+    return drawing
