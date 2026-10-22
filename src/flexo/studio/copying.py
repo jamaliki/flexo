@@ -3,9 +3,10 @@
 The page has its document drawn (each page's SVG, as the studio drew it for it) and knows
 what is chosen in it. Copying, it sends that drawing and the ids of what is copied; here
 they are cut out of it (``flexo.copied``), the photographs the page was shown by address
-carried at their full size. The Mac app puts the drawing on the Mac's clipboard itself,
-each form when an app asks for it; a browser is answered (``/api/copy``) with what a web
-page may put there: a picture, and the drawing as SVG.
+carried at their full size, and the pictures taken out of its drawing for the page
+(``flexo.studio.inline_pictures``) carried as they were. The Mac app puts the drawing on the
+Mac's clipboard itself, each form when an app asks for it; a browser is answered
+(``/api/copy``) with what a web page may put there: a picture, and the drawing as SVG.
 """
 
 from __future__ import annotations
@@ -27,7 +28,13 @@ def copied(workspace: Any, svg: str, keep: list[str] | None = None, *, title: st
         found = urlparse(href)
         if found.path != PICTURE_ROUTE:
             return None
-        name = (parse_qs(found.query).get("path") or [""])[0]
+        asked = parse_qs(found.query)
+        if asked.get("made"):
+            # Carried in the drawing, and taken out of it for the page: the very bytes again.
+            from flexo.studio.inline_pictures import data_uri
+
+            return data_uri(asked["made"][0])
+        name = (asked.get("path") or [""])[0]
         try:
             from flexo.artwork import load_artwork
 

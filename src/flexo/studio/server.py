@@ -210,6 +210,34 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, explain(error))
 
+    def _made_picture(self, name: str) -> None:
+        """A picture a drawing carried in itself, taken out of it as the studio sent it to the
+        page (``flexo.studio.inline_pictures``): named by what it is, so kept for good -- and,
+        asked after by its ``ETag``, answered not changed."""
+
+        from flexo.studio import inline_pictures
+
+        kept = inline_pictures.found(name)
+        if kept is None:
+            raise FileNotFoundError(f"no picture {name}")
+        data, kind = kept
+        tag = f'"{name}"'
+        asked = self.headers.get("If-None-Match") == tag
+        self.send_response(HTTPStatus.NOT_MODIFIED if asked else HTTPStatus.OK)
+        self.send_header("ETag", tag)
+        self.send_header("Cache-Control", static_files.KEPT)
+        if not asked:
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            # (An SVG opened by its address is a picture still: nothing in it runs.)
+            self.send_header("Content-Security-Policy", "sandbox")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if not asked:
+            self.wfile.write(data)
+
     def _font(self, name: str) -> None:
         """The bundled fonts, which drawings in the studio name rather than embed."""
 
@@ -258,6 +286,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._drawing(query))
         elif route == "/api/drawn":
             self._drawn(query)
+        elif route == "/api/picture" and query.get("made"):
+            # A picture a drawing carried, taken out of it as it was sent to the page.
+            self._made_picture(_one(query, "made"))
         elif route == "/api/picture":
             # A photograph a drawing names: its address carries its version, so it keeps.
             # (A GIF plays, or is shown still at a frame of it: ``still``, from 1.)

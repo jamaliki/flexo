@@ -1482,7 +1482,10 @@ class Workspace:
                 continue
             found = was.get(page.svg)
             if found is None:
-                svg = _with_token(page.svg, self.token)
+                from flexo.studio.inline_pictures import linked
+
+                # (The pictures it carries in itself sent apart: flexo.studio.inline_pictures.)
+                svg = linked(_with_token(page.svg, self.token), self.token)
                 found = (svg, hashlib.sha1(svg.encode("utf-8")).hexdigest()[:16])
             digests[page.svg] = found
             svg, digest = found
