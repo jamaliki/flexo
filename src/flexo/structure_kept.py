@@ -211,27 +211,74 @@ _CODE: list[str] = []
 
 def _code() -> str:
     """flexo's own source and mol-sketch's (its engine and the Python that draws with it),
-    hashed, with the versions of what draws for it: a change to any draws it afresh."""
+    hashed, with the versions of what draws for it: a change to any draws it afresh.
+
+    An installed package (the app's) is told by the hashes its installation recorded of each
+    of its files (``_recorded``): one file read, not every one -- in a busy studio each read is
+    a wait, and reading them all took over a second. A package worked on in place is read."""
 
     if not _CODE:
         import importlib.metadata
         import importlib.util
 
-        import flexo
-
         digest = hashlib.sha256()
-        for path in sorted(Path(flexo.__file__).parent.rglob("*.py")):
-            digest.update(path.read_bytes())
-        spec = importlib.util.find_spec("molsketch")
-        if spec is not None and spec.origin:
+        for package, nested, suffixes in (
+            ("flexo", True, (".py",)),
+            ("molsketch", False, (".py", ".js")),
+        ):
+            spec = importlib.util.find_spec(package)
+            if spec is None or not spec.origin:
+                continue
             here = Path(spec.origin).parent
-            for path in sorted([*here.glob("*.py"), *here.glob("*.js")]):
-                digest.update(path.read_bytes())
+            digest.update(
+                _recorded(package, here, nested, suffixes) or _read_through(here, nested, suffixes)
+            )
         for package in ("skia-python", "mini-racer"):
             with contextlib.suppress(importlib.metadata.PackageNotFoundError):
                 digest.update(importlib.metadata.version(package).encode())
         _CODE.append(digest.hexdigest()[:16])
     return _CODE[0]
+
+
+def _recorded(package: str, here: Path, nested: bool, suffixes: tuple[str, ...]) -> bytes | None:
+    """What the installation of ``package`` recorded of its files with ``suffixes`` (in its
+    folder ``here``, and those within it if ``nested``): each one's name and hash -- or None,
+    where it recorded no hash of one, or none of them (a package installed to be worked on in
+    place), or its record is not of the copy found at ``here``."""
+
+    import importlib.metadata
+
+    try:
+        installed = importlib.metadata.distribution(package)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    found = []
+    for item in installed.files or ():
+        parts = item.parts
+        if not parts or parts[0] != package or item.suffix not in suffixes:
+            continue
+        if not nested and len(parts) != 2:
+            continue
+        if item.hash is None:
+            return None
+        found.append(f"{item.as_posix()}={item.hash.mode}:{item.hash.value}")
+    if not found:
+        return None
+    with contextlib.suppress(OSError):
+        if os.path.samefile(installed.locate_file(f"{package}/__init__.py"), here / "__init__.py"):
+            return "\n".join(sorted(found)).encode("utf-8")
+    return None
+
+
+def _read_through(here: Path, nested: bool, suffixes: tuple[str, ...]) -> bytes:
+    """Every file of ``here`` with ``suffixes`` (and those within it if ``nested``), read and
+    hashed in turn."""
+
+    digest = hashlib.sha256()
+    names = here.rglob("*") if nested else here.glob("*")
+    for path in sorted(name for name in names if name.suffix in suffixes):
+        digest.update(path.read_bytes())
+    return digest.digest()
 
 
 _USED: set[Path] = set()

@@ -83,3 +83,23 @@ def test_nothing_is_kept_when_keeping_is_off(tmp_path: Path, monkeypatch) -> Non
     drawn = _counting(monkeypatch)
     _figure(DATA / "1a7g.cif")
     assert drawn
+
+
+def test_an_installed_package_is_told_by_the_hashes_its_installation_recorded() -> None:
+    """mol-sketch installed (as in the app) is told by what its installation recorded of its
+    files, not by reading every one of them; a copy that is not the one recorded is read."""
+
+    pytest.importorskip("molsketch")
+    import importlib.util
+
+    from flexo import structure_kept
+
+    here = Path(importlib.util.find_spec("molsketch").origin).parent
+    recorded = structure_kept._recorded("molsketch", here, False, (".py", ".js"))
+    if recorded is None:
+        pytest.skip("mol-sketch is installed to be worked on in place")
+    names = {line.split("=")[0] for line in recorded.decode().splitlines()}
+    assert names == {
+        f"molsketch/{path.name}" for path in here.iterdir() if path.suffix in (".py", ".js")
+    }
+    assert structure_kept._recorded("molsketch", here.parent / "elsewhere", False, (".py",)) is None
