@@ -365,11 +365,23 @@ const madeOnce = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toStri
 // A path's length, and points along it in its own units -- `step` apart from its start, or
 // `steps` even parts of it: found once for each drawing of it (its "d"), however often a + is
 // placed or a part dragged beside it. (getPointAtLength walks the path at every call.)
+// (And by its "d", whatever element draws it: a slide drawn again puts in its lines anew where
+// they changed and where they did not, and a line as it was is measured as it was.)
 const measured = new WeakMap();
-function measuredPath(path) {
+const measuredAs = new Map();
+export function measuredPath(path) {
   const d = path.getAttribute("d");
   let found = measured.get(path);
-  if (!found || found.d !== d) measured.set(path, found = { d, length: path.getTotalLength?.() || 0, points: new Map() });
+  if (found && found.d === d) return found;
+  found = d === null ? null : measuredAs.get(d);
+  if (!found) {
+    found = { d, length: path.getTotalLength?.() || 0, points: new Map() };
+    if (d !== null) {
+      if (measuredAs.size >= 200) measuredAs.delete(measuredAs.keys().next().value);
+      measuredAs.set(d, found);
+    }
+  }
+  measured.set(path, found);
   return found;
 }
 const pathLength = (path) => measuredPath(path).length;
@@ -600,6 +612,9 @@ export function lookFrom(href) {
 // Asked for as soon as an editor that may show a figure is loaded (a deck's, a figure's),
 // not when a figure is first chosen: chosen with the studio away, its parts are styled.
 lookFrom("/static/kinds/figure/parts.css");
+// So is the studio's monospaced face, which a part's panel writes its name in the file in: a
+// moment after the page is up, not as the first figure is chosen, which would wait for it.
+if (typeof document !== "undefined" && document.fonts?.load) setTimeout(() => document.fonts.load('12px "Paper Mono"').catch(() => {}), 1000);
 
 export function figureParts(host) {
   lookFrom("/static/kinds/figure/parts.css");
@@ -1024,7 +1039,10 @@ export function figureParts(host) {
         if (renamed && typedOver?.ids.includes(job.follow)) typedOver.ids.push(renamed);
         // Drawn under its new name, it lands from where it was, not as a part just made.
         if (renamed) state.renamed.set(renamed, job.follow);
-        if (result.model) setModel(result.model, { afresh: job.fresh });
+        // (A read that brings the figure as it is here already -- read ahead, say, as a figure on a
+        // slide is chosen -- changes nothing: its marks and panel are not drawn again for it.)
+        const asHere = job.action.do === "read" && state.model && result.model && JSON.stringify(result.model) === JSON.stringify(state.model);
+        if (result.model && !asHere) setModel(result.model, { afresh: job.fresh });
         // (`choose` may ask, as the edit comes back: a part added is not chosen should another
         // have been chosen meanwhile.)
         const choose = typeof job.choose === "function" ? job.choose() : job.choose;
@@ -2336,13 +2354,29 @@ export function figureParts(host) {
   // (`cornered`: the part has handles at its corners, which the + keeps well clear of.)
   // (Placed again as it was while the drawing, the figure, the part's box and the page are as
   // they were: a click, the drawing come in, the panel drawn -- each places the + anew.)
-  let plusKept = null;
+  // (Kept for each part: a part chosen again, the drawing and the page as they were, has its +
+  // where it had it -- what it lies clear of is the drawing's, not what else is chosen.)
+  const plusKept = new Map();
+  // The figure's lines' paths (`twins`: with the wide ones that are clicked), found once for
+  // each drawing that comes in: not looked for through all of it -- a slide's thousands of
+  // shapes -- each time a + is placed.
+  let linesKept = null;
+  function linesDrawn(twins) {
+    const root = host.element(model()?.root);
+    if (!linesKept || linesKept.root !== root || linesKept.drawings !== drawings) {
+      const all = [...(root?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || [])];
+      linesKept = { root, drawings, all, own: all.filter((path) => !path.classList.contains("hit-line")) };
+    }
+    return twins ? linesKept.all : linesKept.own;
+  }
   function plusPlace(id, box, towards = null, cornered = false) {
     const seen = host.overlay.getBoundingClientRect();
     const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
-    if (plusKept && plusKept.key.length === key.length && plusKept.key.every((value, index) => value === key[index])) return plusKept.place;
+    const kept = plusKept.get(id);
+    if (kept && kept.key.length === key.length && kept.key.every((value, index) => value === key[index])) return kept.place;
     const place = plusFound(id, box, towards, cornered);
-    plusKept = { key, place };
+    if (plusKept.size >= 64) plusKept.clear();
+    plusKept.set(id, { key, place });
     return place;
   }
   function plusFound(id, box, towards, cornered) {
@@ -2365,7 +2399,7 @@ export function figureParts(host) {
     // The lines, as points along them in the window's pixels: the + lies on none (a line's
     // drawing may let the pointer through it, so it is not found by pointing).
     const points = [];
-    for (const path of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || []) {
+    for (const path of linesDrawn(true)) {
       const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const step = Math.max(length / 200, 3 / (matrix.a || 1));
@@ -2405,7 +2439,7 @@ export function figureParts(host) {
     const meets = (spot, rect, room = radius) => rect && rect.width && spot.x + room > rect.left && spot.x - room < rect.right && spot.y + room > rect.top && spot.y - room < rect.bottom;
     // Every line's points, in the window's pixels: its own, and the others'.
     const points = [];
-    for (const each of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path:not(.hit-line), [data-flexo-entity="net"] path:not(.hit-line)') || []) {
+    for (const each of linesDrawn(false)) {
       const at = each.getScreenCTM?.(), length = each.getTotalLength ? pathLength(each) : 0;
       if (!at || !length) continue;
       const step = Math.max(length / 200, 2 / (at.a || 1));
@@ -4514,8 +4548,15 @@ export function figureParts(host) {
     toast(`${inQuotes(nameOf(id))} ${said}.`, { icon: "info", seconds: 2 });
     return false;
   }
+  // (Asked twice as a part's panel is drawn -- may it go back, may it go on? -- the figure as it
+  // is seen is measured once in that turn, not once for each.)
+  let seenThisTurn = null;
+  function seenNow() {
+    if (!seenThisTurn) { seenThisTurn = asSeen(); queueMicrotask(() => { seenThisTurn = null; }); }
+    return seenThisTurn;
+  }
   function nudgePlace(id, key) {
-    const { boxes, drawn, folds } = asSeen();
+    const { boxes, drawn, folds } = seenNow();
     const holder = drawn.groups.find((group) => (group.children || []).includes(id));
     if (!holder || !boxes.get(id)) return null;
     const way = holder.layout?.kind;
