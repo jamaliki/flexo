@@ -97,6 +97,27 @@ def test_a_molecule_is_measured_once_however_often_its_figure_is_laid_out() -> N
     assert first.layout == again.layout
 
 
+def test_a_figure_is_measured_by_its_molecules_extents_as_by_their_shapes() -> None:
+    """The ink of a figure compiled to be measured, each molecule nested in it read as the
+    box of what it draws, is the ink read shape by shape: where the figure's words or its
+    molecules reach furthest."""
+
+    pytest.importorskip("molsketch")
+    from flexo.drawing import ink_bounds, read_drawing
+    from flexo.structure_fit import figure_ink, noting
+
+    for words in ("A", "A substrate named at such length that its words reach past the rest"):
+        with noting() as molecules:
+            compiled = compile_figure(_figure(words, framed=True).spec)
+        assert set(molecules) == {"row.model.molecule", "row.part.molecule"}
+        text = compiled.document.text
+        assert figure_ink(text, molecules) == pytest.approx(
+            ink_bounds(read_drawing(text)), abs=1e-9
+        )
+    # (Not compiled to be measured, nothing is noted: a figure's own drawing is as ever.)
+    assert figure_ink(text, {}) == ink_bounds(read_drawing(text))
+
+
 def test_a_figure_opened_again_neither_draws_nor_measures_its_molecules(
     tmp_path: Path, monkeypatch
 ) -> None:

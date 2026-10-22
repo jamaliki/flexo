@@ -180,7 +180,7 @@ def _image(
 
     import base64
 
-    from flexo.structure_fit import canvas_box, cropped_png, cropped_view, drawn_in
+    from flexo.structure_fit import canvas_box, cropped_png, cropped_view, drawn_in, noted
     from flexo.structures import structure_png, structure_svg
 
     # Laid out round its molecule (flexo.structure_fit): drawn in the canvas it was, the part
@@ -194,6 +194,8 @@ def _image(
     )
     markup = structure_svg(spec, style, palette, drawn_w, drawn_h)
     if markup is not None:
+        # (A figure compiled to be measured measures it by its extent: flexo.structure_fit.)
+        noted(identifier, spec, style, palette, drawn_w / drawn_h)
         holder = element(
             parent, "g", id=identifier, data_flexo_drawn="mol-sketch", data_flexo_canvas=canvas
         )

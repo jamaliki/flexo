@@ -32,10 +32,13 @@ changed, and opened again another day, never reads a molecule's drawing again to
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import math
+import re
 import struct
 import zlib
+from contextvars import ContextVar
 from dataclasses import replace
 
 from flexo.ir.semantic import FigureSpec, NodeSpec, Settings
@@ -271,6 +274,86 @@ def _drawn_extent(ask, aspect: float):
         _EXTENTS.clear()
     _EXTENTS[key] = found
     return found
+
+
+# -- a figure's ink, its molecules as their extents --
+
+
+_NOTED: ContextVar[dict | None] = ContextVar("flexo_noted_molecules", default=None)
+"""The molecules drawn as shapes while a figure is compiled to be measured (``noting``): the
+extent of each, by the id of the group it is drawn in."""
+
+_AS_DRAWN = object()
+"""Noted for a molecule to be read as it is drawn, shape by shape: one whose extent can't be
+had, or a group of an id noted twice (not one molecule)."""
+
+
+@contextlib.contextmanager
+def noting():
+    """While a figure is compiled, each molecule nested in it as shapes noted with its
+    extent (``noted``): what ``figure_ink`` measures it by."""
+
+    held: dict = {}
+    token = _NOTED.set(held)
+    try:
+        yield held
+    finally:
+        _NOTED.reset(token)
+
+
+def noted(identifier: str, node: NodeSpec, style: LayoutStyle, palette: Palette,
+          aspect: float) -> None:
+    """The molecule of ``node`` nested as shapes in the group ``identifier``, drawn at
+    ``aspect`` with ``palette``, noted with its extent -- if a figure is being compiled to be
+    measured (``noting``)."""
+
+    held = _NOTED.get()
+    if held is None:
+        return
+    from flexo.diagnostics import FlexoError
+    from flexo.structures import _ask
+
+    try:
+        found = drawn_extent(_ask(node, style, palette), aspect)
+    except FlexoError:
+        found = _AS_DRAWN
+    held[identifier] = _AS_DRAWN if identifier in held else found
+
+
+def figure_ink(text: str, molecules: dict) -> tuple[float, float, float, float]:
+    """What a compiled figure paints (``flexo.drawing.ink_bounds``), each molecule nested in it
+    as shapes (``molecules``, as ``noting`` noted them) read as the box of what it draws -- a
+    shape over its extent, in its canvas, where its thousands of shapes were -- not shape by
+    shape. It is placed, cut and clipped as they are, so the figure's ink is theirs."""
+
+    from flexo.drawing import ink_bounds, read_drawing
+
+    if not molecules or 'data-flexo-drawn="mol-sketch"' not in text:
+        return ink_bounds(read_drawing(text))
+    import xml.etree.ElementTree as ET
+
+    from flexo.svg import SVG_NS, local_name
+
+    root = ET.fromstring(re.sub(r"<!DOCTYPE[^>]*>", "", text, count=1))
+    stood_in = False
+    for holder in root.iter():
+        if holder.get("data-flexo-drawn") != "mol-sketch" or holder.get("id") not in molecules:
+            continue
+        found = molecules[holder.get("id")]
+        nested = [child for child in holder if local_name(child.tag) == "svg"]
+        if found is _AS_DRAWN or len(nested) != 1:
+            continue
+        for child in list(nested[0]):
+            nested[0].remove(child)
+        if found is not None:
+            (left, top, right, bottom), _ = found
+            ET.SubElement(nested[0], f"{{{SVG_NS}}}path", fill="#000000", d=(
+                f"M{left!r} {top!r}L{right!r} {top!r}L{right!r} {bottom!r}L{left!r} {bottom!r}Z"
+            ))
+        stood_in = True
+    if not stood_in:
+        return ink_bounds(read_drawing(text))
+    return ink_bounds(read_drawing(ET.tostring(root, encoding="unicode")))
 
 
 @functools.lru_cache(maxsize=32)
