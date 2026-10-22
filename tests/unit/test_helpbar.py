@@ -177,6 +177,8 @@ def test_a_drag_says_what_its_modifiers_do_and_that_esc_takes_it_back() -> None:
         side: of({ drag: "side" }),
         turn: of({ drag: "turn" }),
         end: of({ drag: "end" }),
+        // An object taken out of line by the ⌘ still held: placed freely, caught as it goes.
+        out: of({ drag: "out" }),
         // Words typed while a drag goes on (the find bar's): the drag's, first.
         over: of({ drag: "band", typing: "words", find: "find" }),
       };
@@ -188,6 +190,7 @@ def test_a_drag_says_what_its_modifiers_do_and_that_esc_takes_it_back() -> None:
         "side": ["⌥ From Centre", "⌘ Without Snapping", "Esc Cancel"],
         "turn": ["⇧ 15° Steps", "Esc Cancel"],
         "end": ["⇧ 45° Steps", "⌘ Without Snapping", "Esc Cancel"],
+        "out": ["⇧ One Way", "⌥ Copy", "⌘ Place Freely", "Esc Cancel"],
         "over": ["Esc Cancel"],
     }
 
@@ -419,6 +422,8 @@ CONTEXTS = [
                 "pen",
                 "crop",
                 "part",
+                "carry",
+                "out",
                 "plain",
             )
         ),
