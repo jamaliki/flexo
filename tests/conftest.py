@@ -1,4 +1,5 @@
-"""Tests draw structures afresh: the molecules flexo keeps on disk go to a scratch folder."""
+"""Tests draw structures afresh: the molecules flexo keeps on disk go to a scratch folder, and
+so do the pictures it keeps drawn."""
 
 from __future__ import annotations
 
@@ -10,3 +11,4 @@ def _fresh_structure_cache(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FLEXO_STRUCTURE_CACHE", str(tmp_path_factory.mktemp("structures")))
+    monkeypatch.setenv("FLEXO_PICTURE_CACHE", str(tmp_path_factory.mktemp("pictures")))

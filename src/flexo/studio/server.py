@@ -55,6 +55,10 @@ FILE_TYPES = {
 structure only when it is a mol-sketch scene: ``_files``.)"""
 
 
+_EXPORTING = threading.Lock()
+"""One export at a time, where the kind takes the folder's turn to draw only as it draws."""
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -557,8 +561,14 @@ class Handler(BaseHTTPRequestHandler):
         if into is not None and "into" in takes:
             extra["into"] = into
         given = (document, doc.path.parent, doc.path.stem, *([] if part is None else [part]))
+        # A kind that takes the folder's turn to draw itself takes it only while it draws, not
+        # while it writes its files: the studio draws its person's edits meanwhile. (Exports
+        # still go one at a time: what each leaves out is told to its own page.)
+        turn = workspace.drawing
+        if "drawing" in takes:
+            extra["drawing"], turn = workspace.drawing, _EXPORTING
         try:
-            with workspace.drawing, workspace.running():
+            with turn, workspace.running():
                 # What the export left out and says so (a figure that can't be drawn, left an
                 # empty box): told to the page with what was made.
                 doc.kind.export_notes = []
