@@ -8,6 +8,7 @@ export { avatar, colourOf, ago, copyable, nameOf, wedgeHead } from "./shell.js";
 export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes.js";
 import { start } from "./shell.js";
 import { stillGifs } from "./drawings.js";
+import { overflow } from "./keeping.js";
 export { ownResources, stillGifs, stillHref } from "./drawings.js";
 export { pastedDrawing, pastedGif, pastedOwn, pastedOwnWords, pastedOwnWeb, heldData, svgOfWords } from "./clipboard.js";
 export { copyOut, copiedHere } from "./copyout.js";
@@ -155,6 +156,8 @@ const PICTURE_STYLE = ":host{display:block;position:relative}svg{display:block;t
 export function picture(svg, hash, { natural = false } = {}) {
   const key = hash && `${natural ? "n" : "f"}:${hash}`;
   const known = key && pictures.get(key);
+  // (Used again: the newest, kept the longest.)
+  if (known) { pictures.delete(key); pictures.set(key, known); }
   if (known && !known.isConnected) return known;
   // One shown already (a slide's thumbnail, asked for again by the theme editor's preview of
   // the deck): a copy of it, as a node is in one place at a time -- moved, the thumbnail it
@@ -189,12 +192,11 @@ export function picture(svg, hash, { natural = false } = {}) {
   const loading = drawing && fontsLoading(drawing);
   if (loading) { host.style.visibility = "hidden"; loading.then(() => { host.style.visibility = ""; }); }
   if (key) {
+    host.weight = svg.length;
     pictures.set(key, host);
-    // Keep the pictures on screen; let the oldest of the rest go.
-    for (const [old, kept] of pictures) {
-      if (pictures.size <= 240) break;
-      if (!kept.isConnected) pictures.delete(old);
-    }
+    // Keep the pictures on screen; let the oldest of the rest go, past a number of them or a
+    // size in all (keeping.js).
+    for (const old of overflow([...pictures], { inUse: (kept) => kept.isConnected, size: (kept) => kept.weight })) pictures.delete(old);
   }
   return host;
 }
