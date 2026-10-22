@@ -716,8 +716,11 @@ export class Session {
   // starts from the document as it is then. The page follows typing as fast as
   // the server draws. A drawing whose hints say it `yields` (a deck settling its
   // figures, which can take a while) is not waited for: the next is asked for at
-  // once, and the studio gives the first up for it.
-  requestDraw(delay = 40) {
+  // once, and the studio gives the first up for it. (A change is asked to be drawn 10 ms after
+  // it is made: edits made together -- a paste, objects moved at once -- are drawn as one, and
+  // a key typed waits no longer than it must; keys typed while a drawing is out are drawn
+  // together once it is back.)
+  requestDraw(delay = 10) {
     this.drawWanted = true;
     if (this.drawBusy && !this.drawYields) return;
     if (this.drawTimer !== null) {
