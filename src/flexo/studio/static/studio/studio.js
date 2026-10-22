@@ -50,7 +50,9 @@ export function keepFocus(container, render, { undone = false } = {}) {
   // (A field drawn again for an undo shows what is now, not what was being typed: ui.number.)
   if (undone && key) active.undone = true;
   render();
-  container.scrollTop = scroll;
+  // (Its scroll kept: put back only where there is one -- the page laid out at once to put it,
+  // a form drawn again at the top of its panel is where it was.)
+  if (scroll) container.scrollTop = scroll;
   if (!key) return;
   const again = container.querySelector(`[data-key="${CSS.escape(key)}"]`);
   if (!again) return;
