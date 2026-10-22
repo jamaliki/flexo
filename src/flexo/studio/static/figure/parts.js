@@ -365,11 +365,23 @@ const madeOnce = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toStri
 // A path's length, and points along it in its own units -- `step` apart from its start, or
 // `steps` even parts of it: found once for each drawing of it (its "d"), however often a + is
 // placed or a part dragged beside it. (getPointAtLength walks the path at every call.)
+// (And by its "d", whatever element draws it: a slide drawn again puts in its lines anew where
+// they changed and where they did not, and a line as it was is measured as it was.)
 const measured = new WeakMap();
-function measuredPath(path) {
+const measuredAs = new Map();
+export function measuredPath(path) {
   const d = path.getAttribute("d");
   let found = measured.get(path);
-  if (!found || found.d !== d) measured.set(path, found = { d, length: path.getTotalLength?.() || 0, points: new Map() });
+  if (found && found.d === d) return found;
+  found = d === null ? null : measuredAs.get(d);
+  if (!found) {
+    found = { d, length: path.getTotalLength?.() || 0, points: new Map() };
+    if (d !== null) {
+      if (measuredAs.size >= 200) measuredAs.delete(measuredAs.keys().next().value);
+      measuredAs.set(d, found);
+    }
+  }
+  measured.set(path, found);
   return found;
 }
 const pathLength = (path) => measuredPath(path).length;
@@ -597,9 +609,40 @@ export function lookFrom(href) {
   document.head.append(link);
 }
 
+// A shape painted from the theme's roles, given the theme's colour `value` ("1"... or
+// "neutral"): for each of what it is painted with now (`painted`: { role, colour }, the role
+// its drawing names and the colour it is drawn in), the role and colour it is painted with then,
+// as the figure paints a shape of that colour (flexo.render.toned: the block's paint and its
+// words' ink are the tone's) -- null where they stay as they are -- or null for all, should any
+// be what the page cannot tell (a role painted otherwise than the theme `tones` says: a figure
+// in a theme of its own; a kind's own colour family).
+export function retoned(painted, tones, value) {
+  const index = /^\d+$/.test(String(value ?? "")) ? Number(value) : null;
+  const to = value === "neutral" ? tones?.neutral : index ? tones?.colours?.[index - 1] : null;
+  if (!to) return null;
+  const same = (one, other) => typeof one === "string" && typeof other === "string" && one.trim().toLowerCase() === other.trim().toLowerCase();
+  const out = [];
+  for (const { role, colour } of painted) {
+    const toned = /^tone-(\d+)-(fill|stroke|motif|ink)$/.exec(role), block = /^block-(fill|stroke|motif)$/.exec(role);
+    const part = toned ? toned[2] : block ? block[1] : role === "ink" ? "ink" : null;
+    if (!part) {
+      if (/^(accent|warm|container|inset)-/.test(role)) return null;
+      out.push(null);
+      continue;
+    }
+    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
+    if (!known || !same(colour, known) || !to[part]) return null;
+    out.push({ role: index ? `tone-${index}-${part}` : part === "ink" ? "ink" : `block-${part}`, colour: to[part] });
+  }
+  return out;
+}
+
 // Asked for as soon as an editor that may show a figure is loaded (a deck's, a figure's),
 // not when a figure is first chosen: chosen with the studio away, its parts are styled.
 lookFrom("/static/kinds/figure/parts.css");
+// So is the studio's monospaced face, which a part's panel writes its name in the file in: a
+// moment after the page is up, not as the first figure is chosen, which would wait for it.
+if (typeof document !== "undefined" && document.fonts?.load) setTimeout(() => document.fonts.load('12px "Paper Mono"').catch(() => {}), 1000);
 
 export function figureParts(host) {
   lookFrom("/static/kinds/figure/parts.css");
@@ -886,6 +929,7 @@ export function figureParts(host) {
       if (renamed) { queue.unshift({ ...job, retried: true, action: { ...job.action, target: { ...target, id: renamed } } }); continue; }
       toast(error.message, { kind: "error", icon: "error", seconds: 6 });
       if (job.merge) typed.delete(job.merge);
+      job.unpaint?.();
       job.failed?.();
     }
     run();
@@ -930,7 +974,7 @@ export function figureParts(host) {
   const REFUSED = { add: "add shapes", connect: "connect shapes", delete: "delete shapes", paste: "paste shapes", duplicate: "duplicate shapes",
     gather: "group shapes", ungroup: "ungroup shapes", move: "move shapes", step: "move shapes", nudge: "move shapes", arrange: "rearrange shapes", "own-line": "move shapes", align: "move shapes", line_up: "move shapes" };
   const KEPT = new Set(["update", "read", "structure-view", "structure-settings", "structure-fetch"]);
-  function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false } = {}) {
+  function act(action, { merge = null, hold = false, select: choose = true, then = null, failed = null, follow = null, label = null, fresh = false, unpaint = null } = {}) {
     // A framed structure turned, zoomed or moved: every structure of its frame alike; its colours
     // changed: each of its frame's that shares them (structframes.js).
     action = Frames.framedAction(model()?.nodes, action);
@@ -955,6 +999,10 @@ export function figureParts(host) {
     // (When it was made, and which it is, for the history: a run of typing from its first key.)
     const job = { action, merge, hold, choose, then, failed, follow, fresh, label: action.do === "read" || action.do === "structure-view" ? null : label || said(action, merge),
       at: older[0]?.at ?? Date.now(), key: older[0]?.key ?? (jobCount += 1), made: (madeCount += 1) };
+    // (What it painted on the drawing at once, put back should it not be made -- and what those
+    // it replaces painted before it, the latest first: paintTone.)
+    const unpaints = [unpaint, ...older.map((each) => each.unpaint)].filter(Boolean);
+    if (unpaints.length) job.unpaint = () => { for (const each of unpaints) each(); };
     if (merge) lastMade.set(merge, job.made);
     // Made while the studio is away, behind those held for it: shown as made at once (what
     // it shows put back, should it be taken back, to before the words it replaces).
@@ -1010,10 +1058,11 @@ export function figureParts(host) {
           if (target?.type === "node" && nodeOf(target.id) && !job.retried) { parked.push({ job, error }); setTimeout(unpark, 2000); continue; }
           toast(error.message, { kind: "error", icon: "error", seconds: 6 });
           if (job.merge) typed.delete(job.merge);
+          job.unpaint?.();
           job.failed?.();
           continue;
         }
-        if (!result) { if (job.merge) typed.delete(job.merge); job.failed?.(); continue; }
+        if (!result) { if (job.merge) typed.delete(job.merge); job.unpaint?.(); job.failed?.(); continue; }
         // The drawing that comes after an edit that moves parts lands smoothly.
         if (LANDS.has(job.action.do)) state.landing = Date.now();
         if (job.merge && !queue.some((next) => next.merge === job.merge)) typed.delete(job.merge);
@@ -1024,7 +1073,10 @@ export function figureParts(host) {
         if (renamed && typedOver?.ids.includes(job.follow)) typedOver.ids.push(renamed);
         // Drawn under its new name, it lands from where it was, not as a part just made.
         if (renamed) state.renamed.set(renamed, job.follow);
-        if (result.model) setModel(result.model, { afresh: job.fresh });
+        // (A read that brings the figure as it is here already -- read ahead, say, as a figure on a
+        // slide is chosen -- changes nothing: its marks and panel are not drawn again for it.)
+        const asHere = job.action.do === "read" && state.model && result.model && JSON.stringify(result.model) === JSON.stringify(state.model);
+        if (result.model && !asHere) setModel(result.model, { afresh: job.fresh });
         // (`choose` may ask, as the edit comes back: a part added is not chosen should another
         // have been chosen meanwhile.)
         const choose = typeof job.choose === "function" ? job.choose() : job.choose;
@@ -1093,6 +1145,7 @@ export function figureParts(host) {
     if (!job || job.taken) return false;
     job.taken = true;
     takenBack.push(job);
+    job.unpaint?.();
     for (const [where, key, value] of [...(job.shown || [])].reverse()) {
       if (value === undefined) delete where[key]; else where[key] = value;
     }
@@ -2336,13 +2389,29 @@ export function figureParts(host) {
   // (`cornered`: the part has handles at its corners, which the + keeps well clear of.)
   // (Placed again as it was while the drawing, the figure, the part's box and the page are as
   // they were: a click, the drawing come in, the panel drawn -- each places the + anew.)
-  let plusKept = null;
+  // (Kept for each part: a part chosen again, the drawing and the page as they were, has its +
+  // where it had it -- what it lies clear of is the drawing's, not what else is chosen.)
+  const plusKept = new Map();
+  // The figure's lines' paths (`twins`: with the wide ones that are clicked), found once for
+  // each drawing that comes in: not looked for through all of it -- a slide's thousands of
+  // shapes -- each time a + is placed.
+  let linesKept = null;
+  function linesDrawn(twins) {
+    const root = host.element(model()?.root);
+    if (!linesKept || linesKept.root !== root || linesKept.drawings !== drawings) {
+      const all = [...(root?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || [])];
+      linesKept = { root, drawings, all, own: all.filter((path) => !path.classList.contains("hit-line")) };
+    }
+    return twins ? linesKept.all : linesKept.own;
+  }
   function plusPlace(id, box, towards = null, cornered = false) {
     const seen = host.overlay.getBoundingClientRect();
     const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
-    if (plusKept && plusKept.key.length === key.length && plusKept.key.every((value, index) => value === key[index])) return plusKept.place;
+    const kept = plusKept.get(id);
+    if (kept && kept.key.length === key.length && kept.key.every((value, index) => value === key[index])) return kept.place;
     const place = plusFound(id, box, towards, cornered);
-    plusKept = { key, place };
+    if (plusKept.size >= 64) plusKept.clear();
+    plusKept.set(id, { key, place });
     return place;
   }
   function plusFound(id, box, towards, cornered) {
@@ -2365,7 +2434,7 @@ export function figureParts(host) {
     // The lines, as points along them in the window's pixels: the + lies on none (a line's
     // drawing may let the pointer through it, so it is not found by pointing).
     const points = [];
-    for (const path of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || []) {
+    for (const path of linesDrawn(true)) {
       const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const step = Math.max(length / 200, 3 / (matrix.a || 1));
@@ -2405,7 +2474,7 @@ export function figureParts(host) {
     const meets = (spot, rect, room = radius) => rect && rect.width && spot.x + room > rect.left && spot.x - room < rect.right && spot.y + room > rect.top && spot.y - room < rect.bottom;
     // Every line's points, in the window's pixels: its own, and the others'.
     const points = [];
-    for (const each of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path:not(.hit-line), [data-flexo-entity="net"] path:not(.hit-line)') || []) {
+    for (const each of linesDrawn(false)) {
       const at = each.getScreenCTM?.(), length = each.getTotalLength ? pathLength(each) : 0;
       if (!at || !length) continue;
       const step = Math.max(length / 200, 2 / (at.a || 1));
@@ -2443,6 +2512,8 @@ export function figureParts(host) {
     if (!overlay || pointing.has(overlay)) return;
     pointing.add(overlay);
     overlay.addEventListener("mousemove", (event) => {
+      // (Not while a part is carried: no hint is shown then, and the drawing is not measured.)
+      if (drag?.started) return;
       const id = idAt(event);
       for (const hint of overlay.querySelectorAll(".fig-wordless.tight")) {
         hint.classList.toggle("pointed", hint.dataset.id === id || state.selected.includes(hint.dataset.id));
@@ -3753,6 +3824,8 @@ export function figureParts(host) {
   let drag = null;
   const SVG = (element) => element?.ownerSVGElement || element;
   const unitsPerPixel = (element) => 1 / ((element?.parentNode?.getScreenCTM?.() || SVG(element)?.getScreenCTM?.())?.a || 1);
+  // (As the drag in hand measured it as it began, where it did.)
+  const scaleOf = (element) => drag?.scales?.get(element) ?? unitsPerPixel(element);
   const centre = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
   // What is drawn of a part: a group's frame and everything it holds -- each element
   // once, the outermost, as a framed group draws its parts inside itself.
@@ -3934,12 +4007,18 @@ export function figureParts(host) {
     atRest();
     const { boxes, drawn, folds } = asSeen();
     const moving = elementsOf(id).map((element) => ({ element, base: element.getAttribute("transform") || "", scale: unitsPerPixel(element) }));
-    lift(moving);
     const nodes = new Set(model().nodes.filter((node) => inside(node.id, id)).map((node) => node.id));
     const touches = (ref) => nodes.has(nodeOfRef(ref));
     const lines = [...model().edges.filter((edge) => touches(edge.from) || touches(edge.to)),
       ...model().nets.filter((net) => [...(net.sources || []), ...(net.targets || [])].some(touches))]
       .map((line) => host.element(line.id)).filter((element) => element && !moving.some((item) => item.element.contains(element)));
+    // (A shape, not a group, may be let go on a line -- one not its own -- to go into it.)
+    // (Everything measured before anything is lifted or marked: the drawing read as it stands,
+    // laid out once, not again for each mark -- the drag's first move is not kept waiting.)
+    const paths = nodeOf(id) ? linePaths(nodes) : [];
+    const scales = new Map();
+    for (const each of [...model().nodes, ...model().groups]) for (const element of elementsOf(each.id)) if (!scales.has(element)) scales.set(element, unitsPerPixel(element));
+    lift(moving);
     const indicator = h("div.fig-drop-line");
     const zone = h("div.fig-drop-zone");
     host.overlay.append(zone, indicator);
@@ -3947,9 +4026,7 @@ export function figureParts(host) {
     document.body.classList.add("fig-grabbing");
     for (const { element } of moving) element.classList.add("fig-lifted");
     for (const element of lines) element.classList.add("fig-faded");
-    // (A shape, not a group, may be let go on a line -- one not its own -- to go into it.)
-    const paths = nodeOf(id) ? linePaths(nodes) : [];
-    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn, folds, paths });
+    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn, folds, paths, scales });
     carryCopy(drag.copy);
     select([id], { reveal: false });
   }
@@ -3996,6 +4073,9 @@ export function figureParts(host) {
   function dragFrame() {
     if (!drag?.started) return;
     drag.frame = 0;
+    // (Where the page is, read once, as the first frame begins: not again from a drawing just
+    // moved, which would have it laid out again at every frame.)
+    drag.origin ??= host.overlay.getBoundingClientRect();
     const { x, y } = drag.pointer;
     const dx = x - drag.from.x, dy = y - drag.from.y;
     for (const { element, base, scale } of drag.moving) {
@@ -4054,7 +4134,7 @@ export function figureParts(host) {
   function placeTag(at) {
     const tag = drag?.tag;
     if (!tag) return;
-    const outer = host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
+    const outer = drag.origin || host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
     const carried = [...drag.moving.map((item) => item.element), drag.ghost].filter(Boolean).map((element) => drawnRect(element));
     const right = Math.max(at.at.x + 12, ...carried.map((rect) => rect.right + 10));
     const left = Math.min(at.at.x - 12, ...carried.map((rect) => rect.left - 10)) - wide;
@@ -4100,7 +4180,7 @@ export function figureParts(host) {
     showLine(at?.kind === "splice" ? at : null);
     // (Nor beside the part it is beside already: let go there, it stays.)
     if (!at || at.kind === "splice" || (at.kind === "line" && unchanged(at, drag.id))) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
-    const origin = host.overlay.getBoundingClientRect();
+    const origin = drag.origin || host.overlay.getBoundingClientRect();
     drag.indicator.classList.remove("centre");
     drag.zone.classList.remove("named-beside", "named-left");
     const room = drag.boxes.get(at.parent) || SVG(host.element(model().root))?.getBoundingClientRect();
@@ -4206,7 +4286,7 @@ export function figureParts(host) {
     const nudge = (id, sign) => {
       for (const element of elementsOf(id)) {
         if (drag.moving.some((item) => item.element === element)) continue;
-        const shift = sign * apart * unitsPerPixel(element);
+        const shift = sign * apart * scaleOf(element);
         element.style.transform = at.across ? `translate(${shift}px, 0px)` : `translate(0px, ${shift}px)`;
         drag.parted.push({ element });
       }
@@ -4243,11 +4323,15 @@ export function figureParts(host) {
   // Keynote lifts what it moves -- each element last in the drawing, in a group that keeps it
   // where it was drawn; and put back in its place (`land`) should it go home.
   function lift(moving) {
-    for (const item of moving) {
+    // (Each measured before any is moved: the drawing laid out once.)
+    const found = moving.map((item) => {
       const { element } = item, parent = element.parentNode, svg = element.ownerSVGElement;
       const into = svg?.getScreenCTM?.(), from = parent?.getScreenCTM?.();
-      if (!svg || !into || !from || parent === svg) continue;
-      const at = into.inverse().multiply(from);
+      return { item, parent, svg, at: !svg || !into || !from || parent === svg ? null : into.inverse().multiply(from) };
+    });
+    for (const { item, parent, svg, at } of found) {
+      if (!at) continue;
+      const { element } = item;
       const holder = document.createElementNS(SVG_NS, "g");
       holder.setAttribute("transform", `matrix(${at.a} ${at.b} ${at.c} ${at.d} ${at.e} ${at.f})`);
       holder.setAttribute("class", "fig-lift");
@@ -4442,6 +4526,8 @@ export function figureParts(host) {
     window.getSelection?.()?.removeAllRanges();
     atRest();
     const { boxes, drawn, folds } = asSeen();
+    // (The lines measured before anything is marked, as a part's drag does: dragStart.)
+    const paths = linePaths();
     const look = figureLook(), ems = parts[drag.kind]?.size || [5.5, 3.5];
     const ghost = h("div.fig-tile-ghost", {}, glyph(drag.kind), h("span", {}, parts[drag.kind].title));
     document.body.append(ghost);
@@ -4449,12 +4535,13 @@ export function figureParts(host) {
     host.overlay.append(zone, indicator);
     host.overlay.classList.add("fig-dragging");
     document.body.classList.add("fig-grabbing");
-    Object.assign(drag, { started: true, boxes, drawn, folds, ghost, indicator, zone, paths: linePaths(),
+    Object.assign(drag, { started: true, boxes, drawn, folds, ghost, indicator, zone, paths,
       size: { width: ems[0] * look.size, height: ems[1] * look.size } });
   }
   function tileFrame() {
     if (!drag?.started) return;
     drag.frame = 0;
+    drag.origin ??= host.overlay.getBoundingClientRect();
     const at = dropTarget(drag.pointer);
     if (!sameDrop(at, drag.at)) { drag.at = at; showDrop(at); }
     else if (at?.kind === "splice") { drag.at = at; placeTag(at); }
@@ -4496,8 +4583,15 @@ export function figureParts(host) {
     toast(`${inQuotes(nameOf(id))} ${said}.`, { icon: "info", seconds: 2 });
     return false;
   }
+  // (Asked twice as a part's panel is drawn -- may it go back, may it go on? -- the figure as it
+  // is seen is measured once in that turn, not once for each.)
+  let seenThisTurn = null;
+  function seenNow() {
+    if (!seenThisTurn) { seenThisTurn = asSeen(); queueMicrotask(() => { seenThisTurn = null; }); }
+    return seenThisTurn;
+  }
   function nudgePlace(id, key) {
-    const { boxes, drawn, folds } = asSeen();
+    const { boxes, drawn, folds } = seenNow();
     const holder = drawn.groups.find((group) => (group.children || []).includes(id));
     if (!holder || !boxes.get(id)) return null;
     const way = holder.layout?.kind;
@@ -6635,15 +6729,55 @@ export function figureParts(host) {
   const GROUP_OWN = { fill: "Background", stroke: "Border", label: "Title" };
   const TONE_NAMES = () => Object.values(parts).flatMap((part) => part.fields).find((field) => field.key === "properties.tone")?.options.filter((name) => !/^\d+$/.test(name)) || [];
 
+  // -- a theme colour chosen, painted at once --
+  // Shapes given one of the theme's colours (a chip) are painted with it on the drawing as it is
+  // chosen -- their fill, outline, words and marks, each as the figure paints a shape of that
+  // colour (flexo.render.toned: the roles of the block's paint and of its words, the tone's) --
+  // not a moment later, when the figure drawn with it comes back (and is put in where it
+  // changed, which it finds painted already). Should the change not be made, or be taken back
+  // while the studio is away, what was painted is put back. Only shapes painted from those roles
+  // alone, each painted as the page knows the theme paints them: else the drawing is waited for,
+  // as ever (a figure in a theme of its own, a shape of its own colour or of a kind's).
+  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io"]);
+  function paintTone(nodes, value) {
+    if (!nodes.length) return null;
+    const found = [];
+    for (const node of nodes) {
+      const element = host.element(node.id);
+      if (!element || !TONED_KINDS.has(node.item?.kind || "block") || node.item?.properties?.["paint-fill"] || node.item?.properties?.["paint-stroke"]) return null;
+      for (const each of [element, ...element.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
+        for (const attribute of ["fill", "stroke"]) {
+          const role = each.getAttribute(`data-flexo-${attribute}`);
+          if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute) });
+        }
+      }
+    }
+    const now = retoned(found, host.tones?.(), value);
+    if (!now) return null;
+    const changes = found.map((was, at) => now[at] && { ...was, now: now[at].role, painted: now[at].colour }).filter(Boolean);
+    for (const { each, attribute, now: role, painted } of changes) {
+      each.setAttribute(attribute, painted);
+      each.setAttribute(`data-flexo-${attribute}`, role);
+    }
+    // (Put back only where it is as it was painted: not over a drawing come since.)
+    return changes.length ? () => {
+      for (const { each, attribute, role, colour, now: named, painted } of [...changes].reverse()) {
+        if (each.getAttribute(`data-flexo-${attribute}`) !== named || each.getAttribute(attribute) !== painted) continue;
+        each.setAttribute(attribute, colour);
+        each.setAttribute(`data-flexo-${attribute}`, role);
+      }
+    } : null;
+  }
+
   function colourSection(targets) {
     const nodes = targets.filter((target) => target.type === "node");
     const tones = host.tones?.();
     const scope = targets.map((target) => target.id).join(",");
     // One edit for every chosen thing; a colour dragged in the picker is one undo step.
-    const paint = (type, values) => {
+    const paint = (type, values, unpaint = null) => {
       const list = targets.filter((target) => target.type === type);
       if (list.length) act({ do: "update", targets: list.map(({ type: kind, id }) => ({ type: kind, id })), values },
-        { merge: `colour:${type}:${Object.keys(values)[0]}:${scope}`, select: false });
+        { merge: `colour:${type}:${Object.keys(values)[0]}:${scope}`, select: false, unpaint });
     };
     const common = (read) => {
       const values = targets.map((target) => read(target) ?? null);
@@ -6671,7 +6805,7 @@ export function figureParts(host) {
       value: toneNow, noneTitle: "Default",
       // Each tone as a filled chip in its strong colour, as a palette's colours are shown.
       colours: [...neutral, ...offered],
-      onChange: (value) => paint("node", { "properties.tone": value }),
+      onChange: (value) => paint("node", { "properties.tone": value }, paintTone(nodes, value)),
     }), mixed ? { hint: "Mixed" } : {}) : null;
     // A tone by name: parts that share one share its colour, whichever the theme gives it.
     // Sent as it is typed; the words in the field stay the person's while they type.
