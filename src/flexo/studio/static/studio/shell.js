@@ -14,6 +14,7 @@ import { settingCommands, aligningInApp, aligningFromApp } from "./aligntools.js
 import { findKeys, chosenWords } from "./findbar.js";
 import { helpBar, helpCommand, onHelp } from "./helpbar.js";
 import { chords } from "./helpkeys.js";
+import { ACCEPT as FRAMED, answered } from "./framed.js";
 
 const SETTINGS = window.STUDIO || { token: "", file: "" };
 const KIND_ICONS = { deck: "deck", figure: "figure", theme: "theme" };
@@ -171,12 +172,13 @@ export class Workspace {
   async api(route, body, { method = body === undefined ? "GET" : "POST", raw = false } = {}) {
     const response = await fetch(route, {
       method,
-      headers: { "X-Studio-Token": SETTINGS.token, ...(raw ? {} : { "Content-Type": "application/json" }) },
+      // (A drawing's SVG as it is, after its answer's JSON: framed.js.)
+      headers: { "X-Studio-Token": SETTINGS.token, Accept: `${FRAMED}, application/json`, ...(raw ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     });
     // An answer, whatever it says, is the studio there: its news is listened for again at once.
     this.wake();
-    const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+    const data = await answered(response).catch(() => ({ error: `${response.status} ${response.statusText}` }));
     if (!response.ok) throw new Error(data.error || `${response.status}`);
     return data;
   }

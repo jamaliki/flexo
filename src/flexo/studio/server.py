@@ -114,6 +114,18 @@ class Handler(BaseHTTPRequestHandler):
     def _fail(self, status: int, message: str) -> None:
         self._json({"error": message}, status)
 
+    def _drawing_json(self, data: object) -> None:
+        """An answer carrying a drawing: framed for a page that reads it so -- its SVG sent as
+        it is, not escaped into JSON and read back out of it (``flexo.studio.framing``)."""
+
+        from flexo.studio import framing
+
+        body = framing.framed(data) if framing.ACCEPT in self.headers.get("Accept", "") else None
+        if body is None:
+            self._json(data)
+        else:
+            self._reply(200, body, framing.ACCEPT)
+
     def _host_ok(self) -> bool:
         host = self.headers.get("Host", "")
         name = host.rsplit(":", 1)[0] if not host.startswith("[") else host.split("]")[0] + "]"
@@ -357,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
                     version = int(data.get("version", 0))
                     self._json({"version": version, "stale": True, "resend": True})
                     return
-            self._json(
+            self._drawing_json(
                 workspace.draw(
                     name,
                     document,
@@ -470,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
             if "base" in data and "document" not in data:
                 # Kept at once, and drawn, as asked: answered with what changed alone.
                 answer = acting.answered(workspace, doc, data, sent, answer, who)
-            self._json(answer)
+            self._drawing_json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming
 
