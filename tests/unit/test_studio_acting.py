@@ -288,9 +288,11 @@ def test_an_edit_whose_save_never_reached_its_file_is_made_again(
     acting._keep(workspace, doc, "kept", 1)
     acting.saving(workspace, doc, path)  # (the words "before", holding "kept")
     acting._keep(workspace, doc, "lost", 2)
+    acting._keep(workspace, doc, "later", 3)  # (made after the words written were taken)
+    doc.version = 3
     written = tmp_path / ".figure.saving.yaml"
     written.write_text("after", encoding="utf-8")
-    acting.saving(workspace, doc, written)  # (kept beside, and the studio gone before the move)
+    acting.saving(workspace, doc, written, 2)  # (kept beside, and the studio gone before the move)
     acting._MADE.clear()
     assert acting.made_already(workspace, doc, "kept") and not acting.made_already(
         workspace, doc, "lost"
@@ -301,3 +303,5 @@ def test_an_edit_whose_save_never_reached_its_file_is_made_again(
     assert acting.made_already(workspace, doc, "kept") and acting.made_already(
         workspace, doc, "lost"
     )
+    # (Not one made after the words written were taken.)
+    assert not acting.made_already(workspace, doc, "later")
