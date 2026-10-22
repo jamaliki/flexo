@@ -19,6 +19,7 @@ the artwork is rewritten under the node's own id before it is ever appended.
 from __future__ import annotations
 
 import base64
+import os
 import re
 import struct
 import xml.etree.ElementTree as ET
@@ -28,7 +29,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from flexo.confine import outside
+from flexo.confine import found, outside
 from flexo.diagnostics import Diagnostic, FlexoError
 from flexo.ir.semantic import NodeSpec
 from flexo.svg import local_name
@@ -230,7 +231,10 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             "a .png, .jpg, .webp, .tiff or .heic file for a photograph, or a .gif for one "
             "that plays.",
         )
-    if outside(path):
+    # (The file looked at once while it is the same file, unchanged -- confine.found -- not
+    # every folder on its way asked about twice, at every compile of a figure that shows it.)
+    stat, out = found(path)
+    if out or (stat is None and outside(path)):
         raise _error(
             "image.source.outside",
             node_id,
@@ -238,20 +242,39 @@ def load_artwork(node_id: str, source: str) -> Artwork:
             "The artwork file is outside the folder.",
             hint="Put it in the folder, beside the figure.",
         )
-    try:
-        stat = path.stat()
-    except OSError as exc:
-        raise _error(
-            "image.source.unreadable",
-            node_id,
-            path,
-            f"Cannot read the artwork file ({exc.strerror or exc}).",
-            hint="Absolute paths are the reliable choice; relative ones resolve "
-            "against the working directory the figure is compiled in.",
-        ) from exc
+    if stat is None:
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            raise _error(
+                "image.source.unreadable",
+                node_id,
+                path,
+                f"Cannot read the artwork file ({exc.strerror or exc}).",
+                hint="Absolute paths are the reliable choice; relative ones resolve "
+                "against the working directory the figure is compiled in.",
+            ) from exc
     if suffix in PAGE_SUFFIXES:
-        return _page_artwork(node_id, str(path.resolve()), page, stat.st_mtime_ns)
-    return _load(node_id, str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+        return _page_artwork(node_id, _resolved(path, stat), page, stat.st_mtime_ns)
+    return _load(node_id, _resolved(path, stat), stat.st_mtime_ns, stat.st_size)
+
+
+_RESOLVED: dict[tuple[str, int, int, int, int], str] = {}
+"""Where each picture's name led (``Path.resolve``), by its name and the file it was."""
+
+
+def _resolved(path: Path, stat: os.stat_result) -> str:
+    """``path`` resolved, every link on the way followed -- asked of the disk again only once
+    the file there is another, or changed (as ``confine.found`` asks)."""
+
+    key = (os.fspath(path), stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    name = _RESOLVED.get(key)
+    if name is None:
+        name = str(path.resolve())
+        if len(_RESOLVED) >= 4096:
+            _RESOLVED.clear()
+        _RESOLVED[key] = name
+    return name
 
 
 def _page_of(path: Path) -> tuple[Path, int]:
