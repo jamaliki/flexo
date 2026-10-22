@@ -615,6 +615,8 @@ class Workspace:
         """The folder's turn to draw: one drawing at a time -- but for one waiting on a plot
         run apart, which gives its turn to another document meanwhile (``taking_turns``)."""
         self.latest: dict[str, int] = {}
+        self._digests: dict[str, dict[str, str]] = {}
+        """Each document's pages' drawings, as last sent, and their hashes (``draw``)."""
         self.acts: dict[str, int] = {}
         """How many edits the pages have asked of each document's kind (``acting``)."""
         self._documents: dict[Path, tuple[float, str | None]] = {}
@@ -1442,7 +1444,12 @@ class Workspace:
                     ],
                 }
             elapsed = time.perf_counter() - started
-        doc.depends = {file.resolve() for file in drawing.files}
+        # (The files it is drawn from, as the disk names them, worked out again only when the
+        # drawing names others: a deck names the same few at every keystroke.)
+        named = tuple(drawing.files)
+        if named != getattr(doc, "depends_named", None):
+            doc.depends = {file.resolve() for file in named}
+            doc.depends_named = named
         # Whether it draws as written (a problem said in it), for the folder's list of documents.
         faulty = any(message.severity == "error" for message in drawing.messages)
         current = not drawing.unfinished and version >= doc.version
@@ -1450,11 +1457,15 @@ class Workspace:
             doc.faulty = faulty
             self.broadcast({"type": "documents", "documents": self.documents()})
         pages = []
+        # Each drawing's hash worked out once: a deck's unchanged slides are the same drawings
+        # (the very strings) at every keystroke.
+        was, digests = self._digests.get(doc.name, {}), {}
         for page in drawing.pages:
             if page.pending:
                 pages.append({"id": page.id, "label": page.label, "pending": True, **page.extra})
                 continue
-            digest = hashlib.sha1(page.svg.encode("utf-8")).hexdigest()[:16]
+            digest = was.get(page.svg) or hashlib.sha1(page.svg.encode("utf-8")).hexdigest()[:16]
+            digests[page.svg] = digest
             entry: dict[str, Any] = {
                 "id": page.id,
                 "label": page.label,
@@ -1465,6 +1476,7 @@ class Workspace:
             if known.get(page.id) != digest:
                 entry["svg"] = page.svg
             pages.append(entry)
+        self._digests[doc.name] = digests
         return {
             "version": version,
             "pages": pages,

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import gzip
 import json
 import mimetypes
 import queue
@@ -85,20 +84,14 @@ class Handler(BaseHTTPRequestHandler):
     # -- plumbing --
 
     def _reply(self, status: int, body: bytes, kind: str, *, cache: bool = False) -> None:
-        encoding = None
-        # Fonts and photographs are compressed already.
-        packed = kind.startswith(("font/", "image/png", "image/jpeg"))
-        compressible = len(body) > 2048 and not packed
-        if compressible and "gzip" in self.headers.get("Accept-Encoding", ""):
-            body = gzip.compress(body, compresslevel=5)
-            encoding = "gzip"
+        # Sent as it is, never compressed: the studio answers on this machine alone, where
+        # gzip costs more than the bytes it saves -- a slide drawing a protein's surface is
+        # 1.5 MB of SVG that compresses poorly, 65 milliseconds at every keystroke on it.
         self.send_response(status)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "max-age=86400, immutable" if cache else "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        if encoding:
-            self.send_header("Content-Encoding", encoding)
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()

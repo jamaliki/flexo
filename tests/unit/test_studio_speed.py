@@ -5,8 +5,10 @@ page as they are."""
 from __future__ import annotations
 
 import copy
+import json
 import threading
 import time
+import urllib.request
 from collections import OrderedDict
 from pathlib import Path
 
@@ -15,6 +17,7 @@ import yaml
 
 from flexo import roundtrip
 from flexo.studio.figure_kind import SAMPLE_FIGURE
+from flexo.studio.server import start
 from flexo.studio.workspace import Workspace
 
 PERSON = {"id": "page-a", "name": "Ada", "kind": "person"}
@@ -217,3 +220,21 @@ def test_a_long_deck_is_written_over_in_a_fraction_of_the_time_of_the_whole() ->
     # (About a seventh; asked for a half, for a busy computer's sake.)
     assert part < whole / 2
 
+
+def test_answers_go_to_the_page_as_they_are(tmp_path: Path) -> None:
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    server, workspace = start(tmp_path / "figure.yaml", browser=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/api/open?file=figure.yaml"
+        request = urllib.request.Request(
+            url, headers={"X-Studio-Token": workspace.token, "Accept-Encoding": "gzip"}
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request) as reply:
+            assert reply.headers.get("Content-Encoding") is None
+            assert json.loads(reply.read())["file"] == "figure.yaml"
+    finally:
+        workspace.close()
+        server.shutdown()
+        server.server_close()
