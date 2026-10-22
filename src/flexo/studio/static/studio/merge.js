@@ -1008,6 +1008,33 @@ export function stable(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
 
+// `next` (a copy of `was`, changed) with each of its parts equal to `was`'s, as ``same`` finds
+// them, swapped for `was`'s own: the two then share all but what changed, and ``same`` finds
+// them alike, or where they differ, at once -- not walking the whole of each. `was` itself
+// when nothing differs. (Only objects are swapped, each for one equal to it: `next`'s words and
+// numbers stay its own, and it says what it said.)
+export function share(next, was) {
+  if (next === was) return was;
+  if (typeof next !== "object" || next === null || typeof was !== "object" || was === null) return same(next, was) ? was : next;
+  const list = Array.isArray(next);
+  if (list !== Array.isArray(was)) return next;
+  let alike = true;
+  const keep = (key, has) => {
+    const kid = has ? share(next[key], was[key]) : next[key];
+    if (!has || kid !== was[key]) alike = false;
+    else if (kid !== next[key] && typeof kid === "object" && kid !== null) next[key] = kid;
+  };
+  if (list) {
+    if (next.length !== was.length) alike = false;
+    for (let index = 0; index < next.length; index++) keep(index, index < was.length);
+  } else {
+    const keys = Object.keys(next);
+    if (keys.length !== Object.keys(was).length) alike = false;
+    for (const key of keys) keep(key, Object.hasOwn(was, key));
+  }
+  return alike ? was : next;
+}
+
 // Whether two documents are equal, as ``stable`` would find them, without writing
 // either out: it stops at the first difference and allocates nothing, so it can
 // run on every keystroke.
