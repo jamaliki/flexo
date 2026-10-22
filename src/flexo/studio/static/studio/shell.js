@@ -374,6 +374,18 @@ export class Workspace {
     }, 250);
   }
 
+  // Who is here, as the studio says, told the page -- unless all that is new is where this
+  // person is (their own report of it, come back), which nothing here shows: a click that
+  // chooses something draws the slide list and the slide again for no one else.
+  heard(presence) {
+    this.presence = presence;
+    give(presence);
+    const key = JSON.stringify(presence.map((entry) => (entry?.who?.id === this.me.id ? [entry.who, entry.colour] : entry)));
+    if (key === this.presenceHeard) return;
+    this.presenceHeard = key;
+    this.emit("presence");
+  }
+
   presenceOn(file) {
     return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.me.id);
   }
@@ -402,7 +414,7 @@ export class Workspace {
       clearTimeout(this.awayTimer);
       let hello = {};
       try { hello = JSON.parse(message.data || "{}"); } catch { hello = {}; }
-      if (Array.isArray(hello.presence)) { this.presence = hello.presence; give(this.presence); this.emit("presence"); }
+      if (Array.isArray(hello.presence)) this.heard(hello.presence);
       if (this.focused) this.reportFocus(...this.focused);
       this.retryIn = 0;
       this.emit("online", true);
@@ -421,7 +433,7 @@ export class Workspace {
       // Out of reach for more than a moment, who is here is not known: no one is shown, rather
       // than as they were last known, until the studio says again (its hello).
       clearTimeout(this.awayTimer);
-      this.awayTimer = setTimeout(() => { if (this.presence.length) { this.presence = []; give([]); this.emit("presence"); } }, 1500);
+      this.awayTimer = setTimeout(() => { if (this.presence.length) this.heard([]); }, 1500);
     };
     this.source = source;
   }
@@ -472,7 +484,7 @@ export class Workspace {
       case "reopened": this.reopen(event.file, event.kind); break;
       case "renamed": this.renamed(event.file, event.to); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
-      case "presence": this.presence = event.presence; give(this.presence); this.emit("presence"); break;
+      case "presence": this.heard(event.presence); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
       case "trusted":
         this.info.trusted = true;
