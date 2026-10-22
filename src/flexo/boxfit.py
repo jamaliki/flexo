@@ -30,12 +30,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from flexo.compiler import Compilation, compile_figure
+from flexo.confine import once
 from flexo.draft import drafting, give_up_if_newer
-from flexo.drawing import ink_bounds, read_drawing
 from flexo.figure_shapes import free
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation
 from flexo.orient import turned, wrapped
+from flexo.structure_fit import figure_ink, noting
 from flexo.style import LayoutStyle
 from flexo.themes import figure_style
 from flexo.units import Length
@@ -74,6 +75,7 @@ class BoxFit:
     every way would be: what the figure settles to."""
 
 
+@once()  # (its files looked at once, however many ways it is tried)
 def fit_in_box(
     figure: Figure | FigureSpec,
     width: float,
@@ -175,13 +177,14 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
         ):
             continue
         try:
-            compiled = compile_figure(candidate, style=layout_style)
+            with noting() as molecules:
+                compiled = compile_figure(candidate, style=layout_style)
         except Exception:
             if not fits:
                 raise
             continue
         give_up_if_newer()  # (a drawing given up for a newer one: flexo.draft)
-        left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
+        left, top, right, bottom = figure_ink(compiled.document.text, molecules)
         ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
         scale = min(most, width / ink[2], height / ink[3])
         errors = len(lint_compilation(compiled, style=layout_style).errors)
@@ -219,10 +222,11 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
                     continue
                 tried.append(candidate)
                 try:
-                    compiled = compile_figure(candidate, style=layout_style)
+                    with noting() as molecules:
+                        compiled = compile_figure(candidate, style=layout_style)
                 except Exception:
                     return best
-                left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
+                left, top, right, bottom = figure_ink(compiled.document.text, molecules)
                 ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
                 scale = min(most, width / ink[2], height / ink[3])
                 errors = len(lint_compilation(compiled, style=layout_style).errors)
@@ -280,12 +284,13 @@ def _kept(keep: str, candidates, width: float, height: float, most: float, base:
         if label != keep.removesuffix(suffix):
             continue
         try:
-            compiled = compile_figure(
-                wrapped(candidate, back=back) if suffix else candidate, style=layout_style
-            )
+            with noting() as molecules:
+                compiled = compile_figure(
+                    wrapped(candidate, back=back) if suffix else candidate, style=layout_style
+                )
         except Exception:
             return None
-        left, top, right, bottom = ink_bounds(read_drawing(compiled.document.text))
+        left, top, right, bottom = figure_ink(compiled.document.text, molecules)
         ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
         scale = min(most, width / ink[2], height / ink[3])
         errors = len(lint_compilation(compiled, style=layout_style).errors)

@@ -43,6 +43,11 @@ from flexo.studio import cloud_bundles as cloud
 
 POLL = 0.4
 """Seconds between looks at the working folder and at the bundle."""
+RESTING = 2.0
+"""Seconds between looks once nothing has changed in the folder for ``RESTED`` seconds: a
+studio left open is not woken for nothing. A document the studio writes wakes it at once
+(``Keeper.nudge``)."""
+RESTED = 10.0
 QUIET = 0.8
 PATIENCE = 4.0
 """Seconds the folder rests unchanged before the bundle is written, and the most it waits
@@ -162,6 +167,7 @@ class Keeper:
         self._beside: tuple[int, int] | None = None
         self._looked_at: float | None = None
         self._stop = threading.Event()
+        self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self.service = _service(self.path.parent)
         shared = self.service is not None
@@ -320,6 +326,7 @@ class Keeper:
         """Stop, writing back first whatever is not yet in the bundle."""
 
         self._stop.set()
+        self._wake.set()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=10)
         with contextlib.suppress(Exception):
@@ -328,11 +335,27 @@ class Keeper:
     # -- in step --
 
     def _run(self) -> None:
-        while not self._stop.wait(POLL):
+        while True:
+            self._wake.wait(self._interval(time.monotonic()))
+            self._wake.clear()
+            if self._stop.is_set():
+                return
             try:
                 self.step()
             except Exception:
                 traceback.print_exc()
+
+    def _interval(self, now: float) -> float:
+        """How long until the next look: ``POLL``, or ``RESTING`` while nothing has changed
+        for a while and nothing waits to be written, taken in or held."""
+
+        waiting = self.waiting_since or self.unread_since or now < self.held_until or self._away
+        return RESTING if not waiting and now - self.changed_at >= RESTED else POLL
+
+    def nudge(self) -> None:
+        """Look now: the studio has just written a file in the folder."""
+
+        self._wake.set()
 
     def step(self, now: float | None = None) -> None:
         """One look: the bundle changed on disk is taken in, and copies a cloud service made

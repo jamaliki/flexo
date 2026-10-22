@@ -165,10 +165,12 @@ def made_already(workspace: Any, doc: Any, once: str) -> bool:
     return bool(once) and once in _made(workspace, doc)
 
 
-def saving(workspace: Any, doc: Any, written: Path) -> None:
-    """``doc`` about to be written, its words in ``written``: the ids of the edits they hold
-    kept beside them first -- a studio stopped before the file is put in place finds the
-    file's words those of the save before, and the ids that save held."""
+def saving(workspace: Any, doc: Any, written: Path, version: int | None = None) -> None:
+    """``doc`` about to be written, its words in ``written`` -- the document at ``version``
+    (written from what it was when the writing began: edits made since are not in them) --
+    the ids of the edits they hold kept beside them first: a studio stopped before the file
+    is put in place finds the file's words those of the save before, and the ids that save
+    held."""
 
     folder = _folder()
     made = _made(workspace, doc)
@@ -179,8 +181,9 @@ def saving(workspace: Any, doc: Any, written: Path) -> None:
         words = hashlib.sha256(written.read_bytes()).hexdigest()
     except OSError:
         return
+    upto = doc.version if version is None else version
     with _LOCK:
-        ids = list(made)[-KEPT_IDS:]
+        ids = [once for once, made_at in made.items() if made_at <= upto][-KEPT_IDS:]
     saves = [*_saves(name), {"words": words, "ids": ids}][-KEPT_SAVES:]
     try:
         folder.mkdir(parents=True, exist_ok=True)
