@@ -24,7 +24,10 @@ small pad round it (``PAD``):
 
 The extent is read off the drawing made anyway -- drawn here, before the figure is laid out,
 and kept for when it is painted (``flexo.structures``) -- so it costs no drawing of its own:
-the SVG's ink (``flexo.drawing.ink_bounds``), or the picture's opaque pixels.
+the SVG's ink (``flexo.drawing.ink_bounds``), or the picture's opaque pixels. It is found once
+for each drawing (``drawn_extent``) and kept, in memory and on disk beside the drawing
+(``flexo.structure_kept``): a figure laid out every way it could be, again and again as it is
+changed, and opened again another day, never reads a molecule's drawing again to measure it.
 """
 
 from __future__ import annotations
@@ -209,16 +212,14 @@ def _extent(node: NodeSpec, style: LayoutStyle, palette: Palette, box: tuple[flo
     one that is not drawn, or draws nothing."""
 
     from flexo.diagnostics import FlexoError
-    from flexo.structures import _problem, structure_png, structure_svg
+    from flexo.structures import _ask, _problem
 
     problem = _problem(node, style)
     if problem is not None and not problem.drawn:
         return None
     width, height = box
     try:
-        markup = structure_svg(node, style, palette, width, height)
-        found = (_svg_extent(markup) if markup is not None
-                 else _png_extent(structure_png(node, style, palette, width, height)))
+        found = drawn_extent(_ask(node, style, palette), width / height)
     except FlexoError:
         return None
     if found is None:
@@ -229,6 +230,47 @@ def _extent(node: NodeSpec, style: LayoutStyle, palette: Palette, box: tuple[flo
         (left - pixels_w / 2) * scale, (top - pixels_h / 2) * scale,
         (right - pixels_w / 2) * scale, (bottom - pixels_h / 2) * scale,
     ), (pixels_w, pixels_h)
+
+
+def drawn_extent(ask, aspect: float):
+    """The ink of the molecule ``ask`` asks for, drawn at ``aspect`` as the figure draws it
+    (``flexo.structures.structure_svg``, or ``structure_png``), in its canvas's pixels -- and
+    the canvas -- or None, for a drawing of nothing: found from the drawing once, and kept."""
+
+    from flexo.structures import _failed, _failing, _hatched
+
+    if _failed.get(_failing(ask)):
+        # (mol-sketch failed to draw it: the panel is hatched, at any aspect.)
+        return _png_extent(_hatched(aspect))
+    return _drawn_extent(ask, aspect)
+
+
+_EXTENTS: dict[tuple, object] = {}
+"""Each drawing's extent (``drawn_extent``), by what it is drawn from and at what aspect."""
+
+EXTENTS = 1024
+"""How many extents are kept in memory; past that it starts again."""
+
+
+def _drawn_extent(ask, aspect: float):
+    from flexo.structure_kept import extent, keep_extent
+    from flexo.structures import VECTOR_LOOKS, _drawing, _failed, _failing, _hatched
+
+    key = (ask, aspect)
+    if key in _EXTENTS:
+        return _EXTENTS[key]
+    kind = "shapes" if ask.look in VECTOR_LOOKS else "png"
+    known, found = extent(ask, aspect, kind)
+    if not known:
+        drawn = _drawing(ask, aspect)
+        if _failed.get(_failing(ask)):
+            return _png_extent(_hatched(aspect))  # (not kept: drawn again another time)
+        found = _svg_extent(drawn) if isinstance(drawn, str) else _png_extent(drawn)
+        keep_extent(ask, aspect, kind, found)
+    if len(_EXTENTS) >= EXTENTS:
+        _EXTENTS.clear()
+    _EXTENTS[key] = found
+    return found
 
 
 @functools.lru_cache(maxsize=32)

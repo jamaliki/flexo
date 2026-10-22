@@ -309,7 +309,7 @@ def _problem(node: NodeSpec, style: LayoutStyle) -> _Problem | None:
     return _Problem("draw", f"Couldn't draw {name}", failed, drawn=True) if failed else found
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=512)
 def _checked(ask: _Ask, name: str) -> _Problem | None:
     if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
                                                    re.IGNORECASE):
@@ -584,13 +584,35 @@ def structure_png(
                 return drawn
         return _one_at_a_time(_render, ask, width / height)
     except Exception as error:
-        # What mol-sketch said, without where in its code it said it.
-        said = re.sub(r"^.*?\b[A-Za-z]*Error: ", "", str(error).split("\n")[0]).strip()
-        _failed[_failing(ask)] = (
-            f"mol-sketch couldn't draw it with these settings ({said})." if said
-            else "mol-sketch couldn't draw it with these settings."
-        )
+        _failed[_failing(ask)] = _failure(error)
         return _hatched(width / height)
+
+
+def _failure(error: Exception) -> str:
+    """What mol-sketch said, failing to draw a structure, without where in its code it said it."""
+
+    said = re.sub(r"^.*?\b[A-Za-z]*Error: ", "", str(error).split("\n")[0]).strip()
+    return (
+        f"mol-sketch couldn't draw it with these settings ({said})." if said
+        else "mol-sketch couldn't draw it with these settings."
+    )
+
+
+def _drawing(ask: _Ask, aspect: float) -> str | bytes:
+    """What the figure draws of ``ask`` at ``aspect``, as ``structure_svg`` or ``structure_png``
+    hands it over, but for its ids: mol-sketch's SVG (a look drawn as shapes, and drawn so) or
+    its picture -- the panel hatched where mol-sketch fails, and the failure said, as
+    ``structure_png`` says it. What a structure is measured by (``flexo.structure_fit``)."""
+
+    if _failed.get(_failing(ask)):
+        return _hatched(aspect)
+    try:
+        if ask.look in VECTOR_LOOKS:
+            return _one_at_a_time(_render_svg, ask, aspect)
+        return _one_at_a_time(_render, ask, aspect)
+    except Exception as error:
+        _failed[_failing(ask)] = _failure(error)
+        return _hatched(aspect)
 
 
 def structure_svg(
@@ -618,7 +640,7 @@ slides) only approximate -- pictures, blends, blurs, fills of a picture, clips o
 a rectangle: a drawing with any of them is embedded as a picture instead."""
 
 
-@functools.lru_cache(maxsize=32)
+@functools.lru_cache(maxsize=128)
 def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
     """The molecule in a look drawn as shapes: its SVG, painted by role -- or, drawn with
     more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
@@ -694,9 +716,11 @@ def _hex(colour: str) -> str:
     return text
 
 
+@functools.lru_cache(maxsize=128)
 def _own_ids(markup: str, prefix: str) -> str:
     """mol-sketch's SVG with its ids (clip paths and the like, numbered from 1 in every
-    drawing) made the molecule's own, so two molecules in a figure never share one."""
+    drawing) made the molecule's own, so two molecules in a figure never share one. (Made once
+    for each molecule: a figure being laid out asks for its molecules again and again.)"""
 
     if ' id="' not in markup:
         return markup
@@ -1200,7 +1224,7 @@ def _ions(source: str, stamp: float) -> tuple[str, ...]:
     return tuple(sorted(lone - more))
 
 
-@functools.lru_cache(maxsize=32)
+@functools.lru_cache(maxsize=64)
 def _render(ask: _Ask, aspect: float) -> bytes:
     from flexo.structure_kept import drawing, keep_drawing
 
