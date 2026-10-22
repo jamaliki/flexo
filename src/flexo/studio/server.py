@@ -510,6 +510,9 @@ class Handler(BaseHTTPRequestHandler):
             self.workspace.uploads.add(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        nudge = getattr(getattr(self.workspace, "bundle", None), "nudge", None)
+        if nudge is not None:
+            nudge()  # (a bundle's folder: written back once it rests)
         return {"path": target.relative_to(self.workspace.path(name).parent).as_posix()}
 
     def _export(self, doc: Any, data: dict[str, Any]) -> None:

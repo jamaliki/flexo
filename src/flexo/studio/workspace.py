@@ -1132,6 +1132,9 @@ class Workspace:
             return
         if wrote:
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            nudge = getattr(getattr(self, "bundle", None), "nudge", None)
+            if nudge is not None:
+                nudge()  # (a bundle's folder: written back once it rests)
             if self.views:
                 from flexo.studio.embedded import saved as views_saved
 
