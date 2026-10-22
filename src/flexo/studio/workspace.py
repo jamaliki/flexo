@@ -36,8 +36,8 @@ from typing import Any
 import yaml
 
 from flexo.draft import GivenUp, given_up_when
-from flexo.roundtrip import writing
-from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures, taking_turns
+from flexo.roundtrip import prime, writing
+from flexo.studio import Kind, acting, code_allowed, folder_root, kinds, pictures, taking_turns
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
@@ -111,6 +111,9 @@ class Doc:
         self.lock = threading.RLock()
         self.drawing = threading.Lock()
         """One drawing of it at a time, whichever document has the folder's turn."""
+        self.writing = threading.Lock()
+        """One writing of its file at a time (``write``), apart from ``lock``: its edits are
+        taken while it is written."""
         self.exists = path.is_file()
         self.problem: str | None = None
         self.held = False
@@ -163,6 +166,12 @@ class Doc:
         inode): the very file, wherever in the folder it is moved."""
         self.look_at = 0.0
         self.look_every = LOOK[0]
+        try:
+            self.primed = not _keeps_words(type(kind))
+        except AttributeError:  # (a kind that saves nothing)
+            self.primed = True
+        """Whether the parts of its file as it was opened are read, for writing over it
+        (``flexo.roundtrip.prime``): a little at each tick of the clock until they are."""
 
     def info(self) -> dict[str, Any]:
         with self.lock:
@@ -288,11 +297,12 @@ class Doc:
         self, merged: Any, who: dict[str, Any], client: str, *, news: bool = True
     ) -> tuple[int, Any]:
         before = self.document
-        if _dumps(merged) == _dumps(before):
+        written = _dumps(merged)  # (once: compared, and kept in the history)
+        if written == _dumps(before):
             return self.version, self.document
         self.version += 1
         self.document = merged
-        self.history[self.version] = _dumps(merged)
+        self.history[self.version] = written
         self.authors[self.version] = who
         while len(self.history) > HISTORY:
             self.history.popitem(last=False)
@@ -316,54 +326,70 @@ class Doc:
         written over; one gone from where it was is written there again only by a save
         (``again``), never by an edit -- a second copy beside the one moved."""
 
-        with self.lock:
-            if self.held:
-                return False
-            if self.saved >= self.version and (self.exists or not again):
-                return False
-            if self.gone and not again:
-                return False
-            other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
-            if other is not None and other != self.kind.name:
-                # Another kind's document now (put right by hand, an agent's): kept as it is.
-                self._foreign(other)
-                return False
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+        # One writing at a time; edits are not kept waiting for it. The document is put into
+        # its words -- a deck of fifty slides written over its file's takes a few hundred
+        # milliseconds -- as it was when the writing began, outside the lock its edits take,
+        # and counted saved at that version: one made meanwhile is written next.
+        with self.writing:
+            with self.lock:
+                if self.held:
+                    return False
+                if self.saved >= self.version and (self.exists or not again):
+                    return False
+                if self.gone and not again:
+                    return False
+                other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
+                if other is not None and other != self.kind.name:
+                    # Another kind's document now (put right by hand, an agent's): kept as it is.
+                    self._foreign(other)
+                    return False
+                path, version, previous = self.path, self.version, self.disk_text
+                document = copy.deepcopy(self.document)
+            path.parent.mkdir(parents=True, exist_ok=True)
             # Written beside the file and moved over it: a write cut short (a full disk,
             # the app quitting) leaves the file as it was, not half of the new one.
-            partial = self.path.with_name(
-                f".{self.path.name}.{secrets.token_hex(4)}.saving{self.path.suffix}"
-            )
+            partial = path.with_name(f".{path.name}.{secrets.token_hex(4)}.saving{path.suffix}")
             try:
                 # Over the file's words as they are (a kind that can keeps its comments and
                 # quoting where the document did not change) -- as the file it is, not the
                 # one beside it it is written to first: a deletion undone puts back its words.
-                with writing(str(self.path.resolve())):
+                with writing(str(path.resolve())):
                     if _keeps_words(type(self.kind)):
-                        self.kind.save(partial, self.document, previous=self.disk_text)
+                        self.kind.save(partial, document, previous=previous)
                     else:
-                        self.kind.save(partial, self.document)
+                        self.kind.save(partial, document)
                 with contextlib.suppress(OSError):
-                    os.chmod(partial, self.path.stat().st_mode & 0o7777)
-                os.replace(partial, self.path)
+                    os.chmod(partial, path.stat().st_mode & 0o7777)
+                with self.lock:
+                    if self.path != path or self.disk_text != previous or self.held:
+                        # Renamed, or its file changed and taken in (or not reading), while it
+                        # was being written: written again from what it is now, not over that.
+                        with contextlib.suppress(OSError):
+                            partial.unlink()
+                        return False
+                    # (The edits these words hold, by their ids, kept beside them first: a
+                    # studio started again makes none of them twice -- flexo.studio.acting.)
+                    acting.saving(self.workspace, self, partial, version)
+                    os.replace(partial, path)
+                    self.disk_text = _words(path)
+                    self.disk_stamp = _stamp(path)
+                    self.file = _file(path)
+                    self.on_disk = document
+                    self.recent.append((_dumps(document), True))
+                    self.saved = max(self.saved, version)
+                    self.exists = True
+                    self.gone, self.moved = False, None
+                    self.problem = None
             except BaseException:
                 with contextlib.suppress(OSError):
                     partial.unlink()
                 raise
-            self.disk_text = _words(self.path)
-            self.disk_stamp = _stamp(self.path)
-            self.file = _file(self.path)
-            self.on_disk = copy.deepcopy(self.document)
-            self.recent.append((_dumps(self.on_disk), True))
-            self.saved = self.version
-            self.exists = True
-            self.gone, self.moved = False, None
-            self.problem = None
-            other = self.workspace.kind_on_disk(self.path)
+            other = self.workspace.kind_on_disk(path)
             if other is not None and other != self.kind.name:
                 # Written as asked (its words put right in a figure's Source, say), and
                 # another kind's document now: it opens as that kind from here on.
-                self._foreign(other)
+                with self.lock:
+                    self._foreign(other)
             return True
 
     def _foreign(self, other: str) -> None:
@@ -599,8 +625,12 @@ class Workspace:
         """The folder's turn to draw: one drawing at a time -- but for one waiting on a plot
         run apart, which gives its turn to another document meanwhile (``taking_turns``)."""
         self.latest: dict[str, int] = {}
+        self._digests: dict[str, dict[str, tuple[str, str]]] = {}
+        """Each document's pages' drawings, as last drawn: as sent, and their hashes (``draw``)."""
         self.acts: dict[str, int] = {}
         """How many edits the pages have asked of each document's kind (``acting``)."""
+        self.drawn_at = 0.0
+        """When a page last asked for a drawing (``time.monotonic``)."""
         self._documents: dict[Path, tuple[float, str | None]] = {}
         self._unread: dict[Path, bool] = {}  # files of a kind that do not read as it has them
         self._stop = threading.Event()
@@ -1108,6 +1138,9 @@ class Workspace:
             return
         if wrote:
             self.broadcast({"type": "saved", "file": doc.name, "version": doc.saved})
+            nudge = getattr(getattr(self, "bundle", None), "nudge", None)
+            if nudge is not None:
+                nudge()  # (a bundle's folder: written back once it rests)
             if self.views:
                 from flexo.studio.embedded import saved as views_saved
 
@@ -1381,6 +1414,7 @@ class Workspace:
     def draw(
         self, name: str, document: Any, version: int, known: dict[str, str], hints: dict[str, Any]
     ) -> dict[str, Any]:
+        self.drawn_at = time.monotonic()
         doc = self.open(name)
         # Each page counts its own drawings; an older one waiting its turn is dropped.
         client = f"{name}\0{hints.get('client', '')}"
@@ -1426,7 +1460,12 @@ class Workspace:
                     ],
                 }
             elapsed = time.perf_counter() - started
-        doc.depends = {file.resolve() for file in drawing.files}
+        # (The files it is drawn from, as the disk names them, worked out again only when the
+        # drawing names others: a deck names the same few at every keystroke.)
+        named = tuple(drawing.files)
+        if named != getattr(doc, "depends_named", None):
+            doc.depends = {file.resolve() for file in named}
+            doc.depends_named = named
         # Whether it draws as written (a problem said in it), for the folder's list of documents.
         faulty = any(message.severity == "error" for message in drawing.messages)
         current = not drawing.unfinished and version >= doc.version
@@ -1434,11 +1473,19 @@ class Workspace:
             doc.faulty = faulty
             self.broadcast({"type": "documents", "documents": self.documents()})
         pages = []
+        # Each drawing's hash worked out once: a deck's unchanged slides are the same drawings
+        # (the very strings) at every keystroke.
+        was, digests = self._digests.get(doc.name, {}), {}
         for page in drawing.pages:
             if page.pending:
                 pages.append({"id": page.id, "label": page.label, "pending": True, **page.extra})
                 continue
-            digest = hashlib.sha1(page.svg.encode("utf-8")).hexdigest()[:16]
+            found = was.get(page.svg)
+            if found is None:
+                svg = _with_token(page.svg, self.token)
+                found = (svg, hashlib.sha1(svg.encode("utf-8")).hexdigest()[:16])
+            digests[page.svg] = found
+            svg, digest = found
             entry: dict[str, Any] = {
                 "id": page.id,
                 "label": page.label,
@@ -1447,8 +1494,9 @@ class Workspace:
                 **page.extra,
             }
             if known.get(page.id) != digest:
-                entry["svg"] = page.svg
+                entry["svg"] = svg
             pages.append(entry)
+        self._digests[doc.name] = digests
         return {
             "version": version,
             "pages": pages,
@@ -1561,6 +1609,8 @@ class Workspace:
             rested = now - doc.changed_at > self.quiet or now - doc.unsaved_since > self.patience
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
+            if not getattr(doc, "primed", True) and doc.disk_text is not None and not doc.held:
+                doc.primed = prime(doc.disk_text, 0.01)
             moved = False
             for file in list(doc.depends):
                 stamp = _stamp(file)
@@ -1618,6 +1668,19 @@ class Workspace:
                 else:
                     looked[path] = stamps
         self._looked, self._taken = looked, taken
+
+
+_PICTURE_TOKEN = re.compile(r"(/api/picture\?[^\"'\s<>]*?token=)([^&\"'\s<>]+)")
+
+
+def _with_token(svg: str, token: str) -> str:
+    """A drawing with each photograph's address carrying this studio's token: one kept from
+    another run of the studio (a figure's layout, kept between runs with its photographs'
+    addresses in it) carries that run's, which this one refuses -- the photograph not shown."""
+
+    if "/api/picture?" not in svg:
+        return svg
+    return _PICTURE_TOKEN.sub(lambda found: found.group(1) + token, svg)
 
 
 def _person(entry: dict[str, Any]) -> str:

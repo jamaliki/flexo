@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from flexo.confine import once
 from flexo.diagnostics import FlexoError
 from flexo.draft import DRAFT, give_up_if_newer, recall, remember
 from flexo.emit import emit_svg
@@ -51,6 +52,7 @@ class Compilation:
     of the layout either."""
 
 
+@once()  # (its files looked at once, however often its parts ask: flexo.confine)
 def compile_figure(
     figure: FigureSpec,
     *,

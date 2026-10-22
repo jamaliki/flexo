@@ -29,6 +29,7 @@ import itertools
 import math
 import re
 import struct
+import threading
 import unicodedata
 import zlib
 from collections.abc import Callable, Sequence
@@ -37,7 +38,7 @@ from io import BytesIO
 from pathlib import Path
 
 from flexo.colour import to_rgb
-from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text, read_drawing
+from flexo.drawing import Drawing, Group, Image, Paint, Run, Segment, Shape, Text
 from flexo.drawing import _ellipse as _oval
 from flexo.fonts import FontFace, hb_font, load_face
 from flexo.outline import _outline, shape, underline
@@ -126,9 +127,11 @@ def pdf_bytes(
     if isinstance(pages, str | Drawing):
         pages = [pages]
     from flexo.animated import stilled
+    from flexo.drawings_kept import drawing_of
 
-    # (A GIF is the frame its picture names, as paper shows it: flexo.animated.)
-    drawings = [read_drawing(stilled(page)) if isinstance(page, str) else page for page in pages]
+    # (A GIF is the frame its picture names, as paper shows it: flexo.animated.) (Each read as
+    # it was for the deck's PowerPoint, or its PDF before, where it was: flexo.drawings_kept.)
+    drawings = [drawing_of(stilled(page)) if isinstance(page, str) else page for page in pages]
     return _Writer(title, author, tags, language).write(drawings)
 
 
@@ -158,6 +161,8 @@ class _Writer:
         self.fonts: dict[tuple[FontFace, int], _Font] = {}
         self.states: dict[tuple[float, float, str], str] = {}
         self.images: list[tuple[str, int]] = []
+        self.placed: dict[bytes, str] = {}
+        """Each picture's image, by a digest of its bytes: one on many pages is written once."""
         self.shadings: list[tuple[str, int]] = []
         self.tags = tags
         self.language = language
@@ -180,9 +185,14 @@ class _Writer:
         if compress:
             # Flate at its usual level: the best (9) takes five times as long on a picture
             # for a few hundredths smaller.
-            data = zlib.compress(data, 6)
-            extra = "/Filter /FlateDecode " + extra
+            return self.flated(zlib.compress(data, 6), extra)
         head = f"<< {extra}/Length {len(data)} >>\nstream\n".encode()
+        return self.add(head + data + b"\nendstream")
+
+    def flated(self, data: bytes, extra: str = "") -> int:
+        """A stream of ``data`` compressed already (with Flate)."""
+
+        head = f"<< /Filter /FlateDecode {extra}/Length {len(data)} >>\nstream\n".encode()
         return self.add(head + data + b"\nendstream")
 
     def write(self, drawings: list[Drawing]) -> bytes:
@@ -700,17 +710,11 @@ class _Content:
             except Exception:  # a GIF Pillow cannot read is left out, as any unreadable
                 return
         if mime == "image/svg+xml":
-            import resvg_py
+            from flexo.raster_kept import png_of
 
+            # (Drawn once, for the PowerPoint as for this: flexo.raster_kept.)
             pixels = max(1, round(item.width / 72.0 * ARTWORK_DPI))
-            # A dpi lets resvg resolve sizes given in pt or mm; the width sets the pixels.
-            svg = data.decode("utf-8")
-            from flexo.fonts import font_directories
-
-            folders = [str(folder) for folder in font_directories()]
-            data = bytes(
-                resvg_py.svg_to_bytes(svg_string=svg, dpi=72, width=pixels, font_dirs=folders)
-            )
+            data = png_of(data.decode("utf-8"), pixels)
             mime = "image/png"
             x, y, w, h = item.x, item.y, item.width, item.height
         else:
@@ -718,11 +722,16 @@ class _Content:
             if size is None:
                 return
             x, y, w, h = item.placed(*size)
-        name = f"I{len(self.writer.images)}"
-        number = _image_object(self.writer, mime, data)
-        if number is None:
-            return
-        self.writer.images.append((name, number))
+        # A picture on several pages (a logo on every slide) is one image, drawn on each.
+        digest = hashlib.sha256(mime.encode() + b"\0" + data).digest()
+        name = self.writer.placed.get(digest)
+        if name is None:
+            name = f"I{len(self.writer.images)}"
+            number = _image_object(self.writer, mime, data)
+            if number is None:
+                return
+            self.writer.images.append((name, number))
+            self.writer.placed[digest] = name
         # An image fills the unit square with its first row at the top: flip it back
         # (unless it is to be drawn mirrored).
         across = f"{_n(-w)} 0" if item.flip_x else f"{_n(w)} 0"
@@ -982,32 +991,65 @@ def _image_object(writer: _Writer, mime: str, data: bytes) -> int | None:
         )
     if mime != "image/png":
         return None
-    width, height, channels, pixels = _png_pixels(data)
-    colour_channels = 1 if channels in (1, 2) else 3
-    alpha = channels in (2, 4)
-    colour, mask = bytes(pixels), b""
-    if alpha:
-        # Colour and alpha parted by slicing, not pixel by pixel: a plot drawn as a
-        # picture has millions of pixels.
-        mask = bytes(pixels[channels - 1 :: channels])
-        parted = bytearray(len(mask) * colour_channels)
-        for channel in range(colour_channels):
-            parted[channel::colour_channels] = pixels[channel::channels]
-        colour = bytes(parted)
+    width, height, space, mask, colour = _png_image(data)
     smask = ""
-    if alpha and mask.count(255) != len(mask):
-        soft = writer.stream(
-            bytes(mask),
+    if mask is not None:
+        soft = writer.flated(
+            mask,
             f"/Type /XObject /Subtype /Image /Width {width} /Height {height} "
             "/ColorSpace /DeviceGray /BitsPerComponent 8 ",
         )
         smask = f"/SMask {soft} 0 R "
-    space = "/DeviceGray" if colour_channels == 1 else "/DeviceRGB"
-    return writer.stream(
-        bytes(colour),
+    return writer.flated(
+        colour,
         f"/Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace {space} "
         f"/BitsPerComponent 8 {smask}",
     )
+
+
+_IMAGES: dict[bytes, tuple[int, int, str, bytes | None, bytes]] = {}
+"""PNGs as images, by a digest of their bytes, most recently used last: a picture exported
+again (the next export of the same deck) is not decoded and compressed again."""
+
+_IMAGES_HELD = 64 << 20
+"""How many bytes of them are kept."""
+
+_IMAGES_LOCK = threading.Lock()
+
+
+def _png_image(data: bytes) -> tuple[int, int, str, bytes | None, bytes]:
+    """A PNG as a PDF's image: its width and height, its colour space, its alpha as a soft
+    mask (None where it is opaque throughout) and its colour, each compressed with Flate."""
+
+    digest = hashlib.sha256(data).digest()
+    with _IMAGES_LOCK:
+        made = _IMAGES.get(digest)
+    if made is None:
+        width, height, channels, pixels = _png_pixels(data)
+        colour_channels = 1 if channels in (1, 2) else 3
+        alpha = channels in (2, 4)
+        colour, mask = bytes(pixels), b""
+        if alpha:
+            # Colour and alpha parted by slicing, not pixel by pixel: a plot drawn as a
+            # picture has millions of pixels.
+            mask = bytes(pixels[channels - 1 :: channels])
+            parted = bytearray(len(mask) * colour_channels)
+            for channel in range(colour_channels):
+                parted[channel::colour_channels] = pixels[channel::channels]
+            colour = bytes(parted)
+        # Flate at its usual level, as ``_Writer.stream`` compresses.
+        soft = zlib.compress(mask, 6) if alpha and mask.count(255) != len(mask) else None
+        space = "/DeviceGray" if colour_channels == 1 else "/DeviceRGB"
+        made = (width, height, space, soft, zlib.compress(colour, 6))
+    with _IMAGES_LOCK:
+        _IMAGES.pop(digest, None)
+        _IMAGES[digest] = made
+        held = 0
+        for key in reversed(list(_IMAGES)):
+            held += len(_IMAGES[key][4]) + len(_IMAGES[key][3] or b"")
+            if held > _IMAGES_HELD and key != digest:
+                del _IMAGES[key]
+    return made
 
 
 def _png_pixels(data: bytes) -> tuple[int, int, int, bytes]:

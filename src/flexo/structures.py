@@ -67,7 +67,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
-from flexo.confine import outside
+from flexo.confine import found
 from flexo.diagnostics import Diagnostic, FlexoError, Severity
 from flexo.drawn import Picture, Shape, Words, path, units
 from flexo.geometry import Side, Size
@@ -309,7 +309,7 @@ def _problem(node: NodeSpec, style: LayoutStyle) -> _Problem | None:
     return _Problem("draw", f"Couldn't draw {name}", failed, drawn=True) if failed else found
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=512)
 def _checked(ask: _Ask, name: str) -> _Problem | None:
     if not Path(ask.source).exists() and re.search(r"[/\\]|\.(pdb|cif|mmcif|ent|json)$", ask.source,
                                                    re.IGNORECASE):
@@ -584,13 +584,35 @@ def structure_png(
                 return drawn
         return _one_at_a_time(_render, ask, width / height)
     except Exception as error:
-        # What mol-sketch said, without where in its code it said it.
-        said = re.sub(r"^.*?\b[A-Za-z]*Error: ", "", str(error).split("\n")[0]).strip()
-        _failed[_failing(ask)] = (
-            f"mol-sketch couldn't draw it with these settings ({said})." if said
-            else "mol-sketch couldn't draw it with these settings."
-        )
+        _failed[_failing(ask)] = _failure(error)
         return _hatched(width / height)
+
+
+def _failure(error: Exception) -> str:
+    """What mol-sketch said, failing to draw a structure, without where in its code it said it."""
+
+    said = re.sub(r"^.*?\b[A-Za-z]*Error: ", "", str(error).split("\n")[0]).strip()
+    return (
+        f"mol-sketch couldn't draw it with these settings ({said})." if said
+        else "mol-sketch couldn't draw it with these settings."
+    )
+
+
+def _drawing(ask: _Ask, aspect: float) -> str | bytes:
+    """What the figure draws of ``ask`` at ``aspect``, as ``structure_svg`` or ``structure_png``
+    hands it over, but for its ids: mol-sketch's SVG (a look drawn as shapes, and drawn so) or
+    its picture -- the panel hatched where mol-sketch fails, and the failure said, as
+    ``structure_png`` says it. What a structure is measured by (``flexo.structure_fit``)."""
+
+    if _failed.get(_failing(ask)):
+        return _hatched(aspect)
+    try:
+        if ask.look in VECTOR_LOOKS:
+            return _one_at_a_time(_render_svg, ask, aspect)
+        return _one_at_a_time(_render, ask, aspect)
+    except Exception as error:
+        _failed[_failing(ask)] = _failure(error)
+        return _hatched(aspect)
 
 
 def structure_svg(
@@ -618,7 +640,7 @@ slides) only approximate -- pictures, blends, blurs, fills of a picture, clips o
 a rectangle: a drawing with any of them is embedded as a picture instead."""
 
 
-@functools.lru_cache(maxsize=32)
+@functools.lru_cache(maxsize=128)
 def _render_svg(ask: _Ask, aspect: float) -> str | bytes:
     """The molecule in a look drawn as shapes: its SVG, painted by role -- or, drawn with
     more than shapes (``_PICTURED``: a surface hatched in its patches, say), its picture,
@@ -694,9 +716,11 @@ def _hex(colour: str) -> str:
     return text
 
 
+@functools.lru_cache(maxsize=128)
 def _own_ids(markup: str, prefix: str) -> str:
     """mol-sketch's SVG with its ids (clip paths and the like, numbered from 1 in every
-    drawing) made the molecule's own, so two molecules in a figure never share one."""
+    drawing) made the molecule's own, so two molecules in a figure never share one. (Made once
+    for each molecule: a figure being laid out asks for its molecules again and again.)"""
 
     if ' id="' not in markup:
         return markup
@@ -867,18 +891,23 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         paints += [(role, palette.get(role)) for role in ("accent-fill", "warm-fill", "block-fill",
                                                           "accent-stroke")]
     paints.append(("canvas", paper))  # last: a fill as white as the page is still a fill
+    # (Each file looked at once: whether it is there, when it was saved, and -- while the studio
+    # serves a folder -- whether it is in it, asked of the disk afresh only for a file that is
+    # not the one found there before: flexo.confine.found.)
     path = Path(source).expanduser()
-    if path.exists() and outside(path):
+    on_disk, away = found(path)
+    if on_disk is not None and away:
         raise _fail(node, "source", "The structure file is outside the folder.")
     density = node.property("density")
     if density is not None:
         density = str(density).strip()
-        if Path(density).expanduser().exists() and outside(Path(density).expanduser()):
+        if found(Path(density).expanduser())[1]:  # (there, and outside)
             raise _fail(node, "density", "The map file is outside the folder.")
     ss_from = str(node.property("ss_from") or "").strip() or None
     ss_path = Path(ss_from).expanduser() if ss_from else None
-    if ss_path is not None and ss_path.exists():
-        if outside(ss_path):
+    ss_disk, ss_away = found(ss_path) if ss_path is not None else (None, False)
+    if ss_disk is not None:
+        if ss_away:
             raise _fail(node, "ss_from", "The file its secondary structure is from is outside "
                         "the folder.")
         ss_from = str(ss_path)
@@ -891,8 +920,8 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         raise _fail(node, "step", "A scene's step is a whole number, from 1 for its first.")
     noise, fixed, seed = _noise(node)
     return _Ask(
-        str(path) if path.exists() else source.strip(),
-        path.stat().st_mtime if path.exists() else 0.0,
+        str(path) if on_disk is not None else source.strip(),
+        on_disk.st_mtime if on_disk is not None else 0.0,
         look,
         paper,
         tuple(colours),
@@ -910,7 +939,7 @@ def _ask(node: NodeSpec, style: LayoutStyle, palette: Palette) -> _Ask:
         tuple(paints),
         1 if step is None else int(step),
         ss_from,
-        ss_path.stat().st_mtime if ss_path is not None and ss_path.exists() else 0.0,
+        ss_disk.st_mtime if ss_disk is not None else 0.0,
         noise,
         fixed,
         seed,
@@ -1195,7 +1224,7 @@ def _ions(source: str, stamp: float) -> tuple[str, ...]:
     return tuple(sorted(lone - more))
 
 
-@functools.lru_cache(maxsize=32)
+@functools.lru_cache(maxsize=64)
 def _render(ask: _Ask, aspect: float) -> bytes:
     from flexo.structure_kept import drawing, keep_drawing
 
