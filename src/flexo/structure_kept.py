@@ -14,9 +14,10 @@ draws it afresh. The code is not in the file's name but in its first line
 before kept, rather than leaving it to take a place among those kept. The most recently used
 are kept, up to ``KEPT`` of them and ``SIZE`` bytes in all.
 
-Each file is looked at once for each thing looked up (``_key``), and what is read back is
-marked used once a session (``_read``): a deck opened in a busy studio waits on every look at
-the disk, each one a turn for the studio's other threads.
+Each file is looked at once for each thing looked up (``_key``; read only when the disk says
+it has changed, ``flexo.kept_versions.content``), and what is read back is marked used once a
+session (``_read``): a deck opened in a busy studio waits on every look at the disk, each one a
+turn for the studio's other threads.
 """
 
 from __future__ import annotations
@@ -205,6 +206,8 @@ def _key(kind: str, ask, *more) -> str | None:
 
     if folder() is None:
         return None
+    from flexo.kept_versions import content
+
     files = []
     named = {}
     for field, stamp in (("source", "stamp"), ("ss_from", "ss_stamp"), ("density", None)):
@@ -212,7 +215,7 @@ def _key(kind: str, ask, *more) -> str | None:
         if not name:
             continue
         path = os.path.expanduser(name)
-        held = _content(path)
+        held = content(path)
         if held is None:
             files.append(name)  # a PDB entry or a map by its ID: the same wherever it is read
             continue
@@ -224,36 +227,6 @@ def _key(kind: str, ask, *more) -> str | None:
     # (The code that draws it is not in the name: each file says which version kept it.)
     said = repr((VERSION, kind, tuple(files), plain, more))
     return hashlib.sha256(said.encode("utf-8")).hexdigest()[:32]
-
-
-_CONTENTS: dict[str, tuple[tuple[int, int, int, int], str]] = {}
-"""What is in each file a structure is drawn from (``_content``), with the file it was found
-in: its device, inode, time saved and length."""
-
-
-def _content(path: str) -> str | None:
-    """What is in the file at ``path``, hashed -- read once for as long as it is the same file,
-    unchanged -- or None, for no file there."""
-
-    try:
-        stat = os.stat(path)
-    except (OSError, ValueError):
-        return None
-    same = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
-    where = os.path.abspath(path)
-    known = _CONTENTS.get(where)
-    if known is not None and known[0] == same:
-        return known[1]
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read()  # (at once: a ribosome's 25 MB in one read, not a hundred)
-    except OSError:
-        return None
-    held = hashlib.sha256(data).hexdigest()
-    if len(_CONTENTS) >= 1024:
-        _CONTENTS.clear()
-    _CONTENTS[where] = (same, held)
-    return held
 
 
 def _code() -> str:

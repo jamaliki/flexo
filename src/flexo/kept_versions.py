@@ -151,3 +151,36 @@ def _read_through(here: Path, nested: bool, suffixes: tuple[str, ...]) -> bytes:
     for path in sorted(name for name in names if name.suffix in suffixes):
         digest.update(path.read_bytes())
     return digest.digest()
+
+
+_CONTENTS: dict[str, tuple[tuple[int, int, int, int], str]] = {}
+"""What is in each file something kept is made from (``content``), with the file it was found
+in: its device, inode, time saved and length."""
+
+
+def content(path: str) -> str | None:
+    """What is in the file at ``path``, hashed -- read once for as long as the disk says it is
+    the same file, unchanged -- or None, for no file there. What is kept is kept by this, not by
+    where a file is or when it was saved: a deck unpacked afresh (a copy of it, opened on another
+    computer, its bundle put back in its place) has its files elsewhere, saved as they were
+    unpacked, and what is in them is what it was."""
+
+    try:
+        stat = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    same = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    where = os.path.abspath(path)
+    known = _CONTENTS.get(where)
+    if known is not None and known[0] == same:
+        return known[1]
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()  # (at once: a ribosome's 25 MB in one read, not a hundred)
+    except OSError:
+        return None
+    held = hashlib.sha256(data).hexdigest()
+    if len(_CONTENTS) >= 1024:
+        _CONTENTS.clear()
+    _CONTENTS[where] = (same, held)
+    return held

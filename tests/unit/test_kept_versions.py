@@ -132,3 +132,25 @@ def test_the_switch_interval_is_put_back_once_trajectories_are_worked_out() -> N
             pass
         assert sys.getswitchinterval() == quick
     assert sys.getswitchinterval() == pytest.approx(before, rel=1e-3)
+
+
+def test_a_photographs_address_on_the_page_says_what_is_in_it(tmp_path: Path) -> None:
+    """Its version, for the page to load it again once it changes: what is in it -- the same for
+    a copy of it elsewhere saved at another time, another once it is changed."""
+
+    import os
+    import shutil
+    from types import SimpleNamespace
+
+    from flexo.studio.pictures import _version
+
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"\x89PNG one")
+    copy = tmp_path / "elsewhere" / "photo.png"
+    copy.parent.mkdir()
+    shutil.copyfile(photo, copy)
+    os.utime(copy, (1_000_000, 1_000_000))
+    first = _version(SimpleNamespace(path=photo, stamp=1))
+    assert first == _version(SimpleNamespace(path=copy, stamp=2))
+    copy.write_bytes(b"\x89PNG two")
+    assert _version(SimpleNamespace(path=copy, stamp=2)) != first
