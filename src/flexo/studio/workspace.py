@@ -111,6 +111,9 @@ class Doc:
         self.lock = threading.RLock()
         self.drawing = threading.Lock()
         """One drawing of it at a time, whichever document has the folder's turn."""
+        self.writing = threading.Lock()
+        """One writing of its file at a time (``write``), apart from ``lock``: its edits are
+        taken while it is written."""
         self.exists = path.is_file()
         self.problem: str | None = None
         self.held = False
@@ -316,54 +319,67 @@ class Doc:
         written over; one gone from where it was is written there again only by a save
         (``again``), never by an edit -- a second copy beside the one moved."""
 
-        with self.lock:
-            if self.held:
-                return False
-            if self.saved >= self.version and (self.exists or not again):
-                return False
-            if self.gone and not again:
-                return False
-            other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
-            if other is not None and other != self.kind.name:
-                # Another kind's document now (put right by hand, an agent's): kept as it is.
-                self._foreign(other)
-                return False
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+        # One writing at a time; edits are not kept waiting for it. The document is put into
+        # its words -- a deck of fifty slides written over its file's takes a few hundred
+        # milliseconds -- as it was when the writing began, outside the lock its edits take,
+        # and counted saved at that version: one made meanwhile is written next.
+        with self.writing:
+            with self.lock:
+                if self.held:
+                    return False
+                if self.saved >= self.version and (self.exists or not again):
+                    return False
+                if self.gone and not again:
+                    return False
+                other = self.workspace.kind_on_disk(self.path) if self.path.is_file() else None
+                if other is not None and other != self.kind.name:
+                    # Another kind's document now (put right by hand, an agent's): kept as it is.
+                    self._foreign(other)
+                    return False
+                path, version, previous = self.path, self.version, self.disk_text
+                document = copy.deepcopy(self.document)
+            path.parent.mkdir(parents=True, exist_ok=True)
             # Written beside the file and moved over it: a write cut short (a full disk,
             # the app quitting) leaves the file as it was, not half of the new one.
-            partial = self.path.with_name(
-                f".{self.path.name}.{secrets.token_hex(4)}.saving{self.path.suffix}"
-            )
+            partial = path.with_name(f".{path.name}.{secrets.token_hex(4)}.saving{path.suffix}")
             try:
                 # Over the file's words as they are (a kind that can keeps its comments and
                 # quoting where the document did not change) -- as the file it is, not the
                 # one beside it it is written to first: a deletion undone puts back its words.
-                with writing(str(self.path.resolve())):
+                with writing(str(path.resolve())):
                     if _keeps_words(type(self.kind)):
-                        self.kind.save(partial, self.document, previous=self.disk_text)
+                        self.kind.save(partial, document, previous=previous)
                     else:
-                        self.kind.save(partial, self.document)
+                        self.kind.save(partial, document)
                 with contextlib.suppress(OSError):
-                    os.chmod(partial, self.path.stat().st_mode & 0o7777)
-                os.replace(partial, self.path)
+                    os.chmod(partial, path.stat().st_mode & 0o7777)
+                with self.lock:
+                    if self.path != path or self.disk_text != previous or self.held:
+                        # Renamed, or its file changed and taken in (or not reading), while it
+                        # was being written: written again from what it is now, not over that.
+                        with contextlib.suppress(OSError):
+                            partial.unlink()
+                        return False
+                    os.replace(partial, path)
+                    self.disk_text = _words(path)
+                    self.disk_stamp = _stamp(path)
+                    self.file = _file(path)
+                    self.on_disk = document
+                    self.recent.append((_dumps(document), True))
+                    self.saved = max(self.saved, version)
+                    self.exists = True
+                    self.gone, self.moved = False, None
+                    self.problem = None
             except BaseException:
                 with contextlib.suppress(OSError):
                     partial.unlink()
                 raise
-            self.disk_text = _words(self.path)
-            self.disk_stamp = _stamp(self.path)
-            self.file = _file(self.path)
-            self.on_disk = copy.deepcopy(self.document)
-            self.recent.append((_dumps(self.on_disk), True))
-            self.saved = self.version
-            self.exists = True
-            self.gone, self.moved = False, None
-            self.problem = None
-            other = self.workspace.kind_on_disk(self.path)
+            other = self.workspace.kind_on_disk(path)
             if other is not None and other != self.kind.name:
                 # Written as asked (its words put right in a figure's Source, say), and
                 # another kind's document now: it opens as that kind from here on.
-                self._foreign(other)
+                with self.lock:
+                    self._foreign(other)
             return True
 
     def _foreign(self, other: str) -> None:
