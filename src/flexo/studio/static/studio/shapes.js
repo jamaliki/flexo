@@ -452,13 +452,15 @@ export function shapeEditor(host) {
     // (A path's points being edited: they are what is shown.)
     if (tools?.points.active()) { tools.points.place(); return; }
     const picks = chosenNow();
-    const px = 1 / unit();
     if (hovered !== null && !picks.includes(hovered) && !gesture && shapesOf()[hovered]) outline(hovered, "hover");
     if (!picks.length || words) return;
     for (const index of picks) outline(index, picks.length > 1 ? "chosen many" : "chosen");
     if (gesture?.started && gesture.type !== "move") return;
     const locked = picks.some((index) => shapesOf()[index]?.locked);
     if (locked) {
+      // (The page's scale read only here, where it is wanted: read with nothing chosen, as a
+      // slide is put on the stage, it laid the whole window out there and then.)
+      const px = 1 / unit();
       // Locked, it shows so -- and has no handles.
       for (const index of picks) {
         const box = boundsOf(index);
