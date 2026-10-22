@@ -203,8 +203,24 @@ def _geometry_of(node: NodeSpec, style: LayoutStyle) -> tuple[object, _Geometry]
         return None
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=256)
 def _geometry(ask) -> _Geometry:
+    """What ``ask`` is framed by: worked out by mol-sketch once, and kept on disk with the
+    drawings (``flexo.structure_kept``), so a figure laid out again another day, its molecules
+    drawn already, never reads them into mol-sketch to frame them."""
+
+    from flexo.structure_kept import geometry, keep_geometry
+
+    kept = geometry(ask)
+    if kept is not None:
+        return _Geometry(kept["points"], kept["base"], kept["camera"], kept["seen"])
+    found = _worked_out(ask)
+    keep_geometry(ask, {"points": found.points, "base": found.base, "seen": found.seen},
+                  found.camera)
+    return found
+
+
+def _worked_out(ask) -> _Geometry:
     import numpy as np
 
     from flexo.structures import _drawn, _noised
