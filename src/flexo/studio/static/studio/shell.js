@@ -1745,6 +1745,9 @@ class SidePanel {
 // The palette open now, closed (⌘K again, or a menu command run while it is open).
 let closePalette = () => {};
 
+// (How many of the palette's rows are drawn as it opens: a screenful and more.)
+const FIRST_ROWS = 40;
+
 export function palette(workspace) {
   if (document.querySelector(".palette")) return;
   const session = workspace.active;
@@ -1862,15 +1865,21 @@ export function palette(workspace) {
         command.icon ? icon(command.icon) : null, text,
         words ? h("span.found-where", {}, words.name) : command.keys ? h("span.kbd", {}, command.keys) : null);
     };
-    const rows = [];
-    shown.forEach((command, i) => {
-      if (command.head) rows.push(h("div.found-head", {}, h("span", {}, command.head.label), command.head.title ? h("span.found-title", {}, command.head.title) : null));
-      // (The commands under the matches, said so.)
-      if (matches.length && command === rest[0]) rows.push(h("div.found-head.commands", {}, "Commands"));
-      rows.push(row(command, i));
+    const rows = (from, to) => shown.slice(from, to).flatMap((command, k) => {
+      const i = from + k;
+      return [
+        command.head ? h("div.found-head", {}, h("span", {}, command.head.label), command.head.title ? h("span.found-title", {}, command.head.title) : null) : null,
+        // (The commands under the matches, said so.)
+        matches.length && command === rest[0] ? h("div.found-head.commands", {}, "Commands") : null,
+        row(command, i)].filter(Boolean);
     });
-    clear(list, rows.length ? rows : h("div.empty", {}, "No results"));
+    // The rows in sight drawn at once, the rest of a long list (every command, as it opens)
+    // just after: the palette shows as the keys are pressed, not once hundreds of rows are laid out.
+    const drawn = ++renders;
+    clear(list, shown.length ? rows(0, FIRST_ROWS) : h("div.empty", {}, "No results"));
+    if (shown.length > FIRST_ROWS) requestAnimationFrame(() => setTimeout(() => { if (drawn === renders && scrim.isConnected) list.append(...rows(FIRST_ROWS, shown.length)); }, 0));
   };
+  let renders = 0;
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
   // Closed, it gives the keys back where they were, as Spotlight does; a command run then
   // takes them where it goes.
