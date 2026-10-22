@@ -2443,6 +2443,8 @@ export function figureParts(host) {
     if (!overlay || pointing.has(overlay)) return;
     pointing.add(overlay);
     overlay.addEventListener("mousemove", (event) => {
+      // (Not while a part is carried: no hint is shown then, and the drawing is not measured.)
+      if (drag?.started) return;
       const id = idAt(event);
       for (const hint of overlay.querySelectorAll(".fig-wordless.tight")) {
         hint.classList.toggle("pointed", hint.dataset.id === id || state.selected.includes(hint.dataset.id));
@@ -3753,6 +3755,8 @@ export function figureParts(host) {
   let drag = null;
   const SVG = (element) => element?.ownerSVGElement || element;
   const unitsPerPixel = (element) => 1 / ((element?.parentNode?.getScreenCTM?.() || SVG(element)?.getScreenCTM?.())?.a || 1);
+  // (As the drag in hand measured it as it began, where it did.)
+  const scaleOf = (element) => drag?.scales?.get(element) ?? unitsPerPixel(element);
   const centre = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
   // What is drawn of a part: a group's frame and everything it holds -- each element
   // once, the outermost, as a framed group draws its parts inside itself.
@@ -3934,12 +3938,18 @@ export function figureParts(host) {
     atRest();
     const { boxes, drawn, folds } = asSeen();
     const moving = elementsOf(id).map((element) => ({ element, base: element.getAttribute("transform") || "", scale: unitsPerPixel(element) }));
-    lift(moving);
     const nodes = new Set(model().nodes.filter((node) => inside(node.id, id)).map((node) => node.id));
     const touches = (ref) => nodes.has(nodeOfRef(ref));
     const lines = [...model().edges.filter((edge) => touches(edge.from) || touches(edge.to)),
       ...model().nets.filter((net) => [...(net.sources || []), ...(net.targets || [])].some(touches))]
       .map((line) => host.element(line.id)).filter((element) => element && !moving.some((item) => item.element.contains(element)));
+    // (A shape, not a group, may be let go on a line -- one not its own -- to go into it.)
+    // (Everything measured before anything is lifted or marked: the drawing read as it stands,
+    // laid out once, not again for each mark -- the drag's first move is not kept waiting.)
+    const paths = nodeOf(id) ? linePaths(nodes) : [];
+    const scales = new Map();
+    for (const each of [...model().nodes, ...model().groups]) for (const element of elementsOf(each.id)) if (!scales.has(element)) scales.set(element, unitsPerPixel(element));
+    lift(moving);
     const indicator = h("div.fig-drop-line");
     const zone = h("div.fig-drop-zone");
     host.overlay.append(zone, indicator);
@@ -3947,9 +3957,7 @@ export function figureParts(host) {
     document.body.classList.add("fig-grabbing");
     for (const { element } of moving) element.classList.add("fig-lifted");
     for (const element of lines) element.classList.add("fig-faded");
-    // (A shape, not a group, may be let go on a line -- one not its own -- to go into it.)
-    const paths = nodeOf(id) ? linePaths(nodes) : [];
-    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn, folds, paths });
+    Object.assign(drag, { started: true, boxes, moving, lines, indicator, zone, parted: [], drawn, folds, paths, scales });
     carryCopy(drag.copy);
     select([id], { reveal: false });
   }
@@ -3996,6 +4004,9 @@ export function figureParts(host) {
   function dragFrame() {
     if (!drag?.started) return;
     drag.frame = 0;
+    // (Where the page is, read once, as the first frame begins: not again from a drawing just
+    // moved, which would have it laid out again at every frame.)
+    drag.origin ??= host.overlay.getBoundingClientRect();
     const { x, y } = drag.pointer;
     const dx = x - drag.from.x, dy = y - drag.from.y;
     for (const { element, base, scale } of drag.moving) {
@@ -4054,7 +4065,7 @@ export function figureParts(host) {
   function placeTag(at) {
     const tag = drag?.tag;
     if (!tag) return;
-    const outer = host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
+    const outer = drag.origin || host.overlay.getBoundingClientRect(), wide = tag.offsetWidth, high = tag.offsetHeight || 19;
     const carried = [...drag.moving.map((item) => item.element), drag.ghost].filter(Boolean).map((element) => drawnRect(element));
     const right = Math.max(at.at.x + 12, ...carried.map((rect) => rect.right + 10));
     const left = Math.min(at.at.x - 12, ...carried.map((rect) => rect.left - 10)) - wide;
@@ -4100,7 +4111,7 @@ export function figureParts(host) {
     showLine(at?.kind === "splice" ? at : null);
     // (Nor beside the part it is beside already: let go there, it stays.)
     if (!at || at.kind === "splice" || (at.kind === "line" && unchanged(at, drag.id))) { drag.zone.classList.remove("on"); drag.indicator.classList.remove("on"); return; }
-    const origin = host.overlay.getBoundingClientRect();
+    const origin = drag.origin || host.overlay.getBoundingClientRect();
     drag.indicator.classList.remove("centre");
     drag.zone.classList.remove("named-beside", "named-left");
     const room = drag.boxes.get(at.parent) || SVG(host.element(model().root))?.getBoundingClientRect();
@@ -4206,7 +4217,7 @@ export function figureParts(host) {
     const nudge = (id, sign) => {
       for (const element of elementsOf(id)) {
         if (drag.moving.some((item) => item.element === element)) continue;
-        const shift = sign * apart * unitsPerPixel(element);
+        const shift = sign * apart * scaleOf(element);
         element.style.transform = at.across ? `translate(${shift}px, 0px)` : `translate(0px, ${shift}px)`;
         drag.parted.push({ element });
       }
@@ -4243,11 +4254,15 @@ export function figureParts(host) {
   // Keynote lifts what it moves -- each element last in the drawing, in a group that keeps it
   // where it was drawn; and put back in its place (`land`) should it go home.
   function lift(moving) {
-    for (const item of moving) {
+    // (Each measured before any is moved: the drawing laid out once.)
+    const found = moving.map((item) => {
       const { element } = item, parent = element.parentNode, svg = element.ownerSVGElement;
       const into = svg?.getScreenCTM?.(), from = parent?.getScreenCTM?.();
-      if (!svg || !into || !from || parent === svg) continue;
-      const at = into.inverse().multiply(from);
+      return { item, parent, svg, at: !svg || !into || !from || parent === svg ? null : into.inverse().multiply(from) };
+    });
+    for (const { item, parent, svg, at } of found) {
+      if (!at) continue;
+      const { element } = item;
       const holder = document.createElementNS(SVG_NS, "g");
       holder.setAttribute("transform", `matrix(${at.a} ${at.b} ${at.c} ${at.d} ${at.e} ${at.f})`);
       holder.setAttribute("class", "fig-lift");
@@ -4442,6 +4457,8 @@ export function figureParts(host) {
     window.getSelection?.()?.removeAllRanges();
     atRest();
     const { boxes, drawn, folds } = asSeen();
+    // (The lines measured before anything is marked, as a part's drag does: dragStart.)
+    const paths = linePaths();
     const look = figureLook(), ems = parts[drag.kind]?.size || [5.5, 3.5];
     const ghost = h("div.fig-tile-ghost", {}, glyph(drag.kind), h("span", {}, parts[drag.kind].title));
     document.body.append(ghost);
@@ -4449,12 +4466,13 @@ export function figureParts(host) {
     host.overlay.append(zone, indicator);
     host.overlay.classList.add("fig-dragging");
     document.body.classList.add("fig-grabbing");
-    Object.assign(drag, { started: true, boxes, drawn, folds, ghost, indicator, zone, paths: linePaths(),
+    Object.assign(drag, { started: true, boxes, drawn, folds, ghost, indicator, zone, paths,
       size: { width: ems[0] * look.size, height: ems[1] * look.size } });
   }
   function tileFrame() {
     if (!drag?.started) return;
     drag.frame = 0;
+    drag.origin ??= host.overlay.getBoundingClientRect();
     const at = dropTarget(drag.pointer);
     if (!sameDrop(at, drag.at)) { drag.at = at; showDrop(at); }
     else if (at?.kind === "splice") { drag.at = at; placeTag(at); }

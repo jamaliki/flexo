@@ -202,7 +202,10 @@ details.advanced > .inner { margin-top: 10px; }
    go, the group it would join is outlined, and its lines wait, faded, to be drawn again. */
 .fig-marks { transition: opacity 0.16s ease-out; }
 .fig-dragging .fig-marks, .fig-dragging .fig-hover, .fig-landing .fig-marks { opacity: 0; transition: none; }
-body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-select: none; }
+/* (The grabbing hand over everything, from a sheet laid over the window while a part is
+   carried: a class on the body that set it on every element would have the whole page --
+   every shape of the slide's drawing -- styled again as the drag begins and ends.) */
+body.fig-grabbing::after { content: ""; position: fixed; inset: 0; z-index: 2147483647; cursor: grabbing; user-select: none; }
 .fig-lifted { filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22)); }
 .fig-settling { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.16)); }
 .fig-astray { opacity: 0.5; }
@@ -211,7 +214,9 @@ body.fig-grabbing, body.fig-grabbing * { cursor: grabbing !important; user-selec
 .fig-stay, .fig-stay * { pointer-events: none; }
 .fig-faded { opacity: 0.18; transition: opacity 0.15s ease-out; }
 [data-flexo-entity] { transition: transform 0.16s cubic-bezier(.2, .8, .2, 1); }
-.fig-dragging .fig-lifted, .fig-dragging .fig-lifted * { transition: none; }
+/* (Said of what is lifted, which is only while it is dragged: a rule of the page's being dragged
+   on would have every shape of the drawing styled again as the drag begins and ends.) */
+.fig-lifted, .fig-lifted * { transition: none; }
 .fig-drop-line, .fig-drop-zone { position: absolute; left: 0; top: 0; pointer-events: none; opacity: 0;
   transition: transform 0.12s cubic-bezier(.2, .8, .2, 1), width 0.12s, height 0.12s, opacity 0.12s; will-change: transform; }
 .fig-drop-line { z-index: 8; background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -341,7 +346,7 @@ body.fig-banding, body.fig-banding * { user-select: none; }
 .block-dragging .fig-marks { visibility: hidden; }
 /* What is carried is seen whole, past the page's edge too, until it is let go. */
 .fig-dragging svg { overflow: visible; }
-body.fig-grabbing.fig-copying, body.fig-grabbing.fig-copying * { cursor: copy !important; }
+body.fig-grabbing.fig-copying::after { cursor: copy; }
 .fig-end-drag .fig-head { fill: var(--accent); stroke: none; }
 
 /* A shape's words: bold and italic by a button each, pressed when they are, and their
