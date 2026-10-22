@@ -939,6 +939,8 @@ export function figureParts(host) {
         let result;
         try {
           current = job;
+          // (Its drawing may come with it, before it is answered: it lands as smoothly.)
+          if (LANDS.has(job.action.do)) state.landing = Date.now();
           result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label });
           // The studio back: what was held goes, and nothing is said to wait -- nor what was
           // taken back while it was away (made again by an edit of its own, not by ⇧⌘Z).

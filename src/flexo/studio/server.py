@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
-from flexo.studio import sessions
+from flexo.studio import acting, sessions
 from flexo.studio.plain import explain
 from flexo.studio.workspace import Workspace, walk
 
@@ -295,10 +295,21 @@ class Handler(BaseHTTPRequestHandler):
             others = doc.author_since(int(data["base"]), who)
             self._json({"version": version, "document": document, "who": others})
         elif route == "/api/draw":
+            document = data.get("document")
+            if document is None and "base" in data:
+                # The page's document as the studio has it, at the version the page has: not sent
+                # whole (flexo.studio.acting) -- or, the studio started again or that version let
+                # go, sent whole next time.
+                ours = data.get("instance") in (None, workspace.instance)
+                document = acting.sent_document(workspace.open(name), data) if ours else None
+                if document is None:
+                    version = int(data.get("version", 0))
+                    self._json({"version": version, "stale": True, "resend": True})
+                    return
             self._json(
                 workspace.draw(
                     name,
-                    data.get("document"),
+                    document,
                     int(data.get("version", 0)),
                     data.get("known") or {},
                     data.get("hints") or {},
@@ -362,6 +373,19 @@ class Handler(BaseHTTPRequestHandler):
             if act is None:
                 self._fail(HTTPStatus.NOT_FOUND, f"a {doc.kind.title.lower()} takes no such edits")
                 return
+            # Sent as the version the page has, not the whole document (flexo.studio.acting):
+            # made on the studio's copy of it -- unless the studio was started again since, or
+            # has let that version go, when the page sends its document whole.
+            if "base" in data and data.get("instance") not in (None, workspace.instance):
+                self._json({"restarted": True})
+                return
+            if "base" in data and data.get("kind") not in (None, doc.kind.name):
+                self._json({"reopen": True, "kind": doc.kind.name})
+                return
+            sent = acting.sent_document(doc, data)
+            if sent is None:
+                self._json({"resend": True})
+                return
             workspace.acting(name, data.get("action") or {})
             if workspace.set_aside and "document" in data:
                 # A file taken out of a bundle as no document named it, named again by the
@@ -372,8 +396,7 @@ class Handler(BaseHTTPRequestHandler):
             # run only once the folder is trusted.)
             drawing = (data.get("action") or {}).get("do") == "previews"
             with workspace.running() if drawing else contextlib.nullcontext():
-                answer = act(data.get("document", doc.document), data.get("action") or {},
-                             doc.path.parent)
+                answer = act(sent, data.get("action") or {}, doc.path.parent)
             if isinstance(answer, dict) and "released" in answer:
                 # Files the edit leaves the document no longer needing (a figure file whose
                 # figure went into the deck): a bundle's own, taken out of it once no document
@@ -388,6 +411,9 @@ class Handler(BaseHTTPRequestHandler):
                     with contextlib.suppress(PermissionError):
                         workspace.relative(Path(str(file)))
                         workspace.uploads.add(Path(str(file)).resolve())
+            if "base" in data and "document" not in data:
+                # Kept at once, and drawn, as asked: answered with what changed alone.
+                answer = acting.answered(workspace, doc, data, sent, answer, who)
             self._json(answer)
         elif route == "/api/theme/use":
             from flexo.studio import theming

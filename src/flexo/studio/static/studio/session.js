@@ -79,6 +79,26 @@ function exported(name, notes = [], more = null) {
 // Drawings asked for by this page, of any of its documents (see drawOnce).
 let drawings = 0;
 
+// A document with what an edit changed made to it (flexo.studio.acting's `changes`: `[path,
+// value]` puts it there, `[path]` takes away what is there): a copy, the rest shared.
+function changed(document, made = []) {
+  let result = document;
+  for (const [path, ...rest] of made) {
+    if (!path.length) { result = rest[0]; continue; }
+    const into = (holder, depth) => {
+      const copy = Array.isArray(holder) ? [...holder] : { ...holder };
+      const key = path[depth];
+      if (depth < path.length - 1) copy[key] = into(holder[key], depth + 1);
+      else if (rest.length) copy[key] = rest[0];
+      else if (Array.isArray(copy)) copy.splice(key, 1);
+      else delete copy[key];
+      return copy;
+    };
+    result = into(result, 0);
+  }
+  return result;
+}
+
 // A run of typing made in parts, others' typing between them (see change): where it began
 // with its own words alone -- each letter kept as whoever typed it, and those others typed
 // left out, those they took away kept. Null where it is not only words changed in place.
@@ -256,7 +276,8 @@ export class Session {
   // control that made the change already shows it; `label` says what it did, for the
   // history (else the kind's `describe` says it); `hold` joins the run of edits however long
   // the pauses in it (words typed in one place, from opening to done, are one step).
-  change(mutate, { merge = null, quiet = false, label = null, hold = false } = {}) {
+  // `drawn`: its drawing is on its way already (an edit the studio drew as it made it: act).
+  change(mutate, { merge = null, quiet = false, label = null, hold = false, drawn = false } = {}) {
     const before = this.document;
     const next = structuredClone(before);
     const result = mutate(next);
@@ -283,7 +304,7 @@ export class Session {
     this.document = after;
     this.emit("change", { quiet, source: "edit" });
     this.schedulePush();
-    this.requestDraw();
+    if (!drawn) this.requestDraw();
   }
 
   // A change made somewhere other than this document -- a file it draws, written where
@@ -710,6 +731,78 @@ export class Session {
     catch (error) { throw unreachable(error) ? new Error("can’t reach the studio") : error; }
   }
 
+  // An edit its kind makes (`/api/act`) sent as no more than what it is: from the version the
+  // studio has of this page's document, which is the page's own (nothing of its own on its
+  // way), kept by the studio as it makes it and drawn there at once -- one request, answered
+  // with what it changed (flexo.studio.acting) and the drawing's pages that changed. The
+  // document as the edit makes it, on the page's as it now is, is put in by `apply` (a change
+  // whose drawing is on its way: change's `drawn`), told the kind's answer too, then the
+  // drawing. Answered as the kind answers, with that `document`; null when it cannot be sent
+  // so: the caller sends the document whole. (`keep` false: one that changes nothing -- a
+  // figure's parts read -- is only answered.)
+  async act(action, { apply = (document) => this.change(() => document, { quiet: true, drawn: true }), keep = true } = {}) {
+    if (this.sending || this.resyncing || this.unread || this.held || this.unanswered.length || !same(this.document, this.synced)) return null;
+    const sent = this.document;
+    if (!keep) {
+      const answer = await this.workspace.api("/api/act", { file: this.file, kind: this.kind, base: this.version, instance: this.instance, action });
+      if (answer.restarted || answer.resend || answer.reopen) return null;
+      return { ...answer, document: changed(sent, answer.delta) };
+    }
+    // (Drawn with it, as any change is: the next drawing, of the document as it will be.)
+    clearTimeout(this.drawTimer);
+    this.drawTimer = null;
+    this.drawWanted = false;
+    const version = this.drawVersion = ++drawings;
+    const known = Object.fromEntries([...this.pages].map(([id, page]) => [id, page.hash]));
+    const hints = { ...this.hints(), client: this.workspace.client };
+    this.drawYields = false;
+    this.drawBusy += 1;
+    this.sending = sent;
+    this.emit("status");
+    this.emit("drawing", { version });
+    let answer;
+    try {
+      answer = await this.workspace.api("/api/act", {
+        file: this.file, kind: this.kind, base: this.version, instance: this.instance, client: this.workspace.client, who: this.workspace.me,
+        action, commit: true, draw: { version, known, hints },
+      });
+    } catch (error) {
+      if (unreachable(error)) lost(this.workspace);
+      throw error;
+    } finally {
+      this.sending = null;
+      this.drawBusy -= 1;
+      this.emit("status");
+    }
+    if (answer.restarted || answer.resend || answer.reopen) {
+      if (answer.restarted) this.resync();
+      else if (answer.reopen) this.workspace.reopen?.(this.file, answer.kind);
+      if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
+      return null;
+    }
+    const made = changed(sent, answer.delta);
+    if (answer.version !== undefined && answer.version >= this.version) {
+      this.synced = made;
+      this.unwritten = [...this.unwritten.slice(-19), made];
+      this.version = answer.version;
+      this.ownVersion = Math.max(this.ownVersion, answer.version);
+      this.exists = true;
+    }
+    // (Changed here meanwhile: the edit is made on the document as it now is, what was changed
+    // here kept -- sent, and drawn, as any change of its own.)
+    const notes = [];
+    const document = same(this.document, sent) ? made : this.mended(merge3(sent, made, this.document, notes), notes, sent);
+    if (!same(document, this.document)) apply(document, answer);
+    if (!same(this.document, made)) this.drawWanted = true;
+    if (answer.drawing) this.took(version, answer.drawing);
+    if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
+    // (Another's change that came meanwhile, of a version past this one, is taken in now.)
+    const waiting = this.lastRemote;
+    if (waiting && waiting.version > this.version) this.remote(waiting);
+    this.schedulePush();
+    return { ...answer, document };
+  }
+
   // -- drawing --
 
   // Likewise drawing: one drawing at a time, and when it comes back the next
@@ -747,15 +840,25 @@ export class Session {
     const hints = { ...this.hints(), client: this.workspace.client };
     this.drawYields = Boolean(hints.yields);
     this.emit("drawing", { version });
+    // (This page's document the studio's, at the version it has: that version is sent, not the
+    // document -- unless the studio could not find it last time.)
+    const kept = !this.sending && !this.resyncing && !this.unanswered.length && !this.sendWhole && same(this.document, this.synced);
+    const asked = kept ? { base: this.version, instance: this.instance } : { document: this.document };
     let result;
     try {
-      result = await this.workspace.api("/api/draw", { file: this.file, document: this.document, version, known, hints });
+      result = await this.workspace.api("/api/draw", { file: this.file, ...asked, version, known, hints });
     } catch (error) {
       // Out of reach, the drawing stays as it was until the studio is back (and draws again).
       if (unreachable(error)) { lost(this.workspace); return; }
       this.emit("drawn", { version, pages: [], messages: [{ text: String(error.message || error), severity: "error", where: "" }], failed: true });
       return;
     }
+    this.sendWhole = Boolean(result.resend);
+    this.took(version, result);
+  }
+
+  // A drawing come back: asked for (drawOnce), or made with an edit (act).
+  took(version, result) {
     if (result.stale || version < this.drawn) {
       // Given up with nothing newer asked for, and no edit on its way to be drawn instead (an
       // edit given way to is the editor's to draw, or to ask for this again): asked again.
