@@ -359,6 +359,41 @@ const inSentence = (title) => (/^[A-Z][a-z]/.test(title) ? title.charAt(0).toLow
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
+// A path's length, and points along it in its own units -- `step` apart from its start, or
+// `steps` even parts of it: found once for each drawing of it (its "d"), however often a + is
+// placed or a part dragged beside it. (getPointAtLength walks the path at every call.)
+const measured = new WeakMap();
+function measuredPath(path) {
+  const d = path.getAttribute("d");
+  let found = measured.get(path);
+  if (!found || found.d !== d) measured.set(path, found = { d, length: path.getTotalLength?.() || 0, points: new Map() });
+  return found;
+}
+const pathLength = (path) => measuredPath(path).length;
+function pointsAlong(path, step) {
+  const found = measuredPath(path), key = `step ${step}`;
+  if (!found.points.has(key)) {
+    if (found.points.size > 8) found.points.clear();  // (zoomed: other steps)
+    const points = [];
+    for (let along = 0; along <= found.length; along += step) { const point = path.getPointAtLength(along); points.push({ x: point.x, y: point.y }); }
+    found.points.set(key, points);
+  }
+  return found.points.get(key);
+}
+function pointsAt(path, steps) {
+  const found = measuredPath(path), key = `steps ${steps}`;
+  if (!found.points.has(key)) {
+    found.points.set(key, Array.from({ length: steps + 1 }, (_, index) => { const point = path.getPointAtLength((found.length * index) / steps); return { x: point.x, y: point.y }; }));
+  }
+  return found.points.get(key);
+}
+// The longest of `paths` that has a length (the first of those as long), or none.
+function longestPath(paths) {
+  let best = null, most = 0;
+  for (const path of paths) { const length = pathLength(path); if (length > most) { best = path; most = length; } }
+  return best;
+}
+
 // Lines are thin: each is given a wide, invisible twin to click, named for the line
 // as it is drawn (the host maps drawn ids to the figure's).
 export function widenLines(svg) {
@@ -2314,13 +2349,10 @@ export function figureParts(host) {
     // drawing may let the pointer through it, so it is not found by pointing).
     const points = [];
     for (const path of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path, [data-flexo-entity="net"] path') || []) {
-      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const step = Math.max(length / 200, 3 / (matrix.a || 1));
-      for (let along = 0; along <= length; along += step) {
-        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
-        points.push(point);
-      }
+      for (const at of pointsAlong(path, step)) points.push(new DOMPoint(at.x, at.y).matrixTransform(matrix));
     }
     const offLines = (x, y) => !points.some((point) => Math.abs(point.x - x) < PLUS / 2 + 3 && Math.abs(point.y - y) < PLUS / 2 + 3);
     const corners = !cornered ? [] : nodeOf(id)?.kind === "text" ? [[box.left, box.top + box.height / 2], [box.left + box.width, box.top + box.height / 2]]
@@ -2340,8 +2372,7 @@ export function figureParts(host) {
   // (`handles`: where its handles are, in the overlay's pixels, which it keeps clear of too.)
   function plusOnLine(id, handles = []) {
     const element = host.element(id), outer = host.overlay?.getBoundingClientRect();
-    const longest = (holder) => [...(holder?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength?.())
-      .sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
+    const longest = (holder) => longestPath([...(holder?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength));
     const path = longest(element);
     const matrix = path?.getScreenCTM?.();
     if (!path || !matrix || !outer) return null;
@@ -2358,15 +2389,15 @@ export function figureParts(host) {
     // Every line's points, in the window's pixels: its own, and the others'.
     const points = [];
     for (const each of host.element(model()?.root)?.querySelectorAll('[data-flexo-entity="connector"] path:not(.hit-line), [data-flexo-entity="net"] path:not(.hit-line)') || []) {
-      const at = each.getScreenCTM?.(), length = each.getTotalLength?.() || 0;
+      const at = each.getScreenCTM?.(), length = each.getTotalLength ? pathLength(each) : 0;
       if (!at || !length) continue;
       const step = Math.max(length / 200, 2 / (at.a || 1));
-      for (let along = 0; along <= length; along += step) points.push(new DOMPoint(each.getPointAtLength(along).x, each.getPointAtLength(along).y).matrixTransform(at));
+      for (const point of pointsAlong(each, step)) points.push(new DOMPoint(point.x, point.y).matrixTransform(at));
     }
     const offLines = (spot) => !points.some((point) => Math.hypot(point.x - spot.x, point.y - spot.y) < radius + reach);
     const own = [];
-    const length = path.getTotalLength();
-    for (let along = 0; along <= length; along += Math.max(length / 120, 1)) own.push(screen(path.getPointAtLength(along)));
+    const length = pathLength(path);
+    for (const point of pointsAlong(path, Math.max(length / 120, 1))) own.push(screen(point));
     const offOwn = (spot) => !own.some((point) => Math.hypot(point.x - spot.x, point.y - spot.y) < radius + reach);
     const onPage = (spot) => spot.x - radius > outer.left && spot.y - radius > outer.top && spot.x + radius < outer.right && spot.y + radius < outer.bottom;
     const spots = [];
@@ -3116,10 +3147,10 @@ export function figureParts(host) {
     if (!element || !outer || !(edge || net)) return [];
     const points = [];
     for (const path of element.querySelectorAll("path:not(.hit-line)")) {
-      const matrix = path.getScreenCTM?.(), length = path.getTotalLength?.() || 0;
+      const matrix = path.getScreenCTM?.(), length = path.getTotalLength ? pathLength(path) : 0;
       if (!matrix || !length) continue;
       const seen = (along) => {
-        const point = new DOMPoint(path.getPointAtLength(along).x, path.getPointAtLength(along).y).matrixTransform(matrix);
+        const at = path.getPointAtLength(along), point = new DOMPoint(at.x, at.y).matrixTransform(matrix);
         return { x: point.x - outer.left, y: point.y - outer.top };
       };
       const start = seen(0), end = seen(length);
@@ -3973,13 +4004,12 @@ export function figureParts(host) {
     for (const edge of model()?.edges || []) {
       const from = nodeOfRef(edge.from), to = nodeOfRef(edge.to);
       if (own.has(from) || own.has(to)) continue;
-      const path = [...(host.element(edge.id)?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength?.())
-        .sort((a, b) => b.getTotalLength() - a.getTotalLength())[0];
+      const path = longestPath([...(host.element(edge.id)?.querySelectorAll("path:not(.hit-line)") || [])].filter((each) => each.getTotalLength));
       const matrix = path?.getScreenCTM?.();
       if (!matrix) continue;
-      const length = path.getTotalLength(), steps = Math.min(200, Math.max(2, Math.ceil((length * Math.hypot(matrix.a, matrix.b)) / 4)));
-      const points = Array.from({ length: steps + 1 }, (_, index) => {
-        const at = path.getPointAtLength((length * index) / steps), seen = new DOMPoint(at.x, at.y).matrixTransform(matrix);
+      const length = pathLength(path), steps = Math.min(200, Math.max(2, Math.ceil((length * Math.hypot(matrix.a, matrix.b)) / 4)));
+      const points = pointsAt(path, steps).map((at) => {
+        const seen = new DOMPoint(at.x, at.y).matrixTransform(matrix);
         return { x: seen.x, y: seen.y };
       });
       found.push({ id: edge.id, from, to, points });
