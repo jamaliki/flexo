@@ -86,6 +86,25 @@ def test_none_is_kept_on_disk_where_none_is_to_be(tmp_path: Path, monkeypatch) -
     assert not any(tmp_path.rglob("*.png"))
 
 
+def test_a_picture_drawn_otherwise_is_remembered_by_how_it_was_drawn(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLEXO_PICTURE_CACHE", str(tmp_path))
+    raster_kept._KEPT.clear()
+    made: list[str] = []
+
+    def make(name: str) -> bytes:
+        made.append(name)
+        return name.encode()
+
+    assert raster_kept.remembered(ART, ("slide", 144.0), lambda: make("a")) == b"a"
+    assert raster_kept.remembered(ART, ("slide", 144.0), lambda: make("b")) == b"a"
+    assert raster_kept.remembered(ART, ("slide", 72.0), lambda: make("c")) == b"c"
+    assert made == ["a", "c"]
+    # (In memory alone: what draws it may change with flexo.)
+    assert not any(tmp_path.iterdir())
+
+
 def test_a_drawing_kept_is_the_drawing_read_and_its_groups_are_each_reader_s_own() -> None:
     slide = _slide()
     first = drawings_kept.drawing_of(slide)

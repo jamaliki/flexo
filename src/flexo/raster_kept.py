@@ -18,6 +18,7 @@ import os
 import sys
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 
 VERSION = 1
@@ -60,6 +61,24 @@ def png_of(svg: str, pixels: int) -> bytes:
     return data
 
 
+def remembered(svg: str, how: object, make: Callable[[], bytes]) -> bytes:
+    """``make()``, a PNG drawn from ``svg`` as ``how`` says (a slide, at its resolution): as
+    drawn before by this program, where it was. Kept in memory with the pictures above, and
+    not on disk: what draws it (a slide's words as outlines) may change with flexo itself."""
+
+    from flexo.fonts import font_directories
+
+    key = _key(svg, how, [str(folder) for folder in font_directories()])
+    with _LOCK:
+        data = _KEPT.get(key)
+        if data is not None:
+            _KEPT.move_to_end(key)
+            return data
+    data = make()
+    _remember(key, data)
+    return data
+
+
 def _remember(key: str, data: bytes) -> None:
     with _LOCK:
         _KEPT[key] = data
@@ -70,7 +89,7 @@ def _remember(key: str, data: bytes) -> None:
             total -= len(gone)
 
 
-def _key(svg: str, pixels: int, folders: list[str]) -> str:
+def _key(svg: str, pixels: object, folders: list[str]) -> str:
     digest = hashlib.sha256()
     stamps = []
     for folder in folders:
