@@ -1035,6 +1035,10 @@ def serve(
     """Serve the studio for a folder, or a file in it (made when first changed), until stopped."""
 
     server, workspace = start(target, port=port, kind=kind, browser=browser)
+    # (Its documents written by a process of their own, not between its drawings.)
+    from flexo.studio import writer
+
+    writer.start()
     print(f"flexo studio: {workspace.address}")  # type: ignore[attr-defined]
     keeper = getattr(workspace, "bundle", None)
     if keeper is not None:
@@ -1053,6 +1057,7 @@ def serve(
         print()
     finally:
         workspace.close()
+        writer.stop()
         sessions.unregister(workspace.root, server.server_address[1])
         server.server_close()
 

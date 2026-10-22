@@ -37,7 +37,16 @@ import yaml
 
 from flexo.draft import GivenUp, given_up_when
 from flexo.roundtrip import prime, writing
-from flexo.studio import Kind, acting, code_allowed, folder_root, kinds, pictures, taking_turns
+from flexo.studio import (
+    Kind,
+    acting,
+    code_allowed,
+    folder_root,
+    kinds,
+    pictures,
+    taking_turns,
+    writer,
+)
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
@@ -353,11 +362,17 @@ class Doc:
                 # Over the file's words as they are (a kind that can keeps its comments and
                 # quoting where the document did not change) -- as the file it is, not the
                 # one beside it it is written to first: a deletion undone puts back its words.
-                with writing(str(path.resolve())):
-                    if _keeps_words(type(self.kind)):
-                        self.kind.save(partial, document, previous=previous)
-                    else:
+                name, apart = str(path.resolve()), None
+                if not _keeps_words(type(self.kind)):
+                    with writing(name):
                         self.kind.save(partial, document)
+                else:
+                    # (Written by a process of its own, where the studio has one: its Python
+                    # does not take turns with the drawing -- flexo.studio.writer.)
+                    apart = writer.save(self.kind, partial, document, previous, name)
+                    if apart is None:
+                        with writing(name):
+                            self.kind.save(partial, document, previous=previous)
                 with contextlib.suppress(OSError):
                     os.chmod(partial, path.stat().st_mode & 0o7777)
                 with self.lock:
@@ -371,6 +386,10 @@ class Doc:
                     # studio started again makes none of them twice -- flexo.studio.acting.)
                     acting.saving(self.workspace, self, partial, version)
                     os.replace(partial, path)
+                    told = apart and apart.get("kinds") == sorted(self.workspace.kinds)
+                    if told and apart.get("claim"):
+                        # (What kind of document its words are, as the process read them.)
+                        self.workspace.claimed(path, *apart["claim"])
                     self.disk_text = _words(path)
                     self.disk_stamp = _stamp(path)
                     self.file = _file(path)
@@ -821,12 +840,16 @@ class Workspace:
             return self._claiming(_outline(text))
 
     def _claiming(self, parsed: Any) -> str | None:
-        # The figure kind claims broadly; every other kind is asked first.
-        for kind in sorted(self.kinds.values(), key=lambda item: item.name == "figure"):
-            with contextlib.suppress(Exception):
-                if kind.claims(parsed):
-                    return kind.name
-        return None
+        return claiming(self.kinds, parsed)
+
+    def claimed(self, path: Path, found: str | None, unread: bool) -> None:
+        """The kind of document a file just written is (``found``, and whether it does not
+        read as that kind has them: ``unread``), as what wrote it read its words
+        (``claim_of``): kept as ``_claim`` keeps what it reads, not read again here."""
+
+        if found is None or found in self.kinds:
+            self._documents[path] = (_stamp(path), found)
+            self._unread[path] = unread
 
     def _claim(self, path: Path) -> str | None:
         stamp = _stamp(path)
@@ -838,10 +861,7 @@ class Workspace:
             if path.stat().st_size < CLAIM_LIMIT:
                 text = path.read_text(encoding="utf-8")
                 try:
-                    parsed = _parsed(text, path.suffix)
-                    found = self._claiming(parsed)
-                    # Its kind's, but not as its kind has them (a deck whose slides are a number).
-                    unread = bool(found and _malformed(self.kinds[found], parsed))
+                    found, unread = claim_of(self.kinds, text, path.suffix)
                 except Exception:
                     # Anything a file can be (a typo mid-edit, a date that is no date, nesting
                     # too deep to read): not a document now, but one it was stays that kind,
@@ -1613,7 +1633,8 @@ class Workspace:
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
             if not getattr(doc, "primed", True) and doc.disk_text is not None and not doc.held:
-                doc.primed = prime(doc.disk_text, 0.01)
+                # (Where the studio's writings are done apart, its parts are read there.)
+                doc.primed = writer.prime(doc.disk_text) or prime(doc.disk_text, 0.01)
             moved = False
             for file in list(doc.depends):
                 stamp = _stamp(file)
@@ -1879,6 +1900,27 @@ def _words(path: Path) -> str | None:
 
 def _parsed(text: str, suffix: str) -> Any:
     return json.loads(text) if suffix.lower() == ".json" else yaml.load(text, _LOADER)
+
+
+def claiming(kinds: dict[str, Kind], parsed: Any) -> str | None:
+    """The kind that claims a parsed file, if any."""
+
+    # The figure kind claims broadly; every other kind is asked first.
+    for kind in sorted(kinds.values(), key=lambda item: item.name == "figure"):
+        with contextlib.suppress(Exception):
+            if kind.claims(parsed):
+                return kind.name
+    return None
+
+
+def claim_of(kinds: dict[str, Kind], text: str, suffix: str) -> tuple[str | None, bool]:
+    """The kind of document a file's words (``text``, in a file ending ``suffix``) are, and
+    whether they are not as that kind has them (a deck whose slides are a number). Raises
+    when they do not read."""
+
+    parsed = _parsed(text, suffix)
+    found = claiming(kinds, parsed)
+    return found, bool(found and _malformed(kinds[found], parsed))
 
 
 _YAML_KEY = re.compile(
