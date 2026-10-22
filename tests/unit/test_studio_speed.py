@@ -274,3 +274,24 @@ def test_a_bundle_left_alone_is_looked_at_less_often_and_at_once_when_written(
     keeper._wake.clear()
     keeper.nudge()  # (a document the studio wrote: looked at now)
     assert keeper._wake.is_set()
+
+
+def test_a_photograph_kept_from_another_run_of_the_studio_is_shown_with_this_runs_token(
+    tmp_path: Path,
+) -> None:
+    from flexo.studio import Drawing, Page
+
+    (tmp_path / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    workspace = Workspace(tmp_path)
+    try:
+        doc = workspace.open("figure.yaml")
+        kept = '<svg><image href="/api/picture?path=a.png&amp;v=1&amp;token=another-run"/></svg>'
+        doc.kind.draw = lambda document, base, hints: Drawing([Page("figure", kept)])
+        result = workspace.draw("figure.yaml", doc.document, 1, {}, {})
+        (page,) = result["pages"]
+        assert f"token={workspace.token}" in page["svg"] and "another-run" not in page["svg"]
+        again = workspace.draw("figure.yaml", doc.document, 2, {"figure": page["hash"]}, {})
+        assert "svg" not in again["pages"][0]  # (the same drawing: not sent again)
+    finally:
+        del doc.kind.draw
+        workspace.close()

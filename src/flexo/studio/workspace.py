@@ -622,8 +622,8 @@ class Workspace:
         """The folder's turn to draw: one drawing at a time -- but for one waiting on a plot
         run apart, which gives its turn to another document meanwhile (``taking_turns``)."""
         self.latest: dict[str, int] = {}
-        self._digests: dict[str, dict[str, str]] = {}
-        """Each document's pages' drawings, as last sent, and their hashes (``draw``)."""
+        self._digests: dict[str, dict[str, tuple[str, str]]] = {}
+        """Each document's pages' drawings, as last drawn: as sent, and their hashes (``draw``)."""
         self.acts: dict[str, int] = {}
         """How many edits the pages have asked of each document's kind (``acting``)."""
         self._documents: dict[Path, tuple[float, str | None]] = {}
@@ -1474,8 +1474,12 @@ class Workspace:
             if page.pending:
                 pages.append({"id": page.id, "label": page.label, "pending": True, **page.extra})
                 continue
-            digest = was.get(page.svg) or hashlib.sha1(page.svg.encode("utf-8")).hexdigest()[:16]
-            digests[page.svg] = digest
+            found = was.get(page.svg)
+            if found is None:
+                svg = _with_token(page.svg, self.token)
+                found = (svg, hashlib.sha1(svg.encode("utf-8")).hexdigest()[:16])
+            digests[page.svg] = found
+            svg, digest = found
             entry: dict[str, Any] = {
                 "id": page.id,
                 "label": page.label,
@@ -1484,7 +1488,7 @@ class Workspace:
                 **page.extra,
             }
             if known.get(page.id) != digest:
-                entry["svg"] = page.svg
+                entry["svg"] = svg
             pages.append(entry)
         self._digests[doc.name] = digests
         return {
@@ -1658,6 +1662,19 @@ class Workspace:
                 else:
                     looked[path] = stamps
         self._looked, self._taken = looked, taken
+
+
+_PICTURE_TOKEN = re.compile(r"(/api/picture\?[^\"'\s<>]*?token=)([^&\"'\s<>]+)")
+
+
+def _with_token(svg: str, token: str) -> str:
+    """A drawing with each photograph's address carrying this studio's token: one kept from
+    another run of the studio (a figure's layout, kept between runs with its photographs'
+    addresses in it) carries that run's, which this one refuses -- the photograph not shown."""
+
+    if "/api/picture?" not in svg:
+        return svg
+    return _PICTURE_TOKEN.sub(lambda found: found.group(1) + token, svg)
 
 
 def _person(entry: dict[str, Any]) -> str:
