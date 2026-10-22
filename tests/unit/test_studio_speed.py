@@ -251,3 +251,26 @@ def test_answers_go_to_the_page_as_they_are(tmp_path: Path) -> None:
         workspace.close()
         server.shutdown()
         server.server_close()
+
+
+def test_a_bundle_left_alone_is_looked_at_less_often_and_at_once_when_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flexo import bundle as B
+    from flexo.studio import bundles as studio_bundles
+
+    monkeypatch.setenv("FLEXO_BUNDLES", str(tmp_path / "bundles"))
+    folder = tmp_path / "made"
+    folder.mkdir()
+    (folder / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+    keeper = studio_bundles.opened(B.pack(folder / "figure.yaml", tmp_path / "Figure.flexo").path)
+    keeper.step(now=100.0)
+    assert keeper._interval(101.0) == studio_bundles.POLL
+    assert keeper._interval(100.0 + studio_bundles.RESTED + 1) == studio_bundles.RESTING
+    edited = SAMPLE_FIGURE.replace("Input $x$", "Input $x_0$")
+    (keeper.root / "figure.yaml").write_text(edited, encoding="utf-8")
+    keeper.step(now=200.0)  # (changed, waiting to be written: looked at as often as ever)
+    assert keeper._interval(200.0 + studio_bundles.RESTED + 1) == studio_bundles.POLL
+    keeper._wake.clear()
+    keeper.nudge()  # (a document the studio wrote: looked at now)
+    assert keeper._wake.is_set()
