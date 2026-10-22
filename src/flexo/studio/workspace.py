@@ -1541,15 +1541,17 @@ class Workspace:
         return text
 
     def drawing_of(self, name: str, hints: dict[str, Any] | None = None) -> Any:
-        """The document's current drawing, every page drawn (for an agent to look at)."""
+        """The document's current drawing, every page drawn (for an agent to look at) -- by this
+        version of the code, none as an earlier one drew it (``flexo.kept_versions``)."""
 
         doc = self.open(name)
         with doc.lock:
             document = copy.deepcopy(doc.document)
+        asked = {**(hints or {}), "fresh": True}
         with doc.drawing, taking_turns(self.drawing):
             for _ in range(200):
                 with fonts_linked(), self.running():
-                    drawing = doc.kind.draw(document, doc.path.parent, dict(hints or {}))
+                    drawing = doc.kind.draw(document, doc.path.parent, dict(asked))
                 if not drawing.unfinished:
                     return drawing
         return drawing

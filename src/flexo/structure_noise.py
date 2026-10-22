@@ -35,7 +35,10 @@ its place.
 ``seed`` picks the run: every copy of a structure with the same file, ``fixed`` and
 ``seed`` is a moment of one trajectory. A trajectory is worked out once -- in about
 half a second for 300 residues -- and kept, in memory and on disk with flexo's other
-caches; a noise level then blends the snapshots either side of it.
+caches (or in the folder ``FLEXO_NOISE_CACHE`` names); a noise level then blends the
+snapshots either side of it. On disk it is kept by what it is worked out from: the file,
+``fixed`` and ``seed``, this module's own code and numpy's version (``_worked_out_by``) --
+not the rest of flexo's, so an update of the app that leaves this module be keeps it.
 
 The file's helices and strands are drawn where they have formed (where the chain's own
 five residues there lie within 0.35 Å of the file's), and the rest as loops: a noised
@@ -59,7 +62,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 VERSION = 1
-"""Changed whenever trajectories are worked out differently, so those kept are worked out again."""
+"""Changed whenever what is kept of a trajectory changes, so those kept are worked out again.
+(A change to how one is worked out is one to this module, which does so: ``_worked_out_by``.)"""
 
 LEVELS = 100
 """Snapshots kept of each trajectory, evenly in noise from 1 to 0 (one each 0.01)."""
@@ -129,17 +133,50 @@ def fold(chain: Chain, seed: int, name: str = "") -> object:
     if n < SHORTEST:
         out[:] = x0
         return out
-    rng = np.random.default_rng([int(seed) & 0xFFFFFFFF, zlib.crc32(name.encode())])
-    run = _Run(chain, rng)
-    out[0] = run.settled(run.x)
-    levels = noise_levels()
-    for level in range(1, LEVELS):
-        for step in range(STEPS):
-            sigma = levels[level - 1] + (levels[level] - levels[level - 1]) * (step + 1) / STEPS
-            run.step(float(sigma))
-        out[level] = run.settled(run.x)
+    with _handing_back():
+        rng = np.random.default_rng([int(seed) & 0xFFFFFFFF, zlib.crc32(name.encode())])
+        run = _Run(chain, rng)
+        out[0] = run.settled(run.x)
+        levels = noise_levels()
+        for level in range(1, LEVELS):
+            for step in range(STEPS):
+                sigma = levels[level - 1] + (levels[level] - levels[level - 1]) * (step + 1) / STEPS
+                run.step(float(sigma))
+            out[level] = run.settled(run.x)
     out[LEVELS] = x0
     return out
+
+
+HANDING_BACK = 1e-5
+"""How long (seconds) another thread waiting for the interpreter keeps it from a trajectory being
+worked out before it hands it back (``_handing_back``): Python's switch interval, 5 ms else."""
+
+_HANDING = threading.Lock()
+_HANDED: list = [0, None]
+"""Trajectories being worked out, and the switch interval as it was before the first."""
+
+
+@contextlib.contextmanager
+def _handing_back():
+    """While a trajectory is worked out, a thread waiting for the interpreter takes it in
+    ``HANDING_BACK``, not Python's usual 5 ms. numpy lets other threads run during most of the
+    tens of thousands of small steps a trajectory takes, and one busy beside it -- another
+    drawing, Python being read -- kept the interpreter 5 ms each time: a trajectory took over
+    two minutes, not a second. (Each still has its turn; the interval is put back as it was
+    once the last trajectory being worked out is.)"""
+
+    with _HANDING:
+        if _HANDED[0] == 0:
+            _HANDED[1] = sys.getswitchinterval()
+            sys.setswitchinterval(min(HANDING_BACK, _HANDED[1]))
+        _HANDED[0] += 1
+    try:
+        yield
+    finally:
+        with _HANDING:
+            _HANDED[0] -= 1
+            if _HANDED[0] == 0:
+                sys.setswitchinterval(_HANDED[1])
 
 
 def at_noise(trajectory, noise: float, shape: _Shape | None = None):
@@ -183,6 +220,7 @@ class _Run:
         self.bonded = bonded = np.asarray(chain.bonded, dtype=bool)
         self.fixed = fixed = np.asarray(chain.fixed, dtype=bool)
         self.free = ~fixed
+        self.held = bool(fixed.any())
         around = chain.around
         self.around = (
             np.zeros((0, 3)) if around is None else np.asarray(around, dtype=np.float64)
@@ -256,7 +294,8 @@ class _Run:
                 speed = np.sqrt((move * move).sum(1))
                 move *= np.minimum(1.0, RATE / (speed + 1e-12))[:, None]
                 x += move
-                x[self.fixed] = self.x0[self.fixed]
+                if self.held:
+                    x[self.fixed] = self.x0[self.fixed]
         if self.near is not None:
             on = _smooth((u - self.near.onset) / RAMP)
             if on.any():
@@ -264,10 +303,12 @@ class _Run:
                     move = self.near.moves(x, on, pooled=True)
                     speed = np.sqrt((move * move).sum(1))
                     x += move * np.minimum(1.0, RATE / (speed + 1e-12))[:, None]
-                    x[self.fixed] = self.x0[self.fixed]
+                    if self.held:
+                        x[self.fixed] = self.x0[self.fixed]
         self._keep_apart(x, sigma)
         self.shape.hold(x, HOLD)
-        x[self.fixed] = self.x0[self.fixed]
+        if self.held:
+            x[self.fixed] = self.x0[self.fixed]
         self.t += 1
 
     def _keep_apart(self, x, sigma: float = 1.0) -> None:
@@ -324,7 +365,8 @@ class _Run:
 
         y = x.copy()
         self.shape.hold(y, 20)
-        y[self.fixed] = self.x0[self.fixed]
+        if self.held:
+            y[self.fixed] = self.x0[self.fixed]
         return y if self.pinned else _laid_over(y, self.x0)
 
 
@@ -373,20 +415,31 @@ class _Shape:
             (a[a % 4 < 2], 2, self.low[a % 4 < 2], self.high[a % 4 < 2]),
             (a[a % 4 >= 2], 2, self.low[a % 4 >= 2], self.high[a % 4 >= 2]),
         ]
+        # (Each set's ends as one index, first ends then second: read, and written back, in one
+        # step each -- every step a wait beside another busy thread, numpy letting it run.)
         self.sets = []
         for first, apart, low, high in pairs:
             second = first + apart
             mine = np.where(fixed[first], 0.0, np.where(fixed[second], 1.0, 0.5))[:, None]
             theirs = np.where(fixed[second], 0.0, np.where(fixed[first], 1.0, 0.5))[:, None]
-            self.sets.append((first, second, low, high, mine, theirs))
+            both = np.concatenate([first, second])
+            self.sets.append((both, len(first), low, high, mine, theirs))
+        # (Each angle's two bonds as one index; the middles that may be bent; and how far a
+        # middle is put off the line between its ends: _bend.)
+        self.across = np.concatenate([a, a + 1])
+        self.bendable = ~fixed[a + 1]
+        reach = 0.5 * (self.side + self.other)
+        self.height = np.sqrt(np.maximum(reach**2 - (0.5 * self.high) ** 2, 0.0))
+        self.held = bool(fixed.any())
 
     def holds(self, y, slack: float = 0.03) -> bool:
         """Whether ``y`` is in shape: its bonds and angles within ``slack`` Å of their
         bounds."""
 
         np = _numpy()
-        for first, second, low, high, _, _ in self.sets:
-            gap = y[second] - y[first]
+        for both, m, low, high, _, _ in self.sets:
+            ends = y[both]
+            gap = ends[m:] - ends[:m]
             d = np.sqrt((gap * gap).sum(1))
             if len(d) and (np.any(d < low - slack) or np.any(d > high + slack)):
                 return False
@@ -400,43 +453,50 @@ class _Shape:
         if not len(self.bond):
             return
         a = self.angle
+        k = len(a)
         for _ in range(sweeps):
             worst = 0.0
-            for first, second, low, high, mine, theirs in self.sets:
-                if not len(first):
+            for both, m, low, high, mine, theirs in self.sets:
+                if not m:
                     continue
-                gap = y[second] - y[first]
+                pair = y[both]
+                gap = pair[m:] - pair[:m]
                 d = np.sqrt(np.einsum("ij,ij->i", gap, gap)) + 1e-12
                 off = d - np.clip(d, low, high)
                 worst = max(worst, float(np.abs(off).max()))
                 # (No two pairs of a set share a point: each is moved on its own.)
                 fix = (off / d)[:, None] * gap
-                y[first] += mine * fix
-                y[second] -= theirs * fix
+                pair[:m] += mine * fix
+                pair[m:] -= theirs * fix
+                y[both] = pair
             # An angle near straight is bent by moving its middle off the line between its
             # ends (moving the ends apart or together hardly bends it).
-            if len(a):
+            if k:
                 step = np.diff(y, axis=0)
                 bond = np.sqrt(np.einsum("ij,ij->i", step, step))
-                ends = step[a] + step[a + 1]
+                steps = step[self.across]
+                ends = steps[:k] + steps[k:]
                 c = np.sqrt(np.einsum("ij,ij->i", ends, ends)) + 1e-12
-                one, other = bond[a], bond[a + 1]
+                bonds = bond[self.across]
+                one, other = bonds[:k], bonds[k:]
                 # (How far apart the ends may be with the bonds as they are now.)
                 widest = np.sqrt(one * one + other * other + 2 * one * other * self.widest)
-                straight = (c > widest + 0.01) & ~self.fixed[a + 1]
+                straight = (c > widest + 0.01) & self.bendable
                 if straight.any():
                     worst = max(worst, float((c[straight] - widest[straight]).max()))
                     self._bend(y, a[straight], ends[straight] / c[straight][:, None], straight)
             if worst < 0.01:
                 break
-        y[self.fixed] = self.x0[self.fixed]
+        if self.held:
+            y[self.fixed] = self.x0[self.fixed]
 
     def _bend(self, y, k, along, which) -> None:
         """The middles of the angles from ``k`` moved off the lines between their ends
         (``along``), as far as the file's bonds and the widest angle set them."""
 
         np = _numpy()
-        out = y[k + 1] - 0.5 * (y[k] + y[k + 2])
+        middle = y[k + 1]
+        out = middle - 0.5 * (y[k] + y[k + 2])
         out -= np.einsum("ij,ij->i", out, along)[:, None] * along
         size = np.sqrt(np.einsum("ij,ij->i", out, out))
         flat = size <= 1e-6
@@ -446,9 +506,9 @@ class _Shape:
             out[flat] = np.cross(along[flat], axis)
             size[flat] = 0.0
         out /= np.sqrt(np.einsum("ij,ij->i", out, out))[:, None]
-        reach = 0.5 * (self.side[which] + self.other[which])
-        height = np.sqrt(np.maximum(reach**2 - (0.5 * self.high[which]) ** 2, 0.0))
-        y[k + 1] += out * np.maximum(height - size, 0.0)[:, None]
+        height = self.height[which]
+        middle += out * np.maximum(height - size, 0.0)[:, None]
+        y[k + 1] = middle
 
 
 class _Windows:
@@ -498,6 +558,10 @@ class _Windows:
             self.low[size_index] = first + np.searchsorted(begin, residues - size + 1, "left")
             self.high[size_index] = first + np.searchsorted(begin, residues, "right") - 1
         self.count = (self.high - self.low + 1).astype(np.float64)
+        # (The windows' ends, and each residue's windows' last past and first, as one index
+        # each: read in one step, not two -- moves.)
+        self.ends = np.concatenate([self.end, self.start])
+        self.spans = np.concatenate([self.high + 1, self.low])
         self.fit = np.array([absolute is None or size != absolute for size in self.sizes])
         # Each window's turn, as a quaternion, followed from step to step (``_turns``).
         self.q = None
@@ -560,12 +624,15 @@ class _Windows:
         if not len(self.start) or not np.any(weight > 0):
             return out
         x0 = self.x0
+        w = len(self.start)
         s1 = np.concatenate([np.zeros((1, 3, 3)), np.cumsum(x0[:, :, None] * x[:, None, :], 0)])
         s2 = np.concatenate([np.zeros((1, 3)), np.cumsum(x, axis=0)])
-        total = s2[self.end] - s2[self.start]
+        sums = s2[self.ends]
+        total = sums[:w] - sums[w:]
         mid = total / self.length[:, None]
         # Sum over a window of (file - its middle) x now.
-        h = (s1[self.end] - s1[self.start]) - self.mid0[:, :, None] * total[:, None, :]
+        sums = s1[self.ends]
+        h = (sums[:w] - sums[w:]) - self.mid0[:, :, None] * total[:, None, :]
         turn = self._turns(h)
         # A window takes a residue r of the file's to r @ turn + shift; weighted, summed
         # along the windows, each residue's windows' share is a difference of two sums.
@@ -573,10 +640,13 @@ class _Windows:
         turns = np.concatenate([np.zeros((1, 3, 3)), np.cumsum(weight[:, None, None] * turn, 0)])
         shifts = np.concatenate([np.zeros((1, 3)), np.cumsum(weight[:, None] * shift, 0)])
         weights = np.concatenate([[0.0], np.cumsum(weight)])
-        low, high = self.low, self.high + 1
-        pull = weights[high] - weights[low]
-        summed = np.einsum("ri,krij->krj", x0, turns[high] - turns[low])
-        summed += shifts[high] - shifts[low] - pull[:, :, None] * x[None]
+        k = len(self.low)
+        sums = weights[self.spans]
+        pull = sums[:k] - sums[k:]
+        sums = turns[self.spans]
+        summed = np.einsum("ri,krij->krj", x0, sums[:k] - sums[k:])
+        sums = shifts[self.spans]
+        summed += sums[:k] - sums[k:] - pull[:, :, None] * x[None]
         if not self.fit.all():
             # (A size not fitted is matched where the file has it.)
             summed[~self.fit] = pull[~self.fit][:, :, None] * (x0 - x)[None]
@@ -1590,6 +1660,9 @@ _KEPT_MOLECULES: OrderedDict[str, _Molecule] = OrderedDict()
 
 
 def _cache_folder() -> Path:
+    setting = os.environ.get("FLEXO_NOISE_CACHE", "")
+    if setting:
+        return Path(setting)
     if sys.platform == "darwin":
         base = Path.home() / "Library/Caches"
     else:
@@ -1597,13 +1670,32 @@ def _cache_folder() -> Path:
     return base / "flexo" / "noise"
 
 
+_WORKED_OUT_BY: list[str] = []
+
+
+def _worked_out_by() -> str:
+    """What a trajectory is worked out by besides what it is worked out from: this module's own
+    code (it imports no other of flexo's), and numpy's and Python's versions (numpy's random
+    numbers and its linear algebra, Python's arithmetic) -- hashed, once."""
+
+    if not _WORKED_OUT_BY:
+        np = _numpy()
+        try:
+            own = Path(__file__).read_bytes()
+        except OSError:
+            own = b""
+        said = f"{np.__version__}|{sys.version_info[0]}.{sys.version_info[1]}|".encode() + own
+        _WORKED_OUT_BY.append(hashlib.sha256(said).hexdigest()[:16])
+    return _WORKED_OUT_BY[0]
+
+
 def _trajectory(chain: Chain, seed: int, name: str, what: str):
     """``chain``'s trajectory, worked out once: kept in memory, and on disk by what it is
     worked out from (the file, the chain, ``seed``, what is held; ``what`` says the file
-    and what is held)."""
+    and what is held) and by (``_worked_out_by``)."""
 
     np = _numpy()
-    named = f"{VERSION}|{LEVELS}|{what}|{name}|{int(seed)}"
+    named = f"{VERSION}|{LEVELS}|{what}|{name}|{int(seed)}|{_worked_out_by()}"
     key = hashlib.sha256(named.encode()).hexdigest()[:32]
     with _LOCK:
         found = _KEPT_RUNS.get(key)

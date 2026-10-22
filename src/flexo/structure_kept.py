@@ -9,12 +9,15 @@ in the folder ``FLEXO_STRUCTURE_CACHE`` names (``FLEXO_STRUCTURE_CACHE=0`` keeps
 everything the drawing is made from: the structure's settings as it is drawn (its ask), what
 is in its files (by their names, not where they are or when they were saved: a deck unpacked
 afresh draws from the same), and flexo's and mol-sketch's own code. A change to any of them
-draws it afresh. The most recently used are kept, up to ``KEPT`` of them and ``SIZE`` bytes in
-all.
+draws it afresh. The code is not in the file's name but in its first line
+(``flexo.kept_versions``): drawn again after an update, a drawing replaces the one the version
+before kept, rather than leaving it to take a place among those kept. The most recently used
+are kept, up to ``KEPT`` of them and ``SIZE`` bytes in all.
 
-Each file is looked at once for each thing looked up (``_key``), and what is read back is
-marked used once a session (``_read``): a deck opened in a busy studio waits on every look at
-the disk, each one a turn for the studio's other threads.
+Each file is looked at once for each thing looked up (``_key``; read only when the disk says
+it has changed, ``flexo.kept_versions.content``), and what is read back is marked used once a
+session (``_read``): a deck opened in a busy studio waits on every look at the disk, each one a
+turn for the studio's other threads.
 """
 
 from __future__ import annotations
@@ -193,8 +196,9 @@ def keep_checked(ask, name: str, problem: dict | None) -> None:
 
 
 def _key(kind: str, ask, *more) -> str | None:
-    """What ``ask`` is kept by: its settings, what is in its files (by name, not by where they
-    are or when they were saved), and the code that draws it -- None when nothing is kept.
+    """What ``ask`` is kept by: its settings, and what is in its files (by name, not by where
+    they are or when they were saved) -- None when nothing is kept. (Kept, it is said which
+    version of the code drew it: ``_read``.)
 
     A deck unpacked afresh -- opened on another computer, a copy of it, the bundle put back in
     its place -- has its files where it did not, saved when it was unpacked: what is in them
@@ -202,6 +206,8 @@ def _key(kind: str, ask, *more) -> str | None:
 
     if folder() is None:
         return None
+    from flexo.kept_versions import content
+
     files = []
     named = {}
     for field, stamp in (("source", "stamp"), ("ss_from", "ss_stamp"), ("density", None)):
@@ -209,7 +215,7 @@ def _key(kind: str, ask, *more) -> str | None:
         if not name:
             continue
         path = os.path.expanduser(name)
-        held = _content(path)
+        held = content(path)
         if held is None:
             files.append(name)  # a PDB entry or a map by its ID: the same wherever it is read
             continue
@@ -218,113 +224,17 @@ def _key(kind: str, ask, *more) -> str | None:
         if stamp:
             named[stamp] = 0.0
     plain = dataclasses.replace(ask, **named) if named else ask
-    said = repr((VERSION, kind, _code(), tuple(files), plain, more))
+    # (The code that draws it is not in the name: each file says which version kept it.)
+    said = repr((VERSION, kind, tuple(files), plain, more))
     return hashlib.sha256(said.encode("utf-8")).hexdigest()[:32]
 
 
-_CONTENTS: dict[str, tuple[tuple[int, int, int, int], str]] = {}
-"""What is in each file a structure is drawn from (``_content``), with the file it was found
-in: its device, inode, time saved and length."""
-
-
-def _content(path: str) -> str | None:
-    """What is in the file at ``path``, hashed -- read once for as long as it is the same file,
-    unchanged -- or None, for no file there."""
-
-    try:
-        stat = os.stat(path)
-    except (OSError, ValueError):
-        return None
-    same = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
-    where = os.path.abspath(path)
-    known = _CONTENTS.get(where)
-    if known is not None and known[0] == same:
-        return known[1]
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read()  # (at once: a ribosome's 25 MB in one read, not a hundred)
-    except OSError:
-        return None
-    held = hashlib.sha256(data).hexdigest()
-    if len(_CONTENTS) >= 1024:
-        _CONTENTS.clear()
-    _CONTENTS[where] = (same, held)
-    return held
-
-
-_CODE: list[str] = []
-
-
 def _code() -> str:
-    """flexo's own source and mol-sketch's (its engine and the Python that draws with it),
-    hashed, with the versions of what draws for it: a change to any draws it afresh.
+    """This version of flexo's and mol-sketch's code (``flexo.kept_versions.code``)."""
 
-    An installed package (the app's) is told by the hashes its installation recorded of each
-    of its files (``_recorded``): one file read, not every one -- in a busy studio each read is
-    a wait, and reading them all took over a second. A package worked on in place is read."""
+    from flexo.kept_versions import code
 
-    if not _CODE:
-        import importlib.metadata
-        import importlib.util
-
-        digest = hashlib.sha256()
-        for package, nested, suffixes in (
-            ("flexo", True, (".py",)),
-            ("molsketch", False, (".py", ".js")),
-        ):
-            spec = importlib.util.find_spec(package)
-            if spec is None or not spec.origin:
-                continue
-            here = Path(spec.origin).parent
-            digest.update(
-                _recorded(package, here, nested, suffixes) or _read_through(here, nested, suffixes)
-            )
-        for package in ("skia-python", "mini-racer"):
-            with contextlib.suppress(importlib.metadata.PackageNotFoundError):
-                digest.update(importlib.metadata.version(package).encode())
-        _CODE.append(digest.hexdigest()[:16])
-    return _CODE[0]
-
-
-def _recorded(package: str, here: Path, nested: bool, suffixes: tuple[str, ...]) -> bytes | None:
-    """What the installation of ``package`` recorded of its files with ``suffixes`` (in its
-    folder ``here``, and those within it if ``nested``): each one's name and hash -- or None,
-    where it recorded no hash of one, or none of them (a package installed to be worked on in
-    place), or its record is not of the copy found at ``here``."""
-
-    import importlib.metadata
-
-    try:
-        installed = importlib.metadata.distribution(package)
-    except importlib.metadata.PackageNotFoundError:
-        return None
-    found = []
-    for item in installed.files or ():
-        parts = item.parts
-        if not parts or parts[0] != package or item.suffix not in suffixes:
-            continue
-        if not nested and len(parts) != 2:
-            continue
-        if item.hash is None:
-            return None
-        found.append(f"{item.as_posix()}={item.hash.mode}:{item.hash.value}")
-    if not found:
-        return None
-    with contextlib.suppress(OSError):
-        if os.path.samefile(installed.locate_file(f"{package}/__init__.py"), here / "__init__.py"):
-            return "\n".join(sorted(found)).encode("utf-8")
-    return None
-
-
-def _read_through(here: Path, nested: bool, suffixes: tuple[str, ...]) -> bytes:
-    """Every file of ``here`` with ``suffixes`` (and those within it if ``nested``), read and
-    hashed in turn."""
-
-    digest = hashlib.sha256()
-    names = here.rglob("*") if nested else here.glob("*")
-    for path in sorted(name for name in names if name.suffix in suffixes):
-        digest.update(path.read_bytes())
-    return digest.digest()
+    return code()
 
 
 _USED: set[Path] = set()
@@ -335,24 +245,35 @@ _KEPT_SINCE = [0]
 
 
 def _read(name: str) -> bytes | None:
+    """What is kept as ``name`` by this version of the code -- None for nothing, or what another
+    version kept (``flexo.kept_versions.stamped``), which this one draws again."""
+
+    from flexo.kept_versions import unstamped
+
     kept = folder() / name  # type: ignore[operator]
     try:
         data = kept.read_bytes()
-        if kept not in _USED:
-            os.utime(kept)  # used now: kept the longest (marked once a session)
-            _USED.add(kept)
     except OSError:
         return None
+    version, data = unstamped(data)
+    if version != _code():
+        return None
+    if kept not in _USED:
+        with contextlib.suppress(OSError):
+            os.utime(kept)  # used now: kept the longest (marked once a session)
+        _USED.add(kept)
     return data
 
 
 def _write(name: str, data: bytes) -> None:
+    from flexo.kept_versions import stamped
+
     where = folder()
     assert where is not None
     try:
         where.mkdir(parents=True, exist_ok=True)
         partial = where / f"{name}.{os.getpid()}.saving"
-        partial.write_bytes(data)
+        partial.write_bytes(stamped(data))
         partial.replace(where / name)
         _USED.add(where / name)
         if _KEPT_SINCE[0] % PRUNED == 0:
