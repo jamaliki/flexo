@@ -356,7 +356,12 @@ class Handler(BaseHTTPRequestHandler):
             version, document = doc.update(data["document"], int(data["base"]), who, client)
             # Whose changes it was merged with, for the page to name them.
             others = doc.author_since(int(data["base"]), who)
-            self._json({"version": version, "document": document, "who": others})
+            answer = {"version": version, "document": document, "who": others}
+            asked = data.get("draw")
+            if isinstance(asked, dict):
+                # Drawn as it is kept, asked so (an undo): one request, where it took two.
+                answer["drawing"] = acting.drawn(workspace, doc, document, asked)
+            self._drawing_json(answer)
         elif route == "/api/draw":
             document = data.get("document")
             if document is None and "base" in data:
