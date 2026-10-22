@@ -374,6 +374,18 @@ export class Workspace {
     }, 250);
   }
 
+  // Who is here, as the studio says, told the page -- unless all that is new is where this
+  // person is (their own report of it, come back), which nothing here shows: a click that
+  // chooses something draws the slide list and the slide again for no one else.
+  heard(presence) {
+    this.presence = presence;
+    give(presence);
+    const key = JSON.stringify(presence.map((entry) => (entry?.who?.id === this.me.id ? [entry.who, entry.colour] : entry)));
+    if (key === this.presenceHeard) return;
+    this.presenceHeard = key;
+    this.emit("presence");
+  }
+
   presenceOn(file) {
     return this.presence.filter((entry) => entry.file === file && entry.who.id !== this.me.id);
   }
@@ -402,7 +414,7 @@ export class Workspace {
       clearTimeout(this.awayTimer);
       let hello = {};
       try { hello = JSON.parse(message.data || "{}"); } catch { hello = {}; }
-      if (Array.isArray(hello.presence)) { this.presence = hello.presence; give(this.presence); this.emit("presence"); }
+      if (Array.isArray(hello.presence)) this.heard(hello.presence);
       if (this.focused) this.reportFocus(...this.focused);
       this.retryIn = 0;
       this.emit("online", true);
@@ -421,7 +433,7 @@ export class Workspace {
       // Out of reach for more than a moment, who is here is not known: no one is shown, rather
       // than as they were last known, until the studio says again (its hello).
       clearTimeout(this.awayTimer);
-      this.awayTimer = setTimeout(() => { if (this.presence.length) { this.presence = []; give([]); this.emit("presence"); } }, 1500);
+      this.awayTimer = setTimeout(() => { if (this.presence.length) this.heard([]); }, 1500);
     };
     this.source = source;
   }
@@ -472,7 +484,7 @@ export class Workspace {
       case "reopened": this.reopen(event.file, event.kind); break;
       case "renamed": this.renamed(event.file, event.to); break;
       case "depends": if (session) { session.pages.clear(); session.requestDraw(0); } break;
-      case "presence": this.presence = event.presence; give(this.presence); this.emit("presence"); break;
+      case "presence": this.heard(event.presence); break;
       case "documents": this.documents = event.documents; this.emit("documents"); break;
       case "trusted":
         this.info.trusted = true;
@@ -650,6 +662,8 @@ export async function start() {
       docbar.classList.add(step);
     }
   };
+  let fittingSoon = 0;
+  const fitDocbarSoon = () => { if (!fittingSoon) fittingSoon = requestAnimationFrame(() => { fittingSoon = 0; fitDocbar(); }); };
   const fitting = new ResizeObserver(fitDocbar);
   for (const node of [docbar, ...groups, docRight]) fitting.observe(node);
 
@@ -807,51 +821,57 @@ export async function start() {
   // What the document can do now, by label: the app enables its Insert and Slide items by it.
   // A command named for what it acts on ("Duplicate Table") is also the menu's plain one
   // (`also`: Edit › Duplicate); one greyed is not offered.
-  const doable = (session) => {
-    try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
-  };
+  // (Each from the document's commands, asked for once and passed on: `listed`.)
+  const commandsOf = (session) => { try { return session ? session.commands() : []; } catch { return []; } };
+  const doable = (session, listed = commandsOf(session)) => listed.filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]);
   // What each command greyed says of why, by label.
-  const whyNot = (session) => {
-    try { return session ? Object.fromEntries(session.commands().filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint])) : {}; } catch { return {}; }
-  };
+  const whyNot = (session, listed = commandsOf(session)) => Object.fromEntries(listed.filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint]));
   // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
-  const doesKey = (session, keys) => {
-    try { return Boolean(session?.commands().some((command) => !command.disabled && command.keys === keys)); } catch { return false; }
-  };
-  let reporting = null;
+  const doesKey = (session, keys, listed = commandsOf(session)) => listed.some((command) => !command.disabled && command.keys === keys);
+  // Told the Mac app (its menus) a moment after anything changes -- at every key typed, as the
+  // document changes -- but only what is new: the same state again (some two hundred commands'
+  // names, as it was) is not sent through the app's bridge, which is slow to read it. A page
+  // with no app round it (a browser) works none of it out.
+  let reporting = null, reported = "";
   const report = () => {
     if (reporting) return;
     reporting = setTimeout(() => {
       reporting = null;
+      if (!window.pywebview?.api?.studio_state) return;
       const session = workspace.active;
       const field = typingIn(document.activeElement) ? document.activeElement : null;
-      window.pywebview?.api?.studio_state?.({
+      const listed = commandsOf(session);
+      const state = ({
         file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
         can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
         undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
         // (And the help bar's, whatever is open: View › Show Help Bar.)
-        commands: [...doable(session), helpCommand().label],
+        commands: [...doable(session, listed), helpCommand().label],
         // The open documents, for the Window menu (their names as their tabs have them); a
         // sheet up, which the menus wait for; and the side panel shown (Show or Hide Assistant).
         tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
         sheet: Boolean(document.querySelector(".scrim:not(.palette-scrim)")),
         side: side.open || "",
         // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
-        deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
+        deletable: field ? chosenIn(field) : doesKey(session, "⌫", listed),
         // View › Snap to Guides and Objects, ticked while it is on -- and Snap to Grid instead
         // while it is the grid's.
         snapping: snapping(), snapping_grid: toGrid(),
         // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
         align_to: alignTo(), align_group: asGroup(),
         // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
-        why: whyNot(session),
+        why: whyNot(session, listed),
         // Edit › Find: whether the document finds its words (Find…), whether its find bar is
         // open (Find Next, Find Previous), and words chosen to find (Use Selection for Find).
         finds: Boolean(session?.finder), finding: Boolean(session?.finder?.isOpen),
         find_selection: Boolean(session?.finder) && Boolean((field ? chosenWords() : String(getSelection())).trim()),
       });
+      const said = JSON.stringify(state);
+      if (said === reported) return;
+      reported = said;
+      window.pywebview.api.studio_state(state);
     }, 80);
   };
   // Snapping turned -- here, in another tab, in another window of the app -- is told at once;
@@ -950,7 +970,17 @@ export async function start() {
     workspace.activate(workspace.order[next]);
     tabs.querySelector(`.tab[data-file="${CSS.escape(workspace.order[next])}"]`)?.focus();
   };
+  // (Drawn again only when what they show changes: told at every edit -- for the toolbar's
+  // Undo -- they were made again, and the strip measured, at every key typed.)
+  let tabsShown = "";
   const renderTabs = () => {
+    const shows = JSON.stringify([workspace.info.folder, workspace.order.map((file) => {
+      const session = workspace.sessions.get(file);
+      return [file, session?.kind, session && tabName(file, session), session?.state, session && session.state !== "saved" ? statusWords(session) : "",
+        workspace.active === session, workspace.presenceOn(file).slice(0, 3).map((entry) => [colourOf(entry.who), nameOf(entry.who)])];
+    })]);
+    if (shows === tabsShown && tabs.childElementCount === workspace.order.length) return;
+    tabsShown = shows;
     // A tab with the keys has them still once the tabs are drawn again.
     const keyed = tabs.contains(document.activeElement) ? document.activeElement.closest(".tab")?.dataset.file : null;
     clear(tabs, workspace.order.map((file) => {
@@ -971,6 +1001,12 @@ export async function start() {
       return tab;
     }));
     if (keyed) tabs.querySelector(`.tab[data-file="${CSS.escape(keyed)}"]`)?.focus();
+    // (Measured once the page is laid out for its next frame anyway, not at once.)
+    placeTabsSoon();
+  };
+  let placingTabs = 0;
+  const placeTabsSoon = () => { if (!placingTabs) placingTabs = requestAnimationFrame(() => { placingTabs = 0; placeTabs(); }); };
+  const placeTabs = () => {
     // The one in front is in view, however many there are.
     const shown = tabs.querySelector(".tab.on");
     if (shown) {
@@ -1030,7 +1066,8 @@ export async function start() {
     if (text.textContent !== words) {
       text.textContent = words;
       // The bar has room again for its tools' words once a long word on saving is gone.
-      fitDocbar();
+      // (Measured as the next frame is laid out: the words change twice at every key typed.)
+      fitDocbarSoon();
     }
     // A document that has never read has nothing to edit, export or present.
     for (const slot of [docLeft, docCentre, docRight]) slot.inert = unreadable(session);
@@ -1714,6 +1751,9 @@ class SidePanel {
 // The palette open now, closed (⌘K again, or a menu command run while it is open).
 let closePalette = () => {};
 
+// (How many of the palette's rows are drawn as it opens: a screenful and more.)
+const FIRST_ROWS = 40;
+
 export function palette(workspace) {
   if (document.querySelector(".palette")) return;
   const session = workspace.active;
@@ -1831,15 +1871,21 @@ export function palette(workspace) {
         command.icon ? icon(command.icon) : null, text,
         words ? h("span.found-where", {}, words.name) : command.keys ? h("span.kbd", {}, command.keys) : null);
     };
-    const rows = [];
-    shown.forEach((command, i) => {
-      if (command.head) rows.push(h("div.found-head", {}, h("span", {}, command.head.label), command.head.title ? h("span.found-title", {}, command.head.title) : null));
-      // (The commands under the matches, said so.)
-      if (matches.length && command === rest[0]) rows.push(h("div.found-head.commands", {}, "Commands"));
-      rows.push(row(command, i));
+    const rows = (from, to) => shown.slice(from, to).flatMap((command, k) => {
+      const i = from + k;
+      return [
+        command.head ? h("div.found-head", {}, h("span", {}, command.head.label), command.head.title ? h("span.found-title", {}, command.head.title) : null) : null,
+        // (The commands under the matches, said so.)
+        matches.length && command === rest[0] ? h("div.found-head.commands", {}, "Commands") : null,
+        row(command, i)].filter(Boolean);
     });
-    clear(list, rows.length ? rows : h("div.empty", {}, "No results"));
+    // The rows in sight drawn at once, the rest of a long list (every command, as it opens)
+    // just after: the palette shows as the keys are pressed, not once hundreds of rows are laid out.
+    const drawn = ++renders;
+    clear(list, shown.length ? rows(0, FIRST_ROWS) : h("div.empty", {}, "No results"));
+    if (shown.length > FIRST_ROWS) requestAnimationFrame(() => setTimeout(() => { if (drawn === renders && scrim.isConnected) list.append(...rows(FIRST_ROWS, shown.length)); }, 0));
   };
+  let renders = 0;
   const mark = () => list.querySelectorAll(".menu-item").forEach((item, i) => { item.classList.toggle("active", i === index); if (i === index) item.scrollIntoView({ block: "nearest" }); });
   // Closed, it gives the keys back where they were, as Spotlight does; a command run then
   // takes them where it goes.
