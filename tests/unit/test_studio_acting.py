@@ -204,3 +204,100 @@ def test_a_drawing_asked_for_by_the_version_the_page_has_is_the_document_s(
     status, second = call(f"{base}/api/draw", token, kept)
     assert status == 200 and second["pages"][0]["svg"] == first["pages"][0]["svg"]
     assert second["pages"][0]["hash"] == first["pages"][0]["hash"]
+
+
+def test_an_edit_sent_again_after_the_studio_restarted_between_its_save_and_answer_is_made_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flexo.studio import acting
+
+    monkeypatch.setenv("FLEXO_ACTS", str(tmp_path / "acts"))
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    (folder / "figure.yaml").write_text(SAMPLE_FIGURE, encoding="utf-8")
+
+    def studio():
+        server, workspace = start(folder / "figure.yaml", browser=False)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server, workspace, f"http://127.0.0.1:{server.server_address[1]}"
+
+    def stop(server, workspace):
+        workspace.close()
+        server.shutdown()
+        server.server_close()
+
+    server, workspace, base = studio()
+    _, opened = call(f"{base}/api/open?file=figure.yaml", workspace.token)
+    body = {
+        "file": "figure.yaml",
+        "base": opened["version"],
+        "instance": opened["instance"],
+        "client": "page-1",
+        "action": ADD,
+        "commit": True,
+        "once": "page-1:add-protein",
+    }
+    status, made = call(f"{base}/api/act", workspace.token, body)
+    assert status == 200 and made["version"] == opened["version"] + 1
+    # Written to its file -- and the studio gone before its answer reached the page.
+    workspace.flush()
+    stop(server, workspace)
+    acting._MADE.clear()  # (a new studio knows only what was written)
+    server, workspace, base = studio()
+    try:
+        # Sent again as it was, and with the document whole as the page falls back to: made
+        # already, so made no more -- the page takes in the studio's document instead.
+        status, again = call(f"{base}/api/act", workspace.token, body)
+        assert status == 200 and again["repeat"] and again["instance"] == workspace.instance
+        whole = {
+            "file": "figure.yaml",
+            "document": opened["document"],
+            "action": ADD,
+            "once": body["once"],
+        }
+        assert call(f"{base}/api/act", workspace.token, whole)[1]["repeat"]
+        text = workspace.open("figure.yaml").document["text"]
+        assert text.count("id: protein") == 1
+        # Another edit is made as ever.
+        _, now = call(f"{base}/api/open?file=figure.yaml", workspace.token)
+        other = {
+            **body,
+            "base": now["version"],
+            "instance": now["instance"],
+            "once": "page-1:other",
+            "action": {**ADD, "kind": "text"},
+        }
+        status, made = call(f"{base}/api/act", workspace.token, other)
+        assert status == 200 and made["version"] == now["version"] + 1
+    finally:
+        stop(server, workspace)
+
+
+def test_an_edit_whose_save_never_reached_its_file_is_made_again(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from flexo.studio import acting
+
+    monkeypatch.setenv("FLEXO_ACTS", str(tmp_path / "acts"))
+    path = tmp_path / "figure.yaml"
+    path.write_text("before", encoding="utf-8")
+    workspace = SimpleNamespace(root=tmp_path, instance="one")
+    doc = SimpleNamespace(name="figure.yaml", path=path, version=1, workspace=workspace)
+    acting._keep(workspace, doc, "kept", 1)
+    acting.saving(workspace, doc, path)  # (the words "before", holding "kept")
+    acting._keep(workspace, doc, "lost", 2)
+    written = tmp_path / ".figure.saving.yaml"
+    written.write_text("after", encoding="utf-8")
+    acting.saving(workspace, doc, written)  # (kept beside, and the studio gone before the move)
+    acting._MADE.clear()
+    assert acting.made_already(workspace, doc, "kept") and not acting.made_already(
+        workspace, doc, "lost"
+    )
+    # The move made after all: both held.
+    acting._MADE.clear()
+    written.replace(path)
+    assert acting.made_already(workspace, doc, "kept") and acting.made_already(
+        workspace, doc, "lost"
+    )

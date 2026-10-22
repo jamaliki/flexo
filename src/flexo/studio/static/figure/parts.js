@@ -359,6 +359,9 @@ const inSentence = (title) => (/^[A-Z][a-z]/.test(title) ? title.charAt(0).toLow
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 const article = (word) => (/^[aeiou]/i.test(word) ? "an" : "a");
 
+// An id for an edit, the same each time it is sent (the studio makes it once: flexo.studio.acting).
+const madeOnce = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
 // A path's length, and points along it in its own units -- `step` apart from its start, or
 // `steps` even parts of it: found once for each drawing of it (its "d"), however often a + is
 // placed or a part dragged beside it. (getPointAtLength walks the path at every call.)
@@ -976,7 +979,10 @@ export function figureParts(host) {
           current = job;
           // (Its drawing may come with it, before it is answered: it lands as smoothly.)
           if (LANDS.has(job.action.do)) state.landing = Date.now();
-          result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label });
+          // (Sent again as it was -- the studio away, its answer lost -- by the same id: made
+          // once, however often it is sent.)
+          job.once ??= madeOnce();
+          result = await host.run(job.action, { merge: job.merge, hold: job.hold, label: job.label, once: job.once });
           // The studio back: what was held goes, and nothing is said to wait -- nor what was
           // taken back while it was away (made again by an edit of its own, not by ⇧⌘Z).
           if (waiting) { waiting = false; takenBack.length = 0; host.waiting?.(false); host.held?.(); }

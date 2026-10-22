@@ -740,7 +740,9 @@ export class Session {
   // drawing. Answered as the kind answers, with that `document`; null when it cannot be sent
   // so: the caller sends the document whole. (`keep` false: one that changes nothing -- a
   // figure's parts read -- is only answered.)
-  async act(action, { apply = (document) => this.change(() => document, { quiet: true, drawn: true }), keep = true } = {}) {
+  // (`once`: the edit's id, the same however often it is sent -- one the studio holds already
+  // is answered `repeat`, not made again: what the studio has is taken in.)
+  async act(action, { apply = (document) => this.change(() => document, { quiet: true, drawn: true }), keep = true, once = null } = {}) {
     if (this.sending || this.resyncing || this.unread || this.held || this.unanswered.length || !same(this.document, this.synced)) return null;
     const sent = this.document;
     if (!keep) {
@@ -764,7 +766,7 @@ export class Session {
     try {
       answer = await this.workspace.api("/api/act", {
         file: this.file, kind: this.kind, base: this.version, instance: this.instance, client: this.workspace.client, who: this.workspace.me,
-        action, commit: true, draw: { version, known, hints },
+        action, commit: true, draw: { version, known, hints }, ...(once ? { once } : {}),
       });
     } catch (error) {
       if (unreachable(error)) lost(this.workspace);
@@ -773,6 +775,11 @@ export class Session {
       this.sending = null;
       this.drawBusy -= 1;
       this.emit("status");
+    }
+    if (answer.repeat) {
+      this.repeated(answer);
+      if (this.drawWanted && !this.drawBusy) this.requestDraw(0);
+      return { ...answer, document: this.document };
     }
     if (answer.restarted || answer.resend || answer.reopen) {
       if (answer.restarted) this.resync();
@@ -801,6 +808,12 @@ export class Session {
     if (waiting && waiting.version > this.version) this.remote(waiting);
     this.schedulePush();
     return { ...answer, document };
+  }
+
+  // An edit the studio holds already (`repeat`: made by an earlier sending of it whose answer
+  // was lost): what the studio has is taken in, the edit with it.
+  repeated(answer) {
+    if (answer.instance !== this.instance || answer.version > this.version) this.resync();
   }
 
   // -- drawing --

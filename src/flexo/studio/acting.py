@@ -8,15 +8,33 @@ same request. The answer says what the edit changed (``delta``: :func:`changes`)
 version it became, never the whole document, with the drawing's pages that changed alone
 (``Workspace.draw``): one request where an edit took an edit, an update and a drawing, each
 carrying the whole document both ways.
+
+Each such edit carries an id the page made for it (``once``), the same however often it is
+sent: one the studio has kept already -- its answer lost, the studio stopped and started
+again after its file was written -- is answered ``repeat``, never made twice. The ids kept
+are written beside each save of the file (``saving``), each save's with the very words it
+wrote, so that a studio started again knows those its file holds, and only those.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import os
+import sys
+import threading
 import time
+from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 MISSING = object()
+
+KEPT_IDS = 256
+"""How many of a document's edits are remembered as made, by their ids (``once``)."""
+KEPT_SAVES = 8
+"""How many of its saves are remembered, each with the ids of the edits it holds."""
 
 
 def sent_document(doc: Any, data: dict[str, Any]) -> Any:
@@ -79,6 +97,116 @@ def changed(document: Any, made: list[list[Any]]) -> Any:
     return document
 
 
+# -- edits made once --
+
+_LOCK = threading.Lock()
+_MADE: dict[str, OrderedDict[str, int]] = {}
+"""The ids of the edits each document holds (by ``_named``), and the version each became."""
+
+
+def _named(workspace: Any, doc: Any) -> str:
+    """A document, by where it is kept for its person: its bundle (wherever that is unpacked
+    each time it is opened), or the folder it is in -- and its name there."""
+
+    keeper = getattr(workspace, "bundle", None)
+    where = keeper.path if keeper is not None else workspace.root
+    return hashlib.sha256(f"{Path(where).resolve()}\0{doc.name}".encode()).hexdigest()[:32]
+
+
+def _folder() -> Path | None:
+    """Where the ids of edits made are kept between studios (``FLEXO_ACTS``: elsewhere, or
+    "0" for nowhere)."""
+
+    setting = os.environ.get("FLEXO_ACTS", "")
+    if setting == "0":
+        return None
+    if setting:
+        return Path(setting)
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/flexo/acts"
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "flexo" / "acts"
+
+
+def _saves(name: str) -> list[dict[str, Any]]:
+    folder = _folder()
+    try:
+        saves = json.loads((folder / f"{name}.json").read_text(encoding="utf-8")) if folder else []
+    except (OSError, ValueError):
+        return []
+    return [save for save in saves if isinstance(save, dict)] if isinstance(saves, list) else []
+
+
+def _made(workspace: Any, doc: Any) -> OrderedDict[str, int]:
+    """The ids of the edits ``doc`` holds: those made here, and -- found the first time it is
+    asked, its file as the last studio left it -- those its file was written with: the save
+    whose words it has, else (changed since by another app) the last."""
+
+    name = _named(workspace, doc)
+    with _LOCK:
+        made = _MADE.get(name)
+        if made is not None:
+            return made
+        saves = _saves(name)
+        found: list[str] = []
+        if saves:
+            try:
+                words = hashlib.sha256(doc.path.read_bytes()).hexdigest()
+            except OSError:
+                words = None
+            held = next((save for save in reversed(saves) if save.get("words") == words), saves[-1])
+            found = [str(item) for item in held.get("ids") or []]
+        _MADE[name] = made = OrderedDict((item, 0) for item in found)
+        return made
+
+
+def made_already(workspace: Any, doc: Any, once: str) -> bool:
+    """Whether the edit ``once`` is one the document holds already."""
+
+    return bool(once) and once in _made(workspace, doc)
+
+
+def saving(workspace: Any, doc: Any, written: Path) -> None:
+    """``doc`` about to be written, its words in ``written``: the ids of the edits they hold
+    kept beside them first -- a studio stopped before the file is put in place finds the
+    file's words those of the save before, and the ids that save held."""
+
+    folder = _folder()
+    made = _made(workspace, doc)
+    name = _named(workspace, doc)
+    if folder is None or (not made and not (folder / f"{name}.json").exists()):
+        return
+    try:
+        words = hashlib.sha256(written.read_bytes()).hexdigest()
+    except OSError:
+        return
+    with _LOCK:
+        ids = list(made)[-KEPT_IDS:]
+    saves = [*_saves(name), {"words": words, "ids": ids}][-KEPT_SAVES:]
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        partial = folder / f".{name}.{os.getpid()}.json"
+        partial.write_text(json.dumps(saves), encoding="utf-8")
+        os.replace(partial, folder / f"{name}.json")
+    except OSError:
+        return
+
+
+def _keep(workspace: Any, doc: Any, once: str, version: int) -> None:
+    made = _made(workspace, doc)
+    with _LOCK:
+        made.pop(once, None)
+        made[once] = version
+        while len(made) > KEPT_IDS:
+            made.popitem(last=False)
+
+
+def repeated(doc: Any) -> dict[str, Any]:
+    """The answer to an edit the document holds already: nothing made again; the studio's
+    version, for the page to take in what it has."""
+
+    return {"repeat": True, "version": doc.version, "instance": doc.workspace.instance}
+
+
 def answered(
     workspace: Any, doc: Any, data: dict[str, Any], sent: Any, answer: Any, who: dict[str, Any]
 ) -> Any:
@@ -95,8 +223,12 @@ def answered(
     final = made
     base = int(data["base"])
     client = str(data.get("client") or who.get("id") or "")
+    once = str(data.get("once") or "")
     if data.get("commit") and not doc.held and not doc.unread:
         with doc.lock:
+            # (Made once: sent again while the first was on its way, it is not made again.)
+            if made_already(workspace, doc, once):
+                return repeated(doc)
             # (Kept only on the version it was made from: made on an older one, the page has
             # yet to take in what changed since, and sends it as any edit, to be merged.)
             if base == doc.version:
@@ -106,6 +238,8 @@ def answered(
                     final = made  # (refused, it is said when the page sends it)
                 else:
                     answer["version"] = version
+                    if once:
+                        _keep(workspace, doc, once, version)
     answer["delta"] = changes(sent, final)
     asked = data.get("draw")
     if isinstance(asked, dict):

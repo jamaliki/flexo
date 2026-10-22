@@ -376,6 +376,11 @@ class Handler(BaseHTTPRequestHandler):
             # Sent as the version the page has, not the whole document (flexo.studio.acting):
             # made on the studio's copy of it -- unless the studio was started again since, or
             # has let that version go, when the page sends its document whole.
+            # (An edit the document holds already -- sent again, its answer lost -- is not made
+            # twice: the page takes in the studio's document.)
+            if acting.made_already(workspace, doc, str(data.get("once") or "")):
+                self._json(acting.repeated(doc))
+                return
             if "base" in data and data.get("instance") not in (None, workspace.instance):
                 self._json({"restarted": True})
                 return

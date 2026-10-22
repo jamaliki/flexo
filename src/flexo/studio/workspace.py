@@ -37,7 +37,7 @@ import yaml
 
 from flexo.draft import GivenUp, given_up_when
 from flexo.roundtrip import writing
-from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures, taking_turns
+from flexo.studio import Kind, acting, code_allowed, folder_root, kinds, pictures, taking_turns
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
 from flexo.svg_resources import fonts_linked
@@ -374,6 +374,9 @@ class Doc:
                         self.kind.save(partial, self.document)
                 with contextlib.suppress(OSError):
                     os.chmod(partial, self.path.stat().st_mode & 0o7777)
+                # (The edits these words hold, by their ids, kept beside them first: a studio
+                # started again makes none of them twice -- flexo.studio.acting.)
+                acting.saving(self.workspace, self, partial)
                 os.replace(partial, self.path)
             except BaseException:
                 with contextlib.suppress(OSError):
