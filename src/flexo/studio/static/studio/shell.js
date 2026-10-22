@@ -821,51 +821,57 @@ export async function start() {
   // What the document can do now, by label: the app enables its Insert and Slide items by it.
   // A command named for what it acts on ("Duplicate Table") is also the menu's plain one
   // (`also`: Edit › Duplicate); one greyed is not offered.
-  const doable = (session) => {
-    try { return session ? session.commands().filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]) : []; } catch { return []; }
-  };
+  // (Each from the document's commands, asked for once and passed on: `listed`.)
+  const commandsOf = (session) => { try { return session ? session.commands() : []; } catch { return []; } };
+  const doable = (session, listed = commandsOf(session)) => listed.filter((command) => !command.disabled).flatMap((command) => [command.label, ...(command.also || [])]);
   // What each command greyed says of why, by label.
-  const whyNot = (session) => {
-    try { return session ? Object.fromEntries(session.commands().filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint])) : {}; } catch { return {}; }
-  };
+  const whyNot = (session, listed = commandsOf(session)) => Object.fromEntries(listed.filter((command) => command.disabled && command.hint).map((command) => [command.label, command.hint]));
   // Whether the document does something now with a key (⌫, ⌘C): one of its commands says so.
-  const doesKey = (session, keys) => {
-    try { return Boolean(session?.commands().some((command) => !command.disabled && command.keys === keys)); } catch { return false; }
-  };
-  let reporting = null;
+  const doesKey = (session, keys, listed = commandsOf(session)) => listed.some((command) => !command.disabled && command.keys === keys);
+  // Told the Mac app (its menus) a moment after anything changes -- at every key typed, as the
+  // document changes -- but only what is new: the same state again (some two hundred commands'
+  // names, as it was) is not sent through the app's bridge, which is slow to read it. A page
+  // with no app round it (a browser) works none of it out.
+  let reporting = null, reported = "";
   const report = () => {
     if (reporting) return;
     reporting = setTimeout(() => {
       reporting = null;
+      if (!window.pywebview?.api?.studio_state) return;
       const session = workspace.active;
       const field = typingIn(document.activeElement) ? document.activeElement : null;
-      window.pywebview?.api?.studio_state?.({
+      const listed = commandsOf(session);
+      const state = ({
         file: session?.file || "", kind: session?.kind || "", title: session?.title || "",
         can_undo: Boolean(session?.past.length), can_redo: Boolean(session?.future.length),
         undo_label: session?.past.length ? session.said(session.past[session.past.length - 1]).text : "",
         redo_label: session?.future.length ? session.said(session.future[session.future.length - 1]).text : "",
         exports: session?.exports || [], present: Boolean(session?.present), saved: session ? session.state === "saved" : true,
         // (And the help bar's, whatever is open: View › Show Help Bar.)
-        commands: [...doable(session), helpCommand().label],
+        commands: [...doable(session, listed), helpCommand().label],
         // The open documents, for the Window menu (their names as their tabs have them); a
         // sheet up, which the menus wait for; and the side panel shown (Show or Hide Assistant).
         tabs: workspace.order.map((file) => ({ file, name: tabName(file, workspace.sessions.get(file)) })),
         sheet: Boolean(document.querySelector(".scrim:not(.palette-scrim)")),
         side: side.open || "",
         // Edit › Delete: words chosen in the field typed in, else what ⌫ deletes in the document.
-        deletable: field ? chosenIn(field) : doesKey(session, "⌫"),
+        deletable: field ? chosenIn(field) : doesKey(session, "⌫", listed),
         // View › Snap to Guides and Objects, ticked while it is on -- and Snap to Grid instead
         // while it is the grid's.
         snapping: snapping(), snapping_grid: toGrid(),
         // Arrange › Align Objects › Relative To, what Align aligns to ticked, and Move as a Group.
         align_to: alignTo(), align_group: asGroup(),
         // Why a command greyed is (Distribute's "Choose three or more shapes"): its item's tooltip.
-        why: whyNot(session),
+        why: whyNot(session, listed),
         // Edit › Find: whether the document finds its words (Find…), whether its find bar is
         // open (Find Next, Find Previous), and words chosen to find (Use Selection for Find).
         finds: Boolean(session?.finder), finding: Boolean(session?.finder?.isOpen),
         find_selection: Boolean(session?.finder) && Boolean((field ? chosenWords() : String(getSelection())).trim()),
       });
+      const said = JSON.stringify(state);
+      if (said === reported) return;
+      reported = said;
+      window.pywebview.api.studio_state(state);
     }, 80);
   };
   // Snapping turned -- here, in another tab, in another window of the app -- is told at once;
