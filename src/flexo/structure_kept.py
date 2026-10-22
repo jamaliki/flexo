@@ -6,10 +6,11 @@ its molecules anew. A ribosome takes seconds to read and draw; read back, a few 
 
 They are kept in flexo's cache folder (``~/Library/Caches/flexo/structures`` on a Mac), or
 in the folder ``FLEXO_STRUCTURE_CACHE`` names (``FLEXO_STRUCTURE_CACHE=0`` keeps none), by
-everything the drawing is made from: the structure's settings as it is drawn (its ask), its
-files -- where each is, when it was last saved and how long it is -- and flexo's and
-mol-sketch's own code. A change to any of them draws it afresh. The most recently used are
-kept, up to ``KEPT`` of them and ``SIZE`` bytes in all.
+everything the drawing is made from: the structure's settings as it is drawn (its ask), what
+is in its files (by their names, not where they are or when they were saved: a deck unpacked
+afresh draws from the same), and flexo's and mol-sketch's own code. A change to any of them
+draws it afresh. The most recently used are kept, up to ``KEPT`` of them and ``SIZE`` bytes in
+all.
 
 Each file is looked at once for each thing looked up (``_key``), and what is read back is
 marked used once a session (``_read``): a deck opened in a busy studio waits on every look at
@@ -19,6 +20,7 @@ the disk, each one a turn for the studio's other threads.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import hashlib
 import json
 import os
@@ -174,36 +176,80 @@ def checked(ask, name: str) -> tuple[bool, dict | None]:
 
 
 def keep_checked(ask, name: str, problem: dict | None) -> None:
-    """What was found wrong with ``ask`` (its fields, or None), kept."""
+    """What was found wrong with ``ask`` (its fields, or None), kept -- unless it says where one
+    of its files is: kept by what is in its files, it is read back for the same files elsewhere."""
 
+    words = " ".join(str(value) for value in (problem or {}).values())
+    folders = [
+        os.path.dirname(os.path.abspath(os.path.expanduser(name)))
+        for name in (ask.source, ask.ss_from, ask.density)
+        if name
+    ]
+    if any(len(where) > 1 and where in words for where in folders):
+        return
     key = _key("checked", ask, name)
     if key is not None:
         _write(key + ".json", json.dumps({"problem": problem}).encode("utf-8"))
 
 
 def _key(kind: str, ask, *more) -> str | None:
-    """What ``ask`` is kept by: its settings, its files as they are now, and the code that
-    draws it -- None when a file of it can't be looked at, or nothing is kept."""
+    """What ``ask`` is kept by: its settings, what is in its files (by name, not by where they
+    are or when they were saved), and the code that draws it -- None when nothing is kept.
+
+    A deck unpacked afresh -- opened on another computer, a copy of it, the bundle put back in
+    its place -- has its files where it did not, saved when it was unpacked: what is in them
+    is what it was, and so is what was drawn from them."""
 
     if folder() is None:
         return None
     files = []
-    for name in (ask.source, ask.ss_from, ask.density):
+    named = {}
+    for field, stamp in (("source", "stamp"), ("ss_from", "ss_stamp"), ("density", None)):
+        name = getattr(ask, field)
         if not name:
             continue
         path = os.path.expanduser(name)
-        try:
-            stat = os.stat(path)
-        except (OSError, ValueError):
+        held = _content(path)
+        if held is None:
             files.append(name)  # a PDB entry or a map by its ID: the same wherever it is read
             continue
-        # (Where it is, as written from the root: one look at the file, not one for every
-        # folder on the way to follow links. The file itself is told by its device and inode.)
-        files.append(
-            (os.path.abspath(path), stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
-        )
-    named = repr((VERSION, kind, _code(), tuple(files), ask, more))
-    return hashlib.sha256(named.encode("utf-8")).hexdigest()[:32]
+        files.append((os.path.basename(path), held))
+        named[field] = os.path.basename(path)
+        if stamp:
+            named[stamp] = 0.0
+    plain = dataclasses.replace(ask, **named) if named else ask
+    said = repr((VERSION, kind, _code(), tuple(files), plain, more))
+    return hashlib.sha256(said.encode("utf-8")).hexdigest()[:32]
+
+
+_CONTENTS: dict[str, tuple[tuple[int, int, int, int], str]] = {}
+"""What is in each file a structure is drawn from (``_content``), with the file it was found
+in: its device, inode, time saved and length."""
+
+
+def _content(path: str) -> str | None:
+    """What is in the file at ``path``, hashed -- read once for as long as it is the same file,
+    unchanged -- or None, for no file there."""
+
+    try:
+        stat = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    same = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    where = os.path.abspath(path)
+    known = _CONTENTS.get(where)
+    if known is not None and known[0] == same:
+        return known[1]
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()  # (at once: a ribosome's 25 MB in one read, not a hundred)
+    except OSError:
+        return None
+    held = hashlib.sha256(data).hexdigest()
+    if len(_CONTENTS) >= 1024:
+        _CONTENTS.clear()
+    _CONTENTS[where] = (same, held)
+    return held
 
 
 _CODE: list[str] = []

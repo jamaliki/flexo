@@ -66,9 +66,20 @@ def test_a_structure_drawn_once_is_read_back_until_its_file_changes(
     assert _figure(source, look) == first
     assert drawn == []
 
-    # The file saved again: drawn afresh, checked and drawn.
+    # Unpacked afresh (a copy of the deck, opened on another computer): the same file in
+    # another folder, saved when it was unpacked -- read back, not drawn.
+    elsewhere = tmp_path / "unpacked" / "model.cif"
+    elsewhere.parent.mkdir()
+    shutil.copyfile(source, elsewhere)
     later = source.stat().st_mtime + 5
-    os.utime(source, (later, later))
+    os.utime(elsewhere, (later, later))
+    _forget()
+    assert _figure(elsewhere, look) == first
+    assert drawn == []
+
+    # The file changed: drawn afresh, checked and drawn.
+    with source.open("a") as written:
+        written.write("#\n")
     _forget()
     assert _figure(source, look) == first  # (the same molecule, drawn again)
     assert len(drawn) >= 2
@@ -103,3 +114,24 @@ def test_an_installed_package_is_told_by_the_hashes_its_installation_recorded() 
         f"molsketch/{path.name}" for path in here.iterdir() if path.suffix in (".py", ".js")
     }
     assert structure_kept._recorded("molsketch", here.parent / "elsewhere", False, (".py",)) is None
+
+
+def test_what_says_where_a_file_is_is_not_kept(tmp_path: Path, monkeypatch) -> None:
+    """Kept by what is in its files, a check is read back for the same files elsewhere: one
+    that says where its file is (what reading it said) is not kept, or it would say the other
+    place."""
+
+    from flexo import structure_kept
+    from flexo.structures import _Ask
+
+    monkeypatch.setenv("FLEXO_STRUCTURE_CACHE", str(tmp_path / "kept"))
+    source = tmp_path / "models" / "model.pdb"
+    source.parent.mkdir()
+    source.write_text("ATOM\n")
+    ask = _Ask(str(source), 0.0, "flat", "#ffffff", (), (), (), None, ())
+    said = {"code": "ss_from", "title": "Couldn't read x", "reason": f"No such file {source}."}
+    structure_kept.keep_checked(ask, "model", said)
+    assert structure_kept.checked(ask, "model") == (False, None)
+    plain = {**said, "reason": "It has none of model's residues."}
+    structure_kept.keep_checked(ask, "model", plain)
+    assert structure_kept.checked(ask, "model") == (True, plain)
