@@ -81,6 +81,55 @@ export function pastedOwn(data) {
   }, () => null);
 }
 
+// Flexo's own copy a paste of words alone brings from a window of another folder: several
+// slides copied there are no one drawing, so the Mac app puts Flexo's own copy on the
+// clipboard beside their words alone (no picture), and the web view hands this page only the
+// words. In the Mac app, a promise of that copy (null if the clipboard holds none of Flexo's);
+// null at once in a browser, or where the paste brings files. The paste's data is gone once
+// anything is waited for: what it holds is kept first (`heldData`).
+export function pastedOwnWords(data) {
+  const app = globalThis.pywebview?.api;
+  if (!app?.clipboard_own || [...(data?.files || [])].length) return null;
+  return Promise.resolve(app.clipboard_own()).then((words) => {
+    try { return words ? JSON.parse(words) : null; } catch { return null; }
+  }, () => null);
+}
+
+// Flexo's own copy a paste of a picture alone brings, in a browser, from a studio of another
+// folder: copied there, the picture of it was put on the clipboard with Flexo's own copy in a
+// web format of its own (copyout.js), which a paste's data does not hand over -- read from the
+// clipboard (the browser may ask the person, once). A promise of it (null if there is none, or
+// the clipboard is not to be read); null at once in the Mac app, or where the paste brings
+// anything but pictures -- or no drawing beside them, as the studio puts its copy's there
+// (so a screenshot pasted never has the browser ask).
+export function pastedOwnWeb(data) {
+  const files = [...(data?.files || [])];
+  if (globalThis.pywebview?.api || !files.length || !files.every(pictured) || !navigator.clipboard?.read) return null;
+  if (![...(data?.types || [])].includes("image/svg+xml")) return null;
+  return (async () => {
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        if (!item.types.includes(OWN_WEB)) continue;
+        return JSON.parse(await (await item.getType(OWN_WEB)).text());
+      }
+    } catch { /* not to be read, or not Flexo's */ }
+    return null;
+  })();
+}
+const OWN_WEB = "web application/x-flexo-clip";
+
+// What a paste's data (its clipboardData) holds, kept to be read after it is waited on --
+// when the web view has emptied it: each of its types' words, and its files.
+export function heldData(data) {
+  const kept = {};
+  for (const type of [...(data?.types || []), "text/plain", "text/html", ...SVG_TYPES]) {
+    if (type === "Files" || type in kept) continue;
+    try { kept[type] = data?.getData?.(type) || ""; } catch { kept[type] = ""; }
+  }
+  const files = [...(data?.files || [])];
+  return { files, types: [...(data?.types || [])], getData: (type) => kept[type] ?? "" };
+}
+
 // A GIF pasted, as the GIF it is -- every frame, to play -- never the still picture a copy
 // hands the page instead: a browser's Copy Image puts a GIF on the clipboard as a PNG of its
 // first frame (its address in the HTML beside it), and the web view hands Safari's GIF on as

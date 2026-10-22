@@ -9,7 +9,7 @@ export { themeCard, themeField, themeName, themeUses, themesFor } from "./themes
 import { start } from "./shell.js";
 import { stillGifs } from "./drawings.js";
 export { ownResources, stillGifs, stillHref } from "./drawings.js";
-export { pastedDrawing, pastedGif, pastedOwn, svgOfWords } from "./clipboard.js";
+export { pastedDrawing, pastedGif, pastedOwn, pastedOwnWords, pastedOwnWeb, heldData, svgOfWords } from "./clipboard.js";
 export { copyOut, copiedHere } from "./copyout.js";
 export { drawingPaster, clipboardDrawing, DRAWING_FILE } from "./drawingpaste.js";
 

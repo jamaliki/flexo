@@ -311,6 +311,18 @@ def gather(document: str | Path, *, text: str | None = None) -> Gathered:
     return gathered
 
 
+def followed(reference: Reference, root: str | Path) -> Gathered:
+    """The files one name a document gives (``reference``) stands for, followed through the
+    files they name in turn, each by its name from ``root`` -- as a bundle of the document
+    holds them -- and what was left out: a slide's picture, or a figure file with its own."""
+
+    lexical = Path(os.path.abspath(Path(root).expanduser()))
+    gathered = Gathered(root=lexical, document="")
+    with contextlib.suppress(OSError, ValueError):
+        _Walker(gathered, lexical).follow(reference, "")
+    return gathered
+
+
 class _Walker:
     def __init__(self, gathered: Gathered, root: Path) -> None:
         self.gathered = gathered
