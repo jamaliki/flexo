@@ -144,6 +144,9 @@ const DRAGS = {
   // An object carried among the others in its place: ⌘ takes it out of line, to stay where it
   // is let go.
   carry: () => [row("⌘", "Place Freely"), CANCEL],
+  // One taken out of line so, the ⌘ that took it still held: placed freely, caught as it goes
+  // (that ⌘ let go, a move's: pressed again, without snapping).
+  out: () => [row("⇧", "One Way"), row("⌥", "Copy"), row("⌘", "Place Freely"), CANCEL],
   // A band, a logo along its row: Esc alone.
   plain: () => [CANCEL],
 };
