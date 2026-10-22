@@ -159,7 +159,8 @@ def apply(
     handler = getattr(document, f"_{verb}", None)
     if verb not in STRUCTURAL | {"update", "read", "show"} or handler is None:
         raise EditError(f"Unknown figure edit “{verb}”.")
-    was_valid = _reads(text, suffix, base)
+    # (Whether it read before the edit matters only to one that changes what it is made of.)
+    was_valid = verb in STRUCTURAL and _reads(text, suffix, base)
     if verb in PLACING:
         document.hold_all()
     grouped = group_ids(document)
@@ -244,8 +245,10 @@ def apply_to_data(
 
     text = yaml.safe_dump(dict(data), sort_keys=False, allow_unicode=True)
     result = apply(text, action, base=base)
+    # (Read back as safe_load reads it, by libyaml where there is one: an edit is made as the
+    # page waits.)
     return {
-        "data": yaml.safe_load(result["text"]),
+        "data": yaml.load(result["text"], getattr(yaml, "CSafeLoader", yaml.SafeLoader)),
         "select": result["select"],
         "model": model(result["text"], base=base),
     }
