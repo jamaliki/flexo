@@ -29,15 +29,16 @@ def warm(workspace, name: str) -> None:
         text = workspace.path(name).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError, ValueError):
         return
-    structure = "structure" in text
+    try:
+        figure = workspace.kind_of(workspace.path(name)).name == "figure"
+    except Exception:
+        return
+    if figure and "structure" not in text:
+        return
 
     def draw() -> None:
         try:
-            doc = workspace.open(name) if structure else None
-            if doc is None and workspace.kind_of(workspace.path(name)).name != "figure":
-                doc = workspace.open(name)
-            if doc is None:
-                return
+            doc = workspace.open(name)
             if doc.kind.name == "figure":
                 workspace.drawing_of(name)
                 return
