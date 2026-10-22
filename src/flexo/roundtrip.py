@@ -31,6 +31,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -919,11 +920,15 @@ def _read_back(candidate: str, document: Any) -> str | None:
         return None
 
 
-def _sketched(root: Any, lines: list[str]) -> dict[Any, dict[str, Any]] | None:
+def _sketched(
+    root: Any, lines: list[str], read: Callable[[str, str | None], str] | None = None
+) -> dict[Any, dict[str, Any]] | None:
     """``_parts`` of a file, from where PyYAML's reader (C) finds its keys and items, each
-    part's ``key`` as the round trip reads its words (``_read``). None for a file whose top
-    is not a mapping of plain keys at its left edge, or whose items are not each on the line
-    of its dash."""
+    part's ``key`` as the round trip reads its words (``read``: ``_read``). None for a file
+    whose top is not a mapping of plain keys at its left edge, or whose items are not each on
+    the line of its dash."""
+
+    read = read or _read
 
     if not isinstance(root, yaml.MappingNode) or not root.value:
         return None
@@ -975,14 +980,52 @@ def _sketched(root: Any, lines: list[str]) -> dict[Any, dict[str, Any]] | None:
             ends = [*begins[1:], last]
             items = []
             for k, first in enumerate(begins):
-                read = _read("".join(lines[item_heads[k] : ends[k]]), None)
-                items.append({"start": first, "line": item_heads[k], "end": ends[k], "key": read})
+                said = read("".join(lines[item_heads[k] : ends[k]]), None)
+                items.append({"start": first, "line": item_heads[k], "end": ends[k], "key": said})
             rest = (last, end)
             key_of = "[" + ", ".join(item["key"] for item in items) + "]"
         else:
-            key_of = _read("".join(lines[starts[at] : end]), key)
+            key_of = read("".join(lines[starts[at] : end]), key)
         parts[key] = {"start": starts[at], "end": end, "key": key_of, "items": items, "tail": rest}
     return parts
+
+
+_PRIMING: list[Any] = []
+"""The file whose parts ``prime`` is reading, and those still to read."""
+
+
+def prime(previous: str, budget: float = 0.01) -> bool:
+    """Read the parts of a file (``previous``) as ``_in_part`` will first ask for them, a few
+    at a time -- about ``budget`` seconds' worth -- so that the first writing over it, at the
+    first pause in typing after it is opened, is as quick as the others. True once all are."""
+
+    started = time.perf_counter()
+    if not _PRIMING or _PRIMING[0] != previous:
+        _PRIMING[:] = [previous, []]
+        if _ANCHORED.search(previous) or _MARKED.search(previous):
+            return True
+        wanted: list[tuple[str, str | None]] = []
+
+        def note(words: str, key: str | None) -> str:
+            wanted.append((words, key))
+            return ""
+
+        try:
+            lines = previous.splitlines(keepends=True)
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            _sketched(yaml.compose(previous, Loader=_LOADER), lines, note)
+        except Exception:
+            return True
+        _PRIMING[1] = wanted
+    wanted = _PRIMING[1]
+    while wanted:
+        words, key = wanted.pop()
+        with contextlib.suppress(Exception):
+            _read(words, key)
+        if time.perf_counter() - started >= budget:
+            break
+    return not wanted
 
 
 def _read(words: str, key: str | None) -> str:

@@ -195,6 +195,19 @@ def test_what_is_not_an_edit_of_slides_in_place_is_written_whole() -> None:
     assert _in_part(DECK, typed, None) is not None
 
 
+def test_a_file_opened_is_read_ahead_a_little_at_a_time_for_its_first_writing() -> None:
+    roundtrip._READ.clear()
+    rounds = 1
+    while not roundtrip.prime(DECK, budget=0.0):  # (one part at a time)
+        rounds += 1
+    assert rounds > 5
+    read = len(roundtrip._READ)
+    document = yaml.safe_load(DECK)
+    document["slides"][2]["title"] = "Words, words"
+    assert _in_part(DECK, document, None) == _whole(DECK, document, None)
+    assert len(roundtrip._READ) == read  # (every part of the file read before)
+
+
 def test_a_long_deck_is_written_over_in_a_fraction_of_the_time_of_the_whole() -> None:
     slides = [
         {"title": f"Slide {n}", "body": [{"bullets": [f"Point {n} " * 6, ["sub a", "sub b"]]}],

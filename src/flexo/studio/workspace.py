@@ -36,7 +36,7 @@ from typing import Any
 import yaml
 
 from flexo.draft import GivenUp, given_up_when
-from flexo.roundtrip import writing
+from flexo.roundtrip import prime, writing
 from flexo.studio import Kind, code_allowed, folder_root, kinds, pictures, taking_turns
 from flexo.studio.merge import merge3
 from flexo.studio.plain import explain
@@ -166,6 +166,12 @@ class Doc:
         inode): the very file, wherever in the folder it is moved."""
         self.look_at = 0.0
         self.look_every = LOOK[0]
+        try:
+            self.primed = not _keeps_words(type(kind))
+        except AttributeError:  # (a kind that saves nothing)
+            self.primed = True
+        """Whether the parts of its file as it was opened are read, for writing over it
+        (``flexo.roundtrip.prime``): a little at each tick of the clock until they are."""
 
     def info(self) -> dict[str, Any]:
         with self.lock:
@@ -1589,6 +1595,8 @@ class Workspace:
             rested = now - doc.changed_at > self.quiet or now - doc.unsaved_since > self.patience
             if doc.saved < doc.version and rested and now >= doc.retry_at:
                 self._write(doc)
+            if not getattr(doc, "primed", True) and doc.disk_text is not None and not doc.held:
+                doc.primed = prime(doc.disk_text, 0.01)
             moved = False
             for file in list(doc.depends):
                 stamp = _stamp(file)
