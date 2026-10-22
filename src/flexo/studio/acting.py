@@ -13,6 +13,7 @@ carrying the whole document both ways.
 from __future__ import annotations
 
 import copy
+import time
 from typing import Any
 
 MISSING = object()
@@ -115,4 +116,9 @@ def answered(
             asked.get("known") or {},
             asked.get("hints") or {},
         )
+        if "version" in answer:
+            # (Written to its file once its drawing is answered, not while it is drawn: the
+            # two would only wait on each other.)
+            with doc.lock:
+                doc.changed_at = max(doc.changed_at, time.monotonic())
     return answer
