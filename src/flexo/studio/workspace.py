@@ -297,11 +297,12 @@ class Doc:
         self, merged: Any, who: dict[str, Any], client: str, *, news: bool = True
     ) -> tuple[int, Any]:
         before = self.document
-        if _dumps(merged) == _dumps(before):
+        written = _dumps(merged)  # (once: compared, and kept in the history)
+        if written == _dumps(before):
             return self.version, self.document
         self.version += 1
         self.document = merged
-        self.history[self.version] = _dumps(merged)
+        self.history[self.version] = written
         self.authors[self.version] = who
         while len(self.history) > HISTORY:
             self.history.popitem(last=False)
