@@ -45,7 +45,11 @@ def test_large_drawings_go_past_a_size_in_all_however_few() -> None:
 
 
 def test_drawings_on_screen_stay_whatever_their_size() -> None:
-    assert run("""
+    assert (
+        run("""
       const entries = [["big", { shown: true, size: 9e9 }], ["small", { shown: false, size: 1 }]];
-      return K.overflow(entries, { inUse: (d) => d.shown, size: (d) => d.size, most: 1, budget: 10 });
-    """) == []
+      const options = { inUse: (d) => d.shown, size: (d) => d.size, most: 1, budget: 10 };
+      return K.overflow(entries, options);
+    """)
+        == []
+    )
