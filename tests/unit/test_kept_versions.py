@@ -4,6 +4,7 @@ be shown it while it is made again (``flexo.kept_versions.earlier``)."""
 
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 
@@ -76,3 +77,58 @@ def test_a_structure_drawn_by_another_version_is_drawn_again_in_its_place(
     assert sorted(item.name for item in kept.iterdir()) == names
     svg = next(item for item in kept.iterdir() if item.suffix == ".svg")
     assert svg.read_bytes().startswith(b"flexo-kept bbbbbbbbbbbbbbbb\n")
+
+
+def test_a_noised_trajectory_kept_survives_an_update_that_leaves_its_module_be(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A trajectory is kept by what works it out -- structure_noise's own code, numpy's -- not
+    by the rest of flexo's: an update elsewhere reads it back; one to its module works it out
+    again."""
+
+    from flexo import structure_noise as sn
+
+    monkeypatch.setenv("FLEXO_NOISE_CACHE", str(tmp_path / "noise"))
+    source = Path(__file__).parent / "data" / "1a7g.cif"
+    text = source.read_text()
+    worked: list[int] = []
+    fold = sn.fold
+
+    def counted(*args, **kwargs):
+        worked.append(1)
+        return fold(*args, **kwargs)
+
+    monkeypatch.setattr(sn, "fold", counted)
+
+    def afresh() -> None:
+        sn._KEPT_RUNS.clear()
+        sn._KEPT_NOISED.clear()
+        sn._KEPT_MOLECULES.clear()
+
+    afresh()
+    _version(monkeypatch, "aaaaaaaaaaaaaaaa")
+    first = sn.noised(text, seed=3).trajectories
+    assert worked and list((tmp_path / "noise").glob("*.npy"))
+    worked.clear()
+    afresh()
+    _version(monkeypatch, "bbbbbbbbbbbbbbbb")  # (flexo updated, this module as it was)
+    again = sn.noised(text, seed=3).trajectories
+    assert worked == []
+    assert all((a == b).all() for a, b in zip(first, again, strict=True))
+    afresh()
+    monkeypatch.setattr(sn, "_WORKED_OUT_BY", ["its own code changed"])
+    sn.noised(text, seed=3)
+    assert worked
+
+
+def test_the_switch_interval_is_put_back_once_trajectories_are_worked_out() -> None:
+    from flexo import structure_noise as sn
+
+    before = sys.getswitchinterval()
+    quick = pytest.approx(min(sn.HANDING_BACK, before), rel=1e-3)
+    with sn._handing_back():
+        assert sys.getswitchinterval() == quick
+        with sn._handing_back():  # (two at once: put back after the last)
+            pass
+        assert sys.getswitchinterval() == quick
+    assert sys.getswitchinterval() == pytest.approx(before, rel=1e-3)
