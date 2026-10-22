@@ -103,17 +103,17 @@ def test_an_installed_package_is_told_by_the_hashes_its_installation_recorded() 
     pytest.importorskip("molsketch")
     import importlib.util
 
-    from flexo import structure_kept
+    from flexo import kept_versions
 
     here = Path(importlib.util.find_spec("molsketch").origin).parent
-    recorded = structure_kept._recorded("molsketch", here, False, (".py", ".js"))
+    recorded = kept_versions._recorded("molsketch", here, False, (".py", ".js"))
     if recorded is None:
         pytest.skip("mol-sketch is installed to be worked on in place")
     names = {line.split("=")[0] for line in recorded.decode().splitlines()}
     assert names == {
         f"molsketch/{path.name}" for path in here.iterdir() if path.suffix in (".py", ".js")
     }
-    assert structure_kept._recorded("molsketch", here.parent / "elsewhere", False, (".py",)) is None
+    assert kept_versions._recorded("molsketch", here.parent / "elsewhere", False, (".py",)) is None
 
 
 def test_what_says_where_a_file_is_is_not_kept(tmp_path: Path, monkeypatch) -> None:
