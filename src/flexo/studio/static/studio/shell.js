@@ -662,6 +662,8 @@ export async function start() {
       docbar.classList.add(step);
     }
   };
+  let fittingSoon = 0;
+  const fitDocbarSoon = () => { if (!fittingSoon) fittingSoon = requestAnimationFrame(() => { fittingSoon = 0; fitDocbar(); }); };
   const fitting = new ResizeObserver(fitDocbar);
   for (const node of [docbar, ...groups, docRight]) fitting.observe(node);
 
@@ -962,7 +964,17 @@ export async function start() {
     workspace.activate(workspace.order[next]);
     tabs.querySelector(`.tab[data-file="${CSS.escape(workspace.order[next])}"]`)?.focus();
   };
+  // (Drawn again only when what they show changes: told at every edit -- for the toolbar's
+  // Undo -- they were made again, and the strip measured, at every key typed.)
+  let tabsShown = "";
   const renderTabs = () => {
+    const shows = JSON.stringify([workspace.info.folder, workspace.order.map((file) => {
+      const session = workspace.sessions.get(file);
+      return [file, session?.kind, session && tabName(file, session), session?.state, session && session.state !== "saved" ? statusWords(session) : "",
+        workspace.active === session, workspace.presenceOn(file).slice(0, 3).map((entry) => [colourOf(entry.who), nameOf(entry.who)])];
+    })]);
+    if (shows === tabsShown && tabs.childElementCount === workspace.order.length) return;
+    tabsShown = shows;
     // A tab with the keys has them still once the tabs are drawn again.
     const keyed = tabs.contains(document.activeElement) ? document.activeElement.closest(".tab")?.dataset.file : null;
     clear(tabs, workspace.order.map((file) => {
@@ -983,6 +995,12 @@ export async function start() {
       return tab;
     }));
     if (keyed) tabs.querySelector(`.tab[data-file="${CSS.escape(keyed)}"]`)?.focus();
+    // (Measured once the page is laid out for its next frame anyway, not at once.)
+    placeTabsSoon();
+  };
+  let placingTabs = 0;
+  const placeTabsSoon = () => { if (!placingTabs) placingTabs = requestAnimationFrame(() => { placingTabs = 0; placeTabs(); }); };
+  const placeTabs = () => {
     // The one in front is in view, however many there are.
     const shown = tabs.querySelector(".tab.on");
     if (shown) {
@@ -1042,7 +1060,8 @@ export async function start() {
     if (text.textContent !== words) {
       text.textContent = words;
       // The bar has room again for its tools' words once a long word on saving is gone.
-      fitDocbar();
+      // (Measured as the next frame is laid out: the words change twice at every key typed.)
+      fitDocbarSoon();
     }
     // A document that has never read has nothing to edit, export or present.
     for (const slot of [docLeft, docCentre, docRight]) slot.inert = unreadable(session);
