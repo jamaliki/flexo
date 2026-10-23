@@ -22,16 +22,30 @@ It stops as soon as a layout lets the words reach ``largest``, so a figure that
 already fits costs one compile. A turned or tightened layout is only chosen when
 it is clearly better (``PREFERENCE``), and never when it lints worse than the
 figure as written.
+
+A caller that knows what else its figures are drawn from -- the files they name, as
+they are now; whether their photographs are named by address -- may have what is
+compiled and measured kept (``kept``): a figure laid out again for a box of another
+height (a line of words added above it on a slide) is compiled at the same width, and
+is found compiled, its ink measured, not compiled again. Only a figure drawn in full is
+kept, never a draft (``flexo.draft``), whose drawing follows the drawing before it; and
+what its drawing remembered for its drafts is remembered again as it is found, as though
+it had been drawn again.
 """
 
 from __future__ import annotations
 
+import contextlib
+import threading
+from collections import OrderedDict
+from collections.abc import Hashable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from flexo.compiler import Compilation, compile_figure
 from flexo.confine import once
-from flexo.draft import drafting, give_up_if_newer
+from flexo.draft import DRAFT, drafting, give_up_if_newer, recording, remember_again
 from flexo.figure_shapes import free
 from flexo.ir.semantic import FigureSpec
 from flexo.lint import lint_compilation
@@ -177,17 +191,17 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
         ):
             continue
         try:
-            with noting() as molecules:
-                compiled = compile_figure(candidate, style=layout_style)
+            made = _compiled(candidate, layout_style)
         except Exception:
             if not fits:
                 raise
             continue
         give_up_if_newer()  # (a drawing given up for a newer one: flexo.draft)
-        left, top, right, bottom = figure_ink(compiled.document.text, molecules)
+        compiled = made.compilation
+        left, top, right, bottom = made.ink()
         ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
         scale = min(most, width / ink[2], height / ink[3])
-        errors = len(lint_compilation(compiled, style=layout_style).errors)
+        errors = made.errors(layout_style)
         fits.append(BoxFit(compiled, scale, ink, label, base * scale, errors, layout_style))
     written_errors = fits[0].errors
     usable = [fit for fit in fits if fit.errors <= written_errors]
@@ -222,14 +236,14 @@ def _afresh(spec, style, candidates, width, height, most, least, base, pad, fold
                     continue
                 tried.append(candidate)
                 try:
-                    with noting() as molecules:
-                        compiled = compile_figure(candidate, style=layout_style)
+                    made = _compiled(candidate, layout_style)
                 except Exception:
                     return best
-                left, top, right, bottom = figure_ink(compiled.document.text, molecules)
+                compiled = made.compilation
+                left, top, right, bottom = made.ink()
                 ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
                 scale = min(most, width / ink[2], height / ink[3])
-                errors = len(lint_compilation(compiled, style=layout_style).errors)
+                errors = made.errors(layout_style)
                 if errors > written_errors or scale <= best.scale * FOLD_GAIN:
                     break
                 # A fold is the layout's doing, not its author's: one that makes lines cross
@@ -284,16 +298,14 @@ def _kept(keep: str, candidates, width: float, height: float, most: float, base:
         if label != keep.removesuffix(suffix):
             continue
         try:
-            with noting() as molecules:
-                compiled = compile_figure(
-                    wrapped(candidate, back=back) if suffix else candidate, style=layout_style
-                )
+            made = _compiled(wrapped(candidate, back=back) if suffix else candidate, layout_style)
         except Exception:
             return None
-        left, top, right, bottom = figure_ink(compiled.document.text, molecules)
+        compiled = made.compilation
+        left, top, right, bottom = made.ink()
         ink = (left - pad, top - pad, right - left + 2 * pad, bottom - top + 2 * pad)
         scale = min(most, width / ink[2], height / ink[3])
-        errors = len(lint_compilation(compiled, style=layout_style).errors)
+        errors = made.errors(layout_style)
         return BoxFit(compiled, scale, ink, keep, base * scale, errors, layout_style)
     return None
 
@@ -301,16 +313,143 @@ def _kept(keep: str, candidates, width: float, height: float, most: float, base:
 def _estimate(spec: FigureSpec, style, width: float, height: float, most: float) -> float:
     """The scale a layout's measured size allows in the box: at least what it gets."""
 
+    give_up_if_newer()
+    size = _measured_size(spec, style)
+    if size is None:
+        return 0.0
+    return min(most, width / max(size[0], 1.0), height / max(size[1], 1.0))
+
+
+def _measured_size(spec: FigureSpec, style) -> tuple[float, float] | None:
+    """The size a layout measures (``_estimate``), its outermost group's; None should it not
+    measure. Kept (``kept``) by the layout and its style: the same whatever the box."""
+
     from flexo.layout.measure import measure_figure
 
-    give_up_if_newer()
+    held = _COMPILING.get()
+    key = None
+    if held is not None:
+        store, also = held
+        key = _hashed((spec, style, also))
+    if key is not None:
+        with store.lock:
+            if key in store.measured:
+                store.measured.move_to_end(key)
+                return store.measured[key]
     try:
         # (Its structures laid out round their molecules, as the figure is compiled with them.)
         from flexo.structure_fit import measured_as_drawn
 
         measured = measure_figure(measured_as_drawn(spec, style), style=style)
     except Exception:
-        return 0.0
+        return None
     root = next(group for group in measured.groups if group.spec.id == spec.root)
-    size = root.intrinsic_size
-    return min(most, width / max(size.width, 1.0), height / max(size.height, 1.0))
+    size = (root.intrinsic_size.width, root.intrinsic_size.height)
+    if key is not None:
+        with store.lock:
+            store.measured[key] = size
+            while len(store.measured) > store.most_measured:
+                store.measured.popitem(last=False)
+    return size
+
+
+def _hashed(key: tuple) -> tuple | None:
+    """``key``, if it can key what is kept (a figure some part of which is not hashed is not
+    kept)."""
+
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
+class Kept:
+    """What ``fit_in_box`` compiled and measured for a caller, kept for it (``kept``): the
+    last few compilations, with the extent of their ink, and the sizes layouts measured."""
+
+    def __init__(self, compiled: int = 12, measured: int = 256) -> None:
+        self.compiled: OrderedDict[Any, _Compiled] = OrderedDict()
+        self.measured: OrderedDict[Any, tuple[float, float] | None] = OrderedDict()
+        self.most_compiled = compiled
+        self.most_measured = measured
+        self.lock = threading.Lock()
+
+
+_COMPILING: ContextVar[tuple[Kept, Hashable] | None] = ContextVar(
+    "flexo_boxfit_kept", default=None
+)
+
+
+@contextlib.contextmanager
+def kept(store: Kept, also: Hashable) -> Iterator[None]:
+    """Within, what ``fit_in_box`` compiles in full, and what it measures, is kept in ``store``
+    by the figure laid out and its style -- and by ``also``, all else it is drawn from that its
+    caller knows of (the files it names as they are now, its photographs named by address or
+    not): a caller that cannot say so all keeps nothing. (Drafts are never kept.)"""
+
+    token = _COMPILING.set((store, also))
+    try:
+        yield
+    finally:
+        _COMPILING.reset(token)
+
+
+class _Compiled:
+    """A figure compiled (``_compiled``): its compilation, what was noted of its molecules as
+    it was (``flexo.structure_fit.noting``), and what it remembered for its drafts."""
+
+    __slots__ = ("_errors", "_ink", "compilation", "molecules", "remembered")
+
+    def __init__(self, compilation: Compilation, molecules: dict, remembered: list) -> None:
+        self.compilation = compilation
+        self.molecules = molecules
+        self.remembered = tuple(remembered)
+        self._ink: tuple[float, float, float, float] | None = None
+        self._errors: dict[tuple[LayoutStyle | None, bool], int] = {}
+
+    def ink(self) -> tuple[float, float, float, float]:
+        """``left, top, right, bottom`` of what it paints (``flexo.structure_fit.figure_ink``)."""
+
+        if self._ink is None:
+            self._ink = figure_ink(self.compilation.document.text, self.molecules)
+        return self._ink
+
+    def errors(self, style: LayoutStyle | None) -> int:
+        """How many errors lint finds in it, linted in ``style``."""
+
+        from flexo.artwork import picture_link
+
+        key = (style, picture_link.get() is not None)
+        if key not in self._errors:
+            self._errors[key] = len(lint_compilation(self.compilation, style=style).errors)
+        return self._errors[key]
+
+
+def _compiled(candidate: FigureSpec, layout_style: LayoutStyle | None) -> _Compiled:
+    """``candidate`` compiled in ``layout_style`` -- or found compiled so (``kept``), and what
+    its drawing remembered for its drafts remembered again."""
+
+    held = _COMPILING.get()
+    key = None
+    if held is not None and not DRAFT.get():
+        store, also = held
+        key = _hashed((candidate, layout_style, also))
+    if key is not None:
+        with store.lock:
+            found = store.compiled.get(key)
+            if found is not None:
+                store.compiled.move_to_end(key)
+        if found is not None:
+            give_up_if_newer()
+            remember_again(list(found.remembered))
+            return found
+    with recording() as remembered, noting() as molecules:
+        compilation = compile_figure(candidate, style=layout_style)
+    made = _Compiled(compilation, molecules, remembered)
+    if key is not None:
+        with store.lock:
+            store.compiled[key] = made
+            while len(store.compiled) > store.most_compiled:
+                store.compiled.popitem(last=False)
+    return made
