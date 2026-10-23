@@ -616,23 +616,34 @@ export function lookFrom(href) {
 // words' ink are the tone's) -- null where they stay as they are -- or null for all, should any
 // be what the page cannot tell (a role painted otherwise than the theme `tones` says: a figure
 // in a theme of its own; a kind's own colour family).
+// (`family`, of each: the paint a shape of no colour is drawn in -- the block's, or for a frame
+// the container's, as flexo.frames draws one: its fill and outline then the theme's
+// container's, `tones.container`.)
 export function retoned(painted, tones, value) {
   const index = /^\d+$/.test(String(value ?? "")) ? Number(value) : null;
   const to = value === "neutral" ? tones?.neutral : index ? tones?.colours?.[index - 1] : null;
   if (!to) return null;
   const same = (one, other) => typeof one === "string" && typeof other === "string" && one.trim().toLowerCase() === other.trim().toLowerCase();
   const out = [];
-  for (const { role, colour } of painted) {
+  for (const { role, colour, family = "block" } of painted) {
     const toned = /^tone-(\d+)-(fill|stroke|motif|ink)$/.exec(role), block = /^block-(fill|stroke|motif)$/.exec(role);
-    const part = toned ? toned[2] : block ? block[1] : role === "ink" ? "ink" : null;
+    // (A frame's own: the container's fill and outline, while it is of no colour.)
+    const container = family === "container" ? /^container-(fill|stroke)$/.exec(role) : null;
+    const part = toned ? toned[2] : block ? block[1] : container ? container[1] : role === "ink" ? "ink" : null;
     if (!part) {
       if (/^(accent|warm|container|inset)-/.test(role)) return null;
       out.push(null);
       continue;
     }
-    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
-    if (!known || !same(colour, known) || !to[part]) return null;
-    out.push({ role: index ? `tone-${index}-${part}` : part === "ink" ? "ink" : `block-${part}`, colour: to[part] });
+    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : container ? tones.container?.[part]
+      : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
+    if (!known || !same(colour, known)) return null;
+    // The tone's role and colour -- or, of no colour, the block's (a frame's fill and outline,
+    // the container's), its words the ink.
+    const now = index ? { role: `tone-${index}-${part}`, colour: to[part] } : part === "ink" ? { role: "ink", colour: tones.neutral?.ink }
+      : family === "container" ? { role: `container-${part}`, colour: tones.container?.[part] } : { role: `block-${part}`, colour: tones.neutral?.[part] };
+    if (!now.colour) return null;
+    out.push(now);
   }
   return out;
 }
@@ -856,6 +867,8 @@ export function figureParts(host) {
     if (!next) return;
     const before = state.model;
     state.model = next;
+    // (Its shapes' colours as an undo or another's edit left them, painted at once: tonesNow.)
+    if (fresh && before) tonesNow(before, next);
     if (fresh) followRenamed(before, next);
     if (fresh && parked.length) unpark();
     // A drawing begun before an edit brings the figure as it was then: what is chosen that it
@@ -6751,17 +6764,29 @@ export function figureParts(host) {
   // while the studio is away, what was painted is put back. Only shapes painted from those roles
   // alone, each painted as the page knows the theme paints them: else the drawing is waited for,
   // as ever (a figure in a theme of its own, a shape of its own colour or of a kind's).
-  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io"]);
+  // (A frame too -- its outline and fill the container's while it is of no colour, as
+  // flexo.frames draws it -- and words on their own. A part painted in colours of its own is
+  // painted so as ever: those carry no role, and the colour leaves them be.)
+  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io", "frame", "text", "label"]);
   function paintTone(nodes, value) {
     if (!nodes.length) return null;
     const found = [];
     for (const node of nodes) {
       const element = host.element(node.id);
-      if (!element || !TONED_KINDS.has(node.item?.kind || "block") || node.item?.properties?.["paint-fill"] || node.item?.properties?.["paint-stroke"]) return null;
-      for (const each of [element, ...element.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
-        for (const attribute of ["fill", "stroke"]) {
-          const role = each.getAttribute(`data-flexo-${attribute}`);
-          if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute) });
+      if (!element || !TONED_KINDS.has(node.item?.kind || "block")) return null;
+      const family = node.item?.kind === "frame" ? "container" : "block";
+      // (A frame drawn again, in part, inside a group it shows through: that part too.)
+      const again = family === "container" && element.id ? [...(element.ownerSVGElement?.querySelectorAll(`g[data-hit-for="${element.id.replace(/["\\]/g, "\\$&")}"]`) || [])] : [];
+      for (const holder of [element, ...again]) {
+        for (const each of [holder, ...holder.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
+          // (Not a run of its words in a colour of its own, nor a formula's: their paint is
+          // theirs, whatever the shape's -- only its words' own, its text, takes the colour.)
+          const words = each.parentNode?.closest?.('text, [id$=".label"]');
+          if (words && holder.contains(words) && !(each.tagName?.toLowerCase() === "text" && !each.parentNode.closest("text"))) continue;
+          for (const attribute of ["fill", "stroke"]) {
+            const role = each.getAttribute(`data-flexo-${attribute}`);
+            if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute), family });
+          }
         }
       }
     }
@@ -6780,6 +6805,25 @@ export function figureParts(host) {
         each.setAttribute(`data-flexo-${attribute}`, role);
       }
     } : null;
+  }
+
+  // The figure as an undo, a redo or another's edit left it, come before its drawing: each
+  // shape whose colour alone that changed is painted in it at once, where the page can tell
+  // how (paintTone) -- an undo of a colour chosen is seen as the key is pressed, not when the
+  // studio has drawn the figure again, which finds it painted so.
+  function tonesNow(before, next) {
+    const was = new Map((before.nodes || []).map((node) => [node.id, node]));
+    const toned = new Map();
+    for (const node of next.nodes || []) {
+      const old = was.get(node.id), tone = node.properties?.tone ?? null;
+      if (!old || (old.properties?.tone ?? null) === tone || tone === null) continue;
+      const bare = (item) => JSON.stringify({ ...item, properties: { ...(item.properties || {}), tone: null } });
+      if (bare(old) !== bare(node)) continue;
+      const key = String(tone);
+      if (!toned.has(key)) toned.set(key, []);
+      toned.get(key).push({ type: "node", id: node.id, item: node });
+    }
+    for (const [tone, nodes] of toned) paintTone(nodes, tone);
   }
 
   function colourSection(targets) {

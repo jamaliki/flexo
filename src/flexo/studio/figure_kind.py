@@ -521,7 +521,14 @@ def _tones(spec) -> dict[str, Any]:
     # The theme's grey, as a shape toned ``neutral`` is painted (its block paint).
     neutral = {part: palette.get(f"block-{part}") for part in ("fill", "stroke", "motif")}
     neutral["ink"] = palette.get("ink")
-    return {"colours": colours, "used": _tone_map(spec, figure_style(spec)), "neutral": neutral}
+    # And a frame's, of no colour: the container's fill and outline (flexo.frames).
+    container = {part: palette.get(f"container-{part}") for part in ("fill", "stroke")}
+    return {
+        "colours": colours,
+        "used": _tone_map(spec, figure_style(spec)),
+        "neutral": neutral,
+        "container": container,
+    }
 
 
 def outline(spec) -> dict[str, Any]:
