@@ -562,13 +562,20 @@ def outline(spec) -> dict[str, Any]:
     return {"root": tree(spec.root), "edges": edges, "nets": [net.id for net in spec.nets]}
 
 
-def parse(text: str, base: Path, *, suffix: str = ".yaml"):
+def parse(text: str, base: Path, *, suffix: str = ".yaml", libyaml: bool = False):
     """A figure from its file's words, theme and palette files -- and the pictures and
-    structures its parts draw -- found from ``base``."""
+    structures its parts draw -- found from ``base``. (``libyaml``: its YAML read by libyaml,
+    where there is one -- as safe_load reads it, eight times sooner, but for what it says of
+    words that do not read.)"""
 
     from flexo.serialization import found_beside, parse_figure
 
-    document = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
+    if suffix == ".json":
+        document = json.loads(text)
+    elif libyaml:
+        document = yaml.load(text, getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+    else:
+        document = yaml.safe_load(text)
     if not isinstance(document, dict):
         raise ValueError("a figure file is a mapping: figure, nodes, edges, groups")
     return parse_figure(found_beside(document, base))

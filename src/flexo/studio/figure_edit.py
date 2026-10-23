@@ -153,6 +153,15 @@ def apply(
 ) -> dict[str, Any]:
     """The figure file's words after ``action``, and the ids to choose next."""
 
+    return _applied(text, action, suffix=suffix, base=base)[0]
+
+
+def _applied(
+    text: str, action: Mapping[str, Any], *, suffix: str = ".yaml", base: Path | None = None
+) -> tuple[dict[str, Any], _Document | None]:
+    """``apply``'s answer, and the document the edit was made on (its words the answer's) --
+    None for an edit that left the words as they were."""
+
     document = _Document(text, suffix)
     document.base = base
     verb = str(action.get("do", ""))
@@ -167,7 +176,7 @@ def apply(
     select = handler(action) or []
     if document.unchanged:
         # Nothing to do: the file's words as they were, to the letter.
-        return {"text": text, "select": list(select)}
+        return {"text": text, "select": list(select)}, None
     document.tidy_alignment()
     document.tidy_frames()
     drop_gone(document, grouped)  # (lines to a group gone go with it: flexo.group_ends)
@@ -177,12 +186,12 @@ def apply(
         problem = _problem(result, suffix, base)
         if problem and document.spliced:
             # A part that cannot carry the line on (one with no output) is only fed.
-            return apply(text, {**action, "splice": False}, suffix=suffix, base=base)
+            return _applied(text, {**action, "splice": False}, suffix=suffix, base=base)
         if problem:
             raise EditError(f"This change would break the figure: {problem}")
     # (What an edit made, in words, where it says: Convert to Figure Parts's.)
     said = {"said": document.summary} if document.summary else {}
-    return {"text": result, "select": list(select), **said}
+    return {"text": result, "select": list(select), **said}, document
 
 
 def astray(data: Any, ids: list[str] | None = None) -> list[str]:
@@ -243,15 +252,61 @@ def apply_to_data(
 
     import yaml
 
-    text = yaml.safe_dump(dict(data), sort_keys=False, allow_unicode=True)
-    result = apply(text, action, base=base)
+    # (Written as safe_dump writes it, by libyaml where there is one -- the very words, four
+    # times sooner: an edit is made as the page waits.)
+    text = yaml.dump(
+        dict(data),
+        Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper),
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    result, edited = _applied(text, action, base=base)
+    # (Its model made from the document the edit was made on, as reading its words again would
+    # make it -- not read again, which took as long as making the edit -- where its words read
+    # back as it holds them: _reads_as_held.)
+    shown = (
+        _model(edited, base)
+        if edited is not None and _reads_as_held(edited.data)
+        else model(result["text"], base=base)
+    )
     # (Read back as safe_load reads it, by libyaml where there is one: an edit is made as the
     # page waits.)
     return {
         "data": yaml.load(result["text"], getattr(yaml, "CSafeLoader", yaml.SafeLoader)),
         "select": result["select"],
-        "model": model(result["text"], base=base),
+        "model": shown,
     }
+
+
+_BREAKS = ("\r", "\x85", "\u2028", "\u2029", "\ufeff")
+"""What YAML may read otherwise than written in words: line breaks it takes as a new line, and
+a byte order mark."""
+
+
+def _reads_as_held(value: Any) -> bool:
+    """Whether a figure's document, written as YAML (``_Document.dump``) and read again as a
+    ``_Document`` reads it, would be what it holds now, for its model: a mapping of words to
+    mappings, lists, words without breaks YAML reads otherwise (``_BREAKS``), numbers, true
+    or false and nothing -- with its ``figure`` and its ``nodes``, as a document read is given."""
+
+    if not isinstance(value, dict) or "figure" not in value or "nodes" not in value:
+        return False
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if not isinstance(key, str) or any(mark in key for mark in _BREAKS):
+                    return False
+                stack.append(child)
+        elif isinstance(item, list):
+            stack.extend(item)
+        elif isinstance(item, str):
+            if any(mark in item for mark in _BREAKS):
+                return False
+        elif item is not None and not isinstance(item, bool | int | float):
+            return False
+    return True
 
 
 def mend(data: Any, before: set[str] | None = None) -> bool:
@@ -361,6 +416,12 @@ def model(
         document = _Document(text, suffix)
     except Exception:
         return None
+    return _model(document, base)
+
+
+def _model(document: _Document, base: Path | None) -> dict[str, Any]:
+    """``model`` of a document read."""
+
     data = json.loads(json.dumps(document.data, default=str))
     groups = list(data.get("groups") or [])
     root = next(
@@ -467,7 +528,9 @@ def _problem(text: str, suffix: str, base: Path | None) -> str | None:
     from flexo.studio.figure_kind import parse
 
     try:
-        parse(text, base or Path.cwd(), suffix=suffix)
+        # (Read by libyaml where there is one: whether an edit breaks the figure is asked twice
+        # as the page waits.)
+        parse(text, base or Path.cwd(), suffix=suffix, libyaml=True)
     except FlexoError as error:
         return "; ".join(item.message for item in error.diagnostics) or str(error)
     except (ValueError, TypeError, KeyError) as error:
