@@ -2404,11 +2404,14 @@ export function figureParts(host) {
     }
     return twins ? linesKept.all : linesKept.own;
   }
-  function plusPlace(id, box, towards = null, cornered = false) {
+  // (`quick`: only should it be kept -- null else, for it to be placed a moment later: see
+  // markViews.)
+  function plusPlace(id, box, towards = null, cornered = false, quick = false) {
     const seen = host.overlay.getBoundingClientRect();
     const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
     const kept = plusKept.get(id);
     if (kept && kept.key.length === key.length && kept.key.every((value, index) => value === key[index])) return kept.place;
+    if (quick) return null;
     const place = plusFound(id, box, towards, cornered);
     if (plusKept.size >= 64) plusKept.clear();
     plusKept.set(id, { key, place });
@@ -2520,7 +2523,12 @@ export function figureParts(host) {
       }
     });
   }
-  function markViews() {
+  // (`quick`: what is chosen marked at once, a click's choice painted as soon as can be -- its
+  // + left out where placing it would measure the drawing round it (on a slide of molecules,
+  // a hundred thousand elements under every point it tries), for the host to mark it again
+  // a moment later: the views it returns say so, `later`.)
+  function markViews({ quick = false } = {}) {
+    let later = false;
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
     // (Everything measured before anything is marked, and the words only for a group's tag:
@@ -2595,18 +2603,21 @@ export function figureParts(host) {
     const choose = (event, into = null) => { event.preventDefault(); stop(event); addPalette(event.currentTarget, into ? { into } : { next: id }); };
     // A frame is no place in the figure, so nothing comes after it -- but a line may start at
     // it: its + dragged to a shape draws one, and clicked, asks for the shape (Connect to…).
-    if (box && nodeOf(id)?.kind === "frame") {
-      const { side, x, y } = plusPlace(id, box, null, false);
+    const framePlus = box && nodeOf(id)?.kind === "frame" ? plusPlace(id, box, null, false, quick) : null;
+    const kind = box && nodeOf(id)?.kind !== "frame" ? nextKind(nodeOf(id)) : null;
+    const { branch } = kind ? addWhere(id, true, kind) : {};
+    const shapePlus = kind ? plusPlace(id, box, branch?.towards, sizable, quick) : null;
+    if (box && !framePlus && !shapePlus) later = true;
+    if (framePlus) {
+      const { side, x, y } = framePlus;
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: `Draw a line from ${inQuotes(nameOf(id))}: drag to a shape, or click and then click the shape`,
         onpointerdown: (event) => { stop(event); if (event.button === 0) linkStart(event, id); }, ondblclick: stop, onmousemove: stop,
         onclick: (event) => { stop(event); toggleConnect(true); }, oncontextmenu: (event) => { event.preventDefault(); stop(event); },
       }, icon("plus")));
-    } else if (box) {
-      const kind = nextKind(nodeOf(id));
-      const { branch } = addWhere(id, true, kind);
-      const { side, x, y } = plusPlace(id, box, branch?.towards, sizable);
+    } else if (shapePlus) {
+      const { side, x, y } = shapePlus;
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: splices(id, kind) ? `Insert ${article(parts[kind].title)} ${inSentence(parts[kind].title)} between ${inQuotes(nameOf(id))} and ${inQuotes(nameOf(splices(id, kind)))} (⌥-click for other shapes)`
@@ -2631,7 +2642,8 @@ export function figureParts(host) {
     const curving = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
     const bending = curving && apart >= 56 && ends.every((end) => Math.hypot(end.at.x - curving.at.x, end.at.y - curving.at.y) >= 22) ? curving : null;
     const line = id && edgeOf(id) && !state.connecting && !inline ? id : null;
-    const spot = line && plusOnLine(line, [...endsShown.map((end) => end.at), ...(bending ? [bending.at] : [])]);
+    if (line && quick) later = true;
+    const spot = line && !quick && plusOnLine(line, [...endsShown.map((end) => end.at), ...(bending ? [bending.at] : [])]);
     if (spot) {
       const edge = edgeOf(line);
       views.push(h("button.fig-next.on-line", {
@@ -2735,6 +2747,7 @@ export function figureParts(host) {
     for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
     // (But for one whose words are being typed: its words' box is where it is marked.)
     for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
+    views.later = later;
     return views;
   }
 

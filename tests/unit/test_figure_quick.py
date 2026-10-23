@@ -1,7 +1,8 @@
 """The figure editor kept quick (``studio/static/figure/parts.js``, ``parts.css``): a theme colour
-painted on a shape at once, as the figure will paint it; a line measured once however often it
-is drawn anew; a figure read back as it is drawing nothing again; and no drag's class that has
-every element of the page styled again as it begins and ends -- run in Node where it is code."""
+painted on a shape at once, as the figure will paint it; a shape chosen marked at once, its + a
+moment later should placing it measure the drawing; a line measured once however often it is
+drawn anew; a figure read back as it is drawing nothing again; and no drag's class that has every
+element of the page styled again as it begins and ends -- run in Node where it is code."""
 
 from __future__ import annotations
 
@@ -130,6 +131,39 @@ def test_a_shape_the_page_cannot_tell_the_paint_of_waits_for_its_drawing() -> No
     """
     )
     assert out == [None, None, None, None, None, None]
+
+
+def test_a_shape_chosen_is_marked_at_once_its_plus_placed_a_moment_later() -> None:
+    out = run("""
+      document.querySelectorAll = () => [];
+      const rect = (left, top, width, height) =>
+        ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top });
+      const at = (tag, box) => Object.assign(new Node(tag),
+        { getBoundingClientRect: () => box, querySelector: () => null,
+          querySelectorAll: () => [] });
+      const overlay = at("div", rect(0, 0, 800, 600));
+      const shape = at("g", rect(100, 100, 80, 40)), root = at("g", rect(0, 0, 400, 300));
+      const model = { figure: { id: "f" }, root: "root", edges: [], nets: [],
+        nodes: [{ id: "a", kind: "block", label: "A" }, { id: "b", kind: "block", label: "B" }],
+        groups: [{ id: "root", children: ["a", "b"], layout: { kind: "row" } }] };
+      const figure = P.figureParts({
+        catalog: { parts: { block: { title: "Block", fields: [] } }, groups: [] },
+        overlay, idOf: (id) => id,
+        changed() {}, element: (id) => (id === "root" ? root : id === "a" ? shape : null),
+        box: (id) => (id === "a" ? rect(95, 95, 90, 50) : null), run: async () => null,
+      });
+      figure.setModel(model);
+      figure.select(["a"]);
+      const plus = (views) => views.filter((view) => String(view.tag).startsWith("button")).length;
+      const quick = figure.markViews({ quick: true });
+      const whole = figure.markViews();
+      const again = figure.markViews({ quick: true });
+      return { quick: [quick.later, plus(quick)], whole: [whole.later, plus(whole)],
+        again: [again.later, plus(again)] };
+    """)
+    # Marked at once with no + (no point round it tried), it is owed; marked in full, it has one;
+    # placed once, a quick marking has it where it was put.
+    assert out == {"quick": [True, 0], "whole": [False, 1], "again": [False, 1]}
 
 
 def test_a_line_is_measured_once_however_often_it_is_drawn_anew() -> None:
