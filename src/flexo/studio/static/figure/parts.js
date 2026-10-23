@@ -2542,6 +2542,8 @@ export function figureParts(host) {
   // a moment later: the views it returns say so, `later`.)
   function markViews({ quick = false } = {}) {
     let later = false;
+    // (A part gliding home, let go where it stays, is marked where it comes to rest: sendHome.)
+    const resume = homeNow();
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
     // (Everything measured before anything is marked, and the words only for a group's tag:
@@ -2761,6 +2763,7 @@ export function figureParts(host) {
     // (But for one whose words are being typed: its words' box is where it is marked.)
     for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
     views.later = later;
+    resume();
     return views;
   }
 
@@ -4393,23 +4396,47 @@ export function figureParts(host) {
   }
   // Home again: the part slides back to where it was drawn, the lines come back. (`glide`
   // false: it is there at once.)
+  // Parts gliding home (sendHome): measured, while they do, where they come to rest -- each
+  // glide set at its end for as long as what marks them measures, then let go on again.
+  const homing = new Set();
+  function homeNow() {
+    const going = [...homing].filter((glide) => glide.playState === "running" || glide.playState === "pending");
+    const at = going.map((glide) => glide.currentTime);
+    for (const glide of going) glide.currentTime = Math.max(0, (glide.effect?.getComputedTiming?.().endTime ?? 0) - 0.01);
+    return () => going.forEach((glide, index) => { if (at[index] !== null) glide.currentTime = at[index]; });
+  }
   function sendHome(was, { glide = true } = {}) {
     clearTimeout(was.wait);
     if (letDown === was) letDown = null;
     unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
+    const glides = [];
     for (const { element, base } of was.moving) {
       const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(element.getAttribute("transform") || "");
       if (base) element.setAttribute("transform", base);
       else element.removeAttribute("transform");
       element.classList.remove("fig-lifted", "fig-settling", "fig-astray", "fig-over-line");
-      if (moved && glide) element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
-        { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+      if (moved && glide) glides.push([element, moved]);
     }
     for (const element of was.lines) element.classList.remove("fig-faded");
-    // Its frame and its + go back with it: at once, and again where it comes to rest.
+    // Its frame and its + are where it is going, at once -- placed before it glides there,
+    // from where it was let go, into them -- and stay there: placed again as it comes to rest
+    // only should it rest elsewhere (a drawing come meanwhile). (Placed as it began to glide,
+    // they were left where it was let go until it had arrived, then jumped after it.)
+    const home = was.moving.map(({ element }) => drawnRect(element));
     host.settled?.();
-    setTimeout(() => host.settled?.(), 240);
+    for (const [element, moved] of glides) {
+      const going = element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
+        { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+      if (!going) continue;
+      homing.add(going);
+      going.onfinish = going.oncancel = () => homing.delete(going);
+    }
+    setTimeout(() => {
+      const rests = was.moving.map(({ element }) => drawnRect(element));
+      const same = (a, b) => (!a && !b) || (a && b && Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5);
+      if (!rests.every((rest, at) => same(rest, home[at]) && was.moving[at].element.isConnected)) host.settled?.();
+    }, 240);
   }
   function dragEnd(event) {
     if (drag?.started && event) drag.pointer = { x: event.clientX, y: event.clientY };
