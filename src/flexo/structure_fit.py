@@ -334,7 +334,10 @@ def figure_ink(text: str, molecules: dict) -> tuple[float, float, float, float]:
 
     from flexo.svg import SVG_NS, local_name
 
-    root = ET.fromstring(re.sub(r"<!DOCTYPE[^>]*>", "", text, count=1))
+    words = re.sub(r"<!DOCTYPE[^>]*>", "", text, count=1)
+    # (Read without the shapes of the molecules it stands boxes in for -- most of its words --
+    # where they can be told apart: flexo.drawn_spans. The rest is read as it would be.)
+    root = ET.fromstring(_without_molecules(words, molecules))
     stood_in = False
     for holder in root.iter():
         if holder.get("data-flexo-drawn") != "mol-sketch" or holder.get("id") not in molecules:
@@ -354,6 +357,29 @@ def figure_ink(text: str, molecules: dict) -> tuple[float, float, float, float]:
     if not stood_in:
         return ink_bounds(read_drawing(text))
     return ink_bounds(read_drawing(ET.tostring(root, encoding="unicode")))
+
+
+def _without_molecules(words: str, molecules: dict) -> str:
+    """``words`` without the shapes of each molecule ``figure_ink`` takes out of them: those
+    noted (``molecules``) that are not measured as drawn, in a group of their own with one
+    ``<svg>`` -- the words as they would read once those shapes were taken out."""
+
+    from flexo.drawn_spans import spans, without
+
+    found = spans(words)
+    if not found:
+        return words
+    count: dict[str, int] = {}
+    for span in found:
+        count[span.holder] = count.get(span.holder, 0) + 1
+    left_out = [
+        span
+        for span in found
+        if count[span.holder] == 1
+        and span.holder in molecules
+        and molecules[span.holder] is not _AS_DRAWN
+    ]
+    return without(words, left_out) if left_out else words
 
 
 @functools.lru_cache(maxsize=32)
