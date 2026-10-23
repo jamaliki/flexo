@@ -36,8 +36,8 @@ WRITTEN = 512
 
 _KEPT: weakref.WeakKeyDictionary[ET.Element, ET.Element] = weakref.WeakKeyDictionary()
 """Each sealed child: what it is a copy of."""
-_WRITTEN: OrderedDict[tuple[int, int], tuple[ET.Element, str]] = OrderedDict()
-"""Each kept child, written at a depth (by its identity, held)."""
+_WRITTEN: OrderedDict[tuple[int, int, tuple], tuple[ET.Element, str]] = OrderedDict()
+"""Each kept child, written at a depth (by its identity, held, and its namespaces' prefixes)."""
 _USES: OrderedDict[int, tuple[ET.Element, tuple[str, ...] | None]] = OrderedDict()
 """The namespaces each kept child names -- None should one not be registered."""
 _LOCK = threading.Lock()
@@ -173,7 +173,10 @@ def _written(kept: ET.Element, depth: int) -> str:
 
     from flexo.svg import unspaced
 
-    key = (id(kept), depth)
+    # (By the prefixes its namespaces are written with too: registered since, they would be
+    # written so.)
+    registered = ET._namespace_map  # type: ignore[attr-defined]
+    key = (id(kept), depth, tuple(registered.get(uri) for uri in _uses(kept) or ()))
     with _LOCK:
         known = _WRITTEN.get(key)
         if known is not None and known[0] is kept:
