@@ -616,23 +616,34 @@ export function lookFrom(href) {
 // words' ink are the tone's) -- null where they stay as they are -- or null for all, should any
 // be what the page cannot tell (a role painted otherwise than the theme `tones` says: a figure
 // in a theme of its own; a kind's own colour family).
+// (`family`, of each: the paint a shape of no colour is drawn in -- the block's, or for a frame
+// the container's, as flexo.frames draws one: its fill and outline then the theme's
+// container's, `tones.container`.)
 export function retoned(painted, tones, value) {
   const index = /^\d+$/.test(String(value ?? "")) ? Number(value) : null;
   const to = value === "neutral" ? tones?.neutral : index ? tones?.colours?.[index - 1] : null;
   if (!to) return null;
   const same = (one, other) => typeof one === "string" && typeof other === "string" && one.trim().toLowerCase() === other.trim().toLowerCase();
   const out = [];
-  for (const { role, colour } of painted) {
+  for (const { role, colour, family = "block" } of painted) {
     const toned = /^tone-(\d+)-(fill|stroke|motif|ink)$/.exec(role), block = /^block-(fill|stroke|motif)$/.exec(role);
-    const part = toned ? toned[2] : block ? block[1] : role === "ink" ? "ink" : null;
+    // (A frame's own: the container's fill and outline, while it is of no colour.)
+    const container = family === "container" ? /^container-(fill|stroke)$/.exec(role) : null;
+    const part = toned ? toned[2] : block ? block[1] : container ? container[1] : role === "ink" ? "ink" : null;
     if (!part) {
       if (/^(accent|warm|container|inset)-/.test(role)) return null;
       out.push(null);
       continue;
     }
-    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
-    if (!known || !same(colour, known) || !to[part]) return null;
-    out.push({ role: index ? `tone-${index}-${part}` : part === "ink" ? "ink" : `block-${part}`, colour: to[part] });
+    const known = toned ? tones.colours?.[Number(toned[1]) - 1]?.[part] : container ? tones.container?.[part]
+      : part === "ink" ? tones.neutral?.ink : tones.neutral?.[part];
+    if (!known || !same(colour, known)) return null;
+    // The tone's role and colour -- or, of no colour, the block's (a frame's fill and outline,
+    // the container's), its words the ink.
+    const now = index ? { role: `tone-${index}-${part}`, colour: to[part] } : part === "ink" ? { role: "ink", colour: tones.neutral?.ink }
+      : family === "container" ? { role: `container-${part}`, colour: tones.container?.[part] } : { role: `block-${part}`, colour: tones.neutral?.[part] };
+    if (!now.colour) return null;
+    out.push(now);
   }
   return out;
 }
@@ -856,6 +867,8 @@ export function figureParts(host) {
     if (!next) return;
     const before = state.model;
     state.model = next;
+    // (Its shapes' colours as an undo or another's edit left them, painted at once: tonesNow.)
+    if (fresh && before) tonesNow(before, next);
     if (fresh) followRenamed(before, next);
     if (fresh && parked.length) unpark();
     // A drawing begun before an edit brings the figure as it was then: what is chosen that it
@@ -2404,11 +2417,14 @@ export function figureParts(host) {
     }
     return twins ? linesKept.all : linesKept.own;
   }
-  function plusPlace(id, box, towards = null, cornered = false) {
+  // (`quick`: only should it be kept -- null else, for it to be placed a moment later: see
+  // markViews.)
+  function plusPlace(id, box, towards = null, cornered = false, quick = false) {
     const seen = host.overlay.getBoundingClientRect();
     const key = [host.element(model()?.root), state.model, drawings, id, box.left, box.top, box.width, box.height, towards, cornered, seen.left, seen.top, seen.width, seen.height];
     const kept = plusKept.get(id);
     if (kept && kept.key.length === key.length && kept.key.every((value, index) => value === key[index])) return kept.place;
+    if (quick) return null;
     const place = plusFound(id, box, towards, cornered);
     if (plusKept.size >= 64) plusKept.clear();
     plusKept.set(id, { key, place });
@@ -2520,7 +2536,14 @@ export function figureParts(host) {
       }
     });
   }
-  function markViews() {
+  // (`quick`: what is chosen marked at once, a click's choice painted as soon as can be -- its
+  // + left out where placing it would measure the drawing round it (on a slide of molecules,
+  // a hundred thousand elements under every point it tries), for the host to mark it again
+  // a moment later: the views it returns say so, `later`.)
+  function markViews({ quick = false } = {}) {
+    let later = false;
+    // (A part gliding home, let go where it stays, is marked where it comes to rest: sendHome.)
+    const resume = homeNow();
     // A group's name tag sits over its frame -- else in its top right corner, else under it
     // -- where it hides no words drawn: its own title, the slide's words over the figure.
     // (Everything measured before anything is marked, and the words only for a group's tag:
@@ -2595,18 +2618,21 @@ export function figureParts(host) {
     const choose = (event, into = null) => { event.preventDefault(); stop(event); addPalette(event.currentTarget, into ? { into } : { next: id }); };
     // A frame is no place in the figure, so nothing comes after it -- but a line may start at
     // it: its + dragged to a shape draws one, and clicked, asks for the shape (Connect to…).
-    if (box && nodeOf(id)?.kind === "frame") {
-      const { side, x, y } = plusPlace(id, box, null, false);
+    const framePlus = box && nodeOf(id)?.kind === "frame" ? plusPlace(id, box, null, false, quick) : null;
+    const kind = box && nodeOf(id)?.kind !== "frame" ? nextKind(nodeOf(id)) : null;
+    const { branch } = kind ? addWhere(id, true, kind) : {};
+    const shapePlus = kind ? plusPlace(id, box, branch?.towards, sizable, quick) : null;
+    if (box && !framePlus && !shapePlus) later = true;
+    if (framePlus) {
+      const { side, x, y } = framePlus;
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: `Draw a line from ${inQuotes(nameOf(id))}: drag to a shape, or click and then click the shape`,
         onpointerdown: (event) => { stop(event); if (event.button === 0) linkStart(event, id); }, ondblclick: stop, onmousemove: stop,
         onclick: (event) => { stop(event); toggleConnect(true); }, oncontextmenu: (event) => { event.preventDefault(); stop(event); },
       }, icon("plus")));
-    } else if (box) {
-      const kind = nextKind(nodeOf(id));
-      const { branch } = addWhere(id, true, kind);
-      const { side, x, y } = plusPlace(id, box, branch?.towards, sizable);
+    } else if (shapePlus) {
+      const { side, x, y } = shapePlus;
       views.push(h(`button.fig-next.${side}`, {
         type: "button", style: { left: `${x}px`, top: `${y}px` },
         title: splices(id, kind) ? `Insert ${article(parts[kind].title)} ${inSentence(parts[kind].title)} between ${inQuotes(nameOf(id))} and ${inQuotes(nameOf(splices(id, kind)))} (⌥-click for other shapes)`
@@ -2631,7 +2657,8 @@ export function figureParts(host) {
     const curving = ended && ["curved", "straight"].includes(edgeOf(ended)?.shape) ? bendSeen(ended) : null;
     const bending = curving && apart >= 56 && ends.every((end) => Math.hypot(end.at.x - curving.at.x, end.at.y - curving.at.y) >= 22) ? curving : null;
     const line = id && edgeOf(id) && !state.connecting && !inline ? id : null;
-    const spot = line && plusOnLine(line, [...endsShown.map((end) => end.at), ...(bending ? [bending.at] : [])]);
+    if (line && quick) later = true;
+    const spot = line && !quick && plusOnLine(line, [...endsShown.map((end) => end.at), ...(bending ? [bending.at] : [])]);
     if (spot) {
       const edge = edgeOf(line);
       views.push(h("button.fig-next.on-line", {
@@ -2735,6 +2762,8 @@ export function figureParts(host) {
     for (const twin of document.querySelectorAll(".hit-line.chosen")) twin.classList.remove("chosen");
     // (But for one whose words are being typed: its words' box is where it is marked.)
     for (const id of state.selected) if (isLine(id) && inline?.id !== id) for (const twin of host.element(id)?.querySelectorAll(".hit-line") || []) twin.classList.add("chosen");
+    views.later = later;
+    resume();
     return views;
   }
 
@@ -4367,23 +4396,47 @@ export function figureParts(host) {
   }
   // Home again: the part slides back to where it was drawn, the lines come back. (`glide`
   // false: it is there at once.)
+  // Parts gliding home (sendHome): measured, while they do, where they come to rest -- each
+  // glide set at its end for as long as what marks them measures, then let go on again.
+  const homing = new Set();
+  function homeNow() {
+    const going = [...homing].filter((glide) => glide.playState === "running" || glide.playState === "pending");
+    const at = going.map((glide) => glide.currentTime);
+    for (const glide of going) glide.currentTime = Math.max(0, (glide.effect?.getComputedTiming?.().endTime ?? 0) - 0.01);
+    return () => going.forEach((glide, index) => { if (at[index] !== null) glide.currentTime = at[index]; });
+  }
   function sendHome(was, { glide = true } = {}) {
     clearTimeout(was.wait);
     if (letDown === was) letDown = null;
     unlift(was.moving);
     host.overlay.classList.remove("fig-dragging");
+    const glides = [];
     for (const { element, base } of was.moving) {
       const moved = /translate\(([-\d.e]+) ([-\d.e]+)\)/.exec(element.getAttribute("transform") || "");
       if (base) element.setAttribute("transform", base);
       else element.removeAttribute("transform");
       element.classList.remove("fig-lifted", "fig-settling", "fig-astray", "fig-over-line");
-      if (moved && glide) element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
-        { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+      if (moved && glide) glides.push([element, moved]);
     }
     for (const element of was.lines) element.classList.remove("fig-faded");
-    // Its frame and its + go back with it: at once, and again where it comes to rest.
+    // Its frame and its + are where it is going, at once -- placed before it glides there,
+    // from where it was let go, into them -- and stay there: placed again as it comes to rest
+    // only should it rest elsewhere (a drawing come meanwhile). (Placed as it began to glide,
+    // they were left where it was let go until it had arrived, then jumped after it.)
+    const home = was.moving.map(({ element }) => drawnRect(element));
     host.settled?.();
-    setTimeout(() => host.settled?.(), 240);
+    for (const [element, moved] of glides) {
+      const going = element.animate([{ transform: `translate(${moved[1]}px, ${moved[2]}px)` }, { transform: "translate(0px, 0px)" }],
+        { duration: 220, easing: "cubic-bezier(.2,.8,.2,1)" });
+      if (!going) continue;
+      homing.add(going);
+      going.onfinish = going.oncancel = () => homing.delete(going);
+    }
+    setTimeout(() => {
+      const rests = was.moving.map(({ element }) => drawnRect(element));
+      const same = (a, b) => (!a && !b) || (a && b && Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5);
+      if (!rests.every((rest, at) => same(rest, home[at]) && was.moving[at].element.isConnected)) host.settled?.();
+    }, 240);
   }
   function dragEnd(event) {
     if (drag?.started && event) drag.pointer = { x: event.clientX, y: event.clientY };
@@ -6738,17 +6791,29 @@ export function figureParts(host) {
   // while the studio is away, what was painted is put back. Only shapes painted from those roles
   // alone, each painted as the page knows the theme paints them: else the drawing is waited for,
   // as ever (a figure in a theme of its own, a shape of its own colour or of a kind's).
-  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io"]);
+  // (A frame too -- its outline and fill the container's while it is of no colour, as
+  // flexo.frames draws it -- and words on their own. A part painted in colours of its own is
+  // painted so as ever: those carry no role, and the colour leaves them be.)
+  const TONED_KINDS = new Set(["block", "terminal", "decision", "circle", "database", "server", "cloud", "queue", "document", "person", "io", "frame", "text", "label"]);
   function paintTone(nodes, value) {
     if (!nodes.length) return null;
     const found = [];
     for (const node of nodes) {
       const element = host.element(node.id);
-      if (!element || !TONED_KINDS.has(node.item?.kind || "block") || node.item?.properties?.["paint-fill"] || node.item?.properties?.["paint-stroke"]) return null;
-      for (const each of [element, ...element.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
-        for (const attribute of ["fill", "stroke"]) {
-          const role = each.getAttribute(`data-flexo-${attribute}`);
-          if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute) });
+      if (!element || !TONED_KINDS.has(node.item?.kind || "block")) return null;
+      const family = node.item?.kind === "frame" ? "container" : "block";
+      // (A frame drawn again, in part, inside a group it shows through: that part too.)
+      const again = family === "container" && element.id ? [...(element.ownerSVGElement?.querySelectorAll(`g[data-hit-for="${element.id.replace(/["\\]/g, "\\$&")}"]`) || [])] : [];
+      for (const holder of [element, ...again]) {
+        for (const each of [holder, ...holder.querySelectorAll("[data-flexo-fill], [data-flexo-stroke]")]) {
+          // (Not a run of its words in a colour of its own, nor a formula's: their paint is
+          // theirs, whatever the shape's -- only its words' own, its text, takes the colour.)
+          const words = each.parentNode?.closest?.('text, [id$=".label"]');
+          if (words && holder.contains(words) && !(each.tagName?.toLowerCase() === "text" && !each.parentNode.closest("text"))) continue;
+          for (const attribute of ["fill", "stroke"]) {
+            const role = each.getAttribute(`data-flexo-${attribute}`);
+            if (role) found.push({ each, attribute, role, colour: each.getAttribute(attribute), family });
+          }
         }
       }
     }
@@ -6767,6 +6832,25 @@ export function figureParts(host) {
         each.setAttribute(`data-flexo-${attribute}`, role);
       }
     } : null;
+  }
+
+  // The figure as an undo, a redo or another's edit left it, come before its drawing: each
+  // shape whose colour alone that changed is painted in it at once, where the page can tell
+  // how (paintTone) -- an undo of a colour chosen is seen as the key is pressed, not when the
+  // studio has drawn the figure again, which finds it painted so.
+  function tonesNow(before, next) {
+    const was = new Map((before.nodes || []).map((node) => [node.id, node]));
+    const toned = new Map();
+    for (const node of next.nodes || []) {
+      const old = was.get(node.id), tone = node.properties?.tone ?? null;
+      if (!old || (old.properties?.tone ?? null) === tone || tone === null) continue;
+      const bare = (item) => JSON.stringify({ ...item, properties: { ...(item.properties || {}), tone: null } });
+      if (bare(old) !== bare(node)) continue;
+      const key = String(tone);
+      if (!toned.has(key)) toned.set(key, []);
+      toned.get(key).push({ type: "node", id: node.id, item: node });
+    }
+    for (const [tone, nodes] of toned) paintTone(nodes, tone);
   }
 
   function colourSection(targets) {
