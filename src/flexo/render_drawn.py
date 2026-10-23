@@ -15,7 +15,7 @@ from flexo.drawn import Picture, Shape, Words, picture
 from flexo.ir.fitted import FittedNode
 from flexo.render_common import paint_attributes, render_runs
 from flexo.style import LayoutStyle, Palette
-from flexo.svg import element
+from flexo.svg import element, read_markup
 from flexo.units import pt
 
 _ARGUMENTS = {"M": 2, "L": 2, "A": 7, "C": 6, "Z": 0}
@@ -200,7 +200,7 @@ def _image(
             parent, "g", id=identifier, data_flexo_drawn="mol-sketch", data_flexo_canvas=canvas
         )
         element(holder, "rect", x=x, y=y, width=width, height=height, fill="none")
-        nested = ET.fromstring(markup)
+        nested = read_markup(markup)
         if fitted:
             nested.set("viewBox", cropped_view(nested.get("viewBox", ""), fitted[1]))
         for name, value in (("x", x), ("y", y), ("width", width), ("height", height)):

@@ -35,7 +35,7 @@ from flexo.render_common import (
 from flexo.render_scientific import render_scientific
 from flexo.shapes import SHAPE_KINDS, label_area, outline
 from flexo.style import RAMP_ROLES, LayoutStyle, Palette
-from flexo.svg import element, number
+from flexo.svg import element, number, read_markup
 from flexo.title_sides import drawing_box, title_band, title_baseline, title_side
 from flexo.wording import anchor_of, typography_of
 
@@ -923,7 +923,7 @@ def _image(parent: ET.Element, node: FittedNode, style: LayoutStyle) -> None:
             if (still := still_frame(spec.property("still", 1))) > 1:
                 picture.set(STILL, str(still))
         return
-    nested = ET.fromstring(artwork.markup)
+    nested = read_markup(artwork.markup)
     for name, value in (
         ("id", part),
         ("x", number(bounds.x)),
@@ -945,7 +945,7 @@ def _plot(parent: ET.Element, node: FittedNode, style: LayoutStyle, palette: Pal
     spec, bounds = node.measured.spec, node.bounds
     made = drawn(spec, bounds.width, bounds.height, style, palette)
     if made.markup:
-        nested = ET.fromstring(made.markup)
+        nested = read_markup(made.markup)
         for name, value in (
             ("id", f"{spec.id}.artwork"),
             ("x", number(bounds.x)),
