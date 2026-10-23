@@ -183,6 +183,22 @@ def test_the_same_figure_compiles_to_the_same_bytes(monkeypatch: pytest.MonkeyPa
     assert compile_figure(_figure().spec).document.text == first
 
 
+def test_the_same_figure_writes_the_same_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A PDF's font subsets carry their faces' dates, not the time they were written."""
+
+    import time
+
+    from flexo.compiler import compile_figure
+    from flexo.pdf import pdf_bytes
+
+    monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+    svg = compile_figure(_figure().spec).document.text
+    first = pdf_bytes(svg)
+    real_time = time.time
+    monkeypatch.setattr(time, "time", lambda: real_time() + 86_400.0)
+    assert pdf_bytes(svg) == first
+
+
 def test_a_script_no_bundled_font_has_is_set_in_one_installed_font() -> None:
     """Characters outside every bundled font come from an installed font that has them all."""
 
@@ -266,12 +282,21 @@ def test_links_are_clickable_in_every_format(tmp_path: Path) -> None:
     assert 'text-decoration="underline"' in editable
     link = portable[portable.index("<a href") : portable.index("</a>")]
     assert re.search(r'<rect [^>]*height="0\.5" fill="#1a5d9b"', link)
-    assert any(re.search(rb"\d re f", stream) for stream in _streams(pdf))
+    assert any(re.search(rb"\d re f", stream) for stream in _contents(pdf))
 
 
-def _streams(pdf: bytes) -> list[bytes]:
-    found = re.findall(rb"stream\n(.*?)\nendstream", pdf, re.S)
-    return [zlib.decompress(body) for body in found if body[:1] == b"x"]
+def _contents(pdf: bytes) -> list[bytes]:
+    """Each page's content stream, decoded: what the page draws, without the fonts embedded
+    with it, whose bytes may read as any operator (a ``Q``) anywhere."""
+
+    contents = []
+    for number in re.findall(rb"/Contents (\d+) 0 R", pdf):
+        head = re.search(
+            rb"\n" + number + rb" 0 obj\n<< /Filter /FlateDecode /Length (\d+) >>\nstream\n", pdf
+        )
+        assert head is not None
+        contents.append(zlib.decompress(pdf[head.end() : head.end() + int(head.group(1))]))
+    return contents
 
 
 def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
@@ -284,7 +309,7 @@ def test_a_pdf_keeps_the_space_where_a_line_wraps_so_words_copy_apart() -> None:
             figure.root.block("b", label=label, width=80)
         pdf = pdf_bytes(compile_figure(figure.spec).document.text)
         wraps = pdfium.PdfDocument(pdf)[0].get_textpage().get_text_range().count("\r\n")
-        return sum(stream.count(b" 3 Tr ") for stream in _streams(pdf)), wraps
+        return sum(stream.count(b" 3 Tr ") for stream in _contents(pdf)), wraps
 
     # Each soft wrap is given back its space, laid invisibly at the end of the line.
     assert spaces_and_wraps("Hexamers") == (0, 0)
@@ -337,7 +362,7 @@ def test_words_after_invisible_ones_on_a_pdf_page_are_still_drawn() -> None:
         figure.root.block("m", label=r"$\frac{a}{b}$")
         figure.root.block("z", label="Zebra")
     pdf = pdf_bytes(compile_figure(figure.spec).document.text)
-    content = b"".join(_streams(pdf)).decode("latin-1")
+    content = b"".join(_contents(pdf)).decode("latin-1")
     # The render mode and scaling are graphics state, kept past ET: walk them as a reader does.
     stack: list[tuple[int, float]] = []
     mode, scale, shown = 0, 100.0, []
