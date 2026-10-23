@@ -92,3 +92,34 @@ def test_a_figure_read_by_libyaml_is_the_figure_safe_load_reads() -> None:
 
     text = yaml.safe_dump(_FIGURE, sort_keys=False, allow_unicode=True)
     assert parse(text, Path.cwd(), libyaml=True) == parse(text, Path.cwd())
+
+
+def test_a_figure_s_words_read_ahead_are_taken_by_the_edit_made_to_them(monkeypatch) -> None:
+    """Read ahead of the next edit (``read_ahead``), a figure's words are taken by an edit made
+    to the very same words -- answered as one that read them then -- and by no other."""
+
+    from flexo.studio import figure_edit
+    from flexo.studio.figure_edit import apply_to_data, inline_words, read_ahead
+
+    edit = {
+        "do": "update",
+        "targets": [{"type": "node", "id": "a"}],
+        "values": {"label": "Read on"},
+    }
+    expected = apply_to_data(copy.deepcopy(_FIGURE), edit)
+    read_ahead(inline_words(_FIGURE))
+    made: list[str] = []
+    real = figure_edit._Document
+
+    def counted(text: str, suffix: str) -> object:
+        made.append(text)
+        return real(text, suffix)
+
+    monkeypatch.setattr(figure_edit, "_Document", counted)
+    assert apply_to_data(copy.deepcopy(_FIGURE), edit) == expected
+    assert made == []
+    assert apply_to_data(copy.deepcopy(_FIGURE), edit) == expected  # (taken once)
+    assert len(made) == 1
+    read_ahead(inline_words({**_FIGURE, "figure": {"id": "other"}}))
+    assert apply_to_data(copy.deepcopy(_FIGURE), edit) == expected
+    assert len(made) == 3  # (the other's words read ahead, then these read)

@@ -65,6 +65,8 @@ import io
 import json
 import math
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -162,7 +164,7 @@ def _applied(
     """``apply``'s answer, and the document the edit was made on (its words the answer's) --
     None for an edit that left the words as they were."""
 
-    document = _Document(text, suffix)
+    document = _read(text, suffix)
     document.base = base
     verb = str(action.get("do", ""))
     handler = getattr(document, f"_{verb}", None)
@@ -252,14 +254,7 @@ def apply_to_data(
 
     import yaml
 
-    # (Written as safe_dump writes it, by libyaml where there is one -- the very words, four
-    # times sooner: an edit is made as the page waits.)
-    text = yaml.dump(
-        dict(data),
-        Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper),
-        sort_keys=False,
-        allow_unicode=True,
-    )
+    text = inline_words(data)
     result, edited = _applied(text, action, base=base)
     # (Its model made from the document the edit was made on, as reading its words again would
     # make it -- not read again, which took as long as making the edit -- where its words read
@@ -276,6 +271,55 @@ def apply_to_data(
         "select": result["select"],
         "model": shown,
     }
+
+
+def inline_words(data: Mapping[str, Any]) -> str:
+    """A figure written inline (``apply_to_data``) as the words its edits are made to: as
+    safe_dump writes them, by libyaml where there is one -- the very words, four times sooner:
+    an edit is made as the page waits."""
+
+    import yaml
+
+    return yaml.dump(
+        dict(data),
+        Dumper=getattr(yaml, "CSafeDumper", yaml.SafeDumper),
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
+READ_AHEAD = 4
+"""How many figures' words are kept read ahead of the edits to be made to them."""
+
+_READ_AHEAD: OrderedDict[str, _Document] = OrderedDict()
+_READ_AHEAD_LOCK = threading.Lock()
+
+
+def read_ahead(words: str) -> None:
+    """A figure's ``words`` (``inline_words``) read as an edit made to them will read them, ahead
+    of it -- reading them round-trip takes as long as the rest of the edit -- and kept, by the
+    words, for that edit to take (``_read``): each read so is taken once, by an edit made to
+    the very same words, and read anew for any other."""
+
+    with _READ_AHEAD_LOCK:
+        if words in _READ_AHEAD:
+            return
+    document = _Document(words, ".yaml")
+    with _READ_AHEAD_LOCK:
+        _READ_AHEAD[words] = document
+        while len(_READ_AHEAD) > READ_AHEAD:
+            _READ_AHEAD.popitem(last=False)
+
+
+def _read(text: str, suffix: str) -> _Document:
+    """``text`` read as a ``_Document``: as read ahead (``read_ahead``), taken, or read now."""
+
+    if suffix == ".yaml":
+        with _READ_AHEAD_LOCK:
+            found = _READ_AHEAD.pop(text, None)
+        if found is not None:
+            return found
+    return _Document(text, suffix)
 
 
 _BREAKS = ("\r", "\x85", "\u2028", "\u2029", "\ufeff")
