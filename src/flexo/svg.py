@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -132,12 +133,44 @@ def local_name(tag: object) -> str:
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 
-def xml_document(root: ET.Element) -> str:
-    """One indented XML document with the declaration Flexo always writes."""
+@functools.lru_cache(maxsize=64)
+def _read(markup: str) -> ET.Element:
+    return ET.fromstring(markup)
 
+
+def read_markup(markup: str) -> ET.Element:
+    """``markup`` read as XML (``ET.fromstring``): a copy of its own of what it read the first
+    time, kept -- a molecule's drawing, a hundred kilobytes of shapes, is read once however
+    often its figure is drawn again -- each of its children sealed (``flexo.sealed``): written
+    out once, however often its drawing is."""
+
+    from flexo.sealed import copied
+
+    return copied(_read(markup))
+
+
+def xml_document(root: ET.Element) -> str:
+    """One indented XML document with the declaration Flexo always writes. (What in it is a
+    copy of something kept, still as it was copied, is written as that is, written once:
+    ``flexo.sealed``.)"""
+
+    from flexo.sealed import sealed_in, written_with
+
+    found = sealed_in(root)
+    xml = written_with(root, found, _indented) if found else _indented(root)
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'
+
+
+def _indented(root: ET.Element) -> str:
     ET.indent(root, space="  ")
-    # Inside a text object whitespace is content: a newline between two tspans
-    # draws as a space. Take back what indenting put there.
+    unspaced(root)
+    return ET.tostring(root, encoding="unicode", short_empty_elements=True)
+
+
+def unspaced(root: ET.Element) -> None:
+    """Inside a text object whitespace is content: a newline between two tspans draws as a
+    space. Take back what indenting put there."""
+
     for text in root.iter():
         if local_name(text.tag) != "text":
             continue
@@ -146,5 +179,3 @@ def xml_document(root: ET.Element) -> str:
                 item.tail = None
             if len(item) and item.text is not None and not item.text.strip():
                 item.text = None
-    xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n{xml}\n'

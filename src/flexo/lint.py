@@ -732,9 +732,13 @@ def _structural_svg_diagnostics(
     *,
     worded: bool = True,
 ) -> tuple[Diagnostic, ...]:
+    from flexo.drawn_spans import read
+
     diagnostics: list[Diagnostic] = []
     try:
-        root = ET.fromstring(svg_text)
+        # (Its molecules' shapes read once however often a figure holding them is linted:
+        # flexo.drawn_spans.)
+        root = read(svg_text)
     except ET.ParseError as error:
         return (Diagnostic("svg.xml.invalid", str(error)),)
     elements = tuple(root.iter())

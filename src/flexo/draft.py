@@ -46,6 +46,11 @@ _NEWER: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextV
 _REMEMBERED: OrderedDict[tuple[str, str, Any], Any] = OrderedDict()
 _LOCK = threading.Lock()
 
+_RECORDING: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "flexo_draft_recording", default=None
+)
+_AHEAD = contextvars.ContextVar("flexo_draft_ahead", default=False)
+
 
 @contextmanager
 def drafting(on: bool = True) -> Iterator[None]:
@@ -63,7 +68,7 @@ def recall(kind: str, key: Any) -> Any:
 
     with _LOCK:
         found = _REMEMBERED.get((kind, key))
-        if found is not None:
+        if found is not None and not _AHEAD.get():
             _REMEMBERED.move_to_end((kind, key))
         return found
 
@@ -71,11 +76,55 @@ def recall(kind: str, key: Any) -> Any:
 def remember(kind: str, key: Any, value: Any) -> None:
     """Keep ``value`` of a figure (``key``) for ``kind`` of work, for its next draft."""
 
+    made = _RECORDING.get()
+    if made is not None:
+        made.append((kind, key, value))
+    if _AHEAD.get():
+        return
     with _LOCK:
         _REMEMBERED[(kind, key)] = value
         _REMEMBERED.move_to_end((kind, key))
         while len(_REMEMBERED) > MEMORY * 3:
             _REMEMBERED.popitem(last=False)
+
+
+@contextmanager
+def recording() -> Iterator[list[tuple[str, Any, Any]]]:
+    """What is remembered within (``remember``), in the order it was: for a drawing kept, to
+    be remembered again as it would be were the figure drawn again (``flexo.boxfit``). (Nested,
+    the outer recording has it too.)"""
+
+    outer = _RECORDING.get()
+    made: list[tuple[str, Any, Any]] = []
+    token = _RECORDING.set(made)
+    try:
+        yield made
+    finally:
+        _RECORDING.reset(token)
+        if outer is not None:
+            outer.extend(made)
+
+
+@contextmanager
+def ahead() -> Iterator[None]:
+    """Figures drawn within are drawn ahead of time, to be found kept (``flexo.boxfit.kept``)
+    when they are asked for: what each remembers is only recorded (``recording``), remembered
+    when it is found, and what each recalls leaves the memory as it was -- as though nothing
+    had been drawn."""
+
+    token = _AHEAD.set(True)
+    try:
+        yield
+    finally:
+        _AHEAD.reset(token)
+
+
+def remember_again(made: list[tuple[str, Any, Any]]) -> None:
+    """What a drawing remembered (``recording``), remembered again in the same order: as
+    though the figure had been drawn again just now."""
+
+    for kind, key, value in made:
+        remember(kind, key, value)
 
 
 class GivenUp(BaseException):
